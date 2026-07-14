@@ -81,9 +81,10 @@ function ensureSignalFlush(): void {
     for (const rec of liveRecorders) {
       try {
         rec.flush()
-      } catch {
+      } catch (e) {
         // Best-effort: a torn-down volume must not abort the teardown path or
         // block the remaining recorders. The tail we could save, we saved.
+        logger.warn("jsonl-recorder: signal flush failed", { error: errMessage(e) })
       }
     }
   }
@@ -92,9 +93,10 @@ function ensureSignalFlush(): void {
   try {
     process.on("SIGTERM", flushAll)
     process.on("SIGINT", flushAll)
-  } catch {
+  } catch (e) {
     // Some sandboxes forbid signal registration — degrade to turn-boundary
     // flush only rather than crash the recorder at construction time.
+    logger.warn("jsonl-recorder: signal handler registration failed", { error: errMessage(e) })
   }
 }
 
@@ -213,6 +215,12 @@ export class JsonlRecorder implements StreamPort {
     // ARE recorded via the `usage`/`llm_usage` line), so the recorder SKIPS it —
     // kept out of `RecordedEventType` below so KIND_MAP / dataOf never see it.
     if (event.type === "budget_breach") return
+    // Multi-agent-panel SUBSTRATE — subagent lifecycle events are transient,
+    // render-only UI signals (the SAME class as `item_*` / `budget_breach`): the
+    // durable subagent trajectory rides the ADR-0133 hooks + the parent `agent`
+    // tool_result, so the recorder SKIPS them (kept out of `RecordedEventType`
+    // so KIND_MAP / dataOf never see them).
+    if (event.type === "subagent_spawn" || event.type === "subagent_status") return
     if (this.written >= this.maxLines) {
       this.handleCap()
       return
@@ -309,8 +317,9 @@ export class JsonlRecorder implements StreamPort {
       )
       this.writeLine(line)
       this.flush()
-    } catch {
+    } catch (e) {
       // best-effort: the cap line itself is allowed to fail silently
+      logger.warn("jsonl-recorder: line-cap degraded record write failed", { error: errMessage(e) })
     }
   }
 
@@ -478,6 +487,14 @@ type RecordedEventType = Exclude<
   // crossing banner); the cost totals ARE recorded via `usage`/`llm_usage`, so
   // this notice carries no separate durable payload (skipped in `emit` above).
   | "budget_breach"
+  // Multi-agent-panel SUBSTRATE — `subagent_spawn`/`subagent_status` are
+  // transient render-only UI signals (the SAME class as `item_*`): the DURABLE
+  // subagent trajectory is already captured by the ADR-0133 subagent_start/stop
+  // hooks + the parent `agent` tool_result, so these carry no separate payload.
+  // Kept out of `RecordedEventType` so KIND_MAP / dataOf never see them; the
+  // `emit` guard below drops them.
+  | "subagent_spawn"
+  | "subagent_status"
 >
 type RecordedEvent = Extract<AgentEvent, { type: RecordedEventType }>
 

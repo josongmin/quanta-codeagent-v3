@@ -143,6 +143,8 @@ export const AGENT_EVENT_TYPES = [
   "response_queued",
   "interrupted",
   "subagent_cancel",
+  "subagent_spawn",
+  "subagent_status",
   "plan_created",
   "plan_updated",
   "plan_snapshot",
@@ -384,6 +386,38 @@ export type AgentEvent =
       subagentId: string
       outcome: "stopped" | "not_found" | "registry_absent"
       source: "submission_op" | "conversation_action"
+    }
+  // Multi-agent orchestration SUBSTRATE — subagent lifecycle events for the CLI
+  // `/agents --tree` + web Sub-Agents panel (later waves). Emitted where the
+  // shared `TaskRegistry` TRANSITIONS: `register()` ⇒ `subagent_spawn`;
+  // `complete()`/`fail()`/`stop()` ⇒ `subagent_status`. Additive + OPT-IN:
+  // emitted ONLY when the host wired `AgentConfig.onSubagentEvent` (mirror of
+  // `onAgentState`); absent ⇒ never emitted (byte-identical). Render-only — the
+  // loop never inspects them (no control authority). These arms STRUCTURALLY
+  // mirror `@/subagent`'s duck-declared `SubagentLifecycleEvent` (the leaf slice
+  // may not import `@/stream`); the `@/protocol/subagent` projection is the seam
+  // the web-daemon (Wave 2) taps. `description` / `finalTextPreview` / `error`
+  // are ALREADY bounded + secret-scrubbed at the registry emit boundary (this
+  // data crosses to a UI). The recorder SKIPS both (transient render-only, like
+  // `item_*` — the durable subagent trajectory rides ADR-0133 hooks + the parent
+  // `agent` tool_result), so neither reaches `KIND_MAP` / `dataOf`.
+  | {
+      type: "subagent_spawn"
+      taskId: string
+      parentTaskId?: string
+      depth: number
+      description: string
+      agentType?: string
+      at: number
+    }
+  | {
+      type: "subagent_status"
+      taskId: string
+      status: "running" | "completed" | "failed" | "stopped"
+      at: number
+      turns?: number
+      finalTextPreview?: string
+      error?: string
     }
   // Plan-mode cluster (P3, 2026-05-23): plan created / updated / late-attach
   // snapshot. Carries the structural mirror of @/agent/plan/types.ts (see top

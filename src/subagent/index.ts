@@ -69,7 +69,13 @@ export {
   type MailboxSendPort,
 } from "./introspect-tools"
 export { assignNickname, MAESTRO_NICKNAMES, nextSequentialNickname } from "./nicknames"
-export type { TaskRecord, TaskRegistryOptions, TaskStatus } from "./registry"
+export type {
+  SubagentEventEmitter,
+  SubagentLifecycleEvent,
+  TaskRecord,
+  TaskRegistryOptions,
+  TaskStatus,
+} from "./registry"
 export { TaskRegistry } from "./registry"
 export {
   createTaskOutputTool,

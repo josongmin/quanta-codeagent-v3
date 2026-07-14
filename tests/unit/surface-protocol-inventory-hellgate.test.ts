@@ -24,7 +24,11 @@ import { AGENT_EVENT_TYPES } from "@/stream"
 describe("surface-protocol inventory hellgate", () => {
   test("current canonical inventories stay at the reviewed counts", () => {
     // ALBB-21 — +1 advisory `budget_breach` (soft/hard cost-cap crossing).
-    expect(AGENT_EVENT_TYPES.length).toBe(37)
+    // Multi-agent-panel SUBSTRATE — +2 subagent lifecycle events
+    // (`subagent_spawn` / `subagent_status`) for the `/agents --tree` CLI + web
+    // Sub-Agents panel (later waves), consumed off the `@/protocol/subagent`
+    // projection seam. Transient render-only (recorder skips them).
+    expect(AGENT_EVENT_TYPES.length).toBe(39)
     // T01 — +3 additive session.v1 item events (item.started/delta/completed).
     // ALBB-04 — +1 dedicated cancel terminal (turn.aborted).
     // UUX-1-12 (jul-10) — +4 additive observability events (tool.progress /

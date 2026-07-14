@@ -72,33 +72,22 @@
  */
 
 import type { Message } from "@/llm"
+import { projectToSubagentObservation } from "@/protocol/subagent"
 import { isGitRepo, withWorktree } from "@/runtime"
-import { runtimeConfig } from "@/shared"
 import {
   type AgentMetaRegistry,
   assignNickname,
+  type SubagentLifecycleEvent,
   SubagentTurnGate,
+  type TaskRegistry,
   type TurnWakeRegistry,
 } from "@/subagent"
-import { type Tool, ToolRegistry } from "@/tool"
 import type { SubagentRequest, SubagentResult, SubagentRunner } from "../subagent/types"
-import {
-  buildLeaderDecide,
-  buildLeaderHitlBroker,
-  type LeaderEscalationDecider,
-} from "./coordination-broker-wire"
 import { runAgent } from "./loop"
-import { isMutatingMode } from "./mode"
-import type { NamedAgentDefinition, NamedAgentResolver } from "./named-agent-registry"
-import { buildOwnershipPolicy } from "./ownership-policy"
-import type { AgentMode } from "./prompt"
 import { canExposeSpawnTools, childDepthOf, effectiveCap, SpawnLineageError } from "./spawn-depth"
 import { emitSpawnDepthDecision } from "./spawn-depth-telemetry"
-import {
-  resolveChildEffort,
-  resolveChildLlm,
-  UnknownSubagentModelError,
-} from "./subagent-runner-overrides"
+import { buildChildConfig } from "./subagent-runner-child-config"
+import type { ToolNamespaceStrategy } from "./subagent-tool-namespace"
 import type { AgentConfig, AgentOutcome } from "./types"
 
 export { UnknownSubagentModelError } from "./subagent-runner-overrides"
@@ -140,48 +129,7 @@ export interface SubagentRunnerOptions {
   toolNamespace?: ToolNamespaceStrategy
 }
 
-/**
- * B1 — closed-port tool-namespacing strategy. Maps a raw tool name to a scoped
- * name given the child's stable namespace token (its mailbox label, e.g.
- * `root/0`). The strategy MUST be injective per-namespace (distinct raw names
- * map to distinct scoped names) so dispatch can round-trip. The runner builds
- * the child registry keyed by the scoped name; `dispatch.ts` resolves a tool
- * call via `registry.get(call.name)`, so a scoped name the model emits resolves
- * directly back to the real tool — no separate reverse map needed.
- */
-export interface ToolNamespaceStrategy {
-  /** `(namespaceToken, rawToolName) → scopedToolName`. */
-  scope(namespaceToken: string, rawToolName: string): string
-}
-
-/** A sensible default strategy the host can opt into: `prefixToolNamespace`.
- *  Produces `${safe(token)}__${rawName}` where `safe` replaces any char outside
- *  `[A-Za-z0-9_]` with `_` (most tool-name validators / model APIs reject `/`
- *  and other punctuation, so the raw `root/0` label is sanitized). Injective
- *  per namespace because only the raw-name suffix varies within one token. */
-export const prefixToolNamespace: ToolNamespaceStrategy = {
-  scope(namespaceToken: string, rawToolName: string): string {
-    const safe = namespaceToken.replace(/[^A-Za-z0-9_]/g, "_")
-    return `${safe}__${rawToolName}`
-  },
-}
-
-/** Apply a {@link ToolNamespaceStrategy} to a registry, returning a NEW
- *  registry whose tools carry scoped names. Each tool is shallow-cloned with
- *  only `name` overridden (unknown Tool fields are preserved via spread), so
- *  the model sees the scoped name AND dispatch (`registry.get(scopedName)`)
- *  resolves to the same `run`. Pure: the source registry is not mutated. */
-const namespaceRegistry = (
-  source: ToolRegistry,
-  strategy: ToolNamespaceStrategy,
-  namespaceToken: string,
-): ToolRegistry => {
-  const scoped = source.all().map((tool) => ({
-    ...tool,
-    name: strategy.scope(namespaceToken, tool.name),
-  }))
-  return new ToolRegistry(scoped)
-}
+export { prefixToolNamespace, type ToolNamespaceStrategy } from "./subagent-tool-namespace"
 
 /** Join the trailing assistant turn's text blocks into the child's answer.
  *  Mirrors the slice contract ("final assistant text the child produced"). */
@@ -210,229 +158,54 @@ const toResult = (outcome: AgentOutcome): SubagentResult => ({
   messages: outcome.messages,
 })
 
-/** Build the filtered child registry. The slice's `toolFilter` is a tool-name
- *  allowlist; we re-enumerate the parent registry via its public `specs()`
- *  names + `get(name)` (no private enumerator exists) and reconstruct a fresh
- *  {@link ToolRegistry} from the intersection. Absent filter ⇒ inherit the
- *  parent registry as-is. An empty/all-miss filter yields an empty registry
- *  (the child simply has no tools — it can still answer from the prompt). */
-const filterRegistry = (
-  parent: ToolRegistry,
-  toolFilter: string[] | undefined,
-  // GAP7-2 — per-dispatch tools the child gets IN ADDITION to the filtered set
-  // (e.g. a batch row's `report_agent_job_result` bound to a fresh reporter).
-  // Appended AFTER the filter so the allowlist never drops them. Absent ⇒
-  // byte-identical to the pre-seam behavior.
-  extraTools?: readonly Tool[],
-): ToolRegistry => {
-  const extra = extraTools ?? []
-  const allTools = (): Tool[] =>
-    parent
-      .specs()
-      .map((s) => parent.get(s.name))
-      .filter((t): t is Tool => t !== undefined)
-  if (!toolFilter) {
-    if (extra.length === 0) return parent // no filter + no extras ⇒ inherit as-is
-    return new ToolRegistry([...allTools(), ...extra])
-  }
-  const allow = new Set(toolFilter)
-  const kept = parent
-    .specs()
-    .map((s) => s.name)
-    .filter((name) => allow.has(name))
-    .map((name) => parent.get(name))
-    .filter((t): t is NonNullable<typeof t> => t !== undefined)
-  return new ToolRegistry([...kept, ...extra])
+interface ChildExecution {
+  parent: AgentConfig
+  req: SubagentRequest
+  subagentId: string
+  requestedCwd: string
+  isolate: boolean
+  mailboxIds: { agentId: string; parentId: string }
+  toolNamespace: ToolNamespaceStrategy | undefined
+  turnGate: SubagentTurnGate | undefined
+  spawnedAsTaskId: string | undefined
+  run: typeof runAgent
+  withWorktree: typeof withWorktree
 }
 
-/** Compose the child's {@link AbortSignal} from up to two sources: the parent
- *  loop's signal and an optional per-request signal (e.g. the `TaskRegistry`
- *  per-task controller driven by `task_stop`). Aborting EITHER source aborts
- *  the child. When `extra` is absent we return `parent` directly — the child
- *  config never aborts its own signal, so sharing the parent's is safe and
- *  keeps the no-extra path allocation-free. With `extra`, `AbortSignal.any`
- *  returns a fresh signal that aborts when ANY input aborts (already-aborted
- *  inputs produce an already-aborted result). */
-const chainedSignal = (parent: AbortSignal, extra?: AbortSignal): AbortSignal =>
-  extra ? AbortSignal.any([parent, extra]) : parent
-
-/** Build the child's seed user-prompt text. When the caller sets NONE of the
- *  five opt-in fields (`priorAttempt`, `ownedSurfaces`, `forbiddenSurfaces`,
- *  `checkpointPath`, `resultShape`) the result is byte-identical to
- *  `req.prompt` (preserves the legacy non-opt-in call path — load-bearing
- *  regression invariant). Ordering rationale: prior context first (warm-start
- *  the child), then the task, then boundary constraints, then operational
- *  guidance (checkpoint), then the output spec. */
-const buildSeedPrompt = (req: SubagentRequest): string => {
-  const parts: string[] = []
-  if (req.priorAttempt && req.priorAttempt.length > 0) {
-    parts.push(
-      `## Previous attempt's findings\n${req.priorAttempt}\n\n## Current task\n${req.prompt}`,
-    )
-  } else {
-    parts.push(req.prompt)
-  }
-  if (req.ownedSurfaces && req.ownedSurfaces.length > 0) {
-    parts.push(
-      `**Owned surfaces** (you may read/modify these): ${req.ownedSurfaces.map((s) => `- ${s}`).join("\n")}`,
-    )
-  }
-  if (req.forbiddenSurfaces && req.forbiddenSurfaces.length > 0) {
-    parts.push(
-      `**Forbidden surfaces** (do NOT touch): ${req.forbiddenSurfaces.map((s) => `- ${s}`).join("\n")}`,
-    )
-  }
-  if (req.checkpointPath && req.checkpointPath.length > 0) {
-    parts.push(
-      `**Checkpoint**: Write your interim progress to \`${req.checkpointPath}\` every few turns (use the \`write\` or \`edit\` tool). The parent uses this file to monitor and to recover work if you are stopped.`,
-    )
-  }
-  if (req.resultShape && req.resultShape.length > 0) {
-    parts.push(`**Final answer format**: ${req.resultShape}`)
-  }
-  return parts.join("\n\n")
+/** Run the child once, selecting the worktree wrapper only after admission. */
+const executeChild = async ({
+  parent,
+  req,
+  subagentId,
+  requestedCwd,
+  isolate,
+  mailboxIds,
+  toolNamespace,
+  turnGate,
+  spawnedAsTaskId,
+  run,
+  withWorktree: wt,
+}: ChildExecution): Promise<SubagentResult> => {
+  const configAt = (cwd: string): AgentConfig =>
+    buildChildConfig(parent, req, cwd, mailboxIds, toolNamespace, turnGate, spawnedAsTaskId)
+  if (!isolate) return toResult(await run(configAt(requestedCwd)))
+  const outcome = await wt(subagentId, requestedCwd, async (worktreePath) =>
+    run(configAt(worktreePath)),
+  )
+  return toResult(outcome.value)
 }
 
-/**
- * §20.1/§20.2 — resolve the named-agent definition for this spawn (if any) and
- * fold it into an EFFECTIVE request. A definition is consulted ONLY when the
- * parent wired a `namedAgentResolver` AND `req.agentType` matches a loaded
- * definition; otherwise the original `req` is returned unchanged (the
- * byte-identical default-OFF path — no resolver, or no match).
- *
- * Precedence is EXPLICIT-REQUEST-WINS for every field (a caller's explicit
- * value always beats the definition's default — mirrors `taskKind`/`toolFilter`):
- *   - `system`     ← `req.system ?? def.system`
- *   - `toolFilter` ← `req.toolFilter ?? def.tools`   (narrow-only, see below)
- *   - `model`      ← `req.model ?? def.model`
- *   - `mode`       ← `req.mode ?? def.mode`
- *
- * SECURITY (tool widening — the crux): `def.tools` is REPO-CONTROLLED and is
- * carried ONLY as the spawn's `toolFilter`. `buildChildConfig` feeds that into
- * `filterRegistry(parent.registry, toolFilter)`, which INTERSECTS the names
- * against the PARENT registry's `specs()` (`allow.has(name)`). So a definition
- * naming a tool the parent never granted yields a child registry WITHOUT it —
- * the named definition can only NARROW, never widen. This function performs no
- * grant of its own.
- */
-const applyNamedAgent = (parent: AgentConfig, req: SubagentRequest): SubagentRequest => {
-  // Read the resolver via a structural accessor so this slice compiles whether
-  // or not the (parent-owned) `AgentConfig.namedAgentResolver?: NamedAgentResolver`
-  // field has landed yet — EMIT-BLOCK in the report adds it. No field ⇒
-  // `undefined` ⇒ byte-identical default-OFF.
-  const resolver = (parent as { namedAgentResolver?: NamedAgentResolver }).namedAgentResolver
-  if (resolver === undefined || req.agentType === undefined || req.agentType.length === 0) {
-    return req
-  }
-  const def: NamedAgentDefinition | undefined = resolver.resolve(req.agentType)
-  if (def === undefined) return req
-  // Explicit-request-wins on every field; the definition only supplies a
-  // default for fields the caller left absent. `toolFilter` rides through
-  // `filterRegistry` (intersection ⇒ narrow-only) so `def.tools` can never widen.
-  return {
-    ...req,
-    ...(req.system === undefined ? { system: def.system } : {}),
-    ...(req.toolFilter === undefined && def.tools !== undefined ? { toolFilter: def.tools } : {}),
-    ...(req.model === undefined && def.model !== undefined ? { model: def.model } : {}),
-    ...(req.mode === undefined && def.mode !== undefined ? { mode: def.mode } : {}),
-  }
-}
-
-/** §20.1 — pick the child's role system prompt. `req.system` (set by an
- *  explicit caller OR a matched named-agent definition via `applyNamedAgent`)
- *  REPLACES the inherited `parent.system`; absent ⇒ `parent.system`
- *  (byte-identical). Extracted so the ternary lives outside `buildChildConfig`'s
- *  cognitive-complexity budget. */
-const resolveChildSystem = (parent: AgentConfig, req: SubagentRequest): string =>
-  req.system !== undefined && req.system.length > 0 ? req.system : parent.system
-
-/** §20.2 — pick the child's prompt `mode`. A named-agent definition's `mode:`
- *  (folded into `req.mode`) overrides the inherited parent mode; absent ⇒ the
- *  child inherits `parent.mode` exactly as before (byte-identical). `req.mode`
- *  is a SSOT-validated string (the registry's `normalizeMode` only emits an
- *  `AGENT_PROMPT_MODES` member), so the narrowing cast carries no runtime risk.
- *  Returns a spread fragment so an absent mode omits the key entirely (honors
- *  exactOptionalPropertyTypes). */
-const resolveChildMode = (
-  parent: AgentConfig,
-  req: SubagentRequest,
-): Pick<AgentConfig, "mode"> | Record<string, never> => {
-  const parentMode = parent.mode
-  if (req.mode !== undefined && req.mode.length > 0) {
-    const requested = req.mode as AgentMode
-    // Most-restrictive clamp (SECURITY): a named-agent `mode:` (repo-controlled
-    // definition, folded into `req.mode`) may FURTHER restrict the child but must
-    // never RELAX a read-only parent (plan/review/audit/architect) into a
-    // write-capable posture (default/editor). Without this, a definition
-    // declaring `mode: default` would let a review-posture parent spawn a child
-    // that invokes mutating tools — the exact escalation that unconditional
-    // parent-mode inheritance prevented. A read-only parent therefore floors the
-    // child; two mutating modes, or a parent that is already mutating, honor the
-    // request as-is. Pinned by `named-agent-mode-clamp-hellgate`.
-    if (parentMode !== undefined && !isMutatingMode(parentMode) && isMutatingMode(requested)) {
-      return { mode: parentMode }
-    }
-    return { mode: requested }
-  }
-  return parentMode !== undefined ? { mode: parentMode } : {}
-}
-
-/**
- * Capability B (multi-agent coordination) — wire the leader-mediated escalation
- * broker onto the CHILD's admissibility bundle. DEFAULT-OFF: returns `{}` (no
- * `admissibility` slot ⇒ byte-identical legacy child) UNLESS `QUANTA_TEAM_BROKER`
- * is on AND the parent has an `onConfirm` authority (the leader's HITL) AND the
- * child has stable worker/leader mailbox ids. The decider wraps the LEADER's
- * `onConfirm` — a worker's SOFT-denied tool escalates to the leader's
- * confirmation; HARD_DENY is structurally never escalatable (enforced in the
- * gate). The correlation-id source is a deterministic per-child counter (NOT a
- * clock / random) so a recorded session re-mints identical ids.
- */
-const maybeWireCoordinationBroker = (
-  parent: AgentConfig,
-  mailboxIds: { agentId: string; parentId: string },
-): Pick<AgentConfig, "admissibility"> | Record<string, never> => {
-  if (!runtimeConfig().teamBroker) return {}
-  const onConfirm = parent.onConfirm
-  if (onConfirm === undefined) return {} // no leader authority ⇒ nothing to escalate to
-  const workerId = mailboxIds.agentId
-  const leaderId = mailboxIds.parentId
-  if (workerId.length === 0 || leaderId.length === 0) return {}
-
-  // WS-A (jul-10, UUX-1-07) — the SSOT mapping (coordination-broker-wire's
-  // `buildLeaderDecide`) replaces the prior inline collapse to `{approved}`:
-  // the leader's deny_and_steer STEER and allow SCOPE now survive the boundary,
-  // and a session-scoped allow is cached so the same ask never re-prompts.
-  // UUX-6-12 — thread the worker's id so the leader's prompt names WHO asks.
-  const leaderDecide: LeaderEscalationDecider = buildLeaderDecide(onConfirm, { workerId })
-
-  let esc = 0
-  const broker = buildLeaderHitlBroker({
-    workerId,
-    leaderId,
-    leaderDecide,
-    ...(parent.subagentMailbox ? { mailbox: parent.subagentMailbox } : {}),
-    nextCorrelationId: () => `${workerId}#esc${esc++}`,
-  })
-  return { admissibility: { coordinationBroker: broker } }
-}
-
-/** RFC jun-6 (DELTA #2) — register a freshly-spawned child into the PARENT's
- *  team so siblings share a team bus. No-op when no team registry is wired
- *  (`teamPeerMsg` off) or the parent is un-teamed. The parent's mailbox label
- *  (`mailboxAgentId ?? "root"`) is its membership key. NO-THROW: a malformed
- *  registry call is swallowed (the spawn must never fail on a comms-channel
- *  bookkeeping error). */
+/** RFC jun-6 (DELTA #2) — register a spawned child into its parent's team.
+ *  Registry failures are bookkeeping-only and must not fail the spawn. */
 const maybeRegisterChildTeam = (parent: AgentConfig, childLabel: string): void => {
   const registry = parent.teamRegistry
   if (registry === undefined) return
-  const parentLabel = parent.mailboxAgentId ?? "root"
-  const team = registry.teamOf(parentLabel)
-  if (team === undefined) return // parent un-teamed ⇒ child stays un-teamed
+  const team = registry.teamOf(parent.mailboxAgentId ?? "root")
+  if (team === undefined) return
   try {
     registry.addMember(team, childLabel)
   } catch {
-    // bookkeeping only — never fail a spawn on a registry hiccup
+    // Team membership does not own the child execution lifecycle.
   }
 }
 
@@ -541,189 +314,140 @@ const recordChildNickname = (
   agentMeta.set(taskId, { depth, label })
 }
 
-/** Construct the CHILD {@link AgentConfig} by shallow-cloning `parent` and
- *  applying the subagent overrides (see the override table in the report).
- *  `store`/`hooks`/`metrics`/`run`/`sessionId`/`memory` are DROPPED so a child
- *  never persists into the parent's long-term memory or pollutes its
- *  correlation/observability; `llm`/`stream`/`permission`/`system` are kept.
- *  Seed is `[{ role: "user", content: [{ type: "text", text:
- *  buildSeedPrompt(req) }] }]` — see {@link buildSeedPrompt} for the
- *  five-field (priorAttempt / ownedSurfaces / forbiddenSurfaces /
- *  checkpointPath / resultShape) augmentation rules. */
+type ChildDepthAdmission = { readonly childDepth: number } | { readonly denied: SubagentResult }
 
-/** The child's mailbox-identity fields: its UNIQUE mailbox label, its parent's
- *  label, and (when spawned with a registry task) its OWN task id for the
- *  `followup_task` self-target guard (BUG#4). Extracted so `buildChildConfig`
- *  stays under the cognitive-complexity cap. */
-const childMailboxIdentity = (
-  mailboxIds: { agentId: string; parentId: string },
-  req: SubagentRequest,
-): { mailboxAgentId: string; mailboxParentId: string; subagentTaskId?: string } => ({
-  mailboxAgentId: mailboxIds.agentId,
-  mailboxParentId: mailboxIds.parentId,
-  ...(req.taskId !== undefined ? { subagentTaskId: req.taskId } : {}),
-})
-
-const buildChildConfig = (
-  parent: AgentConfig,
-  rawReq: SubagentRequest,
-  cwd: string,
-  mailboxIds: { agentId: string; parentId: string },
-  toolNamespace?: ToolNamespaceStrategy,
-  turnGate?: SubagentTurnGate,
-): AgentConfig => {
-  // §20.1/§20.2 — fold a matching named-agent definition into the request
-  // (system / toolFilter / model / mode), explicit-request-wins. No resolver or
-  // no match ⇒ `req === rawReq` (byte-identical). `def.tools` only ever NARROWS
-  // (it rides `toolFilter` → `filterRegistry` intersection).
-  const req = applyNamedAgent(parent, rawReq)
-  const seed: Message[] = [
-    { role: "user", content: [{ type: "text", text: buildSeedPrompt(req) }] },
-  ]
-  // B1 — start from the parent's ALLOW-LIST-filtered registry (unchanged
-  // default path). When a namespacing strategy is injected, rewrite it so the
-  // child's tools carry scoped names (keyed by the scoped name, so dispatch
-  // round-trips). The child's mailbox label (`mailboxIds.agentId`, e.g.
-  // `root/0`) is the per-child namespace token — distinct per sibling, so
-  // concurrent siblings cannot collide. Absent ⇒ raw names (byte-identical).
-  const filtered = filterRegistry(parent.registry, req.toolFilter, req.extraTools)
-  const childRegistry =
-    toolNamespace !== undefined
-      ? namespaceRegistry(filtered, toolNamespace, mailboxIds.agentId)
-      : filtered
-  // ADR-0451 — resolve the child's effective LLM port (explicit model > role >
-  // parent) and optional effort thunk. With NO override on the request these
-  // collapse to `parent.llm` and `undefined` (no sessionEffort wired) — the
-  // exact pre-ADR-0451 child config (byte-identical). A bad model id throws
-  // UnknownSubagentModelError here (fail-closed); the runner's catch turns it
-  // into a non-ok SubagentResult.
-  const childLlm = resolveChildLlm(parent, req)
-  const childEffort = resolveChildEffort(req)
-  // §20.1 — the child's role system prompt: an explicit caller `req.system` OR a
-  // matched named-agent definition (folded into `req.system` by
-  // `applyNamedAgent`); absent ⇒ inherit `parent.system` (byte-identical).
-  const childSystem = resolveChildSystem(parent, req)
-  // §20.4 (ticket-12) — assemble the ENFORCED ownership policy from the request's
-  // owned/forbidden surfaces (canonicalized against the child cwd) ONLY when the
-  // strict `QUANTA_FS_OWNERSHIP_ENFORCE` knob is on. No surfaces / knob off ⇒
-  // `undefined` ⇒ the surfaces stay advisory seed-prompt guidance (byte-identical).
-  const ownershipPolicy = buildOwnershipPolicy({
-    ...(req.ownedSurfaces ? { owned: req.ownedSurfaces } : {}),
-    ...(req.forbiddenSurfaces ? { forbidden: req.forbiddenSurfaces } : {}),
-    cwd,
-    enforced: runtimeConfig().fsOwnershipEnforce,
-  })
-  // Shallow clone, then strip the inheritance-unsafe keys. We rebuild the
-  // object explicitly (rather than `delete`) to satisfy
-  // exactOptionalPropertyTypes: omit keys entirely, never assign `undefined`.
-  const child: AgentConfig = {
-    llm: childLlm,
-    registry: childRegistry,
-    // jul-7 audit (F1): carry the child's tool allowlist so `buildEffectiveConfig`
-    // intersects the feature tools (spawn_agent / team_*) with it too — a restricted
-    // child must not re-acquire, via the feature layer, tools its registry filter denied.
-    // Same value fed to `filterRegistry` above ⇒ consistent. Absent ⇒ no feature filter.
-    ...(req.toolFilter !== undefined ? { toolAllowlist: req.toolFilter } : {}),
-    stream: parent.stream,
-    permission: parent.permission,
-    messages: seed,
-    // §20.1 — role-specialized system prompt (see `resolveChildSystem`). Absent
-    // override ⇒ `parent.system` (byte-identical to pre-§20.1).
-    system: childSystem,
-    cwd,
-    // §20.4 — the enforced FS ownership boundary (undefined ⇒ advisory legacy).
-    ...(ownershipPolicy !== undefined ? { ownershipPolicy } : {}),
-    maxTurns: req.budget?.maxTurns ?? parent.maxTurns,
-    // Child abort is composed from BOTH the parent loop's signal and the
-    // per-request signal (driven by `TaskRegistry.stop(id)` from `task_stop`).
-    // Either source aborting unwinds the forked `runAgent`. See chainedSignal.
-    signal: chainedSignal(parent.signal, req.signal),
-    // RFC jul-13 §4.1 (rev.3) — the child's depth is LINEAGE-DERIVED from the
-    // REAL parent config (`childDepthOf(parent) = parent.depth + 1`), NOT the
-    // caller-asserted `req.depth`. This is the anti-forgery authority: a Bash /
-    // IPC / adapter / forced-injection path that forges `req.depth:0` cannot mint
-    // a shallow child — the background/delegate `depth:0` hardcodes are advisory
-    // now (§4.3). Malformed `parent.depth` ⇒ `SpawnLineageError` (caught by the
-    // runner's try, turned into a non-ok result — fail-closed, no depth:0
-    // fallback). In the honest path callers already set `req.depth = parentDepth +
-    // 1` and `parent.depth = parentDepth`, so this is byte-identical. dispatch.ts
-    // surfaces the marker onto ToolContext so the child's `agent` tool computes
-    // `childDepth = depth+1`; with `subagent` propagated below this is
-    // LOAD-BEARING. Duck-typed cast sets it unconditionally without tripping
-    // exactOptionalPropertyTypes.
-    ...({ depth: childDepthOf(parent) } as { depth: number }),
-    // ADR-0416 sibling-identity fix — thread the DETERMINISTIC mailbox label
-    // for this child (`parentLabel/seq`) + the parent's label. dispatch.ts
-    // surfaces these onto ToolContext.agentLabel / parentAgentLabel so the
-    // subagent-mailbox tools address each sibling UNIQUELY (audit H). The
-    // mailbox PORT itself is propagated below so the child shares the parent's
-    // single in-memory mailbox instance (a child fork can both send and read).
-    // ADR-0416 sibling identity + ADR-0437 self-target id (BUG#4). See
-    // {@link childMailboxIdentity}. `req.taskId` absent ⇒ `subagentTaskId`
-    // omitted (byte-identical foreground/legacy path).
-    ...childMailboxIdentity(mailboxIds, req),
-    // Propagated so a forked child can participate in the SAME inter-agent
-    // mailbox (parent↔child + sibling↔sibling). The port is an in-process
-    // shared-by-reference instance — safe across the worktree-isolation fork.
-    ...(parent.subagentMailbox ? { subagentMailbox: parent.subagentMailbox } : {}),
-    // RFC jun-6 (DELTA #2) — propagate the team registry so a forked child shares
-    // the SAME membership scope (and can itself create/delete teams + the
-    // cross-team deny applies to it). Absent ⇒ no team boundary (byte-identical).
-    ...(parent.teamRegistry ? { teamRegistry: parent.teamRegistry } : {}),
-    // RFC jun-6 (DELTA #1) — propagate the auto-delivery drain so the child's
-    // turn loop AUTO-receives peer mail addressed to ITS label (the drain takes
-    // the agent id at call time — one shared port drains every label). Absent ⇒
-    // the child must manually poll (byte-identical default-OFF).
-    ...(parent.peerInbox ? { peerInbox: parent.peerInbox } : {}),
-    // ADR-0437 follow-up — THIS child's own turn gate (never the parent's).
-    // The child loop parks on it at clean-completion so a `followup_task`
-    // wake (registered against this child's task id in the runner below) can
-    // trigger another turn. Absent ⇒ the child finishes immediately on
-    // completion (byte-identical legacy / no-followup path).
-    ...(turnGate !== undefined ? { subagentTurnGate: turnGate } : {}),
-    // ADR-0451 — the child's effort source. Wired ONLY when `req.effort` named a
-    // recognised tier; the child loop reads this each turn and caps its thinking
-    // budget via `effortToTokenBudget` (the SAME seam as `sessionEffort`/skill
-    // effort). Absent ⇒ omitted, so the child has no session-effort source
-    // exactly as before (byte-identical no-override path).
-    ...(childEffort !== undefined ? { sessionEffort: childEffort } : {}),
-    // Kept (safe to share, no parent-state mutation):
-    ...(parent.onConfirm ? { onConfirm: parent.onConfirm } : {}),
-    ...(parent.embedder ? { embedder: parent.embedder } : {}),
-    ...(parent.compaction ? { compaction: parent.compaction } : {}),
-    ...(parent.planMode !== undefined ? { planMode: parent.planMode } : {}),
-    // Codex-absorption inheritance (Round 2 fix): a child fork MUST
-    // inherit the parent's safety / interaction posture or read-only modes
-    // (review/audit) silently broaden in the child. Read-only modes block
-    // mutating tools at dispatch — if the child collapses to `default`, a
-    // review-posture parent could spawn a child that writes. Verify/closeout
-    // guards and HITL 4-tier are also safety contracts the child must honor.
-    // §20.2 — a named-agent definition's `mode:` (folded into `req.mode` by
-    // `applyNamedAgent`, already validated against the prompt-mode SSOT) sets the
-    // child's posture; absent ⇒ inherit the parent's mode (byte-identical). The
-    // SSOT membership check happened registry-side, so the cast is contract-safe.
-    ...resolveChildMode(parent, req),
-    ...(parent.verifyGuard !== undefined ? { verifyGuard: parent.verifyGuard } : {}),
-    ...(parent.closeoutGuard !== undefined ? { closeoutGuard: parent.closeoutGuard } : {}),
-    ...(parent.hitl !== undefined ? { hitl: parent.hitl } : {}),
-    // Propagated so a child can itself spawn sub-subagents — recursion is
-    // bounded by the depth marker above + this runner's `req.depth > maxDepth`
-    // deny guard (now the real, exercised bound, not belt-and-braces). Skills
-    // are intentionally NOT propagated (a subagent gets a clean tool surface).
-    ...(parent.subagent ? { subagent: parent.subagent } : {}),
-    // Capability B — leader-mediated escalation broker on the child's
-    // admissibility bundle. Default-OFF (empty spread) unless QUANTA_TEAM_BROKER
-    // is on + the parent has an onConfirm authority. See the helper above.
-    ...maybeWireCoordinationBroker(parent, mailboxIds),
-    // DROPPED on purpose: store, sessionId, memory, hooks, metrics, run,
-    // repoRules, globRules, workingState. A subagent must not write into the
-    // parent's durable memory, emit into the parent's hook bus / metrics, or
-    // share its correlation context. `repoRules` / `globRules` are dropped
-    // because the child may run in a different `cwd` (worktree fork), where the
-    // parent's file-scoped rules are stale authority. `workingState` is
-    // session-scoped (Codex memory L3) — each agent gets a fresh scratchpad.
+/** Resolve and telemetry-record the authority-derived spawn depth once. */
+const admitChildDepth = (parent: AgentConfig, maxDepth: number): ChildDepthAdmission => {
+  const parentDepth = parent.depth ?? 0
+  const toolExposed = canExposeSpawnTools(parentDepth, maxDepth)
+  let childDepth: number
+  try {
+    childDepth = childDepthOf(parent)
+  } catch (e) {
+    if (!(e instanceof SpawnLineageError)) throw e
+    emitSpawnDepthDecision({
+      parentDepth,
+      childDepth: null,
+      maxDescendantDepth: maxDepth,
+      toolExposed,
+      decision: "denied_malformed",
+    })
+    return { denied: { ok: false, finalText: `spawn denied: ${e.message}`, turns: 0 } }
   }
-  return child
+  if (childDepth > maxDepth) {
+    emitSpawnDepthDecision({
+      parentDepth,
+      childDepth,
+      maxDescendantDepth: maxDepth,
+      toolExposed,
+      decision: "denied_by_depth",
+    })
+    return {
+      denied: {
+        ok: false,
+        finalText: `max subagent depth (${maxDepth}) exceeded — complete this task yourself, do not spawn.`,
+        turns: 0,
+      },
+    }
+  }
+  emitSpawnDepthDecision({
+    parentDepth,
+    childDepth,
+    maxDescendantDepth: maxDepth,
+    toolExposed,
+    decision: "admitted",
+  })
+  return { childDepth }
+}
+
+/**
+ * Multi-agent-panel SUBSTRATE — install the shared registry's lifecycle emit
+ * sink from `parent.onSubagentEvent` (mirror of the `onAgentState` tap). The
+ * registry emits its duck-declared {@link SubagentLifecycleEvent}; this closure
+ * projects it to a `@/protocol/subagent` `SubagentObservation` (re-scrubbed,
+ * defense-in-depth) before handing it to the host sink. No-op when either the
+ * sink OR the shared registry is absent (byte-identical OFF). Idempotent:
+ * setting the SAME sink twice (two runners over one registry) is harmless.
+ */
+const installSubagentEmitter = (parent: AgentConfig): void => {
+  const sink = parent.onSubagentEvent
+  const registry = parent.subagent?.taskRegistry
+  if (sink === undefined || registry === undefined) return
+  registry.setEmitter((event: SubagentLifecycleEvent) => {
+    // The lifecycle event is structurally a subset of `AgentEvent`; the
+    // projector maps + re-redacts it. A null (unexpected type) is dropped.
+    const obs = projectToSubagentObservation(
+      event as Parameters<typeof projectToSubagentObservation>[0],
+    )
+    if (obs !== null) sink(obs)
+  })
+}
+
+/**
+ * Multi-agent-panel SUBSTRATE — ensure the spawned child has a lineage
+ * `TaskRecord` in the shared registry, and return the child's effective task id
+ * (its OWN id, to thread as `spawnedAsTaskId`). This is the seam that makes
+ * `registry.list()` reconstruct a real parent→child TREE.
+ *
+ *   - No shared registry ⇒ `undefined` (foreground/legacy path stays
+ *     byte-identical: nothing registered, no `spawnedAsTaskId` threaded).
+ *   - `req.taskId` already set (background / 6-tool pre-registered by the tool
+ *     layer) ⇒ STAMP the lineage edge (`parentTaskId` / `depth` / `mailboxLabel`)
+ *     onto that existing record (mutating it in place; the emit already fired at
+ *     its `register()`), and return it.
+ *   - `req.taskId` absent (foreground spawn) ⇒ REGISTER a fresh lineage record
+ *     (emitting `subagent_spawn` if a sink is wired) and return its id.
+ *
+ * `parentTaskId` is `parent.spawnedAsTaskId` — undefined at the root ⇒ the
+ * direct child is root-level.
+ */
+const ensureLineageTask = (
+  parent: AgentConfig,
+  req: SubagentRequest,
+  childDepth: number,
+  mailboxLabel: string,
+):
+  | { registry: TaskRegistry; taskId: string; settle: (result: SubagentResult) => void }
+  | undefined => {
+  const registry = parent.subagent?.taskRegistry
+  if (registry === undefined) return undefined
+  const parentTaskId = parent.spawnedAsTaskId
+  const description = req.prompt.slice(0, 120)
+  if (req.taskId !== undefined) {
+    // Background / 6-tool: the tool layer already `register()`ed this id. Stamp
+    // the lineage edge onto the existing record so the tree is complete. Do NOT
+    // re-register (that would reset status + double-emit).
+    const existing = registry.get(req.taskId)
+    if (existing !== undefined) {
+      const stamped = existing as {
+        parentTaskId?: string
+        depth: number
+        mailboxLabel?: string
+      }
+      if (parentTaskId !== undefined) stamped.parentTaskId = parentTaskId
+      stamped.depth = childDepth
+      stamped.mailboxLabel = mailboxLabel
+    }
+    // Its settle is owned by the tool layer's `.then(complete)` chain — we do
+    // NOT settle it here (return a no-op settle so the caller never double-settles).
+    return { registry, taskId: req.taskId, settle: () => {} }
+  }
+  // Foreground: register a fresh lineage record. The runner OWNS this record's
+  // settle (the foreground path has no tool-layer `complete` chain).
+  const taskId = registry.newId()
+  registry.register({
+    id: taskId,
+    description,
+    ...(req.agentType !== undefined ? { agentType: req.agentType } : {}),
+    ...(parentTaskId !== undefined ? { parentTaskId } : {}),
+    depth: childDepth,
+    mailboxLabel,
+  })
+  return {
+    registry,
+    taskId,
+    settle: (result: SubagentResult): void => registry.complete(taskId, result),
+  }
 }
 
 /**
@@ -750,6 +474,10 @@ export const createSubagentRunner = (
   const gitProbe = opts.isGitRepo ?? isGitRepo
   const wt = opts.withWorktree ?? withWorktree
   const now = opts.now ?? Date.now
+  // Multi-agent-panel SUBSTRATE — wire the shared registry's lifecycle emit sink
+  // from `parent.onSubagentEvent` once (mirror of the `onAgentState` tap). No-op
+  // when the sink OR the shared registry is absent (byte-identical OFF).
+  installSubagentEmitter(parent)
   // B1 — undefined ⇒ raw tool names (default, byte-identical). When set, child
   // registries are rewritten with scoped names per the injected strategy.
   const toolNamespace = opts.toolNamespace
@@ -765,66 +493,9 @@ export const createSubagentRunner = (
   const localIdentity = { childOrdinal: 0, spawnSeq: 0 }
 
   return async (req: SubagentRequest): Promise<SubagentResult> => {
-    // RFC jul-13 §4.1/§4.2 (rev.4) — the recursion bound is on the
-    // LINEAGE-DERIVED child depth (`childDepthOf(parent) > maxDepth`), NOT the
-    // caller-asserted `req.depth`. Same authority as `buildChildConfig` below, so
-    // a forged `req.depth` cannot slip past. `maxDepth = effectiveCap(opts.maxDepth)`
-    // = `min(runtimeConfig().maxDescendantDepth policy [default 1], opts.maxDepth)`
-    // — the SAME min-cap the tier1 gates expose on (config can only tighten). A
-    // malformed `parent.depth`
-    // ⇒ SpawnLineageError, converted HERE into a typed non-ok deny (fail-closed,
-    // never a rejected Promise, never a depth:0 fallback). Honest path:
-    // childDepthOf(parent) === req.depth, so byte-identical.
-    // RFC jul-13 §4.5 (Phase 2 observability) — the EXPOSURE side of the
-    // split-brain invariant: would `projectSpawnTools` have exposed a spawn tool
-    // to THIS parent? Same `canExposeSpawnTools(parentDepth, effectiveCap)` the
-    // projection uses, so `emitSpawnDepthDecision` can prove exposure ⇔ admission
-    // at the reject. Reused (not recomputed) in all three decision branches below.
-    const parentDepth = parent.depth ?? 0
-    const toolExposed = canExposeSpawnTools(parentDepth, maxDepth)
-    let childDepth: number
-    try {
-      childDepth = childDepthOf(parent)
-    } catch (e) {
-      if (e instanceof SpawnLineageError) {
-        // §4.5 — malformed parent depth ⇒ no valid child depth (`childDepth:null`).
-        emitSpawnDepthDecision({
-          parentDepth,
-          childDepth: null,
-          maxDescendantDepth: maxDepth,
-          toolExposed,
-          decision: "denied_malformed",
-        })
-        return { ok: false, finalText: `spawn denied: ${e.message}`, turns: 0 }
-      }
-      throw e
-    }
-    if (childDepth > maxDepth) {
-      // §4.5 — depth reject. On the normal path this is only reached when the
-      // tool was NOT exposed (`toolExposed:false`); a `toolExposed && denied_by_depth`
-      // bumps the split-brain regression counter (must stay 0 in production).
-      emitSpawnDepthDecision({
-        parentDepth,
-        childDepth,
-        maxDescendantDepth: maxDepth,
-        toolExposed,
-        decision: "denied_by_depth",
-      })
-      return {
-        ok: false,
-        finalText: `max subagent depth (${maxDepth}) exceeded — complete this task yourself, do not spawn.`,
-        turns: 0,
-      }
-    }
-    // §4.5 — admitted: exposure ⇔ admission holds (toolExposed is true here on
-    // the normal path).
-    emitSpawnDepthDecision({
-      parentDepth,
-      childDepth,
-      maxDescendantDepth: maxDepth,
-      toolExposed,
-      decision: "admitted",
-    })
+    const admission = admitChildDepth(parent, maxDepth)
+    if ("denied" in admission) return admission.denied
+    const { childDepth } = admission
 
     // Isolation guarantee (jul-7 audit F4, verified): when `isolate` holds, the child's
     // `cwd` is the throwaway worktree path (below), and BOTH write surfaces are jailed to
@@ -838,6 +509,13 @@ export const createSubagentRunner = (
     // exec cwd; treat raw shell absolute-path writes as still able to reach the parent tree.
     const requestedCwd = req.workspace ?? parent.cwd
     const mailboxIds = allocateChildMailboxIds(parentMailboxLabel, sharedIdentity, localIdentity)
+    // Multi-agent-panel SUBSTRATE — ensure this child has a lineage `TaskRecord`
+    // in the shared registry (register foreground / stamp pre-registered
+    // background) and get its OWN task id to thread as `spawnedAsTaskId`. The
+    // emit (if a sink is wired) fires inside `register()`. `undefined` when no
+    // shared registry ⇒ nothing registered, no id threaded (byte-identical).
+    const lineage = ensureLineageTask(parent, req, childDepth, mailboxIds.agentId)
+    const spawnedAsTaskId = lineage?.taskId
     // D3 (AUDIT-2026-07-14) — stamp the run id with the AUTHORITY-derived
     // `childDepth` (`childDepthOf(parent)`), NOT the caller-asserted `req.depth`
     // (a forged `req.depth:0` must not mislabel the run id; admission already used
@@ -883,27 +561,19 @@ export const createSubagentRunner = (
     const turnGate = wakerWiring?.gate
 
     try {
-      const rawChildResult: SubagentResult = isolate
-        ? toResult(
-            (
-              await wt(subagentId, requestedCwd, async (worktreePath) => {
-                const child = buildChildConfig(
-                  parent,
-                  req,
-                  worktreePath,
-                  mailboxIds,
-                  toolNamespace,
-                  turnGate,
-                )
-                return run(child)
-              })
-            ).value,
-          )
-        : toResult(
-            await run(
-              buildChildConfig(parent, req, requestedCwd, mailboxIds, toolNamespace, turnGate),
-            ),
-          )
+      const rawChildResult = await executeChild({
+        parent,
+        req,
+        subagentId,
+        requestedCwd,
+        isolate,
+        mailboxIds,
+        toolNamespace,
+        turnGate,
+        spawnedAsTaskId,
+        run,
+        withWorktree: wt,
+      })
 
       // UX honesty (jul-7 audit F5): `isolation:"worktree"` was REQUESTED but could not be
       // honored — the workspace is not a git repo — so the child ran in the SHARED parent
@@ -919,6 +589,13 @@ export const createSubagentRunner = (
 
       // ADR-0133 — fire `subagent_stop` after the child completes (any reason).
       await emitSubagentStopHook(parent, { subagentId, result: childResult })
+
+      // Multi-agent-panel SUBSTRATE — settle the FOREGROUND lineage record so a
+      // `subagent_status{completed|failed}` transition fires (the registry maps
+      // ok→completed / !ok→failed and emits, redacting the preview). No-op for a
+      // background/6-tool spawn (its settle is owned by the tool layer's
+      // `.then(complete)` chain) and when no shared registry is wired.
+      lineage?.settle(childResult)
 
       return childResult
     } finally {

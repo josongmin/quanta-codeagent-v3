@@ -356,6 +356,43 @@ export interface WireSlotsRuntimeConfig {
    */
   onAgentState?: import("@/protocol/agent-state").AgentStateSink
   /**
+   * Multi-agent orchestration SUBSTRATE — OPTIONAL subagent lifecycle capture
+   * sink (PARALLEL to {@link onAgentState}). When set, the subagent runner
+   * installs it as the shared `TaskRegistry`'s emit sink so every spawn/settle
+   * TRANSITION (`register()` ⇒ `subagent_spawn`; `complete()`/`fail()`/`stop()`
+   * ⇒ `subagent_status`) is projected to a {@link
+   * import("@/protocol/subagent").SubagentObservation} and handed here. BOTH the
+   * CLI `/agents --tree` and the web Sub-Agents panel (later waves) tap this via
+   * the `@/protocol/subagent` seam. The `description` / `finalTextPreview` /
+   * `error` fields are bounded + secret-scrubbed at the registry emit boundary
+   * (this data crosses to a UI).
+   *
+   * Absent ⇒ the runner never installs the registry emitter, NO event is
+   * captured, and the path is byte-identical for every non-panel caller
+   * (default-OFF, RFC §1.2). The `TaskRecord` still gains its cheap lineage
+   * fields (`parentTaskId` / `depth` / `mailboxLabel`) regardless — those are a
+   * pure data addition, not a behaviour change. Duck-typed via the
+   * `@/protocol/subagent` `SubagentObservation` so neither slice imports the
+   * other's `@/apps/*` surface. Best-effort: the sink is no-throw by contract
+   * and the registry additionally guards each emit, so a misbehaving forwarder
+   * can never crash a spawn/settle transition.
+   */
+  onSubagentEvent?: (event: import("@/protocol/subagent").SubagentObservation) => void
+  /**
+   * Multi-agent-panel SUBSTRATE (lineage thread) — the registry TASK ID under
+   * which THIS agent config was registered when it was itself spawned as a
+   * child. The subagent runner threads it onto a forked CHILD config so that
+   * when the child spawns a GRANDCHILD, the runner can stamp the grandchild's
+   * `TaskRecord.parentTaskId = spawnedAsTaskId` — forming a real parent→child
+   * TREE in `registry.list()` instead of a flat list. The ROOT session leaves
+   * this UNSET ⇒ its direct children get `parentTaskId: undefined` (root-level).
+   * Distinct from {@link subagentTaskId} (which is the SAME id but scoped to the
+   * `followup_task` self-target guard — kept separate so the two consumers can
+   * evolve independently). Absent ⇒ the spawned task is root-level
+   * (byte-identical legacy path).
+   */
+  spawnedAsTaskId?: string
+  /**
    * H6 (jun-3-misc §3) — OPTIONAL passive-VCS event sink. When set, the dispatch
    * seam surfaces it onto {@link import("@/tool").ToolContext}'s `vcsEventSink`
    * so the `bash` tool's post-exec hook (`maybeEmitPassiveVcs`) — gated by
