@@ -20,13 +20,13 @@
  * (`bindBranchRunCandidate`) with `runAgent` stubbed and asserts the stub is
  * NEVER called when the cap forbids the child depth.
  *
- * CURRENT STATE: `bindBranchRunCandidate` has NO cap check, so it calls
- * `runAgent` unconditionally ⇒ this test is RED (documents the hole). Blast
- * radius is bounded (branchSearch is ROOT-only — never propagated to children by
- * `buildChildConfig`, and candidates get `branchSearch` stripped), but the RFC's
- * stated kill-switch completeness is not met. When the binder is fixed to skip
- * the fork on `!canAdmitChildDepth(childDepthOf(config), effectiveCap(...))`,
- * this flips GREEN.
+ * CURRENT STATE: FIXED + GREEN. `bindBranchRunCandidate` now skips the fork on
+ * `!canAdmitChildDepth(childDepthOf(config), effectiveCap(...))` (rev.4 cert D1,
+ * branch-search-runner.ts), so under cap 0 zero candidate `runAgent`s fire. This
+ * test GUARDS that fix (removing the cap check → RED). Blast radius was always
+ * bounded (branchSearch is ROOT-only — never propagated to children by
+ * `buildChildConfig`, and candidates get `branchSearch` stripped); this closes the
+ * RFC kill-switch-completeness gap for the branch_search vector.
  */
 import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
 
@@ -80,8 +80,8 @@ describe("branch_search kill-switch bypass (repro)", () => {
     const run = bindBranchRunCandidate(rootConfig())
     await run(candidateArgs())
 
-    // RFC §10: branch_search cap0 ⇒ candidate runAgent 0회. RED today: the binder
-    // ignores the operator cap and forks the depth-1 candidate anyway.
+    // RFC §10: branch_search cap0 ⇒ candidate runAgent 0회. GREEN (fix landed):
+    // the binder now honors the operator cap and skips the depth-1 candidate fork.
     expect(runAgentCalls).toHaveLength(0)
   })
 
