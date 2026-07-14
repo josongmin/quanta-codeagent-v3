@@ -77,6 +77,26 @@ const spawnInput = {
   max_turns_per_wake: 3,
 }
 
+describe("side_agent_spawn — depth authority (§4 defense-in-depth: a leaf cannot mint daemons)", () => {
+  test("admitChild()===false DENIES creation AND registry.spawn is NOT called", async () => {
+    const reg = fakeRegistry()
+    const denied = sideAgentTools(reg, () => false)
+    const res = await run(byName(denied, "side_agent_spawn"), spawnInput)
+    expect(res.ok).toBe(false)
+    expect(res.output.toLowerCase()).toContain("depth")
+    // Authority, not just a message: no daemon was actually created.
+    const listed = await run(byName(denied, "side_agent_list"), {})
+    expect(listed.output).toContain("No background")
+  })
+
+  test("admitChild()===true still spawns (paired control — proves the deny is the predicate)", async () => {
+    const reg = fakeRegistry()
+    const allowed = sideAgentTools(reg, () => true)
+    const res = await run(byName(allowed, "side_agent_spawn"), spawnInput)
+    expect(res.ok).toBe(true)
+  })
+})
+
 describe("side-agent tools — spawn/list/stop/findings", () => {
   test("spawn registers a daemon → list shows it; stop by id", async () => {
     const reg = fakeRegistry()
