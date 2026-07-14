@@ -197,32 +197,10 @@ describe("running-row ordering + determinism + no input mutation", () => {
   })
 })
 
-describe("tree group ordering — byte sort, untyped last", () => {
-  // INVARIANT: tree groups are byte-sorted by agentType, with the UNTYPED
-  // bucket forced LAST regardless of byte order.
-  // MUTATION-KILL: dropping the UNTYPED-last special-case → untyped sorts
-  // before "zeta"/"alpha" by bytes → group-order assertion RED.
-  test("zeta + alpha + untyped: alpha before zeta, untyped LAST", () => {
-    const rows = [
-      row({ id: "z1", agentType: "zeta", status: "running" }),
-      row({ id: "a1", agentType: "alpha", status: "running" }),
-      // genuinely untyped — agentType OMITTED (exactOptionalPropertyTypes).
-      { id: "u1", description: "d", status: "running" as const, startedAt: NOW - 1_000 },
-    ]
-    const out = stripAnsi(renderAgentFleet(rows, { format: "tree", now: NOW }))
-
-    const idxAlpha = out.indexOf("alpha")
-    const idxZeta = out.indexOf("zeta")
-    const idxUntyped = out.toLowerCase().indexOf("untyped")
-
-    expect(idxAlpha).toBeGreaterThanOrEqual(0)
-    expect(idxZeta).toBeGreaterThanOrEqual(0)
-    expect(idxUntyped).toBeGreaterThanOrEqual(0)
-
-    expect(idxAlpha).toBeLessThan(idxZeta) // byte sort: alpha < zeta
-    expect(idxZeta).toBeLessThan(idxUntyped) // UNTYPED forced last
-  })
-})
+// NOTE: `--tree` agentType-GROUPING was replaced in Wave 2 (feat: Sub-Agents
+// panel) by the real parent→child SPAWN tree. The former "tree group ordering —
+// byte sort, untyped last" invariant no longer exists; spawn-tree ordering /
+// nesting is covered by the colocated `src/apps/cli/agents-fleet-tree.test.ts`.
 
 describe("surrogate-safe unicode truncation", () => {
   // INVARIANT: finalText truncation uses code-point-aware slicing

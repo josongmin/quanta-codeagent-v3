@@ -166,31 +166,11 @@ describe("renderAgentFleet — json", () => {
   })
 })
 
-describe("renderAgentFleet — tree", () => {
-  test("groups by agentType", () => {
-    const out = stripAnsi(
-      renderAgentFleet(
-        [
-          row({ id: "e1", agentType: "explorer" }),
-          row({ id: "e2", agentType: "explorer" }),
-          row({ id: "w1", agentType: "writer" }),
-          // A genuinely untyped row — agentType OMITTED (not `: undefined`, which
-          // exactOptionalPropertyTypes forbids). Must group under the UNTYPED bucket,
-          // NOT inherit the row() helper's default agentType.
-          { id: "u1", description: "investigate flaky test", status: "running", startedAt: NOW - 12_000 },
-        ],
-        { format: "tree", now: NOW },
-      ),
-    )
-    expect(out).toContain("explorer")
-    expect(out).toContain("writer")
-    // ungrouped agents land under a deterministic bucket label.
-    expect(out.toLowerCase()).toContain("untyped")
-    // both explorer ids appear beneath the one explorer header.
-    expect(out).toContain("e1")
-    expect(out).toContain("e2")
-  })
-})
+// NOTE: `renderAgentFleet` `--tree` was rewritten in Wave 2 (feat: Sub-Agents
+// panel) from agentType-GROUPING to the real parent→child SPAWN tree. The former
+// "groups by agentType" test was superseded and moved to the colocated
+// `src/apps/cli/agents-fleet-tree.test.ts` / `agents-fleet-panel.test.ts`
+// (spawn-tree nesting, orphan re-root, cycle safety, --depth prune, inspect).
 
 describe("renderAgentFleet — colour map (status → colour)", () => {
   test("running=cyan, completed=green, failed=red carry ANSI when colours ON", () => {
