@@ -194,6 +194,56 @@ describe("META-PIN (NON-CIRCULAR) — SPAWN_TOOL_NAMES covers every manifest spa
     expect(unclassified).toEqual([])
   })
 
+  // followup_task is a spawn-RISK manifest tool (it can wake a child) but is
+  // MANAGEMENT of an already-registered child, NOT a descendant-CREATION vector.
+  // Pin its classification EXPLICITLY: it must be the management exception and must
+  // NOT be projected away from a leaf. If someone "fixed" the guard by adding it to
+  // SPAWN_TOOL_NAMES, a leaf would lose the ability to wake its own child (§5.1).
+  test("followup_task is classified MANAGEMENT (in the exception, NOT in SPAWN_TOOL_NAMES)", () => {
+    const manifestSpawnRisk = new Set(
+      GATED_TOOLS.filter((e) => e.risk === "spawns-subagent").map((e) => e.name),
+    )
+    expect(manifestSpawnRisk.has("followup_task")).toBe(true) // it IS spawn-risk tagged
+    expect(MANIFEST_SPAWN_MANAGEMENT.has("followup_task")).toBe(true) // …but management
+    expect(SPAWN_TOOL_NAMES.has("followup_task")).toBe(false) // …NOT a creation vector
+  })
+
+  // ROBUSTNESS — prove the guard is not merely tautological: if a NEW spawns-subagent
+  // manifest tool existed that was in NEITHER SPAWN_TOOL_NAMES NOR the management
+  // allowlist, the SAME partition logic FLAGS it. We simulate a forgotten tool by
+  // appending a synthetic name to a LOCAL copy of the manifest spawn-risk slice and
+  // running the identical classifier — it must be reported unclassified (RED for the
+  // real guard were it live). This is the exact `subagent_fork`/`side_agent_spawn`
+  // omission that the earlier CIRCULAR guard could not see.
+  test("guard CATCHES a forgotten spawn tool (simulated new manifest vector not in either set)", () => {
+    const realSpawnRisk = GATED_TOOLS.filter((e) => e.risk === "spawns-subagent").map((e) => e.name)
+    const FORGOTTEN = "__new_spawn_vector_not_yet_registered__"
+    // Sanity: the synthetic name is genuinely absent from both SSOTs (else the
+    // simulation would be vacuous).
+    expect(SPAWN_TOOL_NAMES.has(FORGOTTEN)).toBe(false)
+    expect(MANIFEST_SPAWN_MANAGEMENT.has(FORGOTTEN)).toBe(false)
+
+    const simulatedManifest = [...realSpawnRisk, FORGOTTEN]
+    const unclassified = simulatedManifest.filter(
+      (n) => !SPAWN_TOOL_NAMES.has(n) && !MANIFEST_SPAWN_MANAGEMENT.has(n),
+    )
+    // The forgotten vector — and ONLY it — is flagged; the real tools stay clean.
+    expect(unclassified).toEqual([FORGOTTEN])
+  })
+
+  // Complementary robustness: if the forgotten vector WERE added to SPAWN_TOOL_NAMES
+  // (the correct fix), the same classifier goes clean — proving the guard's verdict
+  // tracks membership, not a constant `[]`.
+  test("guard CLEARS once the forgotten vector is registered in SPAWN_TOOL_NAMES", () => {
+    const realSpawnRisk = GATED_TOOLS.filter((e) => e.risk === "spawns-subagent").map((e) => e.name)
+    const FORGOTTEN = "__new_spawn_vector_now_registered__"
+    const patchedSet = new Set([...SPAWN_TOOL_NAMES, FORGOTTEN])
+    const unclassified = [...realSpawnRisk, FORGOTTEN].filter(
+      (n) => !patchedSet.has(n) && !MANIFEST_SPAWN_MANAGEMENT.has(n),
+    )
+    expect(unclassified).toEqual([])
+  })
+
   // The daemon/bg creation tools are not composed by `fullCfg`, so prove the
   // projection behavior directly: at a leaf they are STRIPPED, a management tool
   // (`followup_task`, `side_agent_stop`) SURVIVES. Uses `projectSpawnTools` over a
@@ -245,6 +295,110 @@ describe("projectSpawnTools — root no-op, leaf strips CREATION tools only (§4
 
     // Management/observe tools SURVIVE (§5.1 N2 fix).
     for (const name of EXPECTED_MANAGEMENT_TOOLS) expect(names).toContain(name)
+  })
+
+  // ── BOUNDARY truth table : expose ⇔ parentDepth < effectiveCap ──────────────
+  // Direct over `projectSpawnTools` (no composer needed) so we can sweep cap ∈
+  // {0,1,2,3} × parentDepth ∈ {0,1,2,3} and pin the expose/strip decision at EVERY
+  // at-cap / over-cap / under-cap boundary — not the single (cap 1, depth 0/1) point
+  // the composed tests cover. `canExposeSpawnTools` is `parentDepth < cap`; a flipped
+  // `<`/`<=` or an off-by-one goes RED on the at-cap rows (depth === cap).
+  test("boundary truth table: a CREATION tool is exposed ⇔ depth < cap (cap 0..3 × depth 0..3)", () => {
+    const asTool = (name: string) =>
+      ({ name }) as unknown as Parameters<typeof projectSpawnTools>[0][number]
+    const tools = [asTool("agent"), asTool("read")]
+    for (const cap of [0, 1, 2, 3]) {
+      for (const depth of [0, 1, 2, 3]) {
+        withCap(cap)
+        try {
+          const kept = projectSpawnTools(tools, { depth }).map((t) => t.name)
+          const exposed = depth < cap
+          // `agent` (creation) tracks the boundary; `read` (non-spawn) ALWAYS survives.
+          expect({
+            cap,
+            depth,
+            agent: kept.includes("agent"),
+            read: kept.includes("read"),
+          }).toEqual({ cap, depth, agent: exposed, read: true })
+        } finally {
+          withCap(undefined)
+        }
+      }
+    }
+  })
+
+  test("cap=0 kill switch STRIPS even the root (depth 0) — creation gone, non-spawn kept", () => {
+    const asTool = (name: string) =>
+      ({ name }) as unknown as Parameters<typeof projectSpawnTools>[0][number]
+    const tools = [asTool("agent"), asTool("team_create"), asTool("read")]
+    withCap(0) // total kill switch: 0 < 0 is false ⇒ even root loses creation
+    try {
+      const kept = projectSpawnTools(tools, { depth: 0 }).map((t) => t.name)
+      expect(kept).not.toContain("agent")
+      expect(kept).not.toContain("team_create")
+      expect(kept).toContain("read")
+    } finally {
+      withCap(undefined)
+    }
+  })
+
+  // ── MIN-CAP : per-config `subagent.maxDepth` can only TIGHTEN the policy ──────
+  // effectiveCap(requested) = min(policy, requested). A requested cap BELOW policy
+  // tightens (strips earlier); a requested cap ABOVE policy is ignored (never raises).
+  // Guards the min() resolution — a mutation to `max()` or dropping the requested arg
+  // flips one of the two rows.
+  test("subagent.maxDepth tightens below policy but cannot raise above it", () => {
+    const asTool = (name: string) =>
+      ({ name }) as unknown as Parameters<typeof projectSpawnTools>[0][number]
+    const tools = [asTool("agent")]
+    withCap(3) // operator policy = 3
+    try {
+      const keeps = (depth: number, requested?: number) =>
+        projectSpawnTools(tools, {
+          depth,
+          ...(requested !== undefined ? { subagent: { maxDepth: requested } } : {}),
+        } as never).some((t) => t.name === "agent")
+
+      // TIGHTEN: requested 1 < policy 3 ⇒ effective cap 1 ⇒ depth 1 is a leaf.
+      expect(keeps(1, 1)).toBe(false)
+      expect(keeps(0, 1)).toBe(true) // root still exposed under the tightened cap
+      // CANNOT RAISE: requested 5 > policy 3 ⇒ effective cap stays 3 ⇒ depth 3 leaf.
+      expect(keeps(3, 5)).toBe(false)
+      expect(keeps(2, 5)).toBe(true) // 2 < 3 ⇒ still exposed (proves cap is 3, not 5)
+      // Paired control: no requested ⇒ cap = policy 3.
+      expect(keeps(2)).toBe(true)
+      expect(keeps(3)).toBe(false)
+    } finally {
+      withCap(undefined)
+    }
+  })
+
+  // ── MALFORMED depth in the OPTIMIZATION layer ────────────────────────────────
+  // The projection is an OPTIMIZATION (§4); the AUTHORITATIVE fail-closed guard is
+  // `childDepthOf` in the runner/`admitsDaemonChild` (pinned in the wiring hellgate:
+  // NaN/-1/2.5 all DENY there). Here we pin the projection's OWN behavior so a
+  // regression is observable: NaN strips (NaN < cap is false ⇒ fail-closed). undefined
+  // is a genuine root (spec: absent=root) ⇒ exposed. NOTE (finding): negative / non-
+  // integer depths (-1, 2.5) currently fail-OPEN in THIS layer (`-1 < 1` ⇒ exposed) —
+  // benign only because the runner authority (fail-closed) backstops an actual spawn.
+  test("malformed depth in projection: NaN fail-closed (strips); undefined = root (exposes)", () => {
+    const asTool = (name: string) =>
+      ({ name }) as unknown as Parameters<typeof projectSpawnTools>[0][number]
+    const tools = [asTool("agent")]
+    withCap(1)
+    try {
+      const keeps = (depth: unknown) =>
+        projectSpawnTools(tools, { depth } as never).some((t) => t.name === "agent")
+      // NaN ⇒ `NaN < 1` is false ⇒ stripped (fail-closed, NOT treated as root).
+      expect(keeps(Number.NaN)).toBe(false)
+      // undefined ⇒ coerced to 0 (genuine root per spec) ⇒ exposed.
+      expect(keeps(undefined)).toBe(true)
+      // Paired control confirming the sweep axis is live at this cap.
+      expect(keeps(0)).toBe(true)
+      expect(keeps(1)).toBe(false)
+    } finally {
+      withCap(undefined)
+    }
   })
 
   test("MUTATION anchor — the SET membership is load-bearing (dropping a name would leak)", async () => {

@@ -229,12 +229,10 @@ interface CallSite {
  * aliased import IS caught. `typeof runAgent` in a type position is skipped
  * (it declares a signature, it does not fork).
  */
-const enumerateFile = (abs: string): CallSite[] => {
-  const src = readFileSync(abs, "utf8")
-  const sf = parse(abs, src)
+const enumerateSource = (repoRel: string, src: string): CallSite[] => {
+  const sf = parse(repoRel, src)
   const names = localRunAgentNames(sf)
   if (names.size === 0) return []
-  const repoRel = toRepoRel(abs)
   const out: CallSite[] = []
   const seenCallLines = new Set<number>()
 
@@ -300,6 +298,14 @@ const enumerateFile = (abs: string): CallSite[] => {
   visit(sf)
   return out
 }
+
+/** Real-file entrypoint: read from disk, delegate to the (synthetic-testable)
+ *  source-string engine. Keeps on-disk enumeration byte-identical while exposing
+ *  {@link enumerateSource} so the non-vacuity tests can feed CONTROLLED sources
+ *  (aliased import, inject value-ref, type-only) and assert the discrimination
+ *  directly — not merely infer it from which real files land in the allowlist. */
+const enumerateFile = (abs: string): CallSite[] =>
+  enumerateSource(toRepoRel(abs), readFileSync(abs, "utf8"))
 
 const enumerateAll = (): CallSite[] => {
   const out: CallSite[] = []
@@ -385,6 +391,85 @@ describe("runAgent call-site authority fence (INV-03 / G8)", () => {
         /req\.depth\s*>\s*maxDepth|max subagent depth exceeded/.test(src)
       expect(routesAuthority).toBe(true)
     }
+  })
+
+  // ── NON-VACUITY: the AST engine is exercised on CONTROLLED synthetic sources,
+  //    so the alias / inject-ref discrimination is asserted DIRECTLY (not merely
+  //    inferred from which real files happen to be allowlisted). Each assertion
+  //    goes RED under a plausible mutation of enumerateSource/localRunAgentNames.
+  const formsAt = (repoRel: string, src: string): Set<CallSite["form"]> =>
+    new Set(enumerateSource(repoRel, src).map((s) => s.form))
+
+  test("catches a DIRECT call through the real binding name", () => {
+    // Floor: the simplest form must be seen. RED if the CallExpression callee
+    // branch (names.has(node.expression.text)) is removed.
+    const sites = enumerateSource("src/x.ts", `import { runAgent } from "@/agent"\nrunAgent(cfg)\n`)
+    expect(sites.some((s) => s.form === "call")).toBe(true)
+  })
+
+  test("catches an ALIASED import call (`runAgent as fork`) — grep-proof", () => {
+    // The whole reason this is AST, not grep: `fork(cfg)` shows no `runAgent(`
+    // token. RED if localRunAgentNames stops resolving `el.propertyName` (the
+    // ORIGINAL export name) — the alias would then be missed entirely.
+    const forms = formsAt(
+      "src/x.ts",
+      `import { runAgent as fork } from "@/agent"\nfork(childCfg)\n`,
+    )
+    expect(forms.has("call")).toBe(true)
+  })
+
+  test("catches an INJECT value-ref (`deps.runAgent ?? runAgent`)", () => {
+    // The inject pattern is an equally real fork surface. RED if the value-ref
+    // branch is dropped, or if `?? runAgent` is misclassified as a callee.
+    const forms = formsAt(
+      "src/x.ts",
+      `import { runAgent } from "@/agent"\nconst run = deps.runAgent ?? runAgent\nrun(cfg)\n`,
+    )
+    expect(forms.has("value-ref")).toBe(true)
+  })
+
+  test("catches an ALIASED inject value-ref (`?? defaultRunAgent` from `runAgent as defaultRunAgent`)", () => {
+    // Mirrors agent-config-assembler.ts EXACTLY: aliased import used only as a
+    // `??` fallback value (never called locally). RED if alias resolution OR the
+    // value-ref branch is broken — this form has NEITHER `runAgent(` NOR the
+    // original name as a call.
+    const forms = formsAt(
+      "src/x.ts",
+      `import { runAgent as defaultRunAgent } from "@/agent"\n` +
+        `const pick = (seams) => seams?.runAgent ?? defaultRunAgent\n`,
+    )
+    expect(forms.has("value-ref")).toBe(true)
+    expect(forms.has("call")).toBe(false)
+  })
+
+  test("IGNORES a type-only import (`import type { runAgent }`) — a type cannot fork", () => {
+    // Anti-false-positive: a pure type import must NOT enter the enumeration.
+    // RED if the `clause.isTypeOnly` skip is removed (the gate would then flag
+    // every type-only consumer as a spawn surface).
+    const sites = enumerateSource(
+      "src/x.ts",
+      `import type { runAgent } from "@/agent"\nlet r: typeof runAgent\n`,
+    )
+    expect(sites).toEqual([])
+  })
+
+  test("IGNORES a same-named local that is NOT the imported entrypoint", () => {
+    // Binding resolution proof: `runAgent` here is a LOCAL function, imported
+    // from nothing on the re-export list. RED if the engine matched on the bare
+    // token instead of the resolved import binding (localRunAgentNames).
+    const sites = enumerateSource("src/x.ts", `function runAgent(x) { return x }\nrunAgent(1)\n`)
+    expect(sites).toEqual([])
+  })
+
+  test("IGNORES an import from an UNRELATED specifier (not a runAgent re-export)", () => {
+    // Only the vetted re-export specifiers resolve to the fork entrypoint. RED if
+    // RUNAGENT_EXPORT_SPECIFIERS membership check is dropped (any `runAgent`
+    // import from anywhere would then be treated as the loop entrypoint).
+    const sites = enumerateSource(
+      "src/x.ts",
+      `import { runAgent } from "@/some-other-lib"\nrunAgent(cfg)\n`,
+    )
+    expect(sites).toEqual([])
   })
 
   test("every allowlisted kind is a known classification", () => {

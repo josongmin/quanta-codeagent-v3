@@ -35,7 +35,7 @@ const stubRegistry = () => {
   }
 }
 
-const cfg = (depth: number, registry: ReturnType<typeof stubRegistry>): AgentConfig =>
+const cfg = (depth: number | undefined, registry: ReturnType<typeof stubRegistry>): AgentConfig =>
   ({ depth, sideAgentDaemons: registry }) as unknown as AgentConfig
 
 const ctx = (): ToolContext => ({ cwd: "/repo", signal: new AbortController().signal })
@@ -48,7 +48,7 @@ const spawnInput = {
 }
 
 const runSpawn = async (
-  depth: number,
+  depth: number | undefined,
   registry: ReturnType<typeof stubRegistry>,
 ): Promise<{ ok: boolean; output: string }> => {
   const tool = buildSideAgentBlock(cfg(depth, registry)).find(
@@ -95,6 +95,70 @@ describe("buildSideAgentBlock — wires the REAL spawn-depth authority", () => {
       const res = await runSpawn(0, reg)
       expect(res.ok).toBe(false)
       expect(reg.spawned).toEqual([])
+    } finally {
+      withCap(undefined)
+    }
+  })
+
+  // ── BOUNDARY sweep : childDepth = depth+1 <= cap admits, else denies ──────────
+  // The wiring authority is `canAdmitChildDepth(childDepthOf(config), effectiveCap(cap))`
+  // = `(depth+1) <= cap`. Assert the decision at EVERY at-cap / over-cap / under-cap
+  // boundary for cap ∈ {0,1,2,3} × depth ∈ {0,1,2,3}, and that registry.spawn fires
+  // IFF admitted (real effect, not just result.ok). A single flipped `<`/`<=` or an
+  // off-by-one in childDepthOf goes RED on one of these rows.
+  test("boundary truth table: admit ⇔ (depth+1) <= cap, registry.spawn fires iff admitted", async () => {
+    for (const cap of [0, 1, 2, 3]) {
+      for (const depth of [0, 1, 2, 3]) {
+        withCap(cap)
+        try {
+          const reg = stubRegistry()
+          const res = await runSpawn(depth, reg)
+          const expectedAdmit = depth + 1 <= cap
+          expect({ cap, depth, ok: res.ok, spawned: reg.spawned.length }).toEqual({
+            cap,
+            depth,
+            ok: expectedAdmit,
+            spawned: expectedAdmit ? 1 : 0,
+          })
+        } finally {
+          withCap(undefined)
+        }
+      }
+    }
+  })
+
+  // ── MALFORMED own-depth : fail-CLOSED, NEVER fail-open to root ────────────────
+  // A parent AgentConfig carrying a non-nonneg-integer depth (NaN / negative /
+  // fractional) makes `childDepthOf` throw SpawnLineageError, which `admitsDaemonChild`
+  // catches → DENY. This is the authoritative backstop the projection optimization
+  // cannot see: a forced/held-runner path with a corrupt depth must NOT mint a daemon.
+  // Cap is WIDE (3) so a fail-OPEN-to-root regression (silently coercing to depth 0 ⇒
+  // childDepth 1 <= 3 ⇒ admit) would flip these RED.
+  test("malformed own depth (NaN / -1 / 2.5) ⇒ DENIED + registry.spawn NOT called (fail-closed at cap 3)", async () => {
+    for (const bad of [Number.NaN, -1, 2.5]) {
+      withCap(3)
+      try {
+        const reg = stubRegistry()
+        const res = await runSpawn(bad, reg)
+        expect(res.ok).toBe(false)
+        expect(res.output.toLowerCase()).toContain("depth")
+        expect(reg.spawned).toEqual([]) // NEVER fail-open to root
+      } finally {
+        withCap(undefined)
+      }
+    }
+  })
+
+  // Paired control for the malformed sweep: `undefined` depth is a GENUINE root
+  // (spec: 0=root, absent=root), NOT a malformed value — it must ADMIT at cap 3.
+  // This proves the deny above is the malformed-guard, not a blanket "non-0 denies".
+  test("undefined depth is a genuine root (paired control) ⇒ ADMITTED at cap 3", async () => {
+    withCap(3)
+    try {
+      const reg = stubRegistry()
+      const res = await runSpawn(undefined, reg)
+      expect(res.ok).toBe(true)
+      expect(reg.spawned.length).toBe(1)
     } finally {
       withCap(undefined)
     }
