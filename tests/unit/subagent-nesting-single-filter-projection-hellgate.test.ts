@@ -26,14 +26,14 @@
 
 import { describe, expect, test } from "bun:test"
 import { buildSessionFeatures } from "@/agent/features"
-import { SPAWN_TOOL_NAMES } from "@/agent/spawn-projection"
+import { projectSpawnTools, SPAWN_TOOL_NAMES } from "@/agent/spawn-projection"
 import type { AgentConfig } from "@/agent/types"
 import type { LLMPort } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { __resetRuntimeConfig } from "@/shared"
 import type { StreamPort } from "@/stream"
 import { createTeamRegistry } from "@/subagent"
-import { defaultTools, ToolRegistry } from "@/tool"
+import { defaultTools, GATED_TOOLS, ToolRegistry } from "@/tool"
 
 // ── env cap helpers ───────────────────────────────────────────────────────────
 
@@ -88,7 +88,9 @@ const fullCfg = (depth?: number): AgentConfig =>
 const composedNames = async (config: AgentConfig): Promise<string[]> =>
   (await buildSessionFeatures(config)).extraTools.map((t) => t.name)
 
-/** The rev.4 CREATION-authority set, enumerated for the meta-pin. */
+/** The CREATION-authority tools the `fullCfg` fixture actually COMPOSES (trio +
+ *  6-tool + workflow + csv + batch + team + delegate + branch_search). Used by the
+ *  fixture-liveness pin (enumerated over real composed `extraTools`). */
 const EXPECTED_CREATION_TOOLS = [
   "agent",
   "spawn_agent",
@@ -99,6 +101,12 @@ const EXPECTED_CREATION_TOOLS = [
   "team_create",
   "branch_search", // D1 — speculative candidate fork is a spawn vector (ADR-0084)
 ] as const
+
+/** CREATION vectors that `fullCfg` does NOT compose (they need a background
+ *  `scheduler` / side-agent `registry` port). They are still in SPAWN_TOOL_NAMES
+ *  and are covered by the manifest-parity guard + the direct-projection behavior
+ *  test below — NOT by the fixture-liveness pin. */
+const DAEMON_CREATION_TOOLS = ["subagent_fork", "side_agent_spawn"] as const
 
 /** Tools the builders emit that are MANAGEMENT/OBSERVE, NOT creation — these must
  *  NOT be in the SET so a leaf keeps authority over its own sub-state (§5.1). */
@@ -116,8 +124,10 @@ const EXPECTED_MANAGEMENT_TOOLS = [
 // ── SPAWN_TOOL_NAMES shape ────────────────────────────────────────────────────
 
 describe("SPAWN_TOOL_NAMES — the frozen CREATION-authority SSOT (§5.1)", () => {
-  test("contains exactly the 8 creation tools", () => {
-    expect([...SPAWN_TOOL_NAMES].sort()).toEqual([...EXPECTED_CREATION_TOOLS].sort())
+  test("contains exactly the 10 creation tools (8 fixture-composed + 2 daemon/bg)", () => {
+    expect([...SPAWN_TOOL_NAMES].sort()).toEqual(
+      [...EXPECTED_CREATION_TOOLS, ...DAEMON_CREATION_TOOLS].sort(),
+    )
   })
 
   test("does NOT contain any management/observe tool (leaf keeps its sub-state)", () => {
@@ -143,28 +153,73 @@ describe("META-PIN — SPAWN_TOOL_NAMES covers every CREATION tool the builders 
     }
   })
 
-  test("EVERY composed spawn tool is CLASSIFIED (creation in-SET, management not) — forgot-a-tool guard", async () => {
-    withCap(3)
+  // (REMOVED) The old "forgot-a-tool guard" here was VACUOUS: it pre-filtered
+  // `emitted` to names ALREADY in `SPAWN_TOOL_NAMES ∪ EXPECTED_MANAGEMENT_TOOLS`
+  // before asserting they were classified — so a NEW/forgotten spawn tool (in
+  // NEITHER set) was filtered out before the check and never caught. That is
+  // exactly how `subagent_fork`/`side_agent_spawn` slipped past. Superseded by the
+  // NON-CIRCULAR manifest-parity guard below (derives the truth set from an
+  // independent SSOT, `GATED_TOOLS.risk`).
+})
+
+// ── NON-CIRCULAR completeness : the manifest risk tag is the independent SSOT ──
+
+/** Manifest tools tagged `risk:"spawns-subagent"` that are MANAGEMENT of an
+ *  ALREADY-spawned child (wake/observe), NOT a descendant CREATION vector —
+ *  verified: `followup_task` wakes a registered child via `turn-wake`/`turn-gate`
+ *  with NO `runAgent`/`createSubagentRunner` new edge. These are deliberately NOT
+ *  projected away from a leaf (§5.1: a leaf keeps authority over its OWN
+ *  sub-state). Adding a name here is an explicit, reviewed classification. */
+const MANIFEST_SPAWN_MANAGEMENT = new Set(["followup_task"])
+
+describe("META-PIN (NON-CIRCULAR) — SPAWN_TOOL_NAMES covers every manifest spawn CREATION vector", () => {
+  // Unlike the EXPECTED_CREATION_TOOLS pin above (which is a COPY of the SET and so
+  // can only ever tautologically agree), this derives the truth set from the
+  // manifest `GATED_TOOLS` `risk` classification — an INDEPENDENT SSOT. A spawn
+  // tool the projection forgot (in the manifest, absent from SPAWN_TOOL_NAMES,
+  // not an explicit management exception) is caught here. This is the guard that
+  // the `subagent_fork`/`side_agent_spawn` omission slipped past when the old
+  // circular guard could not see it.
+  test("every GATED_TOOLS risk:spawns-subagent tool is a projected creation vector OR an explicit management exception", () => {
+    const manifestSpawnRisk = GATED_TOOLS.filter((e) => e.risk === "spawns-subagent").map(
+      (e) => e.name,
+    )
+    // Anti-vacuum floor: the manifest genuinely tags a batch of spawn-risk tools.
+    expect(manifestSpawnRisk.length).toBeGreaterThanOrEqual(6)
+    const unclassified = manifestSpawnRisk.filter(
+      (n) => !SPAWN_TOOL_NAMES.has(n) && !MANIFEST_SPAWN_MANAGEMENT.has(n),
+    )
+    // A manifest spawn-risk tool in NEITHER partition ⇒ a leaf still SEES it (the
+    // projection hole this suite exists to forbid).
+    expect(unclassified).toEqual([])
+  })
+
+  // The daemon/bg creation tools are not composed by `fullCfg`, so prove the
+  // projection behavior directly: at a leaf they are STRIPPED, a management tool
+  // (`followup_task`, `side_agent_stop`) SURVIVES. Uses `projectSpawnTools` over a
+  // synthetic tool list so no scheduler/registry port is needed.
+  test("direct projection: a leaf STRIPS subagent_fork + side_agent_spawn, KEEPS management", () => {
+    const asTool = (name: string) =>
+      ({ name }) as unknown as Parameters<typeof projectSpawnTools>[0][number]
+    const tools = [
+      asTool("subagent_fork"),
+      asTool("side_agent_spawn"),
+      asTool("followup_task"), // management — survives
+      asTool("side_agent_stop"), // management — survives
+      asTool("read"), // unrelated — survives
+    ]
+    withCap(1)
     try {
-      const emitted = await composedNames(fullCfg(0))
-      // Every emitted tool that IS a declared creation tool must be in the SET.
-      for (const n of emitted) {
-        if ((EXPECTED_CREATION_TOOLS as readonly string[]).includes(n)) {
-          expect(SPAWN_TOOL_NAMES.has(n)).toBe(true)
-        }
-      }
-      // COMPLETE partition over the spawn-block families: every emitted tool that
-      // belongs to a spawn builder is EITHER a known creation tool (in the SET) OR
-      // a known management tool (NOT in the SET). A NEW un-classified spawn-family
-      // tool trips this — forcing a creation-vs-management decision + SET update.
-      const spawnFamilyEmitted = emitted.filter(
-        (n) =>
-          SPAWN_TOOL_NAMES.has(n) || (EXPECTED_MANAGEMENT_TOOLS as readonly string[]).includes(n),
-      )
-      // The union of the two declared partitions must EQUAL what we classified —
-      // i.e. no creation-or-management tool the SET/list forgot.
-      const classified = new Set<string>([...EXPECTED_CREATION_TOOLS, ...EXPECTED_MANAGEMENT_TOOLS])
-      for (const n of spawnFamilyEmitted) expect(classified.has(n)).toBe(true)
+      const kept = projectSpawnTools(tools, { depth: 1 }).map((t) => t.name) // depth 1 ≥ default cap 1
+      expect(kept).not.toContain("subagent_fork")
+      expect(kept).not.toContain("side_agent_spawn")
+      expect(kept).toContain("followup_task")
+      expect(kept).toContain("side_agent_stop")
+      expect(kept).toContain("read")
+      // Paired control: at the ROOT (depth 0, cap 1) nothing is stripped.
+      const rootKept = projectSpawnTools(tools, { depth: 0 }).map((t) => t.name)
+      expect(rootKept).toContain("subagent_fork")
+      expect(rootKept).toContain("side_agent_spawn")
     } finally {
       withCap(undefined)
     }
