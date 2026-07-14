@@ -189,13 +189,18 @@ export interface SubagentTreeNode {
  * Build the spawn TREE from the flat model: nodes whose `parentTaskId` is null
  * (or points at an unknown/absent parent — a dropped-parent orphan still shows)
  * are roots; every other node nests under its parent. Insertion-ordered at each
- * level. Cycle-safe via a visited set.
+ * level. Per-walk `seen` set stops infinite recursion; any node NOT reachable
+ * from a real root (a pure cycle A↔B where each is the other's "parent") is
+ * re-rooted in a final sweep so it still shows instead of silently vanishing —
+ * mirrors the CLI `rowsToTree` builder (hellaudit MEDIUM, 2026-07-15).
  */
 export const buildSubagentTree = (state: SubagentState): SubagentTreeNode[] => {
   const nodes = allNodes(state)
   const present = new Set(nodes.map((n) => n.taskId))
+  const emitted = new Set<string>()
   const build = (node: SubagentNode, seen: ReadonlySet<string>): SubagentTreeNode => {
     const nextSeen = new Set(seen).add(node.taskId)
+    emitted.add(node.taskId)
     return {
       node,
       children: nodes
@@ -205,7 +210,13 @@ export const buildSubagentTree = (state: SubagentState): SubagentTreeNode[] => {
   }
   const isRoot = (n: SubagentNode): boolean =>
     n.parentTaskId === null || !present.has(n.parentTaskId)
-  return nodes.filter(isRoot).map((n) => build(n, new Set<string>()))
+  const roots = nodes.filter(isRoot).map((n) => build(n, new Set<string>()))
+  // Re-root any node a real root never reached (cycle-only nodes) so it is never
+  // silently dropped. `build`'s `seen` guard breaks the cycle on the way down.
+  for (const n of nodes) {
+    if (!emitted.has(n.taskId)) roots.push(build(n, new Set<string>()))
+  }
+  return roots
 }
 
 /* ------------------------------------------------------------------ */

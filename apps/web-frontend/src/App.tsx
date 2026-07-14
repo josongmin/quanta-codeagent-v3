@@ -1005,6 +1005,12 @@ export const App = (): JSX.Element => {
         }
         return () => {
           handlers.delete(handler)
+          // Tear down the underlying client bridge when the last subscriber
+          // leaves (no dangling `onSubagent` subscription if this memo re-runs).
+          if (handlers.size === 0 && detachClient !== null) {
+            detachClient()
+            detachClient = null
+          }
         }
       },
     }

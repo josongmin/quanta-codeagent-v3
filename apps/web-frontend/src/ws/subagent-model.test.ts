@@ -100,4 +100,26 @@ describe("subagent-model reducer", () => {
     expect(node?.error).toBe("boom")
     expect(node?.description).toBe("task late")
   })
+
+  it("a pure cycle (A↔B) re-roots instead of silently dropping both nodes", () => {
+    // hellaudit MEDIUM (2026-07-15): a defensively-constructed cycle (A.parent=B,
+    // B.parent=A) must NOT vanish (the old builder returned [] since neither is a
+    // root). It must terminate (no stack overflow) and surface both nodes —
+    // matching the CLI `rowsToTree` re-root behavior.
+    const st = fold([spawn("A", "B", 1), spawn("B", "A", 1)])
+    const ids = new Set<string>()
+    const walk = (ns: ReturnType<typeof buildSubagentTree>): void => {
+      for (const n of ns) {
+        ids.add(n.node.taskId)
+        walk(n.children)
+      }
+    }
+    walk(buildSubagentTree(st))
+    expect(ids).toEqual(new Set(["A", "B"]))
+  })
+
+  it("an orphan (parent never seen) shows as a root", () => {
+    const st = fold([spawn("child", "ghost-parent", 2)])
+    expect(buildSubagentTree(st).map((r) => r.node.taskId)).toEqual(["child"])
+  })
 })

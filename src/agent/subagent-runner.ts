@@ -427,13 +427,26 @@ const ensureLineageTask = (
       if (parentTaskId !== undefined) stamped.parentTaskId = parentTaskId
       stamped.depth = childDepth
       stamped.mailboxLabel = mailboxLabel
+      // The tool layer already emitted a provisional `depth:0` / no-parent spawn
+      // at its `register()` (lineage wasn't known yet). Re-emit the CORRECTED
+      // spawn so the web panel's tree reflects the real parent/depth (no-op when
+      // the panel is OFF — no emitter — so this stays byte-identical).
+      registry.restampSpawn(req.taskId)
     }
     // Its settle is owned by the tool layer's `.then(complete)` chain — we do
     // NOT settle it here (return a no-op settle so the caller never double-settles).
     return { registry, taskId: req.taskId, settle: () => {} }
   }
-  // Foreground: register a fresh lineage record. The runner OWNS this record's
-  // settle (the foreground path has no tool-layer `complete` chain).
+  // Foreground: register a fresh lineage record ONLY when a panel observer is
+  // wired (`onSubagentEvent`). Without it, a foreground spawn keeps its historical
+  // synthetic id with NO registry entry — so `registry.list()` (⇒ the LLM
+  // `task_list` tool, `/agents`, `/activity`, LRU) is byte-identical when the
+  // panel feature is OFF. The panel opts into foreground visibility via the sink.
+  // (Background/6-tool records are registered by the tool layer regardless and
+  // only get their lineage edge STAMPED above — benign for existing consumers,
+  // which read depth from AgentMeta, not the record — so those stay ungated and
+  // the CLI `/agents --tree` still reconstructs the background spawn tree.)
+  if (parent.onSubagentEvent === undefined) return undefined
   const taskId = registry.newId()
   registry.register({
     id: taskId,

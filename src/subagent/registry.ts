@@ -233,6 +233,28 @@ export class TaskRegistry {
     return { abort: ac, ownerToken }
   }
 
+  /** Re-emit a CORRECTED `subagent_spawn` for an already-registered task after
+   *  its lineage edge was stamped post-`register()`. The background / 6-tool
+   *  path registers (and emits a provisional `depth:0` / no-parent spawn) BEFORE
+   *  the runner derives `parentTaskId` / `depth`; once stamped, this fires the
+   *  corrected spawn so the web panel's tree is right (the frontend reducer
+   *  upserts by `taskId`, so it cleanly overwrites the provisional node). No-op
+   *  with no emitter (panel OFF ⇒ byte-identical) or a missing record. */
+  restampSpawn(taskId: string): void {
+    if (this.emitter === undefined) return
+    const t = this.tasks.get(taskId)
+    if (t === undefined) return
+    this.emit({
+      type: "subagent_spawn",
+      taskId: t.id,
+      ...(t.parentTaskId !== undefined ? { parentTaskId: t.parentTaskId } : {}),
+      depth: t.depth,
+      description: boundedRedact(t.description) ?? "",
+      ...(t.agentType !== undefined ? { agentType: t.agentType } : {}),
+      at: t.startedAt,
+    })
+  }
+
   get(id: string): TaskRecord | undefined {
     return this.tasks.get(id)
   }

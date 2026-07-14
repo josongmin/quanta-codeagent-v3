@@ -13,6 +13,7 @@ import type {
 } from "@/runner/assemble/session-state"
 import type { RuntimeSideConversationArgs, RuntimeSideConversationResult } from "@/sdk/runtime"
 import type { SessionEnvelopeRecord } from "@/session"
+import { redactValue } from "@/shared"
 import type { BranchProgressTracker } from "../branch-search-progress"
 import type { CostPanel } from "../cost-panel"
 import type { ComposerEditPort } from "../edit-message-cmd"
@@ -492,18 +493,32 @@ const spreadNewSlots = (s: NewSlotAdapters): Partial<ReplSlashCtx> => ({
  *  `result.messages`, carries the optional fields with presence-spread
  *  (exactOptionalPropertyTypes). Keeps the panel decoupled from `@/subagent`
  *  internals (the surface owns the mapping seam). */
-const toAgentFleetRow = (
+/** Scrub secrets out of an untrusted subagent string before it reaches the
+ *  `/agents` UI. The CLI reads RAW `TaskRecord`s from `TaskRegistry.list()` (a
+ *  DIFFERENT path from the redacted event stream the web panel consumes), so a
+ *  child that echoes a key into its description / final response / error would
+ *  otherwise print it verbatim (hellaudit HIGH, 2026-07-15). `redactValue` is
+ *  the same SoT the registry emit boundary uses. */
+export const scrubAgentText = (s: string): string => redactValue(s) as string
+
+export const toAgentFleetRow = (
   r: import("@/subagent").TaskRecord,
 ): import("../agents-fleet-panel").AgentFleetRow => ({
   id: r.id,
-  description: r.description,
+  description: scrubAgentText(r.description),
   status: r.status,
   startedAt: r.startedAt,
   ...(r.agentType !== undefined ? { agentType: r.agentType } : {}),
   ...(r.endedAt !== undefined ? { endedAt: r.endedAt } : {}),
-  ...(r.error !== undefined ? { error: r.error } : {}),
+  ...(r.error !== undefined ? { error: scrubAgentText(r.error) } : {}),
   ...(r.result !== undefined
-    ? { result: { ok: r.result.ok, finalText: r.result.finalText, turns: r.result.turns } }
+    ? {
+        result: {
+          ok: r.result.ok,
+          finalText: scrubAgentText(r.result.finalText),
+          turns: r.result.turns,
+        },
+      }
     : {}),
   // Lineage edges — the spawn TREE that `/agents --tree` reconstructs.
   ...(r.parentTaskId !== undefined ? { parentTaskId: r.parentTaskId } : {}),

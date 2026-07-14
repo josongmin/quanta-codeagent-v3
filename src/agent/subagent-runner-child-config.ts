@@ -193,6 +193,12 @@ const buildChildInheritedConfig = (
     ...(parent.closeoutGuard !== undefined ? { closeoutGuard: parent.closeoutGuard } : {}),
     ...(parent.hitl !== undefined ? { hitl: parent.hitl } : {}),
     ...(parent.subagent ? { subagent: parent.subagent } : {}),
+    // Propagate the Sub-Agents panel observer DOWN the whole spawn tree so a
+    // depth-2+ descendant emits + registers too (the panel shows the full tree,
+    // not just direct children). Also makes the runner's foreground-register gate
+    // (`parent.onSubagentEvent !== undefined`) consistent at every level — absent
+    // at the root ⇒ absent everywhere ⇒ byte-identical OFF.
+    ...(parent.onSubagentEvent !== undefined ? { onSubagentEvent: parent.onSubagentEvent } : {}),
     ...maybeWireCoordinationBroker(parent, mailboxIds),
   }
 }

@@ -161,7 +161,8 @@ describe("PART 1 — lineage edges form a real parent→child tree in the regist
     // parentTaskId MUST equal the child's id (not undefined). A revert of the
     // `spawnedAsTaskId` thread makes both nodes root-level ⇒ this fails.
     const registry = new TaskRegistry()
-    const { rootRunner } = buildTreeRunner({ registry })
+    // Sink wired ⇒ foreground spawns register (the tree we're asserting on).
+    const { rootRunner } = buildTreeRunner({ registry, onSubagentEvent: () => {} })
     await rootRunner(req({ prompt: "CHILD-TASK", depth: 1 }))
     const tasks = registry.list()
     const child = tasks.find((t) => t.description.includes("CHILD-TASK"))
@@ -278,37 +279,35 @@ describe("PART 2 — subagent lifecycle events (spawn + status), redacted", () =
     expect(at(raw, 0).description?.includes(SECRET) ?? false).toBe(false)
   })
 
-  test("OFF byte-identical: no onSubagentEvent ⇒ NO events, registry still gains lineage fields", async () => {
+  test("OFF byte-identical: no onSubagentEvent ⇒ FOREGROUND spawns register NOTHING (registry stays empty)", async () => {
+    // The panel-OFF contract (hellaudit HIGH, 2026-07-15): a FOREGROUND spawn
+    // must keep its historical synthetic id with NO registry entry when no panel
+    // observer is wired — otherwise `registry.list()` (⇒ the LLM `task_list`
+    // tool, `/agents`, `/activity`, LRU) silently changes with the feature fully
+    // OFF. Foreground registration is opt-in via `onSubagentEvent`.
     const registry = new TaskRegistry()
-    // Spy on the registry emitter directly: with no onSubagentEvent the runner
-    // must NOT install an emitter, so this stays untouched (undefined). We
-    // additionally assert the registry never fires by wiring nothing.
-    const emitted: unknown[] = []
-    // No onSubagentEvent wired ⇒ runner installs NO emitter. Prove it by leaving
-    // the registry's emitter unset and checking the runner never set one that
-    // fires (we can't read the private field, so we assert via a fresh spy set
-    // AFTER the run: a run that wrongly self-installed a sink would have emitted
-    // during the run, which we can't observe — so instead we assert the registry
-    // is still emit-free by setting our spy now and confirming a manual
-    // transition below is the ONLY thing it sees).
-    const { rootRunner } = buildTreeRunner({ registry })
+    const { rootRunner } = buildTreeRunner({ registry }) // NO onSubagentEvent
     await rootRunner(req({ prompt: "CHILD-TASK", depth: 1 }))
-    // Registry still gains the (cheap) lineage fields even with no emitter.
-    const tasks = registry.list()
-    expect(tasks.length).toBe(2)
-    const grandchild = tasks.find((t) => t.description.includes("GRANDCHILD-TASK"))
-    const child = tasks.find((t) => t.description.includes("CHILD-TASK"))
-    expect(grandchild?.parentTaskId).toBe(child?.id)
-    expect(grandchild?.depth).toBe(2)
-    // The runner must not have self-installed a sink: setting one now and driving
-    // a fresh transition proves the emitter slot was ours to claim (a wrongly
-    // installed sink would still be the runner's, but our set overwrites it — so
-    // this is a weak check; the STRONG no-emit proof is the events[] count in the
-    // wired tests being EXACTLY 4, i.e. no phantom extra emits).
+    // Byte-identical: a foreground root + grandchild spawn leaves the registry
+    // EMPTY. (Contrast PART 1, which wires the sink and DOES get 2 records.)
+    expect(registry.list().length).toBe(0)
+    // And the runner did NOT self-install a registry emitter: set our own spy and
+    // confirm the ONLY thing it ever sees is our own manual transition.
+    const emitted: unknown[] = []
     registry.setEmitter((e) => emitted.push(e))
-    // Fresh manual task ⇒ exactly one spawn event to our spy.
     registry.register({ id: registry.newId(), description: "probe", depth: 0 })
     expect(emitted.length).toBe(1)
+  })
+
+  test("RED-on-injection pin: foreground registers WHEN the sink IS wired (proves the gate is load-bearing)", async () => {
+    // Paired control for the OFF test above — the SAME spawn WITH a sink wired
+    // registers the lineage records. If the gate regressed to unconditional
+    // register, the OFF test would silently pass for the wrong reason; this pins
+    // that the gate actually keys on `onSubagentEvent`.
+    const registry = new TaskRegistry()
+    const { rootRunner } = buildTreeRunner({ registry, onSubagentEvent: () => {} })
+    await rootRunner(req({ prompt: "CHILD-TASK", depth: 1 }))
+    expect(registry.list().length).toBe(2)
   })
 })
 
