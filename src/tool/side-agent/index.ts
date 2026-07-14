@@ -138,7 +138,10 @@ const renderSnapshot = (s: SideAgentSnapshotView): string => {
   return `  ${s.id} [${s.status}] ${t} wakes=${s.wakesDone}/${s.spec.maxWakes} — ${s.spec.task}`
 }
 
-const makeSpawnTool = (registry: SideAgentDaemonPort): Tool<SideAgentSpawnInput> => ({
+const makeSpawnTool = (
+  registry: SideAgentDaemonPort,
+  admitChild: () => boolean,
+): Tool<SideAgentSpawnInput> => ({
   name: "side_agent_spawn",
   description:
     "Spawn a PERSISTENT background side-agent (monitor / cleanup / periodic check) " +
@@ -163,6 +166,23 @@ const makeSpawnTool = (registry: SideAgentDaemonPort): Tool<SideAgentSpawnInput>
       yield {
         type: "result",
         result: err("aborted before start", { mode: "rejected", reason: "aborted" }),
+      }
+      return
+    }
+    // DEPTH AUTHORITY (rev.4 §4 defense-in-depth). Daemon CREATION is a
+    // descendant-spawn vector: a leaf / cap-0 agent must not mint a persistent
+    // background daemon even via a forced/held path the projection cannot hide.
+    // `admitChild` is the SAME min-cap authority every other spawn vector uses
+    // (injected by `buildSideAgentBlock` = `childDepthOf(config)` vs `effectiveCap`,
+    // fail-closed). Kept as an injected predicate so `@/tool` never imports the
+    // `@/agent` authority (slice fence).
+    if (!admitChild()) {
+      yield {
+        type: "result",
+        result: err(
+          "side-agent daemon creation denied: spawn depth cap reached — a leaf agent cannot mint background daemons (raise QUANTA_MAX_DESCENDANT_DEPTH or run from the root).",
+          { mode: "rejected", reason: "depth_exceeded" },
+        ),
       }
       return
     }
@@ -314,9 +334,19 @@ const makeFindingsTool = (registry: SideAgentDaemonPort): Tool<SideAgentFindings
   },
 })
 
-/** Build the side-agent management tools over a wired daemon registry. */
-export const sideAgentTools = (registry: SideAgentDaemonPort): Tool[] => [
-  makeSpawnTool(registry) as Tool,
+/** Build the side-agent management tools over a wired daemon registry.
+ *
+ *  `admitChild` is the spawn-depth authority for daemon CREATION (rev.4 §4): it
+ *  returns whether THIS agent may mint a new descendant (the daemon). Production
+ *  wiring (`buildSideAgentBlock`) injects `childDepthOf(config)` vs `effectiveCap`
+ *  so a leaf / cap-0 agent is denied. Default `() => true` keeps the tool-only
+ *  call sites (which do not model depth) byte-identical; the production injection
+ *  is pinned by a wiring hellgate. */
+export const sideAgentTools = (
+  registry: SideAgentDaemonPort,
+  admitChild: () => boolean = () => true,
+): Tool[] => [
+  makeSpawnTool(registry, admitChild) as Tool,
   makeListTool(registry) as Tool,
   makeStopTool(registry) as Tool,
   makeFindingsTool(registry) as Tool,
