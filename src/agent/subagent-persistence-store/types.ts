@@ -68,6 +68,21 @@ export interface PersistedHandle {
    *  fork from `spec.task` only). Caller writes it at fork time / turn
    *  boundary; persistence layer just preserves the string. */
   readonly conversationSnapshotId?: string
+  /** OPTIONAL lineage depth (INV-09/INV-10 — jul-14 resume-depth-preservation).
+   *  The REAL depth the background child RAN at, mirroring the runner's
+   *  `AgentConfig.depth` convention (0 = root; `childDepthOf(parent) =
+   *  parent.depth + 1`). Persisted at fork time so a later resume can enforce
+   *  that the re-forked child does NOT gain spawn authority by being re-derived
+   *  to a shallower depth (the runner's depth AUTHORITY is
+   *  `childDepthOf(resume-time-parent)`, which ignores the persisted lineage —
+   *  see `subagent-runner.ts:654`). ABSENT for legacy records written before
+   *  this field existed; the resume orchestrator treats an absent depth as
+   *  fail-closed under a `lineageGuard` (INV-10 — never silently resume at the
+   *  re-derived / possibly-root depth). Under the shipping default (cap=1) a
+   *  background child is always depth-1 so this field is INERT; it only bites
+   *  under cap>=2. Non-negative integer; NaN/negative/fractional values are
+   *  treated as absent by the codec (fail-closed). */
+  readonly depth?: number
 }
 
 /** Closed port: an external store satisfies this so the hydrating wrapper can

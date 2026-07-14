@@ -148,6 +148,44 @@ export interface ResumerOpts {
      *  absent (cannot restore workspace state). */
     readonly shadowOdb?: ShadowCommitRestorer
   }
+  /** OPTIONAL (INV-09/INV-10 — jul-14 resume-depth-preservation) lineage guard.
+   *
+   *  WHY: the injected `scheduler.fork(spec)` re-derives the resumed child's
+   *  depth from the RESUME-TIME parent, NOT from the depth the child originally
+   *  ran at. The chain is
+   *
+   *    resumer.applyResume → scheduler.fork(spec)
+   *      → subagent-background/engine.ts:257 specToRequest(spec, sig, parentDepth)
+   *           (parentDepth is fixed at scheduler CONSTRUCTION, engine.ts:287)
+   *      → subagent-background.ts:331 req.depth = parentDepth + 1   (ADVISORY)
+   *      → subagent-runner.ts:654     depth: childDepthOf(parent)   (AUTHORITY)
+   *
+   *  Since `req.depth` is advisory-only and the resumer's SOLE seam is
+   *  `fork(spec)`, the resumer CANNOT force the fork to run at the persisted
+   *  depth. What it CAN do is refuse to resume when the re-forked child would
+   *  run at a depth that diverges from the depth it was persisted at — a
+   *  SHALLOWER re-derivation is exactly the spawn-authority escalation this
+   *  guards against.
+   *
+   *  When ABSENT the orchestrator is BYTE-IDENTICAL to the pre-INV-09 path
+   *  (the shipping cap=1 default never sets a guard — every bg child is
+   *  depth-1 so the check would be inert anyway). When PRESENT, every
+   *  `"resume"` decision is gated:
+   *    - persisted `handle.depth` present AND `=== resumeForkDepth`  → resume.
+   *    - persisted `handle.depth` present AND `!== resumeForkDepth`  → DENY
+   *      (INV-09; would re-derive to a different depth — fail-closed on any
+   *      divergence, since a shallower re-derivation grants spawn authority).
+   *    - persisted `handle.depth` ABSENT (legacy record)            → DENY
+   *      (INV-10; cannot prove the re-derived depth is not shallower than the
+   *      original — never silently resume at the re-derived / possibly-root
+   *      depth). Denials do NOT fork and do NOT flip the old handle to
+   *      `"resumed"`; the outcome carries `errorMessage` and no `newId`. */
+  readonly lineageGuard?: {
+    /** The REAL depth the injected scheduler will run a resumed fork at
+     *  (= its construction-time `parentDepth + 1`). The caller who built the
+     *  scheduler is the authority on this value. Non-negative integer. */
+    readonly resumeForkDepth: number
+  }
 }
 
 /** Build the `SubagentSpec` for the resumed fork. Preserves every spec field
@@ -219,6 +257,45 @@ const markFailed = (old: PersistedHandle, reason: string, tNow: number): Persist
 /** Extract a stable error message from a caught `unknown` throwable. */
 const errMsg = (e: unknown): string => errMessage(e)
 
+/** INV-09/INV-10 lineage-depth guard. Returns a DENY reason string when the
+ *  resumed fork would NOT preserve the persisted lineage depth, or `null` when
+ *  the resume is safe to proceed. Pure — no I/O, no fork.
+ *
+ *  Fail-closed matrix (only consulted when `guard` is present):
+ *   - persisted depth ABSENT              → DENY (INV-10; legacy record, cannot
+ *                                            prove the re-derived depth is not
+ *                                            shallower — never resume at root).
+ *   - persisted depth !== resumeForkDepth → DENY (INV-09; re-fork would run at
+ *                                            a divergent depth; a shallower one
+ *                                            grants spawn authority).
+ *   - persisted depth === resumeForkDepth → allow (null).
+ *
+ *  A persisted depth that is NOT a non-negative integer is treated as ABSENT
+ *  (defense-in-depth; the codec already fail-closes such values, but the
+ *  in-memory port could hand us a raw handle). */
+const lineageDenyReason = (
+  handle: PersistedHandle,
+  guard: { readonly resumeForkDepth: number } | undefined,
+): string | null => {
+  if (guard === undefined) return null
+  const persisted = handle.depth
+  if (persisted === undefined || !Number.isInteger(persisted) || persisted < 0) {
+    return (
+      "lineage-guard: persisted handle has no recorded lineage depth (legacy " +
+      "record); refusing auto-resume to avoid granting spawn authority at a " +
+      `re-derived depth (would run at depth ${guard.resumeForkDepth}) — INV-10 fail-closed`
+    )
+  }
+  if (persisted !== guard.resumeForkDepth) {
+    return (
+      `lineage-guard: persisted lineage depth ${persisted} != resume-time fork ` +
+      `depth ${guard.resumeForkDepth}; refusing auto-resume (a re-derived depth ` +
+      "would change the child's spawn authority) — INV-09 fail-closed"
+    )
+  }
+  return null
+}
+
 /** Apply the `"resume"` branch — optionally consult the replay composer, then
  *  fork in the scheduler + flip OLD to `"resumed"` in the store.
  *
@@ -237,7 +314,16 @@ const applyResume = async (
   tNow: number,
   replay?: { readonly context: ReplayContext; readonly policy: ReplayPolicy },
   toolReplay?: ResumerOpts["toolReplay"],
+  lineageGuard?: ResumerOpts["lineageGuard"],
 ): Promise<ResumeOutcome> => {
+  // 0) INV-09/INV-10 lineage-depth guard — runs BEFORE any replay/fork/save so
+  //    a denied resume performs NO side effects (no fork, no store flip). When
+  //    the guard is absent this is a no-op (byte-identical default-OFF path).
+  const denyReason = lineageDenyReason(handle, lineageGuard)
+  if (denyReason !== null) {
+    return { id: handle.id, decision, errorMessage: denyReason }
+  }
+
   // 1) OPTIONAL replay seed — NO-THROW composer.
   let seedMessages: ReadonlyArray<Message> = []
   let replayMetadata: Readonly<Record<string, string>> | undefined
@@ -349,10 +435,11 @@ const applyDecision = (
   tNow: number,
   replay?: { readonly context: ReplayContext; readonly policy: ReplayPolicy },
   toolReplay?: ResumerOpts["toolReplay"],
+  lineageGuard?: ResumerOpts["lineageGuard"],
 ): Promise<ResumeOutcome> => {
   switch (decision.action) {
     case "resume":
-      return applyResume(handle, decision, scheduler, store, tNow, replay, toolReplay)
+      return applyResume(handle, decision, scheduler, store, tNow, replay, toolReplay, lineageGuard)
     case "mark-failed":
       return applyMarkFailed(handle, decision, store, tNow)
     case "skip":
@@ -371,6 +458,7 @@ export const resumeInterruptedHandles = async (
   const now = opts.now ?? Date.now
   const replay = opts.replay
   const toolReplay = opts.toolReplay
+  const lineageGuard = opts.lineageGuard
 
   // `store.list` failure bubbles — it indicates the persistence layer itself
   // is unreachable; the caller decides whether to retry / surface to user.
@@ -395,7 +483,16 @@ export const resumeInterruptedHandles = async (
       continue
     }
     outcomes.push(
-      await applyDecision(handle, decision, scheduler, store, now(), replay, toolReplay),
+      await applyDecision(
+        handle,
+        decision,
+        scheduler,
+        store,
+        now(),
+        replay,
+        toolReplay,
+        lineageGuard,
+      ),
     )
   }
   return outcomes
