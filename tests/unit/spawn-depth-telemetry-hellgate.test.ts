@@ -29,7 +29,9 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { canExposeSpawnTools, effectiveCap } from "@/agent/spawn-depth"
 import {
+  __resetSpawnDepthLogSink,
   __resetSpawnDepthTelemetry,
+  __setSpawnDepthLogSink,
   emitSpawnDepthDecision,
   SPAWN_DEPTH_SPLIT_BRAIN_COUNTER,
   spawnDepthSplitBrainCount,
@@ -90,6 +92,7 @@ beforeEach(() => {
 afterEach(() => {
   clearPolicy()
   __resetSpawnDepthTelemetry()
+  __resetSpawnDepthLogSink()
 })
 
 // ── 1. INVARIANT — real runner + real exposure across the matrix ──────────────

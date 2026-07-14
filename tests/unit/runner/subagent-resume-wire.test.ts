@@ -118,7 +118,10 @@ describe("A. Gate OFF — store is untouched", () => {
 describe("B. Gate ON — interrupted handle becomes resumed", () => {
   test("B1: QUANTA_SUBAGENT_RESUME=1 causes interrupted handle to be marked resumed", async () => {
     const store = defaultJsonlSchedulerStore({ baseDir })
-    const handle = mkHandle("bg-test-b001")
+    // INV-09 LIVE: the plane wires a lineageGuard from the scheduler's
+    // resume-fork depth (= parentDepth+1 = 0+1 = 1 for a root parent). A handle
+    // persisted at the MATCHING depth resumes normally.
+    const handle = mkHandle("bg-test-b001", { depth: 1 })
     await store.save(handle)
 
     const args: SharedExecutionPlaneRuntimeArgs = {
@@ -141,7 +144,7 @@ describe("B. Gate ON — interrupted handle becomes resumed", () => {
 
   test("B2: the resumed handle outputSummary references the new handle id", async () => {
     const store = defaultJsonlSchedulerStore({ baseDir })
-    const handle = mkHandle("bg-test-b002")
+    const handle = mkHandle("bg-test-b002", { depth: 1 })
     await store.save(handle)
 
     const args: SharedExecutionPlaneRuntimeArgs = {
