@@ -32,6 +32,17 @@ import { projectSpawnTools, SPAWN_TOOL_NAMES } from "@/agent/spawn-projection"
 import type { AgentConfig } from "@/agent/types"
 import type { EnvLike, LLMPort } from "@/llm"
 import { __resetRuntimeConfig } from "@/shared"
+import type {
+  ChildProcessHandle,
+  DelayScheduler,
+  ProcessForkPort,
+  ProcessForkSpec,
+  SideAgentSpec,
+} from "@/side-agent"
+import {
+  createProcessSideAgentDaemonRegistry,
+  WORKER_PARENT_DEPTH_ENV_KEY,
+} from "@/side-agent/process-registry"
 import {
   assembleChildConfig,
   MIN_DAEMON_DEPTH,
@@ -177,5 +188,106 @@ describe("resolveDaemonDepth — fail-closed lineage resolution", () => {
     expect(daemon.depth).toBe(3)
     expect(daemon.subagent?.maxDepth).toBe(4)
     expect(childDepthOf(daemon)).toBe(4)
+  })
+})
+
+// ── FORK-BOUNDARY LINEAGE THREADING (this ticket) ─────────────────────────────
+// The prior commit made `resolveDaemonDepth` READ `WORKER_PARENT_DEPTH_ENV`, but
+// NOTHING on the spawning/fork side SET it — so the worker always floored. These
+// tests fork a worker (over a spec-capturing fake fork) with a KNOWN spawning
+// depth N and assert the forked worker's env carries N, so `resolveDaemonDepth`
+// (which the real worker calls on `process.env`) resolves to N — not the floor.
+
+/** A fake fork port that RECORDS the exact `ProcessForkSpec` each fork saw, so we
+ *  can assert the env the real worker would inherit (`{...process.env,...spec.env}`
+ *  in the real `nodeProcessForkPort`). */
+const mkSpecCapturingFork = (): { port: ProcessForkPort; specs: ProcessForkSpec[] } => {
+  const specs: ProcessForkSpec[] = []
+  const mkChild = (pid: number): ChildProcessHandle => ({
+    pid,
+    send: () => undefined,
+    onMessage: () => () => undefined,
+    onExit: () => () => undefined,
+    kill: () => undefined,
+  })
+  return {
+    specs,
+    port: {
+      fork(spec: ProcessForkSpec): ChildProcessHandle {
+        specs.push(spec)
+        return mkChild(3000 + specs.length)
+      },
+    },
+  }
+}
+
+const noopScheduler: DelayScheduler = { schedule: () => 0, cancel: () => undefined }
+
+const forkSpec = (over: Partial<SideAgentSpec> = {}): SideAgentSpec => ({
+  task: "monitor the build",
+  trigger: { kind: "interval", everyMs: 1000 },
+  maxWakes: 5,
+  maxTurnsPerWake: 2,
+  ...over,
+})
+
+/** Spawn ONE daemon over the capturing fork at spawning depth `parentDepth` and
+ *  return the env the forked worker inherited (merged like the real port does). */
+const forkedWorkerEnv = (parentDepth: number | undefined): Record<string, string | undefined> => {
+  const fk = mkSpecCapturingFork()
+  const reg = createProcessSideAgentDaemonRegistry({
+    fork: fk.port,
+    scheduler: noopScheduler,
+    now: () => 1,
+    workerModulePath: "/abs/worker-entry.mjs",
+    ...(parentDepth !== undefined ? { parentDepth } : {}),
+  })
+  reg.spawn(forkSpec())
+  const spec = fk.specs[0]
+  expect(spec).toBeDefined()
+  // The real `nodeProcessForkPort` forks with `{ ...process.env, ...spec.env }`.
+  return { ...(spec?.env ?? {}) }
+}
+
+describe("process registry — threads the spawning-agent depth across the fork boundary", () => {
+  test("DRIFT GUARD: the registry's mirrored env key === the worker's SSOT const", () => {
+    // The leaf registry mirrors the key (cannot value-import the child composition
+    // root without dragging @/agent/@/llm into the pure leaf). Pin them lock-step:
+    // if either drifts, threading silently no-ops (the worker reads a different key).
+    expect(WORKER_PARENT_DEPTH_ENV_KEY).toBe(WORKER_PARENT_DEPTH_ENV)
+  })
+
+  test("a spawning depth N flows to the forked worker env ⇒ resolveDaemonDepth === N", () => {
+    // RED pre-fix: the registry never set WORKER_PARENT_DEPTH_ENV, so the env is
+    // absent and resolveDaemonDepth floors to MIN_DAEMON_DEPTH regardless of N.
+    for (const n of [1, 2, 5]) {
+      const env = forkedWorkerEnv(n)
+      expect(env[WORKER_PARENT_DEPTH_ENV]).toBe(String(n))
+      // The worker calls resolveDaemonDepth(process.env); prove the threaded value
+      // drives the daemon depth to the REAL lineage, not the always-floor.
+      expect(resolveDaemonDepth(env as EnvLike)).toBe(n)
+    }
+  })
+
+  test("a DEEPER spawner ⇒ a proportionally deeper worker daemon (never shallower)", () => {
+    const shallow = resolveDaemonDepth(forkedWorkerEnv(1) as EnvLike)
+    const deep = resolveDaemonDepth(forkedWorkerEnv(4) as EnvLike)
+    expect(deep).toBeGreaterThan(shallow)
+    expect(deep).toBe(4)
+  })
+
+  test("FAIL-CLOSED: no spawning depth threaded ⇒ worker falls back to the floor", () => {
+    // Unavailable lineage must NOT fabricate a shallow depth — it keeps the floor.
+    const env = forkedWorkerEnv(undefined)
+    expect(env[WORKER_PARENT_DEPTH_ENV]).toBeUndefined()
+    expect(resolveDaemonDepth(env as EnvLike)).toBe(MIN_DAEMON_DEPTH)
+  })
+
+  test("PAIRED CONTROL: a threaded depth-0 root is still the floor, but is SET explicitly", () => {
+    // A genuine root spawner (depth 0) threads "0" (distinct from absent): the
+    // value is present and resolves to 0 — proving the seam carries even the root.
+    const env = forkedWorkerEnv(0)
+    expect(env[WORKER_PARENT_DEPTH_ENV]).toBe("0")
+    expect(resolveDaemonDepth(env as EnvLike)).toBe(0)
   })
 })

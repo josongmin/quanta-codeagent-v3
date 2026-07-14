@@ -623,6 +623,13 @@ const maybeWireSideAgent = (
       },
       now: () => Date.now(),
       workerModulePath: sideAgentWorkerModulePath(),
+      // Thread the SPAWNING agent's real lineage depth across the fork boundary
+      // (registry injects it as QUANTA_SIDE_AGENT_PARENT_DEPTH). `cfg.depth` is
+      // the same depth the daemon-creation authority (`admitsDaemonChild`) gates
+      // on; the forked worker's daemon config then runs at its TRUE lineage
+      // instead of the always-floor. `?? 0` mirrors the root-is-depth-0 contract
+      // used at the subagent block wire above (`parentDepth: cfg.depth ?? 0`).
+      parentDepth: cfg.depth ?? 0,
       cwd: cfg.cwd,
     })
     return
