@@ -122,4 +122,23 @@ describe("subagent-model reducer", () => {
     const st = fold([spawn("child", "ghost-parent", 2)])
     expect(buildSubagentTree(st).map((r) => r.node.taskId)).toEqual(["child"])
   })
+
+  it("caps the node Map (drops oldest TERMINAL nodes; NEVER a running one)", () => {
+    // hellaudit R2 MEDIUM: the backend LRU-evicts settled records silently, so a
+    // long session must self-bound the frontend Map (else unbounded memory +
+    // O(n²) selectors). Drive 400 completed spawns + one long-running spawn.
+    const msgs: SubagentMessage[] = []
+    for (let i = 0; i < 400; i++) {
+      msgs.push(spawn(`t${i}`, undefined, 0), status(`t${i}`, "completed"))
+    }
+    msgs.push(spawn("keepalive", undefined, 0), status("keepalive", "running"))
+    const st = fold(msgs)
+    // Bounded (cap = 256), and the running node is NEVER evicted.
+    expect(st.nodes.size).toBeLessThanOrEqual(256)
+    expect(st.nodes.has("keepalive")).toBe(true)
+    expect(activeNodes(st).some((n) => n.taskId === "keepalive")).toBe(true)
+    // The OLDEST terminal nodes were the ones dropped (t0 gone, a recent one kept).
+    expect(st.nodes.has("t0")).toBe(false)
+    expect(st.nodes.has("t399")).toBe(true)
+  })
 })

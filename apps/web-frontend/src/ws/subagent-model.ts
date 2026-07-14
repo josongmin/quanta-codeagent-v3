@@ -112,6 +112,26 @@ const EMPTY_NODE = (taskId: string, seq: number): SubagentNode => ({
   seq,
 })
 
+/** Cap the node Map so a long daemon session can't grow it without bound. The
+ *  backend `TaskRegistry` LRU-evicts SETTLED records at 256 but SILENTLY (no
+ *  removal frame), so the frontend must self-bound or it leaks memory + drifts
+ *  to O(n²) selector cost over the session lifetime (hellaudit R2 MEDIUM). Only
+ *  TERMINAL nodes are dropped (oldest `seq` first); a still-running node is
+ *  NEVER evicted (it belongs in the Active list). Mutates the passed fresh Map. */
+const MAX_NODES = 256
+const capNodes = (nodes: Map<string, SubagentNode>): void => {
+  if (nodes.size <= MAX_NODES) return
+  const terminal = [...nodes.values()]
+    .filter((n) => isTerminal(n.status))
+    .sort((a, b) => a.seq - b.seq)
+  let over = nodes.size - MAX_NODES
+  for (const n of terminal) {
+    if (over <= 0) break
+    nodes.delete(n.taskId)
+    over -= 1
+  }
+}
+
 const applySpawn = (state: SubagentState, msg: SubagentSpawnMessage): SubagentState => {
   const prior = state.nodes.get(msg.taskId)
   const seq = prior?.seq ?? state.nextSeq
@@ -125,6 +145,7 @@ const applySpawn = (state: SubagentState, msg: SubagentSpawnMessage): SubagentSt
   }
   const nodes = new Map(state.nodes)
   nodes.set(msg.taskId, node)
+  capNodes(nodes)
   return { nodes, nextSeq: prior === undefined ? state.nextSeq + 1 : state.nextSeq }
 }
 
@@ -141,6 +162,7 @@ const applyStatus = (state: SubagentState, msg: SubagentStatusMessage): Subagent
   }
   const nodes = new Map(state.nodes)
   nodes.set(msg.taskId, node)
+  capNodes(nodes)
   return { nodes, nextSeq: prior === undefined ? state.nextSeq + 1 : state.nextSeq }
 }
 
