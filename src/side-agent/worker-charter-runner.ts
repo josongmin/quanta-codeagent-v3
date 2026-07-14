@@ -36,6 +36,7 @@
 
 import type { AgentConfig } from "@/agent"
 import { subagentRunnerToSidePass } from "@/agent/side-agent-runner"
+import { childDepthOf } from "@/agent/spawn-depth"
 import { createSubagentRunner } from "@/agent/subagent-runner"
 import type { EnvLike, LLMPort, Message } from "@/llm"
 import { createLLM, pickProvider } from "@/llm"
@@ -67,6 +68,64 @@ export interface CharterRunnerSeams {
 /** A discard `StreamPort` — a forked side-agent has no UI surface to render to;
  *  the only product is the finding pushed back over IPC. */
 const discardStream: StreamPort = { emit: (_event: AgentEvent): void => undefined }
+
+/**
+ * Env key by which the SPAWNING agent's real depth is threaded across the OS
+ * process boundary onto the forked worker (via `{...process.env, ...spec.env}`
+ * from the fork port). Absent ⇒ the fork boundary did not carry lineage, so the
+ * worker falls back to the fail-closed floor below (treated as depth 0 = a
+ * top-level descendant, never granted a widened budget).
+ */
+export const WORKER_PARENT_DEPTH_ENV = "QUANTA_SIDE_AGENT_PARENT_DEPTH" as const
+
+/**
+ * DEFENSE-IN-DEPTH depth containment for a process-backed side-agent worker.
+ *
+ * RUNNER SEMANTICS (the subtlety that dictates this design): the config
+ * `assembleChildConfig` builds is the PARENT handed to `createSubagentRunner`;
+ * `subagentRunnerToSidePass` invokes that runner ONCE to spawn the actual
+ * investigating pass, which runs at `childDepthOf(parent) = parent.depth + 1`.
+ * The runner's reject fires when `childDepthOf(parent) > effectiveCap`. So under
+ * the default operator policy cap (`maxDescendantDepth = 1`) the daemon config
+ * MUST be depth 0 for its single investigating pass (depth 1) to run at all —
+ * pinning the daemon itself to depth 1 would make the pass depth 2 > cap and
+ * DENY the legitimate investigation.
+ *
+ * The real hole a prior review flagged is not this one pass (which is a depth-1
+ * LEAF, spawn tools already projected away under the default cap). It is that a
+ * depth-BLIND daemon is treated as a genuine ROOT: if the operator cap were
+ * WIDENED (`QUANTA_MAX_DESCENDANT_DEPTH > 1`), a background daemon would inherit
+ * the FULL root spawning budget and its investigating pass could recurse
+ * descendants — contained ONLY by the `subagentRunnerToSidePass` read-only tool
+ * filter (single-layer). A daemon is a DESCENDANT, not the user's root session,
+ * and must not get the root's budget.
+ *
+ * FIX (fail-closed, non-breaking): pin a TIGHTENING-ONLY per-config
+ * `subagent.maxDepth = childDepthOf(daemon)` so the effective ceiling
+ * (`min(operator policy, this)`) admits EXACTLY the one investigating pass and
+ * NO deeper, regardless of a widened operator policy. The investigating pass runs
+ * at `depth >= 1`; its OWN `childDepthOf` exceeds the pinned cap, so any
+ * descendant it tried to mint is admission-denied at the capability layer —
+ * defense-in-depth ON TOP of (not replacing) the read-only filter. The daemon
+ * parent depth reflects the threaded spawning-agent lineage when present (so a
+ * deeper spawner gets a proportionally deeper — never shallower — budget), else
+ * the fail-closed {@link MIN_DAEMON_DEPTH} floor.
+ */
+export const MIN_DAEMON_DEPTH = 0 as const
+
+/**
+ * Resolve the DAEMON PARENT config depth from the threaded spawning-agent depth
+ * (`WORKER_PARENT_DEPTH_ENV`), else the fail-closed {@link MIN_DAEMON_DEPTH}
+ * floor. A malformed / forged / absent value floors to 0 (a top-level
+ * descendant) — it can only DEEPEN the lineage (max with the floor), never grant
+ * a shallower/wider budget. This is the daemon's OWN depth; its single
+ * investigating pass runs one level deeper (`childDepthOf`). */
+export const resolveDaemonDepth = (env: EnvLike): number => {
+  const raw = env[WORKER_PARENT_DEPTH_ENV]
+  const parent = raw !== undefined && raw.length > 0 ? Number.parseInt(raw, 10) : Number.NaN
+  const derived = Number.isInteger(parent) && parent >= 0 ? parent : MIN_DAEMON_DEPTH
+  return Math.max(derived, MIN_DAEMON_DEPTH)
+}
 
 /**
  * Build the child's LLMPort per the precedence above, or `null` when no source
@@ -111,9 +170,26 @@ const buildLlmPort = (env: EnvLike, seams: CharterRunnerSeams): LLMPort | null =
  * spawn's `toolFilter` (intersected against this registry inside the runner). A
  * permissive `acceptEdits` permission is harmless here because the tool surface
  * is already narrowed to read-only by that filter.
+ *
+ * DEPTH CONTAINMENT (defense-in-depth): `daemonDepth` is the daemon PARENT's
+ * lineage depth (see {@link resolveDaemonDepth}); the config carries it as
+ * `depth` AND pins a TIGHTENING-ONLY `subagent.maxDepth = childDepthOf(daemon)`.
+ * The single investigating pass runs at `childDepthOf(daemon) (>= 1)` and is
+ * admitted (childDepth == cap); its OWN children exceed that pinned cap, so a
+ * background daemon can never recurse descendants even if the operator policy is
+ * widened — the read-only tool filter is no longer the sole containment.
  */
-const assembleChildConfig = (llm: LLMPort, cwd: string): AgentConfig => {
+export const assembleChildConfig = (
+  llm: LLMPort,
+  cwd: string,
+  daemonDepth: number,
+): AgentConfig => {
   const seed: Message[] = [{ role: "user", content: [{ type: "text", text: "side-agent" }] }]
+  // The tightening cap = the depth of the ONE investigating pass this daemon
+  // spawns (`childDepthOf(daemon)`). `effectiveCap = min(operator policy, this)`
+  // then admits exactly that pass and denies anything deeper (fail-closed under a
+  // widened policy). `childDepthOf` on a well-formed non-negative int never throws.
+  const passDepth = childDepthOf({ depth: daemonDepth })
   return {
     llm,
     registry: new ToolRegistry(buildDefaultTools()),
@@ -122,6 +198,13 @@ const assembleChildConfig = (llm: LLMPort, cwd: string): AgentConfig => {
     messages: seed,
     system: "You are a background side-agent. Investigate the charter and report findings.",
     cwd,
+    // Daemon lineage depth (0 = top-level descendant). Load-bearing: it is the
+    // parent depth the runner derives the investigating pass's depth from.
+    depth: daemonDepth,
+    // Tightening-only recursion cap — pins the effective ceiling to the single
+    // investigating-pass depth so a widened operator policy cannot hand a
+    // background daemon a deeper spawning budget than its one pass.
+    subagent: { maxDepth: passDepth },
     maxTurns: 8,
     signal: new AbortController().signal,
     onConfirm: async () => false,
@@ -149,7 +232,7 @@ export const runCharterPassLLM = async (
     if (llm === null) return null
 
     const cwd = seams.cwd ?? process.cwd()
-    const cfg = assembleChildConfig(llm, cwd)
+    const cfg = assembleChildConfig(llm, cwd, resolveDaemonDepth(env))
     const runner = createSubagentRunner(cfg)
     // Reuse the in-process backer's mapping (finalText → finding) verbatim.
     const pass = subagentRunnerToSidePass(runner)

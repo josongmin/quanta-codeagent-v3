@@ -133,6 +133,13 @@ const parseHandle = (raw: unknown): PersistedHandle | undefined => {
     ...(typeof r.errorMessage === "string" ? { errorMessage: r.errorMessage } : {}),
     ...(typeof r.hostPid === "number" ? { hostPid: r.hostPid } : {}),
     ...(typeof r.workspace === "string" ? { workspace: r.workspace } : {}),
+    // INV-09/INV-10 lineage depth. Only a NON-NEGATIVE INTEGER round-trips;
+    // NaN / negative / fractional are treated as ABSENT (fail-closed) so a
+    // corrupt depth cannot mint a shallow resumed child. Legacy records (no
+    // `depth` key) parse fine — the field is simply omitted.
+    ...(typeof r.depth === "number" && Number.isInteger(r.depth) && r.depth >= 0
+      ? { depth: r.depth }
+      : {}),
   }
 }
 
