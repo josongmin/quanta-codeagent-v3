@@ -43,7 +43,7 @@ evidence:
     - src/shared/runtime-config.ts
     - src/shared/runtime-config/types.ts
     - src/shared/runtime-config-knobs/knobs-a.ts
-  adrs: []
+  adrs: ["docs/plans/jul-13-subagent-nesting-control.md"]
   tests:
     unit:
       - tests/unit/spawn-depth-hellgate.test.ts

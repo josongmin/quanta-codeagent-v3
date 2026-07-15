@@ -47,7 +47,7 @@ evidence:
     - src/skill/system-skills/product-onboard/SKILL.md
     - src/skill/system-skills/index.ts
     - src/skill/index.ts
-  adrs: []
+  adrs: ["docs/analysis/jul-03-competitor-ux-absorption.md"]
   tests:
     unit:
       - tests/unit/system-skills-product-onboard-hellgate.test.ts

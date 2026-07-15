@@ -60,7 +60,7 @@ evidence:
     - src/tool/default-tool-ports.ts
     - src/host/runtime/agent-arg-builder/gated-tool-ports.ts
     - src/tool/surface/gated-tools.ts
-  adrs: []
+  adrs: ["docs/analysis/jul-03-competitor-ux-absorption.md"]
   tests:
     unit:
       - tests/unit/projects-kb.test.ts

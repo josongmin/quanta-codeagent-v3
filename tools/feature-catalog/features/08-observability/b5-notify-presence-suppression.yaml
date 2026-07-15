@@ -41,7 +41,7 @@ evidence:
     - src/apps/cli/repl/factories/notify-and-warning.ts
     - src/apps/cli/notify/osc-adapter.ts
     - src/apps/cli/repl.ts
-  adrs: []
+  adrs: [444]
   tests:
     unit:
       - src/apps/cli/repl/factories/__tests__/notify-presence-wire.hellgate.test.ts

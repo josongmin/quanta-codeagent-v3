@@ -55,7 +55,7 @@ evidence:
     - src/shared/runtime-config/types-extra.ts
     - src/shared/runtime-config-knobs/knobs-a.ts
     - src/agent/dispatch/tool-context.ts
-  adrs: []
+  adrs: [398]
   tests:
     unit:
       - tests/unit/edit-fresh-hash-hellgate.test.ts

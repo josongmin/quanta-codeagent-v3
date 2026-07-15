@@ -42,7 +42,7 @@ evidence:
     - src/agent/prompt-body.ts
     - src/agent/prompt-graph/atoms-body.ts
     - src/agent/prompt.ts
-  adrs: []
+  adrs: ["docs/plans/jul-13-codex-5059-absorption.md"]
   tests:
     unit:
       - tests/unit/subagent-delegation-suppression-hellgate.test.ts
