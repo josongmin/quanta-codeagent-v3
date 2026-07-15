@@ -61,7 +61,7 @@ import {
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { isPathLikeToken } from "@/runner/orchestrate"
 import { openSessionEgressProxy } from "@/runtime/network-proxy"
-import { errMessage, gateOn, type Logger, logger } from "@/shared"
+import { errMessage, gateOn, runtimeConfigFromEnv, type Logger, logger } from "@/shared"
 import {
   type BootstrapFeatures,
   type SessionBootstrapDeps,
@@ -294,6 +294,10 @@ const probeCapabilityConsistency = (env: NodeJS.ProcessEnv): void => {
   // only effect). This matters especially once `legacyGateFor` is upgraded to the
   // real (throwable) registration predicate — see the SCAFFOLD note below.
   try {
+    // Keep the host's injected env path on the same strict parser as
+    // `runtimeConfig()`.  `runCapabilityProbe` retains its own early return as
+    // defense in depth for direct callers.
+    if (!runtimeConfigFromEnv(env).capabilityLayer) return
     // ADR-0503 P3 — REAL composite check. `resolveExposure` now models the
     // COMPOSITE gate (workflow also requires the default-ON parent QUANTA_SUBAGENT),
     // so it is NO LONGER a re-derivation of `gateOn(env, gate.envKey)`. This

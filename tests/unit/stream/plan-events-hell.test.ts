@@ -472,6 +472,33 @@ describe("StdoutStream renders each plan-mode variant with the discriminant toke
     expect(s).toContain("dev override")
   })
 
+  test("subagent lifecycle renders its type token and redacts model-derived text", () => {
+    const stream = new StdoutStream()
+    stream.emit({
+      type: "subagent_spawn",
+      taskId: "child-1",
+      parentTaskId: "root-1",
+      depth: 1,
+      agentType: "worker",
+      description: "investigate sk-test-abcdefghijklmnopqrstuvwxyz",
+      at: 1,
+    })
+    stream.emit({
+      type: "subagent_status",
+      taskId: "child-1",
+      status: "failed",
+      turns: 2,
+      error: "failed with sk-test-abcdefghijklmnopqrstuvwxyz",
+      at: 2,
+    })
+    const s = out()
+    expect(s).toContain("subagent_spawn")
+    expect(s).toContain("child-1")
+    expect(s).toContain("subagent_status")
+    expect(s).toContain("failed")
+    expect(s).not.toContain("sk-test-abcdefghijklmnopqrstuvwxyz")
+  })
+
   test("each variant produces exactly one terminal newline (one-line dim render)", () => {
     const events: AgentEvent[] = [
       { type: "plan_created", plan: samplePlan },
@@ -555,6 +582,10 @@ describe("Exhaustive AgentEvent switch covers the 6 new variants (drift gate)", 
         return "interrupted"
       case "subagent_cancel":
         return "subagent_cancel"
+      case "subagent_spawn":
+        return "subagent_spawn"
+      case "subagent_status":
+        return "subagent_status"
       case "plan_created":
         return "plan_created"
       case "plan_updated":
@@ -625,5 +656,17 @@ describe("Exhaustive AgentEvent switch covers the 6 new variants (drift gate)", 
       discriminate({ type: "plan_user_input_resolved", promptId: "p", decision: "answer" }),
     ).toBe("plan_user_input_resolved")
     expect(discriminate({ type: "mode_changed", from: "default", to: "plan" })).toBe("mode_changed")
+    expect(
+      discriminate({
+        type: "subagent_spawn",
+        taskId: "child-1",
+        depth: 1,
+        description: "work",
+        at: 1,
+      }),
+    ).toBe("subagent_spawn")
+    expect(
+      discriminate({ type: "subagent_status", taskId: "child-1", status: "completed", at: 2 }),
+    ).toBe("subagent_status")
   })
 })

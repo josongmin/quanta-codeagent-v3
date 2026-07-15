@@ -64,7 +64,6 @@ import {
 } from "@/agent/subagent-background"
 import { createSubagentMailbox, type MailboxPort } from "@/agent/subagent-mailbox"
 import { createSubagentRunner } from "@/agent/subagent-runner"
-import { untrustedEnvelopeEnabled } from "@/agent/untrusted-envelope"
 import {
   type BrowserPort,
   createCdpBrowser,
@@ -90,7 +89,7 @@ import { defaultPromptCacheObserver } from "@/observability/prompt-cache"
 import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
-import { gateOn, runtimeConfig } from "@/shared"
+import { gateOn, runtimeConfig, runtimeConfigFromEnv } from "@/shared"
 import { createProcessSideAgentDaemonRegistry } from "@/side-agent"
 import { skillMcpDepsEnabled } from "@/skill/skill-mcp-deps"
 import { resolveJailed } from "@/storage"
@@ -469,6 +468,7 @@ const parseAssemblerPositiveInt = (raw: string | undefined): number | undefined 
  *  under the cognitive-complexity cap; each helper is independently env-gated,
  *  caller-override-safe, and a no-op when its gate/resource is absent. */
 const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  const config = runtimeConfigFromEnv(env)
   maybeWireBrowser(cfg, env)
   // G1 — runs AFTER maybeWireBrowser so it can read the freshly-wired
   // `cfg.browser.port`; no-op unless QUANTA_APPSHOT=1 AND a browser is present.
@@ -483,8 +483,8 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
   maybeWirePromptCacheObserver(cfg, env)
   maybeWireVcsEventSink(cfg, env)
   maybeWireProgressSink(cfg, env)
-  maybeWireSideAgent(cfg, env)
-  maybeWireWriteBudget(cfg, env)
+  maybeWireSideAgent(cfg, config)
+  maybeWireWriteBudget(cfg, config)
   maybeWireBudgetLedger(cfg, env)
 }
 
@@ -559,24 +559,19 @@ const maybeWireBudgetLedger = (cfg: AgentConfig, env: AssemblerEnv): void => {
  *  narrow default per RFC §7 — the user can wave it through). Dispatch binds the
  *  current turn so the counter resets per turn. Caller-override-safe; absent gate
  *  / no cap ⇒ slot unset ⇒ no counter, byte-identical (default-OFF). */
-const maybeWireWriteBudget = (cfg: AgentConfig, env: AssemblerEnv): void => {
+const maybeWireWriteBudget = (
+  cfg: AgentConfig,
+  config: ReturnType<typeof runtimeConfigFromEnv>,
+): void => {
   if (cfg.writeBudget !== undefined) return
-  if (!gateOn(env, "QUANTA_WRITE_BUDGET")) return
-  const max = parseWriteBudgetMax(env["QUANTA_WRITE_BUDGET_MAX"])
+  if (!config.writeBudget) return
+  const max = config.writeBudgetMax
   if (max === undefined) return
   cfg.writeBudget = createSessionWriteBudget({
-    untrustedContext: untrustedEnvelopeEnabled(env),
+    untrustedContext: config.untrustedEnvelope,
     maxWritesPerTurn: max,
     overVerdict: "confirm",
   })
-}
-
-/** Parse the `QUANTA_WRITE_BUDGET_MAX` cap from the injected env bag: a positive
- *  integer, else `undefined` (the budget stays inert). No magic default. */
-const parseWriteBudgetMax = (raw: string | undefined): number | undefined => {
-  if (raw === undefined || !/^\d+$/.test(raw.trim())) return undefined
-  const n = Number.parseInt(raw.trim(), 10)
-  return Number.isInteger(n) && n > 0 ? n : undefined
 }
 
 /** N1 — mint the live side-agent daemon registry when opted in
@@ -606,8 +601,11 @@ const parseWriteBudgetMax = (raw: string | undefined): number | undefined => {
  *  passes; sharing the foreground subagent block's runner (one budget) is a
  *  follow-up — functionally the dedicated runner still honors the per-pass
  *  `maxTurns` + the registry's `maxConcurrent` guard. */
-const maybeWireSideAgent = (cfg: AgentConfig, env: AssemblerEnv): void => {
-  if (!gateOn(env, "QUANTA_SIDE_AGENT")) return
+const maybeWireSideAgent = (
+  cfg: AgentConfig,
+  config: ReturnType<typeof runtimeConfigFromEnv>,
+): void => {
+  if (!config.sideAgent) return
   const slot = cfg as AgentConfig & { sideAgentDaemons?: unknown }
   if (slot.sideAgentDaemons !== undefined) return
   // §4.3 — OS-PROCESS backer selection. When `QUANTA_SIDE_AGENT_PROCESS` is ALSO
@@ -616,7 +614,7 @@ const maybeWireSideAgent = (cfg: AgentConfig, env: AssemblerEnv): void => {
   // (both satisfy `SideAgentDaemonRegistry`/`SideAgentDaemonPort`), so the
   // `side_agent_*` tools are byte-identical from the model's view. Gate OFF ⇒ the
   // EXACT legacy in-process path below (byte-identical default).
-  if (runtimeConfig().sideAgentProcess) {
+  if (config.sideAgentProcess) {
     cfg.sideAgentDaemons = createProcessSideAgentDaemonRegistry({
       fork: nodeProcessForkPort,
       scheduler: {

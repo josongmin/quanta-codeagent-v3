@@ -110,9 +110,17 @@ export const emitSpawnDepthDecision = (record: SpawnDepthDecisionRecord): void =
       toolExposed: record.toolExposed,
       decision: record.decision,
     })
-  } catch {
+  } catch (e) {
     // Observability is best-effort — a sink/registry hiccup MUST NOT abort the
-    // spawn decision. Swallow.
+    // spawn decision. Attribute it if the same sink is still usable.
+    try {
+      log.warn("agent.spawn.admission telemetry emission failed", {
+        error: e instanceof Error ? e.message : String(e),
+      })
+    } catch (reportError) {
+      // The reporter itself is the failed dependency; preserve the never-throw contract.
+      void reportError
+    }
   }
 }
 
@@ -121,7 +129,14 @@ export const emitSpawnDepthDecision = (record: SpawnDepthDecisionRecord): void =
 export const spawnDepthSplitBrainCount = (): number => {
   try {
     return registry.counter(SPAWN_DEPTH_SPLIT_BRAIN_COUNTER).value()
-  } catch {
+  } catch (e) {
+    try {
+      log.warn("agent.spawn.admission split-brain counter read failed", {
+        error: e instanceof Error ? e.message : String(e),
+      })
+    } catch (reportError) {
+      void reportError
+    }
     return 0
   }
 }
@@ -131,7 +146,14 @@ export const spawnDepthSplitBrainCount = (): number => {
 export const spawnDepthTelemetrySnapshot = (): Record<string, number> => {
   try {
     return registry.snapshot().counters
-  } catch {
+  } catch (e) {
+    try {
+      log.warn("agent.spawn.admission telemetry snapshot failed", {
+        error: e instanceof Error ? e.message : String(e),
+      })
+    } catch (reportError) {
+      void reportError
+    }
     return {}
   }
 }

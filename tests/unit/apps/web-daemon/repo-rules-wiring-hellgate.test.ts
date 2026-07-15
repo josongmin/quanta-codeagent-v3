@@ -27,8 +27,10 @@ describe("WS4 R7 — web-daemon honors repo-local rules (trusted surface parity)
     expect(SRC).toMatch(/import\s*\{\s*loadRepoRules\s*\}\s*from\s*"@\/agent\/repo-rules"/)
   })
 
-  test("loads rules from the session cwd, fail-open", () => {
-    expect(SRC).toMatch(/loadRepoRules\(cwd\)\.catch\(\(\)\s*=>\s*undefined\)/)
+  test("loads rules from the session cwd, reports a failure, then fails open", () => {
+    expect(SRC).toMatch(
+      /loadRepoRules\(cwd\)\.catch\(\(e\)\s*=>\s*\{[\s\S]{0,350}?logger\.warn\([\s\S]{0,350}?return undefined[\s\S]{0,80}?\}\)/,
+    )
   })
 
   test("threads the loaded rules into the assembled base config", () => {

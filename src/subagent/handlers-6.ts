@@ -25,10 +25,10 @@
  * `./registry` (`TaskRegistry`/`TaskOwnerToken`) + `./types` (`SubagentRunner`).
  * It does NOT import `@/agent`; the recursive runner is injected.
  */
-import type { Subprocess } from "bun"
 import { errMessage } from "@/shared"
-import { legacyKillHandle, type MakeProcKill, type ProcKillHandle } from "./exec-kill"
+import type { PtyTable } from "./exec-command"
 
+export { handleExecCommand, MAX_PTY, PtyTable } from "./exec-command"
 // Re-export the kill contract (split into `exec-kill.ts` for the god-MODULE
 // ratchet) so `dispatch-6` + the exec hellgates keep their import path.
 export type { MakeProcKill, ProcKillHandle } from "./exec-kill"
@@ -50,8 +50,6 @@ import type { TaskRegistry } from "./registry"
 import type {
   CloseAgentInput,
   CloseAgentOutput,
-  ExecCommandInput,
-  ExecCommandOutput,
   SendInputInput,
   SendInputOutput,
   SpawnAgentInput,
@@ -62,12 +60,6 @@ import type {
   WriteStdinOutput,
 } from "./tools-6"
 import type { SubagentRequest, SubagentRunner } from "./types"
-
-/** Bound on concurrent long-running PTYs we will keep alive across calls.
- *  A normal agent run uses 0–2; this cap exists to defend against runaway
- *  spawn_loops (LLM hallucination / runaway tool). Hits return a structured
- *  error with cause:"pty_cap". */
-export const MAX_PTY = 32
 
 /** (d) Last-resort recursion-depth ceiling for `spawn_agent` — applied when
  *  NEITHER `input.maxDepth` NOR `deps.maxDepth` is supplied, so the fan-out
@@ -135,16 +127,8 @@ export const clampWaitTimeout = (
   const raised = Math.max(want, policy.minMs)
   return Math.min(raised, policy.maxMs)
 }
-/** Startup grace for `exec_command({pty:true})`: if the child is still alive
- *  after this window, we attach it into the PTY table and return its pid
- *  instead of blocking until natural exit. Short-lived commands that exit
- *  inside the window keep the old fully-buffered synchronous behavior. */
-const PTY_ATTACH_GRACE_MS = 75
-
 /** Per-tool error helpers — guarantees the discriminator + message shape that
  *  matches the frozen contract (`ErrorShape` in tools-6.ts). */
-const errExec = (message: string, cause?: string): ExecCommandOutput =>
-  cause !== undefined ? { kind: "error", message, cause } : { kind: "error", message }
 const errWrite = (message: string, cause?: string): WriteStdinOutput =>
   cause !== undefined ? { kind: "error", message, cause } : { kind: "error", message }
 const errSpawn = (message: string, cause?: string): SpawnAgentOutput =>
@@ -155,331 +139,6 @@ const errClose = (message: string, cause?: string): CloseAgentOutput =>
   cause !== undefined ? { kind: "error", message, cause } : { kind: "error", message }
 const errSendInput = (message: string, cause?: string): SendInputOutput =>
   cause !== undefined ? { kind: "error", message, cause } : { kind: "error", message }
-
-// ─── PTY table — Bun.spawn handles that exec_command kept open ─────────────
-
-/** A live child process handle, keyed by pid, so subsequent `write_stdin`
- *  calls can route to the right child without re-spawning. */
-interface PtySlot {
-  proc: Subprocess<"pipe", "pipe", "pipe">
-  // Used for traceability + reuse decisions (Codex `getSnapshot`).
-  startedAt: number
-  command: string
-  /** Resolved when the child exits naturally. We hold this so `close_agent`
-   *  can await final exit after issuing kill. */
-  exited: Promise<number>
-  /** WS1 P1 — the tree killer built at spawn, so `closeAll` reaps a retained
-   *  pty's backgrounded grandchildren instead of orphaning them (parity with the
-   *  timeout/abort teardown). */
-  killHandle: ProcKillHandle
-}
-
-/** Internal pty registry. Module-scoped (one process worth of state) — the
- *  agent runs a single Bun process; the registry is the source of truth for
- *  the host's living children. Exposed for tests via {@link snapshotPtyTable}. */
-export class PtyTable {
-  private readonly slots = new Map<number, PtySlot>()
-
-  size(): number {
-    return this.slots.size
-  }
-
-  has(pid: number): boolean {
-    return this.slots.has(pid)
-  }
-
-  get(pid: number): PtySlot | undefined {
-    return this.slots.get(pid)
-  }
-
-  set(pid: number, slot: PtySlot): void {
-    this.slots.set(pid, slot)
-  }
-
-  delete(pid: number): boolean {
-    return this.slots.delete(pid)
-  }
-
-  /** Codex `getSnapshot` analogue — readable view for turn-checkpoint dumps. */
-  snapshot(): ReadonlyArray<{ pid: number; command: string; startedAt: number }> {
-    const out: Array<{ pid: number; command: string; startedAt: number }> = []
-    for (const [pid, s] of this.slots.entries()) {
-      out.push({ pid, command: s.command, startedAt: s.startedAt })
-    }
-    return out
-  }
-
-  /** Force-kill every live process and clear the table. Idempotent. Used by
-   *  test cleanup; production sessions call this from their shutdown path. */
-  closeAll(): void {
-    for (const [, s] of this.slots) {
-      try {
-        // WS1 P1 — tree-kill a retained pty's descendants (parity with
-        // timeout/abort); legacyKillHandle keeps single-pid when uninjected.
-        s.killHandle.kill()
-      } catch {
-        // already dead — ignore
-      }
-    }
-    this.slots.clear()
-  }
-}
-
-// ─── exec_command ──────────────────────────────────────────────────────────
-
-/** Injected path-jail port so `exec_command`'s model-supplied `cwd` cannot
- *  escape the session workspace. Structurally the `resolveJailed(requested,
- *  jailRoot)` contract (`@/storage`): returns the resolved absolute path,
- *  THROWS on a jail escape. Injected (closed port) so this slice keeps its
- *  fence — handlers-6 imports no storage code; the composition root wires the
- *  real `resolveJailed`. Absent ⇒ NO jail (byte-identical legacy path) — the
- *  port is opt-in so existing callers that never wired a workspace root stay
- *  unchanged. Present ⇒ a cwd outside `jailRoot` is rejected fail-closed with
- *  `cause:"cwd_outside_workspace"` BEFORE any process is spawned. */
-interface CwdJailPort {
-  /** Resolve `requested` against `jailRoot`; throw when it escapes the jail. */
-  readonly resolve: (requested: string, jailRoot: string) => string
-  /** The workspace root the child `cwd` is confined to (the session cwd). */
-  readonly jailRoot: string
-}
-
-interface ExecCommandDeps {
-  ptyTable?: PtyTable
-  /** Confine `input.cwd` to the session workspace before spawning. Absent ⇒
-   *  no jail (legacy). See {@link CwdJailPort}. */
-  cwdJail?: CwdJailPort
-  /** Tree-aware kill factory (WS1). Absent ⇒ legacy single-pid `proc.kill()`
-   *  on timeout/abort (byte-identical). See {@link MakeProcKill}. */
-  makeKill?: MakeProcKill
-}
-
-interface StreamPump {
-  readonly done: Promise<void>
-  snapshot(): string
-  stopCapturing(): string
-}
-
-/** Drain a subprocess pipe continuously so long-lived PTYs cannot deadlock on
- *  a full stdout/stderr buffer. While capture is enabled we retain bytes for
- *  the eventual tool result; after an attached PTY returns we discard future
- *  bytes but keep draining until the child exits. */
-const createStreamPump = (stream: ReadableStream<Uint8Array>): StreamPump => {
-  const reader = stream.getReader()
-  const chunks: Uint8Array[] = []
-  let capture = true
-  const done = (async (): Promise<void> => {
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) return
-        if (capture && value !== undefined && value.byteLength > 0) chunks.push(value)
-      }
-    } catch {
-      // Kill/abort/pipe-close can race the reader; stdout/stderr capture is
-      // best-effort and must not throw past the handler.
-    } finally {
-      reader.releaseLock()
-    }
-  })()
-  const decode = (): string => new TextDecoder("utf-8").decode(concatChunks(chunks))
-  return {
-    done,
-    snapshot: decode,
-    stopCapturing(): string {
-      const text = decode()
-      capture = false
-      chunks.length = 0
-      return text
-    },
-  }
-}
-
-const concatChunks = (chunks: readonly Uint8Array[]): Uint8Array => {
-  let total = 0
-  for (const chunk of chunks) total += chunk.byteLength
-  const out = new Uint8Array(total)
-  let offset = 0
-  for (const chunk of chunks) {
-    out.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return out
-}
-
-/**
- * `exec_command` — spawn a shell command via `Bun.spawn` with piped stdio.
- * When `pty:true` is requested AND the child is still running at return time,
- * the handle is held in the {@link PtyTable} so subsequent `write_stdin`
- * calls can reach it; the child's pid is returned to the model.
- *
- * Failure modes (all returned as `{kind:"error", ...}` — never thrown):
- *   - spawn failure (bad command / bad cwd / ENOENT)        → `cause:"spawn_error"`
- *   - timeout (kills the child, returns timed-out result)   → `cause:"timeout"`
- *   - pty cap exceeded                                      → `cause:"pty_cap"`
- *   - abort via ctx signal (caller-cancelled mid-exec)      → `cause:"abort"`
- */
-export const handleExecCommand = async (
-  input: ExecCommandInput,
-  deps: ExecCommandDeps = {},
-  signal?: AbortSignal,
-): Promise<ExecCommandOutput> => {
-  const table = deps.ptyTable
-  const wantPty = input.pty === true
-
-  // (e) A `pty:true` request with NO ptyTable wired would otherwise fall
-  // through to the synchronous branch and run an UNTRACKED child — the host
-  // could never `write_stdin` / `close_agent` it, and the cleanup path would
-  // never see it. Fail-closed with a structured error instead of silently
-  // degrading to a non-PTY run.
-  if (wantPty && table === undefined) {
-    return errExec(
-      "exec_command requested pty:true but no PTY table is wired (write_stdin/close_agent would be unreachable).",
-      "pty_unsupported",
-    )
-  }
-
-  if (wantPty && table !== undefined && table.size() >= MAX_PTY) {
-    return errExec(`PTY cap exceeded: ${MAX_PTY} concurrent ptys already open.`, "pty_cap")
-  }
-
-  // (c) Path jail — confine the model-supplied cwd to the session workspace
-  // BEFORE spawning. When the port is wired, an escaping cwd is rejected
-  // fail-closed (the jail's `resolve` throws). Absent ⇒ no jail (legacy).
-  //
-  // Hole-fix: the jail must determine the cwd the child ACTUALLY runs in, not
-  // merely validate-then-discard. A RELATIVE `input.cwd` (e.g. "../escape")
-  // resolves against the jailRoot here, but Bun.spawn resolves a relative cwd
-  // against `process.cwd()` — so when process.cwd() != jailRoot the raw value
-  // would execute OUTSIDE the workspace even after passing the check. We bind
-  // the spawn `cwd` to the JAILED absolute path so the validated path is the
-  // executed path. No jail wired ⇒ raw `input.cwd` (byte-identical legacy).
-  let spawnCwd: string = input.cwd
-  if (deps.cwdJail !== undefined) {
-    try {
-      spawnCwd = deps.cwdJail.resolve(input.cwd, deps.cwdJail.jailRoot)
-    } catch (e: unknown) {
-      return errExec(
-        `Refusing to run in cwd outside the workspace: ${errMessage(e)}`,
-        "cwd_outside_workspace",
-      )
-    }
-  }
-
-  // Build env: only set when caller supplied an overlay (so the default Bun
-  // semantics — inherit current env — applies on the no-overlay path). When
-  // a record is passed we MERGE onto process.env so unrelated vars survive.
-  const env =
-    input.env !== undefined
-      ? ({ ...(process.env as Record<string, string | undefined>), ...input.env } as Record<
-          string,
-          string | undefined
-        >)
-      : undefined
-
-  let proc: Subprocess<"pipe", "pipe", "pipe">
-  try {
-    proc = Bun.spawn(["bash", "-lc", input.command], {
-      cwd: spawnCwd,
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      ...(env !== undefined ? { env } : {}),
-    }) as Subprocess<"pipe", "pipe", "pipe">
-  } catch (e: unknown) {
-    const msg = errMessage(e)
-    return errExec(`Failed to spawn command: ${msg}`, "spawn_error")
-  }
-
-  // WS1 — route timeout/abort (and, once retained, closeAll) kills through the
-  // injected escalating tree-killer so a `bash -lc` that forked a grandchild has
-  // the WHOLE tree reaped. Absent ⇒ legacy single-pid kill (byte-identical).
-  const killHandle: ProcKillHandle = deps.makeKill?.(proc) ?? legacyKillHandle(proc)
-
-  let timedOut = false
-  let aborted = false
-  const timer = setTimeout(() => {
-    timedOut = true
-    killHandle.kill()
-  }, input.timeoutMs)
-
-  const onAbort = () => {
-    aborted = true
-    killHandle.kill()
-  }
-  signal?.addEventListener("abort", onAbort, { once: true })
-
-  try {
-    if (wantPty && table !== undefined) {
-      const stdoutPump = createStreamPump(proc.stdout as ReadableStream<Uint8Array>)
-      const stderrPump = createStreamPump(proc.stderr as ReadableStream<Uint8Array>)
-      const winner = await Promise.race([
-        (proc.exited as Promise<number>).then(() => "exited" as const),
-        new Promise<"attach">((resolve) =>
-          setTimeout(() => resolve("attach"), PTY_ATTACH_GRACE_MS),
-        ),
-      ])
-
-      if (winner === "attach" && !timedOut && !aborted) {
-        const stdoutText = stdoutPump.stopCapturing()
-        const stderrText = stderrPump.stopCapturing()
-        table.set(proc.pid, {
-          proc,
-          startedAt: Date.now(),
-          command: input.command,
-          exited: proc.exited as Promise<number>,
-          killHandle, // WS1 P1 — closeAll tree-kills this retained child's descendants
-        })
-        void (proc.exited as Promise<number>).finally(() => {
-          table.delete(proc.pid)
-        })
-        return {
-          kind: "success",
-          exitCode: -1,
-          stdout: stdoutText,
-          stderr: stderrText,
-          pid: proc.pid,
-        }
-      }
-
-      const exitCode = await (proc.exited as Promise<number>)
-      await Promise.all([stdoutPump.done, stderrPump.done])
-      if (timedOut) {
-        return errExec(`Command timed out after ${input.timeoutMs}ms`, "timeout")
-      }
-      if (aborted) {
-        return errExec("Command aborted", "abort")
-      }
-      return {
-        kind: "success",
-        exitCode,
-        stdout: stdoutPump.snapshot(),
-        stderr: stderrPump.snapshot(),
-      }
-    }
-
-    const [stdoutText, stderrText, exitCode] = await Promise.all([
-      new Response(proc.stdout as ReadableStream<Uint8Array>).text(),
-      new Response(proc.stderr as ReadableStream<Uint8Array>).text(),
-      proc.exited as Promise<number>,
-    ])
-
-    if (timedOut) {
-      return errExec(`Command timed out after ${input.timeoutMs}ms`, "timeout")
-    }
-    if (aborted) {
-      return errExec("Command aborted", "abort")
-    }
-
-    return { kind: "success", exitCode, stdout: stdoutText, stderr: stderrText }
-  } finally {
-    clearTimeout(timer)
-    signal?.removeEventListener("abort", onAbort)
-    // Clear any pending SIGKILL grace timer so it never outlives this call
-    // (the PTY-attach handoff path returns through here too; disarm is a no-op
-    // when no kill was armed).
-    killHandle.disarm()
-  }
-}
 
 // ─── write_stdin ───────────────────────────────────────────────────────────
 

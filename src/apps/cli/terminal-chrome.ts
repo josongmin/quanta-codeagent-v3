@@ -34,9 +34,20 @@
  *  existing split is preserved while the DECSTBM *ordering* is centralized
  *  (the scroll region is terminal-global no matter which fd carries it).
  *
- *  Slice isolation: zero imports — pure leaf so status-bar, timeline-panel
- *  and the repl session-loop can all depend on it without cycles.
+ *  Slice isolation: only the shared logger — status-bar, timeline-panel and
+ *  the repl session-loop can all depend on it without cycles.
  */
+
+import { errMessage, logger } from "@/shared"
+
+const reportChromeFault = (operation: string, error: unknown): void => {
+  try {
+    logger.warn(`terminal chrome ${operation} failed`, { error: errMessage(error) })
+  } catch (reportError) {
+    // A closed terminal can break both the chrome writer and the shared logger.
+    void reportError
+  }
+}
 
 // --- 1. DEC-only cursor save/restore -------------------------------------
 
@@ -125,9 +136,10 @@ export const createScrollRegionManager = (): ScrollRegionManager => {
   const safeWrite = (entry: RegionEntry, bytes: string): void => {
     try {
       entry.spec.write(bytes)
-    } catch {
+    } catch (e) {
       // Intentional: chrome is a UX surface, never a control path. A closed
       // fd (EPIPE) must not corrupt the ownership stack.
+      reportChromeFault("write", e)
     }
   }
 
@@ -152,8 +164,9 @@ export const createScrollRegionManager = (): ScrollRegionManager => {
       if (bottomRowOccludedFor(e)) continue
       try {
         e.spec.onBottomRowFreed()
-      } catch {
+      } catch (e) {
         // Intentional — chrome, never a control path.
+        reportChromeFault("bottom-row release callback", e)
       }
     }
   }
@@ -224,8 +237,9 @@ const sigwinchHandler = (): void => {
   for (const cb of [...resizeCallbacks]) {
     try {
       cb()
-    } catch {
+    } catch (e) {
       // One broken panel must not starve the others' resize handling.
+      reportChromeFault("resize callback", e)
     }
   }
 }

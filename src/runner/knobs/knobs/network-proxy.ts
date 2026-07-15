@@ -38,6 +38,9 @@
 
 import type { AgentConfig } from "@/agent"
 import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
+import { MitmCertAuthority, type NetworkProxyConfig, nodeKeyPairSource } from "@/runtime/network-proxy"
+import { compositeSecretScanner } from "@/security/secret-detection"
+import { runtimeConfigFromEnv } from "@/shared"
 import { registerKnob } from "../registry"
 import type { Knob, Surface } from "../types"
 
@@ -45,6 +48,21 @@ const SURFACES: readonly Surface[] = ["bench", "cli", "agent-batch", "agent-inte
 
 interface NetworkProxyValue {
   readonly allowlist: readonly string[]
+}
+
+// The CA is short lived and scoped to one in-memory proxy instance. These are
+// lifecycle constants, not operator policy: the opt-in, egress mode, body cap,
+// and failure mode all come from RuntimeConfig below.
+const EPHEMERAL_MITM_CERT_VALIDITY = {
+  notBeforeMs: -5 * 60_000,
+  notAfterMs: 365 * 24 * 60 * 60_000,
+} as const
+const MITM_HANDSHAKE_TIMEOUT_MS = 15_000
+let nextMitmCertSerial = 0
+
+const nextMitmSerial = (): number => {
+  nextMitmCertSerial = nextMitmCertSerial >= 0x7fff_fffe ? 1 : nextMitmCertSerial + 1
+  return nextMitmCertSerial
 }
 
 /** Split a raw `host,host,...` source into trimmed, lowercased, non-empty
@@ -66,11 +84,42 @@ const parseHostList = (raw: string): readonly string[] =>
  * / empty / zero-token ⇒ `undefined` (slot omitted, byte-identical default-OFF).
  */
 export const resolveNetworkProxyFromEnv = (
-  env: NodeJS.ProcessEnv,
-): { readonly enabled: true; readonly allowlist: readonly string[] } | undefined => {
+  env: Readonly<Record<string, string | undefined>>,
+): NetworkProxyConfig | undefined => {
   const value = parseNetworkProxy(env.QUANTA_NETWORK_PROXY)
   if (value === undefined) return undefined
-  return { enabled: true, allowlist: value.allowlist }
+  const config = runtimeConfigFromEnv(env)
+  const secretEgress =
+    config.secretEgress !== undefined && config.secretEgressMaxBody !== undefined
+      ? {
+          scanner: compositeSecretScanner(),
+          mode: config.secretEgress,
+          maxBodyBytes: config.secretEgressMaxBody,
+        }
+      : undefined
+  const mitm =
+    config.tlsMitm && secretEgress !== undefined
+      ? {
+          certAuthority: new MitmCertAuthority({
+            keyPairSource: nodeKeyPairSource,
+            serialSource: nextMitmSerial,
+            now: Date.now,
+            validity: EPHEMERAL_MITM_CERT_VALIDITY,
+          }),
+          secretEgress,
+          onFailure: config.tlsMitmOnFailure,
+          handshakeTimeoutMs: MITM_HANDSHAKE_TIMEOUT_MS,
+        }
+      : undefined
+  return {
+    enabled: true,
+    allowlist: value.allowlist,
+    ...(secretEgress !== undefined ? { secretEgress } : {}),
+    ...(config.exfilScouting && config.exfilScoutingK !== undefined
+      ? { exfilScoutingThreshold: config.exfilScoutingK }
+      : {}),
+    ...(mitm !== undefined ? { mitm } : {}),
+  }
 }
 
 const parseNetworkProxy = (raw: string | undefined): NetworkProxyValue | undefined => {

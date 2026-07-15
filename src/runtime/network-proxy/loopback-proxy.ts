@@ -40,6 +40,7 @@ import { openBunMitmChannel } from "./mitm-channel-bun"
 import { makeNodeMitmChannelOpener } from "./mitm-channel-node"
 import type { NetworkProxyPort } from "./port"
 import { readCappedBody } from "./read-capped-body"
+import { detectScouting, type ScoutingSignal } from "./scouting"
 import { decideEgressScan, type SecretEgressConfig } from "./secret-egress"
 import type { DecisionLogEntry, NetworkProxyConfig, ProxyAddress } from "./types"
 
@@ -135,6 +136,7 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
   readonly amendments: NetworkPolicyAmendment
   private readonly server: Server
   private readonly log: DecisionLogEntry[] = []
+  private latestScoutingSignal: ScoutingSignal | null = null
   /** ticket-13 (§12.2) — append-only audit of every outbound header-rewrite rule
    *  that FIRED (or was refused). The VALUE is never recorded (see
    *  {@link HeaderRuleAudit}); each entry carries the rule index / header name /
@@ -231,6 +233,12 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
     return this.log
   }
 
+  /** Latest advisory exfil-scouting signal, if the configured denied-host
+   * threshold has been reached. The signal does not alter egress verdicts. */
+  scoutingSignal(): ScoutingSignal | null {
+    return this.latestScoutingSignal
+  }
+
   /** ticket-13 (§12.2) — the outbound header-rewrite mutation audit (value-free).
    *  Append-only; the proxy never mutates a prior entry. Empty when no header
    *  rules are configured (default-OFF) or none fired. */
@@ -277,6 +285,10 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
         ...(secretScan !== undefined ? { secretScan } : {}),
       }),
     )
+    const threshold = this.config.exfilScoutingThreshold
+    if (threshold !== undefined) {
+      this.latestScoutingSignal = detectScouting(this.log, { threshold })
+    }
   }
 
   private decide(host: string): EgressDecision {

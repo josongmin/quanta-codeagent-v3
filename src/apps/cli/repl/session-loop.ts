@@ -41,6 +41,8 @@ import { composePromptPipeline, type DispatchSlash } from "./prompt-pipeline"
 import { maybeCreatePromptSuggestionWire } from "./prompt-suggestion-wire"
 import { normalizeCliPromptInput } from "./prompt-types"
 import { performSessionSwitch, type SessionSwitchReceipt } from "./session-loop/session-switch"
+import { stripAutomationTickerHandler } from "./session-loop/automation"
+import type { SessionLoopSinks } from "./session-loop/types"
 import {
   buildPromptPipelineNotifyDeps,
   drainTurnImages,
@@ -62,27 +64,8 @@ import { runOneTurn } from "./turn-runner"
 // sibling `./session-loop/turn-helpers`, but `shouldWireBackground` was a
 // public export consumed by the background-ctrlb hellgate test).
 export { shouldWireBackground }
-
-/** Slice-C: per-turn render + state side-effects the surface owns. Each
- *  callback is injected so the loop module is pure (no metrics / costPanel
- *  imports beyond the typed slots above). The host wires the actual
- *  metrics snapshot fold + lifecycle pills flush. */
-export interface SessionLoopSinks {
-  /** Render the per-turn cost+cache dashboard (default-OFF when metrics
-   *  are disabled — the sink should short-circuit). */
-  readonly renderTurnDashboard: () => void
-  /** Fold the per-turn token delta into the cost panel + render the
-   *  turn-summary panel + reset the summary collector. */
-  readonly renderAndResetSummary: (outcome: { messages: readonly Message[] }) => void
-  /** Snapshot the lifecycle pills (subagent / follow-up / mcp) + flush.
-   *  UUX-6-23: the loop passes its live `externalPromptQueue.size()` so the
-   *  follow-up pill counts mid-turn-queued prompts too (the queue is born
-   *  inside the loop, AFTER the sinks are composed — hence the argument
-   *  rather than a captured dep). Optional for legacy/one-off callers. */
-  readonly flushLifecyclePills: (live?: { readonly externalQueued: number }) => void
-  /** Render a NON-abort turn-level error inline + on the status bar. */
-  readonly renderTurnError: (err: unknown) => void
-}
+export type { SessionLoopSinks } from "./session-loop/types"
+export { stripAutomationTickerHandler }
 
 /** Dependencies for {@link runSessionLoop}. Every dep is EXPLICIT so the
  *  loop owns ZERO closure captures over the surface state. */
@@ -237,22 +220,6 @@ export interface RunSessionLoopDeps {
    *  prompt). Absent ⇒ Ctrl+B is unwired ⇒ the turn path is byte-identical
    *  (default-OFF). The one-shot path NEVER wires it (no prompt to return to). */
   readonly backgroundPortal?: import("./background-turn-portal").BackgroundTurnPortal
-}
-
-/** ALBB-14 double-arm fix — project the REPL's live automation slot onto the
- *  per-turn `runAgent` CONFIG path with the `handler` DROPPED. The REPL owns a
- *  persistent session-scoped ticker (the single owner); the config-path slot
- *  needs only `engine` (for the `automation_update` tool). Dropping `handler`
- *  makes the shared-lifecycle bootstrap ticker short-circuit
- *  (`startAutomationEngineTicker` returns `undefined` when `handler` is absent)
- *  so it never arms a SECOND `setInterval` on the same engine during a turn.
- *  `undefined` in ⇒ `undefined` out (no slot ⇒ no compose entry). */
-export const stripAutomationTickerHandler = (
-  slot: NonNullable<AgentConfig["automationEngine"]> | undefined,
-): NonNullable<AgentConfig["automationEngine"]> | undefined => {
-  if (slot === undefined) return undefined
-  const { handler: _replOwnedHandler, ...engineOnly } = slot
-  return engineOnly
 }
 
 /** Run the per-session orchestration: ONE-shot when `setup.argPrompt`

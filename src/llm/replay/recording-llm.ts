@@ -114,7 +114,8 @@ function safeActiveRef(
   if (provider === undefined) return undefined
   try {
     return provider()
-  } catch {
+  } catch (e) {
+    logger.warn("recording-llm: active trace reference provider failed", { error: errMessage(e) })
     return undefined
   }
 }
@@ -125,7 +126,8 @@ function safeExpected(probe: (() => boolean) | undefined): boolean {
   if (probe === undefined) return false
   try {
     return probe() === true
-  } catch {
+  } catch (e) {
+    logger.warn("recording-llm: trace-context expectation probe failed", { error: errMessage(e) })
     return false
   }
 }
@@ -138,7 +140,8 @@ function safeDrain(
   if (drain === undefined) return undefined
   try {
     return drain()
-  } catch {
+  } catch (e) {
+    logger.warn("recording-llm: debug drain failed", { error: errMessage(e) })
     return undefined
   }
 }
@@ -167,7 +170,10 @@ async function appendDegradedSentinel(params: DegradedSentinelParams): Promise<v
   let id: string
   try {
     id = hashFn(input)
-  } catch {
+  } catch (e) {
+    logger.warn("recording-llm: degraded sentinel hash failed; using fallback id", {
+      error: errMessage(e),
+    })
     id = createHash("sha256")
       .update(`degraded:${startedAt}:${captured.length}`)
       .digest("hex")
@@ -253,11 +259,12 @@ function recordingStreamImpl(
     let id: string
     try {
       id = hashFn(input)
-    } catch {
+    } catch (e) {
       // Hash failures collapse to a degenerate-but-stable fallback id so
       // append never aborts. Using a content-free constant would collide
       // every miss; SHA-256 of stringified input length+timestamp is
       // best-effort uniqueness.
+      logger.warn("recording-llm: request hash failed; using fallback id", { error: errMessage(e) })
       id = createHash("sha256")
         .update(`fallback:${startedAt}:${captured.length}`)
         .digest("hex")

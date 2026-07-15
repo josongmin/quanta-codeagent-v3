@@ -74,35 +74,38 @@ export class StdoutStream implements StreamPort {
     this.inText = true
   }
 
+  /** Close an inline answer/reasoning run before a visible event. Transient
+   * progress updates intentionally preserve the open run so they cannot insert
+   * a newline between streaming deltas. */
+  private closeOpenStreams(eventType: AgentEvent["type"]): boolean {
+    const transient =
+      eventType === "output_progress" ||
+      eventType === "in_progress" ||
+      eventType === "ratelimit_snapshot" ||
+      eventType === "item_started" ||
+      eventType === "item_updated" ||
+      eventType === "item_completed"
+    if ((this.inText || this.inThinking) && transient) return true
+
+    if (eventType !== "assistant_text" && this.inText) {
+      this.drainPainterTail()
+      this.write("\n")
+      this.inText = false
+    }
+    if (eventType !== "assistant_thinking" && this.inThinking) {
+      this.write("\n")
+      this.inThinking = false
+    }
+    return false
+  }
+
   emit(event: AgentEvent): void {
     // Events that produce no visible stdout line — must not trigger the inText
     // flush or they insert a spurious \n between streaming text deltas.
     // output_progress fires on every token (live counter → status-bar only),
     // in_progress fires between deltas (heartbeat), item_* and ratelimit_snapshot
     // are all no-ops in the switch below.
-    if (
-      (this.inText || this.inThinking) &&
-      (event.type === "output_progress" ||
-        event.type === "in_progress" ||
-        event.type === "ratelimit_snapshot" ||
-        event.type === "item_started" ||
-        event.type === "item_updated" ||
-        event.type === "item_completed")
-    )
-      return
-
-    if (event.type !== "assistant_text" && this.inText) {
-      this.drainPainterTail()
-      this.write("\n")
-      this.inText = false
-    }
-
-    // jun-11 (#11) — symmetric: close an open DIM reasoning run when any non-
-    // thinking event arrives (so the answer / tool line starts on its own line).
-    if (event.type !== "assistant_thinking" && this.inThinking) {
-      this.write("\n")
-      this.inThinking = false
-    }
+    if (this.closeOpenStreams(event.type)) return
 
     switch (event.type) {
       case "session_start":
@@ -201,6 +204,12 @@ export class StdoutStream implements StreamPort {
         break
       case "subagent_cancel":
         this.write(renderSubagentCancel(event))
+        break
+      case "subagent_spawn":
+        this.write(renderSubagentSpawn(event))
+        break
+      case "subagent_status":
+        this.write(renderSubagentStatus(event))
         break
       case "plan_created":
         this.write(renderPlanCreated(event))
@@ -332,6 +341,32 @@ const renderInterrupted = (event: Extract<AgentEvent, { type: "interrupted" }>):
  *  running — this is not a finish trigger. */
 const renderSubagentCancel = (event: Extract<AgentEvent, { type: "subagent_cancel" }>): string =>
   `${DIM}✂ subagent ${event.subagentId} (${event.outcome}, via ${event.source})${RESET}\n`
+
+/** Multi-agent lifecycle observation. Keep the `type` token visible: this is
+ *  the compact stdout counterpart of the structured `/agents --tree` feed.
+ *  Descriptions cross a UI boundary, so redact again even though the registry
+ *  already bounds and scrubs them at emission time. */
+const renderSubagentSpawn = (event: Extract<AgentEvent, { type: "subagent_spawn" }>): string => {
+  const parent = event.parentTaskId === undefined ? "" : ` parent=${event.parentTaskId}`
+  const agentType = event.agentType === undefined ? "" : ` type=${event.agentType}`
+  return `${DIM}↳ subagent_spawn ${event.taskId} depth=${event.depth}${parent}${agentType}: ${oneLine(redactStr(event.description))}${RESET}\n`
+}
+
+/** Multi-agent lifecycle transition. Final text and errors are model-/runtime-
+ * derived, so do not bypass the terminal redaction boundary when surfacing a
+ * compact completion summary. */
+const renderSubagentStatus = (event: Extract<AgentEvent, { type: "subagent_status" }>): string => {
+  const turns = event.turns === undefined ? "" : ` turns=${event.turns}`
+  const preview =
+    event.finalTextPreview === undefined || event.finalTextPreview === ""
+      ? ""
+      : `: ${oneLine(redactStr(event.finalTextPreview))}`
+  const error =
+    event.error === undefined || event.error === ""
+      ? ""
+      : `${preview === "" ? ":" : " |"} error=${oneLine(redactStr(event.error))}`
+  return `${DIM}↳ subagent_status ${event.taskId} (${event.status}${turns})${preview}${error}${RESET}\n`
+}
 
 /** ALBB-21 — advisory budget-cap crossing banner (Claude Code / Codex cost-
  *  warning UX). One dim line: severity + scope + observed-vs-limit USD. NON-

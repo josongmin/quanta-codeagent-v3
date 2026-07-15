@@ -34,7 +34,7 @@ import {
   type ResponsesContinuationStore,
   responsesContinuationLlmPort,
 } from "@/llm"
-import { gateOn } from "@/shared"
+import { gateOn, runtimeConfigFromEnv } from "@/shared"
 import { assembleConfig, type SessionDeps } from "./assemble/config"
 
 export interface SharedExecutionPlaneArgs {
@@ -196,7 +196,7 @@ export const buildSharedExecutionPlaneRuntimeAugments = async (
   // sweep interrupted handles from the previous process and re-fork them via
   // the freshly-constructed persistent scheduler.  default-OFF: absent or "0"
   // ⇒ byte-identical (no store reads, no forks).
-  if (gateOn(args.envSource, "QUANTA_SUBAGENT_RESUME")) {
+  if (runtimeConfigFromEnv(args.envSource).subagentResume) {
     // `persistent.fork` is structurally compatible with `BackgroundSubagentScheduler.fork`.
     // ResumerOpts.scheduler is narrowed to `Pick<..., "fork">` so no cast needed.
     const resumeOutcomes = await resumeInterruptedHandles({

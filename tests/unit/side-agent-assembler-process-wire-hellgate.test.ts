@@ -21,15 +21,13 @@
  * it always wired the process backer, the OFF test would fork a worker and see
  * the signature finding and fail.
  *
- * Env hygiene: `QUANTA_SIDE_AGENT` is read from the INJECTED env bag, but
- * `QUANTA_SIDE_AGENT_PROCESS` is read via `runtimeConfig()` (process.env, cached),
- * so we set/restore `process.env` + `__resetRuntimeConfig()` around each case.
+ * Env hygiene: both side-agent gates are parsed from the same INJECTED env bag,
+ * so a surface cannot assemble one backer while `runtimeConfig()` reports another.
  */
 
-import { afterEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { type AssembleRequest, assembleAgentConfig } from "@/host/runtime/agent-config-assembler"
-import { __resetRuntimeConfig } from "@/shared"
 import type { SideAgentDaemonPort, SideAgentSpawnInput } from "@/tool/side-agent"
 
 const baseReq = (sessionId: string): AssembleRequest["base"] => ({
@@ -84,18 +82,11 @@ const waitFor = async (pred: () => boolean, timeoutMs = 6000): Promise<boolean> 
 
 const WORKER_SIGNATURE = "side-agent process pass:"
 
-afterEach(() => {
-  delete process.env.QUANTA_SIDE_AGENT_PROCESS
-  __resetRuntimeConfig()
-})
-
 describe("§4.3 maybeWireSideAgent — process backer selection", () => {
   test("PROCESS ON ⇒ spawn forks the real worker; a finding crosses IPC", async () => {
-    process.env.QUANTA_SIDE_AGENT_PROCESS = "1"
-    __resetRuntimeConfig()
     const cfg = assembleAgentConfig(
       { mode: "interactive", base: baseReq("sess-proc-on") },
-      { QUANTA_SIDE_AGENT: "1" },
+      { QUANTA_SIDE_AGENT: "1", QUANTA_SIDE_AGENT_PROCESS: "1" },
     )
     const reg = cfg.sideAgentDaemons as SideAgentDaemonPort | undefined
     expect(reg).toBeDefined()
@@ -118,8 +109,6 @@ describe("§4.3 maybeWireSideAgent — process backer selection", () => {
   }, 12000)
 
   test("PROCESS OFF ⇒ in-process backer; the worker signature finding NEVER appears", async () => {
-    // QUANTA_SIDE_AGENT_PROCESS unset (afterEach deletes it) ⇒ in-process path.
-    __resetRuntimeConfig()
     const cfg = assembleAgentConfig(
       { mode: "interactive", base: baseReq("sess-proc-off") },
       { QUANTA_SIDE_AGENT: "1" },
@@ -142,11 +131,9 @@ describe("§4.3 maybeWireSideAgent — process backer selection", () => {
   }, 5000)
 
   test("gate unset ⇒ slot undefined even with PROCESS on (byte-identical default-OFF)", () => {
-    process.env.QUANTA_SIDE_AGENT_PROCESS = "1"
-    __resetRuntimeConfig()
     const cfg = assembleAgentConfig(
       { mode: "interactive", base: baseReq("sess-proc-master-off") },
-      {},
+      { QUANTA_SIDE_AGENT_PROCESS: "1" },
     )
     // QUANTA_SIDE_AGENT (the master gate) unset ⇒ no daemons regardless of the
     // process sub-gate.

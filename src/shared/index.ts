@@ -124,6 +124,7 @@ export {
   parseBool,
   ratelimitNoticeWanted,
   runtimeConfig,
+  runtimeConfigFromEnv,
   SWEBENCH_CACHE_LEVELS,
 } from "./runtime-config"
 export type { ShellExecEvent, ShellExecObserver } from "./shell-exec-types"

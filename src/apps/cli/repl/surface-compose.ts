@@ -19,7 +19,6 @@ import { createShadowVerify } from "@/agent/shadow-verify"
 import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
 import type { Message, StreamInput } from "@/llm"
 import type { RadarStore } from "@/radar"
-import { parseEnvFlag } from "@/runner/assemble"
 import { isApprovedDecision } from "@/runner/orchestrate"
 import type {
   RuntimeFacadeComposeOptions,
@@ -71,6 +70,7 @@ import {
 import { buildSkillsCallback } from "./skills-surface"
 import { buildReplSlashCtx, type ReplSlashCtx } from "./slash-surface"
 import { buildSurfaceDispatch, buildVoiceLiveSlot } from "./surface-compose/dispatch"
+import { buildKbSlashSlot, isEnvTruthy } from "./surface-compose/kb-slot"
 import type { SurfaceState } from "./surface-compose/turn-sinks"
 import {
   buildDefaultSessionIo,
@@ -95,27 +95,6 @@ export { buildPromptUx, type PromptUxOpts } from "./surface-compose/prompt-ux"
 export { composeTurnSinks, createSurfaceState } from "./surface-compose/turn-sinks"
 export type { SurfaceState }
 export { buildModelAdapterWire, buildRetryCandidates, extractApplyPatchPaths }
-
-/** Opt-in env gate for this surface's feature knobs (QUANTA_WORKING_STATE /
- *  QUANTA_SHADOW / QUANTA_PER_TOOL_CHECKPOINT / etc.). Thin alias over the
- *  SHARED {@link parseEnvFlag} truth table (default OFF) so this surface no
- *  longer reimplements the env-flag semantics inline — the prior local copy
- *  diverged (unknown values were treated as truthy). One source of truth now. */
-const isEnvTruthy = (raw: string | undefined): boolean => parseEnvFlag(raw, false)
-
-/** A3 (jul-04 CLI-surfacing) — build the READ-ONLY `/kb` slash slot over the
- *  host-minted `ProjectsKbStore` (the SAME instance the `projects_kb` tool writes
- *  into). Maps `docCount ← store.size()` + `knowledge ← store.knowledge(false)` —
- *  the store's own body-FREE byte-budget accounting, NEVER a doc body. `undefined`
- *  store (gate off ⇒ tool not registered) ⇒ `undefined` slot ⇒ `/kb` "not wired"
- *  (default-OFF byte-identical). Module-scope so `composeSurfaceWires` stays under
- *  the cognitive-complexity budget (mirrors the other extracted slot helpers). */
-const buildKbSlashSlot = (
-  store: SessionSetupResult["projectsKbStore"],
-): import("../slash/kb-cmd").KbSlashState | undefined =>
-  store !== undefined
-    ? { docCount: () => store.size(), knowledge: () => store.knowledge(false) }
-    : undefined
 
 /** ADR-0310 — bundle of REPL-side wires constructed once per session. The
  *  surface (`runRepl`) keeps the references alive so the loop can:

@@ -35,7 +35,7 @@
 import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import type { GradeBreakdown } from "@/runner/batch/types"
-import { abortableSleep, abortReasonOf, errMessage, runtimeConfig } from "@/shared"
+import { abortableSleep, abortReasonOf, errMessage, logger, runtimeConfig } from "@/shared"
 import { benchWorkRoot } from "./corpus/paths"
 import { type HarnessConfig, harnessFlags, resolveHarnessConfig } from "./harness"
 import type { Instance } from "./types"
@@ -167,8 +167,12 @@ export const isPythonSwebenchAvailable = async (opts: PySwebenchOpts = {}): Prom
     try {
       const r = await spawn([py, "-c", "import swebench"], ".", IMPORT_PROBE_TIMEOUT_MS)
       if (r.code === 0) return true
-    } catch {
+    } catch (e) {
       // try the next interpreter
+      logger.warn("python-swebench availability probe failed; trying next interpreter", {
+        error: errMessage(e),
+        interpreter: py,
+      })
     }
   }
   return false
@@ -180,8 +184,12 @@ const resolvePython = async (spawn: Spawn): Promise<string | null> => {
     try {
       const r = await spawn([py, "-c", "import swebench"], ".", IMPORT_PROBE_TIMEOUT_MS)
       if (r.code === 0) return py
-    } catch {
+    } catch (e) {
       // try the next interpreter
+      logger.warn("python-swebench interpreter resolution probe failed; trying next interpreter", {
+        error: errMessage(e),
+        interpreter: py,
+      })
     }
   }
   return null
@@ -207,7 +215,8 @@ const collectResolvedIds = async (dir: string): Promise<string[]> => {
   let names: string[]
   try {
     names = await readdir(dir)
-  } catch {
+  } catch (e) {
+    logger.warn("python-swebench report directory read failed", { error: errMessage(e), dir })
     return []
   }
   const ids: string[] = []
@@ -216,8 +225,12 @@ const collectResolvedIds = async (dir: string): Promise<string[]> => {
     try {
       const parsed = JSON.parse(await readFile(join(dir, name), "utf8")) as unknown
       ids.push(...extractResolvedIds(parsed))
-    } catch {
+    } catch (e) {
       // not a report / unreadable — skip
+      logger.warn("python-swebench report read failed; skipping report", {
+        error: errMessage(e),
+        report: name,
+      })
     }
   }
   return ids
@@ -253,12 +266,26 @@ const failurePartition = (
   }
 }
 
+/** A clean verdict is only meaningful when the harness supplied BOTH test
+ * partitions and their success/failure lists. An absent partition is not an
+ * empty partition: treating malformed `{ tests_status: {} }` as zero failures
+ * would let `breakdown.resolved` override the harness's raw unresolved verdict.
+ */
+const hasCompleteTestStatus = (status: Record<string, unknown>): boolean =>
+  [status.FAIL_TO_PASS, status.PASS_TO_PASS].every((partition) => {
+    if (typeof partition !== "object" || partition === null) return false
+    const record = partition as Record<string, unknown>
+    return Array.isArray(record.success) && Array.isArray(record.failure)
+  })
+
 /**
  * Pull per-instance {@link GradeBreakdown}s out of a parsed harness PER-INSTANCE
  * report object: `{ "<instance_id>": { resolved, tests_status: { FAIL_TO_PASS:
  * {success,failure}, PASS_TO_PASS:{success,failure} } } }`. Entries without a
  * `tests_status` (e.g. the run-summary report, which only has `resolved_ids`)
- * yield nothing — so feeding either report shape here is safe.
+ * yield nothing — so feeding either report shape here is safe. A present but
+ * malformed/partial `tests_status` yields a fail-closed unresolved breakdown:
+ * it must not manufacture the clean evidence used to repair truncated test ids.
  */
 export const extractGradeBreakdowns = (report: unknown): Map<string, GradeBreakdown> => {
   const out = new Map<string, GradeBreakdown>()
@@ -269,6 +296,18 @@ export const extractGradeBreakdowns = (report: unknown): Map<string, GradeBreakd
     const ts = rec.tests_status
     if (typeof ts !== "object" || ts === null) continue // not a per-instance report
     const tsr = ts as Record<string, unknown>
+    if (!hasCompleteTestStatus(tsr)) {
+      // The caller may use `breakdown.resolved` to override `resolved_ids` for
+      // the narrowly-scoped truncated-id repair. Missing partitions carry no
+      // clean-test evidence, so preserve the safe unresolved verdict.
+      out.set(iid, {
+        resolved: false,
+        failToPassFailed: 0,
+        passToPassFailed: 0,
+        passToPassTotal: 0,
+      })
+      continue
+    }
     const f2p = failurePartition(tsr.FAIL_TO_PASS)
     const p2p = failurePartition(tsr.PASS_TO_PASS)
     const truncatedExcluded = f2p.truncated + p2p.truncated
@@ -318,7 +357,8 @@ export const collectPatchApplied = async (dir: string): Promise<Map<string, bool
   let entries: string[]
   try {
     entries = (await readdir(dir, { recursive: true })) as unknown as string[]
-  } catch {
+  } catch (e) {
+    logger.warn("python-swebench patch report directory read failed", { error: errMessage(e), dir })
     return merged
   }
   for (const rel of entries) {
@@ -326,8 +366,12 @@ export const collectPatchApplied = async (dir: string): Promise<Map<string, bool
     try {
       const parsed = JSON.parse(await readFile(join(dir, rel), "utf8")) as unknown
       for (const [iid, a] of extractPatchApplied(parsed)) merged.set(iid, a)
-    } catch {
+    } catch (e) {
       // not a per-instance report / unreadable — skip
+      logger.warn("python-swebench patch report read failed; skipping report", {
+        error: errMessage(e),
+        report: rel,
+      })
     }
   }
   return merged
@@ -343,7 +387,8 @@ export const collectGradeBreakdowns = async (dir: string): Promise<Map<string, G
   let entries: string[]
   try {
     entries = (await readdir(dir, { recursive: true })) as unknown as string[]
-  } catch {
+  } catch (e) {
+    logger.warn("python-swebench grade report directory read failed", { error: errMessage(e), dir })
     return merged
   }
   for (const rel of entries) {
@@ -351,8 +396,12 @@ export const collectGradeBreakdowns = async (dir: string): Promise<Map<string, G
     try {
       const parsed = JSON.parse(await readFile(join(dir, rel), "utf8")) as unknown
       for (const [iid, b] of extractGradeBreakdowns(parsed)) merged.set(iid, b)
-    } catch {
+    } catch (e) {
       // not a per-instance report / unreadable — skip
+      logger.warn("python-swebench grade report read failed; skipping report", {
+        error: errMessage(e),
+        report: rel,
+      })
     }
   }
   return merged

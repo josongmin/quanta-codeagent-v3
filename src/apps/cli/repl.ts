@@ -12,7 +12,7 @@ import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { bootstrapCrashResumeOffers, selectCrashResumeReinject } from "@/runner/orchestrate"
 import { runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"
 import { clearSessionInterrupted, crashResumeEnabled, listSessions } from "@/session"
-import { gateOn } from "@/shared"
+import { gateOn, runtimeConfig } from "@/shared"
 import { composeShellObservers, type ShellExecObserver } from "@/tool"
 import { emitConfigMigrationImport, emitConfigMigrationNotice } from "./config-migration-notice"
 import { createIdleMonitor, DEFAULT_IDLE_MS } from "./idle-monitor"
@@ -307,7 +307,11 @@ export const runRepl = async (): Promise<void> => {
           buildWelcomeInfo(setup, setup.homeDir.length > 0 ? setup.homeDir : undefined, {
             modeCycle: gateOn(process.env, "QUANTA_MODE_CYCLE"),
             atMention: gateOn(process.env, "QUANTA_AT_AUTOCOMPLETE"),
-            untrustedEnvelope: gateOn(process.env, "QUANTA_UNTRUSTED_ENVELOPE"),
+            // Security posture must come from the frozen, strict runtime-config
+            // authority. `gateOn` accepts loose spellings such as "true"/"on",
+            // which would make the banner claim envelope protection while the
+            // dispatch seam remains disabled.
+            untrustedEnvelope: runtimeConfig().untrustedEnvelope,
           }),
         )}\n`,
       )

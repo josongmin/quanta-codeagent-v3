@@ -124,6 +124,30 @@ const mapStatus = (s: SupervisedDaemonStatus): SideAgentStatus => {
   }
 }
 
+/** Record an IPC finding with the same wake accounting and ring cap as the
+ * in-process registry. Kept outside the registry factory to keep construction
+ * focused on lifecycle wiring. */
+const recordProcessFinding = (
+  opts: Pick<ProcessSideAgentRegistryOpts, "now">,
+  daemonId: string,
+  state: ProcessDaemonState,
+  finding: { readonly summary: string; readonly detail?: string },
+  findingsLog: SideAgentFinding[],
+  maxFindings: number,
+): void => {
+  state.wakes += 1
+  const at = opts.now()
+  findingsLog.push({
+    daemonId,
+    wake: state.wakes,
+    summary: finding.summary,
+    at,
+    ...(finding.detail !== undefined ? { detail: finding.detail } : {}),
+  })
+  if (findingsLog.length > maxFindings) findingsLog.shift()
+  state.lastFindingAt = at
+}
+
 export const createProcessSideAgentDaemonRegistry = (
   opts: ProcessSideAgentRegistryOpts,
 ): SideAgentDaemonRegistry => {
@@ -189,22 +213,8 @@ export const createProcessSideAgentDaemonRegistry = (
         },
         now: opts.now,
         scheduler: opts.scheduler,
-        onFinding: (f) => {
-          // A child finding ⇒ one wake; tag + log it (mirrors the in-process
-          // registry's `publish`, including the ring-buffer cap).
-          state.wakes += 1
-          const at = opts.now()
-          const finding: SideAgentFinding = {
-            daemonId: id,
-            wake: state.wakes,
-            summary: f.summary,
-            at,
-            ...(f.detail !== undefined ? { detail: f.detail } : {}),
-          }
-          findingsLog.push(finding)
-          if (findingsLog.length > maxFindings) findingsLog.shift()
-          state.lastFindingAt = at
-        },
+        onFinding: (finding) =>
+          recordProcessFinding(opts, id, state, finding, findingsLog, maxFindings),
         ...(opts.maxRestarts !== undefined ? { maxRestarts: opts.maxRestarts } : {}),
         ...(opts.baseBackoffMs !== undefined ? { baseBackoffMs: opts.baseBackoffMs } : {}),
         ...(opts.backoffCapMs !== undefined ? { backoffCapMs: opts.backoffCapMs } : {}),

@@ -59,6 +59,9 @@ import {
 } from "./runtime-config/parsers"
 import type { RuntimeConfig } from "./runtime-config/types"
 
+/** Shared parser input for process and injected composition-root env views. */
+export type RuntimeConfigEnv = Readonly<Record<string, string | undefined>>
+
 // Re-export the COMPLETE original public surface so every importer of
 // `@/shared/runtime-config` (and the `@/shared` barrel) stays byte-compatible
 // after the god-module split. The value vocabulary + parsers live in
@@ -82,11 +85,11 @@ export type { RuntimeConfig } from "./runtime-config/types"
  *  ORIGINAL field-declaration order and freezes once — byte-identical to the
  *  legacy single object literal (same keys, defaults, coercion, insertion order).
  *  Each slice is a `const` arrow initialized during module eval, so it is defined
- *  before the first `loadFromEnv` call (which only happens later, from
+ *  before the first `runtimeConfigFromEnv` call (which only happens later, from
  *  `runtimeConfig()`). Kept ABOVE the slices so the runtime-config-knobs parity
- *  gate — which scans the source between `const loadFromEnv = ` and `let cached`
+ *  gate — which scans the source between `runtimeConfigFromEnv` and `let cached`
  *  — still sees every `env.QUANTA_*` read (they now live in the slices). */
-const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
+export const runtimeConfigFromEnv = (env: RuntimeConfigEnv): RuntimeConfig => {
   return Object.freeze({
     ...parseCompactionSlice(env),
     ...parseCapabilitySlice(env),
@@ -100,7 +103,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Per-domain env sub-parsers. Each is a PURE function that reads only from `env`
 // and returns its contiguous slice of the config as a `Partial<RuntimeConfig>`.
-// The composer (`loadFromEnv`) spreads them in the SAME order the fields were
+// The composer (`runtimeConfigFromEnv`) spreads them in the SAME order the fields were
 // originally declared, so the assembled object is BYTE-IDENTICAL to the legacy
 // single object literal (same keys, same defaults, same coercion, same insertion
 // order) — this is a mechanical size split of a god-function, not a behavior
@@ -109,7 +112,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
 
 /** Compaction, micro-compaction, and the dispatch/edit/skill/MCP capability
  *  gates (the leading run of the legacy literal, up to `mcpSampling`). */
-const parseCompactionSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+const parseCompactionSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
   return {
     logLevel: parseLogLevel(env["QUANTA_LOG_LEVEL"]),
     compactTokens: parsePositiveInt(env["QUANTA_COMPACT_TOKENS"], "QUANTA_COMPACT_TOKENS"),
@@ -167,7 +170,7 @@ const parseCompactionSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =>
 
 /** Token-accounting, MCP roots/oauth, read/vcs/lang tool gates, and the
  *  capability/team/artifact/code-mode cluster. */
-const parseCapabilitySlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+const parseCapabilitySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
   return {
     // delta-token-accounting (RFC jun-6) — strict `=== "1"` opt-in. Default
     // false ⇒ the loop never constructs the counter and calls `estimateTokens`
@@ -272,7 +275,7 @@ const parseCapabilitySlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =>
 /** File-history, remember-patterns, paste/skill-creator, deny-reason/hunk,
  *  sandbox-escalation, rate-limit, PTY, subagent/appshot, MCP connectors/
  *  resources/annotations, mid-turn capture, and the prompt-directive bundle. */
-const parseToolSurfaceSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+const parseToolSurfaceSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
   return {
     // file_history_rewind — opt-in (`gateOn` vocab; #24). Default false ⇒ no per-file
     // history store, no capture sink, no file_history_rewind tool (byte-identical).
@@ -407,7 +410,7 @@ const parseToolSurfaceSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =
 
 /** FS-jail / cap-enforce, session + transcript, tool-output caps, LLM stream
  *  timings, bench/swebench dirs + knobs, hooks, deferred/async, auto-dream. */
-const parseSessionBenchSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+const parseSessionBenchSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
   return {
     // SECURITY protection (filesystem jail) — tearing it down requires the
     // deliberate, unambiguous `=off`; a loose `=0` must NOT silently drop the jail.
@@ -500,7 +503,7 @@ const parseSessionBenchSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> 
  *  oauth-revoke, ipynb outputs, BYOK, session auto-title, tool-interrupt +
  *  critical-section, permission hook, and the exfil-rail (glob/budget/scouting/
  *  secret-egress). */
-const parseSecuritySlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+const parseSecuritySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
   return {
     // Log rate-limit is a DoS guard; disabling it requires the unambiguous `=off`.
     logRateLimitDisabled: gateDisabledStrict(env, "QUANTA_LOG_RATE_LIMIT"),
@@ -594,7 +597,7 @@ const parseSecuritySlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
  *  guardian/auto-review/approval-ladder, auto-mode/circumvent, fs-ownership,
  *  central-config (dir/sources/trusted-paths), fast-apply, MCP protocol max,
  *  and the scriptable status-line config (the trailing run of the legacy literal). */
-const parseConfigTailSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+const parseConfigTailSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
   return {
     // jun-7 TLS-MITM — OPERATOR-OPT-IN (stronger gate). Requires BOTH the master
     // switch `=1` AND the verbatim ack phrase, so a stray `=1` cannot mint a
@@ -716,8 +719,8 @@ export const runtimeConfig = (): RuntimeConfig => {
   if (cached === undefined || cachedVersion !== version) {
     cached =
       knobOverrideCount() === 0
-        ? loadFromEnv(process.env)
-        : loadFromEnv({ ...process.env, ...knobOverrides() })
+        ? runtimeConfigFromEnv(process.env)
+        : runtimeConfigFromEnv({ ...process.env, ...knobOverrides() })
     cachedVersion = version
   }
   return cached
