@@ -71,17 +71,26 @@ export const getKnobOverride = (envKey: string): string | undefined => OVERRIDES
 /** Immutable snapshot of all overrides (for merging into an env bag / `/knobs save`). */
 export const knobOverrides = (): Readonly<Record<string, string>> => Object.fromEntries(OVERRIDES)
 
+/** PURE reader-side forbidden partition — the record MINUS any `isSessionForbidden`
+ *  key. Extracted so it is directly testable with a forbidden key present (the store
+ *  itself can never hold one — the writer gate refuses it — so testing the drop
+ *  through the store would be vacuous; testing this pure fn is not). */
+export const filterSessionForbidden = (
+  record: Readonly<Record<string, string>>,
+): Record<string, string> => {
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(record)) if (!isSessionForbidden(k)) out[k] = v
+  return out
+}
+
 /** Reader-side defense-in-depth: `knobOverrides()` MINUS any session-forbidden key.
  *  `runtimeConfig()` merges THIS (not raw `knobOverrides()`) over env, so even if a
  *  FUTURE store-writer bypassed `setKnobOverride`'s writer gate, a forbidden knob
  *  still cannot take effect at read time — making the module's "enforced at BOTH the
  *  writer AND the reader" contract actually true. Byte-identical on the happy path
  *  (the writer already refuses forbidden keys, so the store never holds one). */
-export const sessionSafeKnobOverrides = (): Readonly<Record<string, string>> => {
-  const out: Record<string, string> = {}
-  for (const [k, v] of OVERRIDES) if (!isSessionForbidden(k)) out[k] = v
-  return out
-}
+export const sessionSafeKnobOverrides = (): Readonly<Record<string, string>> =>
+  filterSessionForbidden(Object.fromEntries(OVERRIDES))
 
 /** Number of active overrides (fast "any overrides?" check). */
 export const knobOverrideCount = (): number => OVERRIDES.size

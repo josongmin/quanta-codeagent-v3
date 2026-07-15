@@ -63,12 +63,14 @@ export {
 } from "./item-stream"
 export {
   __resetKnobOverrides,
+  filterSessionForbidden,
   getKnobOverride,
   isSessionForbidden,
   knobOverrideCount,
   knobOverrides,
   knobOverridesVersion,
   SESSION_FORBIDDEN_KNOBS,
+  sessionSafeKnobOverrides,
   setKnobOverride,
 } from "./knob-overrides"
 export { currentLane, laneContext } from "./lane-context"
