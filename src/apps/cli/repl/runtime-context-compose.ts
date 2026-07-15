@@ -10,6 +10,7 @@ import {
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
+import { wireSecurityRailsForOverlay } from "@/host/runtime/security-rails-wire"
 import type { ResponsesContinuationStore } from "@/llm"
 import {
   // #20 (durable prefix grants) — the persistent, cross-session trust-scope
@@ -34,7 +35,7 @@ import { applyHunkSelection } from "@/runner/hunk-apply"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
-import { gateOn, runtimeConfig } from "@/shared"
+import { gateOn, runtimeConfig, runtimeConfigFromEnv } from "@/shared"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import type { WorktreeSlotHandle } from "@/tool"
 import {
@@ -610,6 +611,12 @@ const buildBootstrapContextArgs = (args: {
    *  per-turn AgentConfig carries `trustScope` and the gate consults durable
    *  grants. Absent ⇒ slot omitted (default-OFF, byte-identical). */
   readonly trustScope?: { registry: TrustScopeRegistry; projectKey: string }
+  /** SECURITY-RAIL (a) — the per-session write-budget minted by
+   *  {@link wireSecurityRailsForOverlay} when `QUANTA_WRITE_BUDGET` is on (+ cap).
+   *  Threaded onto the overlay so the base carries it to per-turn dispatch (the
+   *  (N+1)th untrusted write is rejected). Absent ⇒ slot omitted (default-OFF,
+   *  byte-identical: no counter). */
+  readonly writeBudget?: ReturnType<typeof wireSecurityRailsForOverlay>["writeBudget"]
 }): Parameters<typeof composeRuntimeBootstrapContext>[0] => {
   const {
     boot,
@@ -627,6 +634,7 @@ const buildBootstrapContextArgs = (args: {
     namedAgentResolver,
     activeWorktreeSlot,
     trustScope,
+    writeBudget,
   } = args
   // ADR-0428 jun-02 wire — DIRECT env read of `QUANTA_NETWORK_PROXY` (this
   // surface builds its base via the host overlay, not `applyKnobs`). Absent /
@@ -686,6 +694,10 @@ const buildBootstrapContextArgs = (args: {
       // wired one. Absent ⇒ slot omitted ⇒ gate's trustScopeGrants returns false
       // (default-OFF byte-identical).
       ...(trustScope !== undefined ? { trustScope } : {}),
+      // SECURITY-RAIL (a) — overlay the per-session write-budget minted at the
+      // comp-root when QUANTA_WRITE_BUDGET is on. Absent ⇒ slot omitted ⇒ no
+      // counter (default-OFF byte-identical).
+      ...(writeBudget !== undefined ? { writeBudget } : {}),
     },
   }
 }
@@ -853,6 +865,21 @@ export const composeCliRuntimeContext = async (
     })
   }
   const permissionStore = await loadPermissionStore()
+  // SECURITY RAILS — the interactive REPL builds its per-turn config through the
+  // runtime overlay (NOT the host assembler), so both jun-6 anti-exfil rails were
+  // DARK here: `QUANTA_WRITE_BUDGET` / `QUANTA_SANDBOX_ESCALATION` gave zero
+  // protection on `quanta`. Route the SAME owner the assembler uses:
+  //  - write-budget: the returned `writeBudget` is threaded onto the overlay so
+  //    the base carries it to per-turn dispatch (the (N+1)th untrusted write is
+  //    rejected).
+  //  - sandbox-escalation: the handler is installed as a side-effect against the
+  //    gate-shared `permissionStore` + the composed `onConfirm` authority.
+  // Both knobs off ⇒ writeBudget undefined (overlay slot omitted) + handler
+  // cleared ⇒ byte-identical to today (default-OFF).
+  const { writeBudget: securityWriteBudget } = wireSecurityRailsForOverlay(
+    runtimeConfigFromEnv(args.envSource ?? process.env),
+    { permissionStore, onConfirm },
+  )
   const planExitPort = createCliPlanExitPort({
     ask: (p) => askLine(midTurnApprovalChannel, p, "plan-exit"),
   })
@@ -899,6 +926,7 @@ export const composeCliRuntimeContext = async (
       ...(namedAgentResolver !== undefined ? { namedAgentResolver } : {}),
       ...(activeWorktreeSlot !== undefined ? { activeWorktreeSlot } : {}),
       ...(trustScope !== undefined ? { trustScope } : {}), // #20 durable
+      ...(securityWriteBudget !== undefined ? { writeBudget: securityWriteBudget } : {}),
     }),
     ...(args.convStore !== undefined || args.responsesStore !== undefined
       ? {

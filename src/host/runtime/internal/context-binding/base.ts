@@ -301,6 +301,12 @@ const buildBootstrapBaseShape = (
     // per-turn AgentConfig carries `trustScope` and the gate consults durable
     // grants. Absent ⇒ omitted (default-OFF, byte-identical).
     ...whenDefined("trustScope", args.overlay?.trustScope),
+    // SECURITY-RAIL (a) — lift the per-session write-budget onto the base so the
+    // per-turn dispatch binds the current turn onto `ToolContext.writeBudget`
+    // (the (N+1)th untrusted write is rejected). The interactive CLI's
+    // `wireSecurityRails` mints this behind `QUANTA_WRITE_BUDGET`. Absent ⇒
+    // omitted (default-OFF, byte-identical: no counter).
+    ...whenDefined("writeBudget", args.overlay?.writeBudget),
     // F2 (round-2) — lift the host-wired named-agent resolver onto the base so
     // the per-turn `assembleAgentConfig` spread carries it to the SubagentRunner.
     ...whenDefined("namedAgentResolver", args.overlay?.namedAgentResolver),

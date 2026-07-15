@@ -297,6 +297,14 @@ export type RuntimeBootstrapOverlay = {
    *  commands across sessions). Absent ⇒ slot omitted (default-OFF,
    *  byte-identical: the gate's `trustScopeGrants` returns false). */
   readonly trustScope?: AgentConfig["trustScope"]
+  /** SECURITY-RAIL (a) — the per-session `SessionWriteBudget` minted by the
+   *  comp-root's {@link wireSecurityRails} when `QUANTA_WRITE_BUDGET=1` (+ cap).
+   *  When set, the base carries `writeBudget` so the per-turn dispatch binds the
+   *  current turn onto `ToolContext.writeBudget` and the (N+1)th write in an
+   *  untrusted turn is rejected. Absent ⇒ slot omitted (default-OFF,
+   *  byte-identical: no counter). The web daemon / assembler set `cfg.writeBudget`
+   *  directly; the interactive CLI rides this overlay slot. */
+  readonly writeBudget?: AgentConfig["writeBudget"]
 }
 
 export interface RuntimeBootstrapHelpers {

@@ -89,13 +89,12 @@ import { defaultPromptCacheObserver } from "@/observability/prompt-cache"
 import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
-import { gateOn, runtimeConfig, runtimeConfigFromEnv } from "@/shared"
+import { gateOn, runtimeConfigFromEnv } from "@/shared"
 import { createProcessSideAgentDaemonRegistry } from "@/side-agent"
 import { skillMcpDepsEnabled } from "@/skill/skill-mcp-deps"
 import { resolveJailed } from "@/storage"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { AppshotArtifactSink, AppshotSlot } from "@/tool"
-import { createSessionWriteBudget } from "@/tool/_shared/write-budget"
 import { type BrowserNetSink, type DnsResolver, nodeDnsResolver } from "@/tool/browser"
 import { ReadFileState, staleReadGuardEnabled } from "@/tool/stale-read-guard"
 import type { WebSearchProvider } from "@/tool/web"
@@ -104,8 +103,9 @@ import { buildAppshotPortWire } from "./appshot-port-wire"
 import { persistBudgetLedger } from "./budget-ledger-persist"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
 import { maybeWirePeerTeamMessaging } from "./peer-team-wire"
+import { maybeWirePiiRedaction } from "./pii-redaction-wire"
 import { maybeWireProgressSink } from "./progress-sink-wire"
-import { maybeWireBashSandboxEscalation } from "./sandbox-escalation-wire"
+import { maybeWireBashSandboxEscalation, maybeWireWriteBudget } from "./security-rails-wire"
 import { nodeProcessForkPort, sideAgentWorkerModulePath } from "./side-agent-fork-port"
 
 /** Minimal env view this assembler reads. The surface owns the actual
@@ -427,7 +427,11 @@ const maybeWireWebSearch = (cfg: AgentConfig, env: AssemblerEnv): void => {
  *  `spawn_agent` router (the default parallel-worker surface), so it stays OFF
  *  by default to avoid handing the model two redundant parallel-spawn APIs. When
  *  on, children run through the same depth-guarded `SubagentRunner`. */
-const maybeWireBackgroundSubagent = (cfg: AgentConfig, env: AssemblerEnv): void => {
+const maybeWireBackgroundSubagent = (
+  cfg: AgentConfig,
+  env: AssemblerEnv,
+  config: ReturnType<typeof runtimeConfigFromEnv>,
+): void => {
   if (!gateOn(env, "QUANTA_SUBAGENT_BG")) return
   const slot = cfg as AgentConfig & {
     subagentBackground?: { scheduler: BackgroundSubagentScheduler }
@@ -438,7 +442,7 @@ const maybeWireBackgroundSubagent = (cfg: AgentConfig, env: AssemblerEnv): void 
   // `maxQueued` (QUANTA_BG_MAX_QUEUED) is honored ONLY when the queue is on;
   // absent ⇒ the scheduler's built-in DEFAULT_MAX_QUEUED (64). Default-OFF path
   // is byte-identical.
-  const subagentQueue = runtimeConfig().subagentQueue
+  const subagentQueue = config.subagentQueue
   const maxQueued = parseAssemblerPositiveInt(env.QUANTA_BG_MAX_QUEUED)
   slot.subagentBackground = {
     scheduler: defaultBackgroundSubagentScheduler({
@@ -476,13 +480,18 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
   maybeWireObjective(cfg, env)
   maybeWireMailbox(cfg, env)
   maybeWireWebSearch(cfg, env)
-  maybeWireBackgroundSubagent(cfg, env)
+  maybeWireBackgroundSubagent(cfg, env, config)
   maybeWireReadFileState(cfg, env)
   maybeWireDiagnostics(cfg, env)
   maybeWireSkillMcp(cfg, env)
   maybeWirePromptCacheObserver(cfg, env)
   maybeWireVcsEventSink(cfg, env)
   maybeWireProgressSink(cfg, env)
+  // ADR-0399 — operator switch (`QUANTA_PII_REDACTION=1`) that populates
+  // `cfg.redaction.pii` so the dispatch masking chokepoint becomes reachable.
+  // Absent ⇒ no pii block ⇒ byte-identical default-OFF (the secret branch of
+  // the same RedactionConfig is untouched).
+  maybeWirePiiRedaction(cfg, env)
   maybeWireSideAgent(cfg, config)
   maybeWireWriteBudget(cfg, config)
   maybeWireBudgetLedger(cfg, env)
@@ -546,32 +555,6 @@ const maybeWireBudgetLedger = (cfg: AgentConfig, env: AssemblerEnv): void => {
   const path = env["QUANTA_BUDGET_LEDGER_PATH"]
   cfg.budgetLedger =
     path !== undefined && path.length > 0 ? persistBudgetLedger(ledger, path) : ledger
-}
-
-/** jun-6 exfil-rail (a) — mint ONE per-session `SessionWriteBudget` when the
- *  write-budget is opted in (`QUANTA_WRITE_BUDGET=1`) AND a cap is configured
- *  (`QUANTA_WRITE_BUDGET_MAX=<N>`, a positive integer). BOTH must be present —
- *  the cap is a KNOB value with NO hardcoded default (no-heuristics rule), so an
- *  enabled-but-uncapped config stays inert. `untrustedContext` is resolved from
- *  the EXISTING untrusted-envelope gate (`QUANTA_UNTRUSTED_ENVELOPE`): the budget
- *  fires ONLY when the session is operating on untrusted input — a trusted
- *  codegen session keeps unlimited writes. The over-cap verdict is `confirm` (the
- *  narrow default per RFC §7 — the user can wave it through). Dispatch binds the
- *  current turn so the counter resets per turn. Caller-override-safe; absent gate
- *  / no cap ⇒ slot unset ⇒ no counter, byte-identical (default-OFF). */
-const maybeWireWriteBudget = (
-  cfg: AgentConfig,
-  config: ReturnType<typeof runtimeConfigFromEnv>,
-): void => {
-  if (cfg.writeBudget !== undefined) return
-  if (!config.writeBudget) return
-  const max = config.writeBudgetMax
-  if (max === undefined) return
-  cfg.writeBudget = createSessionWriteBudget({
-    untrustedContext: config.untrustedEnvelope,
-    maxWritesPerTurn: max,
-    overVerdict: "confirm",
-  })
 }
 
 /** N1 — mint the live side-agent daemon registry when opted in
@@ -927,7 +910,7 @@ export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): Ag
   // `QUANTA_SANDBOX_ESCALATION` is on (else clears any stale handler). Runs AFTER
   // the optional slots so it can read the freshly-resolved `cfg.admissibility`
   // permission store. Knob-OFF ⇒ no handler ⇒ the bash tool is byte-identical.
-  maybeWireBashSandboxEscalation(cfg)
+  maybeWireBashSandboxEscalation(cfg, runtimeConfigFromEnv(env))
   // RFC jun-6 Binding 2 — peer teammate messaging (auto-delivered inbox +
   // team-scoped bus). Wires `cfg.peerInbox` (turn-loop drain), wraps the shared
   // mailbox with the team-membership decorator, mints the team registry, and
