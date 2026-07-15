@@ -322,7 +322,16 @@ export const buildSubagentBlock = (
     // a live child can't outlive the registry teardown. No-op when 6-tool is
     // off (subagent6Cleanup is undefined).
     subagent6Cleanup?.()
-    const ids = reg.pendingIds()
+    // NEVER force-stop the task that represents THIS session itself. When this
+    // is a spawned child, `config.spawnedAsTaskId` is its OWN lineage record in
+    // the SHARED registry — still "running" because the PARENT settles it (via
+    // `lineage.settle` / the background `.then(complete)`) only AFTER this child
+    // loop returns. Sweeping it here would force it to "stopped" and make the
+    // parent's later `complete()` a no-op (`status !== "running"`), so a normally
+    // finished subagent would show "stopped" in the panel. (hellaudit e2e —
+    // caught only by driving a REAL child loop, not the runner `run` stub.)
+    const ownTaskId = config.spawnedAsTaskId
+    const ids = reg.pendingIds().filter((id) => id !== ownTaskId)
     // S17: host-side cleanup uses `forceStop` — not the token-gated `stop`.
     // The session owner has the authority to cancel ALL pending tasks at
     // shutdown regardless of who minted them; per-task owner tokens are
