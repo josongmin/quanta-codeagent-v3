@@ -15,7 +15,7 @@ import type { PrimaryRailStep } from "@/agent/closure"
 import type { OwnerCritic } from "@/agent/observation/critic"
 import { lspOwnerRefuter } from "@/agent/observation/critic/lsp-refuter"
 import { makeOwnerCritic } from "@/agent/observation/critic/owner-critic"
-import { logger } from "@/shared"
+import { errMessage, logger } from "@/shared"
 import type { Instance } from "../../types"
 import type { ChaRepairTarget } from "../cha-multisite"
 import { diffTouchedSymbols } from "../diff-touched-symbols"
@@ -82,7 +82,7 @@ export const maybeCriticRefute = async (args: {
     return { refuted, checked }
   } catch (e) {
     logger.warn("observation: owner-critic pass failed (observe-only, ignored)", {
-      error: e instanceof Error ? e.message : String(e),
+      error: errMessage(e),
     })
     return undefined
   }

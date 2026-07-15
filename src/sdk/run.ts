@@ -13,6 +13,7 @@
  */
 
 import type { AgentOutcome } from "@/agent"
+import { errMessage } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { isError, isText, isThinking, isToolCall, isToolResult, isUsage } from "./events"
 
@@ -145,7 +146,7 @@ export const makeAgentRun = (
       // never awaits) — otherwise `void .catch` below would swallow it silently.
       hooks?.onError?.({
         type: "error",
-        message: err instanceof Error ? err.message : String(err),
+        message: errMessage(err),
       })
       channel.fail(err)
       throw err

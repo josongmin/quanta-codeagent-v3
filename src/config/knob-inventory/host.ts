@@ -394,6 +394,16 @@ export const HOST: readonly KnobInventoryEntry[] = [
     readSite: "host/runtime/agent-arg-builder/gated-tool-ports.ts",
   },
   {
+    envKey: "QUANTA_MCP_AUTORESTART",
+    kind: "bool",
+    default: false,
+    group: "mcp",
+    home: "runtime-config",
+    describe:
+      "MCP crash-detection + auto-restart (ADR-0435) — wraps every server in a reconnect supervisor (backoff + jitter, storm cap → DEGRADED); default-OFF ⇒ single-client path, byte-identical.",
+    readSite: "host/mcp-composition.ts",
+  },
+  {
     envKey: "QUANTA_RETRIEVAL_HYBRID",
     kind: "bool",
     default: false,
@@ -561,5 +571,45 @@ export const HOST: readonly KnobInventoryEntry[] = [
     home: "runtime-config",
     describe: "LLM provider override (anthropic/openai).",
     readSite: "host/runtime/agent-arg-builder.ts",
+  },
+  {
+    envKey: "QUANTA_PII_REDACTION",
+    kind: "bool",
+    default: false,
+    group: "security",
+    home: "runtime-config",
+    describe:
+      "ADR-0399 PII-redaction pass on the tool_result stream (opt-in; default-OFF for every surface — a default-ON would change bench/eval + web-daemon output).",
+    readSite: "host/runtime/pii-redaction-wire.ts",
+  },
+  {
+    envKey: "QUANTA_PII_KINDS",
+    kind: "string",
+    default: undefined,
+    group: "security",
+    home: "runtime-config",
+    describe:
+      "Comma list restricting the PII scan to a PiiKind subset (unknown tokens dropped; empty/absent ⇒ ALL kinds). Inert unless QUANTA_PII_REDACTION on.",
+    readSite: "host/runtime/pii-redaction-wire.ts",
+  },
+  {
+    envKey: "QUANTA_PII_ALLOWLIST",
+    kind: "string",
+    default: undefined,
+    group: "security",
+    home: "runtime-config",
+    describe:
+      "Comma list of exact strings to pass through the PII scan unredacted (absent ⇒ no allowlist). Inert unless QUANTA_PII_REDACTION on.",
+    readSite: "host/runtime/pii-redaction-wire.ts",
+  },
+  {
+    envKey: "QUANTA_SIDE_AGENT_PARENT_DEPTH",
+    kind: "int",
+    default: 0,
+    group: "host-gate",
+    home: "runtime-config",
+    describe:
+      "Lineage seam — spawning-agent depth threaded across the side-agent fork boundary so the forked worker runs at its TRUE depth; absent/forged floors to 0 (can only deepen, never widen). Set by the host, not an operator dial.",
+    readSite: "side-agent/process-registry.ts",
   },
 ]

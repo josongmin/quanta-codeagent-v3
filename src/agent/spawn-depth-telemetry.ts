@@ -59,7 +59,7 @@
  */
 
 import { log, Metrics, StructuredLogger } from "@/observability"
-import type { LogLevel } from "@/shared"
+import { errMessage, type LogLevel } from "@/shared"
 
 /** The terminal decision for a single spawn attempt (§4.5). Closed union — a new
  *  decision kind forces every switch/Record over it to be updated. */
@@ -144,7 +144,7 @@ export const emitSpawnDepthDecision = (record: SpawnDepthDecisionRecord): void =
     // spawn decision. Attribute it if the same sink is still usable.
     try {
       log.warn("agent.spawn.admission telemetry emission failed", {
-        error: e instanceof Error ? e.message : String(e),
+        error: errMessage(e),
       })
     } catch (reportError) {
       // The reporter itself is the failed dependency; preserve the never-throw contract.
@@ -161,7 +161,7 @@ export const spawnDepthSplitBrainCount = (): number => {
   } catch (e) {
     try {
       log.warn("agent.spawn.admission split-brain counter read failed", {
-        error: e instanceof Error ? e.message : String(e),
+        error: errMessage(e),
       })
     } catch (reportError) {
       void reportError
@@ -178,7 +178,7 @@ export const spawnDepthTelemetrySnapshot = (): Record<string, number> => {
   } catch (e) {
     try {
       log.warn("agent.spawn.admission telemetry snapshot failed", {
-        error: e instanceof Error ? e.message : String(e),
+        error: errMessage(e),
       })
     } catch (reportError) {
       void reportError

@@ -22,6 +22,7 @@
  * runner to the persisted spec) is a separate ADR.
  */
 
+import { errMessage } from "@/shared"
 import type {
   BackgroundSubagentScheduler,
   SubagentHandleId,
@@ -230,10 +231,7 @@ export const persistentBackgroundSubagentScheduler = async (
     const err =
       caught instanceof PersistenceError
         ? caught
-        : new PersistenceError(
-            "io-failed",
-            `save ${id}: ${caught instanceof Error ? caught.message : String(caught)}`,
-          )
+        : new PersistenceError("io-failed", `save ${id}: ${errMessage(caught)}`)
     try {
       onPersistError(err, { id, phase, critical })
     } catch {

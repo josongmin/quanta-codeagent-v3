@@ -59,20 +59,37 @@ const NODE_SURFACE_MODULES = new Set<string>([
 
 export const sliceDir = (slice: string): string => join(REPO_ROOT, "src", slice)
 
+/** Is `name` a PRODUCTION `.ts` slice member to be scanned? Excludes:
+ *   - non-`.ts` and `.d.ts` (declaration-only) files;
+ *   - `*.test.ts` (incl. `*.hellgate.test.ts`) — TEST files that legitimately
+ *     import peer slices' tools end-to-end. Matches the god-code ratchet
+ *     walker's `!p.endsWith(".test.ts")` exclusion so both walkers see the same
+ *     production file set;
+ *   - `.from-worktree` / `.my-backup` artifacts (unless `includeBackupArtifacts`).
+ *  (`__tests__/` DIRECTORIES are pruned by the caller before descent.) */
+const isScannableSliceFile = (name: string, includeBackupArtifacts: boolean): boolean => {
+  if (!name.endsWith(".ts") || name.endsWith(".d.ts")) return false
+  if (name.endsWith(".test.ts")) return false
+  if (!includeBackupArtifacts && (name.includes(".from-worktree") || name.includes(".my-backup"))) {
+    return false
+  }
+  return true
+}
+
 export const listSliceTsFiles = (dir: string, includeBackupArtifacts: boolean): string[] => {
   const out: string[] = []
   for (const name of readdirSync(dir)) {
     const full = join(dir, name)
     const st = statSync(full)
     if (st.isDirectory()) {
+      // Test-only directories: a `__tests__/` sub-tree holds TEST files that
+      // legitimately exercise cross-slice CONTRACTS end-to-end (importing a
+      // peer slice's tool under test is what the test IS). These are not
+      // production slice members, so — like the god-code / no-raw-nul walkers —
+      // they must not be scanned under the production purity rules.
+      if (name === "__tests__") continue
       out.push(...listSliceTsFiles(full, includeBackupArtifacts))
-    } else if (st.isFile() && name.endsWith(".ts") && !name.endsWith(".d.ts")) {
-      if (
-        !includeBackupArtifacts &&
-        (name.includes(".from-worktree") || name.includes(".my-backup"))
-      ) {
-        continue
-      }
+    } else if (st.isFile() && isScannableSliceFile(name, includeBackupArtifacts)) {
       out.push(full)
     }
   }

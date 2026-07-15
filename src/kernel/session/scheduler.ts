@@ -1,6 +1,7 @@
 import type { Message } from "@/llm"
 import type { ArtifactRef, SessionCommand, SessionEvent, TurnRunCommand } from "@/protocol/session"
 import { SessionProtocolValidationError } from "@/protocol/session"
+import { errMessage } from "@/shared"
 import { isAbort } from "@/shared/abortable"
 import { writeStderr } from "@/shared/terminal-io"
 import type {
@@ -71,7 +72,7 @@ let observerErrorSink: (error: unknown) => void = (error) => {
   // Documented diagnostic surface — routed through the ADR-0303 injected terminal
   // sink (default NOOP) so this kernel module owns no raw terminal; overridable
   // via `setKernelObserverErrorSink` to route into structured telemetry.
-  const detail = error instanceof Error ? (error.stack ?? error.message) : String(error)
+  const detail = error instanceof Error ? (error.stack ?? error.message) : errMessage(error)
   writeStderr(
     `[kernel.session] onCommitted observer threw (diagnostic, not a turn failure): ${detail}\n`,
   )
@@ -99,7 +100,7 @@ export const setKernelObserverErrorSink = (
  * (measure-first — diagnostic, never a gate).
  */
 let streamAppendErrorSink: (error: unknown) => void = (error) => {
-  const detail = error instanceof Error ? (error.stack ?? error.message) : String(error)
+  const detail = error instanceof Error ? (error.stack ?? error.message) : errMessage(error)
   writeStderr(
     `[kernel.session] stream eventLog.append rejected (diagnostic, not a turn failure): ${detail}\n`,
   )
@@ -181,10 +182,7 @@ const reconcileSessionPostureState = (
   }
 }
 
-const rewriteStateUpdatedEvent = (
-  event: SessionEvent,
-  state: KernelSessionState,
-): SessionEvent =>
+const rewriteStateUpdatedEvent = (event: SessionEvent, state: KernelSessionState): SessionEvent =>
   event.type === "session.state.updated"
     ? {
         ...event,

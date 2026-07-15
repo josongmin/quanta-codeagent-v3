@@ -38,6 +38,16 @@ export const DAEMON: readonly KnobInventoryEntry[] = [
     readSite: "apps/web-daemon/runtime-factory.ts",
   },
   {
+    envKey: "QUANTA_WEB_SUBAGENTS",
+    kind: "bool",
+    default: false,
+    group: "web-daemon",
+    home: "runtime-config",
+    describe:
+      "Web-daemon subagent orchestration source gate — wires the onSubagentEvent sink that streams spawn-tree/status to the Sub-Agents panel (opt-in; absent ⇒ no sink, byte-identical).",
+    readSite: "apps/web-daemon/subagent-source.ts",
+  },
+  {
     envKey: "QUANTA_OTEL_ENDPOINT",
     kind: "string",
     default: undefined,

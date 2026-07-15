@@ -61,15 +61,24 @@ const REPO_ROOT = resolve(import.meta.dir, "..", "..")
 const DEFAULT_ROOT = join(REPO_ROOT, "src")
 
 /** Skip-list for filenames we must not parse. Mirrors the
- *  `agent-slice-boundary.test.ts` exclusion set so the graph + the runtime
- *  guard see the same set of files. */
+ *  `agent-slice-boundary.test.ts` exclusion set (see
+ *  `tests/unit/_arch/slice-boundary-scanner.ts` → `listSliceTsFiles`) so the
+ *  graph + the runtime guard see the same set of files. TEST files
+ *  (`*.test.ts`, incl. `*.hellgate.test.ts`) legitimately import peer slices'
+ *  tools end-to-end and are NOT production slice members — excluding them keeps
+ *  the cross-slice edge count a PRODUCTION-only metric. */
 const isSkippedName = (name: string): boolean => {
   if (!name.endsWith(".ts")) return true
   if (name.endsWith(".d.ts")) return true
+  if (name.endsWith(".test.ts")) return true
   if (name.includes(".from-worktree")) return true
   if (name.includes(".my-backup")) return true
   return false
 }
+
+/** Directory names never descended into — the `__tests__/` sub-tree holds only
+ *  test files (matching the slice-boundary walker's `__tests__` skip). */
+const isSkippedDir = (name: string): boolean => name === "__tests__"
 
 const walk = async (dir: string): Promise<string[]> => {
   const out: string[] = []
@@ -88,6 +97,7 @@ const walk = async (dir: string): Promise<string[]> => {
       continue
     }
     if (st.isDirectory()) {
+      if (isSkippedDir(name)) continue
       const sub = await walk(full)
       out.push(...sub)
     } else if (st.isFile() && !isSkippedName(name)) {
