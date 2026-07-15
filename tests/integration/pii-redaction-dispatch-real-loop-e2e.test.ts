@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { runAgent } from "@/agent"
+import { type AssemblerEnv, assembleAgentConfig } from "@/host/runtime/agent-config-assembler"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
-import type { RedactionConfig } from "@/security"
+import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import { __resetRuntimeConfig } from "@/shared"
 import { defaultTools, type Tool, type ToolEvent, ToolRegistry } from "@/tool"
 import { z } from "zod"
-import { cfg, RecordingStream, withTimeout } from "./_harness"
+import { RecordingStream, withTimeout } from "./_harness"
 
 /**
  * REAL-LOOP FAKE-LLM e2e for the PII-redaction dispatch wire
@@ -17,6 +18,17 @@ import { cfg, RecordingStream, withTimeout } from "./_harness"
  * the masking survives onto the tool_result the NEXT turn's LLM actually sees
  * (`runAgent × scripted-LLM == 0`).
  *
+ * REACHABILITY (the dead-end this suite closes): the masking chokepoint
+ * (`dispatch/execute.ts#applyRedaction`, application point #2) fires only when
+ * `config.redaction.pii.enabled === true`, but NO production composition root
+ * populated that field — so the whole PII pass was unreachable by any operator.
+ * The fix wired an env switch (`QUANTA_PII_REDACTION=1`) through the SHARED
+ * composition root (`agent-config-assembler.ts#maybeWirePiiRedaction`). This
+ * suite drives that REAL seam — it sets the env and lets `assembleAgentConfig`
+ * populate `cfg.redaction.pii`, rather than hand-injecting the config — so it
+ * proves the feature is REACHABLE end-to-end, not merely that the chokepoint
+ * masks a hand-built config.
+ *
  * THE WIRED CONTRACT (`dispatch/execute.ts#applyRedaction`, application point
  * #2): after the secret pass, when `config.redaction.pii.enabled === true`, a
  * `compositePiiScanner().redactText(...)` pass masks PII in the tool's
@@ -25,12 +37,14 @@ import { cfg, RecordingStream, withTimeout } from "./_harness"
  *
  * GROUND TRUTH — capture the NEXT turn's `StreamInput.messages` and assert the
  * `tool_result` the model sees is masked:
- *   - PII ON  + a tool output carrying an email + a phone ⇒ the follow-up
- *     turn's tool_result shows `[EMAIL]` / `[PHONE]` and the raw values are
- *     GONE (masking actually applied in-band, mid-loop).
- *   - PAIRED CONTROL: PII OFF (config absent) ⇒ the SAME output reaches the
- *     next turn UNCHANGED (raw email/phone survive) — proving the masking is
- *     the PII branch's doing, not something else scrubbing every tool_result.
+ *   - PII ON  (`QUANTA_PII_REDACTION=1` through the assembler) + a tool output
+ *     carrying an email + a phone ⇒ the follow-up turn's tool_result shows
+ *     `[EMAIL]` / `[PHONE]` and the raw values are GONE (masking actually
+ *     applied in-band, mid-loop, via the operator switch).
+ *   - PAIRED CONTROL: PII OFF (env unset) ⇒ the assembler leaves `redaction`
+ *     unset, the SAME output reaches the next turn UNCHANGED (raw email/phone
+ *     survive) — proving the masking is the wired enable-path's doing, not
+ *     something else scrubbing every tool_result.
  *
  * We assert on the `StreamInput` the SCRIPTED LLM captured (what the model
  * literally received), not on `out.messages` alone — the whole point of the
@@ -97,24 +111,31 @@ class PiiLLM implements LLMPort {
 
 const perm: PermissionContext = { mode: "acceptEdits" }
 
-const run = async (redaction: RedactionConfig | undefined, label: string) => {
+/** Build the assembler base (surface-specific AgentConfig core). The assembler
+ *  adds `modePolicy` + `budgetMeter` and — the point of this suite — populates
+ *  `cfg.redaction.pii` from the env gate via `maybeWirePiiRedaction`. */
+const baseFor = (llm: LLMPort): RuntimeAgentConfigBase =>
+  ({
+    llm,
+    stream: new RecordingStream(),
+    registry: registryWithPiiTool(),
+    permission: perm,
+    messages: [{ role: "user", content: [{ type: "text", text: "go" }] }],
+    system: "test-system",
+    cwd: "/tmp",
+    maxTurns: 6,
+    signal: new AbortController().signal,
+    onConfirm: async () => false,
+  }) as unknown as RuntimeAgentConfigBase
+
+/** Drive the REAL composition seam: assemble the config from the given
+ *  operator `env` (so the enable path — NOT a hand-injected `redaction` — is
+ *  what turns PII masking on), then run the real loop. */
+const run = async (env: AssemblerEnv, label: string) => {
   const llm = new PiiLLM()
-  const out = await withTimeout(
-    runAgent(
-      cfg({
-        llm,
-        stream: new RecordingStream(),
-        registry: registryWithPiiTool(),
-        permission: perm,
-        cwd: "/tmp",
-        maxTurns: 6,
-        ...(redaction !== undefined ? { redaction } : {}),
-      }),
-    ),
-    15_000,
-    label,
-  )
-  return { out, llm }
+  const assembled = assembleAgentConfig({ mode: "interactive", base: baseFor(llm) }, env)
+  const out = await withTimeout(runAgent(assembled), 15_000, label)
+  return { out, assembled, llm }
 }
 
 /** All tool_result contents the model saw on the FOLLOW-UP turn (turn 2+) —
@@ -130,8 +151,12 @@ describe("pii-redaction-dispatch-wire — real loop + fake LLM, masking on the n
     __resetRuntimeConfig()
   })
 
-  test("PII ON ⇒ the tool_result the NEXT turn's LLM sees is MASKED ([EMAIL]/[PHONE], raw values gone)", async () => {
-    const { llm } = await run({ pii: { enabled: true } }, "pii-on")
+  test("PII ON via QUANTA_PII_REDACTION ⇒ assembler populates cfg.redaction.pii AND the NEXT turn's tool_result is MASKED", async () => {
+    const { assembled, llm } = await run({ QUANTA_PII_REDACTION: "1" }, "pii-on")
+
+    // REACHABILITY: the operator switch went THROUGH the composition root — the
+    // assembler minted the pii block on cfg (NOT hand-injected by the test).
+    expect(assembled.redaction?.pii?.enabled).toBe(true)
 
     // GROUND TRUTH: the model's follow-up turn received the MASKED tool_result.
     const seen = followUpToolResults(llm)
@@ -145,8 +170,12 @@ describe("pii-redaction-dispatch-wire — real loop + fake LLM, masking on the n
     expect(result ?? "").not.toContain(PHONE)
   })
 
-  test("PAIRED CONTROL: PII OFF (config absent) ⇒ the SAME tool_result reaches the next turn UNCHANGED", async () => {
-    const { llm } = await run(undefined, "pii-off")
+  test("PAIRED CONTROL: env unset ⇒ assembler leaves redaction UNSET ⇒ the SAME tool_result reaches the next turn UNCHANGED", async () => {
+    const { assembled, llm } = await run({}, "pii-off")
+
+    // REACHABILITY (default-OFF): no gate ⇒ the assembler wired NO pii block, so
+    // the dispatch chokepoint's strict `=== true` toggle can never fire.
+    expect(assembled.redaction?.pii).toBeUndefined()
 
     // The follow-up turn saw the RAW output — no PII masking (existing
     // secret-only baseline has no email/phone rule, so the values survive).
@@ -159,11 +188,12 @@ describe("pii-redaction-dispatch-wire — real loop + fake LLM, masking on the n
     expect(result ?? "").not.toContain("[PHONE]")
   })
 
-  test("CONTROL: pii.enabled === false ⇒ strict-true gate OFF ⇒ tool_result UNCHANGED (non-vacuity)", async () => {
-    // `enabled: false` is the explicit off form — the strict `=== true` gate
-    // must NOT fire. Proves the ON test's masking is keyed on the exact flag,
-    // not on any truthy `pii` block being present.
-    const { llm } = await run({ pii: { enabled: false } }, "pii-false")
+  test("CONTROL: QUANTA_PII_REDACTION=0 ⇒ gate OFF at the composition root ⇒ redaction UNSET, tool_result UNCHANGED (non-vacuity)", async () => {
+    // A non-truthy gate token must be treated as OFF by the assembler — proving
+    // the ON test's masking is keyed on the actual operator switch, not on the
+    // env var merely being PRESENT.
+    const { assembled, llm } = await run({ QUANTA_PII_REDACTION: "0" }, "pii-gate-off")
+    expect(assembled.redaction?.pii).toBeUndefined()
     const seen = followUpToolResults(llm)
     const result = seen.find((c) => c.includes(EMAIL) || c.includes("[EMAIL]"))
     expect(result).toBeDefined()

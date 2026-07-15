@@ -169,6 +169,24 @@ export class TaskRegistry {
     }
   }
 
+  /** SUBSTRATE — assemble the `subagent_spawn` lifecycle event from a STORED
+   *  {@link TaskRecord}. The SINGLE source of the spawn payload so `register()`
+   *  and `restampSpawn()` can never drift a field (a 7th field added here lands
+   *  on BOTH sites at once). `description` is bounded + secret-scrubbed HERE
+   *  (`boundedRedact`) since this crosses to a UI; `parentTaskId`/`agentType`
+   *  ride the conditional spread when present. */
+  private buildSpawnEvent(rec: TaskRecord): SubagentLifecycleEvent {
+    return {
+      type: "subagent_spawn",
+      taskId: rec.id,
+      ...(rec.parentTaskId !== undefined ? { parentTaskId: rec.parentTaskId } : {}),
+      depth: rec.depth,
+      description: boundedRedact(rec.description) ?? "",
+      ...(rec.agentType !== undefined ? { agentType: rec.agentType } : {}),
+      at: rec.startedAt,
+    }
+  }
+
   /** SUBSTRATE — emit a `subagent_status` transition for a task that has just
    *  settled. `finalTextPreview` is sourced from the settled record's result
    *  (when present) and `error` from its error; both are bounded + secret-
@@ -209,7 +227,11 @@ export class TaskRegistry {
     // through the spread when the runner supplied them.
     const startedAt = Date.now()
     const depth = rec.depth ?? 0
-    this.tasks.set(rec.id, { ...rec, depth, status: "running", startedAt })
+    // Store the FULL record first, then source BOTH the map entry and the spawn
+    // event from it — so `buildSpawnEvent` (shared with `restampSpawn`) reads a
+    // real `TaskRecord`, never the partial `Omit<…>` input.
+    const stored: TaskRecord = { ...rec, depth, status: "running", startedAt }
+    this.tasks.set(rec.id, stored)
     this.aborters.set(rec.id, ac)
     let resolve!: () => void
     const promise = new Promise<void>((r) => {
@@ -218,18 +240,10 @@ export class TaskRegistry {
     this.settlers.set(rec.id, { promise, resolve })
     const ownerToken = crypto.randomUUID() as TaskOwnerToken
     this.owners.set(rec.id, ownerToken)
-    // SUBSTRATE — spawn transition. `description` is bounded + secret-scrubbed
-    // HERE (`boundedRedact`) since this crosses to a UI. Absent emitter ⇒ no-op
-    // (byte-identical).
-    this.emit({
-      type: "subagent_spawn",
-      taskId: rec.id,
-      ...(rec.parentTaskId !== undefined ? { parentTaskId: rec.parentTaskId } : {}),
-      depth,
-      description: boundedRedact(rec.description) ?? "",
-      ...(rec.agentType !== undefined ? { agentType: rec.agentType } : {}),
-      at: startedAt,
-    })
+    // SUBSTRATE — spawn transition, sourced from the STORED record via the shared
+    // `buildSpawnEvent` (single payload SoT, byte-identical to `restampSpawn`).
+    // Absent emitter ⇒ no-op (byte-identical).
+    this.emit(this.buildSpawnEvent(stored))
     return { abort: ac, ownerToken }
   }
 
@@ -244,15 +258,8 @@ export class TaskRegistry {
     if (this.emitter === undefined) return
     const t = this.tasks.get(taskId)
     if (t === undefined) return
-    this.emit({
-      type: "subagent_spawn",
-      taskId: t.id,
-      ...(t.parentTaskId !== undefined ? { parentTaskId: t.parentTaskId } : {}),
-      depth: t.depth,
-      description: boundedRedact(t.description) ?? "",
-      ...(t.agentType !== undefined ? { agentType: t.agentType } : {}),
-      at: t.startedAt,
-    })
+    // Shared spawn payload SoT — byte-identical to `register()`'s emit.
+    this.emit(this.buildSpawnEvent(t))
   }
 
   get(id: string): TaskRecord | undefined {

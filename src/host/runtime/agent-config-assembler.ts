@@ -110,6 +110,7 @@ import { persistBudgetLedger } from "./budget-ledger-persist"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
 import { maybeWirePeerTeamMessaging } from "./peer-team-wire"
 import { maybeWirePeerMessageSurface } from "./peer-message-sink-wire"
+import { maybeWirePiiRedaction } from "./pii-redaction-wire"
 import { maybeWireProgressSink } from "./progress-sink-wire"
 import { maybeWireBashSandboxEscalation } from "./sandbox-escalation-wire"
 import { nodeProcessForkPort, sideAgentWorkerModulePath } from "./side-agent-fork-port"
@@ -495,6 +496,11 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
   maybeWirePromptCacheObserver(cfg, env)
   maybeWireVcsEventSink(cfg, env)
   maybeWireProgressSink(cfg, env)
+  // ADR-0399 — operator switch (`QUANTA_PII_REDACTION=1`) that populates
+  // `cfg.redaction.pii` so the dispatch masking chokepoint becomes reachable.
+  // Absent ⇒ no pii block ⇒ byte-identical default-OFF (the secret branch of
+  // the same RedactionConfig is untouched).
+  maybeWirePiiRedaction(cfg, env)
   maybeWireSideAgent(cfg, env)
   maybeWireWriteBudget(cfg, env)
   maybeWireBudgetLedger(cfg, env)

@@ -9,17 +9,25 @@ import { type Tool, ToolRegistry } from "@/tool"
 import { cfg, FakeLLM, RecordingStream, text, withTimeout } from "./_harness"
 
 /**
- * REAL-LOOP FAKE-LLM e2e for the AUTO-approval review cadence + revocation
- * (feature 03/auto-approval-reviewer, ADR-0135 — the periodic "are these
- * grants still OK?" seam).
+ * REAL-LOOP FAKE-LLM e2e for the ADR-0070 `allowlistEscalated` grant/revoke
+ * cadence across the auto-review reviewer tier.
  *
- * THE GAP: the feature is UNIT-only. The `createApprovalReviewer` ledger is a
- * pure data structure with no loop hookup, and every guardian/auto-review test
- * drives `reviewAction()` / `runAdmissibilityGate` DIRECTLY (`runAgent == 0`).
- * The behavior that MATTERS across N tool calls — a periodic agent review that
- * grants, remembers the grant so a re-issued action isn't re-reviewed, and,
- * when the grant is REVOKED, re-prompts and can DENY the next same call — was
- * never exercised through the real loop.
+ * WHAT THIS ACTUALLY COVERS (title honesty): NOT the ADR-0135
+ * `createApprovalReviewer` periodic ledger — that pure data structure has NO
+ * loop hookup (its own coverage is the unit suite in
+ * `tests/unit/permission-pillars.test.ts`) and it is NEVER touched here. The
+ * WIRED seam this drives is the run-scoped `allowlistEscalated` cache
+ * (ADR-0070): the admissibility gate consults the auto-review reviewer for a
+ * verdict, and a GRANT is remembered in that `Set<string>` so a re-issued
+ * identical action is NOT re-reviewed — until the grant is REVOKED (cache
+ * cleared), which forces a re-consult.
+ *
+ * THE GAP this closes: every guardian/auto-review test drives `reviewAction()` /
+ * `runAdmissibilityGate` DIRECTLY (`runAgent == 0`). The behavior that MATTERS
+ * across N tool calls — the reviewer grants, the `allowlistEscalated` grant
+ * makes a re-issued action skip re-review, and, when that grant is REVOKED, the
+ * gate re-consults and can DENY the next same call — was never exercised through
+ * the real loop.
  *
  * This drives several tool calls through `runAgent` with an AUTO-tier reviewer
  * (`defaultReviewer: "auto_review"`) wired to a SCRIPTED verdict, and the
@@ -27,14 +35,14 @@ import { cfg, FakeLLM, RecordingStream, text, withTimeout } from "./_harness"
  * "stick" across calls). We assert, with GROUND TRUTH (did `execute()` run?):
  *
  *   1. CADENCE — the reviewer fires on the FIRST call of a distinct action.
- *   2. GRANT STICKS — a second identical call is NOT re-reviewed (the recorded
- *      grant is honored) and still runs.
+ *   2. GRANT STICKS — a second identical call is NOT re-reviewed (the
+ *      `allowlistEscalated` grant is honored) and still runs.
  *   3. REVOKE TAKES EFFECT — after the grant is revoked (cache cleared), the
- *      next identical call RE-PROMPTS the reviewer, whose scripted DENY BLOCKS
+ *      next identical call RE-CONSULTS the reviewer, whose scripted DENY BLOCKS
  *      the real `execute()`.
  *
  * The auto-review reviewer's verdict is what closes/opens the gate — proving the
- * "review across N calls" surface has teeth against real dispatch.
+ * `allowlistEscalated` grant/revoke cadence has teeth against real dispatch.
  */
 
 const MARKER = "autoreview"
@@ -161,7 +169,7 @@ const drive = async (
   return { ran, reason: out.reason, consulted, cache }
 }
 
-describe("auto-approval review — real loop cadence + grant revocation gates execute()", () => {
+describe("ADR-0070 allowlistEscalated — real loop grant/revoke cadence gates execute()", () => {
   beforeEach(() => {
     __resetRuntimeConfig()
   })

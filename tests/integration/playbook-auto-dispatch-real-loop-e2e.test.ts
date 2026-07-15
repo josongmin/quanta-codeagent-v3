@@ -1,7 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { runAgent } from "@/agent"
-import { FollowUpQueue, threadId } from "@/agent/follow-up-queue"
-import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import { ExternalPromptQueue } from "@/apps/cli/repl/external-prompt-queue"
 import {
   createMemoryWatcher,
   dispatchPlaybook,
@@ -9,58 +7,60 @@ import {
   type PlaybookRegistration,
   startPlaybookAutoDispatch,
 } from "@/skill/playbook"
-import { defaultTools, ToolRegistry } from "@/tool"
-import { cfg, RecordingStream, text, withTimeout } from "./_harness"
+import { withTimeout } from "./_harness"
 
 /**
- * TRUE end-to-end for PLAYBOOK AUTO-DISPATCH (ADR-0240/0241), driven by a FAKE
- * LLM through the REAL agent loop (`runAgent`).
+ * TRUE end-to-end for PLAYBOOK AUTO-DISPATCH (ADR-0240/0293), driven through
+ * the REAL production sink — the CLI's `ExternalPromptQueue`.
  *
- * The prior coverage stopped at the ORCHESTRATOR seam: the existing integration
- * suite (`playbook-inline-trigger-dispatch-hellgate.test.ts`) fires
- * `createMemoryWatcher()` into `startPlaybookAutoDispatch` and asserts the
- * dispatch OUTCOME (a `mock` sink recorded the `/play` enqueue), and only
- * `session-loop-hellgate` touches the loop. ZERO test closes the WHOLE chain:
- *   watcher fire → dispatch → enqueue → the REAL `runAgent` loop consuming that
- *   enqueued `/play <name>` on a SUBSEQUENT turn.
+ * WHAT PRODUCTION ACTUALLY WIRES (verified against `session-loop.ts`):
+ *   `attachPlaybookHandle()` (src/apps/cli/repl/session-loop.ts:543-566)
+ *   builds the dispatcher's ONLY prod `PlaybookPlanQueueSink`:
  *
- * This drives the load-bearing next-turn seam directly: the loop drains
- * `cfg.followUpQueue.popReady(threadId(sessionId), null)` at the TOP of every
- * turn (`syncQueuedTurnInputs` → `pollFollowUpQueue`) and appends the ready
- * follow-up's `content` to working memory as the next `role:"user"` turn seed.
+ *       const playbookSink = { enqueue: (input) => {
+ *         externalPromptQueue.push(input.text); return { ok: true } } }
  *
- * So we wire ONE real `FollowUpQueue` as `cfg.followUpQueue`, adapt it into the
- * dispatcher's `PlaybookPlanQueueSink`, fire a REAL memory watcher (simulating
- * an FS save carrying the trigger marker) through the REAL
- * `startPlaybookAutoDispatch` orchestrator, then run the loop and assert the
- * `/play <name>` text ACTUALLY REACHES a later LLM turn's input `messages`.
+ *   and hands it to `maybeStartPlaybookTriggerWire({ planQueueSink })`. The
+ *   `externalPromptQueue` is a real `ExternalPromptQueue`; the REPL's outer
+ *   turn loop drains it via `promptSource.next()` (session-loop.ts:840) —
+ *   `push(text)` publishes and `next()` yields that exact text back.
  *
- * Coverage limitation (reported): the FS-`fs.watch` adapter itself
- * (`createInlineTriggerWatcher`) is not part of `runAgent`; we drive the
- * closest real layer — the same `InlineTriggerWatcherPort` contract the real
- * adapter satisfies (`createMemoryWatcher`) plus the REAL orchestrator + REAL
- * `dispatchPlaybook` sink + the REAL loop consumption. Only the physical
- * inotify/kqueue event is simulated.
+ * This test reconstructs THAT sink verbatim (push `input.text` into a REAL
+ * `ExternalPromptQueue`) and drives the REAL dispatcher
+ * (`startPlaybookAutoDispatch` + a real `createMemoryWatcher` fire, and the
+ * one-shot `dispatchPlaybook`) so we prove the load-bearing production seam:
+ * a marker save resolves to `/play <name>` text that ACTUALLY lands in the
+ * `ExternalPromptQueue` the REPL consumes.
+ *
+ * SCOPE HONESTY (why not `runAgent`): `externalPromptQueue` is NOT touched by
+ * `runAgent` (grep `externalPromptQueue` in src/agent/ = empty). It is the
+ * OUTER REPL ingress, drained by the interactive branch's `promptSource.next()`
+ * on a later REPL turn — that consumption cannot be driven without standing up
+ * the whole REPL. So this test asserts ONLY what is real: the dispatch enqueues
+ * `/play <name>` into the production `ExternalPromptQueue` sink, and the
+ * production drain (`queue.next()`, the same call the REPL makes) yields it
+ * back. It does NOT claim `runAgent`-loop consumption.
+ *
+ * NON-VACUITY: a control (no marker in the saved file ⇒ nothing enqueued ⇒ the
+ * queue stays empty and `next()` never resolves), plus a red-on-injection
+ * (neuter the sink so the push is dropped ⇒ the enqueue assertion goes RED).
  */
 
 const PLAYBOOK_NAME = "refactor-sweep"
 const MARKER = "QUANTA-DISPATCH!"
 const WATCHED_FILE = "src/thing.ts"
 
-/** Adapt a real loop `FollowUpQueue` into the dispatcher's narrow
- *  `PlaybookPlanQueueSink`. This is the SAME shape the CLI's
- *  `adaptPlanQueueStoreToSink` / `session-loop` sink satisfies — here we target
- *  the loop's `followUpQueue` so the enqueued `/play` lands in the exact queue
- *  the loop drains at the turn boundary. */
-const followUpQueueSink = (queue: FollowUpQueue, sessionId: string): PlaybookPlanQueueSink => ({
+/**
+ * The REAL production sink, byte-for-byte from `session-loop.ts:545-556`:
+ * the dispatcher's `/play <name>` follow-up text is pushed straight into the
+ * REPL's `ExternalPromptQueue`. `input.text` is a `string`, and
+ * `ExternalPromptQueue<CliPromptInput>` accepts a bare string (CliPromptInput
+ * = `string | {text,...}`), so this is the exact prod shape — no adapter.
+ */
+const externalPromptQueueSink = (queue: ExternalPromptQueue): PlaybookPlanQueueSink => ({
   enqueue: (input) => {
     try {
-      queue.enqueue(threadId(sessionId), {
-        content: input.text,
-        submittedAt: 0,
-        submittedTurnId: null,
-        metadata: input.metadata,
-      })
+      queue.push(input.text)
       return { ok: true }
     } catch (e) {
       return { ok: false, reason: e instanceof Error ? e.message : String(e) }
@@ -75,38 +75,27 @@ const registration = (): PlaybookRegistration => ({
   },
 })
 
-/** Records every turn's user-visible text so we can prove which turn saw the
- *  enqueued `/play <name>`. Two scripted turns: the first does real work, the
- *  second finishes — the follow-up should surface on the SECOND turn's input
- *  (it was enqueued while turn 1 was in flight). */
-class TurnRecordingLLM implements LLMPort {
-  readonly model = "playbook-dispatch-e2e"
-  readonly turnUserText: string[] = []
-  private turn = 0
-  async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
-    const userText = input.messages
-      .filter((m) => m.role === "user")
-      .flatMap((m) => m.content.map((b) => (b.type === "text" ? b.text : "")))
-      .join(" ")
-    this.turnUserText.push(userText)
-    this.turn += 1
-    // Turn 1: emit a benign tool call so the loop takes a SECOND turn (giving
-    // the enqueued follow-up a boundary to drain into). Turn 2+: finish.
-    if (this.turn === 1) {
-      yield { type: "tool_use_start", id: "t1", name: "read" }
-      yield { type: "tool_use_end", id: "t1", input: { path: "/tmp/__nope_playbook__.txt" } }
-      yield { type: "message_stop", stop_reason: "tool_use" }
-      return
-    }
-    yield* text("done")
+/** Drain the production queue the way the REPL does: `promptSource.next()`
+ *  resolves the pushed prompt (or `null` on abort). We bound the wait so a
+ *  non-enqueue (control) times out fast instead of hanging the suite. */
+const drainNext = async (
+  queue: ExternalPromptQueue,
+  ms: number,
+): Promise<string | null> => {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), ms)
+  try {
+    const next = await queue.next(ctrl.signal)
+    return typeof next === "string" ? next : (next?.text ?? null)
+  } finally {
+    clearTimeout(timer)
   }
 }
 
-describe("playbook auto-dispatch — real loop consumes the enqueued /play on a later turn", () => {
-  test("watcher fire → dispatch enqueue → loop drains /play <name> into a SUBSEQUENT LLM turn", async () => {
-    const sessionId = "sess-playbook-dispatch"
-    const queue = new FollowUpQueue()
-    const sink = followUpQueueSink(queue, sessionId)
+describe("playbook auto-dispatch enqueues /play into the real ExternalPromptQueue sink", () => {
+  test("watcher fire → dispatch → /play <name> lands in the production ExternalPromptQueue (drained via queue.next())", async () => {
+    const queue = new ExternalPromptQueue()
+    const sink = externalPromptQueueSink(queue)
     const watcher = createMemoryWatcher()
 
     const dispatched: string[] = []
@@ -115,75 +104,39 @@ describe("playbook auto-dispatch — real loop consumes the enqueued /play on a 
       watcher,
       registry: { list: () => [registration()] },
       planQueueSink: sink,
-      threadId: sessionId,
+      threadId: "sess-playbook-dispatch",
       defaultRoot: "/repo",
       onDispatch: (r) => dispatched.push(r.kind),
     })
 
-    // GROUND TRUTH #1: the watcher actually consumed a saved file carrying the
+    // GROUND TRUTH: the watcher actually consumed a saved file carrying the
     // marker, and the dispatch reached the ENQUEUED terminal state.
     const consumed = watcher.fire(WATCHED_FILE, `// do a thing ${MARKER}\nconst x = 1\n`)
     expect(consumed).toBe(true)
     expect(dispatched).toEqual(["enqueued"])
-    // GROUND TRUTH #2: the follow-up is really sitting in the loop's queue.
-    expect(queue.sizeFor(threadId(sessionId))).toBe(1)
 
-    const llm = new TurnRecordingLLM()
-    const stream = new RecordingStream()
-    const out = await withTimeout(
-      runAgent(
-        cfg({
-          llm,
-          stream,
-          sessionId,
-          followUpQueue: queue,
-          registry: new ToolRegistry(defaultTools),
-          messages: [{ role: "user", content: [{ type: "text", text: "PARENT-GO" }] }],
-          maxTurns: 6,
-        }),
-      ),
-      15_000,
-      "playbook-auto-dispatch",
+    // GROUND TRUTH on the SINK: the `/play <name>` text is really sitting in the
+    // production queue (the REPL's turn-boundary `size()` gate would see it).
+    expect(queue.size()).toBe(1)
+
+    // LOAD-BEARING: the production drain (`queue.next()` — the exact call the
+    // REPL interactive branch makes at session-loop.ts:840) yields the enqueued
+    // `/play <name>` text back verbatim.
+    const drained = await withTimeout(
+      drainNext(queue, 5_000),
+      10_000,
+      "playbook-auto-dispatch-drain",
     )
+    expect(drained).toBe(`/play ${PLAYBOOK_NAME}`)
+    // The queue is emptied by that single drain — the REPL consumes it once.
+    expect(queue.size()).toBe(0)
+
     ctrl.stop()
-
-    expect(out.reason).toBe("completed")
-    // The queue was drained by the loop (the follow-up left the queue).
-    expect(queue.sizeFor(threadId(sessionId))).toBe(0)
-    // LOAD-BEARING: the `/play <name>` text reached a REAL LLM turn's input.
-    expect(llm.turnUserText.some((t) => t.includes(`/play ${PLAYBOOK_NAME}`))).toBe(true)
-    // Ground truth on the DRAIN SEAM shape: the queue was populated BEFORE the
-    // loop started (the watcher fired pre-run), so the loop's turn-top
-    // `pollFollowUpQueue` drains it on the FIRST turn — the `/play` text is
-    // appended AFTER the original seed (`PARENT-GO`) in that same turn's input,
-    // proving it is the drained follow-up, not the seed. This pins that the
-    // consumption is the loop's real `followUpQueue.popReady` append.
-    const dispatchTurn = llm.turnUserText.find((t) => t.includes(`/play ${PLAYBOOK_NAME}`))
-    expect(dispatchTurn).toBeDefined()
-    expect((dispatchTurn ?? "").indexOf("PARENT-GO")).toBeLessThan(
-      (dispatchTurn ?? "").indexOf(`/play ${PLAYBOOK_NAME}`),
-    )
-    // Drained EXACTLY once. `popReady` pops one ready follow-up per boundary and
-    // marks it a tombstone (`state.head += 1`), so the queue is emptied by the
-    // first drain (`sizeFor === 0`, asserted above) — no second boundary can
-    // re-inject it. The follow-up message, once appended to working memory,
-    // persists across later turns (cumulative conversation history), so its
-    // presence in >1 turn INPUT snapshot is history — NOT a re-drain. Pin the
-    // single-drain ground truth on the QUEUE, and pin that it was appended as
-    // exactly ONE distinct user message in the final transcript.
-    const playMessages = out.messages.filter(
-      (m) =>
-        m.role === "user" &&
-        m.content.some((b) => b.type === "text" && b.text.includes(`/play ${PLAYBOOK_NAME}`)),
-    )
-    expect(playMessages).toHaveLength(1)
-    expect(llm.turnUserText.length).toBeGreaterThanOrEqual(2)
   })
 
-  test("CONTROL: dispatch that never enqueues (no marker in the saved file) ⇒ loop turn NEVER sees /play (non-vacuous)", async () => {
-    const sessionId = "sess-playbook-no-marker"
-    const queue = new FollowUpQueue()
-    const sink = followUpQueueSink(queue, sessionId)
+  test("CONTROL: saved file WITHOUT the marker ⇒ no dispatch ⇒ nothing enqueued (non-vacuous)", async () => {
+    const queue = new ExternalPromptQueue()
+    const sink = externalPromptQueueSink(queue)
     const watcher = createMemoryWatcher()
     const dispatched: string[] = []
     const ctrl = startPlaybookAutoDispatch({
@@ -191,80 +144,97 @@ describe("playbook auto-dispatch — real loop consumes the enqueued /play on a 
       watcher,
       registry: { list: () => [registration()] },
       planQueueSink: sink,
-      threadId: sessionId,
+      threadId: "sess-playbook-no-marker",
       defaultRoot: "/repo",
       onDispatch: (r) => dispatched.push(r.kind),
     })
 
     // A saved file WITHOUT the marker ⇒ the watcher does not fire ⇒ no dispatch
-    // ⇒ nothing enqueued. This discriminates the assertion above: the loop only
-    // ever sees `/play` when a real enqueue happened.
+    // ⇒ nothing enqueued. This discriminates the positive test above: the queue
+    // only ever carries `/play` when a real marker-triggered enqueue happened.
     const consumed = watcher.fire(WATCHED_FILE, "const x = 1\n// nothing special here\n")
     expect(consumed).toBe(false)
     expect(dispatched).toEqual([])
-    expect(queue.sizeFor(threadId(sessionId))).toBe(0)
+    expect(queue.size()).toBe(0)
 
-    const llm = new TurnRecordingLLM()
-    const out = await withTimeout(
-      runAgent(
-        cfg({
-          llm,
-          stream: new RecordingStream(),
-          sessionId,
-          followUpQueue: queue,
-          registry: new ToolRegistry(defaultTools),
-          messages: [{ role: "user", content: [{ type: "text", text: "PARENT-GO" }] }],
-          maxTurns: 6,
-        }),
-      ),
-      15_000,
-      "playbook-auto-dispatch-control",
+    // The production drain resolves `null` (abort) because nothing was ever
+    // published — proving the enqueue is gated on a real marker fire.
+    const drained = await withTimeout(
+      drainNext(queue, 300),
+      5_000,
+      "playbook-auto-dispatch-control-drain",
     )
-    ctrl.stop()
+    expect(drained).toBe(null)
 
-    expect(out.reason).toBe("completed")
-    // No turn ever carried a `/play` — the loop consumption is gated on a real
-    // enqueue, so the positive test above is non-vacuous.
-    expect(llm.turnUserText.every((t) => !t.includes("/play"))).toBe(true)
+    ctrl.stop()
   })
 
-  test("direct dispatchPlaybook (sink = loop followUpQueue) ⇒ /play reaches the loop turn (bypasses the watcher orchestration)", async () => {
-    // Same next-turn consumption proof, but exercising the canonical
-    // `dispatchPlaybook` one-shot sink directly (the entrypoint hosts that wire
-    // their own watcher call). Confirms the enqueue → loop-drain contract holds
-    // regardless of whether the orchestrator or a direct caller drove the fire.
-    const sessionId = "sess-playbook-direct"
-    const queue = new FollowUpQueue()
-    const sink = followUpQueueSink(queue, sessionId)
+  test("RED-ON-INJECTION: a neutered sink (push dropped) ⇒ /play NEVER reaches the queue", async () => {
+    // Inject a broken production sink: same shape, but the enqueue does NOT
+    // push into the queue (simulating the sink wire being severed). The
+    // dispatcher still reports ok (the sink lies), but the load-bearing effect
+    // — the `/play` text reaching the ExternalPromptQueue — is ABSENT. This is
+    // the mutation that must make the positive test's core assertion RED.
+    const queue = new ExternalPromptQueue()
+    const neuteredSink: PlaybookPlanQueueSink = {
+      enqueue: () => {
+        // DROPPED — never `queue.push(input.text)`.
+        return { ok: true }
+      },
+    }
+    const watcher = createMemoryWatcher()
+    const dispatched: string[] = []
+    const ctrl = startPlaybookAutoDispatch({
+      enabled: true,
+      watcher,
+      registry: { list: () => [registration()] },
+      planQueueSink: neuteredSink,
+      threadId: "sess-playbook-neuter",
+      defaultRoot: "/repo",
+      onDispatch: (r) => dispatched.push(r.kind),
+    })
+
+    const consumed = watcher.fire(WATCHED_FILE, `// go ${MARKER}\n`)
+    expect(consumed).toBe(true)
+    // The dispatcher STILL believes it enqueued (the sink returned ok) — proving
+    // the positive test's `dispatched === ["enqueued"]` alone is insufficient;
+    // only the REAL sink effect (below) distinguishes a working wire.
+    expect(dispatched).toEqual(["enqueued"])
+    // The load-bearing effect is ABSENT: nothing reached the real queue.
+    expect(queue.size()).toBe(0)
+    const drained = await withTimeout(
+      drainNext(queue, 300),
+      5_000,
+      "playbook-auto-dispatch-neuter-drain",
+    )
+    expect(drained).toBe(null)
+
+    ctrl.stop()
+  })
+
+  test("direct dispatchPlaybook (sink = real ExternalPromptQueue) ⇒ /play lands in the queue (bypasses the watcher orchestration)", async () => {
+    // Same production-sink proof, but exercising the canonical `dispatchPlaybook`
+    // one-shot directly (some hosts wire their own watcher call). Confirms the
+    // enqueue → ExternalPromptQueue contract holds regardless of whether the
+    // orchestrator or a direct caller drove the fire.
+    const queue = new ExternalPromptQueue()
+    const sink = externalPromptQueueSink(queue)
 
     const result = dispatchPlaybook({
       playbookName: PLAYBOOK_NAME,
       fire: { path: WATCHED_FILE, marker: MARKER, line: 1, firedAt: 0 },
-      threadId: sessionId,
+      threadId: "sess-playbook-direct",
       planQueueSink: sink,
     })
     expect(result.kind).toBe("enqueued")
-    expect(queue.sizeFor(threadId(sessionId))).toBe(1)
+    expect(queue.size()).toBe(1)
 
-    const llm = new TurnRecordingLLM()
-    const out = await withTimeout(
-      runAgent(
-        cfg({
-          llm,
-          stream: new RecordingStream(),
-          sessionId,
-          followUpQueue: queue,
-          registry: new ToolRegistry(defaultTools),
-          messages: [{ role: "user", content: [{ type: "text", text: "PARENT-GO" }] }],
-          maxTurns: 6,
-        }),
-      ),
-      15_000,
-      "playbook-auto-dispatch-direct",
+    const drained = await withTimeout(
+      drainNext(queue, 5_000),
+      10_000,
+      "playbook-auto-dispatch-direct-drain",
     )
-
-    expect(out.reason).toBe("completed")
-    expect(queue.sizeFor(threadId(sessionId))).toBe(0)
-    expect(llm.turnUserText.some((t) => t.includes(`/play ${PLAYBOOK_NAME}`))).toBe(true)
+    expect(drained).toBe(`/play ${PLAYBOOK_NAME}`)
+    expect(queue.size()).toBe(0)
   })
 })

@@ -9,39 +9,54 @@ import {
   runIdleContinuation,
 } from "@/agent/objective"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import { objectiveTools } from "@/tool/objective"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { cfg, RecordingStream, text, toolUse, withTimeout } from "./_harness"
 
 /**
- * TRUE end-to-end for `objective-goal-continuation-live` (ADR-0394 / Codex
- * `core/src/goals.rs` parity), driven by a FAKE LLM through the REAL agent loop
- * (`runAgent`) — NOT the isolated `startGoalContinuationTicker` /
- * `runIdleContinuation` unit doubles. This closes the `runAgent × scripted == 0`
- * gap the catalog records (`goal-pursuit-chain-hellgate` drives the chain but
- * its `resume` sink is a STUB that only `enqueued.push(goal)` — it never re-runs
- * the loop, so the "wake → bounded pass → re-evaluate" behavior was never
- * exercised through a real `runAgent`).
+ * Integration coverage for `objective-goal-continuation-live` (ADR-0394 / Codex
+ * `core/src/goals.rs` parity): the DECISION LOGIC of `runIdleContinuation` — the
+ * pure orchestrator the goal-continuation ticker fires on each idle tick — over a
+ * REAL shared `createObjectiveStore()`, plus the REAL `objective_*` tool
+ * registration path exercised by the `resume` re-drive.
  *
- * The production seam under test: the idle continuation ticker's `resume` sink
- * re-drives the agent loop when an `active` goal is unmet, and STOPS once the
- * goal is met (the shared objective store derives `completed`). We wire the REAL
- * `runIdleContinuation` (the pure orchestrator the ticker fires each tick) with:
+ * WHAT THIS COVERS (accurately):
  *
- *   - a REAL shared `createObjectiveStore()` (the SAME store `/goal` writes and
- *     the LLM's `objective_*` tools mutate — the Codex auto-stop SSOT),
- *   - a `resume` sink that invokes the REAL `runAgent`, handing it the REAL
- *     `buildPursuitContinuationPrompt(goal)` and the REAL `objectiveTools(store)`
- *     so the scripted LLM can mark the goal done ON the shared store mid-pass,
- *   - a scripted LLM that first "completes" its turn WITHOUT meeting the goal
- *     (criterion still unmet ⇒ status stays `active`), and only on a LATER pass
- *     marks the success criterion met ⇒ the store derives `completed`.
+ *   1. `runIdleContinuation`'s orchestration/decision matrix over the shared
+ *      store: an `active` goal ⇒ launch; a `completed` goal ⇒ STOP
+ *      (`skipReason: "goal-not-active"`, the Codex auto-stop); a `paused` goal ⇒
+ *      skip (`goal-not-active`); the feature gate OFF (`enabled:false`) ⇒ skip
+ *      (`disabled`) with ZERO passes.
  *
- * GROUND TRUTH: the scripted LLM's `calls` counter + the store status. A single
- * `runIdleContinuation` per simulated idle tick MUST re-drive `runAgent` (the
- * LLM is called again) while the goal is `active`, and MUST NOT re-drive it once
- * the goal is `completed` (no infinite continuation). Non-vacuity: the OFF gate
- * (`enabled:false`) drives ZERO passes — byte-identical to a never-armed session.
+ *   2. The shared-store COMPLETION FLIP: the scripted LLM marks the success
+ *      criterion met via the REAL `objective_update` tool on the SAME
+ *      `createObjectiveStore()` the ticker reads, so the store DERIVES
+ *      `completed` mid-run — after which the orchestrator refuses further passes.
+ *
+ *   3. The REAL objective-tool REGISTRATION seam (Defect-A fix): the `resume`
+ *      sink builds the `runAgent` config with `objective: store` and a registry
+ *      of JUST `defaultTools` — NO manual `objectiveTools(store)` push. The
+ *      `objective_update` tool reaches the registry ONLY because `runAgent` →
+ *      `createRunAgentContext` → `buildSessionFeatures` → `buildObjectiveBlock`
+ *      (`src/agent/features.ts`, `src/agent/tier1/objective.ts`) materializes
+ *      `objectiveTools(config.objective)` and `buildEffectiveConfig` merges them.
+ *      So a `buildObjectiveBlock` regression to `[]` breaks the scripted tool
+ *      call ⇒ this test goes RED (red-on-injection proof, see the neuter test).
+ *
+ * WHAT THIS DOES **NOT** COVER (honest scoping — Defect-B):
+ *
+ *   The `resume` sink here calls `runAgent(...)` INLINE as a test STAND-IN. That
+ *   is NOT the production resume seam. In prod (`src/apps/cli/repl/session-loop.ts`
+ *   ~L790-796) `resume` does `enqueueWithHeartbeat(buildPursuitContinuationPrompt(
+ *   goal), {})` — it ENQUEUES a prompt onto the REPL's `externalPromptQueue`, which
+ *   is REPL-loop-only and is NOT `runAgent`-drivable. This suite therefore does NOT
+ *   exercise the real REPL enqueue/heartbeat wiring; it substitutes an inline
+ *   `runAgent` pass so the continuation's decision + the objective-tool registration
+ *   are observable. The REPL enqueue path is covered elsewhere (session-loop tests).
+ *
+ * GROUND TRUTH: the scripted LLM's `calls` counter + the derived store status.
+ * `runIdleContinuation` launches (re-drives the stand-in) while `active`, and
+ * refuses once `completed`. Non-vacuity: the OFF gate (`enabled:false`) and the
+ * `paused`/`completed` statuses each drive ZERO passes.
  */
 
 const TID = "thread-goal-live"
@@ -71,9 +86,11 @@ class PursuitLLM implements LLMPort {
 }
 
 /** Wire the REAL `runIdleContinuation` deps: every probe passes (idle + no
- *  pending work), the semaphore is REAL, and `resume` invokes the REAL
- *  `runAgent` over the shared store + the objective tools. `launches` records
- *  each pass so we can prove the loop actually re-drove. */
+ *  pending work), the semaphore is REAL, and `resume` is a TEST STAND-IN that
+ *  drives a `runAgent` pass over the shared store. (In prod `resume` enqueues a
+ *  REPL prompt via `enqueueWithHeartbeat`, NOT a `runAgent` call — see the file
+ *  docstring; the inline `runAgent` is what makes the continuation + the objective
+ *  tool registration observable here.) `launches` records each pass. */
 const makeContinuationDeps = (args: {
   store: ObjectivePort
   llm: LLMPort
@@ -89,10 +106,12 @@ const makeContinuationDeps = (args: {
   queuedInputPending: () => false,
   mailboxInputPending: () => false,
   isEphemeral: () => false,
-  // This is the SEAM the gap was about: the ticker's `resume` actually
-  // re-drives the loop. Mirrors the session-loop wire
-  // (`enqueueWithHeartbeat(buildPursuitContinuationPrompt(goal))`) but with the
-  // enqueue realised as a REAL `runAgent` pass so the continuation is observable.
+  // Test STAND-IN for the resume seam. Prod's session-loop wire is
+  // `enqueueWithHeartbeat(buildPursuitContinuationPrompt(goal), {})` — a REPL
+  // enqueue that is NOT `runAgent`-drivable. We substitute an inline `runAgent`
+  // pass here so the continuation DECISION (launch vs. stop) and the REAL
+  // objective-tool registration are both observable; we do NOT claim to cover
+  // the REPL enqueue/heartbeat path itself.
   resume: async (tid) => {
     const goal = args.store.get(tid)?.goal
     args.launches.push(goal ?? "")
@@ -100,7 +119,16 @@ const makeContinuationDeps = (args: {
       cfg({
         llm: args.llm,
         stream: new RecordingStream(),
-        registry: new ToolRegistry([...defaultTools, ...objectiveTools(args.store)]),
+        // REAL registration seam: the registry starts as JUST `defaultTools`, and
+        // the `objective` port below is what drives the `objective_*` trio into it
+        // — through the SAME production path a live session uses. `runAgent` →
+        // `createRunAgentContext` → `buildSessionFeatures` runs `buildObjectiveBlock`
+        // (features.ts, SESSION_FEATURE_BLOCKS), which returns `objectiveTools(port)`
+        // for a wired `config.objective`, then `buildEffectiveConfig` rebuilds the
+        // registry with those tools. NO manual `objectiveTools(store)` push here — so
+        // a `buildObjectiveBlock`/`buildSessionFeatures` regression to `[]` makes the
+        // scripted `objective_update` call unresolvable and this test go RED (non-vacuity).
+        registry: new ToolRegistry(defaultTools),
         objective: args.store,
         messages: [
           { role: "user", content: [{ type: "text", text: buildPursuitContinuationPrompt(goal) }] },
@@ -111,8 +139,8 @@ const makeContinuationDeps = (args: {
   },
 })
 
-describe("objective-goal-continuation-live — real loop (runAgent) + fake LLM end-to-end", () => {
-  test("an ACTIVE unmet goal ⇒ each idle tick re-drives runAgent (another pass); met goal ⇒ STOPS", async () => {
+describe("objective-goal-continuation-live — runIdleContinuation decision logic + real objective-tool registration (resume is a REPL-enqueue stand-in)", () => {
+  test("an ACTIVE unmet goal ⇒ each idle tick launches a continuation pass; a met goal (shared-store flip) ⇒ STOPS", async () => {
     const store = createObjectiveStore()
     // A goal with ONE success criterion — the store derives `completed` ONLY
     // once the criterion is marked met, so "the turn finished" is NOT itself
@@ -143,23 +171,23 @@ describe("objective-goal-continuation-live — real loop (runAgent) + fake LLM e
     )
 
     const launches: string[] = []
-    // Phase A — the goal is ACTIVE + unmet. Two idle ticks MUST each re-drive a
-    // real `runAgent` pass (the continuation), and the goal MUST stay `active`
-    // because the criterion is never met.
+    // Phase A — the goal is ACTIVE + unmet. `runIdleContinuation` MUST DECIDE to
+    // launch on each idle tick (its `resume` stand-in drives one `runAgent` pass),
+    // and the goal MUST stay `active` because the criterion is never met.
     const depsA = makeContinuationDeps({ store, llm: finishWithoutMeetingGoal, launches })
 
     const tick1 = await withTimeout(runIdleContinuation(TID, depsA), 10_000, "goal-live-tick1")
-    expect(tick1.launched).toBe(true) // the ticker WOKE the loop
-    expect(finishWithoutMeetingGoal.calls).toBe(1) // runAgent really ran once
+    expect(tick1.launched).toBe(true) // orchestrator DECIDED to launch (active goal)
+    expect(finishWithoutMeetingGoal.calls).toBe(1) // the resume stand-in ran runAgent once
     expect(store.get(TID)?.status).toBe("active") // goal NOT met ⇒ still active
 
     const tick2 = await withTimeout(runIdleContinuation(TID, depsA), 10_000, "goal-live-tick2")
-    expect(tick2.launched).toBe(true) // re-driven AGAIN (the bug this gap targets)
-    expect(finishWithoutMeetingGoal.calls).toBe(2) // a SECOND real pass
+    expect(tick2.launched).toBe(true) // launches AGAIN — still active, not one-shot
+    expect(finishWithoutMeetingGoal.calls).toBe(2) // a SECOND runAgent pass
     expect(store.get(TID)?.status).toBe("active")
 
     // The continuation carried the REAL pursuit prompt (goal text fenced as data
-    // + the verify-before-complete discipline) into the loop — proof it is the
+    // + the verify-before-complete discipline) into the pass — proof it is the
     // production `buildPursuitContinuationPrompt`, not a bare re-run.
     const firstPassText = finishWithoutMeetingGoal.inputs[0]?.messages
       .flatMap((m) => m.content.map((b) => (b.type === "text" ? b.text : "")))
@@ -167,18 +195,18 @@ describe("objective-goal-continuation-live — real loop (runAgent) + fake LLM e
     expect(firstPassText).toContain("ship the migration")
     expect(firstPassText).toContain("verify completion against the")
 
-    // Phase B — the agent now VERIFIES + marks the criterion met (via the REAL
-    // objective_update tool, on the SHARED store) during a real pass. The store
-    // derives `completed`.
+    // Phase B — the agent now VERIFIES + marks the criterion met via the REAL
+    // `objective_update` tool (registered through `buildObjectiveBlock`, NOT a
+    // manual push) on the SHARED store during a pass. The store derives `completed`.
     const depsB = makeContinuationDeps({ store, llm: markGoalMet, launches })
     const tickMet = await withTimeout(runIdleContinuation(TID, depsB), 10_000, "goal-live-tick-met")
     expect(tickMet.launched).toBe(true)
     expect(markGoalMet.calls).toBeGreaterThanOrEqual(1)
     expect(store.get(TID)?.status).toBe("completed") // goal is now MET
 
-    // Phase C — the goal is `completed`. Further idle ticks MUST NOT re-drive the
-    // loop (Codex auto-stop): no infinite continuation. Use a fresh LLM double so
-    // any spurious pass is unmistakable (its call count would go > 0).
+    // Phase C — the goal is `completed`. `runIdleContinuation` MUST refuse to
+    // launch further passes (Codex auto-stop): no infinite continuation. Use a
+    // fresh LLM double so any spurious pass is unmistakable (its call count > 0).
     const afterDoneLlm = new PursuitLLM([], text("should never run"))
     const depsC = makeContinuationDeps({ store, llm: afterDoneLlm, launches })
     const tickA = await withTimeout(runIdleContinuation(TID, depsC), 10_000, "goal-live-done-a")
@@ -186,7 +214,7 @@ describe("objective-goal-continuation-live — real loop (runAgent) + fake LLM e
     expect(tickA.launched).toBe(false)
     expect(tickB.launched).toBe(false)
     expect(tickA.skipReason).toBe("goal-not-active") // completed ⇒ not active ⇒ skip
-    expect(afterDoneLlm.calls).toBe(0) // the loop was NEVER re-driven after completion
+    expect(afterDoneLlm.calls).toBe(0) // the resume stand-in was NEVER driven after completion
   })
 
   test("NON-VACUITY: enabled:false (goal-continuation OFF) ⇒ ZERO runAgent passes even with an active goal", async () => {

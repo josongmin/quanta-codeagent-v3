@@ -111,12 +111,16 @@ const workflowTools = (
 
 /** Optional wiring the composition root injects alongside `config`. */
 export interface SubagentBlockDeps {
-  /** ALBB-16 #1 — LIVE working-memory source for `fork_turns`, mirroring the
-   *  advisor's `transcriptSource` (advisor.ts:140). The loop owns its live
-   *  message buffer and injects this getter; `forkPrompt` resolves it LAZILY at
-   *  spawn time so a child spawned mid-session inherits the turns accrued AFTER
-   *  block build — not just the frozen `config.messages` seed. ABSENT ⇒ falls
-   *  back to `config.messages ?? []` (byte-identical to the seed-sourced path). */
+  /** ALBB-16 #1 — TEST-ONLY / FORWARD SEAM (unwired in production). A LIVE
+   *  working-memory source for `fork_turns`, mirroring the advisor's
+   *  `transcriptSource` (advisor.ts:140): a loop that owns its live message
+   *  buffer could inject this getter so `forkPrompt` resolves it LAZILY at spawn
+   *  time and a child spawned mid-session inherits the turns accrued AFTER block
+   *  build. BUT the sole production call site (`buildSubagentBlock(config)` at
+   *  `features.ts:209`) passes the default `deps={}`, so this is NEVER wired in
+   *  the running system — in production `config.messages` is the only live
+   *  fork-inheritance path. ABSENT ⇒ falls back to `config.messages ?? []`
+   *  (byte-identical to the seed-sourced path). */
   readonly transcriptSource?: () => readonly import("@/llm").Message[]
 }
 
@@ -166,11 +170,17 @@ export const buildSubagentBlock = (
   // GAP8a / ALBB-16 #1+#2 — the ONE shared `forkPrompt` source. Both the trio
   // `agent` tool and the 6-tool `spawn_agent` path close over THIS single
   // closure, so their inherited-context preambles are byte-identical by
-  // construction (no divergent second implementation). The transcript is read
-  // LAZILY at spawn time from the live working-memory thunk when the composition
-  // root wired one (`deps.transcriptSource`), else fails CLOSED to the frozen
-  // session seed (`config.messages ?? []`) — byte-identical to the legacy path.
-  // `redactTranscript` (advisor) scrubs secrets + PII; `fork_turns:"none"`
+  // construction (no divergent second implementation).
+  //
+  // HONESTY (jul-15): in PRODUCTION the `config.messages` seed IS the only live
+  // fork-inheritance path. The sole prod call site is `buildSubagentBlock(config)`
+  // at `features.ts:209` — invoked with the DEFAULT `deps={}`, so
+  // `deps.transcriptSource` is NEVER wired in the running system. That thunk is a
+  // test-only / forward seam (unwired at `features.ts:209`): when a caller DOES
+  // supply it, the transcript is read LAZILY at spawn time from the live
+  // working-memory thunk; absent (the production case) it falls back to the
+  // frozen session seed (`config.messages ?? []`) — byte-identical to the legacy
+  // path. `redactTranscript` (advisor) scrubs secrets + PII; `fork_turns:"none"`
   // (default) ⇒ identity (byte-identical cold start).
   const forkPrompt = (prompt: string, spec: "none" | "all" | number): string =>
     composeForkedPrompt(

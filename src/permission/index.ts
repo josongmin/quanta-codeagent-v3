@@ -4,6 +4,9 @@ export { canAccess, containsPath } from "./access-check"
 // jun-7-misc 03 (ADR-0497) — guardian per-action typed assessment collapse.
 export { collapseAssessment } from "./assessment-collapse"
 export type { ApprovalRecord, ApprovalReviewer, ApprovalReviewerOpts } from "./auto-approval-review"
+// FORWARD-SEAM (not wired): `createApprovalReviewer` has no runtime consumer —
+// the live auto-approval cadence is auto-approval-review-observer +
+// allowlistEscalated. Kept as Codex-parity substrate (unit-tested only).
 export { createApprovalReviewer } from "./auto-approval-review"
 // ADR-0453 — Heartbeat autorun eligibility (pure verdict consumed by scheduler/reactor).
 export type {
