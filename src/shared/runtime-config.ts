@@ -39,7 +39,11 @@
 
 import { tlsMitmAuthorized } from "@/runtime/network-proxy/mitm-gate"
 import { gateDisabledStrict, gateOn, gateOnStrict } from "./env-flag"
-import { knobOverrideCount, knobOverrides, knobOverridesVersion } from "./knob-overrides"
+import {
+  knobOverrideCount,
+  knobOverridesVersion,
+  sessionSafeKnobOverrides,
+} from "./knob-overrides"
 import {
   DEFAULT_CRITICAL_SECTION_MAX_MS,
   parseBashAutoBackground,
