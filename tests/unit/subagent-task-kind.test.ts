@@ -171,3 +171,33 @@ describe("createAgentTool — new structured fields thread byte-for-byte", () =>
     expect("taskKind" in (r as object)).toBe(false)
   })
 })
+
+describe("createAgentTool — ctxDepth fail-CLOSED (C3: malformed caller depth denies, no fork)", () => {
+  const resultOf = (ev: ToolEvent): { ok: boolean; output: string } =>
+    ev.type === "result" ? { ok: ev.result.ok, output: ev.result.output } : { ok: true, output: "" }
+
+  // A corrupt ctx.depth must DENY before forking — mirroring the authoritative
+  // runner childDepthOf discipline. A fail-OPEN regression (coerce NaN→root 0)
+  // would fork the child, so `seen()` (the captured request) flips this RED.
+  test("malformed ctx.depth (NaN / -1 / 2.5) ⇒ DENIED and the runner is NEVER forked", async () => {
+    for (const bad of [Number.NaN, -1, 2.5]) {
+      const { runner, seen } = capturingRunner()
+      const tool = createAgentTool({ runner })
+      const last = await run(tool, { prompt: "go" }, ctxAt(bad))
+      const r = resultOf(last)
+      expect(r.ok).toBe(false)
+      expect(r.output.toLowerCase()).toContain("depth")
+      expect(seen()).toBeUndefined() // authority: the child was never forked
+    }
+  })
+
+  // Paired control: an ABSENT ctx.depth is a genuine root ⇒ forks normally. Proves
+  // the deny above is the malformed-guard, not a blanket "any depth denies".
+  test("absent ctx.depth is a genuine root ⇒ forks normally (paired control)", async () => {
+    const { runner, seen } = capturingRunner()
+    const tool = createAgentTool({ runner })
+    const last = await run(tool, { prompt: "go" }, ctxAt(undefined))
+    expect(resultOf(last).ok).toBe(true)
+    expect(seen()).toBeDefined()
+  })
+})
