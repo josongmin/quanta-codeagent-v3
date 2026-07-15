@@ -59,6 +59,10 @@ export interface FetchHandlerDeps {
    *  reads it so a hydrated (swapped-onto) thread reports `live-attach`, not
    *  read-only. Absent ⇒ falls back to the session id (pre-swap behavior). */
   readonly activeThreadId?: () => string
+  /** Test/embedding seam for the terminal auth-route handlers.  The auth gate
+   * stays in this route table, so callers can prove a rejected bearer never
+   * reaches an effectful OAuth/file handler. */
+  readonly authRoutes?: AuthRouteHandlers
 }
 
 type RouteResult = Response | Promise<Response> | undefined
@@ -66,6 +70,20 @@ type RouteResult = Response | Promise<Response> | undefined
 type RequireAuth = (url: URL, req: Request) => Response | null
 
 type FetchHandler = (req: Request, srv: Server<WSData>) => RouteResult
+
+export interface AuthRouteHandlers {
+  readonly login: () => Promise<Response>
+  readonly loginStatus: (url: URL) => Promise<Response>
+  readonly logout: () => Promise<Response>
+  readonly status: () => Promise<Response>
+}
+
+const defaultAuthRoutes: AuthRouteHandlers = {
+  login: handleAuthLoginStart,
+  loginStatus: handleAuthLoginAttemptStatus,
+  logout: handleAuthLogout,
+  status: handleAuthStatus,
+}
 
 /**
  * Bearer-auth gate shared by every authenticated route (WS upgrade + the
@@ -273,7 +291,12 @@ const tryResolveArtifact = async (
 
 /** Authenticated mutation/OAuth routes — `POST /config` + the `/auth/*` ChatGPT
  *  OAuth login/logout/whoami wrappers. Same bearer auth as WS upgrade. */
-const tryMutationRoutes = (url: URL, req: Request, requireAuth: RequireAuth): RouteResult => {
+const tryMutationRoutes = (
+  url: URL,
+  req: Request,
+  requireAuth: RequireAuth,
+  authRoutes: AuthRouteHandlers,
+): RouteResult => {
   if (url.pathname === "/config" && req.method === "POST") {
     // Dynamic LLM knob update via slash commands. Mutates `process.env`
     // so the next adapter call picks it up; closed allowlist of keys
@@ -289,14 +312,14 @@ const tryMutationRoutes = (url: URL, req: Request, requireAuth: RequireAuth): Ro
   if (url.pathname.startsWith("/auth/") && (req.method === "POST" || req.method === "GET")) {
     const denied = requireAuth(url, req)
     if (denied !== null) return denied
-    if (url.pathname === "/auth/login" && req.method === "POST") return handleAuthLoginStart()
+    if (url.pathname === "/auth/login" && req.method === "POST") return authRoutes.login()
     // UUX-4-13 — login-attempt completion readback for the frontend's bounded
     // poll (login success/failure used to be logger-only).
     if (url.pathname === "/auth/login/status" && req.method === "GET") {
-      return handleAuthLoginAttemptStatus(url)
+      return authRoutes.loginStatus(url)
     }
-    if (url.pathname === "/auth/logout" && req.method === "POST") return handleAuthLogout()
-    if (url.pathname === "/auth/status" && req.method === "GET") return handleAuthStatus()
+    if (url.pathname === "/auth/logout" && req.method === "POST") return authRoutes.logout()
+    if (url.pathname === "/auth/status" && req.method === "GET") return authRoutes.status()
     return jsonResponse(404, { error: "unknown_auth_route", path: url.pathname })
   }
   return undefined
@@ -335,6 +358,7 @@ export const buildFetchHandler = (deps: FetchHandlerDeps): FetchHandler => {
   const { config } = deps
   const requireAuth = makeRequireAuth(config)
   const tryUpgrade = makeTryUpgrade(config)
+  const authRoutes = deps.authRoutes ?? defaultAuthRoutes
 
   return (req, srv) => {
     const url = new URL(req.url)
@@ -347,7 +371,7 @@ export const buildFetchHandler = (deps: FetchHandlerDeps): FetchHandler => {
     if (status !== undefined) return status
     const read = tryReadRoutes(url, req, deps, requireAuth)
     if (read !== undefined) return read
-    const mutation = tryMutationRoutes(url, req, requireAuth)
+    const mutation = tryMutationRoutes(url, req, requireAuth, authRoutes)
     if (mutation !== undefined) return mutation
     if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
       const resp = tryUpgrade(req, srv)

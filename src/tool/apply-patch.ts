@@ -49,6 +49,7 @@ import {
 import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
 import { recordFreshBaseline } from "./_shared/fresh-hash"
+import { writeBudgetEvent } from "./_shared/exfil-rail-guards"
 import { classifyFastApplyError, failingTargetPath } from "./apply-patch-fallback-wire"
 import { guardWrite } from "./stale-read-guard"
 import type {
@@ -536,6 +537,7 @@ async function guardedParseAndApply(
   port: FsJailFileSystemPort,
   guard: GitWriteGuard | undefined,
   ctx?: EditToolContext,
+  enforceWriteBudget = true,
 ): Promise<{ deny: ToolEvent } | { result: ApplyResult }> {
   // Auto-convert standard unified diff (--- a/file / +++ b/file format) to V4A.
   // Models frequently produce unified diff; without this, parsePatch throws on a
@@ -553,6 +555,14 @@ async function guardedParseAndApply(
   // mutation, so a denied patch is NEVER a partial write.
   const staleDeny = await guardStaleTargets(patch, port, ctx)
   if (staleDeny) return { deny: staleDeny }
+  // A V4A patch is one user-visible mutating tool call, even if it has several
+  // file operations. Check exactly once after all preflight guards and before
+  // the atomic apply. The fast-apply rescue retry passes false so one original
+  // request cannot consume the turn budget twice.
+  if (enforceWriteBudget) {
+    const budgetDeny = writeBudgetEvent(ctx)
+    if (budgetDeny) return { deny: budgetDeny }
+  }
   // applyPatch throws PatchApplyError / PatchAnchorNotFoundError on apply
   // failure — propagate. FsJailFileSystemPort throws FsJailViolationError
   // on boundary breach — propagate. `PATCH_TRACE` injects the OTel binding.
@@ -636,7 +646,7 @@ async function tryFastApplyFallback(
   try {
     // [F6] the retry commit is ALSO a multi-file FS mutation ⇒ same critical
     // section as the primary apply (parity; default-OFF when the seam is unwired).
-    const applied = await guardedParseAndApply(attempt.newPatch, port, guard, ctx)
+    const applied = await guardedParseAndApply(attempt.newPatch, port, guard, ctx, false)
     // A git-escape deny OR a stale-read deny on the re-emit is a non-rescue: the
     // model cannot slip a guarded/stale target through the fallback ⇒ surface the
     // ORIGINAL error (caller re-throws), never the retry's.

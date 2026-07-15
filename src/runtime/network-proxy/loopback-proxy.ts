@@ -299,7 +299,11 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
   private onRequest(req: IncomingMessage, res: import("node:http").ServerResponse): void {
     const target = this.parseHttpTarget(req)
     if (target === null) {
-      res.writeHead(400, { "content-type": "text/plain" }).end("malformed proxy request")
+      // A forward proxy cannot authorize a relative/malformed target because
+      // it has no reliable destination host. Treat it as an egress denial,
+      // rather than a recoverable origin-style bad request, to keep this
+      // boundary fail-closed and uniform with denied CONNECT requests.
+      res.writeHead(403, { "content-type": "text/plain" }).end("malformed proxy request")
       return
     }
     const decision = this.decide(target.host)
@@ -424,32 +428,44 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
     target: { host: string; port: number; url: URL },
   ): void {
     const dialed = this.dial(target.host, target.port)
-    const upstream = httpRequest(
-      {
-        host: dialed.host,
-        port: dialed.port,
-        method: req.method,
-        path: target.url.pathname + target.url.search,
-        headers: req.headers,
-      },
-      (up) => {
-        // Post-connect SSRF re-check on the resolved peer (rebinding defense).
-        if (this.peerIsBlocked(up.socket)) {
-          up.destroy()
-          if (!res.headersSent)
-            res.writeHead(403).end("egress denied: peer resolved to blocked address")
-          return
-        }
-        res.writeHead(up.statusCode ?? 502, up.headers)
-        up.pipe(res)
-      },
-    )
-    upstream.on("error", () => {
+    // Do not construct/request-pipe `httpRequest` until the raw TCP peer has
+    // passed the rebind check. Creating it first queues request bytes on the
+    // socket before the response callback sees `remoteAddress`, which leaks a
+    // request to a rebinding target despite returning 403 to the child.
+    const socket = netConnect(dialed.port, dialed.host)
+    socket.once("connect", () => {
+      if (this.peerIsBlocked(socket)) {
+        socket.destroy()
+        if (!res.headersSent)
+          res.writeHead(403).end("egress denied: peer resolved to blocked address")
+        return
+      }
+      const upstream = httpRequest(
+        {
+          host: dialed.host,
+          port: dialed.port,
+          method: req.method,
+          path: target.url.pathname + target.url.search,
+          headers: req.headers,
+          createConnection: () => socket,
+        },
+        (up) => {
+          res.writeHead(up.statusCode ?? 502, up.headers)
+          up.pipe(res)
+        },
+      )
+      upstream.on("error", () => {
+        if (!res.headersSent)
+          res.writeHead(502, { "content-type": "text/plain" }).end("upstream error")
+        else res.end()
+      })
+      req.pipe(upstream)
+    })
+    socket.on("error", () => {
       if (!res.headersSent)
         res.writeHead(502, { "content-type": "text/plain" }).end("upstream error")
       else res.end()
     })
-    req.pipe(upstream)
   }
 
   /**
@@ -489,32 +505,43 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
       headers,
       this.config.secretEgress?.headerRules,
     )
-    const upstream = httpRequest(
-      {
-        host: dialed.host,
-        port: dialed.port,
-        method: req.method,
-        path: target.url.pathname + target.url.search,
-        headers,
-      },
-      (up) => {
-        if (this.peerIsBlocked(up.socket)) {
-          up.destroy()
-          if (!res.headersSent)
-            res.writeHead(403).end("egress denied: peer resolved to blocked address")
-          return
-        }
-        res.writeHead(up.statusCode ?? 502, up.headers)
-        up.pipe(res)
-      },
-    )
-    upstream.on("error", () => {
+    // Mirror `pipeHttp`: the post-dial SSRF decision must precede writing the
+    // buffered body, otherwise a DNS-rebound peer receives it before rejection.
+    const socket = netConnect(dialed.port, dialed.host)
+    socket.once("connect", () => {
+      if (this.peerIsBlocked(socket)) {
+        socket.destroy()
+        if (!res.headersSent)
+          res.writeHead(403).end("egress denied: peer resolved to blocked address")
+        return
+      }
+      const upstream = httpRequest(
+        {
+          host: dialed.host,
+          port: dialed.port,
+          method: req.method,
+          path: target.url.pathname + target.url.search,
+          headers,
+          createConnection: () => socket,
+        },
+        (up) => {
+          res.writeHead(up.statusCode ?? 502, up.headers)
+          up.pipe(res)
+        },
+      )
+      upstream.on("error", () => {
+        if (!res.headersSent)
+          res.writeHead(502, { "content-type": "text/plain" }).end("upstream error")
+        else res.end()
+      })
+      if (bodyBuf.length > 0) upstream.write(bodyBuf)
+      upstream.end()
+    })
+    socket.on("error", () => {
       if (!res.headersSent)
         res.writeHead(502, { "content-type": "text/plain" }).end("upstream error")
       else res.end()
     })
-    if (bodyBuf.length > 0) upstream.write(bodyBuf)
-    upstream.end()
   }
 
   /** HTTPS `CONNECT host:443` tunnel path. */

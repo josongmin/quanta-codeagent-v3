@@ -253,9 +253,11 @@ describe("side_agent_* — read/write split honored at the permission + plan sea
     expect(port.stopped).toEqual([])
   })
 
-  test("side_agent_spawn (mutating, no hitlTier) ⇒ secure-by-default always-confirm under HITL", async () => {
-    // inferToolTier fallback for a mutating tool with no hitlTier() is
-    // "always-confirm" — so with HITL enabled, even bypass mode calls onConfirm.
+  test("side_agent_spawn (unclassified mutating) ⇒ explicit bypass defers its needs-sandbox HITL tier", async () => {
+    // The fallback is still always-confirm under default/acceptEdits, but its
+    // `needs-sandbox` reason is deliberately non-universal. An explicit bypass
+    // defers to mode policy; only sensitive/declared confirm tiers remain
+    // confirmation floors under bypass.
     let confirmed = 0
     const res = await dispatch(
       sideAgentTools(fakeSideAgentPort()),
@@ -275,7 +277,7 @@ describe("side_agent_* — read/write split honored at the permission + plan sea
         },
       },
     )
-    expect(confirmed).toBe(1) // always-confirm tier fired even under bypass
+    expect(confirmed).toBe(0)
     expect(res.ok).toBe(true)
   })
 })

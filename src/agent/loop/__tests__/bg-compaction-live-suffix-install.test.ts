@@ -28,7 +28,7 @@
 import { describe, expect, test } from "bun:test"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import { createWorkingMemory } from "@/memory"
-import { makeBgCompactionController } from "../../compaction"
+import { makeBgCompactionController, reactiveCompact } from "../../compaction"
 import type { BgCompactionConfig } from "../../compaction/index"
 import type { AgentConfig } from "../../types"
 import { maybeCompact, rebuildBgInstallAgainstLive } from "../compaction-wire"
@@ -284,5 +284,77 @@ describe("maybeCompact + real bg controller (FIX H1) — live-suffix install", (
     )
     // OFF ⇒ undefined ⇒ maybeCompact never references the bg install path.
     expect(controller).toBeUndefined()
+  })
+
+  test("background result racing a reactive replacement is discarded: no second replace or stale install", async () => {
+    const seed: Message[] = [
+      txt("user", `u0 ${"x".repeat(50)}`),
+      txt("assistant", `a0 ${"x".repeat(50)}`),
+      txt("user", `u1 ${"x".repeat(50)}`),
+      txt("assistant", `a1 ${"x".repeat(50)}`),
+      txt("user", `u2 ${"x".repeat(50)}`),
+      txt("assistant", `a2 ${"x".repeat(50)}`),
+    ]
+    const backing = createWorkingMemory<Message>(seed)
+    let replaces = 0
+    const wm = {
+      snapshot: () => backing.snapshot(),
+      append: (message: Message) => backing.append(message),
+      replace: (messages: Message[]) => {
+        replaces += 1
+        backing.replace(messages)
+      },
+    }
+    let now = 1000
+    const controller = makeBgCompactionController(
+      { QUANTA_BG_COMPACTION: "1" },
+      summarizerLlm,
+      () => wm.snapshot(),
+      () => now,
+      bgCfg,
+    )
+    const config = makeConfig()
+
+    // Start the speculative pass over `seed`.
+    await maybeCompact({
+      config,
+      system: "sys",
+      wm,
+      breaker: undefined,
+      archive: undefined,
+      turn: 0,
+      bgController: controller,
+      resetClassifier: noopReset,
+      tokenBaselineBox: undefined,
+    })
+    for (let i = 0; i < 20; i++) await Promise.resolve()
+
+    // The PTL/recovery path replaces the history before the background result
+    // reaches its boundary. This is a real reactive compaction, not a shaped
+    // replacement fixture.
+    const reactive = await reactiveCompact({ messages: wm.snapshot(), llm: summarizerLlm })
+    expect(reactive.ok).toBe(true)
+    if (!reactive.ok) throw new Error(`reactive compaction unexpectedly failed: ${reactive.reason}`)
+    wm.replace(reactive.messages)
+    const afterReactive = wm.snapshot()
+    expect(replaces).toBe(1)
+
+    // The pass was built against the pre-reactive prefix. Its frozen suffix can
+    // no longer match, so reconciliation must discard it and leave the reactive
+    // result as the only install. A verbatim background install would make this 2.
+    now += 10
+    await maybeCompact({
+      config,
+      system: "sys",
+      wm,
+      breaker: undefined,
+      archive: undefined,
+      turn: 1,
+      bgController: controller,
+      resetClassifier: noopReset,
+      tokenBaselineBox: undefined,
+    })
+    expect(replaces).toBe(1)
+    expect(wm.snapshot()).toEqual(afterReactive)
   })
 })

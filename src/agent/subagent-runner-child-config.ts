@@ -1,5 +1,5 @@
 import type { Message } from "@/llm"
-import { runtimeConfig } from "@/shared"
+import { runtimeConfig, type RuntimeConfig } from "@/shared"
 import type { SubagentTurnGate } from "@/subagent"
 import { type Tool, ToolRegistry } from "@/tool"
 import type { SubagentRequest } from "../subagent/types"
@@ -137,6 +137,7 @@ const buildChildBase = (
   cwd: string,
   mailboxId: string,
   toolNamespace: ToolNamespaceStrategy | undefined,
+  childRuntime: Pick<RuntimeConfig, "fsOwnershipEnforce">,
 ): ChildBase => {
   const filtered = filterRegistry(parent.registry, req.toolFilter, req.extraTools)
   const registry =
@@ -145,7 +146,7 @@ const buildChildBase = (
     ...(req.ownedSurfaces ? { owned: req.ownedSurfaces } : {}),
     ...(req.forbiddenSurfaces ? { forbidden: req.forbiddenSurfaces } : {}),
     cwd,
-    enforced: runtimeConfig().fsOwnershipEnforce,
+    enforced: childRuntime.fsOwnershipEnforce,
   })
   const messages: Message[] = [
     { role: "user", content: [{ type: "text", text: buildSeedPrompt(req) }] },
@@ -212,10 +213,11 @@ export const buildChildConfig = (
   toolNamespace?: ToolNamespaceStrategy,
   turnGate?: SubagentTurnGate,
   spawnedAsTaskId?: string,
+  childRuntime: Pick<RuntimeConfig, "fsOwnershipEnforce"> = runtimeConfig(),
 ): AgentConfig => {
   const req = applyNamedAgent(parent, rawReq)
   return {
-    ...buildChildBase(parent, req, cwd, mailboxIds.agentId, toolNamespace),
+    ...buildChildBase(parent, req, cwd, mailboxIds.agentId, toolNamespace, childRuntime),
     ...buildChildInheritedConfig(parent, req, mailboxIds, turnGate, spawnedAsTaskId),
   } as AgentConfig
 }
