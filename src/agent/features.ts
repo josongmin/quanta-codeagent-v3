@@ -176,30 +176,41 @@ export interface SessionFeatures {
  *  registries/dispose handles) and the small worktree..userInput tail that is
  *  interleaved with them stay inline below — keeping them out avoids a
  *  half-covered "two registration systems" tangle. */
+// ⚠️ TDZ-SAFE LAZY ENTRIES — every element is an arrow `(c) => buildX(c)`, NOT a
+// bare `buildX` reference. This module participates in an import cycle (the
+// `@/tool` + `@/subagent` + `@/agent/tier1` graph re-enters `@/agent/features`
+// under some load orders), so a BARE reference to a `tier1` `export const`
+// builder is read at ARRAY-CONSTRUCTION time — i.e. during this module's init,
+// while the referenced builder may still be in its temporal dead zone. That
+// threw `ReferenceError: Cannot access 'buildShadowBlock' before initialization`
+// under the manifest-test import order. Wrapping each entry in an arrow defers
+// the symbol read to CALL time (inside `buildSessionFeatures`, long after all
+// modules finish init), making the array order-independent. Do NOT "simplify"
+// these back to bare `buildX` refs — that reintroduces the cycle-order crash.
 const SESSION_FEATURE_BLOCKS: readonly ((config: AgentConfig) => readonly Tool[])[] = [
   // ADR-0083 — branch_search (Tool | undefined ⇒ normalized to a 0/1 array).
   (c) => {
     const t = buildBranchSearchBlock(c)
     return t !== undefined ? [t] : []
   },
-  buildShadowBlock, // ADR-0119 — shadow store tools
-  buildForkSessionBlock, // ADR-0201 — fork_session
-  buildShadowVerifyBlock, // ADR-0400 — shadow_verify
-  buildSubagentBgBlock, // ADR-0140 — background-subagent tools
-  buildSubagentBatchBlock, // RFC-02/ADR-0436 — spawn_batch
-  buildSubagentIntrospectBlock, // RFC-04/ADR-0437 — list_agents + followup_task
-  buildSubagentMailboxBlock, // ADR-0416 — subagent_send_message
-  buildTeamBlock, // RFC jun-6 — team_create / team_delete
-  buildDelegateBlock, // ADR-0393 — delegate
-  buildAdvisorBlock, // ADR-0257 — advisor consult
-  buildComposeAuthoringBlock, // ADR-0016 — git_compose_commit / _pr (read-only)
-  buildPrShipBlock, // ADR-0460 — gh_pr_open (write; separate from the sealed compose block)
-  buildObjectiveBlock, // ADR-0398 — objective_set / _update / _get
-  buildBudgetBlock, // ADR-0136 — budget_status
+  (c) => buildShadowBlock(c), // ADR-0119 — shadow store tools
+  (c) => buildForkSessionBlock(c), // ADR-0201 — fork_session
+  (c) => buildShadowVerifyBlock(c), // ADR-0400 — shadow_verify
+  (c) => buildSubagentBgBlock(c), // ADR-0140 — background-subagent tools
+  (c) => buildSubagentBatchBlock(c), // RFC-02/ADR-0436 — spawn_batch
+  (c) => buildSubagentIntrospectBlock(c), // RFC-04/ADR-0437 — list_agents + followup_task
+  (c) => buildSubagentMailboxBlock(c), // ADR-0416 — subagent_send_message
+  (c) => buildTeamBlock(c), // RFC jun-6 — team_create / team_delete
+  (c) => buildDelegateBlock(c), // ADR-0393 — delegate
+  (c) => buildAdvisorBlock(c), // ADR-0257 — advisor consult
+  (c) => buildComposeAuthoringBlock(c), // ADR-0016 — git_compose_commit / _pr (read-only)
+  (c) => buildPrShipBlock(c), // ADR-0460 — gh_pr_open (write; separate from the sealed compose block)
+  (c) => buildObjectiveBlock(c), // ADR-0398 — objective_set / _update / _get
+  (c) => buildBudgetBlock(c), // ADR-0136 — budget_status
   (c) => buildCheckSecretsBlock(c.secretCheckToolEnabled), // ADR-0412 — check_secrets (env-gated)
-  buildWebSearchBlock, // ADR-0127/0148 — web_search
-  buildPromptCacheBlock, // ADR-0182 — prompt_cache_status
-  buildSideAgentBlock, // N1 — background side-agent management tools
+  (c) => buildWebSearchBlock(c), // ADR-0127/0148 — web_search
+  (c) => buildPromptCacheBlock(c), // ADR-0182 — prompt_cache_status
+  (c) => buildSideAgentBlock(c), // N1 — background side-agent management tools
 ]
 
 export const buildSessionFeatures = async (config: AgentConfig): Promise<SessionFeatures> => {
