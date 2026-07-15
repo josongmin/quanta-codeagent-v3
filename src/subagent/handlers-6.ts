@@ -317,6 +317,16 @@ export const handleSpawnAgent = async (
   // to the schema's `string`, so no separate intersection is needed.
 ): Promise<SpawnAgentOutput> => {
   const parentDepth = deps.parentDepth ?? 0
+  // Fail-CLOSED on a malformed parent depth (NaN / negative / non-integer),
+  // mirroring the authoritative runner `childDepthOf` `SpawnLineageError` — a
+  // corrupt depth must DENY here, never compute a spuriously-shallow child that
+  // wrongly passes the cap. (`?? 0` above only handles absent=root.)
+  if (!Number.isInteger(parentDepth) || parentDepth < 0) {
+    return errSpawn(
+      `Subagent denied: malformed parent depth ${parentDepth} (fail-closed)`,
+      "depth_exceeded",
+    )
+  }
   const childDepth = parentDepth + 1
   // (d) Fail-CLOSED depth cap: when neither the per-call nor the dep-level
   // `maxDepth` is supplied, fall back to the built-in `DEFAULT_MAX_DEPTH`

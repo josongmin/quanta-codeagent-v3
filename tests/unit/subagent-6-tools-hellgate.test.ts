@@ -367,6 +367,33 @@ describe("HELLGATE — handleSpawnAgent", () => {
     if (r.kind === "error") expect(r.cause).toBe("depth_exceeded")
   })
 
+  // FAIL-CLOSED: a MALFORMED parentDepth (NaN / negative / non-integer) must DENY,
+  // not compute a spuriously-shallow child that wrongly passes the cap. maxDepth is
+  // WIDE (100) so a fail-OPEN regression (coercing NaN→0 ⇒ child 1 <= 100 ⇒ pass)
+  // would flip these RED. Mirrors the authoritative runner childDepthOf discipline.
+  test("malformed parentDepth (NaN / -1 / 2.5) ⇒ DENIED cause:depth_exceeded (fail-closed, wide cap)", async () => {
+    for (const bad of [Number.NaN, -1, 2.5]) {
+      const reg = new TaskRegistry()
+      const r = await handleSpawnAgent(
+        { prompt: "do a thing" },
+        { runner: slowRunner(10), registry: reg, maxDepth: 100, parentDepth: bad },
+      )
+      expect(r.kind).toBe("error")
+      if (r.kind === "error") expect(r.cause).toBe("depth_exceeded")
+    }
+  })
+
+  // Paired control: an ABSENT parentDepth is a genuine root (0) — must ADMIT under a
+  // wide cap. Proves the deny above is the malformed-guard, not "any non-cap denies".
+  test("absent parentDepth is genuine root ⇒ ADMITTED under wide cap (paired control)", async () => {
+    const reg = new TaskRegistry()
+    const r = await handleSpawnAgent(
+      { prompt: "p" },
+      { runner: slowRunner(10), registry: reg, maxDepth: 100 },
+    )
+    expect(r.kind).not.toBe("error")
+  })
+
   test("happy path returns agentId AND an ownerToken (capability cap)", async () => {
     const reg = new TaskRegistry()
     const r = await handleSpawnAgent({ prompt: "p" }, { runner: slowRunner(10), registry: reg })
