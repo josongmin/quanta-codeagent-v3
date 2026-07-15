@@ -48,8 +48,17 @@ purpose: |
 
   Default-OFF byte-identical: absent onChange + absent rebuilder ⇒
   behavior identical to ADR-0291 (state-only swap, stale prompt).
-  The actual surface wire that composes the three is left for a
-  follow-up ADR — this slice ships the seams.
+
+  WIRE LANDED (2026-07): the live surface composition wires the mid-session
+  rebuild via the inline `buildPromptFromIdentityMode` path, NOT the
+  `createSystemPromptRebuilder` port. `surface-compose.ts:802` binds
+  `onIdentityModeChange → setup.refreshSystemPrompt`; that seam
+  (`bootstrap-session.ts:226`) calls `systemSource.set(buildPromptFromIdentityMode())`,
+  which fresh-reads the live `identityModeState.get()` (bootstrap-session.ts:201)
+  so /identity mid-session refreshes the cached prefix. The
+  `createSystemPromptRebuilder` port here is an unwired forward-seam (unit-tested
+  only, no production caller — see the FORWARD-SEAM marker in
+  system-prompt-rebuilder.ts).
 evidence:
   code:
     - src/apps/cli/repl/system-prompt-rebuilder.ts
@@ -66,12 +75,12 @@ deliberate_hold: null
 notes: |
   15 hellgate cases / 45 expects / 0 fail. tsc 0, biome 0.
 
-  Slice fence preserved — session-loop.ts, surface-compose.ts,
-  prompt-pipeline.ts, session-bootstrap.ts UNTOUCHED. Loop / runner
-  contract (SessionDeps.system: string) UNTOUCHED. The follow-up wire
-  will mirror the rebuilder output into sessionDeps.system (mutable
-  field) so assembleConfig(messages, d) reads the fresh string on the
-  next turn — no shape change.
+  Live wire landed via the inline path (see purpose): surface-compose.ts:802
+  binds onIdentityModeChange → refreshSystemPrompt (bootstrap-session.ts:226),
+  which mutates the shared `systemSource` cell that the per-turn assembler reads
+  on the next turn — no loop/runner contract shape change. The
+  createSystemPromptRebuilder / SystemSource port pair in this slice is the
+  unwired forward-seam substrate (unit-tested only).
 
   No new closed enums or error codes; the typed fallback prefix
   ("(prompt rebuild failed: ") is a stable test target, not a public
