@@ -33,19 +33,23 @@
  * the resume sink — byte-identical to today's informational objective (no
  * continuation ever launches).
  *
- * ⚠️ NOT YET WIRED (ALBB-15 honesty note): this whole module is CURRENTLY DEAD
- * — `evaluateContinuation` / `runIdleContinuation` / {@link ContinuationSemaphore}
- * are only barrel re-exported from `@/agent/objective` with ZERO production
- * callers, and the `QUANTA_GOAL_ENFORCE` → `goalContinuationEnforce` knob has
- * ZERO readers. The LIVE budget-suppression path is `objectiveBudgetExhausted`
- * in `@/agent/loop/emit-helpers` (reads the DERIVED `budget_limited` status),
- * NOT this continuation machine. To activate: bind the probes/resume at the
- * idle-monitor / reactor seam and gate `ContinuationDeps.enabled` from the
- * `QUANTA_GOAL_ENFORCE` knob.
+ * LIVE WIRING (jul-13 "Pursuing goal" landing): this module is NO LONGER dead.
+ * `runIdleContinuation` is driven by the host binding
+ * `apps/cli/goal-continuation-hook.ts` (`startGoalContinuationTicker`, which
+ * calls `void runIdleContinuation(threadId, deps)` at ~L93 on each idle tick
+ * with host-bound probes + a `resume` sink). The `QUANTA_GOAL_ENFORCE` →
+ * `goalContinuationEnforce` knob IS read: `apps/cli/repl/session-loop.ts` (~L780)
+ * passes `enabled: runtimeConfig().goalContinuationEnforce` when arming the
+ * ticker. A ratchet pins the binding
+ * (`tests/unit/goal-continuation-wiring-ratchet.test.ts`).
+ * Separately, the budget-suppression path `objectiveBudgetExhausted` in
+ * `@/agent/loop/emit-helpers` (reads the DERIVED `budget_limited` status) is a
+ * DIFFERENT machine and still lives — the two are unrelated.
  *
  * SLICE FENCE: imports ONLY `./types` (the closed `ObjectivePort` +
  * `ObjectiveStatus`). Nothing from `@/agent` core, `@/reactor`, `@/apps`. The
- * host binds the probes/resume at the idle-monitor / reactor seam.
+ * host binds the probes/resume at the idle-monitor / reactor seam
+ * (goal-continuation-hook).
  */
 
 import type { ObjectivePort, ObjectiveStatus } from "./types"

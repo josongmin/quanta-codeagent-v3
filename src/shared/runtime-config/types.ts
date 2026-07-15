@@ -59,19 +59,18 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  (byte-identical). Also read by the slice's own `skillMcpDepsEnabled`. */
   readonly skillMcpDeps: boolean
   /** ADR-0470 B1 follow-up inbound MCP sampling gate (`QUANTA_MCP_SAMPLING`).
-   *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). SEAM (validated, not yet composed at the root):
-   *  the handler builder (`host/runtime/mcp-sampling-handler.ts`
-   *  `buildSamplingWiring`) and the `McpClient` `samplingHandler` acceptance slot
-   *  both exist and are unit-tested, but NO production code reads this field to
-   *  pass `opts.sampling` + a `samplingHandler` to the client yet. Until that
-   *  composition lands, this field has zero production consumers and is a no-op.
-   *  Intended end state (advertise-iff-able): when ON *and* an LLM + a consent
-   *  prompter are assembled at the composition root, the MCP client advertises
-   *  `sampling` AND is wired with an `@/llm`-backed handler (HITL consent on
-   *  every request); the advertisement and the handler always move together.
-   *  Default false ⇒ sampling is NOT advertised and the headless rejecter
-   *  declines (`no-handler`) — byte-identical (and currently byte-identical even
-   *  when ON, because the field is unread). */
+   *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). LIVE consumer:
+   *  `host/mcp-composition.ts` (`resolveMcpInboundWiring`, ~L623) reads this
+   *  field and passes it to `buildSamplingWiring(runtimeConfig().mcpSampling,
+   *  samplingDeps)`, whose `advertise` flag + answering handler flow to the MCP
+   *  inbound negotiator / sampling handler (advertise-iff-able).
+   *  Advertise-iff-able: sampling is ON only when this field is set AND an LLM
+   *  AND an interactive consent prompter are assembled at the composition root (a
+   *  remote server must never silently spend inference unattended); the
+   *  advertisement and the `@/llm`-backed HITL handler always move together.
+   *  Default false ⇒ `buildSamplingWiring` returns OFF, sampling is NOT
+   *  advertised, and the headless rejecter declines (`no-handler`) —
+   *  byte-identical. A live consumer exists when ON (given LLM + consent). */
   readonly mcpSampling: boolean
   /** delta-token-accounting (RFC jun-6) incremental context-estimate gate
    *  (`QUANTA_DELTA_TOKEN_COUNT`). Strict opt-in (`=== "1"`). When ON, the loop
