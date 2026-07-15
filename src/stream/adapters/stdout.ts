@@ -205,6 +205,12 @@ export class StdoutStream implements StreamPort {
       case "peer_message":
         this.write(renderPeerMessage(event))
         break
+      case "subagent_spawn":
+        this.write(renderSubagentSpawn(event))
+        break
+      case "subagent_status":
+        this.write(renderSubagentStatus(event))
+        break
       case "plan_created":
         this.write(renderPlanCreated(event))
         break
@@ -361,6 +367,34 @@ const renderPeerMessage = (event: Extract<AgentEvent, { type: "peer_message" }>)
       ? `\n${DIM}  … (+${extra} more line${extra === 1 ? "" : "s"} — subagent_read_messages to view)${RESET}`
       : ""
   return `${head}${body}${more}\n`
+}
+
+/** Multi-agent-panel SUBSTRATE — subagent lifecycle spawn line. Description is
+ *  model-/runtime-derived, so it routes through the terminal redaction boundary.
+ *  (Copied verbatim from the concurrent multi-agent-panel work committed on
+ *  feat/fc-evidence-relink so main's exhaustive switch is complete NOW and the
+ *  eventual feat→main merge of these two functions is a no-op — jul-15.) */
+const renderSubagentSpawn = (event: Extract<AgentEvent, { type: "subagent_spawn" }>): string => {
+  const parent = event.parentTaskId === undefined ? "" : ` parent=${event.parentTaskId}`
+  const agentType = event.agentType === undefined ? "" : ` type=${event.agentType}`
+  return `${DIM}↳ subagent_spawn ${event.taskId} depth=${event.depth}${parent}${agentType}: ${oneLine(redactStr(event.description))}${RESET}\n`
+}
+
+/** Multi-agent lifecycle transition. Final text and errors are model-/runtime-
+ * derived, so do not bypass the terminal redaction boundary when surfacing a
+ * compact completion summary. (Copied verbatim from feat/fc-evidence-relink — see
+ * renderSubagentSpawn.) */
+const renderSubagentStatus = (event: Extract<AgentEvent, { type: "subagent_status" }>): string => {
+  const turns = event.turns === undefined ? "" : ` turns=${event.turns}`
+  const preview =
+    event.finalTextPreview === undefined || event.finalTextPreview === ""
+      ? ""
+      : `: ${oneLine(redactStr(event.finalTextPreview))}`
+  const error =
+    event.error === undefined || event.error === ""
+      ? ""
+      : `${preview === "" ? ":" : " |"} error=${oneLine(redactStr(event.error))}`
+  return `${DIM}↳ subagent_status ${event.taskId} (${event.status}${turns})${preview}${error}${RESET}\n`
 }
 
 /** ALBB-21 — advisory budget-cap crossing banner (Claude Code / Codex cost-
