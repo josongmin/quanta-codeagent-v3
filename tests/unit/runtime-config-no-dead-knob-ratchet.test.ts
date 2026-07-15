@@ -152,7 +152,7 @@ const HOMONYM_OWNER_READS = {
     pattern: /config\.secretEgress\b/,
   },
   writeBudget: {
-    path: join(SRC, "host/runtime/agent-config-assembler.ts"),
+    path: join(SRC, "host/runtime/security-rails-wire.ts"),
     pattern: /config\.writeBudget\b/,
   },
 } as const

@@ -33,7 +33,7 @@
  *   E2E-ALLOW the SAME child still admits a read-only tool (`read`) — the clamp
  *            denies writes WITHOUT over-blocking reads (no false positive)
  */
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { runAgent } from "@/agent/loop"
 import type { NamedAgentDefinition, NamedAgentResolver } from "@/agent/named-agent-registry"
 import type { AgentMode } from "@/agent/prompt"
@@ -41,6 +41,7 @@ import { createSubagentRunner } from "@/agent/subagent-runner"
 import type { AgentConfig, AgentOutcome } from "@/agent/types"
 import type { LLMPort } from "@/llm"
 import type { PermissionContext } from "@/permission"
+import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import type { SubagentRequest } from "@/subagent/types"
 import type { Tool, ToolEvent } from "@/tool"
 import { ToolRegistry } from "@/tool"
@@ -176,6 +177,31 @@ describe("named-agent mode clamp — depth-2 grandchild non-escape (hellgate)", 
   // → grandchild. The grandchild's parent IS the clamped child config, so a
   // read-only floor at depth 1 must keep flooring at depth 2 (no escape by
   // re-requesting `default` one level deeper).
+  //
+  // OPERATOR-POLICY WIDEN (RFC jul-13 §4.2 rev.4 min-cap): admitting a depth-2
+  // grandchild requires `effectiveCap >= 2`. The effective cap is
+  // `min(spawnDepthCap() operator policy, opts.maxDepth ?? +∞)` and the operator
+  // policy `maxDescendantDepth` now DEFAULTS to 1 (min-cap RFC) — so with the
+  // default policy `effectiveCap(undefined) = min(1, +∞) = 1` and the depth-2
+  // spawn is DENIED before `run` ("runner never forked a child"). A per-config
+  // `subagent.maxDepth` would NOT help: it only ever TIGHTENS below the policy
+  // ceiling (`min(1, 2) = 1`), and `captureChild` passes NO `opts.maxDepth`
+  // anyway. The authoritative lever is the operator policy env, so we widen it
+  // to 2 (via the real runtime-config seam) around THIS block only — exactly the
+  // pattern in `subagent-runner.test.ts`'s depth-guard block. The depth-1 tests
+  // above stay untouched (they assert the DEFAULT-policy clamp).
+  let savedPolicy: string | undefined
+  beforeEach(() => {
+    savedPolicy = process.env.QUANTA_MAX_DESCENDANT_DEPTH
+    process.env.QUANTA_MAX_DESCENDANT_DEPTH = "2"
+    __resetRuntimeConfig()
+  })
+  afterEach(() => {
+    if (savedPolicy === undefined) delete process.env.QUANTA_MAX_DESCENDANT_DEPTH
+    else process.env.QUANTA_MAX_DESCENDANT_DEPTH = savedPolicy
+    __resetRuntimeConfig()
+  })
+
   const grandchildOf = async (
     rootMode: AgentMode,
     childAgentType: string,

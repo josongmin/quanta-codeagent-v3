@@ -41,9 +41,11 @@ describe("buildProjectEnvUvRunArgv — astropy env parity (SCAFF-07 / P0 mechani
     expect(argv).toContain(
       "CFLAGS=-Wno-error=incompatible-function-pointer-types -Wno-incompatible-function-pointer-types",
     )
-    // The repo itself is installed editable from the sandbox cwd.
+    // The repo itself is installed editable from the sandbox cwd. astropy's
+    // official install is `pip install -e .[test]`, so the editable target
+    // carries the `[test]` extra (not a bare `.`).
     expect(argv).toContain("--with-editable")
-    expect(argv[argv.indexOf("--with-editable") + 1]).toBe(".")
+    expect(argv[argv.indexOf("--with-editable") + 1]).toBe(".[test]")
   })
 
   test("extraWith deps coexist with the base env (pytest path), still no build flags", () => {
@@ -125,10 +127,11 @@ describe("buildProjectEnvUvRunArgv — per-repo env overrides (FIX C consolidati
     expect(hasWithDep(argv, "setuptools")).toBe(true) // base dep still present
   })
 
-  // Ordering invariant: base flags → `--with` deps → `--with-editable .`. No
-  // build flags remain (build deps moved to pyproject), so the shape is
-  // `--no-project … --python v --with <dep> … --with-editable .`.
-  test("argv shape preserved: base flags → --with deps → --with-editable .", () => {
+  // Ordering invariant: base flags → `--with` deps → `--with-editable .[test]`.
+  // No build flags remain (build deps moved to pyproject), so the shape is
+  // `--no-project … --python v --with <dep> … --with-editable .[test]` (astropy's
+  // official install carries the `[test]` extra).
+  test("argv shape preserved: base flags → --with deps → --with-editable .[test]", () => {
     const argv = buildProjectEnvUvRunArgv("astropy/astropy", "4.3")
     const uvIdx = uvRunIndex(argv)
     const noProjIdx = argv.indexOf("--no-project")
@@ -138,6 +141,6 @@ describe("buildProjectEnvUvRunArgv — per-repo env overrides (FIX C consolidati
     expect(noProjIdx).toBeGreaterThan(uvIdx)
     expect(firstWith).toBeGreaterThan(noProjIdx)
     expect(editIdx).toBeGreaterThan(firstWith)
-    expect(argv[editIdx + 1]).toBe(".")
+    expect(argv[editIdx + 1]).toBe(".[test]")
   })
 })

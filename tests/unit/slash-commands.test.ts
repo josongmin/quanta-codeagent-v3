@@ -153,6 +153,9 @@ describe("BUILTINS table", () => {
       "/inbound",
       "/resume-turn",
       "/hooks",
+      // `/goal` (autonomous goal-pursuit) is the session-layer tail
+      // (registry-session.ts, after /hooks) — see goal-cmd.ts.
+      "/goal",
       // ── app layer (./slash/registry-app.ts) ─────────────────────────
       "/permission",
       "/mcp",

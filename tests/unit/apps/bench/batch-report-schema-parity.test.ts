@@ -17,7 +17,7 @@ const mkResult = (id: string, passed: boolean, patch: string): InstanceResult =>
 
 describe("T5 batch report schema parity", () => {
   test("bench surface keeps report ownership outside the sdk runtime", () => {
-    const source = read("src/apps/bench/index.ts")
+    const source = read("src/apps/bench/run-main-helpers.ts")
 
     expect(source).toContain("writeBatchArtifacts")
     expect(source).toContain("export const writeArtifacts = async")

@@ -159,7 +159,9 @@ describe("toInstance — PASS_TO_PASS threading", () => {
       "/tmp/repo",
     )
     expect(inst.testCmd).toContain("PYTEST_ADDOPTS=")
-    expect(inst.testCmd).toContain("python tests/runtests.py --settings=test_sqlite --parallel=1")
+    expect(inst.testCmd).toContain(
+      "python tests/runtests.py --verbosity 2 --settings=test_sqlite --parallel 1",
+    )
     expect(inst.testCmd).toContain(
       "'timezones.tests.NewDatabaseTests.test_query_convert_timezones'",
     )

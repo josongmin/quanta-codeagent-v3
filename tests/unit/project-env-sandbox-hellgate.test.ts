@@ -663,7 +663,9 @@ describe("buildProjectEnvUvRunArgv — build-dep mechanism moved to pyproject", 
     expect(argv).toContain("--no-project")
     expect(hasWithDep(argv, "setuptools")).toBe(true)
     expect(argv).toContain("--with-editable")
-    expect(argv[argv.indexOf("--with-editable") + 1]).toBe(".")
+    // astropy's official install is `pip install -e .[test]`, so the editable
+    // target carries the `[test]` extra (not a bare `.`).
+    expect(argv[argv.indexOf("--with-editable") + 1]).toBe(".[test]")
   })
 
   test("xarray RUNTIME pin stays a --with (it is NOT a build dep)", () => {

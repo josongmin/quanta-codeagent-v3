@@ -200,7 +200,11 @@ const baseInstance = (swebench: boolean): Instance =>
         id: "test-1",
         repoPath: "/tmp/x",
         problemStatement: "fix it",
-        testCmd: "true",
+        // NOTE: a real, non-noop, non-dataset command. `"true"` is now in
+        // NOOP_TEST_COMMANDS (repo-local-verifier-command.ts) so it is filtered
+        // out ⇒ no `exactCommands`; a real repo-local command like `pytest -q`
+        // surfaces as the agent-visible verifier authority.
+        testCmd: "pytest -q",
         swebench: {
           instanceId: "x__1",
           repo: "x/x",
@@ -284,7 +288,7 @@ describe("buildConfig — bench opt-ins wired into AgentConfig", () => {
     // by these flags); pinned here to lock that the new opts don't drop it.
     // mustPass+maxTrips:2 (ADR-0011 outcome-gate extension) — pins the bench
     // shape so a regression that strips the SOTA mustPass branch fails here.
-    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["true"] })
+    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["pytest -q"] })
     // Nav tools present — registry expands relative to the all-unset baseline.
     const ac2 = new AbortController()
     const savedLsp = process.env.QUANTA_BENCH_LSP

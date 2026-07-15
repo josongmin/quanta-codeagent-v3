@@ -151,10 +151,12 @@ describe("#23 runId / artifactSuffix shell-injection boundary", () => {
     })
 
     expect(result.resolved).toEqual(["fixture__clean"])
-    const scrubIndex = sshCommands.findIndex((cmd) =>
-      cmd.includes(
-        "rm -f ~/preds.jsonl ~/report.json ~/run.log ~/run.exit ~/report.closure-diagnostics.json $HOME/quanta/bench-trajectory.jsonl; rm -rf ~/observe; mkdir -p ~/observe",
-      ),
+    // The scrub command's exact middle drifts (a `rm -rf <trajDir>;` segment is
+    // inserted when recordTrajectory:true), so pin the stable prefix + the
+    // `mkdir -p ~/observe` tail rather than the full brittle string. Both fence
+    // the scrub-before-launch ordering without re-pinning every drifting token.
+    const scrubIndex = sshCommands.findIndex(
+      (cmd) => cmd.startsWith("rm -f ~/preds.jsonl") && cmd.includes("mkdir -p ~/observe"),
     )
     const launchIndex = sshCommands.findIndex((cmd) => cmd.includes("setsid bash -c"))
     expect(scrubIndex).toBeGreaterThanOrEqual(0)
