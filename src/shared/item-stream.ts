@@ -54,6 +54,11 @@ export type ItemStreamItemType =
   | "plan"
   | "subagent"
   | "progressCard"
+  // jul-15 W2 (append-only) — an inter-agent / side-agent message surfaced to the
+  // user (Codex "Sent from another task" parity). A `peer_message` AgentEvent folds
+  // into ONE atomic `started`+`completed` item so every surface renders it from the
+  // same stream. Attribution (from→to [kind] body) rides `completed.text`.
+  | "peerMessage"
 
 /**
  * The KIND of a delta payload. Closed union, 1:1 derivable from the owning
@@ -74,6 +79,10 @@ export type ItemStreamDeltaKind =
   | "plan.patch"
   | "subagent.progress"
   | "progressCard.step"
+  // jul-15 W2 (append-only) — the delta kind for a `peerMessage` item. A surfaced
+  // message is atomic (started+completed in one shot), so this kind exists only to
+  // satisfy the 1:1 item→delta map; no incremental `delta` is emitted for it.
+  | "peerMessage.text"
 
 /** An item opened. `index` is monotonic across ALL items in a turn-stream. */
 export interface ItemStreamStarted {
@@ -127,6 +136,7 @@ export const ITEM_DELTA_KIND_BY_ITEM_TYPE = {
   plan: "plan.patch",
   subagent: "subagent.progress",
   progressCard: "progressCard.step",
+  peerMessage: "peerMessage.text",
 } as const satisfies Record<ItemStreamItemType, ItemStreamDeltaKind>
 
 /**

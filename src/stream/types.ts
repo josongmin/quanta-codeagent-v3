@@ -145,6 +145,7 @@ export const AGENT_EVENT_TYPES = [
   "subagent_cancel",
   "subagent_spawn",
   "subagent_status",
+  "peer_message",
   "plan_created",
   "plan_updated",
   "plan_snapshot",
@@ -418,6 +419,35 @@ export type AgentEvent =
       turns?: number
       finalTextPreview?: string
       error?: string
+    }
+  // Peer/side-agent message surfacing (jul-15 W2 — Codex "Sent from another task"
+  // parity). Emitted by the `surfaceNotifyMailbox` decorator at ENQUEUE time for
+  // a mailbox `send` addressed to the SESSION OWNER (`to === recipientId` or a
+  // broadcast) — so the USER sees inter-agent mail the moment it is queued, while
+  // the MODEL still receives it at its next turn-top drain (no forced turn, exactly
+  // Codex `send_message` semantics). Additive + OPT-IN: emitted ONLY when
+  // `QUANTA_PEER_MSG_SURFACE` is on AND `QUANTA_SUBAGENT_MAILBOX` supplies a
+  // mailbox; absent ⇒ never emitted (byte-identical). Render-only — the loop never
+  // inspects it (no control authority), and it is INFORMATION, never a grant.
+  // `body` is ALREADY redacted + control-sanitized at the emit boundary (secrets
+  // removed, ANSI/control/bidi stripped per line, newlines preserved for a
+  // multi-line finding) — this data crosses to a UI + the trajectory recorder, so
+  // it is safe to render/record verbatim. `provenance` distinguishes peer mail from a
+  // side-agent daemon finding (both ride the same mailbox rail). RECORDED by the
+  // jsonl recorder (content-bearing, low-frequency; its durable copy is otherwise
+  // conditional on the recipient later draining).
+  | {
+      type: "peer_message"
+      /** Sender mailbox label (`root/1`, a daemon id, …) — untrusted, DATA only. */
+      from: string
+      /** Recipient this send was addressed to (the session owner id, or `"*"`). */
+      to: string
+      kind: "request" | "response" | "broadcast"
+      /** Redacted + control-sanitized body — safe to render/record verbatim. */
+      body: string
+      correlationId?: string
+      sentAt: number
+      provenance: { source: "peer" } | { source: "side-agent"; daemonId: string }
     }
   // Plan-mode cluster (P3, 2026-05-23): plan created / updated / late-attach
   // snapshot. Carries the structural mirror of @/agent/plan/types.ts (see top

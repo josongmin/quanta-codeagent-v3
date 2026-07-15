@@ -41,7 +41,12 @@
  *  NEVER `@/agent` core (loop / dispatch / prompt / features / types). */
 
 import { z } from "zod"
-import type { MailboxMessage, MailboxMessageKind, MailboxPort } from "@/agent/subagent-mailbox"
+import {
+  type MailboxMessage,
+  type MailboxMessageKind,
+  type MailboxPort,
+  ROOT_MAILBOX_AGENT_ID,
+} from "@/agent/subagent-mailbox"
 import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 
@@ -90,7 +95,9 @@ const usableLabel = (v: unknown): v is string => typeof v === "string" && v.leng
 const depthLabel = (ctx: ToolContext): string => {
   const d = ctx.depth
   const depth = typeof d === "number" && Number.isFinite(d) && d >= 0 ? Math.floor(d) : 0
-  return depth === 0 ? "root" : `agent@depth-${depth}`
+  // F1 (jul-15) SSOT: a root caller's manual-read id MUST be the SAME label the
+  // side-agent finding WRITE recipient + turn-top drain use (`rootMailboxRecipient`).
+  return depth === 0 ? ROOT_MAILBOX_AGENT_ID : `agent@depth-${depth}`
 }
 
 /** Resolve the calling agent's mailbox identity. PREFERS the stable
@@ -138,7 +145,10 @@ const buildSubagentSendMessage = (port: MailboxPort): Tool<SubagentSendMessageIn
     "response / broadcast (use `correlation_id` to tie a response to a prior " +
     "request). The recipient receives the message the next time it polls its " +
     "inbox via `subagent_read_messages`. Returns the queued message. An " +
-    "unknown target sits unread until that agent (eventually) reads.",
+    "unknown target sits unread until that agent (eventually) reads. When team " +
+    "messaging is enabled, delivery requires a SHARED team with the target: a " +
+    "cross-team or un-teamed send is DENIED (ok:false) rather than silently " +
+    "dropped — create/join a team (team_create) or address a same-team agent.",
   inputSchema: subagentSendMessageSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
@@ -163,6 +173,26 @@ const buildSubagentSendMessage = (port: MailboxPort): Tool<SubagentSendMessageIn
         init.correlationId = parsed.data.correlation_id
       }
       const m = port.send(init)
+      // F3 (jul-15) — honest deny. The team-scoped decorator DROPS a cross-team
+      // direct message (or a broadcast from an un-teamed sender that reaches no
+      // one) before enqueue and stamps `denied:"cross-team"` on the stand-in.
+      // Report the TRUTH — a fake `ok:true` "sent message ..." made the model
+      // believe an undelivered message went through.
+      if (m.denied !== undefined) {
+        yield {
+          type: "result",
+          result: errResult(
+            `send denied: ${m.to === "*" ? "no teammates to broadcast to" : "cross-team target"} — ` +
+              "team messaging is on and you are not in a shared team with the target. " +
+              "Create or join a team (team_create) and address a same-team agent. " +
+              // NB: addressing "parent" is NOT a workaround here — an un-teamed
+              // child is denied against its parent identically (both un-teamed),
+              // so the ONLY remedy is a shared team.
+              'Once you and the target share a team, "parent" and concrete ids both work.',
+          ),
+        }
+        return
+      }
       yield { type: "result", result: { ok: true, output: renderSent(m) } }
     } catch (e) {
       yield { type: "result", result: errResult(`send failed: ${errMessage(e)}`) }

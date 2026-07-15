@@ -62,7 +62,11 @@ import {
   type BackgroundSubagentScheduler,
   defaultBackgroundSubagentScheduler,
 } from "@/agent/subagent-background"
-import { createSubagentMailbox, type MailboxPort } from "@/agent/subagent-mailbox"
+import {
+  createDefaultSubagentMailbox,
+  type MailboxPort,
+  rootMailboxRecipient,
+} from "@/agent/subagent-mailbox"
 import { createSubagentRunner } from "@/agent/subagent-runner"
 import { untrustedEnvelopeEnabled } from "@/agent/untrusted-envelope"
 import {
@@ -105,6 +109,7 @@ import { buildAppshotPortWire } from "./appshot-port-wire"
 import { persistBudgetLedger } from "./budget-ledger-persist"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
 import { maybeWirePeerTeamMessaging } from "./peer-team-wire"
+import { maybeWirePeerMessageSurface } from "./peer-message-sink-wire"
 import { maybeWireProgressSink } from "./progress-sink-wire"
 import { maybeWireBashSandboxEscalation } from "./sandbox-escalation-wire"
 import { nodeProcessForkPort, sideAgentWorkerModulePath } from "./side-agent-fork-port"
@@ -410,7 +415,9 @@ const maybeWireMailbox = (cfg: AgentConfig, env: AssemblerEnv): void => {
   if (!gateOn(env, "QUANTA_SUBAGENT_MAILBOX")) return
   const slot = cfg as AgentConfig & { subagentMailbox?: MailboxPort }
   if (slot.subagentMailbox !== undefined) return
-  slot.subagentMailbox = createSubagentMailbox()
+  // F2 (jul-15) — SSOT factory bakes the per-sender DoS cap; a bare
+  // `createSubagentMailbox()` here left assembler-only surfaces UNCAPPED.
+  slot.subagentMailbox = createDefaultSubagentMailbox()
 }
 
 /** ADR-0142 — `web_search` provider. SELF-GATING: wired ONLY when a provider
@@ -475,6 +482,11 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
   maybeWireAppshot(cfg, env)
   maybeWireObjective(cfg, env)
   maybeWireMailbox(cfg, env)
+  // jul-15 W2 — decorate the mailbox with the peer-message SURFACE notifier
+  // BEFORE side-agent (so daemon findings surface) and BEFORE the team wrap (so a
+  // denied cross-team send never reaches the display seam). No-op unless
+  // QUANTA_PEER_MSG_SURFACE is on AND a mailbox is present (byte-identical default).
+  maybeWirePeerMessageSurface(cfg, env)
   maybeWireWebSearch(cfg, env)
   maybeWireBackgroundSubagent(cfg, env)
   maybeWireReadFileState(cfg, env)
@@ -617,6 +629,12 @@ const maybeWireSideAgent = (cfg: AgentConfig, env: AssemblerEnv): void => {
   // `side_agent_*` tools are byte-identical from the model's view. Gate OFF ⇒ the
   // EXACT legacy in-process path below (byte-identical default).
   if (runtimeConfig().sideAgentProcess) {
+    // jul-15 W2 boundary (audit W2-A2): the OS-PROCESS backer's findings arrive
+    // over IPC into `reg.findings()` (pull via `side_agent_findings`), NOT through
+    // the session `subagentMailbox`, so they are NOT auto-surfaced as
+    // `peer_message` events like the in-process backer's are. Push-surfacing the
+    // process backer would require threading the notify-decorated mailbox across
+    // the fork boundary — a follow-up; findings remain user-reachable via the tool.
     cfg.sideAgentDaemons = createProcessSideAgentDaemonRegistry({
       fork: nodeProcessForkPort,
       scheduler: {
@@ -632,8 +650,12 @@ const maybeWireSideAgent = (cfg: AgentConfig, env: AssemblerEnv): void => {
   const mailbox = (cfg as AgentConfig & { subagentMailbox?: MailboxPort }).subagentMailbox
   cfg.sideAgentDaemons = wireSideAgentDaemons({
     runner: createSubagentRunner(cfg),
-    mailbox: mailbox ?? createSubagentMailbox(),
-    mainRecipient: cfg.mailboxAgentId ?? "main",
+    mailbox: mailbox ?? createDefaultSubagentMailbox(),
+    // F1 (jul-15) — the finding WRITE recipient MUST match the id the root
+    // session READS under (the peer-inbox drain + `subagent_read_messages`, both
+    // `rootMailboxRecipient`). The historical `?? "main"` literal dead-lettered
+    // every daemon finding (stored `to:"main"`, root reads `"root"`). SSOT now.
+    mainRecipient: rootMailboxRecipient(cfg.mailboxAgentId),
     setInterval: (handler, ms) => setInterval(handler, ms),
     clearInterval: (handle) => clearInterval(handle as ReturnType<typeof setInterval>),
     now: () => Date.now(),

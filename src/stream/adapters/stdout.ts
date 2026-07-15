@@ -1,4 +1,4 @@
-import { redactValue, type TerminalWriter, writeStdout } from "@/shared"
+import { redactValue, sanitizeLogText, type TerminalWriter, writeStdout } from "@/shared"
 import type { StreamPort } from "../ports"
 import type { AgentEvent } from "../types"
 
@@ -202,6 +202,9 @@ export class StdoutStream implements StreamPort {
       case "subagent_cancel":
         this.write(renderSubagentCancel(event))
         break
+      case "peer_message":
+        this.write(renderPeerMessage(event))
+        break
       case "plan_created":
         this.write(renderPlanCreated(event))
         break
@@ -332,6 +335,33 @@ const renderInterrupted = (event: Extract<AgentEvent, { type: "interrupted" }>):
  *  running — this is not a finish trigger. */
 const renderSubagentCancel = (event: Extract<AgentEvent, { type: "subagent_cancel" }>): string =>
   `${DIM}✂ subagent ${event.subagentId} (${event.outcome}, via ${event.source})${RESET}\n`
+
+/** jul-15 W2 — a surfaced peer / side-agent message (Codex "Sent from another
+ *  task" parity, terminal dialect). A DIM attribution label line above the body,
+ *  the body collapsed to {@link PEER_BODY_MAX_LINES} lines with a "+N more" marker
+ *  (Codex `collapsedLineCount`). The body was already redacted + sanitized at the
+ *  emit boundary; `redactStr` + per-line `sanitizeLogText` here are belt-and-
+ *  suspenders (a peer_message from any path can never forge terminal UI — the body
+ *  is untrusted-peer content, same anti-forge posture as the read tool). */
+const PEER_BODY_MAX_LINES = 4
+const renderPeerMessage = (event: Extract<AgentEvent, { type: "peer_message" }>): string => {
+  const label =
+    event.provenance.source === "side-agent"
+      ? `sent by ${event.provenance.daemonId} — side agent finding`
+      : `sent by ${event.from} — from another task [${event.kind}]`
+  const head = `${DIM}✉ ${sanitizeLogText(label)}${RESET}\n`
+  const lines = redactStr(event.body)
+    .split("\n")
+    .map(sanitizeLogText)
+  const shown = lines.slice(0, PEER_BODY_MAX_LINES)
+  const extra = lines.length - shown.length
+  const body = shown.map((l) => `${DIM}  ${l}${RESET}`).join("\n")
+  const more =
+    extra > 0
+      ? `\n${DIM}  … (+${extra} more line${extra === 1 ? "" : "s"} — subagent_read_messages to view)${RESET}`
+      : ""
+  return `${head}${body}${more}\n`
+}
 
 /** ALBB-21 — advisory budget-cap crossing banner (Claude Code / Codex cost-
  *  warning UX). One dim line: severity + scope + observed-vs-limit USD. NON-

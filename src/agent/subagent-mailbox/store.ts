@@ -287,6 +287,20 @@ const cellFromMessage = (m: unknown): Cell | null => {
   }
 }
 
+/** The default per-sender undelivered DoS cap (audit-H R2). A single hostile
+ *  sender flooding `send({to:"ghost"})` cannot occupy more than this many
+ *  undelivered cells before its OWN oldest is evicted (FIFO per-sender),
+ *  confining the blast radius to the offender instead of the global budget.
+ *  SSOT for {@link createDefaultSubagentMailbox} — every composition root that
+ *  mints a session mailbox MUST bake this cap (F2, jul-15).
+ *
+ *  32 = ~16× the expected steady-state sibling fan-out (subagent siblings rarely
+ *  exceed 4) while still tiny vs the 1024-cell global cap, so legitimate burst
+ *  traffic stays below it and a hostile flood is capped within ~1 round-trip.
+ *  Hosts wiring a mailbox by hand can still override via the closed-port
+ *  `maxUndeliveredPerSender` option; this constant governs the default path. */
+export const DEFAULT_SUBAGENT_MAILBOX_MAX_UNDELIVERED_PER_SENDER = 32
+
 export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): MailboxPort => {
   const now = opts?.now ?? Date.now
   const maxRetained =
@@ -499,3 +513,16 @@ export const createSubagentMailbox = (opts?: CreateSubagentMailboxOptions): Mail
     },
   }
 }
+
+/** Mint the DEFAULT session subagent mailbox: {@link createSubagentMailbox} with
+ *  the per-sender DoS cap baked in ({@link DEFAULT_SUBAGENT_MAILBOX_MAX_UNDELIVERED_PER_SENDER}).
+ *  This is the SSOT factory ALL composition roots use (the host assembler's
+ *  `maybeWireMailbox` slot + the side-agent mailbox fallback, and the
+ *  `optional-ports` follow-up wire) so no surface can silently get an UNCAPPED
+ *  mailbox (the F2 split-brain, jul-15). Extra `opts` (e.g. a test `now`) merge
+ *  over the default; an explicit `maxUndeliveredPerSender` still wins. */
+export const createDefaultSubagentMailbox = (opts?: CreateSubagentMailboxOptions): MailboxPort =>
+  createSubagentMailbox({
+    maxUndeliveredPerSender: DEFAULT_SUBAGENT_MAILBOX_MAX_UNDELIVERED_PER_SENDER,
+    ...opts,
+  })

@@ -22,6 +22,36 @@
  *  `correlationId`); `broadcast` fans out to every other agent. Closed enum. */
 export type MailboxMessageKind = "request" | "response" | "broadcast"
 
+/** Provenance of a `send`, carried on the `send` init and consumed ONLY by the
+ *  {@link surfaceNotifyMailbox} display decorator (NEVER stored on
+ *  {@link MailboxMessage} — the delivery store ignores it). `peer` = an ordinary
+ *  agent-to-agent send (the default when absent); `side-agent` = a background
+ *  daemon finding (carries the daemon id for attribution). jul-15 W2. */
+export type MailboxSendProvenance =
+  | { readonly source: "peer" }
+  | { readonly source: "side-agent"; readonly daemonId: string }
+
+/** The stable mailbox label of the ROOT (top-level) agent session. The root
+ *  leaves `AgentConfig.mailboxAgentId` unset, so EVERY read/write path that
+ *  addresses "the main session" over this mailbox MUST fall back to THIS id.
+ *
+ *  This const exists because it did NOT: the side-agent finding WRITE path fell
+ *  back to the literal `"main"` (host assembler) while the peer-inbox drain +
+ *  `subagent_read_messages` READ paths fell back to `"root"`. A daemon finding
+ *  was therefore stored addressed to `"main"` and never matched the root's
+ *  `read("root")` — a silent dead letter for the whole advertised push channel.
+ *  See {@link rootMailboxRecipient}. */
+export const ROOT_MAILBOX_AGENT_ID = "root"
+
+/** Resolve the mailbox id "the main session" reads AND writes under: the agent's
+ *  own stable `mailboxAgentId` when set (a spawned child addresses/reads under
+ *  its `parentLabel/seq` id), else {@link ROOT_MAILBOX_AGENT_ID}. This is the
+ *  SSOT for BOTH the side-agent finding recipient (write, host assembler) and
+ *  the turn-top peer-inbox drain id (read, loop) so the two ends can never drift
+ *  to different literals again. Pure. */
+export const rootMailboxRecipient = (mailboxAgentId: string | undefined): string =>
+  mailboxAgentId ?? ROOT_MAILBOX_AGENT_ID
+
 /** A single inter-agent message. Immutable once produced by `send`; `read`
  *  returns a COPY stamped with `deliveredAt` (the stored record is the source
  *  of the delivered flag, never mutated in place after the caller holds it). */
@@ -34,6 +64,13 @@ export interface MailboxMessage {
   readonly body: string
   readonly correlationId?: string
   readonly sentAt: number
+  /** Set by the {@link teamScopedMailbox} decorator (ONLY) on the stand-in it
+   *  returns for a `send` it DROPPED before enqueue — a cross-team direct
+   *  message, or a broadcast from an agent whose team roster is empty (it reaches
+   *  no one). The delivery store NEVER sets this. The `subagent_send_message`
+   *  tool maps a present `denied` to `{ ok:false }` + guidance so the model is
+   *  told the truth instead of a fake success (F3, jul-15). Absent ⇒ a real send. */
+  readonly denied?: "cross-team"
   /** Set the first time the message is delivered to a recipient via `read`.
    *  For a DIRECT message the store tracks delivery PER RECIPIENT (audit-H
    *  fix); this public field projects the EARLIEST recipient's stamp. For a
@@ -83,6 +120,9 @@ export interface MailboxPort {
     kind: MailboxMessageKind
     body: string
     correlationId?: string
+    /** Display provenance (jul-15 W2) — consumed by `surfaceNotifyMailbox`, IGNORED
+     *  by the delivery store (never stored on the returned message). */
+    provenance?: MailboxSendProvenance
   }): MailboxMessage
   /** Returns undelivered messages for `agentId` and MARKS them delivered. */
   read(agentId: string, opts?: { limit?: number; since?: number }): readonly MailboxMessage[]
