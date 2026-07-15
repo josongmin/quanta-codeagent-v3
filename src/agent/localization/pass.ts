@@ -7,6 +7,7 @@
  * session candidates, small). The tracker organizes; it never auto-picks the fix.
  */
 
+import { byteCompare } from "@/shared"
 import {
   type Candidate,
   type CandidateInput,
@@ -90,8 +91,10 @@ export const createLocalizationTracker = (): LocalizationTracker => {
       .filter((c) => !excludedIds.has(c.id) && !selectedIds.has(c.id))
       .slice()
       // confidence is add-validated to a finite [0,1], so the compare is well-defined;
-      // ties break by id (zero-padded ⇒ insertion order) for a deterministic ranking.
-      .sort((a, b) => b.confidence - a.confidence || a.id.localeCompare(b.id))
+      // ties break by id (zero-padded ⇒ insertion order) via locale-independent
+      // `byteCompare` — this ranking is model-facing, so the tiebreak must be
+      // byte-stable across machines (localeCompare's ICU ordering is not).
+      .sort((a, b) => b.confidence - a.confidence || byteCompare(a.id, b.id))
 
   const snapshot = (): LocalizationPass => ({
     candidates: candidates.slice(),

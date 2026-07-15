@@ -214,6 +214,11 @@ export const captureAbortedTurn = (
   cfg: { readonly interruptedTurnBuffer?: InterruptedTurnBuffer },
   wm: { snapshot(): ReadonlyArray<Message> },
   reason: string,
+  // Injected clock so the persisted `interruptedAt` (a replay-compared sort key
+  // in session/crash-resume.ts) is pinnable under test/replay — same
+  // `(now ?? Date.now)()` seam as the sibling runner/orchestrate/crash-resume-wire.ts.
+  // Default `Date.now` keeps production byte-identical.
+  now: () => number = Date.now,
 ): void => {
-  cfg.interruptedTurnBuffer?.capture(captureInterruptedTurn(wm.snapshot(), reason, Date.now()))
+  cfg.interruptedTurnBuffer?.capture(captureInterruptedTurn(wm.snapshot(), reason, now()))
 }

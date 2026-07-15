@@ -364,6 +364,18 @@ const RULES: readonly Rule[] = [
         "God-module split of apps/web-daemon/server.ts — setupFollowerApproval reads QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS at boot. Same composition-root posture as apps/web-daemon/server.ts.",
       "apps/web-daemon/server/persistence.ts":
         "God-module split of apps/web-daemon/server.ts — setupThreadPersistence reads the QUANTA_WEB_DB gate at boot. Same composition-root posture as apps/web-daemon/persistence-sqlite.ts.",
+      "sdk/embed.ts":
+        "Injection-first: `process.env` is ONLY the default for the injected `opts.env` param of the public `createAnalysisAgent` SDK factory (`env?: NodeJS.ProcessEnv`, documented DI seam); the resolved `env` is threaded into `resolveLlm(opts, env)`/`assembleAgentConfig(req, env)` which read provider keys off the PARAM, never a module-level read. Tests/consumers pass a fake env. Same composition-root DI-fallback posture as apps/cli/login-cmd.ts.",
+      "apps/bench/lane-progress-renderer.ts":
+        "Bench-surface DEFAULT-OFF opt-in gate read at the renderer composition root — `startLaneProgressRenderer` (called ONCE at apps/bench/run-main.ts, already allowlisted) reads `QUANTA_BENCH_LANE_PROGRESS`; unset/falsy ⇒ returns a no-op immediately (byte-identical). Same bench-only opt-in surface-gate posture as apps/bench/eval/driver.ts; the `nowMs` clock is separately injected.",
+      "apps/bench/trajectory-debug-sink.ts":
+        "Injection-first: `process.env` is ONLY the default for the injected `env` param of `isTrajectoryDebugEnabled` (`env: Record<string,string|undefined> = process.env`); the QUANTA_BENCH_RECORD_TRAJECTORY / _TRAJECTORY_DEBUG debug-tier gate is read off that param (`env.X`), never module-level. Tests pass a fake env. Same DI-boundary posture as runner/batch/eval/run-health.ts.",
+      "apps/bench/run-main-helpers.ts":
+        "Bench local-run composition helpers extracted verbatim from apps/bench/run-main.ts (already allowlisted) — `resolveObserve` resolves the observe root from `--observe-dir` / QUANTA_OBSERVE_DIR and `datasetFamily` resolves the family from `--dataset-family` / QUANTA_SWEBENCH_DATASET_FAMILY (via resolveDatasetFamily, itself allowlisted); both are launch-time reads called once at run setup, downstream gets resolved values. Same bench-bootstrap posture as apps/bench/run-main.ts.",
+      "apps/terminal/brain-mode.ts":
+        "Box-side process ENTRY shim (`import.meta.main` runMain, `/* c8 ignore */` — verified on the box): the pure `runTerminalBrain` core takes ALL env-gates off an injected `env` param (resolveMaxTurnsFromEnv/resolveOracleLoopRounds/verify-gate read `env.X`). runMain binds `process.env` ONCE at launch — threads `env: process.env` (ENV PROPAGATION so the pure core reads the verify-gate here, not ambient), resolves maxTurns, and does launch-time provider selection (`pickProvider(process.env)` / `tryCreateLLM(…, process.env)`, provider = a launch-time decision). Same composition-root posture as apps/agent/index.ts.",
+      "apps/cli/rewind-tool-cmd.ts":
+        "DIAGNOSTIC surface read — the `/rewind-tool` command's NOT-WIRED branch calls the PURE reporter `missingPerToolCheckpointGates(process.env)` (which reads gate presence off its injected `env` param; the hellgate passes a fake env) to REPORT which of the two wiring gates is missing (D-6 UUX-6-17). Display-only; the actual feature is gated upstream by `ctx.perToolCheckpoint` being wired, never by this read. Same diagnostic-reporter posture as apps/cli/slash-commands-capabilities.ts.",
     },
   },
   {
@@ -632,6 +644,14 @@ const RULES: readonly Rule[] = [
         "INFRA TIMING (RFC jun-17): `Date.now()` in `ensurePyrightFileReady` is the language-server warm-up READINESS-POLL deadline (when to stop polling a cold pyright for an import resolve). Pure infra timing — never reaches model-facing/persisted/replayed output; the budget/retry are injectable for tests via `__setPyrightWarmupTimingForTest`. Same posture as agent/loop/control-poll.ts.",
       "agent/lsp-workspace-pool.ts":
         "INFRA TIMING (RFC jun-17 warm-backend): `Date.now()`/`elapsed()` measure the LSP grounding-receipt warm-up probe duration (`startedAt`/`elapsed`) for telemetry on the receipt — pure infra timing, never reaches model-facing/persisted/replayed output. Same posture as agent/lsp-bridge.ts.",
+      "agent/lsp-bridge/warm-pool.ts":
+        "INFRA TIMING (RFC jun-17, god-module split of agent/lsp-bridge.ts): `Date.now()` in `ensurePyrightFileReady` is the language-server warm-up READINESS-POLL deadline (`deadline`/`while (Date.now() < deadline)`) — when to stop polling a cold pyright for an import resolve. Pure infra timing against a REAL server clock; never reaches model-facing/persisted/replayed output. The budget/retry are injectable for tests via `pyrightWarmupTimingForTest` (`__setPyrightWarmupTimingForTest`). Same posture as agent/lsp-bridge.ts.",
+      "agent/loop/stream-consume.ts":
+        "INFRA TIMING (stream stall-detection): the 3 `Date.now()` samples in `teeUsage` (`startedAt`/`lastEventAt` + the final sample) measure REAL wall-clock gaps in the LIVE provider stream to infer a silent degrade — a fake clock cannot measure a real stream's silence. The pure/deterministic decision function `inferDegradeNotice(config, sawEvent, lastEventAt, startedAt, now)` is already injected (all timing is params); the emitted notice text uses the CONFIG thresholds (`policy.idleMs`/`policy.totalMs`), not the raw samples, so the emit is deterministic given a degrade. Never reaches persisted/replayed output. Same infra-timing posture as agent/loop/control-poll.ts.",
+      "agent/observation/providers/lsp-enrich/provider.ts":
+        "INFRA TIMING (jul-6 S3 lsp-enrich): `Date.now()` in `harvestAll` is the per-provider wall-clock time-budget deadline (`deadline = Date.now() + budget.maxMillis`; loop-break `Date.now() >= deadline`) bounding a real I/O loop against a real language server so a cold server can't stall the pre-prompt enrichment. Pure infra timing; the harvested owners/contracts are the output, the deadline only bounds WHEN to stop. Never reaches persisted/replayed output. Same warm-backend infra-timing posture as agent/lsp-workspace-pool.ts.",
+      "agent/prompt-reminders.ts":
+        "INJECTED CLOCK (default-factory fallback): `todayDateLine(now?: () => number)` implements the sanctioned `(now ?? Date.now)()` pattern — the model-facing today's-date line is deterministic when the caller passes `now` (the sole caller threads `input.now`; replay/tests pin it). The literal `Date.now`/`new Date` is ONLY the default fallback. Same injected-clock-with-default-fallback posture as agent/prompt.ts / agent/run-ledger/store.ts.",
     },
   },
   {

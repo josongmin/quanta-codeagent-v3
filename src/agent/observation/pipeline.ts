@@ -40,7 +40,17 @@ export interface ObservationPolicy {
   readonly budget?: ProviderBudget
 }
 
-const DEFAULT_BUDGET: ProviderBudget = { maxMillis: 5_000, maxOwners: 8 }
+/** Per-provider observation-gather wall-clock cap. 5s keeps a slow provider
+ *  (e.g. a cold language server in lsp-enrich) from stalling the turn's
+ *  pre-prompt enrichment while still allowing a normal warm harvest to finish. */
+const DEFAULT_PROVIDER_BUDGET_MS = 5_000
+/** Max owners returned per provider before the gather stops harvesting — keeps
+ *  the ranked owner list bounded and the merged bundle small. */
+const DEFAULT_PROVIDER_MAX_OWNERS = 8
+const DEFAULT_BUDGET: ProviderBudget = {
+  maxMillis: DEFAULT_PROVIDER_BUDGET_MS,
+  maxOwners: DEFAULT_PROVIDER_MAX_OWNERS,
+}
 
 /** Rank of a source id — lower is higher authority. Unknown ⇒ length (last),
  *  but still deterministic (registration order is the only tiebreak). */
