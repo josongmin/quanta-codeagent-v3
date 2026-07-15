@@ -158,22 +158,34 @@ describe("item-lifecycle stream — real loop + fake LLM end-to-end (GAP 10)", (
     expect(toolStartedAt).toBeGreaterThanOrEqual(0)
     expect(toolCompletedAt).toBeGreaterThanOrEqual(0)
 
-    const toolCallAt = evs.findIndex((e) => e.type === "tool_call")
-    const toolResultAt = evs.findIndex((e) => e.type === "tool_result")
+    const toolCallAt = evs.findIndex((e) => e.type === "tool_call" && e.id === TOOL_ID)
+    const toolResultAt = evs.findIndex((e) => e.type === "tool_result" && e.id === TOOL_ID)
+    expect(toolCallAt).toBeGreaterThanOrEqual(0)
+    expect(toolResultAt).toBeGreaterThanOrEqual(0)
 
-    // GROUND TRUTH ordering: the tool item's started immediately follows its
-    // real tool_call, its completed immediately follows the real tool_result,
-    // and started strictly precedes completed.
-    expect(toolStartedAt).toBe(toolCallAt + 1)
+    // GROUND TRUTH ordering (derived from the ACTUAL loop trace):
+    //   … tool_call(probe-1) → [item_completed(text)] → item_started(tool) …
+    //   … tool_result(probe-1) → item_completed(tool) …
+    // The tool item's started sits AFTER the real tool_call and BEFORE the real
+    // tool_result; its completed sits immediately after the real tool_result.
+    // (started is NOT literally tool_call+1: the projector first closes the open
+    //  text item, so the text's item_completed lands between them — asserting the
+    //  bracketing relation is the load-bearing ground truth, not an off-by-one.)
+    expect(toolStartedAt).toBeGreaterThan(toolCallAt)
+    expect(toolStartedAt).toBeLessThan(toolResultAt)
     expect(toolCompletedAt).toBe(toolResultAt + 1)
     expect(toolStartedAt).toBeLessThan(toolCompletedAt)
 
     // (3) The tool item's started precedes its completed which precedes the
-    //     NEXT turn boundary (turn_start after it, or the terminal done).
+    //     NEXT turn boundary (turn_start after it, or the terminal done) — the
+    //     tool item is fully closed before the loop advances to the next turn.
     const nextBoundaryAfterTool = evs.findIndex(
       (e, i) => i > toolCompletedAt && (e.type === "turn_start" || e.type === "done"),
     )
     expect(nextBoundaryAfterTool).toBeGreaterThan(toolCompletedAt)
+    // …and that boundary is the one that OPENS the second turn (the tool item
+    // closed WITHIN turn 1, before turn 2's turn_start).
+    expect(evs[nextBoundaryAfterTool]?.type).toBe("turn_start")
 
     // (4) The TEXT item opened on the first real assistant_text and closed at/
     //     before the tool item opened (the model moved on to a tool call).

@@ -81,11 +81,11 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import type { ControlEffect } from "@/agent/control-request"
 import { drainControlRequests } from "@/agent/control-request"
 import { startWebDaemon, type WebDaemonServerConfig } from "@/apps/web-daemon/server"
+import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import {
   createWebControlRequestPort,
   type WebControlRequestPortHandle,
 } from "@/apps/web-daemon/web-control-request-port"
-import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import {
   ALL_PERMISSION_MODES,
   evaluate,

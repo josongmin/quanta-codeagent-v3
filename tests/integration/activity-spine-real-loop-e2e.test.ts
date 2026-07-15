@@ -83,12 +83,10 @@ const activityCmd = () => {
 /** Build a minimal SlashContext exposing ONLY the `/activity` slots the fold
  *  needs: the durable spine (`activityStore`) + the live fleet getter (`agents`)
  *  — wired to the REAL registry via `toAgentFleetRow` exactly as the production
- *  `buildReplSlashCtx` does (slash-surface.ts:630). `foldFleet` is the injection
- *  seam: the DEFAULT is the real `fleetToActivity`; the red test swaps a neuter. */
-const activityCtx = (
-  registry: TaskRegistry,
-  foldFleet: typeof fleetToActivity = fleetToActivity,
-): { ctx: SlashContext; out: string[] } => {
+ *  `buildReplSlashCtx` does (slash-surface.ts:630). This is the SAME shape the
+ *  real `/activity` command reads; `renderFold` re-drives the command's own fold
+ *  (registry-surface.ts:487-493) through an injectable producer for the red test. */
+const activityCtx = (registry: TaskRegistry): { ctx: SlashContext; out: string[] } => {
   const out: string[] = []
   const ctx = {
     out: (s: string) => out.push(s),
@@ -97,10 +95,6 @@ const activityCtx = (
     activityStore: createActivityStore(),
     // The EXACT production wire: the live registry projected row-by-row.
     agents: () => registry.list().map(toAgentFleetRow),
-    // Test-owned re-implementation of `/activity`'s fold so red-on-injection can
-    // neuter the producer without touching production code. Mirrors
-    // registry-surface.ts:487-493 (seed durable spine, overlay live fleet).
-    __foldFleet: foldFleet,
   } as unknown as SlashContext
   return { ctx, out }
 }
