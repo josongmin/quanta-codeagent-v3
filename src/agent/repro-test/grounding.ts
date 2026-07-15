@@ -33,6 +33,8 @@
  *     prompt — the default-OFF invariant rides on this).
  */
 
+import { sliceWholeChars } from "@/shared"
+
 /** A line is "structural" iff it starts a top-level import, a decorator, or a
  *  def/class signature. Captured at any indent so nested fixtures/classes keep
  *  their shape. IMPORT is kept verbatim (module paths are not oracle values);
@@ -249,7 +251,7 @@ export const stripTestBodies = (src: string): string => {
     .replace(/\n{3,}/g, "\n\n")
     .trim()
   return joined.length > MAX_SKELETON_CHARS
-    ? `${joined.slice(0, MAX_SKELETON_CHARS)}\n# … skeleton truncated (no-leak)`
+    ? `${sliceWholeChars(joined, MAX_SKELETON_CHARS)}\n# … skeleton truncated (no-leak)`
     : joined
 }
 

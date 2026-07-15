@@ -50,6 +50,20 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       "auto-sweep.ts",
       "inspector.ts",
       "inspector.hellgate.test.ts",
+      // `loop-helpers.ts` reads the DEFAULT-OFF OTel content-capture gate
+      // (`gateOn(process.env, "QUANTA_OTEL_CAPTURE_CONTENT")`) at the span-close
+      // seam — the same sanctioned default-OFF gate-at-a-seam class as the
+      // `tool` slice's `from-env.ts`/`port.ts` carve-outs. Unset/falsy ⇒ NO
+      // content leaves the process (byte-identical); the gate arms the redacted
+      // OTLP content plane only when a span sink is also live. (loop-helpers.ts is
+      // ALSO in `stdioAllowFiles` above for the git-directive sink default.)
+      "loop-helpers.ts",
+      // `loop/control-poll.ts` gates the DEFAULT-OFF control-request drain on
+      // `isControlRequestEnabled(slot.env ?? process.env)` — the `process.env`
+      // token is ONLY the DI fallback for the injected `slot.env` (tests pass a
+      // fake env); an absent slot OR gate-off ⇒ the port is never even queried
+      // (byte-identical). Same injection-first default-OFF gate-at-a-seam class.
+      "control-poll.ts",
     ],
     // `default-stdout-emitter.ts` (ADR-0220) deliberately exposes
     // `process.stderr` as the production default sink for git-directives.
@@ -100,7 +114,16 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     // must pass the parent env to the child so PATH resolves node/lldb/dlv — the
     // same env-boundary carve-out as runner.ts. The gate VALUES come from cfg; only
     // the spawned child's env inherits `process.env`.
-    envAllowFiles: ["runner.ts", "from-env.ts", "port.ts"],
+    //
+    // `container-exec/tool.ts` is a PATH-SCOPED entry (not a bare basename): it
+    // resolves the DEFAULT-OFF per-stream output cap dial `resolveStreamCap(
+    // process.env)` (QUANTA_TB_STREAM_CAP) at module load — unset/≤0 ⇒ the fixed
+    // 8K default (byte-identical); `resolveStreamCap` is PURE (takes the env bag),
+    // so the raw `process.env` is only its call-boundary argument. `tool.ts` is NOT
+    // a unique basename (10 `*/tool.ts` under @/tool), so the path-scoped form
+    // exempts EXACTLY this one file — a future env read in a sibling `*/tool.ts`
+    // still trips the guard.
+    envAllowFiles: ["runner.ts", "from-env.ts", "port.ts", "container-exec/tool.ts"],
     requireSliceBarrel: true,
   },
   memory: {
@@ -192,7 +215,12 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       // SSOTs (biome + this arch test) in lockstep so the fence can't silently drift.
       "@/runtime",
     ],
-    envAllowFiles: ["handlers-6.ts"],
+    // `exec-command.ts` spreads the parent `process.env` INTO the spawned bash
+    // child (`{ ...process.env, ...input.env }`) so PATH/HOME resolve for the
+    // subprocess — ENV PROPAGATION to a child, not a feature-flag read. Same
+    // spawner env-boundary carve-out as `handlers-6.ts` (and the `tool` slice's
+    // `port.ts`); the values only reach the child's environment.
+    envAllowFiles: ["handlers-6.ts", "exec-command.ts"],
     requireSliceBarrel: true,
   },
   skill: {

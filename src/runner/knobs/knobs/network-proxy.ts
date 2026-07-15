@@ -53,9 +53,18 @@ interface NetworkProxyValue {
 // The CA is short lived and scoped to one in-memory proxy instance. These are
 // lifecycle constants, not operator policy: the opt-in, egress mode, body cap,
 // and failure mode all come from RuntimeConfig below.
+// Named minute base so the cert-validity literals are documented UPPER_SNAKE
+// consts (no raw wall-clock magic number in the object body).
+const MS_PER_MINUTE = 60_000
+// 5-minute backdate absorbs small clock skew between the proxy and the client so
+// the just-minted leaf cert is never "not yet valid".
+const MITM_CERT_BACKDATE_MS = -5 * MS_PER_MINUTE
+// 1-year forward validity — the CA is regenerated per in-memory proxy instance,
+// so this only bounds a single short-lived process's leaf certs.
+const MITM_CERT_VALIDITY_MS = 365 * 24 * 60 * MS_PER_MINUTE
 const EPHEMERAL_MITM_CERT_VALIDITY = {
-  notBeforeMs: -5 * 60_000,
-  notAfterMs: 365 * 24 * 60 * 60_000,
+  notBeforeMs: MITM_CERT_BACKDATE_MS,
+  notAfterMs: MITM_CERT_VALIDITY_MS,
 } as const
 const MITM_HANDSHAKE_TIMEOUT_MS = 15_000
 let nextMitmCertSerial = 0

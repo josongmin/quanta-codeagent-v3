@@ -448,6 +448,12 @@ const parseSessionBenchSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> =
     quantaHome: stringOrUndef(env["QUANTA_HOME"]),
     benchHome: stringOrUndef(env["QUANTA_BENCH_HOME"]),
     benchResultsDir: stringOrUndef(env["QUANTA_BENCH_RESULTS_DIR"]),
+    // Daemon/persistence path knobs (ADR-0503 P4 read-routing) — string-or-undef
+    // (no fixed default); the consumers keep their exact HOME-based fallback +
+    // non-empty guards, so absent ⇒ byte-identical to the prior raw process.env reads.
+    webDbDir: stringOrUndef(env["QUANTA_WEB_DB_DIR"]),
+    sessionRegistrySqlitePath: stringOrUndef(env["QUANTA_SESSION_REGISTRY_SQLITE_PATH"]),
+    sessionRegistryDiskDir: stringOrUndef(env["QUANTA_SESSION_REGISTRY_DISK_DIR"]),
     cachePathspecsExtra: parseStringList(env["QUANTA_BENCH_CACHE_PATHSPECS_EXTRA"]),
     dedupEnvPrefixesExtra: parseStringList(env["QUANTA_DEDUP_ENV_PREFIXES_EXTRA"]),
     permissionStateFile: stringOrUndef(env["QUANTA_PERMISSION_STATE"]),

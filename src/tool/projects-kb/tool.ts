@@ -30,6 +30,7 @@
 
 import { z } from "zod"
 import type { SearchHit } from "@/retrieval/pipeline"
+import { sliceWholeChars } from "@/shared"
 import { resolveJailedDoc } from "../_shared/resolve-jailed-doc"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import type { ProjectsKbSlot } from "./port"
@@ -164,7 +165,7 @@ const mapHit = (h: SearchHit): ProjectsKbHit => {
   const md = h.metadata as Record<string, unknown> | undefined
   const name = typeof md?.name === "string" ? md.name : h.id
   const docUuid = typeof md?.docUuid === "string" ? md.docUuid : h.id
-  const text = (h.text ?? "").slice(0, MAX_SNIPPET)
+  const text = sliceWholeChars(h.text ?? "", MAX_SNIPPET)
   return { name, doc_uuid: docUuid, text }
 }
 

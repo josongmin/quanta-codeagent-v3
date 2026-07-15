@@ -710,6 +710,23 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  `tree-sitter-wasms/out` dir. A packaging step that relocates the grammars
    *  sets this. Only read when a parser is constructed (default-OFF ⇒ unread). */
   readonly treeSitterDir: string | undefined
+  /** Web-daemon thread-history DB directory override (`QUANTA_WEB_DB_DIR`).
+   *  Absent ⇒ `undefined` ⇒ the persistence root resolves `~/.quanta/web-daemon`
+   *  at the consumer (byte-identical to the prior raw-read fallback). Routed
+   *  through runtimeConfig() so a `/config set` reaches it and the read is
+   *  testable without mutating the real environment (ADR-0503 P4 read-routing). */
+  readonly webDbDir: string | undefined
+  /** Session-resource-registry SQLite backend path (`QUANTA_SESSION_REGISTRY_SQLITE_PATH`,
+   *  ADR-0367). Absent/empty ⇒ `undefined` ⇒ the registry falls through to the
+   *  disk / in-memory backend (byte-identical to the prior raw-read chain). The
+   *  consumer keeps the non-empty-length guard + NO-THROW fallback. Routed through
+   *  runtimeConfig() (ADR-0503 P4) — same precedence chain as every other knob. */
+  readonly sessionRegistrySqlitePath: string | undefined
+  /** Session-resource-registry disk-JSONL backend directory
+   *  (`QUANTA_SESSION_REGISTRY_DISK_DIR`, ADR-0351). Absent/empty ⇒ `undefined` ⇒
+   *  the registry falls through to in-memory (byte-identical). Routed through
+   *  runtimeConfig() (ADR-0503 P4). */
+  readonly sessionRegistryDiskDir: string | undefined
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
   /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).

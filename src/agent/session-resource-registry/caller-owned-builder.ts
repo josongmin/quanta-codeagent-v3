@@ -55,6 +55,7 @@
  */
 
 import type { MetricEmitterPort } from "@/observability/codex-r2-metrics"
+import { runtimeConfig } from "@/shared"
 import { createDiskSessionResourceRegistry } from "./disk-adapter/disk-store"
 import { createInMemorySessionResourceRegistry } from "./in-memory-registry"
 import { createSqliteSessionResourceRegistry } from "./sqlite-adapter"
@@ -91,9 +92,15 @@ export const buildCallerOwnedRegistryWithTelemetry = (
   opts: CallerOwnedBuilderOpts,
 ): SessionResourceRegistry => {
   const { emitter } = opts
+  // ADR-0503 P4 — same backend-selection knobs as global.ts, routed through the
+  // typed runtimeConfig() (sessionRegistrySqlitePath / sessionRegistryDiskDir) so
+  // `/config set` reaches them and the builder is testable without env mutation.
+  // The non-empty guards + NO-THROW fallback are byte-identical to the prior raw
+  // process.env reads (this path mirrors global.ts::buildDefaultRegistry).
+  const cfg = runtimeConfig()
   // 1. SQLite (ADR-0367) — most durable. NO emitter wiring (WAL
   //    handles concurrency; no flock to telemeter).
-  const sqlitePath = process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH
+  const sqlitePath = cfg.sessionRegistrySqlitePath
   if (sqlitePath !== undefined && sqlitePath.length > 0) {
     try {
       return createSqliteSessionResourceRegistry({ databasePath: sqlitePath })
@@ -104,7 +111,7 @@ export const buildCallerOwnedRegistryWithTelemetry = (
   // 2. Disk JSONL (ADR-0348 + ADR-0356 flock + ADR-0364 telemetry).
   //    The emitter is injected here — this is the WHOLE POINT of the
   //    caller-owned path.
-  const diskDir = process.env.QUANTA_SESSION_REGISTRY_DISK_DIR
+  const diskDir = cfg.sessionRegistryDiskDir
   if (diskDir !== undefined && diskDir.length > 0) {
     try {
       return createDiskSessionResourceRegistry({

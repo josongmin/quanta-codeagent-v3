@@ -346,6 +346,26 @@ const leafName = (sliceDirPath: string, filePath: string): string => {
   return base.split("/").pop() ?? base
 }
 
+/** Does an env-allow entry cover this slice file? An entry WITHOUT a `/` is a
+ *  bare BASENAME (`from-env.ts`) — matched against the file's leaf name (legacy
+ *  behavior). An entry WITH a `/` is a slice-relative PATH suffix
+ *  (`container-exec/tool.ts`) — matched against the file's path RELATIVE to the
+ *  slice dir. Path-scoped entries exist precisely for non-unique basenames (e.g.
+ *  the 10 `tool.ts` files under `@/tool`): they exempt exactly ONE file, so a
+ *  future env read in a SIBLING `<other>/tool.ts` still trips the guard. */
+const isEnvAllowed = (
+  allow: ReadonlySet<string>,
+  sliceDirPath: string,
+  filePath: string,
+): boolean => {
+  if (allow.has(leafName(sliceDirPath, filePath))) return true
+  const rel = relative(sliceDirPath, filePath)
+  for (const entry of allow) {
+    if (entry.includes("/") && (rel === entry || rel.endsWith(`/${entry}`))) return true
+  }
+  return false
+}
+
 const scanProcessEnvArgv = (src: string): Array<{ line: number; hit: string }> =>
   collectAstHits(src, (node) => {
     if (!isPropertyAccessLike(node)) return null
@@ -500,8 +520,7 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
     test("no file reads process.env or process.argv (must take plain config)", () => {
       const violations: string[] = []
       for (const f of files) {
-        const leaf = leafName(dir, f)
-        if (envAllow.has(leaf)) continue
+        if (isEnvAllowed(envAllow, dir, f)) continue
         for (const { line, hit } of scanProcessEnvArgv(readFileSync(f, "utf8"))) {
           violations.push(`${relative(dir, f)}:${line}  ${hit}`)
         }

@@ -42,6 +42,7 @@
  *   - Config knobs (maxEntries / idleTtlMs) on the singleton
  */
 
+import { runtimeConfig } from "@/shared"
 import { type AutoSweepHandle, startAutoSweep } from "./auto-sweep"
 import { createDiskSessionResourceRegistry } from "./disk-adapter/disk-store"
 import { createInMemorySessionResourceRegistry } from "./in-memory-registry"
@@ -82,8 +83,14 @@ let autoSweepHandle: AutoSweepHandle | null = null
  * per process or per `resetGlobalSessionResourceRegistry()`).
  */
 const buildDefaultRegistry = (): SessionResourceRegistry => {
+  // ADR-0503 P4 — the backend-selection paths are routed through the typed
+  // runtimeConfig() (sessionRegistrySqlitePath / sessionRegistryDiskDir) so a
+  // `/config set` reaches them and the lazy-init is testable without mutating the
+  // real environment. The non-empty guards + NO-THROW fallback chain (sqlite →
+  // disk → in-memory) are byte-identical to the prior raw process.env reads.
+  const cfg = runtimeConfig()
   // 1. SQLite (ADR-0367) — most durable backend wins when both env vars set.
-  const sqlitePath = process.env.QUANTA_SESSION_REGISTRY_SQLITE_PATH
+  const sqlitePath = cfg.sessionRegistrySqlitePath
   if (sqlitePath !== undefined && sqlitePath.length > 0) {
     try {
       return createSqliteSessionResourceRegistry({ databasePath: sqlitePath })
@@ -93,7 +100,7 @@ const buildDefaultRegistry = (): SessionResourceRegistry => {
     }
   }
   // 2. Disk JSONL (ADR-0351).
-  const diskDir = process.env.QUANTA_SESSION_REGISTRY_DISK_DIR
+  const diskDir = cfg.sessionRegistryDiskDir
   if (diskDir !== undefined && diskDir.length > 0) {
     try {
       return createDiskSessionResourceRegistry({ storageDir: diskDir })

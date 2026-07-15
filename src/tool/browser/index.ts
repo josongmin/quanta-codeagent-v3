@@ -14,6 +14,7 @@
 
 import type { NetworkEntry } from "@/browser"
 import { type BrowserHandle, type BrowserPort, CDP_ALLOWED_METHODS } from "@/browser"
+import { sliceWholeChars } from "@/shared"
 import { defineTool, type Tool, type ToolContext, type ToolEvent, type ToolResult } from "@/tool"
 import { type DnsResolver, guardNavigationUrl } from "./net-guard"
 import { guardPageText, mapBrowserError } from "./result-map"
@@ -556,7 +557,7 @@ const networkTool = (port: BrowserPort, session: BrowserSession, netSink?: Brows
       const body = lines.length === 0 ? "(network empty)" : lines.join("\n")
       yield {
         type: "result",
-        result: { ok: true, output: (header + body).slice(0, NETWORK_OUTPUT_CAP) },
+        result: { ok: true, output: sliceWholeChars(header + body, NETWORK_OUTPUT_CAP) },
       }
     },
   })

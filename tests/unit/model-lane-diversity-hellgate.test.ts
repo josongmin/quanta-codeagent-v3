@@ -33,7 +33,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import "@/runner/knobs/knobs"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import type { StreamPort } from "@/stream"
 import {
   benchPostureFromState,
   buildConfig,
@@ -41,13 +40,32 @@ import {
   resolveLaneLlm,
 } from "@/runner/batch/eval/driver"
 import { __resetKnobOverrides } from "@/shared/knob-overrides"
+import type { StreamPort } from "@/stream"
 import type { Instance } from "../../src/apps/bench/types"
 
 class LaneLLM implements LLMPort {
+  /** Last StreamInput this port received — proves an outer decorator delegates
+   *  down to THIS instance (the recording-lane label reaches the inner port). */
+  lastInput: StreamInput | undefined
   constructor(readonly provider: string) {}
-  async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
+  async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
+    this.lastInput = input
     yield { type: "message_stop", stop_reason: "end_turn" }
   }
+}
+
+/** Drive one turn through a port and return the input its BACKING port observed.
+ *  For a bare port that's its own input; for a `laneLabeledPort` wrap it's the
+ *  input the INNER port saw (with the injected recording lane) — proving the
+ *  wrap is a transparent delegator, not an independent port. */
+const driveAndCaptureInner = async (port: LLMPort, inner: LaneLLM): Promise<StreamInput> => {
+  inner.lastInput = undefined
+  const req: StreamInput = { messages: [], tools: [] }
+  for await (const _ of port.stream(req)) {
+    /* drain */
+  }
+  if (inner.lastInput === undefined) throw new Error("port did not delegate to the inner LLM")
+  return inner.lastInput
 }
 
 const stubStream: StreamPort = { emit() {} }
@@ -152,7 +170,14 @@ describe("G1 buildConfig — lane port reaches the AgentConfig generator", () =>
     expect(cfg.llm).not.toBe(llm)
   })
 
-  test("CONTROL: no laneLlm ⇒ config.llm is deps.llm (byte-identical OFF path)", () => {
+  test("CONTROL: no laneLlm ⇒ config.llm is deps.llm labeled with the 'repair' recording lane (behaviorally equivalent, NOT a provider swap)", async () => {
+    // SHIPPED (config-build.ts:563, commits 4b5354c1b/be34011ba): on the no-lane
+    // OFF path buildConfig wraps deps.llm in `laneLabeledPort(deps.llm, "repair")`
+    // so the main agent's turns group under one authoritative trajectory band.
+    // That wrap is a transparent SOLID decorator (replay-neutral, never hashed):
+    // a NEW object, so `=== deps.llm` no longer holds, but it is BEHAVIORALLY
+    // equivalent. This CONTROL pins that equivalence WITHOUT asserting a provider
+    // swap — the OFF path must never reach a different vendor than deps.llm.
     const llm = new LaneLLM("base")
     const deps = { llm, maxTurns: 1, timeoutMs: 5_000 }
     const cfg = buildConfig(
@@ -162,7 +187,12 @@ describe("G1 buildConfig — lane port reaches the AgentConfig generator", () =>
       new AbortController().signal,
       stubStream,
     )
-    expect(cfg.llm).toBe(llm)
+    // Same descriptive surface — NOT the ON-path laneB/openai provider.
+    expect(cfg.llm.provider).toBe(llm.provider)
+    // Delegates to the SAME backing port (a bare tag, not an independent LLM):
+    // driving cfg.llm reaches `llm` itself, carrying the "repair" recording lane.
+    const seen = await driveAndCaptureInner(cfg.llm, llm)
+    expect(seen.recordingLane).toBe("repair")
   })
 
   test("ROUND-TRIP: resolveLaneLlm(ON, idx) → buildConfig → distinct config.llm per lane", () => {

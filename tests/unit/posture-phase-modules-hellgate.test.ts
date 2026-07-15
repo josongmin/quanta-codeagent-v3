@@ -44,6 +44,16 @@ import { KNOB_PRESETS } from "@/runner/knobs/presets"
 
 const EMPTY_ENV = {} as NodeJS.ProcessEnv
 
+/** verify-select is a RETIRED footgun gated behind an operator ESCAPE hatch
+ *  (knobs-bench B1 fail-closed): without the env flag `verifySelectN` resolves
+ *  to `undefined` for EVERY module fold, which would make the RED-on-injection
+ *  witness below vacuous (wrong N vs right N both collapse to undefined). Setting
+ *  the escape makes the select-N capability observable so a wrong fragment value
+ *  genuinely diverges the derived posture. */
+const SELECT_ESCAPE_ENV = {
+  QUANTA_BENCH_VERIFY_SELECT_ESCAPE: "1",
+} as unknown as NodeJS.ProcessEnv
+
 /** Hermetic state for a named preset (closed-port: only the explicit map is read). */
 const stateFor = (preset: string) =>
   resolveBenchKnobs({ envVars: { QUANTA_BENCH_PRESET: preset } as NodeJS.ProcessEnv })
@@ -130,9 +140,15 @@ describe("posture phase-module seam", () => {
 
   describe("red-on-injection (equivalence is not vacuous)", () => {
     test("RED-1: wrong N in proof-clean modules breaks the fold equivalence", () => {
+      // verify-select must be OBSERVABLE (escape hatch on) or verifySelectN is
+      // undefined for both folds and the witness is vacuous — see SELECT_ESCAPE_ENV.
       const wrong = PROOF_CLEAN_MODULES.map((m) => (m.id.startsWith("select-n-") ? SELECT_N(2) : m))
-      const derivedWrong = derivePhasePosture(stateFor(THIN_BASE), wrong, EMPTY_ENV)
-      const derivedRight = derivePhasePosture(stateFor(THIN_BASE), PROOF_CLEAN_MODULES, EMPTY_ENV)
+      const derivedWrong = derivePhasePosture(stateFor(THIN_BASE), wrong, SELECT_ESCAPE_ENV)
+      const derivedRight = derivePhasePosture(
+        stateFor(THIN_BASE),
+        PROOF_CLEAN_MODULES,
+        SELECT_ESCAPE_ENV,
+      )
       expect(behavioral(derivedWrong)).not.toEqual(behavioral(derivedRight))
       expect(derivedWrong.verifySelectN).toBe(2)
       expect(derivedRight.verifySelectN).toBe(5)

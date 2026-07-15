@@ -143,6 +143,14 @@ const RULES: readonly Rule[] = [
         "ENV PROPAGATION — docker sandbox forwards named env vars (a hardcoded ALLOWLIST) to the container; pass-through, not a feature flag.",
       "subagent/handlers-6.ts":
         "ENV PROPAGATION — subagent child-process spawn forwards parent env (merged with `input.env`); same posture as runtime/shell.ts and tool/git/runner.ts — pass-through, not a feature read.",
+      "subagent/exec-command.ts":
+        "ENV PROPAGATION — the exec-command bridge spreads the parent env INTO the spawned bash child (`{ ...process.env, ...input.env }`) so PATH/HOME resolve for the subprocess; pass-through to a child, not a feature read. Same spawner env-boundary posture as subagent/handlers-6.ts and tool/git/runner.ts.",
+      "agent/loop-helpers.ts":
+        "DEFAULT-OFF gate at a seam — reads the OTel content-capture gate `gateOn(process.env, \"QUANTA_OTEL_CAPTURE_CONTENT\")` at the span-close boundary. Unset/falsy ⇒ NO content leaves the process (byte-identical); the redacted OTLP content plane is armed only when the gate is on AND a span sink is live. Same sanctioned default-OFF gate-at-a-seam class as tool/web/providers/from-env.ts; mirrored in the @/agent slice-boundary envAllowFiles.",
+      "agent/loop/control-poll.ts":
+        "Injection-first DEFAULT-OFF gate — `isControlRequestEnabled(slot.env ?? process.env)`: `process.env` is ONLY the DI fallback for the injected `slot.env` (tests pass a fake env). An absent controlRequest slot OR gate-off ⇒ the port is never even queried (byte-identical). Same injection-first gate-at-a-seam posture as connectors/marketplace-policy.ts; mirrored in the @/agent slice-boundary envAllowFiles.",
+      "tool/container-exec/tool.ts":
+        "DEFAULT-OFF dial resolved at module load — `resolveStreamCap(process.env)` reads the per-stream output cap `QUANTA_TB_STREAM_CAP`; unset/≤0 ⇒ the fixed 8K default (byte-identical). `resolveStreamCap` is PURE (takes the env bag), so the raw `process.env` is only its call-boundary argument. Same env-at-call-boundary posture as runner/diff-ops.ts; mirrored (path-scoped) in the @/tool slice-boundary envAllowFiles.",
       // jun-09 long-tail (§4.3/§1.6/§2.5/P16/ci-bot wiring) — injection-first DI
       // boundaries + one env-propagation, same posture as the entries above.
       "host/runtime/side-agent-fork-port.ts":
@@ -381,6 +389,12 @@ const RULES: readonly Rule[] = [
         "FALSE POSITIVE — the `catch {}` is INSIDE a template-string of generated cell-bootstrap JS (runs in the WASM cell, not TS control flow here); `delete globalThis.__cmDispatch` is best-effort fencing in that emitted code.",
       "stream/adapters/jsonl-recorder.ts":
         "explicit best-effort recording of a degraded line — the file already documents the fallthrough",
+      "llm/replay/jsonl-store.ts":
+        "`appendTail = run.catch(() => {})` swallows a rejection on the CHAIN TAIL only so one failed append cannot poison the serialized append chain — the documented inline comment notes the awaited `run` still surfaces the error to the caller. Same tail-swallow posture as stream/adapters/jsonl-recorder.ts.",
+      "apps/cli/mcp-config-rmw.ts":
+        "`await unlink(tmp).catch(() => {})` is best-effort tmp cleanup on a FAILED atomic write/rename — the primary io error is returned immediately afterward, so a cleanup failure is non-fatal and must never mask it (documented inline). Same failed-rename tmp-cleanup posture as memory/dream/team-write-target.ts.",
+      "apps/bench/trajectory.ts":
+        "`writeFile(metaPath, …).catch(() => {})` is a fire-and-forget run-meta sidecar write — a meta write failure must never crash the bench run (documented inline); the trajectory itself is recorded on a separate path. Same best-effort posture as apps/bench/otel-trace-sink.ts.",
       "llm/stream-timeout.ts":
         "jun-26 SE-audit: `void nextPromise.catch(() => {})` swallows the ABANDONED upstream promise's late settle on a timeout (4-line comment above explains it) — without it the orphaned rejection becomes an unhandledRejection that can crash the process; the timeout error is surfaced separately.",
       "session/store.ts": "ENOENT-style file delete cleanup; absence is the success state",
@@ -504,6 +518,10 @@ const RULES: readonly Rule[] = [
         "Plugin-lifecycle restart-window default (60s) — documented inline; matches platform supervisor convention for restart-budget windows.",
       "apps/cli/idle-monitor.ts":
         "Idle minutes→ms conversion (`n * 60_000`) — surface helper, not a wall-clock policy literal.",
+      "apps/cli/repl/session-loop.ts":
+        "Goal-pill elapsed ms→minutes conversion (`Math.floor(view.elapsedMs / 60_000)`) used only to build a minute-resolution dedup KEY for the surface chip — display unit conversion, not a wall-clock policy literal. Same posture as apps/cli/idle-monitor.ts / status-pills.ts.",
+      "apps/cli/status-pills.ts":
+        "`formatElapsed` ms→minutes conversion (`Math.floor(ms / 60_000)`) for the surface goal chip's `2h 7m` display — surface unit conversion, not a wall-clock policy literal. Same posture as apps/cli/idle-monitor.ts.",
       "apps/cli/web-cmd.ts":
         "Web-fetch abort timer default (60s) at CLI sub-command boundary — surface composition root.",
       "migration/persistence.ts":

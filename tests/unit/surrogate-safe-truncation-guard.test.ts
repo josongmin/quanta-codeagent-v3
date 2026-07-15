@@ -361,6 +361,18 @@ const ALLOW_HASH_ID_CAPS: ReadonlySet<string> = new Set([
   // list) — the `.slice(0, CAP)` bounds the NUMBER of whole `string[]` lines, never
   // cuts inside one. See runner/batch/eval/forward-localize-trace.ts:96.
   "PER_SYMBOL_FILE_CAP",
+  // array-length cap on the compacted trajectory `TrajectoryStep[]` (tail-keep the
+  // last N whole steps). Bounds the NUMBER of step objects, never cuts inside a
+  // string. See apps/terminal/brain-mode.ts:356 `steps.slice(-TRAJECTORY_MAX_STEPS)`.
+  "TRAJECTORY_MAX_STEPS",
+  // array-length cap on the recent-memory `MemoryReadoutEntry[]` (keep the newest N
+  // whole entries after sort). Bounds the NUMBER of entry objects, never cuts inside
+  // a string. See apps/web-daemon/readout.ts:288.
+  "MEMORY_RECENT_MAX",
+  // array-length cap on the CDP `NetworkEntry[]` rows (tail-keep the newest N whole
+  // exchanges). Bounds the NUMBER of entry objects, never cuts inside a string. Each
+  // row's own string fields are separately guarded. See tool/browser/index.ts:116,537.
+  "NETWORK_ROW_CAP",
 ])
 
 /** ALLOWLIST 2 — BURN-DOWN. Pre-existing GENUINE text-truncation sites that
@@ -371,6 +383,12 @@ const ALLOW_HASH_ID_CAPS: ReadonlySet<string> = new Set([
  *  SHRINK. Format: `relativePath:CAP` (line-independent, so unrelated edits in
  *  the file don't churn the list). */
 const ALLOW_BURNDOWN: ReadonlySet<string> = new Set([
+  // ALREADY surrogate-safe by construction: the `t.slice(0, CLAIM_MAX)` is IMMEDIATELY
+  // followed by a manual dangling-high-surrogate drop (`/[\uD800-\uDBFF]$/` → drop last
+  // unit) AND a trailing-combining-mark strip — so a split pair can never escape. Listed
+  // here (not routed) because the extra `\p{M}` trimming is intentional beyond the helper.
+  // See agent/evidence/ingest.ts:22.
+  "agent/evidence/ingest.ts:CLAIM_MAX",
   "llm/cache-control-audit/analyzer.ts:SAMPLE_CHARS",
   "mcp/isolated-client.ts:MAX_RESULT_CHARS",
   "tool/output-spill.ts:HEAD_CHARS",

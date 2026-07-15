@@ -35,6 +35,7 @@ import type { LLMPort, Message } from "@/llm"
 import { defaultResponsesContinuationStore } from "@/llm/responses-continuation-store"
 import { runSessionTurn } from "@/runner/orchestrate/session-turn-driver"
 import { createRuntimeFromBootstrap } from "@/sdk/runtime"
+import { sliceWholeChars } from "@/shared"
 import { gateOn } from "@/shared/env-flag"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { SELF_TEST_DISCIPLINE, TERMINAL_OPERATOR_GUIDE } from "@/tool"
@@ -310,7 +311,7 @@ class CapturingStream implements StreamPort {
  *  PURE + no-leak: reads only the model's own calls/results/text. */
 export const compactTrajectory = (events: readonly AgentEvent[]): TrajectoryStep[] => {
   const trunc = (s: string | undefined): string | undefined =>
-    s === undefined || s === "" ? undefined : s.slice(0, TRAJECTORY_PREVIEW_MAX)
+    s === undefined || s === "" ? undefined : sliceWholeChars(s, TRAJECTORY_PREVIEW_MAX)
   const resultById = new Map<string, Extract<AgentEvent, { type: "tool_result" }>>()
   for (const ev of events) if (ev.type === "tool_result") resultById.set(ev.id, ev)
   const steps: TrajectoryStep[] = []

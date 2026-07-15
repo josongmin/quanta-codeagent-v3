@@ -6,7 +6,7 @@
 - **게이트**: 신규 `QUANTA_INLINE_APPROVAL_RESOLVER`(default-OFF, 마이그레이션 전환 게이트 — Wave2 종료 시 제거). OFF ⇒ 현 deferred/throw+lease 경로 byte-identical.
 - **관련**:
   - 은퇴/재설계 대상: **ADR-0303**(session-turn-driver 추출 — CLI에서 `for(;;)` 승인루프를 `@/runner`로 hoist. 본 ADR이 그 루프 자체를 engine으로 밀어 소멸시킴), **ADR-0512 P3**(승인 scope once/session + steer — resolver 반환 타입으로 보존), **ADR-0528/0525**(crash-resume 마커 — 유저텍스트만 복원. 본 ADR이 pending-approval까지 resumable로 확장)
-  - 재사용(신축 금지): `approval-protocol.ts:197-269`(`runOnConfirm`의 **이미 존재하는 inline path** = seed) · `approval-protocol.ts:88-103`(`claimLease` — happy-path에선 소멸, replay short-circuit으로 개념 이관) · 이벤트로그 `approval.requested`/`approval.resolved` 영속(scheduler.ts ~203-255) · daemon replayWindow(ws-handlers.ts, `WEB_DAEMON_REPLAY_WINDOW`)
+  - 재사용(신축 금지, **직접검증**): `runOnConfirm` inline path([approval-protocol.ts:214-237](../../src/host/runtime/internal/context-binding/approval-protocol.ts)) = **이미 CLI LIVE** · `AgentConfig.onConfirm` async 콜백(gate에서 in-line await, [gates.ts:414](../../src/agent/admissibility-gate/gates.ts)) · `surfaceConfirms` 스택+`confirmSlot`+`chain` 직렬화+`midTurnApprovalChannel` · `interactive` 선택자(context-binding.ts:66) · `claimLease`(:88-103, replay short-circuit으로 개념 이관) · `approval.requested`/`approval.resolved` emit(scheduler.ts ~203-255, **단 event log는 in-memory only**) · daemon replayWindow(ws-handlers.ts)
   - 메모리: `implementation-baseline-from-competitors`(Codex/Claude 흡수), `agent-state-observability-northstar`(crash 후 "뭐 하다 멈췄나"), `surface-model`(멀티서피스 대칭)
 
 ## Context
@@ -38,9 +38,22 @@
 
 ⇒ crash 케이스에선 우리도 Codex/Claude와 똑같이 잃는다. **continuation을 client로 흘려 얻은 실질 이득 = 0.** 따라서 인라인 resolver는 기존 guarantee를 **보존**하는 게 아니라, 가진 줄 알았던 durability를 **비로소 짓는다** — 퇴행 리스크가 아니라 순수 신규 capability.
 
-### de-risk: 인라인 seam은 이미 있다
+### ⚠️ 직접검증(2026-07-16): 인라인 resolver는 CLI에 이미 LIVE — 재발명 금지
 
-[`runOnConfirm`(approval-protocol.ts:197-269)](../../src/host/runtime/internal/context-binding/approval-protocol.ts)에 **이미 두 경로**가 있다 — inline path(surface 즉시 호출) + deferred path(throw). 본 재설계는 인라인 seam을 맨땅에서 만드는 게 아니라, **inline path를 primary로 승격 + deferred/throw path 은퇴**다.
+적대 discovery 어딧 2회 + 소스 직접확인 결과, **본 ADR이 "짓겠다"던 in-line suspend-and-continue는 이미 구현·배선·default-ON(CLI)·hellgate-pinned다.** jun-10 HITL restructure가 정확히 같은 동기(deferred 재실행이 승인당 ~140k 토큰 재지불)로 이미 만들었다.
+
+- [`runOnConfirm`(approval-protocol.ts:209-238)](../../src/host/runtime/internal/context-binding/approval-protocol.ts): `if (deps.interactive && surface !== undefined)` → `await surface(action)`로 **gate에서 즉시 물어보고 결정을 그대로 반환. pending 없음·turn abort 없음·re-run 없음.** 주석이 명시: *"The deferred mint+throw below remains for surfaces without an operator (web/SDK)."*
+- 주입 콜백 = `AgentConfig["onConfirm"]`(async), [gates.ts:414](../../src/agent/admissibility-gate/gates.ts)·[hitl.ts:304](../../src/agent/admissibility-gate/hitl.ts)서 `normalizeConfirm(await config.onConfirm(action))`로 **mid-dispatch in-line await → 같은 turn 계속**. = canUseTool 아날로그, 이미 배선(231 refs).
+- 선택자 = plain boolean [`approvalProtocol.interactive`](../../src/apps/cli/repl/runtime-context-compose.ts)(:654 `interactive: true` 하드와이어, **게이트 아님**) → [context-binding.ts:66](../../src/host/runtime/internal/context-binding.ts). CLI만 켜져 있음.
+- 봉인: `src/host/runtime/internal/__tests__/approval-inline-interactive.hellgate.test.ts`(interactive ⇒ delegate no-throw; absent ⇒ legacy throw+pending).
+
+**⇒ 실제 델타 재정의**: "인라인 resolver를 짓는다"가 아니라 **이미 CLI에서 도는 인라인 머신러리(`onConfirm`·`surfaceConfirms` 스택·`confirmSlot`·`midTurnApprovalChannel`·`chain` 직렬화)를 deferred 서피스(web-daemon/headless/SDK)로 확장**하는 것. 그 서피스들은 `interactive`를 안 켜서 여전히 throw→deferred→`for(;;)` 재실행을 탄다.
+
+### DEAD 스캐폴드(오인 금지)
+
+- **ADR-0403 `src/agent/approval-state-machine/`**: `resumeStep`은 **display string**(attribution), 실행 재개 아님. DEAD-UNWIRED(gate로 web-daemon에 threaded되나 관측/귀속 레이어).
+- **ADR-0407 `src/agent/approval-gate-wire/wire.ts`**: resolver-wrapping 어댑터, live caller 0. DEAD-UNWIRED.
+- 둘 다 durable resume 아님 — 이걸 resume으로 착각해 그 위에 짓지 말 것.
 
 ## Decision
 
@@ -59,25 +72,28 @@ type ApprovalResolver = (approval: PendingApproval, ctx: ResolverCtx) => Promise
   - **web-daemon**: `approval.requested` WS emit + 매칭 `approval.respond` command await (**서버측 suspend**, Codex형)
 - runAgent 내부 `runOnConfirm`이 deferred-throw 대신 **`await resolver(...)`** → 결정 받으면 같은 turn 계속. 브라우저/드라이버 어느 쪽도 재발행 안 함.
 
-### Wave 1 — parity + leak 제거 (durability는 현 수준 유지)
+### Wave 1 — 인라인 머신러리를 deferred 서피스로 확장 (CLI는 이미 완료)
 
-engine이 turn을 **완료까지** 몬다. 승인은 in-line resolver로 해소.
-- `runOnConfirm` inline path 승격, throw/catch/return([turn-runner.ts:185-192](../../src/host/runtime/internal/context-binding/turn-runner.ts)) 제거.
-- `driveSessionTurn` → `append + run`(단일 run이 내부적으로 완료까지). `for(;;)` 승인루프 삭제.
-- **web-daemon**: resolver = WS round-trip(서버측). **브라우저** `shouldContinueAfterApproval` + client `turn.run` 재발행([session-hooks.ts:939-942, 995-1002](../../apps/web-frontend/src/ws/session-hooks.ts)) 삭제 → 브라우저는 렌더+답만.
-- `approval.requested`/`approval.resolved` event log 영속 유지(관측 + 라이브-데몬 재접속 계속 동작).
-- **스파이크 선행**: headless(가장 쌈, auto-policy, UI無)에서 in-line resolver 증명 → CLI → web 순 웨이브.
-- **게이트**: `QUANTA_INLINE_APPROVAL_RESOLVER` OFF ⇒ deferred/throw+lease byte-identical. ON ⇒ 인라인 경로.
-- 이 단계로 **모든 leak 봉합 + in-process/wire 대칭**. crash durability는 오늘과 동급(오늘도 어차피 broken).
+**핵심 정정(직접검증 후)**: CLI는 이미 인라인이다 — W1 작업 0. W1 = **web-daemon·headless가 `interactive`를 켜고 async surface confirm을 제공**해 이미 도는 `runOnConfirm` 인라인 경로를 타게 하는 것. 머신러리(`onConfirm`·`surfaceConfirms`·`confirmSlot`·`chain`)는 재사용, 신축 아님.
+
+- **headless**(스파이크 선행, 가장 쌈): `interactive` 켜고 surface confirm = **auto-policy**(즉시 approve/정책 반환). throw→deferred 경로 대신 인라인. UI無라 순수 로직만.
+- **web-daemon**: surface confirm = **WS round-trip**(`approval.requested` emit + `approval.respond` await, 서버측 suspend = Codex형). `interactive` 켬 → 인라인 경로. **브라우저** `shouldContinueAfterApproval` + client `turn.run` 재발행([session-hooks.ts:939-942, 995-1002](../../apps/web-frontend/src/ws/session-hooks.ts)) 삭제 → 렌더+respond만.
+- 두 서피스가 인라인으로 오면 `runOnConfirm` deferred throw 경로([:240-268](../../src/host/runtime/internal/context-binding/approval-protocol.ts))의 live 소비자가 사라짐 → [turn-runner.ts:185-192](../../src/host/runtime/internal/context-binding/turn-runner.ts) catch→return + [driveSessionTurn `for(;;)`](../../src/runner/orchestrate/session-turn-driver.ts)가 vestigial(항상 1-iteration)이 되어 `append+run`으로 단순화 가능.
+- `approval.requested`/`approval.resolved` event log emit 유지(관측 + 라이브-데몬 재접속 continue).
+- **게이트**: `QUANTA_INLINE_APPROVAL_RESOLVER` OFF ⇒ web/headless는 현 deferred/throw+lease byte-identical. ON ⇒ 인라인. (CLI는 게이트 무관 — 이미 인라인.)
+- 이 단계로 **wire leak(브라우저 continuation) 봉합 + in-process/wire 대칭**. crash durability는 오늘과 동급(오늘도 broken) — W2에서 처음 지어짐.
 
 ### Wave 2 — 진짜 durability (resumable resolver)
 
-resolver await를 event-log에 대해 **결정적 replay**하게. (durable-execution 패턴: "await external signal"을 checkpoint하고 replay가 resolved signal을 short-circuit.)
-1. **persist-before-await**: resolver await 전 pending-approval을 안정적(결정적) `approvalId`로 event log에 기록(`awaiting_approval` = turn-END가 아닌 turn-INTERNAL checkpoint).
-2. **replay short-circuit**: 프로세스 재시작 → turn을 persisted transcript로 replay → 같은 승인점 도달 시 resolver가 **먼저 로그 조회**: 이미 `approval.resolved` 있으면 즉시 반환(재프롬프트 없이 결정적 계속), 없으면 `approval.requested` 재emit + 재await. lease-claim의 개념이 여기로 이관.
-3. **reload rehydrate**: [state.ts:108](../../src/kernel/session/state.ts)이 persisted `awaiting_approval`+`pendingApproval`을 복원하도록 수정(현재 무조건 idle 리셋 = 버그).
-4. **전제**: turn이 승인점까지 **결정적 replay 가능**해야 함(LLM 재샘플 아닌 persisted transcript 재생 — Codex rollout replay와 동형). 이벤트로그가 이미 messages/tool_result 영속.
-5. Wave2 종료 시 게이트 제거, deferred/throw/lease 코드 삭제.
+> **⚠️ load-bearing 정정(직접검증)**: 본 ADR 초안이 가정한 "이벤트로그가 이미 messages/tool_result 영속"은 **틀렸다.** `KernelEventLogPort` 구현체는 [`InMemorySessionEventLog`](../../src/kernel/session/event-log.ts) **하나뿐**이고 persistence는 [`new InMemorySessionEventLog()`](../../src/host/runtime/persistence.ts)가 전부 — **온디스크 이벤트로그가 없다.** 디스크 durability는 별경로(`SessionMeta`/history via [resume-fsm](../../src/runner/orchestrate/resume-fsm.ts))로 존재하나 event log는 프로세스와 함께 소멸. 따라서 W2의 실제 load-bearing 선행조건은 "resolver를 resumable하게"가 아니라 **온디스크 이벤트로그 substrate를 먼저 짓는 것**.
+
+0. **온디스크 이벤트로그(신규 substrate, 진짜 병목)**: `KernelEventLogPort`의 append-only 디스크 구현(Codex rollout JSONL형). 이게 없으면 아래 1-4 전부 불가.
+1. **persist-before-await**: resolver await 전 pending-approval을 안정적(결정적) `approvalId`로 (디스크) event log에 기록(`awaiting_approval` = turn-END가 아닌 turn-INTERNAL checkpoint).
+2. **replay short-circuit**: 프로세스 재시작 → turn을 persisted transcript로 replay → 같은 승인점 도달 시 resolver가 **먼저 로그 조회**: 이미 `approval.resolved` 있으면 즉시 반환(재프롬프트 없이 결정적 계속), 없으면 `approval.requested` 재emit + 재await. [claimLease](../../src/host/runtime/internal/context-binding/approval-protocol.ts)(현재 in-memory Map, turn-scope마다 drain)의 개념이 여기로 이관.
+3. **reload rehydrate**: [state.ts:108](../../src/kernel/session/state.ts)이 무조건 `idle`/`pendingApproval:null` 리셋 — persisted `awaiting_approval`+`pendingApproval` 복원하도록 수정. (반쯤 지어진 버전 없음 = 완전 부재 확인.)
+4. **전제**: turn이 승인점까지 **결정적 replay 가능**해야 함(LLM 재샘플 아닌 persisted transcript 재생 — Codex rollout replay와 동형).
+5. **crash-resume 확장**: 새 레이어 짓지 말고 [ADR-0525/0528 마커](../../src/session/crash-resume.ts)(현재 userText만)를 pending-approval 운반까지 확장.
+6. Wave2 종료 시 게이트 제거, deferred/throw/lease 코드 삭제.
 
 ### seam 붕괴 + fence
 
@@ -91,8 +107,8 @@ Wave1 후 `driveSessionTurn`의 루프 소멸 → turn primitive가 engine으로
 
 ## Hellgate (RED 먼저)
 
-1. `runAgent × in-line resolver`: 승인 필요 tool → resolver가 in-line await로 호출됨 + 같은 turn 계속(재발행 0). scripted-LLM e2e.
-2. **대칭**: 동일 시나리오가 CLI(TTY)·headless(auto)·web(WS round-trip) 3서피스에서 client 재발행 없이 통과.
+1. **headless/web 인라인 전환**(핵심 RED): 승인 필요 tool → **web/headless가** deferred throw 대신 인라인 surface await로 같은 turn 계속(재발행 0). CLI는 이미 통과(`approval-inline-interactive.hellgate.test.ts` 패턴 미러). scripted-LLM e2e.
+2. **대칭**: 동일 시나리오가 CLI(TTY, 기존)·headless(auto, 신규)·web(WS round-trip, 신규) 3서피스에서 client 재발행 없이 통과.
 3. **브라우저 thin**: web-frontend에 `shouldContinueAfterApproval` 및 승인후 client `turn.run` 부재(red-on-injection).
 4. **durability(Wave2 crown)**: `awaiting_approval` → SIGKILL → 재시작 → 승인 재surface → 답변 → tool 디스패치. (현재 0개 — 신규 guarantee의 봉인.)
 5. **fence**: `src/apps/**`가 `@/runner/orchestrate` turn-driver import 시 컴파일/lint red.

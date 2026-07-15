@@ -1,4 +1,4 @@
-import { redactValue } from "@/shared"
+import { redactValue, sliceWholeChars } from "@/shared"
 import type { SubagentResult } from "./types"
 
 export type TaskStatus = "running" | "completed" | "failed" | "stopped"
@@ -14,7 +14,7 @@ const PREVIEW_CAP = 240
  *  `undefined` in ⇒ `undefined` out (the field is omitted from the event). */
 const boundedRedact = (s: string | undefined): string | undefined => {
   if (s === undefined) return undefined
-  const bounded = s.length > PREVIEW_CAP ? s.slice(0, PREVIEW_CAP) : s
+  const bounded = s.length > PREVIEW_CAP ? sliceWholeChars(s, PREVIEW_CAP) : s
   const scrubbed = redactValue(bounded)
   return typeof scrubbed === "string" ? scrubbed : bounded
 }
