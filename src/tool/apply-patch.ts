@@ -560,7 +560,7 @@ async function guardedParseAndApply(
   // the atomic apply. The fast-apply rescue retry passes false so one original
   // request cannot consume the turn budget twice.
   if (enforceWriteBudget) {
-    const budgetDeny = writeBudgetEvent(ctx)
+    const budgetDeny = ctx ? writeBudgetEvent(ctx) : null
     if (budgetDeny) return { deny: budgetDeny }
   }
   // applyPatch throws PatchApplyError / PatchAnchorNotFoundError on apply

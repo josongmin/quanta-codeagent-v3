@@ -13,13 +13,14 @@
  *   PO-06  disposeSessionResources evicts the pool ONLY when evictLspPoolOnEnd
  *          is set (RED-on-injection: flag off ⇒ the warm child leaks).
  */
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { maybeStartLspPrewarm } from "@/agent/loop/session-bootstrap"
 import { disposeSessionResources } from "@/agent/loop/session-lifecycle"
 import {
+  __acquirePyrightTestIsolationForTest,
   __resetSharedPyrightSessionsForTest,
   __setPyrightClientFactoryForTest,
   evictLspWorkspaces,
@@ -48,11 +49,20 @@ class FakePyright extends LspClient {
 }
 
 const lastClients: FakePyright[] = []
+let releasePyrightTestIsolation: (() => void) | undefined
+beforeEach(async () => {
+  releasePyrightTestIsolation = await __acquirePyrightTestIsolationForTest()
+})
 afterEach(async () => {
-  await __resetSharedPyrightSessionsForTest()
-  __setPyrightClientFactoryForTest(null)
-  created = 0
-  lastClients.length = 0
+  try {
+    await __resetSharedPyrightSessionsForTest()
+    __setPyrightClientFactoryForTest(null)
+    created = 0
+    lastClients.length = 0
+  } finally {
+    releasePyrightTestIsolation?.()
+    releasePyrightTestIsolation = undefined
+  }
 })
 
 const installFakeFactory = (): void => {
@@ -61,6 +71,19 @@ const installFakeFactory = (): void => {
     lastClients.push(c)
     return c
   })
+}
+
+/** Wait for the background task's observable effect without asserting a fixed
+ * scheduler delay. The bounded deadline keeps a missing fire-and-forget launch
+ * RED while allowing a contended full-suite worker to run the queued warm. */
+const waitForCreatedClient = async (timeoutMs = 2_000): Promise<void> => {
+  const deadline = Date.now() + timeoutMs
+  while (created === 0) {
+    if (Date.now() >= deadline) {
+      throw new Error(`background LSP prewarm did not create a client within ${timeoutMs}ms`)
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 10))
+  }
 }
 
 /** Hermetic lister over an in-memory tree (no fs walk). */
@@ -125,8 +148,10 @@ describe("RFC jun-17 — prewarm/evict orchestration", () => {
       // client spawn happen on later microtasks). This is the "session start is
       // not delayed" guarantee.
       expect(created).toBe(0)
-      // …but it DOES run shortly after (the warm was actually scheduled).
-      await new Promise((r) => setTimeout(r, 50))
+      // …but it DOES run after yielding (the warm was actually scheduled).
+      // Do not encode a 50ms scheduler promise: full-suite CPU contention can
+      // delay this task without changing fire-and-forget behavior.
+      await waitForCreatedClient()
       expect(created).toBe(1)
     } finally {
       rmSync(dir, { recursive: true, force: true })

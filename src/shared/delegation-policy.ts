@@ -43,7 +43,7 @@ export const DELEGATION_SUPPRESSION_POLICY =
  *  false. The knob stays registered in runtime-config (inventory + default-off
  *  completeness guard); this is the same env var, one resolution rule. */
 export const delegationSuppressEnabled = (
-  env: Record<string, string | undefined> = process.env,
+  env: Readonly<Record<string, string | undefined>>,
 ): boolean => gateOn(env, "QUANTA_SUBAGENT_DELEGATE_SUPPRESS")
 
 /** Pure projection: prepend the policy atom to a tool description when enabled.

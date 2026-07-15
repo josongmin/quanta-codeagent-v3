@@ -13,11 +13,12 @@
  *   SR-04  a language with NO warm pool ⇒ launch-stage ok (binary preflight is
  *          the only authority; no divergent second readiness heuristic).
  */
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  __acquirePyrightTestIsolationForTest,
   __resetSharedPyrightSessionsForTest,
   __setPyrightClientFactoryForTest,
   __setPyrightWarmupTimingForTest,
@@ -49,13 +50,22 @@ class FakePyrightClient extends LspClient {
 
 const mkRepo = (prefix: string): string => mkdtempSync(join(tmpdir(), prefix))
 
+let releasePyrightTestIsolation: (() => void) | undefined
+beforeEach(async () => {
+  releasePyrightTestIsolation = await __acquirePyrightTestIsolationForTest()
+})
 afterEach(async () => {
-  await __resetSharedPyrightSessionsForTest()
-  __setPyrightClientFactoryForTest(null)
-  __setPyrightWarmupTimingForTest(null)
-  if (priorReadyBudget === undefined) delete process.env[READY_BUDGET_KEY]
-  else process.env[READY_BUDGET_KEY] = priorReadyBudget
-  __resetRuntimeConfig()
+  try {
+    await __resetSharedPyrightSessionsForTest()
+    __setPyrightClientFactoryForTest(null)
+    __setPyrightWarmupTimingForTest(null)
+    if (priorReadyBudget === undefined) delete process.env[READY_BUDGET_KEY]
+    else process.env[READY_BUDGET_KEY] = priorReadyBudget
+    __resetRuntimeConfig()
+  } finally {
+    releasePyrightTestIsolation?.()
+    releasePyrightTestIsolation = undefined
+  }
 })
 
 describe("strict LSP ready proof (LSP-01)", () => {

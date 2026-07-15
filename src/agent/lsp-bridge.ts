@@ -23,7 +23,6 @@
  *   - `tools.ts`        rename/code-action/format/signature ports + nav tool list
  */
 
-export { lspExtensionToLanguage } from "./lsp-bridge/servers"
 export {
   __hasCachedLspAvailabilityForTest,
   __isLspAvailableForTest,
@@ -32,6 +31,16 @@ export {
   lspBinaryAvailable,
 } from "./lsp-bridge/availability"
 export {
+  attachLspDiagnosticsHookIfEnabled,
+  lspDefaultEditTools,
+  lspDiagnosticsProvider,
+  lspDiagnosticsTool,
+} from "./lsp-bridge/diagnostics"
+export { evidenceLspStatic, lspNavProvider } from "./lsp-bridge/nav"
+export { lspExtensionToLanguage } from "./lsp-bridge/servers"
+export { lspNavCheapToolList, lspNavToolList } from "./lsp-bridge/tools"
+export {
+  __acquirePyrightTestIsolationForTest,
   __findPyrightImportProbeForTest,
   __resetSharedPyrightSessionsForTest,
   __setPyrightClientFactoryForTest,
@@ -42,11 +51,3 @@ export {
   resolvePrewarmAnchor,
   startBackgroundLspPrewarm,
 } from "./lsp-bridge/warm-pool"
-export {
-  attachLspDiagnosticsHookIfEnabled,
-  lspDefaultEditTools,
-  lspDiagnosticsProvider,
-  lspDiagnosticsTool,
-} from "./lsp-bridge/diagnostics"
-export { evidenceLspStatic, lspNavProvider } from "./lsp-bridge/nav"
-export { lspNavCheapToolList, lspNavToolList } from "./lsp-bridge/tools"

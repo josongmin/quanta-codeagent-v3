@@ -1,7 +1,7 @@
 import { z } from "zod"
-import { errMessage } from "@/shared"
+import { errMessage, runtimeConfig } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
-import { delegationSuppressEnabled, withDelegationPolicy } from "@/shared/delegation-policy"
+import { withDelegationPolicy } from "@/shared/delegation-policy"
 import { validateAgentType } from "./agent-type"
 import { TaskRegistry } from "./registry"
 import type { SubagentRequest, SubagentResult, SubagentRunner, TaskBudget, TaskKind } from "./types"
@@ -657,7 +657,7 @@ const AGENT_TOOL_BASE_DESCRIPTION =
  *  single-agent-first delegation policy when the opt-in knob is set (default-OFF
  *  ⇒ byte-identical). Reads the knob at construction time. */
 export const agentToolDescription = (): string =>
-  withDelegationPolicy(AGENT_TOOL_BASE_DESCRIPTION, delegationSuppressEnabled())
+  withDelegationPolicy(AGENT_TOOL_BASE_DESCRIPTION, runtimeConfig().subagentDelegateSuppress)
 
 export const createAgentTool = (
   opts: AgentToolOptions,

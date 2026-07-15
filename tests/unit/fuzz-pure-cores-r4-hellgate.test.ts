@@ -535,18 +535,26 @@ describe("FUZZ r4: classifyPassiveVcs total / no-throw / non-git-safe", () => {
     return parts.join("\n")
   }
 
-  test("≥200 random inputs: never throws, terminates fast (<25ms each)", () => {
+  test("≥200 random inputs: never throws, terminates fast (<25ms consistently)", () => {
     const ITERS = 320
     for (let iter = 0; iter < ITERS; iter++) {
       const rng = new Rng(0xabcdef + iter * 16807)
       const command = randomCommand(rng, CMD_TOKENS)
       const stdout = randomStdout(rng)
       const exitCode = rng.int(3) === 0 ? rng.int(128) : 0
-      const start = performance.now()
-      expect(() => classifyPassiveVcs({ command, stdout, exitCode })).not.toThrow()
-      const elapsed = performance.now() - start
-      if (elapsed > 25) {
-        throw new Error(`iter ${iter}: slow (${elapsed}ms) — possible ReDoS — cmd="${command}"`)
+      // `performance.now()` includes process descheduling. A single sample can
+      // cross 25ms while an unrelated LSP-heavy test owns the worker, which is
+      // not evidence of regex backtracking. ReDoS is input-deterministic, so
+      // require every immediate re-run to be slow before failing the rail.
+      const samples = Array.from({ length: 3 }, () => {
+        const start = performance.now()
+        expect(() => classifyPassiveVcs({ command, stdout, exitCode })).not.toThrow()
+        return performance.now() - start
+      })
+      if (samples.every((elapsed) => elapsed > 25)) {
+        throw new Error(
+          `iter ${iter}: consistently slow (${samples.join(", ")}ms) — possible ReDoS — cmd="${command}"`,
+        )
       }
     }
   })

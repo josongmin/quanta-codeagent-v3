@@ -27,7 +27,8 @@
  */
 
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
-import { delegationSuppressEnabled, withDelegationPolicy } from "@/shared/delegation-policy"
+import { runtimeConfig } from "@/shared"
+import { withDelegationPolicy } from "@/shared/delegation-policy"
 import { dispatchSubagent6, type Subagent6Deps } from "./dispatch-6"
 import { InputChannelRegistry, PtyTable } from "./handlers-6"
 import {
@@ -114,7 +115,7 @@ const SPAWN_AGENT_6_BASE_DESCRIPTION =
  *  single-agent-first delegation policy when the opt-in knob is set (default-OFF
  *  ⇒ byte-identical). Projects the SAME SSOT atom as the trio `agent` tool. */
 export const spawnAgent6Description = (): string =>
-  withDelegationPolicy(SPAWN_AGENT_6_BASE_DESCRIPTION, delegationSuppressEnabled())
+  withDelegationPolicy(SPAWN_AGENT_6_BASE_DESCRIPTION, runtimeConfig().subagentDelegateSuppress)
 
 export const createSubagent6Tools = (deps: Subagent6Deps): Subagent6ToolSet => {
   // Mint a PtyTable + InputChannelRegistry when the caller didn't supply one,

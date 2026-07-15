@@ -148,6 +148,10 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     denyImports: [...PEER_LIBRARY_DENY],
     stdioAllowFiles: ["logger.ts", "console-sink.ts"],
     requireSliceBarrel: true,
+    // 77 files / ~600KB: the apps runtime+type-import AST scan alone can exceed
+    // Bun's 5s behavioural-test deadline under full-unit CPU contention.
+    // This remains the same bounded structural assertion, not a policy exemption.
+    surfaceIsolationScanTimeoutMs: 20_000,
   },
   session: {
     slice: "session",

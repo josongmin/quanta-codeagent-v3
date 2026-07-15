@@ -28,6 +28,10 @@ export interface SliceBoundaryConfig {
   readonly requireSliceBarrel?: boolean
   /** Require sub-slice barrels relative to `src/<slice>/`. */
   readonly requireSubSliceBarrels?: readonly string[]
+  /** Explicit budget for the runtime+type-position apps-surface AST scan. The
+   *  default behavioural-test deadline can be too short for a large slice under
+   *  full-suite CPU contention without changing this structural assertion. */
+  readonly surfaceIsolationScanTimeoutMs?: number
   /** Layer-2 composition slices (e.g. `@/host`) are NOT pure libraries: they
    *  legitimately read `process.env`, write startup stdio, and import every
    *  lower layer. Only the ONE invariant that still applies to them — surface
@@ -413,6 +417,13 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
   const envAllow = new Set(config.envAllowFiles ?? [])
   const consoleAllow = new Set(config.consoleAllowFiles ?? [])
   const includeBackup = config.includeBackupArtifacts ?? false
+  const registerSurfaceIsolationGuard = (name: string, body: () => void): void => {
+    if (config.surfaceIsolationScanTimeoutMs === undefined) {
+      test(name, body)
+      return
+    }
+    test(name, body, config.surfaceIsolationScanTimeoutMs)
+  }
 
   describe(`@/${config.slice} — architecture guard`, () => {
     const files = listSliceTsFiles(dir, includeBackup)
@@ -421,33 +432,36 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
       expect(files.length).toBeGreaterThan(0)
     })
 
-    test("no file imports from any `apps/**` (surface isolation, incl. type-position)", () => {
-      const violations: string[] = []
-      for (const f of files) {
-        const src = readFileSync(f, "utf8")
-        // Runtime imports (value `import`/`export … from`, dynamic `import()`)…
-        for (const { line, spec } of extractImports(src)) {
-          if (isSurfaceSpec(spec)) {
-            violations.push(`${relative(dir, f)}:${line}  import "${spec}"`)
+    registerSurfaceIsolationGuard(
+      "no file imports from any `apps/**` (surface isolation, incl. type-position)",
+      () => {
+        const violations: string[] = []
+        for (const f of files) {
+          const src = readFileSync(f, "utf8")
+          // Runtime imports (value `import`/`export … from`, dynamic `import()`)…
+          for (const { line, spec } of extractImports(src)) {
+            if (isSurfaceSpec(spec)) {
+              violations.push(`${relative(dir, f)}:${line}  import "${spec}"`)
+            }
+          }
+          // …AND type-position refs (`import type`, `export type`, `import("x").T`).
+          // A core/wiring slice referencing a surface is an inversion even when
+          // erased — this is the exact form that hid the `@/agent`→`apps/cli`
+          // surface-port inversion. (For non-`apps` peer libs, type contracts stay
+          // allowed; only the surface boundary is checked here.)
+          for (const { line, spec } of extractTypeOnlyModuleRefs(src)) {
+            if (isSurfaceSpec(spec)) {
+              violations.push(`${relative(dir, f)}:${line}  type-import "${spec}"`)
+            }
           }
         }
-        // …AND type-position refs (`import type`, `export type`, `import("x").T`).
-        // A core/wiring slice referencing a surface is an inversion even when
-        // erased — this is the exact form that hid the `@/agent`→`apps/cli`
-        // surface-port inversion. (For non-`apps` peer libs, type contracts stay
-        // allowed; only the surface boundary is checked here.)
-        for (const { line, spec } of extractTypeOnlyModuleRefs(src)) {
-          if (isSurfaceSpec(spec)) {
-            violations.push(`${relative(dir, f)}:${line}  type-import "${spec}"`)
-          }
+        if (violations.length > 0) {
+          throw new Error(
+            `@/${config.slice} must not reference apps/** (incl. type-only):\n\n${violations.join("\n")}`,
+          )
         }
-      }
-      if (violations.length > 0) {
-        throw new Error(
-          `@/${config.slice} must not reference apps/** (incl. type-only):\n\n${violations.join("\n")}`,
-        )
-      }
-    })
+      },
+    )
 
     // Layer-2 composition slices run ONLY the surface-isolation invariant above.
     if (config.surfaceIsolationOnly) return

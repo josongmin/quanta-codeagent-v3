@@ -40,6 +40,35 @@ const PYRIGHT_IMPORT_SCAN_LINE_CAP = 200
 type PyrightClientFactory = (cwd: string) => LspClient
 let pyrightClientFactory: PyrightClientFactory = (cwd) => PYRIGHT.create(cwd)
 
+/**
+ * Test-only process-wide mutex for suites which replace {@link pyrightClientFactory}
+ * or dispose the shared warm pool. Bun can run test files concurrently, but both
+ * seams are module globals: without this lease, one file can reset the pool or
+ * replace the factory while another still owns a fake client. Keep the lock next
+ * to the globals it protects rather than relying on runner-specific serial flags.
+ */
+let pyrightTestIsolationTail: Promise<void> = Promise.resolve()
+
+/** TEST-ONLY: acquire exclusive access to the mutable shared-pyright test seams.
+ * The returned release is idempotent; callers must invoke it from `afterEach` in
+ * a `finally` block so an assertion or cleanup failure cannot strand later files. */
+export const __acquirePyrightTestIsolationForTest = async (): Promise<() => void> => {
+  let unlock: (() => void) | undefined
+  const held = new Promise<void>((resolve) => {
+    unlock = resolve
+  })
+  const prior = pyrightTestIsolationTail
+  pyrightTestIsolationTail = prior.then(() => held)
+  await prior
+
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    unlock?.()
+  }
+}
+
 /** TEST-ONLY: swap the pooled-client factory (pass null to restore the real one). */
 export const __setPyrightClientFactoryForTest = (factory: PyrightClientFactory | null): void => {
   pyrightClientFactory = factory ?? ((cwd) => PYRIGHT.create(cwd))
