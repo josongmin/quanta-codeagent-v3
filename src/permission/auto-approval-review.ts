@@ -85,6 +85,7 @@ export interface ApprovalReviewer {
   clear(): void
 }
 
+// FORWARD-SEAM (not wired): live auto-approval cadence = auto-approval-review-observer + allowlistEscalated; this ledger is Codex-parity substrate, no runtime consumer.
 /** Create an ApprovalReviewer. Pure factory — produces a closure with the
  *  ledger captured. */
 export const createApprovalReviewer = (opts: ApprovalReviewerOpts = {}): ApprovalReviewer => {

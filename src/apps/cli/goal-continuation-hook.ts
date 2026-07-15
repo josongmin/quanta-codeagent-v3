@@ -82,7 +82,12 @@ export const startGoalContinuationTicker = (
   const setFn = opts.setIntervalFn ?? ((fn, ms) => setInterval(fn, ms))
   const clearFn = opts.clearIntervalFn ?? ((h) => clearInterval(h))
 
+  let stopped = false
   const handle = setFn(() => {
+    // `clearInterval` cannot retract a callback already queued by the event
+    // loop. Re-check the lifecycle gate at callback execution so session
+    // teardown cannot resume a goal after `stop()` returned.
+    if (stopped) return
     // Fire-and-forget: runIdleContinuation is NO-THROW and the semaphore guards
     // re-entrancy, so an unresolved resume simply skips the next tick.
     void runIdleContinuation(threadId, deps)
@@ -90,7 +95,6 @@ export const startGoalContinuationTicker = (
   // Never hold the event loop open just for the poll.
   ;(handle as { unref?: () => void }).unref?.()
 
-  let stopped = false
   return {
     stop: (): void => {
       if (stopped) return

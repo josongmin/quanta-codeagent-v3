@@ -39,6 +39,7 @@ evidence:
   adrs: [118]
   tests:
     unit:
+      - tests/unit/shadow-odb-hellgate.test.ts
       - tests/unit/shadow-odb-rewind-extensions-hellgate.test.ts
     integration: []
     contract: []

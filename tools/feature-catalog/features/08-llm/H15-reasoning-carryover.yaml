@@ -61,11 +61,15 @@ evidence:
     - src/llm/responses-stream.ts
     - src/memory/typed-event/types.ts
     - src/shared/runtime-config.ts
+    - src/llm/factory.ts
+    - src/llm/adapters/openai-responses.ts
+    - src/llm/adapters/chatgpt-oauth.ts
   adrs: []
   tests:
     unit:
       - tests/unit/reasoning-carryover-hellgate.test.ts
       - tests/unit/reasoning-carryover-e2e-hellgate.test.ts
+      - tests/unit/reasoning-carryover-live-e2e-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -79,26 +83,20 @@ knobs:
       captures each reasoning item's opaque `encrypted_content`, persists it
       per-route, and re-emits it at the head of the next turn's Responses input
       with `store:false`.
-deliberate_hold:
-  reason: |
-    Adapter wiring is the documented seam: the capture/persist/re-emit machinery
-    is COMPLETE and proven in the owned slice (`openai-responses-wire.ts` /
-    `responses-stream.ts`), but threading `reasoningCarryover:
-    runtimeConfig().reasoningCarryover` + a `ResponsesReasoningCarryoverStore`
-    instance into the `prepareResponsesContinuationRequest` /
-    `streamResponsesSurface` CALLS lives in the non-owned adapters
-    (`src/llm/adapters/openai-responses.ts`, `chatgpt-oauth.ts`) at the
-    composition root. Until wired there, the path stays default-OFF (adapters
-    pass undefined ⇒ byte-identical). The `x-reasoning-included` transport header
-    is likewise an adapter-side seam — the body-level `include` field is the
-    functional SSOT this wire owns.
-  promotion_path: |
-    Composition-root wiring: read `runtimeConfig().reasoningCarryover`, construct
-    one per-session `defaultResponsesReasoningCarryoverStore()`, and thread both
-    into the two responses adapters' `prepare`/`stream` calls (mirroring the
-    existing `responsesContinuation.store` injection). Optionally set the
-    `x-reasoning-included` header on the Responses request.
+deliberate_hold: null
 notes: |
+  Composition-root adapter wire LANDED (2026-07): `src/llm/factory.ts:163`
+  (OpenAIResponsesAdapter) and `:219` (ChatGPTOAuthAdapter) thread
+  `reasoningCarryover: true` when `resolveReasoningCarryover(env)`
+  (`QUANTA_REASONING_CARRYOVER`, factory.ts:291) is on; each adapter consumes it
+  and allocates one per-session `defaultResponsesReasoningCarryoverStore()` at
+  construction (`src/llm/adapters/openai-responses.ts:84-88`,
+  `src/llm/adapters/chatgpt-oauth.ts:212-214`). OFF ⇒ adapters allocate no store
+  and are byte-identical (proven live in
+  `tests/unit/reasoning-carryover-live-e2e-hellgate.test.ts`). Still default-OFF
+  by knob; the `x-reasoning-included` transport header remains an optional
+  adapter-side seam (the body-level `include` field is the functional SSOT).
+
   ZDR-compatible: `encrypted_content` is opaque ciphertext — captured, stored,
   and re-fed verbatim, NEVER decoded locally. Orthogonal to prompt-cache resume
   (`previous_response_id`): carry-over re-emit applies to the full-body path; the

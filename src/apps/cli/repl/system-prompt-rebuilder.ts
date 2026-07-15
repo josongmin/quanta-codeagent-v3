@@ -54,6 +54,7 @@ const formatFallback = (reason: string): string =>
  *  reads the LIVE mode via `args.mode()`, calls `args.baseBuilder` with
  *  it + the captured cwd, and never throws — a builder throw is wrapped
  *  in {@link SYSTEM_PROMPT_REBUILD_FALLBACK_PREFIX}. */
+// FORWARD-SEAM (not wired): live identity-rebuild uses the inline buildPromptFromIdentityMode path (bootstrap-session.ts ~226 + surface-compose.ts:802); this port has no production caller.
 export const createSystemPromptRebuilder = (
   args: CreateSystemPromptRebuilderArgs,
 ): SystemPromptRebuilderPort => ({

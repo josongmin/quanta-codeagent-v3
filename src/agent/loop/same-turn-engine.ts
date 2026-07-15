@@ -103,7 +103,14 @@ export const runTurn = async (
       return classifyTurnAbort(gate, config.signal)
     }
     const result = await streamConsume(turnSession, state, ctx)
-    if ("aborted" in result) return classifyTurnAbort(gate, config.signal)
+    // A stream-originated abort ends the turn before its normal boundary, so
+    // speculative compaction no longer has a consumer. This is the same early
+    // exit contract as the pre-round, mid-loop-action, and post-prep abort
+    // paths above: cancel the in-flight summarizer before returning.
+    if ("aborted" in result) {
+      bgCompaction?.cancelIfPending()
+      return classifyTurnAbort(gate, config.signal)
+    }
     // T08 — refusal-fallback recovery input (undefined ⇒ OFF, byte-identical).
     const refusalFallback = buildRefusalFallbackInput(turnConfig, state)
     const action = resolveTurnAction(turnConfig.stopReasonPolicy, result, rec, refusalFallback)

@@ -9,8 +9,13 @@ import { afterAll, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import {
+  bindWriteBudgetTurn,
+  createSessionWriteBudget,
+  WRITE_BUDGET_REASON,
+} from "@/tool/_shared/write-budget"
 import { applyPatchTool } from "@/tool/apply-patch"
-import { createSessionWriteBudget, bindWriteBudgetTurn, WRITE_BUDGET_REASON } from "@/tool/_shared/write-budget"
+import { makeApplyPatchStructuredTool } from "@/tool/apply-patch-structured-tool"
 import { makeEditTool } from "@/tool/edit"
 import { makeScriptedReplaceTool } from "@/tool/scripted-replace"
 import type { Tool, ToolContext, ToolResult } from "@/tool/types"
@@ -51,8 +56,14 @@ describe("P0 write-budget parity across mutators", () => {
     writeFileSync(path, "one")
     const ctx = budgetCtx()
     const tool = makeEditTool()
-    expect((await run(tool as Tool<never>, { path, old_string: "one", new_string: "two" }, ctx)).ok).toBe(true)
-    const over = await run(tool as Tool<never>, { path, old_string: "two", new_string: "three" }, ctx)
+    expect(
+      (await run(tool as Tool<never>, { path, old_string: "one", new_string: "two" }, ctx)).ok,
+    ).toBe(true)
+    const over = await run(
+      tool as Tool<never>,
+      { path, old_string: "two", new_string: "three" },
+      ctx,
+    )
     expectBudgetDeny(over)
     expect(readFileSync(path, "utf8")).toBe("two")
   })
@@ -62,8 +73,14 @@ describe("P0 write-budget parity across mutators", () => {
     writeFileSync(path, "one")
     const ctx = budgetCtx()
     const tool = makeScriptedReplaceTool()
-    expect((await run(tool as Tool<never>, { file: path, pattern: "one", replacement: "two" }, ctx)).ok).toBe(true)
-    const over = await run(tool as Tool<never>, { file: path, pattern: "two", replacement: "three" }, ctx)
+    expect(
+      (await run(tool as Tool<never>, { file: path, pattern: "one", replacement: "two" }, ctx)).ok,
+    ).toBe(true)
+    const over = await run(
+      tool as Tool<never>,
+      { file: path, pattern: "two", replacement: "three" },
+      ctx,
+    )
     expectBudgetDeny(over)
     expect(readFileSync(path, "utf8")).toBe("two")
   })
@@ -77,7 +94,31 @@ describe("P0 write-budget parity across mutators", () => {
     const tool = applyPatchTool as Tool<never>
     const twoFilePatch = `*** Begin Patch\n*** Update File: ${first}\n@@\n-one\n+two\n*** Update File: ${second}\n@@\n-one\n+two\n*** End Patch`
     expect((await run(tool, { patch: twoFilePatch }, ctx)).ok).toBe(true)
-    const over = await run(tool, { patch: `*** Begin Patch\n*** Update File: ${first}\n@@\n-two\n+three\n*** End Patch` }, ctx)
+    const over = await run(
+      tool,
+      { patch: `*** Begin Patch\n*** Update File: ${first}\n@@\n-two\n+three\n*** End Patch` },
+      ctx,
+    )
+    expectBudgetDeny(over)
+    expect(readFileSync(first, "utf8")).toBe("two\n")
+    expect(readFileSync(second, "utf8")).toBe("two\n")
+  })
+
+  test("apply_patch_structured consumes one slot for a multi-file patch; the next patch is denied before any file mutates", async () => {
+    const first = join(dir, "structured-first.txt")
+    const second = join(dir, "structured-second.txt")
+    writeFileSync(first, "one\n")
+    writeFileSync(second, "one\n")
+    const ctx = budgetCtx()
+    const tool = makeApplyPatchStructuredTool() as Tool<never>
+    const twoFilePatch = `*** Begin Patch\n*** Update File: ${first}\n@@\n-one\n+two\n*** Update File: ${second}\n@@\n-one\n+two\n*** End Patch`
+    expect((await run(tool, { patch: twoFilePatch }, ctx)).ok).toBe(true)
+
+    const over = await run(
+      tool,
+      { patch: `*** Begin Patch\n*** Update File: ${first}\n@@\n-two\n+three\n*** End Patch` },
+      ctx,
+    )
     expectBudgetDeny(over)
     expect(readFileSync(first, "utf8")).toBe("two\n")
     expect(readFileSync(second, "utf8")).toBe("two\n")

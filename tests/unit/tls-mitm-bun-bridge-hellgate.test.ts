@@ -70,9 +70,13 @@ const mitmConfig = (over: Partial<SecretEgressConfig> = {}): MitmConfig => ({
   handshakeTimeoutMs: 1_000,
 })
 
-const startOrigin = async (received: string[]): Promise<{ server: HttpsServer; port: number }> => {
+const startOrigin = async (
+  received: string[],
+  onRequest?: () => void,
+): Promise<{ server: HttpsServer; port: number }> => {
   const leaf = upstreamCa.leafFor(HOST)
   const server = createHttpsServer({ key: leaf.keyPem, cert: leaf.certPem }, (req, res) => {
+    onRequest?.()
     let body = ""
     req.on("data", (c) => {
       body += c
@@ -186,6 +190,43 @@ describeBun("HELLGATE — HTTPS body secret is CAUGHT on Bun via the bridge", ()
       expect(res.status).toBe(200)
       expect(received[0]).toBe("hello=world")
       expect(proxy.decisionLog().at(-1)?.secretScan).toBe("scanned-clean")
+    } finally {
+      await proxy.close()
+      await new Promise<void>((r) => server.close(() => r()))
+    }
+  })
+
+  test("upstream TLS DNS rebind → 403 before the decrypted request body reaches the origin", async () => {
+    const received: string[] = []
+    let originRequests = 0
+    const { server, port: originPort } = await startOrigin(received, () => {
+      originRequests++
+    })
+    const mitm = mitmConfig()
+    const dial: DialTarget = () => ({ host: "127.0.0.1", port: originPort })
+    // The physical test dial remains loopback, while this seam models the
+    // post-dial production peer classification after DNS rebinding.
+    const reboundPrivatePeer: ResolvePeerHost = () => "169.254.169.254"
+    const proxy = new LoopbackEgressProxy(
+      { enabled: true, allowlist: [HOST], secretEgress: mitm.secretEgress, mitm },
+      {
+        dial,
+        resolvePeerHost: reboundPrivatePeer,
+        upstreamTlsExtra: () => ({ ca: upstreamCa.caCertPem() }),
+      },
+    )
+    const { port } = await proxy.listen()
+    try {
+      const res = await httpsThroughProxy(
+        port,
+        mitm.certAuthority.caCertPem(),
+        "secret-body-must-not-leave",
+      )
+      expect(res.status).toBe(403)
+      // The TLS handshake is allowed solely to learn the actual peer. No HTTP
+      // request byte is released after the rebind check fails.
+      expect(originRequests).toBe(0)
+      expect(received).toHaveLength(0)
     } finally {
       await proxy.close()
       await new Promise<void>((r) => server.close(() => r()))

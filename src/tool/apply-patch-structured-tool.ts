@@ -44,6 +44,7 @@ import { applyPatchStructured } from "@/patch/structured"
 import type { AppliedChange, StructuredApplyOutcome } from "@/patch/structured-types"
 import type { PatchFileSystemPort } from "@/patch/types"
 import { errMessage } from "@/shared"
+import { writeBudgetEvent } from "./_shared/exfil-rail-guards"
 import { FsJailFileSystemPort } from "./apply-patch"
 import { defineTool } from "./factory"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "./types"
@@ -135,6 +136,18 @@ export const makeApplyPatchStructuredTool = (fs?: PatchFileSystemPort): Tool<Inp
             failure: { mode: "rejected", reason: errMessage(e) },
           },
         }
+        return
+      }
+
+      // A structured patch is one user-visible filesystem-mutating request,
+      // even when it contains several independently-applied file operations.
+      // Consume the shared turn budget exactly once AFTER parse succeeds (a
+      // malformed string cannot mutate) and BEFORE `applyPatchStructured` can
+      // touch its first file.  Do not move this inside the per-file operation
+      // loop: that would make one multi-file patch bypass the per-call cap.
+      const budgetDeny = writeBudgetEvent(ctx)
+      if (budgetDeny !== null) {
+        yield budgetDeny
         return
       }
 

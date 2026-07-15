@@ -37,10 +37,19 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { runAgent } from "@/agent"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
+import { createWorkingMemory } from "@/memory"
 import type { PermissionContext } from "@/permission"
 import { __resetRuntimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, ToolRegistry } from "@/tool"
+import type { BgSummaryPayload } from "../../src/agent/compaction"
+import { makeBgCompactionController } from "../../src/agent/compaction"
+import {
+  BackgroundSummarizationController,
+  type ReconcileOutcome,
+  type UsageSnapshot,
+} from "../../src/agent/compaction/index"
+import { maybeCompact } from "../../src/agent/loop/compaction-wire"
 
 // ── doubles ──────────────────────────────────────────────────────────────────
 
@@ -133,10 +142,15 @@ const readTool = (id: string, path: string): StreamEvent[] => [
 const THRESHOLD = 10_000
 /** ~34k chars ≈ 8.5k tokens ⇒ unused ≈ 1.5k ≤ 4k (bg starts) AND < THRESHOLD
  *  (sync no-op). */
+/** A marker on the OLDEST turn — deep in the folded prefix, NEVER in the kept
+ *  suffix (keepRecentTurns=2), so its presence/absence cleanly distinguishes a
+ *  real fold (§A) from an intact transcript (§B/§C). */
+const OLD_MARKER = "OLDEST_TURN_SENTINEL_ZZZ"
 const bloatedHistory = (): Message[] => {
   const out: Message[] = []
   for (let i = 0; i < 12; i++) {
-    out.push(userText(`u${i}: ${"x".repeat(1200)}`))
+    const tag = i === 0 ? OLD_MARKER : `body${i}`
+    out.push(userText(`u${i}: ${tag} ${"x".repeat(1200)}`))
     out.push(asstText(`a${i}: ${"y".repeat(1200)}`))
   }
   out.push(userText("now continue the task"))
@@ -144,9 +158,8 @@ const bloatedHistory = (): Message[] => {
 }
 
 const SUMMARY_HEAD = "<continuation summary>"
-const OLD_MARKER = "y".repeat(1200) // a body only the OLD prefix contains
 
-const flatText = (msgs: Message[]): string =>
+const flatText = (msgs: readonly Message[]): string =>
   msgs
     .flatMap((m) => m.content)
     .map((b) => (b.type === "text" ? b.text : b.type === "tool_result" ? b.content : ""))
@@ -297,5 +310,169 @@ describe("background-compaction e2e — real loop", () => {
     expect(
       stream.events.some((e) => e.type === "recovery" && e.reason === "compact"),
     ).toBe(false)
+  })
+})
+
+// ── §D NON-VACUITY (red-on-injection): neuter the reconcile→install wire ──────
+//
+// §A is GREEN (the feature is correct), so per the hellgate protocol we lock it
+// with a mutation proving the §A install assertions are LOAD-BEARING on the
+// reconcile→install decision — not incidental. We drive the SAME prod install
+// wire (`maybeCompact`, the exact seam the real loop calls) against TWO
+// controllers that share ONE identical, VALID prod adapter (from
+// `makeBgCompactionController`) and differ ONLY in reconcile:
+//   - REAL controller ⇒ reconcile returns `install` ⇒ history compacted
+//     (synthetic head installed, transcript shrank) — the §A signals.
+//   - NEUTERED controller ⇒ delegates maybeStart/lifecycle to the SAME real
+//     controller but its `reconcileAtTurnBoundary` always DISCARDS ⇒ NO install
+//     ⇒ those exact §A signals VANISH (assertions flip RED).
+// Because BOTH share the identical valid summarize, the ONLY variable is the
+// reconcile decision — so if §A's assertions were vacuous they would pass under
+// both; the neuter proves they fail iff the reconcile install path is removed.
+
+/** A neutered controller wrapping a REAL delegate: identical maybeStart/lifecycle
+ *  (same valid prod adapter), but its reconcile ALWAYS discards — the mutation
+ *  under test (the install wire severed while everything else is byte-identical). */
+class NeuteredController extends BackgroundSummarizationController<BgSummaryPayload> {
+  constructor(private readonly delegate: BackgroundSummarizationController<BgSummaryPayload>) {
+    // The super ctor's collaborators are unused — every method is delegated except
+    // the neutered reconcile — so a throwing placeholder proves they're never hit.
+    super(
+      async () => {
+        throw new Error("neuter super.summarize must never be called (all delegated)")
+      },
+      () => 0,
+      BG_CFG,
+    )
+  }
+  override maybeStart(usage: UsageSnapshot): boolean {
+    return this.delegate.maybeStart(usage)
+  }
+  override hasPendingPass(): boolean {
+    return this.delegate.hasPendingPass()
+  }
+  override cancelIfPending(): void {
+    this.delegate.cancelIfPending()
+  }
+  // THE MUTATION: reconcile always discards (never installs).
+  override async reconcileAtTurnBoundary(
+    _u: UsageSnapshot,
+  ): Promise<ReconcileOutcome<BgSummaryPayload>> {
+    return { kind: "discard", reason: "not-completed" }
+  }
+}
+
+/** A summarizer LLM that resolves immediately (the §A "landed in time" case). */
+const instantSummarizer: LLMPort = {
+  model: "bg-summarizer-instant",
+  stream(_i: StreamInput): AsyncIterable<StreamEvent> {
+    async function* gen(): AsyncIterable<StreamEvent> {
+      yield { type: "text_delta", delta: "folded" }
+      yield { type: "message_stop", stop_reason: "end_turn" }
+    }
+    return gen()
+  },
+}
+
+const noopReset = (): void => {}
+
+/** Tiny floors so a small seed both STARTS a pass AND clears the persist gate —
+ *  the same config shape the H1 unit test uses (bg-compaction-live-suffix). */
+const BG_CFG = {
+  startAtUnusedTokens: 1_000_000,
+  startAtUnusedPercent: 1,
+  persistUnusedTokens: 0,
+  persistUnusedPercent: 0,
+}
+
+/** Seed with a foldable prefix (findBoundary(keep=2) folds a real prefix) under a
+ *  HIGH threshold so the SYNC path never fires — only the bg controller compacts. */
+const bgSeed = (): Message[] => {
+  const out: Message[] = []
+  for (let i = 0; i < 8; i++) {
+    out.push(userText(`u${i}: ${i === 0 ? OLD_MARKER : `b${i}`} ${"x".repeat(40)}`))
+    out.push(asstText(`a${i}: ${"y".repeat(40)}`))
+  }
+  return out
+}
+
+const highThresholdConfig = (): AgentConfig =>
+  ({
+    system: "sys",
+    llm: instantSummarizer,
+    stream: { emit() {} },
+    // HIGH threshold ⇒ synchronous compactIfNeeded stays under_threshold; the bg
+    // controller is the ONLY compactor here.
+    compaction: { summarizerLlm: instantSummarizer, thresholdTokens: 1_000_000 },
+  }) as unknown as AgentConfig
+
+/**
+ * Drive one start-turn + one reconcile-turn of the REAL prod install wire
+ * (`maybeCompact`) against a fresh wm the given controller closes over. Returns
+ * the post-reconcile transcript signals (§A observables): synthetic head
+ * installed + final length.
+ */
+const driveInstallWire = async (
+  makeController: (getPrefix: () => readonly Message[]) => BackgroundSummarizationController<BgSummaryPayload>,
+): Promise<{ hasSummary: boolean; length: number; text: string }> => {
+  const wm = createWorkingMemory<Message>(bgSeed())
+  const controller = makeController(() => wm.snapshot())
+  const config = highThresholdConfig()
+  // Turn N: arm a speculative pass (maybeStart runs at the tail of maybeCompact).
+  await maybeCompact({
+    config, system: "sys", wm, breaker: undefined, archive: undefined,
+    turn: 0, bgController: controller, resetClassifier: noopReset, tokenBaselineBox: undefined,
+  })
+  // Turn N+1: post-snapshot append + let the summarize settle, then reconcile.
+  wm.append(userText("APPENDED next turn"))
+  for (let i = 0; i < 20; i++) await Promise.resolve()
+  await maybeCompact({
+    config, system: "sys", wm, breaker: undefined, archive: undefined,
+    turn: 1, bgController: controller, resetClassifier: noopReset, tokenBaselineBox: undefined,
+  })
+  const snap = wm.snapshot()
+  const head = snap[0]?.content[0]
+  return {
+    hasSummary: head?.type === "text" && head.text.startsWith(SUMMARY_HEAD),
+    length: snap.length,
+    text: flatText(snap),
+  }
+}
+
+describe("background-compaction e2e — §D non-vacuity (reconcile→install is load-bearing)", () => {
+  /** The ONE valid prod adapter both arms share — built by the real factory over
+   *  the drive's own wm so the produced summary is a genuine `[synthetic,
+   *  ...liveSuffix]` that WOULD install. */
+  const realController = (getPrefix: () => readonly Message[]): BackgroundSummarizationController<BgSummaryPayload> => {
+    const c = makeBgCompactionController(
+      { QUANTA_BG_COMPACTION: "1" },
+      instantSummarizer,
+      getPrefix,
+      () => 1000,
+      BG_CFG,
+    )
+    if (c === undefined) throw new Error("controller unexpectedly OFF")
+    return c
+  }
+
+  test("REAL reconcile installs (compacts); NEUTERED reconcile ⇒ §A install signals VANISH", async () => {
+    // Baseline: the REAL prod controller/adapter ⇒ reconcile returns `install` ⇒
+    // §A signals PRESENT (synthetic head installed, transcript shrank).
+    const real = await driveInstallWire(realController)
+    expect(real.hasSummary).toBe(true) // installed
+    expect(real.length).toBeLessThan(bgSeed().length + 1) // compacted (folded prefix)
+
+    // Mutation: the SAME valid prod adapter/delegate — its summarize DOES produce
+    // an installable summary — but reconcile is severed to always DISCARD. The
+    // ONLY difference vs. the baseline is the reconcile decision, so any surviving
+    // §A signal here would be incidental. There is none.
+    const neuter = await driveInstallWire((getPrefix) => new NeuteredController(realController(getPrefix)))
+
+    // RED-ON-INJECTION: severing reconcile→install makes the §A signals VANISH —
+    // no synthetic head, transcript NOT compacted (it only GREW by the append), and
+    // the OLD prefix survives verbatim. The §A install assertions are load-bearing.
+    expect(neuter.hasSummary).toBe(false)
+    expect(neuter.length).toBe(bgSeed().length + 1)
+    expect(neuter.text).toContain(OLD_MARKER)
   })
 })

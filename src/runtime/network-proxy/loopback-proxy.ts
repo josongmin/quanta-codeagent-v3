@@ -23,8 +23,8 @@
  */
 
 import { createServer, request as httpRequest, type IncomingMessage, type Server } from "node:http"
-import { request as httpsRequestOverTls } from "node:https"
 import { isIP, connect as netConnect, type Socket } from "node:net"
+import { connect as tlsConnect } from "node:tls"
 import { classifyHost } from "@/shared/net/ssrf"
 import { NetworkPolicyAmendment } from "./amendment"
 import { decideEgress, type EgressDecision } from "./decision"
@@ -732,8 +732,17 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
     // byte-identical. The MITM path reuses the SAME pure transform as the
     // plaintext path (one definition, two transports).
     headers = this.applyOutboundHeaderRules(host, headers, this.config.mitm?.headerRules)
+    // The MITM channel accepts one request and then closes, so force the
+    // corresponding upstream response to terminate after that one exchange.
+    // This is intentionally after header rewriting: a user-supplied rule may
+    // narrow other headers but cannot leave this one-shot transport hanging.
+    headers.connection = "close"
 
-    const upstream = httpsRequestOverTls(
+    // Open the upstream TLS transport ourselves instead of letting
+    // `https.request` lazily flush HTTP headers/body as its connection trigger.
+    // This gives the proxy a hard peer-check boundary BEFORE any HTTP byte is
+    // emitted to a DNS-rebound origin.
+    const upstream = tlsConnect(
       {
         // Test-only EXTRA trust root for a hermetic origin (spread FIRST so the
         // security-critical fields below ALWAYS win — `rejectUnauthorized` can
@@ -745,37 +754,33 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
         // the default trust store. NEVER our MITM CA, NEVER rejectUnauthorized:false.
         servername: host,
         rejectUnauthorized: true,
-        method: parsed.method,
-        path: parsed.path,
-        headers,
       },
-      (up) => {
-        if (this.peerIsBlocked(up.socket)) {
-          up.destroy()
+      () => {
+        if (this.peerIsBlocked(upstream)) {
+          upstream.destroy()
           this.writeChannelHttp(channel, 403, "egress denied: peer resolved to blocked address")
           return
         }
-        // Re-encrypt the upstream response back to the client over OUR TLS channel.
-        const statusLine = `HTTP/1.1 ${up.statusCode ?? 502} ${up.statusMessage ?? ""}\r\n`
-        const headerLines = Object.entries(up.headers)
-          .filter(([, v]) => v !== undefined)
-          .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}\r\n`)
+        const headerLines = Object.entries(headers)
+          .map(([name, value]) => `${name}: ${Array.isArray(value) ? value.join(", ") : value}\r\n`)
           .join("")
-        channel.write(`${statusLine}${headerLines}\r\n`)
-        up.on("data", (c: Buffer) => {
-          channel.write(c)
-        })
-        up.on("end", () => {
-          channel.end()
-        })
+        upstream.write(`${parsed.method} ${parsed.path} HTTP/1.1\r\n${headerLines}\r\n`)
+        if (body.length > 0 && parsed.method !== "GET" && parsed.method !== "HEAD")
+          upstream.write(body)
       },
     )
     upstream.on("error", () => {
       // Upstream cert rejection / dial failure / reset ⇒ 502, never a blind pass.
       this.writeChannelHttp(channel, 502, "upstream TLS error (cert not validated or unreachable)")
     })
-    if (body.length > 0 && parsed.method !== "GET" && parsed.method !== "HEAD") upstream.write(body)
-    upstream.end()
+    // The upstream response is already raw HTTP/1.1 bytes, so forwarding the
+    // TLS payload directly avoids a second HTTP parser/re-serializer.
+    upstream.on("data", (chunk: Buffer) => {
+      channel.write(chunk)
+    })
+    upstream.on("end", () => {
+      channel.end()
+    })
   }
 
   /**

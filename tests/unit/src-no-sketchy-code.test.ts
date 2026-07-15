@@ -90,8 +90,6 @@ const RULES: readonly Rule[] = [
         "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The bench-only opt-in gates (`familyCoverageCoeditEnabled(process.env)` / posture resolution) moved here verbatim with the repair-phase slice. Same posture as runner/batch/eval/driver.ts.",
       "runner/batch/eval/driver/attempt-context.ts":
         "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The bench-knob/posture resolution (`resolveBenchKnobs`/`benchPostureFromState` off process.env defaults) moved here verbatim with the attempt-context slice. Same posture as runner/batch/eval/driver.ts.",
-      "runner/batch/eval/driver/agent-phase.ts":
-        "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The `emitKnobsApplied(tap, process.env, …)` knob-telemetry read moved here verbatim with the agent-phase slice. Same posture as runner/batch/eval/driver.ts.",
       "runner/batch/eval/driver/env-knob-parse.ts":
         "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The bench env-var parsers (`resolveBenchKnobs`/`benchPostureFromState` off process.env) moved here verbatim with the env-knob-parse slice. Same posture as runner/batch/eval/driver.ts.",
       "runner/batch/eval/driver/selection-phase.ts":

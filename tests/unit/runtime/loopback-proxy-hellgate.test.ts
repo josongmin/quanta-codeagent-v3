@@ -7,13 +7,9 @@
 
 import { afterEach, describe, expect, test } from "bun:test"
 import { createServer, get as httpGet, type Server } from "node:http"
-import { connect as netConnect } from "node:net"
 import type { AddressInfo } from "node:net"
-import {
-  type DialTarget,
-  LoopbackEgressProxy,
-  type ResolvePeerHost,
-} from "@/runtime/network-proxy"
+import { createServer as createNetServer, connect as netConnect } from "node:net"
+import { type DialTarget, LoopbackEgressProxy, type ResolvePeerHost } from "@/runtime/network-proxy"
 
 const closeServer = (server: Server): Promise<void> =>
   new Promise((resolve) => server.close(() => resolve()))
@@ -100,5 +96,33 @@ describe("P0 loopback proxy unit I/O", () => {
     // The peer re-check occurs after TCP connect but BEFORE request bytes are
     // written, so the rebinding target observes no HTTP request at all.
     expect(originRequests).toBe(0)
+  })
+
+  test("raw CONNECT to a rebinding peer is 403 before tunneled bytes reach the upstream", async () => {
+    let upstreamBytes = 0
+    const rawOrigin = createNetServer((socket) => {
+      socket.on("data", (chunk) => {
+        upstreamBytes += chunk.length
+      })
+    })
+    await new Promise<void>((resolve) => rawOrigin.listen(0, "127.0.0.1", resolve))
+    const originPort = (rawOrigin.address() as AddressInfo).port
+    const dial: DialTarget = () => ({ host: "127.0.0.1", port: originPort })
+    const rebindPeer: ResolvePeerHost = () => "169.254.169.254"
+    proxy = new LoopbackEgressProxy(
+      { enabled: true, allowlist: ["allowed.test"] },
+      { dial, resolvePeerHost: rebindPeer },
+    )
+    const address = await proxy.listen()
+    try {
+      const response = await socketRequest(
+        address.port,
+        "CONNECT allowed.test:443 HTTP/1.1\r\nHost: allowed.test:443\r\n\r\nPOST /leak",
+      )
+      expect(response.startsWith("HTTP/1.1 403 Forbidden")).toBe(true)
+      expect(upstreamBytes).toBe(0)
+    } finally {
+      await new Promise<void>((resolve) => rawOrigin.close(() => resolve()))
+    }
   })
 })

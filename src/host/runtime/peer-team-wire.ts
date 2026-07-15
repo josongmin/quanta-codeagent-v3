@@ -36,7 +36,7 @@ import type { TeamMembershipGate } from "@/agent/subagent-mailbox"
 import { createPeerInboxDrain, teamScopedMailbox } from "@/agent/subagent-mailbox"
 import type { AgentConfig } from "@/agent/types"
 import { redactSecrets } from "@/security"
-import { runtimeConfig } from "@/shared"
+import { gateOn } from "@/shared"
 import { createTeamRegistry, type TeamRegistryPort } from "@/subagent"
 
 /** Adapt the `TeamRegistryPort` into the decorator's `TeamMembershipGate`
@@ -67,9 +67,9 @@ const peerBodyRedactor = (body: string): string =>
  */
 export const maybeWirePeerTeamMessaging = (
   cfg: AgentConfig,
-  _env: Record<string, string | undefined>,
+  env: Record<string, string | undefined>,
 ): void => {
-  if (!runtimeConfig().teamPeerMsg) return
+  if (!gateOn(env, "QUANTA_TEAM_PEER_MSG")) return
   // The peer bus IS the subagent mailbox; without it there is nothing to scope.
   if (cfg.subagentMailbox === undefined) return
 

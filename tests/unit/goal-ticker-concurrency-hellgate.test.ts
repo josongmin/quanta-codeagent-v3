@@ -273,14 +273,12 @@ describe("ticker — stop() teardown", () => {
       clearIntervalFn: timer.clearIntervalFn,
     })
 
-    // Sanity: pre-stop a tick DOES resume (paired control for the post-stop no-op).
-    await timer.fire()
-    expect(resumes).toBe(1)
-
     ticker?.stop()
-    // The captured tick fn is still callable in the test, but a real timer would
-    // be cleared. We assert clearIntervalFn was invoked exactly once (the real
-    // teardown) — the driver's contract is "clear the timer on stop".
+    // Simulate the callback being queued immediately before clearInterval(). A
+    // real clear only removes future interval work; it cannot retract this
+    // captured callback. The callback-local stopped gate is therefore required.
+    await timer.fire()
+    expect(resumes).toBe(0)
     expect(timer.clearedCount()).toBe(1)
   })
 
