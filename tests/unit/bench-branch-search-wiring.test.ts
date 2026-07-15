@@ -173,7 +173,7 @@ const baseInstance = (swebench: boolean): Instance =>
         id: "test-1",
         repoPath: "/tmp/x",
         problemStatement: "fix it",
-        testCmd: "true",
+        testCmd: "pytest -q",
         swebench: {
           instanceId: "x__1",
           repo: "x/x",
@@ -184,7 +184,7 @@ const baseInstance = (swebench: boolean): Instance =>
         id: "test-1",
         repoPath: "/tmp/x",
         problemStatement: "fix it",
-        testCmd: "true",
+        testCmd: "pytest -q",
       }
 
 const baseDeps = { llm: new StubLLM(), maxTurns: 1, timeoutMs: 5_000 }
@@ -222,7 +222,7 @@ describe("buildConfig — branchSearch wired into AgentConfig", () => {
     const cfg = buildConfig(baseInstance(true), baseDeps, "/tmp/sb", ac.signal, stubStream)
     expect(cfg.branchSearch?.defaultN).toBe(3)
     // verifyGuard is wired by the swebench branch (independent of branchSearch).
-    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["true"] })
+    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["pytest -q"] })
   })
 
   test("env mutation isolation: set → buildConfig → restore yields the SAME (omitted) state", () => {
