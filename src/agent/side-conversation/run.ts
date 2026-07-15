@@ -176,6 +176,12 @@ export const SIDE_CONVERSATION_TOOL_NAMES: readonly string[] = Object.freeze([
  */
 export const SIDE_CONVERSATION_TOOL_EXCLUSIONS: readonly string[] = Object.freeze([
   "session_config",
+  // A side-conversation must NOT relay plan-mode entry: `enter_plan_mode` is
+  // `null` (plan-mode-permissive) in planModeMutatingTable, but it flips the
+  // PARENT thread's collaboration posture at the next turn boundary — a
+  // mutation of the main session a delegated read-only side-conv may not make
+  // (same parent-posture rationale as `session_config`).
+  "enter_plan_mode",
   // jun-04 — gated meta/observability read tools. `coverage_check` (V8
   // coverage report) + `prompt_cache_status` (cache-hit snapshot) are read-only
   // but are operator-axis introspection tools, not relevant to a lightweight
