@@ -119,15 +119,14 @@ const ALLOWLIST: readonly Allowed[] = [
     why: "Runner side-chat orchestration — isolated top-level run.",
   },
   // ── host-eval-entry: bench/eval harness roots — one fresh top-level run per task.
-  {
-    path: "src/runner/batch/eval/driver/agent-phase.ts",
-    kind: "host-eval-entry",
-    why: "Bench eval driver agent phase — top-level run per candidate/attempt.",
-  },
+  // (The runner core's `driver/agent-phase.ts` was a DEAD duplicate of the app
+  //  driver's agent phase — ZERO runtime callers after the dead orchestrator
+  //  triad was deleted (D3) — so it was removed; the LIVE agent-phase run lives
+  //  in `src/apps/bench/eval/driver.ts` below.)
   {
     path: "src/apps/bench/eval/driver.ts",
     kind: "host-eval-entry",
-    why: "Bench eval app driver — top-level run per task.",
+    why: "Bench eval app driver — top-level run per task (agent phase + orchestration).",
   },
   {
     path: "src/apps/eval/synthetic/runner.ts",

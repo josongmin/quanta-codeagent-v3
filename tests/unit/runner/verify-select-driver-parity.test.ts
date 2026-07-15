@@ -20,20 +20,25 @@ const DRIVER_SRC = [
 const APP_DRIVER_SRC = readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8")
 
 describe("runner verify-select and patch-budget driver parity", () => {
-  test("runner driver still executes verify-select instead of silently ignoring the knob", () => {
-    expect(DRIVER_SRC).toContain("const runSelectionPhase = async")
-    expect(DRIVER_SRC).toMatch(
+  test("the verify-select orchestrator still executes the knob instead of silently ignoring it", () => {
+    // The per-instance verify-select ORCHESTRATOR is the app driver's
+    // `runSelectionPhase` (the runner core's dead duplicate was deleted — the
+    // runner core is now the shared-helper LIBRARY that the app consumes). The
+    // gate + knob wiring must stay on the LIVE orchestration path.
+    expect(APP_DRIVER_SRC).toContain("const runSelectionPhase = async")
+    expect(APP_DRIVER_SRC).toMatch(
       /verifySelectN !== undefined && (?:args\.)?instance\.swebench !== undefined/,
     )
-    expect(DRIVER_SRC).toContain("posture.verifySelectConcurrency")
-    expect(DRIVER_SRC).toContain("posture.verifySelectEarlyAccept")
-    expect(DRIVER_SRC).toContain("posture.verifySelectRegression")
-    expect(DRIVER_SRC).toContain("posture.verifySelectLlmRiskGate")
-    expect(DRIVER_SRC).toContain("posture.verifySelectRepro")
+    expect(APP_DRIVER_SRC).toContain("posture.verifySelectConcurrency")
+    expect(APP_DRIVER_SRC).toContain("posture.verifySelectEarlyAccept")
+    expect(APP_DRIVER_SRC).toContain("posture.verifySelectRegression")
     expect(APP_DRIVER_SRC).toContain("posture.verifySelectLlmRiskGate")
-    expect(DRIVER_SRC).toContain("selectionPhaseResultOf({")
-    expect(DRIVER_SRC).toContain("selectionGenerationErrorOf({")
+    expect(APP_DRIVER_SRC).toContain("posture.verifySelectRepro")
     expect(APP_DRIVER_SRC).toContain("selectionGenerationErrorOf({")
+    // The runner core still DEFINES the verify-select shared library the app
+    // orchestrator consumes (single SSOT — the app must not re-implement these).
+    expect(DRIVER_SRC).toContain("export const computeEffectiveProofRequired")
+    expect(DRIVER_SRC).toContain("export const selectionReproPolicy")
   })
 
   test("both drivers keep terminal and late-failure phase stopReason wiring", () => {
@@ -60,54 +65,48 @@ describe("runner verify-select and patch-budget driver parity", () => {
     expect(APP_DRIVER_SRC).toContain("args.state.phase.ownerWidening = followup.telemetry")
   })
 
-  test("both drivers route selection evidence and prompt seed assembly through the shared helper", () => {
+  test("the orchestrator routes selection evidence + prompt seed assembly through the shared helper", () => {
+    // Evidence/prompt assembly is a SHARED helper the runner core re-exports and
+    // the app orchestrator consumes — the app must not re-inline the seed/merge
+    // builders. (The runner core's dead duplicate orchestrator was deleted, so
+    // the CALL sites now live only on the LIVE app path.)
     expect(DRIVER_SRC).toContain('from "./selection-assembly"')
     expect(APP_DRIVER_SRC).toContain('from "@/runner/batch/eval/selection-assembly"')
-    expect(DRIVER_SRC).toContain("prepareSelectionEvidenceContext({")
     expect(APP_DRIVER_SRC).toContain("prepareSelectionEvidenceContext({")
-    expect(DRIVER_SRC).toContain("composeSelectionAgentHint(")
     expect(APP_DRIVER_SRC).toContain("composeSelectionAgentHint(")
-    expect(DRIVER_SRC).not.toContain("const selectionCandidateSeed =")
-    expect(DRIVER_SRC).not.toContain("const selectionMergeHint =")
     expect(APP_DRIVER_SRC).not.toContain("const buildSelectionMergeHint =")
     expect(APP_DRIVER_SRC).not.toContain("const selectionGenerationPromptInput =")
   })
 
-  test("verify-select owner seeds still come from ClosureBundle evidence in both drivers", () => {
+  test("verify-select owner seeds still come from ClosureBundle evidence on the orchestration path", () => {
+    // The seed-selection wiring lives on the LIVE orchestrator (app driver); the
+    // runner core's deleted duplicate no longer carries it.
     const expected =
       /(?:args\.prepared\.)?closureSession\?\.bundle\.evidence\.candidates\.map\(\(c\) => c\.file\)\s+\?\?\s+(?:args\.prepared\.)?localizeCandidates/
-    expect(DRIVER_SRC).toMatch(expected)
     expect(APP_DRIVER_SRC).toMatch(expected)
   })
 
-  test("both drivers keep selector authority contracts separate from advisory prompt contracts", () => {
-    expect(DRIVER_SRC).toContain("selectionAuthorityContracts")
-    expect(DRIVER_SRC).toContain("advisoryPromptContracts")
+  test("the orchestrator keeps selector authority contracts separate from advisory prompt contracts", () => {
+    // Contract wiring lives on the LIVE orchestrator (app driver) after the
+    // runner core's dead duplicate was deleted.
     expect(APP_DRIVER_SRC).toContain("selectionAuthorityContracts")
     expect(APP_DRIVER_SRC).toContain("advisoryPromptContracts")
-    expect(DRIVER_SRC).toContain("publicContracts: selectionAuthorityContracts")
     expect(APP_DRIVER_SRC).toContain("publicContracts: args.selectionAuthorityContracts")
-    expect(DRIVER_SRC).toContain("promptContracts: advisoryPromptContracts")
     expect(APP_DRIVER_SRC).toContain("promptContracts: advisoryPromptContracts")
   })
 
-  test("both drivers keep verificationTarget and proof-port wiring on the clean path", () => {
+  test("the orchestrator keeps verificationTarget and proof-port wiring on the clean path", () => {
+    // The runner core still DEFINES the proof-required decision (shared library);
+    // the app orchestrator CALLS it + wires the proof ports.
+    expect(DRIVER_SRC).toContain("export const computeEffectiveProofRequired")
+    expect(APP_DRIVER_SRC).toContain("computeEffectiveProofRequired(")
     expect(APP_DRIVER_SRC).toContain("verificationTargetFromPlan(verificationPlan)")
-    expect(DRIVER_SRC).toContain("verificationTarget: args.verificationTarget")
     expect(APP_DRIVER_SRC).toContain("mweProofSelectionPort")
     expect(APP_DRIVER_SRC).toContain("publicRegressionProofSelectionPort")
     expect(APP_DRIVER_SRC).toContain("reproConsensusProofSelectionPort")
-    expect(DRIVER_SRC).toContain("computeEffectiveProofRequired(")
-    expect(APP_DRIVER_SRC).toContain("computeEffectiveProofRequired(")
-    expect(DRIVER_SRC).toContain("proofCalibration")
     expect(APP_DRIVER_SRC).toContain("proofCalibration")
-    expect(DRIVER_SRC).toContain("ports.mweProof = args.mweProofSelectionPort")
-    expect(DRIVER_SRC).toContain(
-      "ports.publicRegressionProof = args.publicRegressionProofSelectionPort",
-    )
-    expect(DRIVER_SRC).toContain(
-      "ports.reproConsensusProof = args.reproConsensusProofSelectionPort",
-    )
+    expect(APP_DRIVER_SRC).toContain("mweProof: args.mweProofSelectionPort")
+    expect(APP_DRIVER_SRC).toContain("reproConsensusProof: args.reproConsensusProofSelectionPort")
   })
 
   test("both drivers keep deterministic family-coverage coedit default-OFF behind the shared helper", () => {

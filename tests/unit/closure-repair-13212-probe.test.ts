@@ -192,13 +192,13 @@ describe("Part B — repro rail clears ONLY when readFile is supplied (the fix)"
 // ── Part C — WIRING GUARD: the repair loop must pass readFile to runRepairRounds ──
 // Part B proves the orchestrator contract; this binds the PROD wiring so reverting
 // the fix (dropping `readFile` from the prod runRepairRounds call) is RED. Post the
-// jun-30 keystone, the `runRepairRounds` call is shared by BOTH bench drivers via
-// the exported `runRepairRoundsInSnapshot` helper (runner core driver) — so the
-// readFile fix is wired ONCE there, and both drivers delegate to it (inheriting it).
-// Source-level because the helper is reached through the runRepairPhase orchestrator.
-// jul-02 god-file split: the runner core's repair phase (`runRepairRoundsInSnapshot`
-// + `runRepairPhase`) was extracted, PURE code motion, into `./driver/repair-phase.ts`
-// — so the runner-side wiring now lives there (the `driver.ts` barrel re-exports it).
+// jun-30 keystone, the `runRepairRounds` call is wired ONCE inside the exported
+// `runRepairRoundsInSnapshot` helper (runner core driver), and the app orchestrator
+// delegates to it (inheriting the fix). jul-02 god-file split: the helper was
+// extracted (PURE code motion) into `./driver/repair-phase.ts` (the `driver.ts`
+// barrel re-exports it). jul-15 D3 cleanup: the runner core's dead per-instance
+// `runRepairPhase` orchestrator (ZERO runtime callers) was deleted, so the app
+// driver is now the SOLE caller that delegates to `runRepairRoundsInSnapshot`.
 describe("Part C — repair loop wires readFile to runRepairRounds (shared SSOT)", () => {
   const repoRoot = join(import.meta.dir, "..", "..")
   const read = (rel: string): string => readFileSync(join(repoRoot, rel), "utf8")
@@ -211,12 +211,14 @@ describe("Part C — repair loop wires readFile to runRepairRounds (shared SSOT)
     expect(/readFile:\s*async/.test(src.slice(callIdx, callIdx + 2000))).toBe(true)
   })
 
-  test("both drivers delegate repair rounds to the shared helper (inherit the wiring)", () => {
-    // Neither driver can silently drop the readFile wiring without also dropping
-    // the delegation — which this binds RED.
+  test("the app orchestrator delegates repair rounds to the shared helper (inherit the wiring)", () => {
+    // The app orchestrator cannot silently drop the readFile wiring without also
+    // dropping the delegation — which this binds RED.
     expect(read("src/apps/bench/eval/driver.ts")).toContain("runRepairRoundsInSnapshot({")
+    // The runner core still DEFINES + EXPORTS the shared helper (single SSOT) even
+    // though its dead per-instance orchestrator (the old caller) was deleted.
     expect(read("src/runner/batch/eval/driver/repair-phase.ts")).toContain(
-      "runRepairRoundsInSnapshot({",
+      "export const runRepairRoundsInSnapshot",
     )
   })
 })
