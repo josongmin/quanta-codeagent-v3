@@ -98,7 +98,15 @@ const scan = (): { total: number; byFile: Record<string, number> } => {
 // kill-switch gateDisabled reads (QUANTA_MEMORY_EMBED / QUANTA_COMPACT_BREAKER)
 // through `readCliKnob("…","bool")` — provably byte-identical (gateDisabled(env,X)
 // ≡ !readBool(env[X], true) for a default-true knob), now live-controllable.
-// 51 = remaining PRODUCTION-slice raw reads — the meaningful live-control debt
+// Then 51 → 50 (jul-16) by routing the daemon/persistence path knobs
+// (QUANTA_WEB_DB_DIR in apps/web-daemon/persistence-sqlite.ts +
+// QUANTA_SESSION_REGISTRY_SQLITE_PATH / _DISK_DIR in the session-resource-registry
+// global.ts + caller-owned-builder.ts) through NEW typed `runtimeConfig()` fields
+// (webDbDir / sessionRegistrySqlitePath / sessionRegistryDiskDir — string-or-undef,
+// consumers keep their exact HOME/non-empty fallback ⇒ byte-identical). The
+// ceiling is lowered to the new floor per the decreasing-ratchet contract so a
+// re-introduced raw read of these knobs trips the guard.
+// 50 = remaining PRODUCTION-slice raw reads — the meaningful live-control debt
 // that future routing drives to its floor. The reads that legitimately STAY raw
 // (not byte-identically routable): launch-params (RESUME/STATE_PATH/OBSERVE_DIR),
 // presence-checks (`QUANTA_X !== undefined`: VERIFY_GUARD/COMPACT_PROVIDER/
@@ -108,30 +116,26 @@ const scan = (): { total: number; byFile: Record<string, number> } => {
 // SKILLS_DIR, COMPACT_MODEL, MODEL_FALLBACK, MCP_AUTORESTART, MD_MODE,
 // SHELL_SNAPSHOT_SHELL) — routing those would NOT be byte-identical, so they wait
 // for a per-read accessor that preserves the legacy "" quirk.
-const CEILING = 51
+const CEILING = 50
 
 describe("no-raw-process.env-knob ratchet (ADR-0503 P4)", () => {
-  test(
-    `raw process.env.QUANTA_* reads stay <= ${CEILING} (decreasing burn-down)`,
-    () => {
-      const { total, byFile } = scan()
-      // biome-ignore lint/suspicious/noConsole: ratchet visibility
-      console.log(`[no-raw-env] ${total}/${CEILING} raw process.env.QUANTA reads`)
-      if (total > CEILING) {
-        const offenders = Object.entries(byFile)
-          .sort((a, b) => b[1] - a[1])
-          .map(([f, n]) => `  ${f}: ${n}`)
-          .join("\n")
-        throw new Error(
-          `Raw process.env.QUANTA_* reads rose to ${total} (ceiling ${CEILING}). Route the new ` +
-            `read through readCliKnob()/runtimeConfig()/resolveKnobs (it bypasses /config set + ` +
-            `is untestable). Top offenders:\n${offenders}`,
-        )
-      }
-      expect(total).toBeLessThanOrEqual(CEILING)
-    },
-    15_000,
-  )
+  test(`raw process.env.QUANTA_* reads stay <= ${CEILING} (decreasing burn-down)`, () => {
+    const { total, byFile } = scan()
+    // biome-ignore lint/suspicious/noConsole: ratchet visibility
+    console.log(`[no-raw-env] ${total}/${CEILING} raw process.env.QUANTA reads`)
+    if (total > CEILING) {
+      const offenders = Object.entries(byFile)
+        .sort((a, b) => b[1] - a[1])
+        .map(([f, n]) => `  ${f}: ${n}`)
+        .join("\n")
+      throw new Error(
+        `Raw process.env.QUANTA_* reads rose to ${total} (ceiling ${CEILING}). Route the new ` +
+          `read through readCliKnob()/runtimeConfig()/resolveKnobs (it bypasses /config set + ` +
+          `is untestable). Top offenders:\n${offenders}`,
+      )
+    }
+    expect(total).toBeLessThanOrEqual(CEILING)
+  }, 15_000)
 
   test("matcher catches global reach but not injected-env reads", () => {
     expect(RAW.test(`const x = process.env.QUANTA_FOO`)).toBe(true)

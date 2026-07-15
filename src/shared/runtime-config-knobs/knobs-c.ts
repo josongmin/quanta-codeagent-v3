@@ -105,8 +105,7 @@ export const KNOBS_C: readonly RuntimeConfigKnob[] = [
     kind: "string",
     default: undefined,
     group: "web",
-    describe:
-      "Web-daemon thread-history DB directory override; absent ⇒ ~/.quanta/web-daemon.",
+    describe: "Web-daemon thread-history DB directory override; absent ⇒ ~/.quanta/web-daemon.",
   },
   {
     envKey: "QUANTA_SESSION_REGISTRY_SQLITE_PATH",

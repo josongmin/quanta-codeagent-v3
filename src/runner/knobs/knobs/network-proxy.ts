@@ -38,7 +38,11 @@
 
 import type { AgentConfig } from "@/agent"
 import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
-import { MitmCertAuthority, type NetworkProxyConfig, nodeKeyPairSource } from "@/runtime/network-proxy"
+import {
+  MitmCertAuthority,
+  type NetworkProxyConfig,
+  nodeKeyPairSource,
+} from "@/runtime/network-proxy"
 import { compositeSecretScanner } from "@/security/secret-detection"
 import { runtimeConfigFromEnv } from "@/shared"
 import { registerKnob } from "../registry"

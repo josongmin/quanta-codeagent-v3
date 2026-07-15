@@ -47,8 +47,7 @@ const SURFACE_PATTERNS = [/^@\/apps\b/, /(^|\/)apps\//, /(^|\/)src\/apps\//] as 
  *  surface-isolation guard — a core/wiring slice may never reference these,
  *  runtime OR type-position. Exported so the negative-proof battery can drive
  *  the SAME predicate the guard uses (no second copy to drift). */
-export const isSurfaceSpec = (spec: string): boolean =>
-  SURFACE_PATTERNS.some((p) => p.test(spec))
+export const isSurfaceSpec = (spec: string): boolean => SURFACE_PATTERNS.some((p) => p.test(spec))
 
 const NODE_SURFACE_MODULES = new Set<string>([
   "node:readline",
@@ -160,10 +159,7 @@ const collectAstHits = (
 const collectModuleConstStringLiterals = (sf: ts.SourceFile): ReadonlyMap<string, string> => {
   const table = new Map<string, string>()
   for (const stmt of sf.statements) {
-    if (
-      !ts.isVariableStatement(stmt) ||
-      (stmt.declarationList.flags & ts.NodeFlags.Const) === 0
-    ) {
+    if (!ts.isVariableStatement(stmt) || (stmt.declarationList.flags & ts.NodeFlags.Const) === 0) {
       continue
     }
     for (const decl of stmt.declarationList.declarations) {
@@ -259,9 +255,7 @@ export const extractImports = (src: string): Array<{ line: number; spec: string 
  * ports were hoisted to `@/agent/surface-ports`. The surface-isolation guard
  * scans these in ADDITION to runtime imports so the inversion cannot regress.
  */
-export const extractTypeOnlyModuleRefs = (
-  src: string,
-): Array<{ line: number; spec: string }> => {
+export const extractTypeOnlyModuleRefs = (src: string): Array<{ line: number; spec: string }> => {
   const out: Array<{ line: number; spec: string }> = []
   const sf = parseSourceFile(src)
   const visit = (node: ts.Node): void => {
