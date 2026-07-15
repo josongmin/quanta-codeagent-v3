@@ -795,10 +795,13 @@ export const buildAdmissibility = (args: {
   }
 }
 
-export const composeCliRuntimeContext = async (
-  args: ComposeCliRuntimeContextArgs,
-): Promise<CliRuntimeContextBindings> => {
-  const { boot, turnStream, loadPermissionStore, sandboxProfile } = args
+/** S2 (jul-10, commit 8bb5eb7cf) — mint the FIFO ask-queue channel that lets a
+ *  mid-turn approval read the operator's answer through the in-turn keystroke
+ *  reader (no stdin fight) AND publish it so surfaces composed at a different
+ *  layer (MCP elicitation / ask_user prompter io) route their mid-turn reads
+ *  through the SAME line source instead of a second readline. Extracted from
+ *  {@link composeCliRuntimeContext} verbatim (pure code motion). */
+const wireAskQueue = (): MidTurnApprovalChannel => {
   // MID-TURN FIX — the channel that lets a mid-turn approval read the operator's
   // answer through the in-turn keystroke reader (no stdin fight). The session
   // loop flips `.active` + routes captured lines into it around each turn.
@@ -807,6 +810,39 @@ export const composeCliRuntimeContext = async (
   // different layer (MCP elicitation / ask_user prompter io) route their
   // mid-turn reads through the SAME line source instead of a second readline.
   registerMidTurnApprovalChannel(midTurnApprovalChannel)
+  return midTurnApprovalChannel
+}
+
+/** SECURITY RAILS (jun-6, commit bc7202668) — wire the write-budget +
+ *  sandbox-escalation anti-exfil rails onto the interactive REPL's runtime
+ *  overlay path (NOT the host assembler), which was DARK here: `QUANTA_WRITE_BUDGET`
+ *  / `QUANTA_SANDBOX_ESCALATION` gave zero protection on `quanta`. Route the SAME
+ *  owner the assembler uses:
+ *   - write-budget: the returned `writeBudget` is threaded onto the overlay so the
+ *     base carries it to per-turn dispatch (the (N+1)th untrusted write is rejected).
+ *   - sandbox-escalation: the handler is installed as a side-effect against the
+ *     gate-shared `permissionStore` + the composed `onConfirm` authority.
+ *  Both knobs off ⇒ writeBudget undefined (overlay slot omitted) + handler cleared
+ *  ⇒ byte-identical to today (default-OFF). Extracted from
+ *  {@link composeCliRuntimeContext} verbatim (pure code motion). */
+const wireSecurityOverlay = (deps: {
+  readonly envSource?: Readonly<Record<string, string | undefined>>
+  readonly permissionStore: PermissionStore | undefined
+  readonly onConfirm: (action: ToolAction) => Promise<boolean | ConfirmDecision>
+}): ReturnType<typeof wireSecurityRailsForOverlay>["writeBudget"] => {
+  const { writeBudget } = wireSecurityRailsForOverlay(
+    runtimeConfigFromEnv(deps.envSource ?? process.env),
+    { permissionStore: deps.permissionStore, onConfirm: deps.onConfirm },
+  )
+  return writeBudget
+}
+
+export const composeCliRuntimeContext = async (
+  args: ComposeCliRuntimeContextArgs,
+): Promise<CliRuntimeContextBindings> => {
+  const { boot, turnStream, loadPermissionStore, sandboxProfile } = args
+  // S2 — the FIFO ask-queue channel (mid-turn approval + cross-layer publish).
+  const midTurnApprovalChannel = wireAskQueue()
   // #20 (durable prefix grants) — wire the PERSISTENT trust-scope registry ONLY
   // when `QUANTA_TRUST_SCOPE` is on (opt-in; NOT seeded default-ON like the other
   // CLI gates — durable cross-session grants are a deliberate operator choice).
@@ -865,21 +901,14 @@ export const composeCliRuntimeContext = async (
     })
   }
   const permissionStore = await loadPermissionStore()
-  // SECURITY RAILS — the interactive REPL builds its per-turn config through the
-  // runtime overlay (NOT the host assembler), so both jun-6 anti-exfil rails were
-  // DARK here: `QUANTA_WRITE_BUDGET` / `QUANTA_SANDBOX_ESCALATION` gave zero
-  // protection on `quanta`. Route the SAME owner the assembler uses:
-  //  - write-budget: the returned `writeBudget` is threaded onto the overlay so
-  //    the base carries it to per-turn dispatch (the (N+1)th untrusted write is
-  //    rejected).
-  //  - sandbox-escalation: the handler is installed as a side-effect against the
-  //    gate-shared `permissionStore` + the composed `onConfirm` authority.
-  // Both knobs off ⇒ writeBudget undefined (overlay slot omitted) + handler
-  // cleared ⇒ byte-identical to today (default-OFF).
-  const { writeBudget: securityWriteBudget } = wireSecurityRailsForOverlay(
-    runtimeConfigFromEnv(args.envSource ?? process.env),
-    { permissionStore, onConfirm },
-  )
+  // SECURITY RAILS — wire the write-budget + sandbox-escalation anti-exfil rails
+  // onto this overlay path (see {@link wireSecurityOverlay}). Both knobs off ⇒
+  // writeBudget undefined + handler cleared ⇒ byte-identical to today (default-OFF).
+  const securityWriteBudget = wireSecurityOverlay({
+    ...(args.envSource !== undefined ? { envSource: args.envSource } : {}),
+    permissionStore,
+    onConfirm,
+  })
   const planExitPort = createCliPlanExitPort({
     ask: (p) => askLine(midTurnApprovalChannel, p, "plan-exit"),
   })

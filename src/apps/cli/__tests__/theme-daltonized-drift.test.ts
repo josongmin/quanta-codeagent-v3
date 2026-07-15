@@ -22,7 +22,10 @@ import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { getColorPalette } from "../color-palettes"
 
-const REGISTRY_SRC = "src/apps/cli/slash/registry-surface.ts"
+// `VALID_THEMES` lives in the preferences sub-module of the surface registry
+// (extracted from `registry-surface.ts` to keep that file under the god-module
+// ceiling); the enum↔palette invariant this guard pins is unchanged.
+const REGISTRY_SRC = "src/apps/cli/slash/registry-surface/preferences-cmds.ts"
 
 /** Extract the `VALID_THEMES = [...] as const` literal members. */
 const validThemes = (): readonly string[] => {
