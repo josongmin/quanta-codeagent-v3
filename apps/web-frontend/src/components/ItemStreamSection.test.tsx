@@ -58,3 +58,43 @@ describe("S2 ItemStreamSection render", () => {
     expect(html).not.toContain("animate-pulse")
   })
 })
+
+describe("jul-15 peerMessage — dedicated 'Sent from another task' row", () => {
+  // The projector emits a peerMessage item whose completed.text is
+  // `from→to [kind] body` (item-stream-projector `onPeerMessage`).
+  const peerState = (text: string) =>
+    fold(
+      { type: "message", msg: { kind: "item.started", itemId: "p1", itemType: "peerMessage", itemIndex: 0, emittedAt: 0 } },
+      { type: "message", msg: { kind: "item.completed", itemId: "p1", itemType: "peerMessage", text, emittedAt: 0 } },
+    )
+
+  it("renders the Codex-parity label + parsed attribution + body bubble", () => {
+    const html = renderToStaticMarkup(<ItemStreamSection state={peerState("root/1→root [request] compute the sum")} />)
+    expect(html).toContain("peer-message-row")
+    expect(html).toContain("Sent from another task")
+    // attribution meta parsed out of the text
+    expect(html).toContain("root/1")
+    expect(html).toContain("request")
+    // the body renders in the bubble (NOT the raw `from→to [kind]` prefix)
+    expect(html).toContain("compute the sum")
+    // it does NOT fall back to the generic itemType badge row
+    expect(html).not.toContain(">peerMessage<")
+  })
+
+  it("a non-peerMessage item still gets the generic row (no false positive)", () => {
+    const state = fold(
+      { type: "message", msg: { kind: "item.started", itemId: "i1", itemType: "reasoning", itemIndex: 0, emittedAt: 0 } },
+      { type: "message", msg: { kind: "item.completed", itemId: "i1", itemType: "reasoning", text: "x", emittedAt: 0 } },
+    )
+    const html = renderToStaticMarkup(<ItemStreamSection state={state} />)
+    expect(html).not.toContain("peer-message-row")
+    expect(html).not.toContain("Sent from another task")
+  })
+
+  it("a malformed peerMessage text falls back to the raw text in the bubble", () => {
+    const html = renderToStaticMarkup(<ItemStreamSection state={peerState("no arrow here")} />)
+    expect(html).toContain("peer-message-row")
+    expect(html).toContain("Sent from another task")
+    expect(html).toContain("no arrow here")
+  })
+})
