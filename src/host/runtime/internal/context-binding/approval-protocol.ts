@@ -23,6 +23,7 @@ import {
   RuntimeApprovalRequiredError,
   reasonOf,
   SHELL_EXTRACT_FAILED,
+  withResolvedShellCommandForConfirm,
 } from "./approval-support"
 import type { RuntimeBase } from "./types"
 
@@ -196,8 +197,15 @@ const resolvePartialHunkApprove = async (
 
 export const runOnConfirm = async (
   deps: ApprovalProtocolDeps,
-  action: ToolAction,
+  rawAction: ToolAction,
 ): Promise<Awaited<ReturnType<NonNullable<AgentConfig["onConfirm"]>>>> => {
+  // Enrich the action with the registry-derived `shellCommand` (mirror of the
+  // admissibility-gate entry step) so the operator surface confirm can offer the
+  // `[p]`/`[P]` prefix-grant verbs. The inline-approval-resolver path (ADR-0540)
+  // does NOT flow through `runAdmissibilityGate`'s enrichment, so without this
+  // the CLI bash confirm dropped the prefix verbs. Byte-identical for non-shell /
+  // already-resolved actions (same reference returned).
+  const action = withResolvedShellCommandForConfirm(deps.base.registry, rawAction)
   const actionKey = actionKeyOf(deps.base.registry, action)
   const leased = claimLease(deps, actionKey)
   if (leased !== false) return leased
