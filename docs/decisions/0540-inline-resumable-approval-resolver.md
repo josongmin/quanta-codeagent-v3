@@ -72,20 +72,23 @@ type ApprovalResolver = (approval: PendingApproval, ctx: ResolverCtx) => Promise
   - **web-daemon**: `approval.requested` WS emit + 매칭 `approval.respond` command await (**서버측 suspend**, Codex형)
 - runAgent 내부 `runOnConfirm`이 deferred-throw 대신 **`await resolver(...)`** → 결정 받으면 같은 turn 계속. 브라우저/드라이버 어느 쪽도 재발행 안 함.
 
-### Wave 1 — 인라인 머신러리를 deferred 서피스로 확장 (CLI는 이미 완료)
+### Wave 1 — 인라인 머신러리를 headless로 확장 + web leak을 daemon-ownership로 봉합
 
-**핵심 정정(직접검증 후)**: CLI는 이미 인라인이다 — W1 작업 0. W1 = **web-daemon·headless가 `interactive`를 켜고 async surface confirm을 제공**해 이미 도는 `runOnConfirm` 인라인 경로를 타게 하는 것. 머신러리(`onConfirm`·`surfaceConfirms`·`confirmSlot`·`chain`)는 재사용, 신축 아님.
+> **hellaudit 수렴(적대+객관 2시선, 12에이전트) + 직접검증 후 확정.** 핵심 결론: (a) web naive-inline = **데드락**([engine.ts:57](../../src/sdk/runtime/session/engine.ts) `transportDispatchQueue` 직렬화 — turn.run이 큐 점유한 채 approval.respond await), (b) 인라인은 정말 CLI 전용(agent/interactive·terminal은 driveSessionTurn deferred 드라이버 사용), (c) mid-turn out-of-band 왕복 substrate는 이미 있음([web-user-input-port](../../src/apps/web-daemon/web-user-input-port.ts) — dispatch 큐 밖 resolve). 그래서 W1을 두 조각으로 최소화:
 
-- **headless**(스파이크 선행, 가장 쌈): `interactive` 켜고 surface confirm = **auto-policy**(즉시 approve/정책 반환). throw→deferred 경로 대신 인라인. UI無라 순수 로직만.
-- **web-daemon**: surface confirm = **WS round-trip**(`approval.requested` emit + `approval.respond` await, 서버측 suspend = Codex형). `interactive` 켬 → 인라인 경로. **브라우저** `shouldContinueAfterApproval` + client `turn.run` 재발행([session-hooks.ts:939-942, 995-1002](../../apps/web-frontend/src/ws/session-hooks.ts)) 삭제 → 렌더+respond만.
-- 두 서피스가 인라인으로 오면 `runOnConfirm` deferred throw 경로([:240-268](../../src/host/runtime/internal/context-binding/approval-protocol.ts))의 live 소비자가 사라짐 → [turn-runner.ts:185-192](../../src/host/runtime/internal/context-binding/turn-runner.ts) catch→return + [driveSessionTurn `for(;;)`](../../src/runner/orchestrate/session-turn-driver.ts)가 vestigial(항상 1-iteration)이 되어 `append+run`으로 단순화 가능.
-- `approval.requested`/`approval.resolved` event log emit 유지(관측 + 라이브-데몬 재접속 continue).
-- **게이트**: `QUANTA_INLINE_APPROVAL_RESOLVER` OFF ⇒ web/headless는 현 deferred/throw+lease byte-identical. ON ⇒ 인라인. (CLI는 게이트 무관 — 이미 인라인.)
-- 이 단계로 **wire leak(브라우저 continuation) 봉합 + in-process/wire 대칭**. crash durability는 오늘과 동급(오늘도 broken) — W2에서 처음 지어짐.
+**W1-A — headless 인라인 (스파이크 선행, 첫 착지):**
+- headless 컴포지션에 `approvalProtocol: { confirmSlot, interactive: true }` (confirmSlot.current = auto-policy surface) 추가 — 게이트 ON일 때만. throw→deferred→재실행([index.ts:186 driveSessionTurn](../../src/apps/headless/index.ts)) 대신 same-turn 인라인. 머신러리(`onConfirm`·`surfaceConfirms`·`chain`) **재사용, 신축 0**.
+- **게이트는 컴포지션 레벨**(신규 서피스만 opt-in): `QUANTA_INLINE_APPROVAL_RESOLVER` OFF ⇒ headless는 approvalProtocol 미설정 ⇒ 현 deferred(오늘) byte-identical. **`approval-protocol.ts`는 안 건드림, CLI도 안 건드림**(이미 출시된 CLI 인라인 퇴행 방지 — "byte-identical OFF"는 pre-jun-10이 아닌 *오늘 프로덕션* 기준).
+
+**W1-B — web browser leak을 daemon-ownership로 봉합 (헤드리스 검증 후):**
+- 데드락 때문에 web은 inline 안 함. 대신 **continuation 소유권을 브라우저→daemon으로 이관**: `approval.respond` 처리 후 daemon이 `turn.run`을 서버측 재발행(현재 브라우저가 하는 걸 서버로). 브라우저 [`shouldContinueAfterApproval` + client turn.run 재발행](../../apps/web-frontend/src/ws/session-hooks.ts) 삭제 → 렌더+respond만. approval.respond 완료 **후** turn.run 디스패치 = 순차, 데드락 없음.
+- 진짜 web-inline(out-of-band holder, web-user-input-port 패턴으로 서버측 suspend) = payoff가 durability라 **W2로 연기**.
+
+**W1에서 제외(판단):** approval.requested inline-emit(CLI가 한 달간 이거 없이 출시 → follower 블로커 아님, known-gap로 검증) · biome turn-driver fence(cli/headless가 정당히 직접 사용 → whitelist가 목적 훼손, 보류) · CLI 게이트(퇴행). crash durability는 오늘과 동급(broken) — W2에서 처음 지어짐.
 
 ### Wave 2 — 진짜 durability (resumable resolver)
 
-> **⚠️ load-bearing 정정(직접검증)**: 본 ADR 초안이 가정한 "이벤트로그가 이미 messages/tool_result 영속"은 **틀렸다.** `KernelEventLogPort` 구현체는 [`InMemorySessionEventLog`](../../src/kernel/session/event-log.ts) **하나뿐**이고 persistence는 [`new InMemorySessionEventLog()`](../../src/host/runtime/persistence.ts)가 전부 — **온디스크 이벤트로그가 없다.** 디스크 durability는 별경로(`SessionMeta`/history via [resume-fsm](../../src/runner/orchestrate/resume-fsm.ts))로 존재하나 event log는 프로세스와 함께 소멸. 따라서 W2의 실제 load-bearing 선행조건은 "resolver를 resumable하게"가 아니라 **온디스크 이벤트로그 substrate를 먼저 짓는 것**.
+> **⚠️ load-bearing 정정(직접검증)**: 본 ADR 초안이 가정한 "이벤트로그가 이미 messages/tool_result 영속"은 **틀렸다.** `KernelEventLogPort` 구현체는 [`InMemorySessionEventLog`](../../src/kernel/session/event-log.ts) **하나뿐**이고 persistence는 [`new InMemorySessionEventLog()`](../../src/host/runtime/persistence.ts)가 전부 — **온디스크 이벤트로그가 없다.** 디스크 durability는 별경로(`SessionMeta`/history via [resume-fsm](../../src/runner/orchestrate/resume-fsm.ts))로 존재하나 event log는 프로세스와 함께 소멸. **주의(모순 해소, hellaudit)**: web-daemon [`persistence-sqlite.ts`](../../src/apps/web-daemon/persistence-sqlite.ts)가 SessionEvent(approval.requested/resolved 포함)를 디스크에 archive하지만 — KernelEventLogPort와 **orthogonal**(별도 append 루프, zero 통합), **read-only observer**(history UI/미래 replay용, restart 시 rehydrate 안 함), **truncated**(~256자 tool args), seq-index 아님 — **W2 substrate로 재사용 불가**. 따라서 W2의 실제 load-bearing 선행조건은 "resolver를 resumable하게"가 아니라 **신규 온디스크 KernelEventLogPort(Codex rollout JSONL형)를 먼저 짓는 것**.
 
 0. **온디스크 이벤트로그(신규 substrate, 진짜 병목)**: `KernelEventLogPort`의 append-only 디스크 구현(Codex rollout JSONL형). 이게 없으면 아래 1-4 전부 불가.
 1. **persist-before-await**: resolver await 전 pending-approval을 안정적(결정적) `approvalId`로 (디스크) event log에 기록(`awaiting_approval` = turn-END가 아닌 turn-INTERNAL checkpoint).
