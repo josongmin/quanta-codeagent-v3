@@ -49,7 +49,9 @@
 
 ## 웨이브 순서
 
-### Wave 0 — 지금 병렬 (전부 의존 0, 파일 disjoint)
+### Wave 0 — ✅ 완료 (2026-07-16, 4/4 랜딩)
+
+결과: 0-1 S0 **GO**(satisfies 성립, f04f86974) · 0-2 03-A 랜딩(896b0ae86, **실드리프트 1건 적발**→764b70215로 미러+pin해소) · 0-3 **CONFIRMED**(06d8ff6f9, 수선방향 B안) · 0-4 **GO-with-rescope**(b40c18509, Wave 4 재편).
 
 | # | 항목 | 트랙 | 크기 | 내용/판정 |
 |---|---|---|---|---|
@@ -59,7 +61,9 @@
 | 0-4 | **deterministic-replay 스파이크** | 0540 | S–M | 재시작 후 LLM 재샘플 없이 승인점까지 턴 재생이 성립하는가 — **W2 전체(→SDK 05)의 GO/NO-GO**. NO면 W2 보류(measure-first), durability 트랙 동결 |
 | 0-5 | 마커 스펙 합의 | 공동 | 0 | 이 문서 §위로 완료 |
 
-### Wave 1 — W1-B: web leak을 daemon-ownership로 (0540 트랙, M)
+### Wave 1 — ✅ W1-B LANDED (9ea77c2c7 + 764b70215, 2026-07-16)
+
+worktree 구현(RED 4→GREEN 9 e2e) → 적대어딧 2어태커(KILL 0·HIGH 1·MED 3 적발, 마커=snapshot 소스 치명체크 통과) → findings 전수 수정(engine activeDispatch 결정적 수정 + red-on-injection 증명, marker-true 소비자 핀 2종, fixture sync, 주석 정직화) → 동시세션 dirty 겹침 3파일 git merge-file 3-way 클린 랜딩. 신규 SDK dispatch 옵션 `{enqueue:true}` — 01 구현 시 이 계약 참조.
 
 ADR-0540 핸드오프의 6-7파일 풀사이클 그대로 + 마커 스펙 준수: ws-handlers 재발행 + capabilities 필드 + 미러 동기 + 브라우저 게이팅(session-hooks/App) + **attach CLI 게이팅**(attach-client 재발행도 마커 따름) + 구클라 이중 turn.run 서버측 무해화 + hellgate(gate ON: client 재발행 없이 daemon 재발행으로 tool 디스패치). 게이트 `QUANTA_INLINE_APPROVAL_RESOLVER` 재사용, OFF = byte-identical.
 
