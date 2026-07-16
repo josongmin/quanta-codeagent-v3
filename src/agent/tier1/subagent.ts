@@ -327,11 +327,32 @@ export const buildSubagentBlock = (
     subagent6Cleanup = set.cleanup
   }
 
+  // A SPAWNED child inherits the parent's `subagent` block BY REFERENCE
+  // (`buildChildConfig`: `subagent: parent.subagent`), so `reg` here is the
+  // ROOT session's SHARED registry — NOT a private one. The registry-teardown
+  // sweep below (force-stop every pending task + drain the tracked runner
+  // promises) is a SESSION-OWNER verb that only the ROOT may run:
+  //   1. A child that swept it would force-stop its SIBLINGS' still-legitimately-
+  //      running background tasks (they belong to the parent, not this child).
+  //   2. DEADLOCK: a background child runs INSIDE a `registry.trackRunner(...)`
+  //      promise still in `runnerPromises`; its own cleanup calling
+  //      `reg.drainRunners()` would await that very promise (itself) → hang
+  //      forever (the 6 background-spawn e2e timeouts, jul-16). The root's
+  //      teardown drains it correctly AFTER the child loop returns and the
+  //      `.then(complete)` chain settles the marker.
+  // A root session has `depth` undefined or 0; any spawned descendant has
+  // `depth >= 1` (`buildChildConfig` sets `depth: childDepthOf(parent)`).
+  const isSpawnedChild = (config.depth ?? 0) > 0
   const cleanup = async (): Promise<void> => {
     // Tear down any PTY children the 6-tool `exec_command` kept alive FIRST so
-    // a live child can't outlive the registry teardown. No-op when 6-tool is
-    // off (subagent6Cleanup is undefined).
+    // a live child can't outlive the registry teardown. This is THIS session's
+    // OWN 6-tool exec children (not shared), so a spawned child still reaps its
+    // own. No-op when 6-tool is off (subagent6Cleanup is undefined).
     subagent6Cleanup?.()
+    // A spawned child does NOT own the shared registry's lifecycle — the root
+    // session sweeps it. Skipping here avoids sibling force-stops AND the
+    // self-await deadlock on this child's own in-flight runner promise.
+    if (isSpawnedChild) return
     // NEVER force-stop the task that represents THIS session itself. When this
     // is a spawned child, `config.spawnedAsTaskId` is its OWN lineage record in
     // the SHARED registry — still "running" because the PARENT settles it (via
@@ -340,6 +361,8 @@ export const buildSubagentBlock = (
     // parent's later `complete()` a no-op (`status !== "running"`), so a normally
     // finished subagent would show "stopped" in the panel. (hellaudit e2e —
     // caught only by driving a REAL child loop, not the runner `run` stub.)
+    // (Retained defensively even though `isSpawnedChild` already returned above:
+    // `spawnedAsTaskId` can be set on a ROOT that was itself pre-registered.)
     const ownTaskId = config.spawnedAsTaskId
     const ids = reg.pendingIds().filter((id) => id !== ownTaskId)
     // S17: host-side cleanup uses `forceStop` — not the token-gated `stop`.
