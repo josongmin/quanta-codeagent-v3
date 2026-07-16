@@ -6,6 +6,7 @@ import {
 import type { SessionHost } from "@/kernel/session"
 import {
   dispatchSessionCommand,
+  isDurableSessionEventLog,
   type KernelDispatchContext,
   type KernelSessionState,
   toSessionSnapshotLite,
@@ -64,9 +65,17 @@ export const ensureTransportBridge = (
 ): ReturnType<typeof createSessionTransportBridge> => {
   const { box, sessionId } = deps
   if (box.transportBridge !== undefined) return box.transportBridge
+  // Ticket 05 (durable resume) — hand the kernel's ON-DISK event log to the
+  // bridge as its incremental replay feed. Discovery is the same structural
+  // guard the seq-continuity seam uses (`isDurableSessionEventLog`): the
+  // default InMemory log exposes no durable surface ⇒ nothing is injected ⇒
+  // the bridge's snapshot-fallback behavior stays byte-identical.
+  const eventLog = deps.kernel.eventLog
+  const durableLog = isDurableSessionEventLog(eventLog) ? eventLog : undefined
   box.transportBridge = createSessionTransportBridge({
     snapshot: toSessionSnapshotLite(box.state),
     ...(replayWindow !== undefined ? { tailLimit: replayWindow } : {}),
+    ...(durableLog !== undefined ? { durableLog } : {}),
     onCommand: async (command) => {
       // Sequence transport-issued commands on a single tail so they apply in
       // order. The tail MUST NOT stay rejected after one dispatch throws:

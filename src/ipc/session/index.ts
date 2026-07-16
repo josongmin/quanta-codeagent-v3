@@ -47,6 +47,7 @@ export {
   wrapWebSocketLikeAsSessionTransport,
 } from "./transports/websocket"
 export type {
+  SessionDurableEventLogReader,
   SessionReplayPlan,
   SessionTransport,
   SessionTransportCloseInfo,

@@ -7,6 +7,7 @@ import {
 } from "@/protocol/session"
 import { SessionDispatchFailedError, SessionDuplicateCommandError } from "./errors"
 import type {
+  SessionDurableEventLogReader,
   SessionReplayPlan,
   SessionTransport,
   SessionTransportConnectMessage,
@@ -40,6 +41,12 @@ export interface SessionTransportBridgeErrorArgs {
 export interface CreateSessionTransportBridgeOpts {
   readonly snapshot: SessionSnapshotLite
   readonly tailLimit?: number
+  /** Ticket 05 (durable resume) — optional on-disk replay feed. When present,
+   *  the three snapshot-fallback paths of `planSessionReplay` (behind-window /
+   *  ahead-of-tip / in-window gap) first try an INCREMENTAL event replay read
+   *  from this log; the snapshot fallback remains for whatever the log cannot
+   *  cover densely. Absent ⇒ byte-identical historical behavior. */
+  readonly durableLog?: SessionDurableEventLogReader
   readonly onCommand?: (command: SessionCommand) => void | Promise<void>
   readonly onCommandRejected?: (args: CommandRejectedArgs) => void
   readonly onBridgeError?: (args: SessionTransportBridgeErrorArgs) => void
@@ -60,40 +67,96 @@ export interface SessionTransportBridge {
   close(): Promise<void>
 }
 
+/**
+ * Ticket 05 — incremental durable replay for a resume cursor the MEMORY tail
+ * cannot serve. Merges the on-disk segment (`readFrom(resumeFromSeq)`) with
+ * the retained in-memory tail BY SEQ — on a seq collision the tail's own live
+ * object wins (identical content by the kernel's append-before-publish
+ * contract, and the tail is what the live fan-out already carries) — and
+ * accepts the result ONLY when it covers `(resumeFromSeq, tip]` densely:
+ * exactly one event per seq, no duplicate, no hole (kernel seqs are dense by
+ * construction — the same assumption the historical `oldestTailSeq - 1` gap
+ * check encodes). Anything less — a punched log, an empty read, a throwing
+ * reader (pre-neutralized by the bridge's guard), a cursor at/ahead of the
+ * tip — returns undefined and the caller keeps the honest snapshot fallback.
+ */
+const planDurableReplay = (args: {
+  readonly retainedTail: readonly SessionEvent[]
+  readonly resumeFromSeq: number
+  readonly tip: number
+  readonly durableLog: SessionDurableEventLogReader
+}): SessionEvent[] | undefined => {
+  const { retainedTail, resumeFromSeq, tip, durableLog } = args
+  // resume == tip is already served by the memory fast path; a cursor AHEAD of
+  // the tip must keep the snapshot fallback — an "empty events-only" answer
+  // here would recreate the stuck-with-nothing bug the ahead-of-tip guard
+  // exists for (and log events BEYOND the bridge tip are never replayed: the
+  // bridge has not fanned them out yet, so serving them would duplicate the
+  // imminent live publish).
+  if (resumeFromSeq >= tip) return undefined
+  const bySeq = new Map<number, SessionEvent>()
+  for (const event of durableLog.readFrom(resumeFromSeq)) {
+    if (event.seq > resumeFromSeq && event.seq <= tip) bySeq.set(event.seq, event)
+  }
+  for (const event of retainedTail) {
+    if (event.seq > resumeFromSeq) bySeq.set(event.seq, event)
+  }
+  const merged = [...bySeq.values()].sort((a, b) => a.seq - b.seq)
+  // Dense-coverage proof by integer pigeonhole: the map holds at most one
+  // event per seq, every key lies inside (resumeFromSeq, tip], and that range
+  // contains exactly `tip - resumeFromSeq` integers — so a count match means
+  // every seq is present exactly once (a duplicate cannot mask a hole).
+  if (merged.length !== tip - resumeFromSeq) return undefined
+  return merged
+}
+
 export const planSessionReplay = ({
   snapshot,
   tail,
   resumeFromSeq,
+  durableLog,
 }: {
   readonly snapshot: SessionSnapshotLite
   readonly tail: readonly SessionEvent[]
   readonly resumeFromSeq?: number
+  /** Ticket 05 — optional durable feed; consulted ONLY on the fallback trio. */
+  readonly durableLog?: SessionDurableEventLogReader
 }): SessionReplayPlan => {
   const retainedTail = tail.filter((event) => event.seq > snapshot.seq)
   if (resumeFromSeq === undefined) {
     return { snapshot, tail: retainedTail }
   }
-  if (resumeFromSeq < snapshot.seq) {
-    return { snapshot, tail: retainedTail }
-  }
-  // Ahead-of-tip guard (daemon restart / seq reset). After a restart the
-  // in-memory seq resets (kernel state seq:0) but a reconnecting client's
-  // resumeFromSeq is still the OLD high-water mark — i.e. ahead of everything
-  // the bridge now holds. Without this guard the resume arm below filters the
-  // tail down to events with `seq > resumeFromSeq` (none), so the client gets
-  // an empty events-only plan and is stuck with nothing. Fall back to a full
-  // snapshot exactly like the behind-the-window case so the client resets.
   const tip = retainedTail.at(-1)?.seq ?? snapshot.seq
-  if (resumeFromSeq > tip) {
-    return { snapshot, tail: retainedTail }
-  }
   const oldestTailSeq = retainedTail[0]?.seq
-  if (oldestTailSeq !== undefined && resumeFromSeq < oldestTailSeq - 1) {
-    return { snapshot, tail: retainedTail }
+  // Memory fast path — IDENTICAL to the historical planner: the cursor sits
+  // inside [snapshot.seq, tip] and the retained tail reaches back to it
+  // contiguously (`oldestTailSeq - 1`), so the events-only answer comes from
+  // memory alone and the durable log — even when present — is NOT consulted.
+  const memoryServes =
+    resumeFromSeq >= snapshot.seq &&
+    resumeFromSeq <= tip &&
+    (oldestTailSeq === undefined || resumeFromSeq >= oldestTailSeq - 1)
+  if (memoryServes) {
+    return {
+      tail: retainedTail.filter((event) => event.seq > resumeFromSeq),
+    }
   }
-  return {
-    tail: retainedTail.filter((event) => event.seq > resumeFromSeq),
+  // Fallback trio, historically all snapshot resets:
+  //   behind-window  (resumeFromSeq < snapshot.seq — evicted into the snapshot),
+  //   ahead-of-tip   (resumeFromSeq > tip — daemon restart / seq reset; without
+  //                   the guard the client would get an EMPTY events-only plan
+  //                   and be stuck with nothing),
+  //   in-window gap  (resumeFromSeq < oldestTailSeq - 1 — tail eviction hole).
+  // Ticket 05: a durable log rescues the rescuable ones with an incremental
+  // event replay; whatever it cannot cover densely keeps the snapshot reset.
+  const rescued =
+    durableLog === undefined
+      ? undefined
+      : planDurableReplay({ retainedTail, resumeFromSeq, tip, durableLog })
+  if (rescued !== undefined) {
+    return { tail: rescued }
   }
+  return { snapshot, tail: retainedTail }
 }
 
 const cloneSnapshot = (snapshot: SessionSnapshotLite): SessionSnapshotLite => ({
@@ -229,11 +292,34 @@ export const createSessionTransportBridge = (
     }
   }
 
+  // Ticket 05 — the bridge owns the durable feed's ERROR POLICY: a throwing
+  // reader is reported to `onBridgeError` and answers with an empty segment,
+  // which can never pass the planner's dense-coverage check (the memory tail
+  // alone always misses at least the snapshot's own seq on the fallback
+  // paths) — so a broken port degrades to the snapshot fallback, loudly
+  // surfaced client-side as `resume: "snapshot_fallback"`, instead of
+  // crashing the connect path or silently pretending to have replayed.
+  const durablePort = opts.durableLog
+  const guardedDurableLog =
+    durablePort === undefined
+      ? undefined
+      : (peer: SessionTransport): SessionDurableEventLogReader => ({
+          readFrom: (afterSeq) => {
+            try {
+              return durablePort.readFrom(afterSeq)
+            } catch (error) {
+              reportBridgeError(peer, error)
+              return []
+            }
+          },
+        })
+
   const sendReplay = async (peer: SessionTransport, resumeFromSeq?: number): Promise<void> => {
     const plan = planSessionReplay({
       snapshot,
       tail,
       ...(resumeFromSeq !== undefined ? { resumeFromSeq } : {}),
+      ...(guardedDurableLog !== undefined ? { durableLog: guardedDurableLog(peer) } : {}),
     })
     const messages: SessionTransportMessage[] = []
     if (plan.snapshot !== undefined) {

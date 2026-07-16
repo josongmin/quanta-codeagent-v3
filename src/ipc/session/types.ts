@@ -105,3 +105,18 @@ export interface SessionReplayPlan {
   readonly snapshot?: SessionSnapshotLite
   readonly tail: readonly SessionEvent[]
 }
+
+/**
+ * Ticket 05 (durable resume) — the bridge's read-only view of a DURABLE
+ * session event log: `readFrom(afterSeq)` returns every logged event with
+ * `seq > afterSeq`, in seq order. Structural ON PURPOSE: the transport slice
+ * stays kernel-free (`@/kernel` already imports `@/ipc`, so a nominal import
+ * here would open a cross-slice cycle). `@/kernel/session`'s
+ * `DurableSessionEventLog` (the on-disk JSONL log, W4-b) satisfies it as-is;
+ * the SDK engine injects it behind the `isDurableSessionEventLog` guard — the
+ * InMemory log exposes no durable surface, so nothing is injected and the
+ * bridge's snapshot-fallback behavior stays byte-identical (default-OFF).
+ */
+export interface SessionDurableEventLogReader {
+  readFrom(afterSeq: number): readonly SessionEvent[]
+}
