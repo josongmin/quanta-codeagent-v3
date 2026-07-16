@@ -68,7 +68,8 @@ evidence:
       - tests/unit/bench-cli-dispatch.test.ts
       - tests/unit/full-remote-bench-env-forward.test.ts
       - tests/unit/observability/vocabulary-migration.test.ts
-    integration: []
+    integration:
+      - tests/integration/bench-live-trace-run-link-e2e.test.ts
     contract: []
 knobs: []
 deliberate_hold:
