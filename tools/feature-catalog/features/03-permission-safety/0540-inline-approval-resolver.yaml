@@ -1,0 +1,59 @@
+id: 0540-inline-approval-resolver
+title: ADR-0540 inline/daemon-owned approval resolver (W1-A headless + W1-B web daemon continuation)
+section: 3
+subsystem: Approval resolver ownership (ADR-0540 — client-thin continuation)
+order: 540
+maturity: L2
+status: new
+ui_surfaces: [web]
+monitoring: n-a
+modes: [headless, daemon]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["surface:core", "adr:0540", "gate:QUANTA_INLINE_APPROVAL_RESOLVER", "flip-campaign:excluded"]
+depends_on: []
+surface_integration:
+  cli: na
+  web: full
+  method: audited
+  verified: "2026-07-16"
+  evidence:
+    cli: "CLI is ALREADY inline (jun-10 HITL restructure, gate-independent) — this feature deliberately does not touch the CLI composition (regression guard)"
+    web: "daemon subscribes approval.resolved(approve) and re-issues turn.run on the session dispatch tail ({enqueue:true}); browser/attach read the serverAutoContinues capability marker from the snapshot and skip their client re-issue — pinned by the mid-turn web-daemon e2e (10 cases incl. direct-respond M-1 and old-client dup pin)"
+purpose: |
+  Moves post-approval continuation ownership from the client edge into the
+  core, converging on the Codex/Claude model (client answers, core continues).
+  W1-A (4a26c828d): headless composition gains an inline same-turn resolver
+  via approvalProtocol confirmSlot overlay — no throw/re-run, approval-protocol.ts
+  untouched. W1-B (9ea77c2c7): the web daemon owns the continuation — an
+  approval.resolved(approve) subscriber enqueues a daemon-minted bare turn.run
+  strictly AFTER the respond settles (engine transportDispatchQueue tail +
+  activeDispatch in-flight window — deadlock-free by construction, adversarial
+  audit M-1, red-on-injection proven). Old non-marker-aware clients are
+  neutralized server-side with NO absorb layer: the kernel rejects draftless
+  turn.run deterministically (empty_turn_input). The serverAutoContinues
+  capability marker (required field, normalize fallback false; canonical
+  carrier = snapshot) tells marker-aware clients (web session-hooks, CLI
+  attach) to skip their legacy re-issue.
+
+  GATE LIFECYCLE (DOF flip-campaign EXCLUSION — see label): the gate is
+  default-OFF with its own retirement plan — ADR-0540 removes the gate (and
+  deletes the deferred/throw/lease legacy) at Wave-2 close. Do NOT include it
+  in default-ON flip tranches or behavioral A/B batches; OFF is byte-identical
+  legacy flow by construction (hellgated).
+evidence:
+  code:
+    - src/apps/headless/approval-wiring.ts
+    - src/apps/web-daemon/server/approval-continuation.ts
+    - src/sdk/runtime/session/engine.ts
+    - src/protocol/session/capabilities.ts
+    - apps/web-frontend/src/ws/session-hooks.ts
+    - src/apps/cli/attach/attach-client.ts
+  adrs: ["docs/decisions/0540-inline-resumable-approval-resolver.md"]
+  tests:
+    unit:
+      - tests/unit/apps/cli/attach/attach-approval-verbs-hellgate.test.ts
+      - src/apps/agent/mode-presets/__tests__/interactive-approval-resolver.hellgate.test.ts
+      - tests/unit/host/host-capability-derivation.test.ts
+    integration:
+      - tests/integration/approval-respond-mid-turn-web-daemon-e2e.test.ts
