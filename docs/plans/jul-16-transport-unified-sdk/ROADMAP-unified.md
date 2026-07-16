@@ -1,5 +1,34 @@
 # 통합 로드맵 — transport-unified-sdk × ADR-0540 (2026-07-16 확정)
 
+## 구현 대조 원장 (HEAD c2c0e77ad 전수 검증)
+
+**이미 있음 → 재사용 (짓지 말 것)**
+
+| 자산 | evidence |
+|---|---|
+| 세션 substrate 3층 | RuntimeSession(sdk/runtime/types.ts:51) · session.v1(커맨드8/이벤트23) · @/ipc/session(stdio/WS/bridge/tail-replay 128) |
+| conformance 하네스 | tests/unit/ipc/ stdio×WS 매트릭스 + in-memory duplex pair |
+| copy 드리프트 가드 | web-frontend-protocol-drift-contract-hellgate(366줄, union equality — field-shape만 갭) |
+| **W1-A 인라인 resolver** | **DONE** 4a26c828d — approval-wiring.ts + knob-inventory 등록 + session-bridge 배선, gate default-OFF |
+| CLI stdio 서브커맨드 선례 | `quanta mcp-server`(mcp-server-setup.ts) — 02의 등록/stdout 규율 레퍼런스 |
+| attach 클라+e2e | handshake/approval 재발행 플로우(01 S3 hoist 원본) + 실 데몬 e2e |
+| approval 결정타입 SSOT | runner/orchestrate/approval-decision.ts (01이 재사용, 신규 발명 금지) |
+
+**전 계획 항목 미착수 확정 (grep 0건 검증, 07-16)**
+
+| 항목 | 판정 근거 |
+|---|---|
+| 01 connect/SessionHandle | `SessionVerbSurface\|toSessionHandle\|createSessionHandle` src+tests 0건 |
+| W1-B daemon-ownership | `serverAutoContinues` 0건 · ws-handlers에 turn.run 재발행 없음 · 브라우저 `shouldContinueAfterApproval` 잔존(session-hooks.ts:939) · attach 재발행 잔존 |
+| W2 durability | `implements KernelEventLogPort` = InMemory 1개뿐 · state.ts 무조건 idle/null 리셋 그대로 · deterministic-replay 작업물 0 |
+| 03-A field-shape | hellgate에 컴파일러API/optionality 대조 0건 |
+| 02 serve --stdio | `QUANTA_SERVE_STDIO` 0건 |
+| 03-B 번들 | `build:protocol` package.json 0건 |
+| 04 fidelity | `argsFull\|resultFull\|requestedFidelity` 0건 |
+| jul-4 P8 `.d.ts` | dist/sdk/*.d.ts 없음 · package.json types 필드 0 |
+
+⇒ **완료 = W1-A 하나. 나머지 전부 그린필드 — 아래 웨이브 순서가 그대로 최종 실행 계획이다.**
+
 > 두 워크스트림(공개 SDK 문 / 인라인·durable 승인 resolver)의 **합본 실행 계획**. 공유 서피스 3개(capability 마커·온디스크 이벤트로그·protocol mirror) 때문에 단독 진행 금지 — 이 문서가 순서/경계 합의의 SSOT.
 > 세부 설계는 각자: [00-MASTER-PLAN.md](00-MASTER-PLAN.md)(SDK 문) · [ADR-0540](../../decisions/0540-inline-resumable-approval-resolver.md)(승인 resolver) · [HANDOFF.md](HANDOFF.md)(SDK 남은작업 상세)
 
