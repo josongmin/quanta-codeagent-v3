@@ -7,9 +7,33 @@
  * lines yield no commands (the daemon rejects an empty turn anyway; we avoid the
  * round-trip). Approval answers map y→approve / everything-else→deny (fail-safe
  * for a dangerous op awaiting confirmation).
+ *
+ * S1 (jul-16 SDK ticket 01): command ASSEMBLY is no longer hand-rolled here —
+ * this module now maps attach's line/answer semantics onto the hoisted
+ * protocol-slice builder SSOT (`@/protocol/session/builders`), which owns the
+ * wire shape. The attach-flavored injection points (`newCommandId`/`issuedAt`
+ * callables) ride the builders' explicit `meta` overrides, so the clock
+ * fallback below is never consulted on these paths.
  */
 
-import type { ApprovalRespondCommand, SessionCommand } from "@/protocol/session"
+import {
+  type ApprovalRespondCommand,
+  buildApprovalRespond,
+  buildInputAppend,
+  buildTurnRun,
+  type CommandBuildDeps,
+  type SessionCommand,
+} from "@/protocol/session"
+
+/** Fallback clock for {@link CommandBuildDeps}. Attach always supplies an
+ *  explicit `issuedAt` via builder meta, so this is dormant by construction —
+ *  it exists because the deps shape (rightly) demands a clock. */
+const SYSTEM_CLOCK: CommandBuildDeps["clock"] = { now: () => new Date() }
+
+const buildDeps = (sessionId: string): CommandBuildDeps => ({
+  sessionId,
+  clock: SYSTEM_CLOCK,
+})
 
 export interface BuildLineCommandsArgs {
   readonly sessionId: string
@@ -27,20 +51,16 @@ export interface BuildLineCommandsArgs {
 export const buildLineCommands = (args: BuildLineCommandsArgs): readonly SessionCommand[] => {
   const text = args.line.trim()
   if (text.length === 0) return []
-  const append: SessionCommand = {
-    sessionId: args.sessionId,
-    commandId: args.newCommandId(),
-    issuedAt: args.issuedAt(),
-    type: "input.append",
-    text: args.line,
-  }
-  const run: SessionCommand = {
-    sessionId: args.sessionId,
-    commandId: args.newCommandId(),
-    issuedAt: args.issuedAt(),
-    type: "turn.run",
-  }
-  return [append, run]
+  const deps = buildDeps(args.sessionId)
+  return [
+    // NOTE: the UNtrimmed line rides the wire (trim is only the blank check) —
+    // byte-identical to the pre-hoist assembly.
+    buildInputAppend(deps, args.line, {
+      commandId: args.newCommandId(),
+      issuedAt: args.issuedAt(),
+    }),
+    buildTurnRun(deps, { commandId: args.newCommandId(), issuedAt: args.issuedAt() }),
+  ]
 }
 
 export interface BuildApprovalRespondArgs {
@@ -59,11 +79,10 @@ const isAffirmative = (answer: string): boolean => {
 
 export const buildApprovalRespondCommand = (
   args: BuildApprovalRespondArgs,
-): ApprovalRespondCommand => ({
-  sessionId: args.sessionId,
-  commandId: args.commandId,
-  issuedAt: args.issuedAt,
-  type: "approval.respond",
-  approvalId: args.approvalId,
-  decision: isAffirmative(args.answer) ? "approve" : "deny",
-})
+): ApprovalRespondCommand =>
+  buildApprovalRespond(
+    buildDeps(args.sessionId),
+    args.approvalId,
+    isAffirmative(args.answer) ? "approve" : "deny",
+    { commandId: args.commandId, issuedAt: args.issuedAt },
+  )

@@ -1,4 +1,4 @@
-import { encodeSessionTransportMessage, tryDecodeSessionTransportMessage } from "../codec"
+import { encodeSessionTransportMessage, resolveInboundSessionTransportFrame } from "../codec"
 import type { SessionTransport, SessionTransportHandler } from "../types"
 import { createSessionTransportCloseSignal } from "./close-signal"
 
@@ -39,9 +39,23 @@ export interface CreateSessionStdioTransportOpts {
   readonly writer: StdioWriter
 }
 
-const dispatch = (handlers: Set<SessionTransportHandler>, raw: string): void => {
-  const message = tryDecodeSessionTransportMessage(raw)
-  if (message === undefined) return
+const dispatch = (
+  handlers: Set<SessionTransportHandler>,
+  raw: string,
+  replyRaw: (frame: string) => void,
+): void => {
+  // S5b — the resolver either yields a message (incl. the LENIENT decode of a
+  // foreign-version `rejected` frame), a raw echo-reject REPLY for a
+  // version-skewed connect/command (written back verbatim — it must carry the
+  // peer's claimed version, so it cannot ride the typed `send`), or undefined
+  // (undecodable garbage, dropped exactly as before).
+  const resolution = resolveInboundSessionTransportFrame(raw)
+  if (resolution === undefined) return
+  if (resolution.kind === "reply") {
+    replyRaw(resolution.frame)
+    return
+  }
+  const message = resolution.message
   for (const handler of [...handlers]) {
     try {
       const result = handler(message)
@@ -81,6 +95,14 @@ export const createSessionStdioTransport = (
     closeSignal.notify({ reason })
   }
 
+  // S5b — raw write-back for the version-skew echo reject (newline-framed like
+  // every outbound frame). Bypasses `send` on purpose: the reply must carry
+  // the PEER's claimed version, which the typed encoder would overwrite.
+  const replyRaw = (frame: string): void => {
+    if (closed) return
+    opts.writer.write(`${frame}\n`)
+  }
+
   const onData = (chunk: Buffer | string): void => {
     if (closed) return
     buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8")
@@ -88,7 +110,7 @@ export const createSessionStdioTransport = (
     while (nl !== -1) {
       const line = buffer.slice(0, nl)
       buffer = buffer.slice(nl + 1)
-      dispatch(handlers, line)
+      dispatch(handlers, line, replyRaw)
       nl = buffer.indexOf("\n")
     }
     // Frame-size DoS guard: the trailing partial (no newline yet) must never

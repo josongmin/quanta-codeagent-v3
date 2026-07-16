@@ -1,4 +1,14 @@
-import type { KernelDispatchContext } from "@/kernel/session"
+/**
+ * SessionCommand builders — the protocol-slice SSOT (S1, jul-16 SDK ticket 01).
+ *
+ * MOVED (not copied) from `src/sdk/runtime/session/commands.ts`, where these
+ * were already a pure leaf; the second hand-rolled copy in
+ * `src/apps/cli/attach` now consumes THESE builders too, so a command's wire
+ * shape (id minting, `issuedAt` stamping, optional-field spreading) has exactly
+ * one definition. Living in `@/protocol/session` keeps them importable by every
+ * layer (sdk runtime, ipc clients, app surfaces) without an up-import.
+ */
+
 import type { ImageBlock, Message } from "@/llm"
 import type {
   ApprovalRespondCommand,
@@ -7,17 +17,25 @@ import type {
   SessionPermissionSetCommand,
   SessionToolProfileSetCommand,
   SessionTranscriptReplaceCommand,
+  TurnCancelCommand,
   TurnRunCommand,
-} from "@/protocol/session"
+} from "./commands"
+
+/** Structural clock the builders stamp `issuedAt` from. Deliberately defined
+ *  HERE (protocol is a leaf slice): the kernel's `KernelClock` satisfies it
+ *  structurally, but the protocol slice must not reach into `@/kernel`. */
+export interface CommandBuilderClock {
+  now(): Date
+}
 
 /**
  * Pure command-builder deps: the immutable identity of the session plus the
- * clock used to stamp `issuedAt`. None of these builders touch the session's
- * mutable runtime state, so they live as module-level helpers.
+ * clock used to stamp `issuedAt`. None of these builders touch any mutable
+ * runtime state, so they live as module-level helpers.
  */
 export interface CommandBuildDeps {
   readonly sessionId: string
-  readonly clock: KernelDispatchContext["clock"]
+  readonly clock: CommandBuilderClock
 }
 
 export const commandMeta = <
@@ -54,6 +72,18 @@ export const buildTurnRun = (
 ): TurnRunCommand => ({
   sessionId: deps.sessionId,
   type: "turn.run",
+  ...commandMeta(deps, meta),
+})
+
+/** S1 — `turn.cancel` builder. The command has existed in the protocol's
+ *  8-command union all along (commands.ts) and attach was hand-assembling it;
+ *  this gives it the same SSOT treatment as its siblings. */
+export const buildTurnCancel = (
+  deps: CommandBuildDeps,
+  meta: Partial<Omit<TurnCancelCommand, "sessionId" | "type">> | undefined,
+): TurnCancelCommand => ({
+  sessionId: deps.sessionId,
+  type: "turn.cancel",
   ...commandMeta(deps, meta),
 })
 

@@ -1,4 +1,5 @@
 import {
+  type CreateSessionTransportClientOpts,
   createSessionStdioClient,
   createSessionStdioServer,
   createSessionTransportBridge,
@@ -174,6 +175,8 @@ export const createHarness = async (args: {
   readonly bridge: SessionTransportBridge
   readonly sessionId?: string
   readonly resumeFromSeq?: number
+  /** S5 — typed `rejected` surfacing (additive; absent ⇒ prior behavior). */
+  readonly onRejected?: CreateSessionTransportClientOpts["onRejected"]
 }): Promise<{
   readonly client: SessionTransportClient
   readonly server: SessionTransportServer
@@ -186,6 +189,7 @@ export const createHarness = async (args: {
       writer: pair.client.writer,
       sessionId: args.sessionId ?? "session-1",
       ...(args.resumeFromSeq !== undefined ? { resumeFromSeq: args.resumeFromSeq } : {}),
+      ...(args.onRejected !== undefined ? { onRejected: args.onRejected } : {}),
     })
     const server = await createSessionStdioServer({
       reader: pair.server.reader,
@@ -207,6 +211,7 @@ export const createHarness = async (args: {
     socket: pair.client,
     sessionId: args.sessionId ?? "session-1",
     ...(args.resumeFromSeq !== undefined ? { resumeFromSeq: args.resumeFromSeq } : {}),
+    ...(args.onRejected !== undefined ? { onRejected: args.onRejected } : {}),
   })
   const server = await createSessionWebSocketServer({
     socket: pair.server,

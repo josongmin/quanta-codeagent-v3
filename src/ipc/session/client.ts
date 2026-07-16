@@ -1,10 +1,32 @@
-import { type SessionCommand, SessionProtocolValidationError } from "@/protocol/session"
-import type { SessionTransport, SessionTransportHandler, SessionTransportMessage } from "./types"
+import {
+  type SessionCommand,
+  type SessionProtocolError,
+  SessionProtocolValidationError,
+} from "@/protocol/session"
+import { typedErrorFromRejectedMessage } from "./errors"
+import type {
+  SessionTransport,
+  SessionTransportHandler,
+  SessionTransportMessage,
+  SessionTransportRejectedMessage,
+} from "./types"
+
+/** S5 (jul-16 ticket 01) — a server `rejected` frame paired with its typed
+ *  error (`typedErrorFromRejectedMessage` mapping; a version-skew reject
+ *  surfaces as `SessionProtocolVersionError`). */
+export interface SessionTransportClientRejection {
+  readonly message: SessionTransportRejectedMessage
+  readonly error: SessionProtocolError
+}
 
 export interface CreateSessionTransportClientOpts {
   readonly transport: SessionTransport
   readonly sessionId: string
   readonly resumeFromSeq?: number
+  /** S5 — typed surfacing of EVERY inbound `rejected` frame. Additive: absent
+   *  ⇒ byte-identical behavior (rejected frames still flow to `onMessage`
+   *  subscribers as before; this is the typed side-channel, not a filter). */
+  readonly onRejected?: (rejection: SessionTransportClientRejection) => void
 }
 
 /** How the server restored this client's view on (re)connect. RESERVED (S4,
@@ -103,6 +125,13 @@ export const createSessionTransportClient = (
 
   const unsubscribe = opts.transport.onMessage((message) => {
     resumeFromSeq = nextResumeFromSeq(resumeFromSeq, message)
+    if (message.kind === "rejected" && opts.onRejected !== undefined) {
+      try {
+        opts.onRejected({ message, error: typedErrorFromRejectedMessage(message) })
+      } catch {
+        // A throwing rejection observer must not poison message fan-out.
+      }
+    }
     for (const handler of [...handlers]) {
       try {
         const result = handler(message)

@@ -5,8 +5,8 @@ import {
   encodeSessionCommand,
   encodeSessionEvent,
   encodeSessionSnapshot,
-  isSurfaceSubscription,
   isSessionProtocolVersion,
+  isSurfaceSubscription,
   SESSION_PROTOCOL_VERSION,
   SessionProtocolValidationError,
 } from "@/protocol/session"
@@ -110,9 +110,19 @@ const decodeConnectMessage = (raw: string): SessionTransportMessage => {
   }
 }
 
-const decodeRejectedMessage = (raw: string): SessionTransportMessage => {
+const decodeRejectedMessage = (
+  raw: string,
+  opts: { readonly lenientVersion?: boolean } = {},
+): SessionTransportMessage => {
   const envelope = expectObject(JSON.parse(raw) as unknown)
-  requireProtocolVersion(envelope)
+  // S5b — LENIENT mode is the client half of the version-skew handshake:
+  // `rejected` frames (and ONLY that kind) may be decoded version-exempt, so a
+  // reject stamped with a foreign version still reaches the consumer as a
+  // typed rejection instead of being silently dropped. The sessionId is also
+  // relaxed to "any string" (a skew-reject echoing the bootstrap-discovery
+  // sentinel carries an EMPTY sessionId). Every other field keeps the strict
+  // gate — lenient must never admit a structurally different frame.
+  if (opts.lenientVersion !== true) requireProtocolVersion(envelope)
   const target = decodeString(envelope.target, "bad_transport_reject_target")
   const reason = decodeString(envelope.reason, "bad_transport_reject_reason")
   if (target !== "connect" && target !== "command") {
@@ -134,9 +144,13 @@ const decodeRejectedMessage = (raw: string): SessionTransportMessage => {
     envelope.actualRevision,
     "bad_transport_actual_revision",
   )
+  const sessionId =
+    opts.lenientVersion === true && typeof envelope.sessionId === "string"
+      ? envelope.sessionId
+      : decodeString(envelope.sessionId, "bad_transport_session_id")
   return {
     kind: "rejected",
-    sessionId: decodeString(envelope.sessionId, "bad_transport_session_id"),
+    sessionId,
     target,
     reason,
     ...(typeof envelope.commandId === "string" ? { commandId: envelope.commandId } : {}),
@@ -215,5 +229,148 @@ export const tryDecodeSessionTransportMessage = (
     return decodeSessionTransportMessage(raw)
   } catch {
     return undefined
+  }
+}
+
+// ─── S5b (jul-16 ticket 01): version-skew lenient reject ────────────────────
+//
+// A frame whose `version` fails `isSessionProtocolVersion` used to be dropped
+// on the floor by every transport (`tryDecodeSessionTransportMessage` →
+// undefined), so version skew degenerated to an unexplained hang on BOTH
+// sides. The helpers below implement the two additive halves:
+//
+//   server half — a skewed CLIENT-INITIATED frame (`connect` / `command`) is
+//     answered with a `rejected` reply whose envelope `version` ECHOES the
+//     version the peer claimed. Stamping our own version would be
+//     self-defeating: the skewed peer's `requireProtocolVersion` gate is
+//     exactly what would drop the reply. Reason stays inside the CLOSED-4 set
+//     (`protocol_validation`) with issue `"bad_version"` — the only encoding
+//     an already-shipped peer's rejected-decoder accepts.
+//
+//   client half — an inbound `rejected` frame (ONLY that kind) is decoded
+//     version-exempt, so the reply above (or a foreign server's own-stamped
+//     reject) surfaces as a typed rejection instead of vanishing.
+//
+// HONEST RESCUE POPULATION: peers shipped BEFORE this change have neither
+// half — an old server never sends the reply (new client → old server stays
+// silent, the more likely skew once the SDK is public), and an old client can
+// only read the reply thanks to the echo + closed-4 reuse AND only when its
+// frame carried a non-empty sessionId (the bootstrap discovery sentinel is
+// empty ⇒ the old strict decoder refuses the echo; a NEW lenient client reads
+// it fine). Typed surfacing exists from this build onward.
+
+interface VersionSkewProbe {
+  readonly claimedVersion: string
+  readonly kind: "connect" | "command"
+  readonly sessionId: string
+  readonly commandId?: string
+}
+
+const probeSkewedConnect = (
+  envelope: Record<string, unknown>,
+  claimedVersion: string,
+): VersionSkewProbe | undefined =>
+  typeof envelope.sessionId === "string"
+    ? { claimedVersion, kind: "connect", sessionId: envelope.sessionId }
+    : undefined
+
+const probeSkewedCommand = (
+  envelope: Record<string, unknown>,
+  claimedVersion: string,
+): VersionSkewProbe | undefined => {
+  const payload = envelope.payload
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return undefined
+  const command = payload as Record<string, unknown>
+  if (typeof command.sessionId !== "string") return undefined
+  return {
+    claimedVersion,
+    kind: "command",
+    sessionId: command.sessionId,
+    ...(typeof command.commandId === "string" ? { commandId: command.commandId } : {}),
+  }
+}
+
+/** Minimal, forgiving read of an UNDECODABLE frame: did the peer claim a
+ *  version we do not speak, on a kind we can address a reply to? Only
+ *  `connect`/`command` qualify — they are the client-initiated kinds carrying
+ *  a sessionId to address the reply with. A frame with NO version field is
+ *  garbage, not skew (there is nothing to echo), and stays dropped. */
+const probeVersionSkewFrame = (raw: string): VersionSkewProbe | undefined => {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw) as unknown
+  } catch {
+    return undefined
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined
+  const envelope = parsed as Record<string, unknown>
+  if (typeof envelope.version !== "string" || isSessionProtocolVersion(envelope.version)) {
+    return undefined
+  }
+  if (envelope.kind === "connect") return probeSkewedConnect(envelope, envelope.version)
+  if (envelope.kind === "command") return probeSkewedCommand(envelope, envelope.version)
+  return undefined
+}
+
+/** Encode the version-skew reject REPLY. Deliberately NOT routed through
+ *  `encodeSessionTransportMessage` — that stamps SESSION_PROTOCOL_VERSION,
+ *  and the whole point of this frame is the version ECHO (red-on-injection:
+ *  swap the echo for our own version and the "old client can decode the
+ *  reply" pin in tests/unit/ipc/transport-version-skew.test.ts goes red). */
+const encodeVersionSkewRejectedFrame = (probe: VersionSkewProbe): string =>
+  JSON.stringify({
+    version: probe.claimedVersion,
+    kind: "rejected",
+    sessionId: probe.sessionId,
+    target: probe.kind === "command" ? "command" : "connect",
+    reason: "protocol_validation",
+    issue: "bad_version",
+    ...(probe.commandId !== undefined ? { commandId: probe.commandId } : {}),
+  })
+
+export type InboundSessionFrameResolution =
+  | { readonly kind: "message"; readonly message: SessionTransportMessage }
+  | { readonly kind: "reply"; readonly frame: string }
+
+/**
+ * Single inbound-frame gate for the shared transports (stdio + websocket).
+ *
+ *   valid frame                          → deliver as message (unchanged path)
+ *   version-skewed `rejected`            → deliver via the LENIENT decoder
+ *   version-skewed `connect`/`command`   → answer with the echo reject reply
+ *   anything else undecodable            → drop (unchanged behavior)
+ *
+ * Loop safety: replies are only ever produced for `connect`/`command` — a
+ * `rejected` frame NEVER triggers a reply (no reject ping-pong), and the reply
+ * itself is a `rejected` frame.
+ */
+export const resolveInboundSessionTransportFrame = (
+  raw: string,
+): InboundSessionFrameResolution | undefined => {
+  try {
+    return { kind: "message", message: decodeSessionTransportMessage(raw) }
+  } catch (error) {
+    if (!(error instanceof SessionProtocolValidationError) || error.issue !== "bad_version") {
+      return undefined
+    }
+    let kind: SessionTransportMessage["kind"]
+    try {
+      kind = decodeKind(raw)
+    } catch {
+      return undefined
+    }
+    if (kind === "rejected") {
+      try {
+        return {
+          kind: "message",
+          message: decodeRejectedMessage(raw, { lenientVersion: true }),
+        }
+      } catch {
+        return undefined
+      }
+    }
+    const probe = probeVersionSkewFrame(raw)
+    if (probe === undefined) return undefined
+    return { kind: "reply", frame: encodeVersionSkewRejectedFrame(probe) }
   }
 }

@@ -5,7 +5,7 @@ import {
   SessionRevisionConflictError,
   type SessionSnapshotLite,
 } from "@/protocol/session"
-import { SessionDuplicateCommandError } from "./errors"
+import { SessionDispatchFailedError, SessionDuplicateCommandError } from "./errors"
 import type {
   SessionReplayPlan,
   SessionTransport,
@@ -16,12 +16,20 @@ import type {
 
 const DEFAULT_TAIL_LIMIT = 128
 
+/** Every error class a `rejected` frame can be minted from. The dispatch-stage
+ *  members (S5a) are ADDITIVE: `SessionDispatchFailedError` wraps a non-protocol
+ *  dispatch throw; a `SessionProtocolValidationError` may now also ORIGINATE in
+ *  the kernel reducer (e.g. `empty_turn_input`) rather than only in the bridge's
+ *  own admission checks. */
+type SessionRejectError =
+  | SessionDuplicateCommandError
+  | SessionProtocolValidationError
+  | SessionRevisionConflictError
+  | SessionDispatchFailedError
+
 interface CommandRejectedArgs {
   readonly command: SessionCommand
-  readonly error:
-    | SessionDuplicateCommandError
-    | SessionProtocolValidationError
-    | SessionRevisionConflictError
+  readonly error: SessionRejectError
 }
 
 export interface SessionTransportBridgeErrorArgs {
@@ -113,10 +121,7 @@ const toRejectedMessage = (args: {
   readonly target: SessionTransportRejectedMessage["target"]
   readonly reason: SessionTransportRejectedMessage["reason"]
   readonly command?: SessionCommand
-  readonly error:
-    | SessionDuplicateCommandError
-    | SessionProtocolValidationError
-    | SessionRevisionConflictError
+  readonly error: SessionRejectError
 }): SessionTransportRejectedMessage => ({
   kind: "rejected",
   sessionId: args.sessionId,
@@ -129,8 +134,24 @@ const toRejectedMessage = (args: {
         actualRevision: args.error.actualRevision,
       }
     : {}),
-  ...(args.error instanceof SessionProtocolValidationError ? { issue: args.error.issue } : {}),
+  ...(args.error instanceof SessionProtocolValidationError ||
+  args.error instanceof SessionDispatchFailedError
+    ? { issue: args.error.issue }
+    : {}),
 })
+
+/** Single source of the error→wire-reason mapping (shared by the admission
+ *  rejects and the S5a dispatch-failure promotion). NOTE the reason set is
+ *  CLOSED at 4 on the wire (old peers hard-check it — codec.ts), which is why
+ *  dispatch failures ride `protocol_validation` instead of a new value. */
+const rejectReasonOf = (error: SessionRejectError): SessionTransportRejectedMessage["reason"] =>
+  error instanceof SessionDuplicateCommandError
+    ? "duplicate_command"
+    : error instanceof SessionRevisionConflictError
+      ? "revision_conflict"
+      : error instanceof SessionProtocolValidationError && error.issue === "session_id_mismatch"
+        ? "session_id_mismatch"
+        : "protocol_validation"
 
 const currentRevisionOf = (snapshot: SessionSnapshotLite, tail: readonly SessionEvent[]): number =>
   tail.at(-1)?.revision ?? snapshot.revision
@@ -235,14 +256,7 @@ export const createSessionTransportBridge = (
       toRejectedMessage({
         sessionId: snapshot.sessionId,
         target: "command",
-        reason:
-          error instanceof SessionDuplicateCommandError
-            ? "duplicate_command"
-            : error instanceof SessionRevisionConflictError
-              ? "revision_conflict"
-              : error.issue === "session_id_mismatch"
-                ? "session_id_mismatch"
-                : "protocol_validation",
+        reason: rejectReasonOf(error),
         command,
         error,
       }),
@@ -255,6 +269,43 @@ export const createSessionTransportBridge = (
       }
     }
     await sendReplay(peer)
+  }
+
+  /**
+   * S5a (jul-16 ticket 01) — promote a DISPATCH-stage failure to a `rejected`
+   * frame. Previously an accepted command whose dispatch threw (kernel reducer
+   * validation like `empty_turn_input`, or a host crash) was only reported to
+   * the SERVER-side `onBridgeError` hook: the issuing wire peer received no
+   * frame at all and hung undiagnosed (the pre-existing silent bug this
+   * closes). Encoding is S0-3: the CLOSED-4 reason `protocol_validation` +
+   * the error's issue string (kernel issue verbatim; `dispatch_failed` for
+   * non-protocol errors) — the only shape an already-shipped peer decodes.
+   *
+   * Deliberately FRAME-ONLY (contrast `rejectCommand`, which appends a resync
+   * replay): a dispatch failure does not mean the peer's view is stale — the
+   * command was admitted against the CURRENT revision — so no snapshot/tail
+   * rides along (rejected-flood ⇒ no replay amplification).
+   */
+  const rejectDispatchFailure = async (
+    peer: SessionTransport,
+    command: SessionCommand,
+    error: unknown,
+  ): Promise<void> => {
+    const rejection: SessionRejectError =
+      error instanceof SessionProtocolValidationError ||
+      error instanceof SessionRevisionConflictError
+        ? error
+        : new SessionDispatchFailedError({ commandId: command.commandId, cause: error })
+    opts.onCommandRejected?.({ command, error: rejection })
+    await sendMessages(peer, [
+      toRejectedMessage({
+        sessionId: snapshot.sessionId,
+        target: "command",
+        reason: rejectReasonOf(rejection),
+        command,
+        error: rejection,
+      }),
+    ])
   }
 
   const rejectConnect = async (
@@ -312,7 +363,11 @@ export const createSessionTransportBridge = (
     } catch (error) {
       // Terminal transition: a failed command is pruned so a retry can re-run.
       commandStates.delete(command.commandId)
+      // Server-side diagnostic channel is PRESERVED (additive change)…
       reportBridgeError(peer, error)
+      // …and S5a promotes the failure to the issuing peer as a `rejected`
+      // frame — the wire is no longer silent about a dispatch-stage error.
+      await rejectDispatchFailure(peer, command, error)
     }
   }
 

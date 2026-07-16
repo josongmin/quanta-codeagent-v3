@@ -30,7 +30,15 @@ import {
   type SessionTransportMessage,
   wrapWebSocketLikeAsSessionTransport,
 } from "@/ipc/session"
-import type { ApprovalRespondCommand, SessionCommand, SessionEvent } from "@/protocol/session"
+import {
+  type ApprovalRespondCommand,
+  buildApprovalRespond,
+  buildTurnCancel,
+  buildTurnRun,
+  type CommandBuildDeps,
+  type SessionCommand,
+  type SessionEvent,
+} from "@/protocol/session"
 import { buildApprovalRespondCommand, buildLineCommands } from "./commands"
 import {
   type AttachHandshake,
@@ -115,12 +123,18 @@ const withAuthQuery = (url: string, token: string | undefined): string => {
   return `${url}${sep}token=${encodeURIComponent(token)}`
 }
 
+/** S1 (jul-16 ticket 01) — attach commands ride the hoisted protocol builder
+ *  SSOT; `issuedAt`/`commandId` are always given via meta, so the clock
+ *  fallback is dormant by construction. */
+const ATTACH_CLOCK: CommandBuildDeps["clock"] = { now: () => new Date() }
+
 /** UUX-1-19 — map the prompter's answer onto the wire. A STRING answer keeps
  *  the legacy y/N mapping (`buildApprovalRespondCommand`, byte-identical); a
  *  rich {@link AttachApprovalAnswer} carries `scope`/`steer` verbatim — the
  *  kernel scheduler forwards both to `host.resolveApproval`. A steer is only
  *  attached to a DENY and never as an empty string (the normalizer SSOT's
- *  no-phantom-steer rule, mirrored at the wire boundary). */
+ *  no-phantom-steer rule, mirrored at the wire boundary) — that policy stays
+ *  HERE; the hoisted `buildApprovalRespond` owns only the wire assembly. */
 const buildRespondForAnswer = (args: {
   readonly sessionId: string
   readonly approvalId: string
@@ -132,18 +146,14 @@ const buildRespondForAnswer = (args: {
   if (typeof answer === "string") {
     return buildApprovalRespondCommand({ sessionId, approvalId, answer, commandId, issuedAt })
   }
-  return {
-    sessionId,
+  return buildApprovalRespond({ sessionId, clock: ATTACH_CLOCK }, approvalId, answer.decision, {
     commandId,
     issuedAt,
-    type: "approval.respond",
-    approvalId,
-    decision: answer.decision,
     ...(answer.decision === "approve" && answer.scope !== undefined ? { scope: answer.scope } : {}),
     ...(answer.decision === "deny" && answer.steer !== undefined && answer.steer.trim().length > 0
       ? { steer: answer.steer }
       : {}),
-  }
+  })
 }
 
 const resolveCtor = (override: AttachSocketCtor | undefined): AttachSocketCtor => {
@@ -258,12 +268,12 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
           respond.decision === "approve" &&
           handshake.capabilities?.serverAutoContinues !== true
         ) {
-          await sendCommand({
-            sessionId: sid,
-            commandId: newCommandId(),
-            issuedAt: issuedAt(),
-            type: "turn.run",
-          }).catch(() => undefined)
+          await sendCommand(
+            buildTurnRun(
+              { sessionId: sid, clock: ATTACH_CLOCK },
+              { commandId: newCommandId(), issuedAt: issuedAt() },
+            ),
+          ).catch(() => undefined)
         }
       })
     }
@@ -300,12 +310,12 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
     // Skip the best-effort `turn.cancel` when the socket is already broken/
     // closing — a send on a dead socket only throws (it's swallowed anyway).
     if (sid !== undefined && !sendBroken && socket.readyState !== 3 /* CLOSED */) {
-      await sendCommand({
-        sessionId: sid,
-        commandId: newCommandId(),
-        issuedAt: issuedAt(),
-        type: "turn.cancel",
-      }).catch(() => undefined)
+      await sendCommand(
+        buildTurnCancel(
+          { sessionId: sid, clock: ATTACH_CLOCK },
+          { commandId: newCommandId(), issuedAt: issuedAt() },
+        ),
+      ).catch(() => undefined)
     }
     unsubscribe()
     await client.close().catch(() => undefined)
@@ -365,7 +375,9 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
           // UUX-3-14 — a handshake that never settles must not eat the typed
           // line and exit SILENTLY: say why the input went nowhere.
           if (!closed) {
-            opts.write("\n[handshake with the daemon never completed — input not sent; detaching]\n")
+            opts.write(
+              "\n[handshake with the daemon never completed — input not sent; detaching]\n",
+            )
           }
           break
         }

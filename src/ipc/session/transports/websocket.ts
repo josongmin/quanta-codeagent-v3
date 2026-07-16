@@ -1,4 +1,4 @@
-import { encodeSessionTransportMessage, tryDecodeSessionTransportMessage } from "../codec"
+import { encodeSessionTransportMessage, resolveInboundSessionTransportFrame } from "../codec"
 import type { SessionTransport, SessionTransportHandler } from "../types"
 import { createSessionTransportCloseSignal } from "./close-signal"
 
@@ -29,10 +29,21 @@ interface SessionWebSocketLifecycleView {
   removeEventListener?(type: "close" | "error", handler: (event?: unknown) => void): void
 }
 
-const dispatch = (handlers: Set<SessionTransportHandler>, payload: unknown): void => {
+const dispatch = (
+  handlers: Set<SessionTransportHandler>,
+  payload: unknown,
+  replyRaw: (frame: string) => void,
+): void => {
   if (typeof payload !== "string") return
-  const message = tryDecodeSessionTransportMessage(payload)
-  if (message === undefined) return
+  // S5b — same three-way gate as the stdio transport: message (incl. lenient
+  // foreign-version `rejected`), raw version-skew echo reply, or drop.
+  const resolution = resolveInboundSessionTransportFrame(payload)
+  if (resolution === undefined) return
+  if (resolution.kind === "reply") {
+    replyRaw(resolution.frame)
+    return
+  }
+  const message = resolution.message
   for (const handler of [...handlers]) {
     try {
       const result = handler(message)
@@ -74,9 +85,17 @@ export const wrapWebSocketLikeAsSessionTransport = (
   const closeSignal = createSessionTransportCloseSignal()
   let closed = false
 
+  // S5b — raw write-back for the version-skew echo reject. Bypasses `send` on
+  // purpose: the reply must carry the PEER's claimed version, which the typed
+  // encoder would overwrite with our own.
+  const replyRaw = (frame: string): void => {
+    if (closed) return
+    socket.send(frame)
+  }
+
   const onMessage = (event: { data: unknown }): void => {
     if (closed) return
-    dispatch(handlers, event.data)
+    dispatch(handlers, event.data, replyRaw)
   }
 
   const lifecycle = socket as unknown as SessionWebSocketLifecycleView

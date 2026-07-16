@@ -4,7 +4,6 @@ import {
   type KernelDispatchContext,
   toSessionSnapshotLite,
 } from "@/kernel/session"
-import { SessionClosedError } from "@/protocol/session"
 import {
   buildApprovalRespond,
   buildIdentitySet,
@@ -12,9 +11,11 @@ import {
   buildPermissionSet,
   buildToolProfileSet,
   buildTranscriptReplace,
+  buildTurnCancel,
   buildTurnRun,
   type CommandBuildDeps,
-} from "./session/commands"
+  SessionClosedError,
+} from "@/protocol/session"
 import {
   attachSessionTransport,
   closeSession,
@@ -54,8 +55,9 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     kernel: args.kernel,
   }
 
-  // Pure command-builders (see ./session/commands.ts) depend only on the
-  // immutable session identity + clock, so bind those once and delegate.
+  // Pure command-builders (protocol-slice SSOT, `@/protocol/session/builders`)
+  // depend only on the immutable session identity + clock, so bind once and
+  // delegate. The kernel clock satisfies the protocol's structural clock type.
   const commandDeps: CommandBuildDeps = { sessionId, clock: args.kernel.clock }
 
   return {
@@ -72,6 +74,12 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     },
     turn: {
       run: async (meta, options) => dispatch(engine, buildTurnRun(commandDeps, meta), options),
+      // S1 (jul-16 ticket 01, S0-2 ruling) — the ONE sanctioned RuntimeSession
+      // surface addition: `turn.cancel` existed in the protocol's command union
+      // (and the kernel reducer/scheduler) all along, but had no typed verb —
+      // pure dispatch delegation, exactly like its siblings.
+      cancel: async (meta, options) =>
+        dispatch(engine, buildTurnCancel(commandDeps, meta), options),
     },
     identity: {
       set: async (mode, meta, options) =>

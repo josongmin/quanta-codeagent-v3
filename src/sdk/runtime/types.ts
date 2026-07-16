@@ -15,6 +15,7 @@ import type {
   SessionSnapshotLite,
   SessionToolProfileSetCommand,
   SessionTranscriptReplaceCommand,
+  TurnCancelCommand,
   TurnRunCommand,
 } from "@/protocol/session"
 
@@ -85,6 +86,14 @@ export interface RuntimeSession {
   readonly turn: {
     run(
       meta?: Partial<Omit<TurnRunCommand, "sessionId" | "type">>,
+      options?: SessionDispatchOptions,
+    ): Promise<SessionDispatchResult>
+    /** S1 (jul-16 ticket 01, S0-2 ruling) — the ONE sanctioned additive
+     *  RuntimeSession surface change: `TurnCancelCommand` has been in the
+     *  protocol's 8-command union (and handled by the kernel scheduler) all
+     *  along; this verb is pure dispatch delegation like its siblings. */
+    cancel(
+      meta?: Partial<Omit<TurnCancelCommand, "sessionId" | "type">>,
       options?: SessionDispatchOptions,
     ): Promise<SessionDispatchResult>
   }

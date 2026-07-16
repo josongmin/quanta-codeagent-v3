@@ -1,3 +1,15 @@
+export type { CommandBuildDeps, CommandBuilderClock } from "./builders"
+export {
+  buildApprovalRespond,
+  buildIdentitySet,
+  buildInputAppend,
+  buildPermissionSet,
+  buildToolProfileSet,
+  buildTranscriptReplace,
+  buildTurnCancel,
+  buildTurnRun,
+  commandMeta,
+} from "./builders"
 export type { CapabilityExpectation, CapabilityManifest } from "./capabilities"
 export { normalizeCapabilityManifest } from "./capabilities"
 export {
@@ -29,6 +41,7 @@ export {
   SessionClosedError,
   SessionProtocolError,
   SessionProtocolValidationError,
+  SessionProtocolVersionError,
   SessionRevisionConflictError,
 } from "./errors"
 export type {

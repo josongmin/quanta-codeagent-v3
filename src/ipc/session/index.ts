@@ -8,18 +8,25 @@ export { createSessionTransportBridge, planSessionReplay } from "./bridge"
 export type {
   CreateSessionTransportClientOpts,
   SessionTransportClient,
+  SessionTransportClientRejection,
   SessionTransportConnectionClosed,
   SessionTransportConnectionConnected,
   SessionTransportConnectionResume,
   SessionTransportConnectionState,
 } from "./client"
 export { createSessionTransportClient } from "./client"
+export type { InboundSessionFrameResolution } from "./codec"
 export {
   decodeSessionTransportMessage,
   encodeSessionTransportMessage,
+  resolveInboundSessionTransportFrame,
   tryDecodeSessionTransportMessage,
 } from "./codec"
-export { SessionDuplicateCommandError } from "./errors"
+export {
+  SessionDispatchFailedError,
+  SessionDuplicateCommandError,
+  typedErrorFromRejectedMessage,
+} from "./errors"
 export type { BindSessionTransportServerOpts, SessionTransportServer } from "./server"
 export { bindSessionTransportServer } from "./server"
 export { type CreateSessionStdioClientOpts, createSessionStdioClient } from "./stdio-client"

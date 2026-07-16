@@ -321,6 +321,22 @@ export const createStubRuntimeFactory = (): {
               },
               options,
             ),
+          // S1 (jul-16 ticket 01) — RuntimeSession gained the `turn.cancel`
+          // verb (the one sanctioned additive surface change); the fake mirrors
+          // the same dispatch delegation shape.
+          cancel: async (meta, options) =>
+            await dispatch(
+              {
+                sessionId,
+                type: "turn.cancel",
+                commandId: meta?.commandId ?? crypto.randomUUID(),
+                issuedAt: meta?.issuedAt ?? new Date().toISOString(),
+                ...(meta?.expectedRevision !== undefined
+                  ? { expectedRevision: meta.expectedRevision }
+                  : {}),
+              },
+              options,
+            ),
         },
         identity: {
           set: async () => ({ revision: snapshot.revision, seq: snapshot.seq, events: [] }),
@@ -336,6 +352,9 @@ export const createStubRuntimeFactory = (): {
         },
         transcript: {
           replace: async () => ({ revision: snapshot.revision, seq: snapshot.seq, events: [] }),
+          // Pre-existing CI-only tsc red (bun test does not typecheck): the fake
+          // never grew the P1 Phase-0 `messages()` read — inert empty read here.
+          messages: () => [],
         },
         side: {
           start: async () => ({

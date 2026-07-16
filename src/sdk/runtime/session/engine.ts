@@ -11,8 +11,22 @@ import {
   toSessionSnapshotLite,
 } from "@/kernel/session"
 import type { SessionCommand, SessionEvent } from "@/protocol/session"
-import { SessionClosedError } from "@/protocol/session"
+import { SessionClosedError, SessionProtocolValidationError } from "@/protocol/session"
 import { errMessage, logger } from "@/shared"
+
+/**
+ * S5a LOW-3 (jul-16 ticket 01) — dispatch-stage validation issues that are a
+ * BENIGN client-race no-op, not a server anomaly: they land at `info`, where
+ * they previously spammed `logger.error` via `onBridgeError`. The set is a
+ * closed allowlist (no pattern matching): `empty_turn_input` is a bare
+ * `turn.run` racing an empty draft — the kernel already answers it with a
+ * clean reject, and (post-S5a) the issuing peer sees a `rejected` frame.
+ */
+const BENIGN_DISPATCH_ISSUES: ReadonlySet<string> = new Set(["empty_turn_input"])
+
+const isBenignDispatchError = (error: unknown): boolean =>
+  error instanceof SessionProtocolValidationError && BENIGN_DISPATCH_ISSUES.has(error.issue)
+
 import type { SessionSubscriptionHub } from "../subscription"
 import type { SessionDispatchOptions, SessionDispatchResult } from "../types"
 
@@ -68,13 +82,23 @@ export const ensureTransportBridge = (
     // L5 H-3: transport errors and rejected commands were silently dropped —
     // the bridge fired these callbacks but `session.ts` never supplied them,
     // so a failed transport / rejected command vanished with no diagnostic.
+    // S5a LOW-3: benign dispatch validation (see BENIGN_DISPATCH_ISSUES) is
+    // demoted to `info` on BOTH channels — everything else keeps its severity.
     onBridgeError: ({ error }) => {
-      logger.error(`session transport bridge error (session=${sessionId}): ${errMessage(error)}`)
+      const line = `session transport bridge error (session=${sessionId}): ${errMessage(error)}`
+      if (isBenignDispatchError(error)) {
+        logger.info(line)
+        return
+      }
+      logger.error(line)
     },
     onCommandRejected: ({ command, error }) => {
-      logger.warn(
-        `session transport command rejected (session=${sessionId}, type=${command.type}): ${errMessage(error)}`,
-      )
+      const line = `session transport command rejected (session=${sessionId}, type=${command.type}): ${errMessage(error)}`
+      if (isBenignDispatchError(error)) {
+        logger.info(line)
+        return
+      }
+      logger.warn(line)
     },
   })
   return box.transportBridge
