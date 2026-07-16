@@ -202,10 +202,26 @@ export const attachSessionTransport = async (
   const { box, sessionId } = deps
   if (box.closed) throw new SessionClosedError(sessionId)
   const connected = await ensureTransportBridge(deps, options.replayWindow).connect(transport)
-  // Synthesise a `session.created` event for the freshly-attached client
-  // so it can render the model pill + capability manifest without an
-  // out-of-band lookup. This is intentionally per-attach (not
-  // per-session-life) so a reconnecting client sees the same shape.
+  // Synthesise a per-attach `session.created` event — IN-PROC NOTIFICATION
+  // ONLY. On the wire, the connect/resume SNAPSHOT is the authoritative
+  // carrier of `capabilities` + `modelSlug` (the bridge replies to the
+  // client's `connect` handshake with it); this event is deliberately NOT
+  // published to the transport bridge:
+  //   - it could never reach the client it is attached FOR anyway: it is
+  //     minted at `seq = state.seq` (the current tip, attach is a read),
+  //     so the bridge tail filter (`seq > snapshot.seq`) drops it from the
+  //     connect replay, and the live fan-out's `peer.connected` gate
+  //     excludes the still-mid-handshake target peer;
+  //   - the ONLY wire effect it ever had was dup-seq noise fanned out to
+  //     the OTHER, already-connected peers (runtime-confirmed:
+  //     docs/tickets/jul-16-session-created-tail-filter-drop.md, fixed as
+  //     option B "wire delivery non-guaranteed, snapshot is the carrier").
+  // In-proc subscribers are REAL consumers (e.g. the web daemon's SQLite
+  // thread persistence archives every SessionEvent and HTTP hydration
+  // replays it to web clients), so the hub publish stays. Do NOT re-add a
+  // `transportBridge.publishEvents` here — a regression pin
+  // (tests/unit/sdk/session-created-attach-notification.test.ts) goes red
+  // on exactly that injection.
   const createdEvent: SessionEvent = {
     type: "session.created",
     eventId: crypto.randomUUID(),
@@ -215,9 +231,7 @@ export const attachSessionTransport = async (
     capabilityManifest: box.state.capabilityManifest,
     ...(box.state.modelSlug !== undefined ? { model: box.state.modelSlug } : {}),
   }
-  // Publish to in-proc subscribers AND the just-connected transport.
   publishEvents(deps, [createdEvent])
-  await box.transportBridge?.publishEvents([createdEvent])
   return connected
 }
 

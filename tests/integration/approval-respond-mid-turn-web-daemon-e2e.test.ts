@@ -577,7 +577,7 @@ describe("ADR-0540 W1-B: daemon-owned continuation (web leak sealed server-side)
     expect(harness.tap.eventsOfType("approval.resolved").length).toBe(1)
   })
 
-  test("gate ON: capability manifest declares serverAutoContinues=true (snapshot + session.created)", async () => {
+  test("gate ON: capability manifest declares serverAutoContinues=true (wire snapshot carrier + in-proc session.created)", async () => {
     const counts = { n: 0 }
     const harness = await bootWireHarness({
       counts,
@@ -587,6 +587,10 @@ describe("ADR-0540 W1-B: daemon-owned continuation (web leak sealed server-side)
     cleanup = harness.teardown
 
     // The connect handshake replied with a snapshot — the marker rides it.
+    // The snapshot is the SOLE wire carrier of the manifest (see the ticket
+    // docs/tickets/jul-16-session-created-tail-filter-drop.md, fixed as B:
+    // the per-attach `session.created` is an in-proc notification only and
+    // is never published to the transport bridge).
     const snapshot = await harness.tap.waitUntil(
       (msgs) =>
         msgs.find(
@@ -596,7 +600,8 @@ describe("ADR-0540 W1-B: daemon-owned continuation (web leak sealed server-side)
     )
     expect(snapshot.snapshot.capabilities.serverAutoContinues).toBe(true)
 
-    // And the per-attach session.created event carries the SAME manifest.
+    // And the per-attach session.created IN-PROC notification carries the
+    // SAME manifest (captured via `session.subscribe`, NOT the wire tap).
     const created: SessionEvent[] = []
     const unsub = harness.session.subscribe((event) => {
       if (event.type === "session.created") created.push(event)
@@ -608,6 +613,12 @@ describe("ADR-0540 W1-B: daemon-owned continuation (web leak sealed server-side)
     const createdEvent = created[0]
     if (createdEvent?.type !== "session.created") throw new Error("expected session.created")
     expect(createdEvent.capabilityManifest.serverAutoContinues).toBe(true)
+
+    // POSITIVE wire-absence pin: no `session.created` frame ever reached this
+    // client's wire — not from its own attach (pre-fix: tail-filter +
+    // handshake-gate drop) and not from the second attach above (pre-fix:
+    // dup-seq noise fan-out to already-connected peers — removed by fix B).
+    expect(harness.tap.eventsOfType("session.created").length).toBe(0)
   })
 
   test("gate OFF (explicit): respond alone does NOT auto-continue — tool stays uninvoked, manifest declares false", async () => {
