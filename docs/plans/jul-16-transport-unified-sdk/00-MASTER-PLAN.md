@@ -49,7 +49,7 @@
 | 갭 | 실측 |
 |---|---|
 | 공개문이 façade만 노출 | exports `./sdk` 하나, barrel은 `createAnalysisAgent`+도구/테스팅. `connect`/session.v1 타입 미노출. `.d.ts` 미생성(jul-4 P8 위임) |
-| stdio 제품 배선 0 | `createSessionStdioServer` 소비자 = conformance 픽스처뿐. headless는 transport 주입받는 라이브러리([session-bridge.ts:97-106](../../../src/apps/headless/session-bridge.ts)) |
+| stdio 제품 배선 0 | `createSessionStdioServer` 소비자 = conformance 픽스처뿐. headless는 transport 주입받는 라이브러리([session-bridge.ts:109-113](../../../src/apps/headless/session-bridge.ts) — ADR-0540 W1-A 작업으로 라인 이동, 시맨틱 동일) |
 | 클라 verb 층 부재 | RuntimeSession(typed verbs) vs raw 클라 표면 불일치. builder 2벌 |
 | 클라 liveness 부재 | ipc 클라에 연결사망 통지/heartbeat/reconnect 없음 — 유일한 구현이 web-frontend 내부에 갇힘 |
 | 버전 스큐 진단 0 | 버전 불일치 프레임은 tryDecode에서 **무언 드롭**(회신 없음) — 구/신 클라 조합 전부 "설명 불가능한 행" |
@@ -66,7 +66,7 @@ AgentEvent(embed 경로, 40+종: 전문 tool I/O·thinking delta·mid-turn usage
 | 워크스트림 | 소유 | 이 계획과의 관계 |
 |---|---|---|
 | [jul-4-sdk-embed-dx](../jul-4-sdk-embed-dx/00-MASTER-PLAN.md) (P1-3 완료, P8 진행) | in-process embed façade, public-surface snapshot 게이트([public-surface.test.ts](../../../tests/unit/sdk/public-surface.test.ts)), USAGE.md, `.d.ts` | 우리는 wire 보완재. 신규 export는 그쪽 P8 게이트 경유. **외부 in-process 소비 = createAnalysisAgent가 담당**(이 계획은 세션 팩토리를 공개하지 않음, §3.3) |
-| [ADR-0540](../../decisions/0540-inline-resumable-approval-resolver.md) (W1-A headless inline / W1-B daemon continuation 이관 / W2 온디스크 이벤트로그) | approval resolver 인라인화, turn-driver 소멸, biome fence, 온디스크 KernelEventLogPort | 05는 W2 소비자. 01 onApproval은 기존 `ApprovalDecisionResult` SSOT 재사용으로 W1 어댑터-호환. **W1-B 과도기 race**(01 §3.3)는 capability 표식으로 조율 |
+| [ADR-0540](../../decisions/0540-inline-resumable-approval-resolver.md) (W1-A headless inline / W1-B daemon continuation 이관 / W2 온디스크 이벤트로그) | approval resolver 인라인화, turn-driver 소멸, 온디스크 KernelEventLogPort (biome fence는 W1 제외·보류 판정) | 05는 W2 소비자. 01 onApproval은 기존 `ApprovalDecisionResult` SSOT 재사용으로 W1 어댑터-호환. **W1-B 과도기 race**(01 §3.3)는 capability 표식으로 조율. **상태(07-16 재확인): W1-A 구현 랜딩됨**([headless/approval-wiring.ts](../../../src/apps/headless/approval-wiring.ts), `QUANTA_INLINE_APPROVAL_RESOLVER` default-OFF) — 01의 in-process 매핑 대상이 실물화 |
 | [ADR-0520](../../decisions/0520-reverse-mcp-server.md) reverse-MCP | quanta를 MCP 프로토콜 stdio 서버로 | 02는 session.v1 stdio — 다른 프로토콜, 다른 문. 상호 링크만 |
 | [ADR-0516](../../decisions/0516-cli-attach-daemon-client.md) attach | CLI attach 클라 | 01이 handshake/approval-flow를 hoist해 공유(복사 금지) |
 | 기존 drift hellgate | copy↔canonical equality 계약 | 03은 그 위에 field-shape 대조만 **추가**(약화 금지) |
@@ -177,7 +177,7 @@ in-process 구현 = `toSessionHandle(runtimeSession)` 어댑터(자기가 만든
 
 ## 6. Hazards
 
-- **동시세션**: ADR-0540·subagent 계열 in-flight. `src/sdk/runtime`·`src/ipc/session` 편집 전 HEAD 재확인.
+- **동시세션**: ADR-0540 W1 구현이 활발히 랜딩 중(07-16 기준 W1-A approval-wiring 랜딩, 트리 클린이나 계속 움직임 — 스윕커밋 "done"이 무관 파일을 쓸어담는 패턴 확인됨). `src/sdk/runtime`·`src/ipc/session`·headless 편집 전 HEAD 재확인.
 - **CLI_FEATURE_GATES 시딩 함정**: 그 배열 엔트리는 미설정 시 "1" 시드(사실상 ON) — 02 게이트는 직접 env/knob 체크. 구현 시 시딩 시맨틱 재검증.
 - **02 게이트의 정직한 명분**: stdio는 부모-자식 신뢰 경계라 "보안 게이트" 서사는 성립 안 함 — **성숙 게이트**(미완 표면 조기 소비 차단)로 명명. SDK `transports.stdio`는 env 자동 주입 금지(게이트 우회 극장 방지) — 소비자가 명시 설정, 자식 조기종료는 stderr 요약 포함 typed error로 fail-fast.
 - **knob 시스템 3벌**: 신규 게이트 추가 전 grep.

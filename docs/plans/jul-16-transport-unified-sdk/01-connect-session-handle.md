@@ -64,6 +64,8 @@ await session.close()
 ### 3.1 receipt/거부
 verb는 전송 성공 시 `{commandId, submitted}` resolve. 서버 거부(rejected: dup/revision/mismatch/validation/dispatch-failed)는 `onCommandRejected` + 상관된 대기자(awaitTurnEnd)에 typed error로. 성공 ack 프레임은 v1 스코프 아님(수요 시 additive followup).
 
+**구조적 근거(07-16 ADR-0540 헬어딧이 공식화한 데드락 팩트)**: 서버 dispatch는 [engine.ts:57](../../../src/sdk/runtime/session/engine.ts) `transportDispatchQueue`로 **직렬화**된다 — turn.run이 큐를 점유한 동안 후속 커맨드는 대기. wire verb가 "완료까지 await"를 약속하면 이 직렬화와 정면 충돌(naive web-inline이 데드락인 이유와 동일) — submitted-receipt + 이벤트 상관은 선택이 아니라 큐 구조가 강제하는 유일한 정직한 계약이다.
+
 ### 3.2 awaitTurnEnd — 승계 상관
 최초 turn.run commandId → (approval 발생 시) attach-flow가 재발행한 **새 commandId 승계** → 터미널 이벤트(turn.completed/failed/aborted)의 causedByCommandId 매칭. 상관 불가 상태(승계 없이 상관 대상 소실)는 hang 대신 typed error. 멀티피어 세션에서 남의 턴과 crosstalk 금지(자기 체인만).
 
@@ -71,6 +73,7 @@ verb는 전송 성공 시 `{commandId, submitted}` resolve. 서버 거부(reject
 - 현행: approval.requested → onApproval → approval.respond → **클라 turn.run 재발행**(hoist된 attach-flow가 수행).
 - W1-B(daemon 자동 continuation) 랜딩 시: 서버가 capability에 `server-auto-continues`(additive) 선언 → 신클라는 재발행 생략, 구클라 이중 turn.run은 서버측 게이트로 무해화 — **이 표식 설계는 ADR-0540 W1-B와 공동 소유**(둘 중 먼저 랜딩하는 쪽이 표식만 예약).
 - onApproval 미지정 + approval 발생 = park(타임아웃 없음) — 문서에 명시.
+- **07-16 재확인**: ADR-0540 W1-A가 이미 랜딩됨([headless/approval-wiring.ts](../../../src/apps/headless/approval-wiring.ts) — `QUANTA_INLINE_APPROVAL_RESOLVER` default-OFF, confirmSlot overlay, approval-protocol.ts 무수정) — onApproval의 in-process 매핑이 필요해질 때 따라갈 실물 패턴이 생김. wire 쪽(이 티켓)은 영향 0(deferred 플로우 그대로).
 
 ### 3.4 무인 운용 가이드 (문서 3줄)
 무인(CI/봇) = `permission.set("bypass"|"acceptEdits")` 권장. onApproval은 HITL용(승인마다 park→respond→재발행 왕복 비용). 미지정+approval = 영구 park.

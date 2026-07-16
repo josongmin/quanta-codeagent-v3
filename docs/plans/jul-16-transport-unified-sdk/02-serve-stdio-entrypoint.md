@@ -18,7 +18,7 @@ quanta serve --stdio [--cwd <dir>] [--model <slug>] [--permission-mode <mode>]
 ```
 
 - 프로세스 = 세션 1개(v1). 부트 = `openHeadlessRuntimeSession` 재사용.
-- **배선 정정(R1 MED, R2 확인)**: `createSessionStdioServer`는 bridge를 직접 요구하는데 RuntimeSession은 bridge를 비공개 소유 → 그 함수는 못 쓴다. 실제 배선 = `createSessionStdioTransport({reader: stdin, writer: stdout})`를 **`openHeadlessRuntimeSession`의 기존 `input.transport` 옵션에 주입**(그 옵션이 attachSessionTransport까지 이미 수행, session-bridge.ts:97-106) — 신규 배선 코드 최소.
+- **배선 정정(R1 MED, R2 확인)**: `createSessionStdioServer`는 bridge를 직접 요구하는데 RuntimeSession은 bridge를 비공개 소유 → 그 함수는 못 쓴다. 실제 배선 = `createSessionStdioTransport({reader: stdin, writer: stdout})`를 **`openHeadlessRuntimeSession`의 기존 `input.transport` 옵션에 주입**(그 옵션이 attachSessionTransport까지 이미 수행, session-bridge.ts:109-113 — 2026-07-16 재확인) — 신규 배선 코드 최소.
 - stdout = 프로토콜 전용, 로그/진단 = stderr (repo 로거는 이미 stderr 전용 — 라쳇의 진짜 위험원은 **자식 tool/MCP 프로세스의 stdio inherit**이며 라쳇 스코프에 명시).
 
 ## 2. R1이 드러낸 신규 작업 3점 ("배선만" 아님을 정직화)
