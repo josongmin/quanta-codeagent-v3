@@ -299,4 +299,17 @@ export const CONST_KEYED: readonly KnobInventoryEntry[] = [
     describe: "OAuth originator override.",
     readSite: "auth/chatgpt-oauth/config.ts",
   },
+  {
+    // ADR-0540 W1-A — extends the CLI jun-10 inline-interactive approval machinery
+    // to headless. ON ⇒ a mid-turn approval ask resolves INLINE (auto-policy
+    // surface, same turn, no deferred throw + turn re-run); OFF ⇒ byte-identical
+    // deferred path. const-keyed via `HEADLESS_INLINE_APPROVAL_GATE`.
+    envKey: "QUANTA_INLINE_APPROVAL_RESOLVER",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe: "Inline (same-turn) approval resolver for headless (opt-in).",
+    readSite: "apps/headless/approval-wiring.ts",
+  },
 ]

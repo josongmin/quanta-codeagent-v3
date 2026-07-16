@@ -15,6 +15,7 @@ import {
   createRuntimeFromBootstrap,
   summarizeRuntimeContext,
 } from "@/sdk/runtime"
+import { buildHeadlessApprovalWiring } from "./approval-wiring"
 import type { RecordingStream } from "./fake-deps"
 import type { HeadlessRunInput, HeadlessRuntimeWires } from "./types"
 
@@ -43,26 +44,36 @@ const buildHeadlessRuntimeArgs = (
   stream: RecordingStream,
   convStore: ReturnType<typeof defaultConversationCheckpointStore>,
   responsesStore: ResponsesContinuationStore,
-): Parameters<typeof createRuntimeFromBootstrap>[0] => ({
-  boot,
-  stream,
-  onConfirm: async () => false,
-  execution: {
-    history: boot.history,
-    cwd: boot.cwd,
-    convStore,
-    envSource: input.env ?? {},
-    responsesStore,
-  },
-  memoryAuto: {
-    env: input.env ?? {},
-    homeDir: input.homeDir ?? "/tmp",
-  },
-  history: [...boot.history],
-  state: boot.features.state,
-  idMeta: boot.idMeta,
-  shutdown: boot.shutdownMcp,
-})
+): Parameters<typeof createRuntimeFromBootstrap>[0] => {
+  // ADR-0540 W1-A — QUANTA_INLINE_APPROVAL_RESOLVER ON ⇒ an inline auto-approve
+  // surface resolves a mid-turn ask in the SAME turn (no deferred throw + turn
+  // re-run). OFF ⇒ deny + no `approvalProtocol` ⇒ byte-identical to the pre-W1
+  // deferred composition (the `driveSessionTurn` `resolveApproval` re-run path).
+  const approval = buildHeadlessApprovalWiring(input.env ?? {})
+  return {
+    boot,
+    stream,
+    onConfirm: approval.onConfirm,
+    ...(approval.approvalProtocol !== undefined
+      ? { overlay: { approvalProtocol: approval.approvalProtocol } }
+      : {}),
+    execution: {
+      history: boot.history,
+      cwd: boot.cwd,
+      convStore,
+      envSource: input.env ?? {},
+      responsesStore,
+    },
+    memoryAuto: {
+      env: input.env ?? {},
+      homeDir: input.homeDir ?? "/tmp",
+    },
+    history: [...boot.history],
+    state: boot.features.state,
+    idMeta: boot.idMeta,
+    shutdown: boot.shutdownMcp,
+  }
+}
 
 const buildHeadlessSessionConfig = (
   boot: SessionBootstrapResult,
