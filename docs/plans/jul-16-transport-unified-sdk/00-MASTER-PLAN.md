@@ -79,7 +79,8 @@ AgentEvent(embed 경로, 40+종: 전문 tool I/O·thinking delta·mid-turn usage
           (jul-4 문, 불변)            │                  │                │
    ┌──────────────────────────────────┴──────────────────┴────────────────┴───┐
    │ quanta-codeagent/sdk                                                     │
-   │   connect({transport, onApproval?, onConnectionState?}) → SessionHandle  │
+   │   connect({transport, onApproval?, onConnectionState?, resumeFromSeq?})  │
+   │     → SessionHandle                                                      │
    │   + session.v1 타입/코덱/에러/버전 re-export                               │
    │                                                                          │
    │   SessionVerbSurface<R>  ← 하나의 generic verb 표면 (§3.1)                │
@@ -137,7 +138,7 @@ in-process 구현 = `toSessionHandle(runtimeSession)` 어댑터(자기가 만든
 - 서버 거부는 비동기 채널: `handle.onCommandRejected(cb)` + `awaitTurnEnd`가 상관된 rejected를 에러로 흡수.
 - **additive 프로토콜 수선 2건**(heartbeat kind 추가 전례와 같은 등급, 원칙 "프로토콜 무변경"을 "additive 허용"으로 정정):
   1. bridge가 dispatch-단 에러(reducer throw)를 삼키지 않고 `rejected`로 승격 — 선존 침묵 버그(§0) 수선을 01이 소유.
-  2. 버전 불일치 시 무언 드롭 대신 버전-관대 디코더로 `rejected(bad_version)` 회신 + 클라 typed error — 공개 SDK가 버전 스큐를 정상 상태로 만들기 때문에 01 필수 슬라이스.
+  2. 버전 불일치 시 무언 드롭 대신 버전-관대 디코더로 rejected 회신 + 클라 typed error(인코딩·도달성·구제 모집단은 01 S5/S0-3 스펙 따름 — peer version echo 필수, 기출하 **구 피어(클라·서버 공히)**는 구제 불가: 구 데몬엔 회신 로직 자체가 없어 신클라→구서버도 현행 침묵) — 공개 SDK가 버전 스큐를 정상 상태로 만들기 때문에 01 필수 슬라이스.
 
 ### 3.3 in-process 사분면의 정직한 경계
 
@@ -163,7 +164,7 @@ in-process 구현 = `toSessionHandle(runtimeSession)` 어댑터(자기가 만든
 | 04 | [wire fidelity opt-in](04-wire-fidelity-negotiation.md) | connect 프레임 확장 + host-bridge/커널 포트/이벤트 타입 additive full 필드 + bridge peer-필터 | 256자 preview는 외부 SDK 소비자에게 부족; embed-rebase 기각 후 유일한 수렴 경로 | wire로 embed급 관찰가능성 | **L** (4레이어 관통) | 01, 03-A |
 | 05 | [durable resume 합류](05-durable-resume-composition.md) | `connect({resume})`가 온디스크 로그 위에서 재시작 넘어 동작 | 현 replay는 메모리 tail 128 | Codex/Claude 부재 기능 = 차별화 | S (SDK측만) | **BLOCKED**←ADR-0540 W2 + 01 |
 
-의존: `01 → {02, 03-B, 04}` / `05 ← ADR-0540 W2` / 03-A 즉시 독립.
+의존: `01 → {02, 03-B, 04}` / `05 ← ADR-0540 W2 + 01` / 03-A 즉시 독립.
 
 ## 5. Non-goals (명시 기각)
 
@@ -188,7 +189,7 @@ in-process 구현 = `toSessionHandle(runtimeSession)` 어댑터(자기가 만든
 - [ ] **외부 소비 실증**: repo 밖 빈 디렉토리 + `file:` 의존 + `tsc --noEmit` 통과(connect 타입 포함) + ws/stdio 각 1 시나리오 실행 (01; `.d.ts` 산출은 jul-4 P8 게이트 종속 — 그쪽 미랜딩 시 이 항목이 그 티켓을 당긴다)
 - [ ] conformance: 같은 스크립트 → ws/stdio/loopback 이벤트 시퀀스가 **명문화된 정규화 계약** 아래 동일 + RuntimeSession oracle 대조 (01)
 - [ ] `SessionVerbSurface<R>` satisfies가 RuntimeSession·SessionHandle 양쪽 컴파일 성립 — **01 S0 판정 따름**(불성립 판정 시 이 항목은 어댑터-only acceptance로 대체, R2 F7)
-- [ ] dispatch-에러·버전 불일치가 wire 클라에 typed로 표면화 (01 — 선존 침묵 2종 수선)
+- [ ] dispatch-에러·버전 불일치가 wire 클라에 typed로 표면화 — lenient 디코더 탑재분부터, 기출하 구 피어는 현행 침묵 유지 (01 — 선존 침묵 2종 수선)
 - [ ] `quanta serve --stdio` OFF 시 byte-identical + ON 시 attach 동일 시나리오 (02)
 - [ ] field-shape 드리프트 주입 red / 기존 hellgate 계약 무약화 (03-A)
 - [ ] fidelity 미협상 클라 byte-identical (wire·in-proc 구독자·아카이브 전부) (04)

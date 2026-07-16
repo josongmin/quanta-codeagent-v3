@@ -15,6 +15,7 @@
 
 - 위치: **기존 hellgate 파일에 추가**(신규 파일 금지 — 계약 분산 방지). 기존 equality 정책(canonical 전 타입이 frontend에 존재해야 green)을 **그대로 유지** — v1 초안의 "부분집합 허용" 정책은 기존 계약보다 약해서 폐기.
 - 방식: TypeScript 컴파일러 API로 양쪽 소스의 command/event 선언을 파싱해 필드명·타입 텍스트·optionality 대조. 전례 = [slice-boundary-scanner.ts:10](../../../tests/unit/_arch/slice-boundary-scanner.ts)의 `import ts from "typescript"`(devDep 존재; ts-morph는 **미설치+installs blocked** — R1 정정으로 1순위 아님).
+- **방향 규칙(R3 MED-2)**: copy에 존재하는 필드는 canonical과 타입/optionality **일치 필수**(red); canonical-only 필드는 **optional일 때만 green**(=additive-safe, required면 red) — 04의 `argsFull?`류 additive 확장이 이 가드에서 green이어야 하는 계약([04 acceptance 5항](04-wire-fidelity-negotiation.md))과 정합.
 - red-on-injection 셀프체크: copy 필드 타입 변형(string→number)·optionality 뒤집기 주입 → red 확인 후 revert.
 
 ## Phase B — 번들 소비 + copy 삭제 (01 이후)

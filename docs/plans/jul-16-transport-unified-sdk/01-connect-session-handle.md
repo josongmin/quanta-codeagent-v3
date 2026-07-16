@@ -55,7 +55,7 @@ await session.close()
 | S2 | verb 표면 + 핸들: `SessionVerbSurface<R>` 정의, wire 핸들(raw 클라+builders), `toSessionHandle(runtimeSession)` 내부 어댑터 | **순서 제약(R1 MED)**: raw 클라는 sessionId를 seed와 검증하므로 connect()는 handshake 완료 후 canonical id로 클라를 생성 — sentinel 단계는 hoist된 handshake 모듈이 같은 transport에 직송(attach의 현행 우회를 공식화; 소켓 재연결 아님 — 같은 소켓에 재-connect 프레임). **커서 원자 이관(R2 F9)**: handshake가 수신한 (snapshot, 최종 관측 seq)를 클라 생성 시 원자적으로 넘김 — 안 하면 lastSeq가 handshake 구간만큼 뒤처짐 |
 | S3 | attach-flow hoist: handshake + approval 플로우(재발행 포함) → `@/ipc/session/attach-flow.ts`, CLI attach는 소비자로 전환 | 재발행 commandId를 핸들에 보고하는 계약 포함(§3.2 승계 상관의 공급원). 결정 타입 = 기존 `ApprovalDecisionResult` (신규 발명 금지) |
 | S4 | liveness/에러 표면: `SessionTransport`에 close/error 통지 additive 확장 + ws/stdio 구현 + `onConnectionState` · stdio spawn lifecycle(kill/exit 전파/stderr drain/zombie 방지)은 transport 소유 | attach의 추상화-밖 raw 리스너 보완(attach-client.ts:322-331)을 공식 채널로 흡수 |
-| S5 | 프로토콜 수선 2건(additive): bridge dispatch-error→rejected 승격 · 버전 불일치 회신+클라 typed error | **bad_version 회신 도달성 스펙(R2 F1)**: ① 회신 프레임은 peer가 주장한 version을 echo(자기 버전으로 스탬프하면 상대가 구조적으로 못 읽는 자기모순 — codec.ts:115 requireProtocolVersion) + 클라측은 rejected 프레임에 한해 version 검증 면제, ② 인코딩은 S0-3 판정(issue 재사용 vs 신규 reason), ③ 구제 모집단 정직화: **기출하 구클라는 구제 불가**(현행 침묵 유지) — typed error는 lenient 디코더 탑재분부터. OFF 경로 byte-identical(기존 rejected 소비자 = attach 회귀 체크) |
+| S5 | 프로토콜 수선 2건(additive): bridge dispatch-error→rejected 승격 · 버전 불일치 회신+클라 typed error | **bad_version 회신 도달성 스펙(R2 F1)**: ① 회신 프레임은 peer가 주장한 version을 echo(자기 버전으로 스탬프하면 상대가 구조적으로 못 읽는 자기모순 — codec.ts:115 requireProtocolVersion) + 클라측은 rejected 프레임에 한해 version 검증 면제, ② 인코딩은 S0-3 판정(issue 재사용 vs 신규 reason), ③ 구제 모집단 정직화(R3 LOW-2): **기출하 구 피어는 클라·서버 공히 구제 불가**(구 데몬엔 회신 로직 자체가 없어 신클라→구서버도 현행 침묵 — SDK 공개 후엔 이쪽 스큐가 더 개연적, S7 에러 카탈로그에 명시) — typed error는 lenient 탑재분부터. OFF 경로 byte-identical(기존 rejected 소비자 = attach 회귀 체크) |
 | S6 | conformance 확장: loopback(oracle) 열 + **정규화 계약 명문화**(클로즈드 리스트: eventId/emittedAt/seq-remap 제외; 합성 session.created·snapshot 프레임은 "다름이 정답" 항목) + connect() 레벨 실루프 e2e 1본(jul-15 fake-LLM 하네스) | "통과할 때까지 제외 추가" = red 사유로 주석 봉인. **transport별 positive 단언은 02로 이동(R2 F2)**: 스탬프 seam이 02 소유라 01 시점엔 전부 "inproc" — 01은 "현행 inproc 문서화 단언"까지만(vacuous 단언 금지) |
 | S7 | sdk barrel export + 외부 소비 실증 + DX 문서(jul-4 USAGE 확장) | 문서 필수 목차: 첫 프레임 계약(sentinel→rejected(canonical)→snapshot→tail이 정상 핸드셰이크임) · 스트리밍 렌더 레시피(snapshot.streamingAssistantText 시딩→turn.output.delta append) · keepalive 정책 표(ws=클라 ping/서버 pong, **stdio=클라 기본 미발신·서버는 수신 시 pong** — R2 F6 정합) · 무인 운용 3줄(§3.4) · 에러 카탈로그 |
 
@@ -83,7 +83,7 @@ verb는 전송 성공 시 `{commandId, submitted}` resolve. 서버 거부(reject
 - [ ] dispatch-에러(예: empty_turn_input)가 wire 클라에 rejected로 표면화 — red-on-injection: S5 승격 코드 제거 시 침묵 hang 재현
 - [ ] 버전 불일치: **lenient 디코더 탑재 클라**→신서버 typed error 왕복 (기출하 구클라는 현행 침묵 유지가 정답 — S5 모집단 정직화 반영, vacuous "구클라" 문구 금지)
 - [ ] 연결사망: 서버 프로세스 kill → onConnectionState("closed") 통지 (ws·stdio 각각)
-- [ ] conformance: 정규화 계약 아래 3-way 동일 + oracle 대조 + "다름이 정답" 필드 positive 단언
+- [ ] conformance: 정규화 계약 아래 3-way 동일 + oracle 대조 (transport별 "다름이 정답" positive 단언은 R2 F2대로 02 acceptance 소유 — 01은 현행 inproc 문서화 단언까지)
 - [ ] S1 치환 후 기존 attach/runtime/web-daemon 테스트 무수정 green
 - [ ] 신규 export가 public-surface 스냅샷에 등록 + `toSessionHandle`/loopback **부재** 확인(내부 전용 증명)
 - [ ] rejected 전 사유 각각 typed error 유닛 (카운트는 S0-3 인코딩 판정 따름: issue 재사용=5종 / 신규 reason=6종)

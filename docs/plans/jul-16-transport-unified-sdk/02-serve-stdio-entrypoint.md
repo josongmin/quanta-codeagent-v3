@@ -52,7 +52,7 @@ quanta serve --stdio [--cwd <dir>] [--model <slug>] [--permission-mode <mode>]
 - [ ] ON: e2e green (approval 왕복 포함)
 - [ ] stdin EOF·SIGTERM 각각 graceful shutdown, 자식/PTY 잔류 0
 - [ ] heartbeat ping 수신 시 pong (hoist 검증 — web-daemon 경로 무회귀)
-- [ ] 이 진입점의 **snapshot.capabilities**가 `transport:"stdio"` 선언 (스탬프 seam 검증 — session.created 프레임은 R2 F3대로 현행 tail 필터/미핸드셰이크 게이트에서 wire 관찰 불가라 단언 대상 아님; 그 전달 수선은 MASTER §0 선존 이슈로 별도) + **transport별 "다름이 정답" positive 단언 인수(R2 F2 — 01 S6에서 이동)**: stdio/ws/inproc 스탬프가 각자 정직하게 다름을 여기서 단언
+- [ ] 이 진입점의 **snapshot.capabilities**가 `transport:"stdio"` 선언 (스탬프 seam 검증 — session.created 프레임은 R2 F3대로 현행 tail 필터/미핸드셰이크 게이트에서 wire 관찰 불가라 단언 대상 아님; 그 전달 수선은 MASTER §0 선존 이슈로 별도) + **transport별 "다름이 정답" positive 단언 인수(R2 F2 — 01 S6에서 이동)**: 필수 = `stdio ≠ inproc`; ws의 "websocket" 정정(§2-3 별 커밋)이 랜딩되면 3-way로 승격 (R3 MED-1 — ws 정정 미랜딩 상태에서 3-way 단언 요구는 스코프 밖 충족 불가)
 - [ ] stdout 오염 red-on-injection (자식 inherit 시나리오 포함)
 
 ## 6. Non-goals

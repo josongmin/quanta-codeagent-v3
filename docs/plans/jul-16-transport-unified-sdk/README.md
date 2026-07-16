@@ -6,6 +6,8 @@
 
 **R2 수렴 (2026-07-16)**: 신선 어태커가 R1 반영 5축 코드 재검증 — 4축 성립 확인(satisfies 할당성·commandId builder-mint·createSessionStdioTransport 실존·ports.ts 인용), 오인용 0건. 신규 MED 5·LOW 4는 전부 문서-국소 → **선반영 완료**(F1 bad_version echo+모집단 정직화 / F2 transport 단언 02 이동 / F3 snapshot.capabilities로 좁힘 / F4 resumeFromSeq+lastSeq 통일 / F5 강등 채널 명명 / F6-F9). **판정: 구현 착수 가능.**
 
+**R3 최종 (2026-07-16)**: R2-후 편집 11건 자체가 미검증이라 3라운드째 투입(적대어딧 ≥3회 하드룰) — F1-F9 반영 9건 전부 정상, 신규 코드 인용 2건 line-exact, 잔여 = MED 2(02 acceptance 3-way 스코프 충돌 조건화 / 03-A↔04 방향 규칙 명시)·LOW 4(버전스큐 구제 모집단을 "구 피어 공히"로 대칭화, resumeFromSeq 다이어그램 잔여 토큰, 05 의존 +01, MASTER §7 단서) → **전부 반영 완료. 판정: CLEAN — 계획 문서로서 수렴 종료.** 다음 감사 표면은 구현물(01 S0 스파이크부터).
+
 | 티켓 | 내용 | Effort | 상태 | 의존 |
 |---|---|---|---|---|
 | [00](00-MASTER-PLAN.md) | MASTER — evidence(R1 정정)·목표 아키텍처 v2·경계·hazards | — | DRAFT v2 | — |
