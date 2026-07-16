@@ -1,4 +1,12 @@
 export { InMemorySessionEventLog } from "./event-log"
+export {
+  type DurableSessionEventLog,
+  isDurableSessionEventLog,
+  JsonlSessionEventLog,
+  JsonlSessionEventLogCorruptionError,
+  JsonlSessionEventLogLockError,
+  type JsonlSessionEventLogOptions,
+} from "./event-log-jsonl"
 export { SingleWriterLease } from "./lease"
 export type {
   KernelClock,

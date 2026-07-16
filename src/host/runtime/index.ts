@@ -44,13 +44,13 @@ export {
   type RunOutcome,
   resolveRunAgent,
 } from "./agent-config-assembler"
-export { createSingleSessionRuntimeHost } from "./builder"
 export {
   type ArtifactPreview,
   type ArtifactPreviewOutcome,
   type ArtifactPreviewResolver,
   createArtifactPreviewResolver,
 } from "./artifact-preview-resolver"
+export { createSingleSessionRuntimeHost } from "./builder"
 export {
   assertCapabilityExpectation,
   buildCapabilityManifest,
@@ -95,6 +95,6 @@ export {
   type SamplingWiring,
 } from "./mcp-sampling-handler"
 export type { OperatorReviewAdapter } from "./operator-review"
-export { createInMemorySessionPersistence } from "./persistence"
+export { createInMemorySessionPersistence, createSessionPersistence } from "./persistence"
 export { hasExecutableTools } from "./tool-executor"
 export type { CreateRuntimeOptions, RuntimeHost, RuntimeSessionConfig } from "./types"

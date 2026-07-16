@@ -1,6 +1,7 @@
 import type { SessionHost } from "@/kernel/session"
 import {
   createKernelSessionState,
+  isDurableSessionEventLog,
   type KernelDispatchContext,
   toSessionSnapshotLite,
 } from "@/kernel/session"
@@ -34,7 +35,23 @@ interface CreateRuntimeSessionArgs {
 export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSession => {
   const hostDescription = args.hostSession.describe()
   const subscriptions = new SessionSubscriptionHub()
-  const initialState = createKernelSessionState(hostDescription)
+  // W4-b seq-continuity seam (ADR-0540 W2 item 0). A DURABLE event log exposes
+  // `tip()` — the max seq already persisted for this session. Resume issuance
+  // FROM that tip (the kernel mints every event as `state.seq + n`), so
+  // post-restart events extend the log monotonically instead of re-issuing
+  // from 0 — without this, wire `connect({resume})` semantics are undefined
+  // (a client's resumeFromSeq high-water mark would forever sit "ahead" of the
+  // fresh kernel; see planSessionReplay's ahead-of-tip guard in
+  // `@/ipc/session/bridge`). The in-memory log exposes no tip ⇒ the created
+  // state passes through UNTOUCHED (historical seq:0 — default-OFF
+  // byte-identical). `revision` deliberately does NOT resume here: revision
+  // continuity is the W4-a / ticket-05 rehydrate decision, not the log's.
+  const durableLog = isDurableSessionEventLog(args.kernel.eventLog)
+    ? args.kernel.eventLog
+    : undefined
+  const createdState = createKernelSessionState(hostDescription)
+  const durableTip = durableLog?.tip() ?? 0
+  const initialState = durableTip > 0 ? { ...createdState, seq: durableTip } : createdState
   const sessionId = initialState.sessionId
 
   // Mutable session state, boxed so the engine helpers (see ./session/engine.ts)
@@ -67,7 +84,18 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     snapshot: async () => toSessionSnapshotLite(box.state),
     attachSessionTransport: (transport, options) =>
       attachSessionTransport(engine, transport, options),
-    close: () => closeSession(engine),
+    close: async () => {
+      // Terminal `session.closed` is appended by closeSession FIRST; only then
+      // release the durable log's fd + single-writer lock (W4-b lifecycle —
+      // the runtime session owns its injected log). `finally` so a throwing
+      // host close can never leak the lock. No-op for the in-memory log
+      // (`durableLog` undefined ⇒ identical to the historical close path).
+      try {
+        await closeSession(engine)
+      } finally {
+        durableLog?.close()
+      }
+    },
     input: {
       append: async (text, meta, options) =>
         dispatch(engine, buildInputAppend(commandDeps, text, meta), options),

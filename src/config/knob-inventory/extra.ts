@@ -830,4 +830,18 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
       "TB `container_write_file` tool (opt-in). When ON, the terminal surface additionally mints exact-byte file authoring over the SAME container transport — content travels base64 (inert bytes, no heredoc/quoting mangling) and the write is verified by an in-container byte-count readback. Targets the file-is-the-deliverable failure class (polyglot / code-from-image). OFF ⇒ byte-identical tool menu.",
     readSite: "apps/terminal/brain-mode.ts (runTerminalBrain writeFile gate)",
   },
+  // W4-b (ADR-0540 Wave 2 item 0) — on-disk kernel session event log. Default-OFF substrate for
+  // wire connect({resume}) (transport-unified-sdk ticket 05): when set, kernel SessionEvents append
+  // to <dir>/<sessionId>.jsonl (protocol-codec envelope lines) and post-restart seq issuance
+  // RESUMES from the log tip instead of 0. Unset ⇒ in-memory log, byte-identical.
+  {
+    envKey: "QUANTA_SESSION_EVENT_LOG_DIR",
+    kind: "string",
+    default: undefined,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "On-disk session event-log directory (W4-b). Set \u21d2 kernel session events persist as append-only JSONL at <dir>/<sessionId>.jsonl and seq issuance resumes from the on-disk tip after a restart (the substrate wire connect({resume}) replays from \u2014 ticket 05). Unset/blank \u21d2 the in-memory event log, byte-identical zero-disk default.",
+    readSite: "host/runtime/persistence.ts",
+  },
 ]

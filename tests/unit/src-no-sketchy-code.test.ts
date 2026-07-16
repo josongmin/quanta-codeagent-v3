@@ -352,6 +352,8 @@ const RULES: readonly Rule[] = [
         "Bench token-budget composition — reads QUANTA_BENCH_PATCH_GEN_BUDGET / SWEEP_PATCH_GEN_BUDGET + QUANTA_BENCH_TOKEN_BUDGET_DIR at boot (raw extracted then parsed via NaN-safe asPositiveInt on a separate line). Same bench-bootstrap posture as apps/bench/index.ts.",
       "host/mcp-composition.ts":
         "P4 (jul-11) surface-shared MCP composition (moved from apps/cli/internal/mcp.ts — now @/host so the web daemon shares it): surface composition root reading QUANTA_MCP_AUTORESTART gate + resolveQuantaHome(process.env) + pickMcpNegotiator(process.env) + `envSource = process.env` DI fallbacks at launch; the assembled MCP ports downstream stay env-free. Re-exported by apps/cli/internal/mcp.ts.",
+      "host/runtime/persistence.ts":
+        "Injection-first (W4-b): `process.env` is ONLY the default for the injected `envSource` param of createSessionPersistence (tests inject a fake env view); the QUANTA_SESSION_EVENT_LOG_DIR gate is read off that param, never a module-level process.env. Same `envSource = process.env` DI-fallback posture as host/mcp-composition.ts.",
       "apps/cli/internal/argv.ts":
         "God-module split of apps/cli/internal.ts (ADR-0024) — pure process.argv/process.env CLI flag accessors (QUANTA_STATE_PATH / QUANTA_RESUME / QUANTA_OBSERVE_DIR / QUANTA_LSP_TOOLS / QUANTA_AST_GREP), re-exported from ../internal so importers keep resolving from ./internal. Same CLI-bootstrap posture as apps/cli/internal.ts.",
       "apps/cli/internal/shell-snapshot.ts":
