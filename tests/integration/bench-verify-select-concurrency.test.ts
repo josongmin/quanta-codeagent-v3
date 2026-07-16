@@ -59,9 +59,16 @@ class ParallelEditLLM implements LLMPort {
 }
 
 const DEPS = { maxTurns: 4, timeoutMs: 20_000 }
+// B1 FAIL-CLOSED (ea787de4a, 2026-07-03): the verify-select SELECTION plane is a
+// retired footgun; `verifySelectN` resolves ONLY behind the explicit operator
+// ESCAPE hatch `QUANTA_BENCH_VERIFY_SELECT_ESCAPE`. Without it the plane stays
+// inert (verifySelectN ⇒ undefined ⇒ single-pass path ⇒ no selectionTelemetry).
+// These tests exercise the verify-select plane, so they must set the escape —
+// same shipped gating the telemetry sibling already threads.
 const verifySelectEnv = scopedEnv(
   [
     "QUANTA_BENCH_VERIFY_SELECT",
+    "QUANTA_BENCH_VERIFY_SELECT_ESCAPE",
     "QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY",
     "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",
     "QUANTA_BENCH_VERIFY_SELECT_REPRO",
@@ -70,6 +77,7 @@ const verifySelectEnv = scopedEnv(
   ],
   {
     QUANTA_BENCH_VERIFY_SELECT: "2",
+    QUANTA_BENCH_VERIFY_SELECT_ESCAPE: "1",
     QUANTA_BENCH_VERIFY_SELECT_CONCURRENCY: "2",
     QUANTA_BENCH_VERIFY_SELECT_REGRESSION: "off",
     QUANTA_BENCH_VERIFY_SELECT_REPRO: "off",

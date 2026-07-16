@@ -67,6 +67,23 @@ const cont = (u: StreamEvent, i: number): StreamEvent[] => [
   ...toolUse(`c${i}`, "read", { path: `/tmp/__cc_edge_nope_${i}__.txt` }),
 ]
 
+/**
+ * COST-CAP TRIP SEMANTIC (commit 4843c6020, jul-2 runtime bugbash — SHIPPED):
+ * the post-turn meter STOPS the run with `budget_exhausted` only when the turn
+ * was about to CONTINUE (`TurnResult.kind === "tools"`). A cleanly-COMPLETED
+ * final turn (an `end_turn` `text` turn = `done(...)`) is terminal on its OWN
+ * merit and WINS even if it also crossed the meter — the natural outcome is not
+ * overridden by a post-turn cost breach (see `turn-outcome.ts`, and the L4
+ * ledger's identical after-the-natural-outcome placement).
+ *
+ * ⇒ To exercise a cap TRIP, the breaching usage must land on a CONTINUING turn:
+ * a `cont(...)` (tool-use) turn, optionally followed by a benign `text("done")`
+ * the loop never reaches because the meter pre-empts at the tool-turn epilogue.
+ * `done(...)` is reserved for cases that must COMPLETE (best-effort / no-trip).
+ * The pre-flight (L2) admission path is the ONE exception that can stop before a
+ * completed turn — but only when the INPUT-floor alone already breaches.
+ */
+
 describe("E2E cost-cap edge cases — boundary", () => {
   test("cost EXACTLY at cap ⇒ completes (strict greater-than)", async () => {
     // Spend exactly the cap (cap computed via the SAME costUsd, so observed ===
@@ -80,8 +97,10 @@ describe("E2E cost-cap edge cases — boundary", () => {
   })
 
   test("cost just OVER cap ⇒ budget_exhausted", async () => {
+    // A CONTINUING turn just over the cap so the meter pre-empts (a completed
+    // turn wins even when it crosses — see COST-CAP TRIP SEMANTIC note above).
     const { reason } = await assembleRun({
-      scripts: [done(usage(0, outForUsd(1) + 100))], // $1 + a hair
+      scripts: [cont(usage(0, outForUsd(1) + 100), 1), text("done")], // $1 + a hair
       dials: { maxCostUsd: 1 },
     })
     expect(reason).toBe("budget_exhausted")
@@ -102,9 +121,11 @@ describe("E2E cost-cap edge cases — accumulation", () => {
   })
 
   test("PER-TURN cap trips on a single spike while CUMULATIVE stays low", async () => {
-    // one turn = $0.50 (> $0.40 per-turn cap); cumulative cap is generous ($100).
+    // one CONTINUING turn = $0.50 (> $0.40 per-turn cap); cumulative cap is
+    // generous ($100). A continuation so the meter pre-empts (completed turns
+    // win — see COST-CAP TRIP SEMANTIC note above).
     const { reason } = await assembleRun({
-      scripts: [done(usage(0, outForUsd(0.5)))],
+      scripts: [cont(usage(0, outForUsd(0.5)), 1), text("done")],
       dials: { maxCostPerTurnUsd: 0.4, maxCostUsd: 100 },
     })
     expect(reason).toBe("budget_exhausted")
@@ -141,7 +162,8 @@ describe("E2E cost-cap edge cases — pricing robustness", () => {
     const { reason } = await assembleRun({
       scripts: [
         cont(usage(Number.NaN, Number.NaN), 1), // malformed — must be a no-op for cost
-        done(usage(0, outForUsd(5))), // valid $5 > cap
+        cont(usage(0, outForUsd(5)), 2), // valid $5 > cap on a CONTINUING turn ⇒ meter pre-empts
+        text("done"), // never reached — pre-empted at turn-2 epilogue
       ],
       dials: { maxCostUsd: 1 },
     })
@@ -167,8 +189,9 @@ describe("E2E cost-cap edge cases — pricing robustness", () => {
 
   test("cache-read tokens are priced (openai carve-out) and counted toward the cap", async () => {
     // gpt-5.4 cacheRead = $0.25/1M. 1M input all-cached ⇒ ~$0.25 > $0.1 cap.
+    // Continuing turn so the meter pre-empts (completed turns win).
     const { reason } = await assembleRun({
-      scripts: [done(usage(1_000_000, 0, { cacheRead: 1_000_000 }))],
+      scripts: [cont(usage(1_000_000, 0, { cacheRead: 1_000_000 }), 1), text("done")],
       dials: { maxCostUsd: 0.1 },
     })
     expect(reason).toBe("budget_exhausted")
@@ -177,8 +200,9 @@ describe("E2E cost-cap edge cases — pricing robustness", () => {
 
 describe("E2E cost-cap edge cases — numeric extremes", () => {
   test("1e12-token usage ⇒ huge finite cost trips (no overflow / NaN)", async () => {
+    // Continuing turn so the meter pre-empts (completed turns win).
     const { reason, cfg } = await assembleRun({
-      scripts: [done(usage(1_000_000_000_000, 1_000_000_000_000))],
+      scripts: [cont(usage(1_000_000_000_000, 1_000_000_000_000), 1), text("done")],
       dials: { maxCostUsd: 1 },
     })
     expect(reason).toBe("budget_exhausted")
@@ -189,9 +213,13 @@ describe("E2E cost-cap edge cases — numeric extremes", () => {
 
   test("Infinity-token usage ⇒ non-finite cost is dropped by the tick guard (no poison)", async () => {
     // costUsd(Infinity) is non-finite ⇒ the meter tick guard no-ops it. A later
-    // valid event must still trip (the cap was not disabled).
+    // valid event on a CONTINUING turn must still trip (the cap was not disabled).
     const { reason, cfg } = await assembleRun({
-      scripts: [cont(usage(Number.POSITIVE_INFINITY, 0), 1), done(usage(0, outForUsd(5)))],
+      scripts: [
+        cont(usage(Number.POSITIVE_INFINITY, 0), 1),
+        cont(usage(0, outForUsd(5)), 2),
+        text("done"),
+      ],
       dials: { maxCostUsd: 1 },
     })
     expect(reason).toBe("budget_exhausted")
@@ -286,8 +314,10 @@ describe("E2E cost-cap edge cases — cross-run persistence", () => {
 describe("E2E cost-cap edge cases — operator override vs preset", () => {
   test("QUANTA_MAX_COST_USD override beats the batch preset's $5 cap", async () => {
     // batch preset maxCostUsd = $5; the override pins $0.0001 ⇒ a $1 spend trips.
+    // Continuing turn so the meter pre-empts (completed turns win). The override
+    // is what makes the cap bite — the batch preset $5 would let $1 pass.
     const { reason, cfg } = await assembleRun({
-      scripts: [done(usage(0, outForUsd(1)))],
+      scripts: [cont(usage(0, outForUsd(1)), 1), text("done")],
       env: { QUANTA_MAX_COST_USD: "0.0001" },
     })
     expect(cfg.budgetMeter?.dials.maxCostUsd).toBe(0.0001)

@@ -39,7 +39,12 @@ describe("ADR-0239 §C — identity per-turn reminder splice", () => {
     expect(shouldSpliceIdentityReminder(cfgWith(block), "architect")).toBe(true)
     const text = buildIdentityReminderText(cfgWith(block), "architect")
     expect(text).toBeDefined()
-    expect(text).toContain("Architect")
+    // jul-13 identity SSOT consolidation (166fdc408): DEFAULT_MODE_VARIANTS now
+    // PROJECTS from DEFAULT_IDENTITIES, whose canonical architect body renders
+    // "**architect mode**" (lowercase mode name) — NOT the pre-consolidation
+    // capitalized "Architect mode". Pin the distinctive architect posture phrase.
+    expect(text).toContain("architect mode")
+    expect(text).toContain("design-first")
   })
 
   // ── §C2 ── editor + default knob ⇒ reminder ──────────────────────────────
@@ -50,7 +55,10 @@ describe("ADR-0239 §C — identity per-turn reminder splice", () => {
     expect(shouldSpliceIdentityReminder(cfgWith(block), "editor")).toBe(true)
     const text = buildIdentityReminderText(cfgWith(block), "editor")
     expect(text).toBeDefined()
-    expect(text).toContain("Editor")
+    // jul-13 SSOT (166fdc408): editor body renders "**editor mode**" (lowercase);
+    // pin the distinctive editor posture phrase (minimal-diff discipline).
+    expect(text).toContain("editor mode")
+    expect(text).toContain("minimal diffs only")
   })
 
   // ── §C3 ── default mode + default knob ⇒ NO reminder ─────────────────────

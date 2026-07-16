@@ -507,9 +507,17 @@ describe("verify-select telemetry survives early terminal no-patch", () => {
           baseCommit: "0".repeat(40),
         },
       }
+      // Meter exhaustion is terminal ONLY when the turn is about to CONTINUE
+      // (result kind "tools") — a cleanly `completed` turn WINS over meter
+      // exhaustion by design (turn-outcome.ts, jul-2 4843c6020 / ALBB-17). So a
+      // NoopEndLLM (ends `end_turn`, never continues) would never trip the meter
+      // and the terminal candidate would stop `completed`, not `budget_exhausted`.
+      // ReadLoopLLM keeps issuing a `read` tool call every turn ⇒ the loop tries
+      // to continue ⇒ the `maxTurns: 0` dial trips on that continuation ⇒
+      // `budget_exhausted`, which is exactly the terminal authority under test.
       const deps = {
         ...DEPS,
-        llm: new NoopEndLLM(),
+        llm: new ReadLoopLLM(),
         budgetMeterFactory: () => new BudgetMeter({ dials: { maxTurns: 0 } }),
       }
 
