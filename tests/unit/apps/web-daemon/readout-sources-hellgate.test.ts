@@ -38,6 +38,7 @@ const CAPS: CapabilityManifest = {
   subagents: true,
   automation: false,
   shellSnapshot: true,
+  serverAutoContinues: false,
   transport: "websocket",
 }
 

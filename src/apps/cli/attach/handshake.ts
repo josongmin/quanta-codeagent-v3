@@ -23,6 +23,7 @@
  */
 
 import type { SessionTransportMessage } from "@/ipc/session"
+import type { CapabilityManifest } from "@/protocol/session"
 
 /** Matches the frontend's discovery sentinel verbatim — the bridge keys its
  *  mismatch-reject off "not the canonical id", and the sentinel is simply a
@@ -34,6 +35,11 @@ export interface AttachHandshake {
   readonly sessionId: string | undefined
   /** True once a snapshot has settled the handshake (commands may now flow). */
   readonly ready: boolean
+  /** ADR-0540 W1-B — the daemon's capability manifest, retained from the
+   *  handshake snapshot (`undefined` until one arrives). The attach client
+   *  gates its post-approval `turn.run` re-issue on
+   *  `capabilities.serverAutoContinues` (marker true ⇒ the DAEMON re-issues). */
+  readonly capabilities: CapabilityManifest | undefined
   /** Build the FIRST connect frame (discovery sentinel). */
   initialConnect(): SessionTransportMessage
   /**
@@ -51,6 +57,7 @@ const connectFrame = (sessionId: string): SessionTransportMessage => ({
 export const createAttachHandshake = (): AttachHandshake => {
   let sessionId: string | undefined
   let ready = false
+  let capabilities: CapabilityManifest | undefined
 
   // NOTE (v1 scope): this slice has NO reconnect/resume path. A joining client
   // performs the discovery→adopt dance ONCE; a daemon-initiated close exits the
@@ -67,6 +74,9 @@ export const createAttachHandshake = (): AttachHandshake => {
     },
     get ready() {
       return ready
+    },
+    get capabilities() {
+      return capabilities
     },
     initialConnect() {
       return connectFrame(sessionId ?? HANDSHAKE_DISCOVERY_SESSION_ID)
@@ -96,6 +106,9 @@ export const createAttachHandshake = (): AttachHandshake => {
           if (sessionId === undefined || sessionId !== message.snapshot.sessionId) {
             sessionId = message.snapshot.sessionId
           }
+          // ADR-0540 W1-B — retain the manifest (latest snapshot wins) so the
+          // client can gate its post-approval re-issue on `serverAutoContinues`.
+          capabilities = message.snapshot.capabilities
           ready = true
           return undefined
         }

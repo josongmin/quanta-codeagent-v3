@@ -28,6 +28,7 @@ describe("@/kernel/session", () => {
       subagents: false,
       automation: false,
       shellSnapshot: false,
+      serverAutoContinues: false,
       transport: "inproc" as const,
     }
     let permissionMode = "default"
@@ -131,6 +132,7 @@ describe("@/kernel/session", () => {
       subagents: false,
       automation: false,
       shellSnapshot: false,
+      serverAutoContinues: false,
       transport: "inproc" as const,
     }
     let state = createKernelSessionState({
@@ -221,6 +223,7 @@ describe("@/kernel/session", () => {
       subagents: false,
       automation: false,
       shellSnapshot: false,
+      serverAutoContinues: false,
       transport: "inproc" as const,
     }
     let state = createKernelSessionState({
@@ -293,6 +296,7 @@ describe("@/kernel/session", () => {
       subagents: false,
       automation: false,
       shellSnapshot: false,
+      serverAutoContinues: false,
       transport: "inproc" as const,
     }
     const state = createKernelSessionState({
@@ -341,6 +345,7 @@ describe("@/kernel/session", () => {
         subagents: false,
         automation: false,
         shellSnapshot: false,
+        serverAutoContinues: false,
         transport: "inproc",
       },
     })

@@ -935,11 +935,57 @@ export const useSendTurn = (
  * tool. So `approve` (the tool must run) and an ESCALATION `deny` (the loop emits
  * the recoverable `skill-scoped` decline) both continue; a NORMAL `deny` aborts
  * the turn — re-running would just re-ask the same approval forever.
+ *
+ * ADR-0540 W1-B — this predicate answers "does the flow need a continuation";
+ * WHO issues it is a separate question: when the daemon declares the
+ * `serverAutoContinues` capability marker, IT owns the re-issue and the client
+ * must skip its own (see {@link useServerAutoContinues} + the `continueTurn`
+ * call site in `App.tsx`).
  */
 export const shouldContinueAfterApproval = (
   decision: "approve" | "deny",
   isEscalation: boolean,
 ): boolean => decision === "approve" || isEscalation
+
+/**
+ * ADR-0540 W1-B — mirror the daemon's `serverAutoContinues` capability marker
+ * into React state. TRUE ⇒ the daemon re-issues the post-approval `turn.run`
+ * itself and the client MUST NOT re-issue (double `turn.run` is neutralized
+ * server-side, but a marker-aware client simply never sends it).
+ *
+ * Carrier honesty (audit L-1): the LOAD-BEARING carrier is the connect/resume
+ * `snapshot` (`capabilities`). The per-attach synthesized `session.created`
+ * never actually reaches the client it was attached FOR (pre-existing drop,
+ * runtime-confirmed — docs/tickets/jul-16-session-created-tail-filter-drop.md),
+ * so that listener is forward-compat only (it fires for OTHER peers' attaches
+ * today, and for our own once the drop is fixed). Reads are defensive
+ * (`=== true`) so a legacy daemon that predates the field yields `false`
+ * (client-owned continuation, legacy flow unchanged).
+ */
+/** Defensive read (audit M-2): a legacy daemon predates the field — absent ⇒
+ *  `false` (client-owned continuation). A stuck-`true` on a legacy daemon
+ *  would make the browser stop re-issuing = ADR-0512 P3 stall revival, so the
+ *  derivation is exported for a node-env unit pin. */
+export const readServerAutoContinues = (caps: {
+  readonly serverAutoContinues?: boolean
+}): boolean => caps.serverAutoContinues === true
+
+export const useServerAutoContinues = (client: SessionClient): boolean => {
+  const [serverAutoContinues, setServerAutoContinues] = useState(false)
+  useEffect(() => {
+    const offSnapshot = client.onSnapshot((snapshot) => {
+      setServerAutoContinues(readServerAutoContinues(snapshot.capabilities))
+    })
+    const offCreated = client.on("session.created", (event) => {
+      setServerAutoContinues(readServerAutoContinues(event.capabilityManifest))
+    })
+    return () => {
+      offSnapshot()
+      offCreated()
+    }
+  }, [client])
+  return serverAutoContinues
+}
 
 /**
  * ADR-0512 P3 — sends an `approval.respond` command for a pending approval

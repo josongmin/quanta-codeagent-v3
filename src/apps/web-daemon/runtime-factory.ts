@@ -73,7 +73,6 @@ import { TaskRegistry } from "@/subagent"
 import { buildDefaultTools, type Tool, ToolRegistry } from "@/tool"
 import { askUserTool } from "@/tool/ask-user"
 import { type AgentStateSourceHandle, createAgentStateSource } from "./agent-state-source"
-import { createSubagentSource, type SubagentSourceHandle } from "./subagent-source"
 import {
   type CanvasArtifactSourceHandle,
   createCanvasArtifactSource,
@@ -89,6 +88,8 @@ import type {
   MemoryReadoutEntry,
   WebReadoutSources,
 } from "./readout"
+import { WEB_INLINE_APPROVAL_GATE } from "./server/approval-continuation"
+import { createSubagentSource, type SubagentSourceHandle } from "./subagent-source"
 import { createWebAskUserPort } from "./web-ask-user-port"
 import {
   createWebControlRequestPort,
@@ -809,6 +810,16 @@ const buildAgentConfigBase = async ({
           activeTurnRef: follower.surface.activeTurnRef,
         }
       : {}),
+    // ADR-0540 W1-B — declare the `server-auto-continues` capability marker iff
+    // the daemon actually owns the continuation (the SAME gate arms the
+    // `setupApprovalContinuation` re-issue in `server.ts`). Clients that see the
+    // marker skip their post-approval `turn.run` re-issue. Gate OFF ⇒ this base
+    // SLOT is omitted and the manifest normalizes to `false` — the FLOW is the
+    // legacy client-owned continuation, unchanged. NOTE (audit M-3): the wire
+    // manifest itself always CARRIES the field (`false` when OFF) because
+    // `CapabilityManifest` made it required — flow-identical, not byte-identical
+    // on the wire (same precedent as every other required capability bit).
+    ...(gateOn(env, WEB_INLINE_APPROVAL_GATE) ? { serverAutoContinues: true } : {}),
     ...observabilitySlots(observability),
   }
   return base

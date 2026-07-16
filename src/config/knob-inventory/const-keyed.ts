@@ -217,15 +217,6 @@ export const CONST_KEYED: readonly KnobInventoryEntry[] = [
     readSite: "integrations/github/event-source-actions.ts",
   },
   {
-    envKey: "QUANTA_SCHEDULER",
-    kind: "bool",
-    default: false,
-    group: "scheduler",
-    home: "runtime-config",
-    describe: "Background scheduler runtime (opt-in).",
-    readSite: "scheduler/runtime.ts",
-  },
-  {
     envKey: "QUANTA_AUTOMATION_INTERVAL_MS",
     kind: "int",
     default: undefined,
@@ -304,12 +295,18 @@ export const CONST_KEYED: readonly KnobInventoryEntry[] = [
     // to headless. ON ⇒ a mid-turn approval ask resolves INLINE (auto-policy
     // surface, same turn, no deferred throw + turn re-run); OFF ⇒ byte-identical
     // deferred path. const-keyed via `HEADLESS_INLINE_APPROVAL_GATE`.
+    // ADR-0540 W1-B — the SAME gate also arms the web-daemon's daemon-owned
+    // post-approval continuation (the daemon re-issues `turn.run`; clients see
+    // the `serverAutoContinues` capability marker and skip their re-issue).
+    // const-keyed there via `WEB_INLINE_APPROVAL_GATE`.
     envKey: "QUANTA_INLINE_APPROVAL_RESOLVER",
     kind: "bool",
     default: false,
     group: "agent-feature",
     home: "runtime-config",
-    describe: "Inline (same-turn) approval resolver for headless (opt-in).",
-    readSite: "apps/headless/approval-wiring.ts",
+    describe:
+      "ADR-0540 approval resolver gate: headless inline + web-daemon continuation (opt-in).",
+    readSite:
+      "apps/headless/approval-wiring.ts (W1-B also: apps/web-daemon/server/approval-continuation.ts)",
   },
 ]

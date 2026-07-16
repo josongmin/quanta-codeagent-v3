@@ -61,6 +61,7 @@ import {
   useSendCancel,
   useSendPermissionMode,
   useSendTurn,
+  useServerAutoContinues,
   useSessionEvents,
 } from "./ws/session-hooks"
 import { type SubagentMessage, type SubagentSource, useSubagentState } from "./ws/subagent-model"
@@ -384,6 +385,11 @@ export const App = (): JSX.Element => {
   const sendApprovalDecision = useSendApprovalDecision(client, learnedSessionId)
   const sendCancel = useSendCancel(client, learnedSessionId)
   const onSetPermission = useSendPermissionMode(client, learnedSessionId)
+  // ADR-0540 W1-B — when the daemon declares the `serverAutoContinues`
+  // capability marker, IT re-issues the post-approval `turn.run`; the client
+  // must not (marker false / legacy daemon ⇒ client-owned continuation,
+  // byte-identical legacy behavior).
+  const serverAutoContinues = useServerAutoContinues(client)
   const onApprovalDecision = useCallback(
     (decision: EscalationDecision): void => {
       // Determine escalation-ness BEFORE the optimistic dismiss removes the
@@ -395,16 +401,18 @@ export const App = (): JSX.Element => {
       // allow_once (no widen) and deny_and_steer (corrective steer) take effect,
       // and RE-RUN the suspended turn (the kernel does not auto-continue) so the
       // approved tool actually dispatches / the recoverable decline is produced.
+      // ADR-0540 W1-B — unless the DAEMON owns that re-run (capability marker).
       sendApprovalDecision(decision.approvalId, decision.decision, {
         ...(decision.scope !== undefined ? { scope: decision.scope } : {}),
         ...(decision.steer !== undefined ? { steer: decision.steer } : {}),
-        continueTurn: shouldContinueAfterApproval(decision.decision, isEscalation),
+        continueTurn:
+          !serverAutoContinues && shouldContinueAfterApproval(decision.decision, isEscalation),
       })
       // Optimistic: drop the card immediately; the authoritative
       // `approval.resolved` event then arrives and is a no-op for the dropped id.
       dismissApproval(decision.approvalId)
     },
-    [pendingApprovals, sendApprovalDecision, dismissApproval],
+    [pendingApprovals, sendApprovalDecision, dismissApproval, serverAutoContinues],
   )
 
   const [draft, setDraft] = useState("")

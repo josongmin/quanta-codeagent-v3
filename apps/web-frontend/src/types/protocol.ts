@@ -35,6 +35,12 @@ export interface CapabilityManifest {
   readonly automation: boolean
   readonly shellSnapshot: boolean
   readonly transport: "inproc" | "stdio" | "websocket"
+  /** ADR-0540 W1-B (`server-auto-continues`, mirrors
+   *  `src/protocol/session/capabilities.ts`) — TRUE iff the DAEMON re-issues
+   *  the post-approval `turn.run` itself. Client contract: true ⇒ skip the
+   *  client-side re-issue (see `useServerAutoContinues` + the
+   *  `shouldContinueAfterApproval` call site in `App.tsx`). */
+  readonly serverAutoContinues: boolean
 }
 
 export const SURFACE_READ_MODEL_IDS = ["session", "agentState", "canvas", "observability"] as const

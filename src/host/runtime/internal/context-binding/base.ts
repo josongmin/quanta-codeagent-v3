@@ -75,6 +75,11 @@ export const buildCapabilityManifest = (base: RuntimeBase): CapabilityManifest =
     automation: base.automationEngine !== undefined,
     shellSnapshot: base.shellSnapshot !== undefined,
     transport: "inproc",
+    // ADR-0540 W1-B — the `server-auto-continues` marker. Presence-only seam:
+    // the composition root (web-daemon, gate ON) stamps `serverAutoContinues`
+    // on the base; every other surface leaves it absent ⇒ false (the normalize
+    // fallback), byte-identical to the pre-marker manifest.
+    serverAutoContinues: base.serverAutoContinues === true,
   })
 
 const toToolProfileConfig = (state: ToolProfileSessionState | undefined): Partial<AgentConfig> =>
@@ -114,6 +119,9 @@ const buildTurnAssemblerDeps = (args: {
     // `approvalProtocol`).
     artifactRegistry: _artifactRegistry,
     artifactPreviewResolver: _artifactPreviewResolver,
+    // ADR-0540 W1-B — capability-manifest concern only (the `server-auto-
+    // continues` marker); never a per-turn agent field (mirrors the A2 strip).
+    serverAutoContinues: _serverAutoContinues,
     systemSource,
     messages: _baseMessages,
     signal: _baseSignal,
@@ -158,6 +166,8 @@ export const buildAgentConfigFromBase = (args: {
     // buildTurnAssemblerDeps).
     artifactRegistry: _artifactRegistry,
     artifactPreviewResolver: _artifactPreviewResolver,
+    // ADR-0540 W1-B — manifest-only marker, stripped (see buildTurnAssemblerDeps).
+    serverAutoContinues: _serverAutoContinues,
     systemSource,
     toolProfileState,
     identityModeState,
@@ -424,7 +434,6 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("memorySummaryMd", base.memorySummaryMd),
   ...whenDefined("stage1OutputsStore", base.stage1OutputsStore),
   ...whenDefined("memoryConsolidator", base.memoryConsolidator),
-  ...whenDefined("granularRegistry", base.granularRegistry),
   ...whenDefined("onPromptAssembled", base.onPromptAssembled),
   ...whenDefined("workingState", base.workingState),
   ...whenDefined("onWorkingStateReady", base.onWorkingStateReady),

@@ -304,6 +304,8 @@ const capabilityManifestForConfig = (config: AgentConfig): CapabilityManifest =>
   automation: false,
   shellSnapshot: false,
   transport: "inproc",
+  // ADR-0540 W1-B — bench sessions have no daemon continuation owner.
+  serverAutoContinues: false,
 })
 
 const promptTextFromMessages = (messages: readonly Message[]): string => {

@@ -168,7 +168,10 @@ const makeFakeSocket = (): FakeSocket => {
   }
 }
 
-const snapshotMsg = (sid: string): SessionTransportMessage => ({
+const snapshotMsg = (
+  sid: string,
+  opts?: { readonly serverAutoContinues?: boolean },
+): SessionTransportMessage => ({
   kind: "snapshot",
   snapshot: {
     sessionId: sid,
@@ -183,6 +186,7 @@ const snapshotMsg = (sid: string): SessionTransportMessage => ({
       subagents: false,
       automation: false,
       shellSnapshot: false,
+      serverAutoContinues: opts?.serverAutoContinues ?? false,
       transport: "websocket",
     },
     pendingApproval: null,
@@ -212,6 +216,7 @@ const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 
 const attachWithPrompter = async (
   sid: string,
   promptApproval: (reason: string) => Promise<never>,
+  opts?: { readonly serverAutoContinues?: boolean },
 ): Promise<{ socket: FakeSocket; close: () => Promise<void> }> => {
   const socket = makeFakeSocket()
   const ctor = function (this: unknown, _url: string) {
@@ -225,7 +230,7 @@ const attachWithPrompter = async (
     webSocketCtor: ctor,
   })
   socket.fireOpen()
-  socket.deliver(snapshotMsg(sid))
+  socket.deliver(snapshotMsg(sid, opts))
   await flush()
   return { socket, close: () => session.close() }
 }
@@ -250,6 +255,26 @@ describe("HELLGATE UUX-1-19 — attach client sends the RICH decision on the wir
     // approve ⇒ a bare turn.run claims the grant (web parity).
     const idx = cmds.indexOf(respond)
     expect(cmds.slice(idx + 1).some((c) => c.type === "turn.run")).toBe(true)
+    await close()
+  })
+
+  test("W1-B marker (audit M-2): serverAutoContinues=true ⇒ approve responds but the CLIENT does NOT re-issue turn.run (daemon owns the continuation)", async () => {
+    const { socket, close } = await attachWithPrompter(
+      "rich-sac",
+      (async () => ({ decision: "approve", scope: "session" })) as never,
+      { serverAutoContinues: true },
+    )
+    socket.deliver(approvalEvent("ap-sac"))
+    await flush()
+    const cmds = commandsOf(socket)
+    const respond = cmds.find((c) => c.type === "approval.respond")
+    expect(respond).toBeDefined()
+    if (respond?.type !== "approval.respond") throw new Error("narrow")
+    expect(respond.decision).toBe("approve")
+    // Marker-aware client: the daemon re-issues server-side — a client
+    // turn.run here would be the double-dispatch the marker exists to remove.
+    const idx = cmds.indexOf(respond)
+    expect(cmds.slice(idx + 1).some((c) => c.type === "turn.run")).toBe(false)
     await close()
   })
 

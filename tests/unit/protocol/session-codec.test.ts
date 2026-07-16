@@ -243,6 +243,7 @@ describe("@/protocol/session codec", () => {
       subagents: false,
       automation: false,
       shellSnapshot: false,
+      serverAutoContinues: false,
       transport: "inproc",
     },
     pendingApproval: null,

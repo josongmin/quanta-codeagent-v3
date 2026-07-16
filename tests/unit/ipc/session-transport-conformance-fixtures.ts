@@ -21,6 +21,7 @@ const capabilitiesFor = (transport: TransportKind) => ({
   subagents: false,
   automation: false,
   shellSnapshot: false,
+  serverAutoContinues: false,
   transport,
 })
 

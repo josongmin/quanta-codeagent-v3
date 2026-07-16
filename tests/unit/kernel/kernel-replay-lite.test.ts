@@ -22,6 +22,7 @@ const makeSnapshot = (): SessionSnapshotLite => ({
     subagents: false,
     automation: false,
     shellSnapshot: false,
+    serverAutoContinues: false,
     transport: "inproc",
   },
   pendingApproval: null,

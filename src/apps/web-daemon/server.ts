@@ -22,6 +22,7 @@ import type { RuntimeSession } from "@/sdk/runtime"
 import { loadSessionById } from "@/session"
 import { errMessage, logger } from "@/shared"
 import type { CostReadoutTotals, WebReadoutSources } from "./readout"
+import { setupApprovalContinuation } from "./server/approval-continuation"
 import { type CanvasArtifactFeed, setupCanvasArtifactBridge } from "./server/canvas-artifact-bridge"
 import { buildFetchHandler } from "./server/fetch-handler"
 import { setupFollowerApproval } from "./server/follower-approval"
@@ -298,6 +299,16 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   } = setupFollowerApproval(config, sharedSession)
   let followerApprovalUnsub = followerApprovalUnsub0
   let followerSweepTimer = followerSweepTimer0
+  // ADR-0540 W1-B — daemon-owned post-approval continuation. Gate ON ⇒ every
+  // `approval.resolved(approve)` enqueues a daemon-minted bare `turn.run` on
+  // the session dispatch tail (clients see the `serverAutoContinues` capability
+  // marker and skip their own re-issue). Gate OFF ⇒ `unsub` is null and NOTHING
+  // was subscribed (byte-identical legacy client-owned continuation).
+  const { unsub: approvalContinuationUnsub0 } = setupApprovalContinuation(
+    sharedSession,
+    process.env,
+  )
+  let approvalContinuationUnsub = approvalContinuationUnsub0
 
   // UUX-1-11 — readout sources for `GET /readout/:name`. The production
   // runtime-factory exposes a `readoutSources` getter (agents / plan / skills /
@@ -385,6 +396,11 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         clearInterval(followerSweepTimer)
         followerSweepTimer = null
       }
+      // ADR-0540 W1-B — detach the daemon-owned continuation subscription so a
+      // late `approval.resolved` can never enqueue against a closed session
+      // (optional-call form, mirroring `threadStore?.close()` below).
+      approvalContinuationUnsub?.()
+      approvalContinuationUnsub = null
       // UUX-1-11 — stop the cost fold so it never fires against a closed session.
       if (transcriptPersistUnsub !== null) {
         transcriptPersistUnsub()

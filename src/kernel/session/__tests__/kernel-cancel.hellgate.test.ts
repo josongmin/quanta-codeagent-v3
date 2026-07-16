@@ -28,6 +28,8 @@ const manifest = {
   automation: false,
   shellSnapshot: false,
   transport: "inproc" as const,
+  // ADR-0540 W1-B — additive capability marker (kernel-inert here).
+  serverAutoContinues: false,
 }
 
 const clock = { now: () => new Date("2026-05-31T00:00:00.000Z") }

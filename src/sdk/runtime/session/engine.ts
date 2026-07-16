@@ -26,6 +26,11 @@ export interface SessionRuntimeState {
   state: KernelSessionState
   transportBridge: ReturnType<typeof createSessionTransportBridge> | undefined
   transportDispatchQueue: Promise<void>
+  /** ADR-0540 W1-B (audit M-1) — the latest DIRECT (non-queued) dispatch's
+   *  in-flight window. `enqueue` chains behind this too, so a subscriber-fired
+   *  enqueue during a direct dispatch cannot contend the single-writer lease
+   *  that dispatch still holds. */
+  activeDispatch: Promise<void>
 }
 
 /**
@@ -140,18 +145,53 @@ export const dispatch = async (
 ): Promise<SessionDispatchResult> => {
   const { box, sessionId } = deps
   if (box.closed) throw new SessionClosedError(sessionId)
-  let committedEventCount = 0
-  const result = await dispatchSessionCommand(box.state, command, {
-    ...deps.kernel,
-    host: deps.hostSession,
-    ...(options.signal !== undefined ? { signal: options.signal } : {}),
-    onCommitted: async ({ state: committedState, events }) => {
-      committedEventCount += await publishCommittedEvents(deps, committedState, events)
-    },
+  // ADR-0540 W1-B — `enqueue` rides the SAME single tail transport-issued
+  // commands serialize on (`ensureTransportBridge.onCommand`), so an enqueued
+  // command runs strictly AFTER every in-flight/queued command instead of
+  // contending the single-writer lease. The recursive call strips the flag, so
+  // the queued execution takes the plain path below (no re-enqueue cycle).
+  if (options.enqueue === true) {
+    const { enqueue: _enqueue, ...plain } = options
+    // Chain behind BOTH the transport tail AND the latest direct (non-queued)
+    // in-flight dispatch (audit M-1): a subscriber firing DURING a direct
+    // dispatch (e.g. an in-proc `approval.respond`) must land strictly after
+    // that dispatch releases the single-writer lease — deterministically, not
+    // by lease-contention retry.
+    const run = Promise.all([box.transportDispatchQueue, box.activeDispatch]).then(
+      async () => await dispatch(deps, command, plain),
+    )
+    // Mirror onCommand's tail discipline (L5 H-3): store a caught tail BEFORE
+    // returning so one rejected enqueued command can never wedge the queue;
+    // the CALLER still observes this command's own failure via `run`.
+    box.transportDispatchQueue = run.then(
+      () => undefined,
+      () => undefined,
+    )
+    return await run
+  }
+  // Expose this dispatch's in-flight window for the `enqueue` path above
+  // (latest-wins is sufficient: overlapping direct dispatches already contend
+  // the single-writer lease among themselves — pre-existing semantics).
+  let releaseActive!: () => void
+  box.activeDispatch = new Promise<void>((resolve) => {
+    releaseActive = resolve
   })
-  box.state = result.state
-  await publishPendingEvents(deps, result.events, committedEventCount)
-  return toDispatchResult(deps, result)
+  try {
+    let committedEventCount = 0
+    const result = await dispatchSessionCommand(box.state, command, {
+      ...deps.kernel,
+      host: deps.hostSession,
+      ...(options.signal !== undefined ? { signal: options.signal } : {}),
+      onCommitted: async ({ state: committedState, events }) => {
+        committedEventCount += await publishCommittedEvents(deps, committedState, events)
+      },
+    })
+    box.state = result.state
+    await publishPendingEvents(deps, result.events, committedEventCount)
+    return toDispatchResult(deps, result)
+  } finally {
+    releaseActive()
+  }
 }
 
 export const attachSessionTransport = async (

@@ -85,6 +85,7 @@ const stubSetup = (approvalDecisions: readonly ApprovalDecisionResult[]) => {
             subagents: false,
             automation: false,
             shellSnapshot: false,
+            serverAutoContinues: false,
             transport: "inproc" as const,
           },
           pendingApproval: null,

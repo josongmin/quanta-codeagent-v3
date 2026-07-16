@@ -36,6 +36,7 @@ const CAPABILITIES = {
   subagents: false,
   automation: false,
   shellSnapshot: false,
+  serverAutoContinues: false,
   transport: "stdio" as const,
 }
 

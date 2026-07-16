@@ -30,6 +30,7 @@ const manifest = {
   subagents: false,
   automation: false,
   shellSnapshot: false,
+  serverAutoContinues: false,
   transport: "inproc" as const,
 }
 

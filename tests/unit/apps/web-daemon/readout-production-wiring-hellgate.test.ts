@@ -53,6 +53,7 @@ const SNAP: SessionSnapshotLite = {
     subagents: true,
     automation: false,
     shellSnapshot: false,
+    serverAutoContinues: false,
     transport: "websocket",
   },
   pendingApproval: null,

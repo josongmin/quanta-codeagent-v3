@@ -249,7 +249,15 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
         // fresh `turn.run` is what claims the grant and re-dispatches the
         // approved tool. So on APPROVE, re-run the suspended turn (a bare
         // `turn.run`, no `input.append`). A deny aborts ⇒ no continuation.
-        if (respond.decision === "approve") {
+        // ADR-0540 W1-B — UNLESS the daemon declared the `serverAutoContinues`
+        // capability marker (handshake snapshot): then the DAEMON re-issues the
+        // continuation and this client must not (defensive `!== true` read ⇒ a
+        // legacy daemon without the field keeps the client-owned re-issue,
+        // byte-identical).
+        if (
+          respond.decision === "approve" &&
+          handshake.capabilities?.serverAutoContinues !== true
+        ) {
           await sendCommand({
             sessionId: sid,
             commandId: newCommandId(),

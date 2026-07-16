@@ -44,6 +44,7 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
     state: initialState,
     transportBridge: undefined,
     transportDispatchQueue: Promise.resolve(),
+    activeDispatch: Promise.resolve(),
   }
   const engine: SessionEngineDeps = {
     box,

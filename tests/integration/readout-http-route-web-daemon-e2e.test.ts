@@ -72,6 +72,7 @@ const CAPS = {
   subagents: true,
   automation: false,
   shellSnapshot: true,
+  serverAutoContinues: false,
   transport: "websocket" as const,
 }
 

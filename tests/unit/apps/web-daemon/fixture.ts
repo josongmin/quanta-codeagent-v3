@@ -37,6 +37,7 @@ const STUB_CAPS = {
   subagents: false,
   automation: false,
   shellSnapshot: false,
+  serverAutoContinues: false,
   transport: "websocket" as const,
 }
 

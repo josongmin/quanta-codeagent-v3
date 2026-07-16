@@ -115,6 +115,7 @@ const snapshotMsg = (sid: string, seq = 1): SessionTransportMessage => ({
       subagents: false,
       automation: false,
       shellSnapshot: false,
+      serverAutoContinues: false,
       transport: "websocket",
     },
     pendingApproval: null,

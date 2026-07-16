@@ -14,8 +14,9 @@
 
 import { createFollowerApprovalCoordinator } from "@/agent/thread-follower"
 import type { RuntimeSession } from "@/sdk/runtime"
-import { errMessage, logger } from "@/shared"
+import { errMessage, gateOn, logger } from "@/shared"
 import type { WebDaemonServerConfig } from "../server"
+import { WEB_INLINE_APPROVAL_GATE } from "./approval-continuation"
 
 type FollowerApprovalCoordinator = ReturnType<typeof createFollowerApprovalCoordinator>
 
@@ -41,12 +42,23 @@ export const setupFollowerApproval = (
   const followerApprovalTimeoutMs = parseFollowerApprovalTimeoutMs(
     process.env.QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS,
   )
+  // ADR-0540 W1-B — when the daemon owns the post-approval continuation, the
+  // follower relay's respond must ride the session's transport dispatch tail
+  // (`enqueue`) like an in-band respond frame does: the continuation subscriber
+  // fires DURING the respond and chains its `turn.run` onto the same tail, so
+  // an enqueued respond makes the ordering respond → re-issue deterministic
+  // (a direct dispatch would race the re-issue on the single-writer lease).
+  // Gate OFF ⇒ `undefined` options ⇒ the historical direct dispatch,
+  // byte-identical.
+  const respondOptions = gateOn(process.env, WEB_INLINE_APPROVAL_GATE)
+    ? { enqueue: true }
+    : undefined
   const followerApproval =
     config.followerCoControl !== undefined
       ? createFollowerApprovalCoordinator({
           respond: (id, decision, steer) => {
             void sharedSession.approval
-              .respond(id, decision, steer !== undefined ? { steer } : undefined)
+              .respond(id, decision, steer !== undefined ? { steer } : undefined, respondOptions)
               .catch((error) =>
                 logger.warn("web-daemon: follower approval respond failed", {
                   error: errMessage(error),

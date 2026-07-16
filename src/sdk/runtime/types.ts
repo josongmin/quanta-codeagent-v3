@@ -22,6 +22,18 @@ export type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "./base"
 
 export interface SessionDispatchOptions {
   readonly signal?: AbortSignal
+  /** ADR-0540 W1-B — serialize this dispatch onto the session's TRANSPORT
+   *  dispatch tail (the same single tail every transport-issued command rides,
+   *  see `engine.ts` `transportDispatchQueue`): it runs strictly AFTER every
+   *  already-enqueued command instead of contending the single-writer lease
+   *  immediately. The web-daemon's post-approval `turn.run` re-issue uses this
+   *  so the continuation can never race the `approval.respond` that caused it.
+   *  ⚠️ NEVER `await` an enqueued dispatch from INSIDE an in-flight dispatch
+   *  cycle (e.g. a session event subscriber awaiting it synchronously) — the
+   *  tail would then wait on itself (deadlock). Fire-and-forget (`void …
+   *  .catch(…)`) from subscribers. Absent/false ⇒ the historical direct
+   *  dispatch, byte-identical. */
+  readonly enqueue?: boolean
 }
 
 export interface SessionDispatchResult {
