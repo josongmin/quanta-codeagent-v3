@@ -13,6 +13,12 @@
 
 ## 0. S0 — 선행 스파이크 (XS, 결과가 설계를 게이트)
 
+> **✅ 판정 완료 (2026-07-16, 실 tsc 스파이크 — positive/negative control 동반):**
+> 1. **성립(GO)** — protocol 타입에서 파생한 `SessionVerbSurface<R>` 정의에 대해 `RuntimeSession → SessionVerbSurface<SessionDispatchResult>` 할당이 컴파일 성립(에러 0). trailing `options?` 파라미터는 예상대로 표준 할당성으로 흡수. 음성 대조(`SessionVerbSurface<CommandReceipt> = runtimeSession`)는 @ts-expect-error가 실에러를 소비 — R 파라미터가 실제로 분리를 강제함을 확인. positive control(고의 타입에러 주입→검출→제거)로 파일 포함 여부 확증.
+> 2. **turn.cancel = 공유 표면에서 제외 + RuntimeSession에 additive verb 신설 확정** — `TurnCancelCommand`는 프로토콜 8종에 실존(commands.ts:18), 신설은 dispatch 위임 한 줄(유일한 RuntimeSession 표면 변경).
+> 3. **rejected 인코딩 = 기존 `protocol_validation` reason + `issue` 자유문자열 재사용 확정** — 수신측 closed-4 체크(codec.ts:121-127) 때문에 신규 reason은 구클라 무언 드롭; issue 재사용이 구클라도 decode 가능한 유일 경로. ⇒ acceptance의 rejected 사유 = **5종**.
+> 스파이크 파일은 판정 후 삭제(스윕커밋 위생). S1-S7 착수 가능.
+
 1. `RuntimeSession satisfies SessionVerbSurface<SessionDispatchResult>` 성립 여부를 실코드로 판정 — R2 사전검증: 잉여 trailing optional 파라미터(`options?: SessionDispatchOptions`)는 표준 할당성으로 흡수, meta 타입도 동일 파생이라 성립 예상. 예상 밖이면 어댑터-only로 후퇴하고 satisfies acceptance 삭제(MASTER acceptance도 "S0 판정 따름" 단서).
 2. `turn.cancel` verb 신설 — R2 확인으로 리스크 하향: `TurnCancelCommand`는 프로토콜 8종에 이미 존재(commands.ts:18)하고 reducer가 처리하며 attach가 close 시 실제 wire 전송 중(attach-client.ts:294-300) — 신설은 dispatch 위임 한 줄, 프로토콜/커널 무변경. **유일한 RuntimeSession 표면 변경(additive 1건)**.
 3. rejected `reason` 인코딩 확정 — R2 검증 반영: 수신측 `decodeRejectedMessage`가 reason을 클로즈드 4종 체크(codec.ts:121-127)라 **신규 reason 값은 구클라에서 무언 드롭**(크래시 아님). 선택지 = 기존 `protocol_validation` reason + `issue` 자유문자열 재사용(구클라도 decode 가능한 유일 경로) vs 신규 reason(구클라 침묵 감수). 판정 결과가 acceptance의 rejected 사유 카운트(5종/6종)를 결정.
