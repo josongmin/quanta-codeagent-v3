@@ -504,15 +504,6 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     readSite: "apps/web-daemon/server/persistence.ts",
   },
   {
-    envKey: "QUANTA_WEB_DB_DIR",
-    kind: "string",
-    default: "~/.quanta/web-daemon",
-    group: "web-daemon",
-    home: "runtime-config",
-    describe: "Web-daemon sqlite dir.",
-    readSite: "apps/web-daemon/persistence-sqlite.ts",
-  },
-  {
     envKey: "QUANTA_WEB_DIST",
     kind: "string",
     default: undefined,

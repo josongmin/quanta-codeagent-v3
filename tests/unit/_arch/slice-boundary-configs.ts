@@ -318,7 +318,44 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     //     reset/restore guard, not configurable posture.
     // These four leaf names are unique within the slice, so the carve-out
     // exempts exactly these files.
-    envAllowFiles: ["core.ts", "driver.ts", "dataset.ts", "diff-ops.ts", "registry.ts"],
+    //
+    // W3-A (bench eval-DRIVER composition root): when the `agent:batch` /
+    // SWE-bench eval driver was split out of the monolithic `driver.ts` into
+    // the `batch/eval/driver/*.ts` phase files (+ two `batch/eval/*.ts`
+    // repro wires + `batch/eval/sandbox.ts`), the `QUANTA_BENCH_*` knob-
+    // resolution reads moved with them. These are the SAME sanctioned
+    // composition-root / knob-resolution class as `core.ts`/`driver.ts`
+    // above (and the `tool` slice's `runner.ts`/`from-env.ts` precedent):
+    // each read passes the raw `process.env` bag straight into a PURE gate
+    // helper (`gateOn`/`gateDisabled`) or a PURE resolver
+    // (`resolveBenchKnobs({ envVars })`, `benchPostureFromState(state, env)`,
+    // `agentVisibleBenchVerifierCommand(instance, env)`,
+    // `benchBudgetMeterFromEnv(env)`, `resolveLlmSelectMode(env)`,
+    // `familyCoverageCoeditEnabled(env)`, `resolveReproViabilityMode(env)`) —
+    // the value is never a config-SLOT that should be threaded through the
+    // call graph; the bench surface IS the composition root that resolves
+    // these DEFAULT-OFF knobs. (`repro-viability-wire.ts` reads
+    // `args.env ?? process.env` — `process.env` is only the DI fallback for
+    // an injected env, exactly the agent slice's `control-poll.ts` pattern.)
+    // Every leaf name below is UNIQUE within the slice, so each entry exempts
+    // exactly ONE file — a future env read in a NEW driver file still trips
+    // the guard.
+    envAllowFiles: [
+      "core.ts",
+      "driver.ts",
+      "dataset.ts",
+      "diff-ops.ts",
+      "registry.ts",
+      "config-build.ts",
+      "attempt-context.ts",
+      "env-knob-parse.ts",
+      "repair-phase.ts",
+      "repro-test-prep.ts",
+      "selection-port-factories.ts",
+      "repro-adapter.ts",
+      "repro-viability-wire.ts",
+      "sandbox.ts",
+    ],
     requireSubSliceBarrels: ["assemble/index.ts", "orchestrate/index.ts", "session-ops/index.ts"],
   },
   ipc: {
