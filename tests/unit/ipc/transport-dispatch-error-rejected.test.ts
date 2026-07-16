@@ -107,6 +107,7 @@ describe("S5a / bridge dispatch-error → rejected promotion", () => {
             subagents: false,
             automation: false,
             shellSnapshot: false,
+            serverAutoContinues: false,
             transport: "inproc",
           },
         }),

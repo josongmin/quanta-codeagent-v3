@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     "./sdk": {
+      "types": "./src/sdk/index.ts",
       "import": "./dist/sdk/index.js"
     }
   },

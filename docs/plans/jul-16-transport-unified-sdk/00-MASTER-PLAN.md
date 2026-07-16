@@ -79,7 +79,8 @@ AgentEvent(embed 경로, 40+종: 전문 tool I/O·thinking delta·mid-turn usage
           (jul-4 문, 불변)            │                  │                │
    ┌──────────────────────────────────┴──────────────────┴────────────────┴───┐
    │ quanta-codeagent/sdk                                                     │
-   │   connect({transport, onApproval?, onConnectionState?, resumeFromSeq?})  │
+   │   connect({transport, onApproval?, onConnectionState?})                  │
+   │     (resumeFromSeq는 jul-16 적대어딧 KILL로 01에서 descope — 05 소유)      │
    │     → SessionHandle                                                      │
    │   + session.v1 타입/코덱/에러/버전 re-export                               │
    │                                                                          │
@@ -104,7 +105,10 @@ AgentEvent(embed 경로, 40+종: 전문 tool I/O·thinking delta·mid-turn usage
    │ RuntimeSession engine — turn 루프 단일화·인라인 resolver = ADR-0540 소유     │
    ├───────────────────────────────────────────────────────────────────────────┤
    │ 온디스크 이벤트로그 = ADR-0540 W2 소유 → connect resume 옵션은 05(BLOCKED)   │
-   │   ※ 01은 수동 재접속 `lastSeq()`+`resumeFromSeq`(메모리 tail 한정)까지 노출  │
+   │   ※ 01의 `resumeFromSeq`는 구현 어딧(jul-16)서 KILL-descope: handshake     │
+   │     ready=snapshot-only × 브리지 커서응답=events-only(tip이면 0프레임)라     │
+   │     구조적 영구 hang — 01은 관측용 `lastSeq()`만 노출, resume은 05가 raw    │
+   │     client resume watcher로 소유                                          │
    └───────────────────────────────────────────────────────────────────────────┘
 ```
 

@@ -5,8 +5,9 @@
  * TWO commands — `input.append{text}` then `turn.run` — each with a distinct
  * `commandId` so the daemon's command-dedup window never collapses them. Blank
  * lines yield no commands (the daemon rejects an empty turn anyway; we avoid the
- * round-trip). Approval answers map y→approve / everything-else→deny (fail-safe
- * for a dangerous op awaiting confirmation).
+ * round-trip). Approval answers (y→approve / everything-else→deny, fail-safe
+ * for a dangerous op awaiting confirmation) MOVED to the hoisted attach flow —
+ * re-exported below.
  *
  * S1 (jul-16 SDK ticket 01): command ASSEMBLY is no longer hand-rolled here —
  * this module now maps attach's line/answer semantics onto the hoisted
@@ -17,13 +18,18 @@
  */
 
 import {
-  type ApprovalRespondCommand,
-  buildApprovalRespond,
   buildInputAppend,
   buildTurnRun,
   type CommandBuildDeps,
   type SessionCommand,
 } from "@/protocol/session"
+
+// S3 (jul-16 SDK ticket 01) — the approval-answer → wire mapping MOVED to the
+// hoisted attach flow (`@/ipc/session/attach-flow`), where the SDK `connect()`
+// door consumes the same implementation. Re-exported under the historical
+// names so existing import sites stay unmodified (behavior preservation).
+export type { BuildApprovalRespondArgs } from "@/ipc/session"
+export { buildApprovalRespondCommand } from "@/ipc/session"
 
 /** Fallback clock for {@link CommandBuildDeps}. Attach always supplies an
  *  explicit `issuedAt` via builder meta, so this is dormant by construction —
@@ -62,27 +68,3 @@ export const buildLineCommands = (args: BuildLineCommandsArgs): readonly Session
     buildTurnRun(deps, { commandId: args.newCommandId(), issuedAt: args.issuedAt() }),
   ]
 }
-
-export interface BuildApprovalRespondArgs {
-  readonly sessionId: string
-  readonly approvalId: string
-  /** Raw operator answer (`"y"` / `"yes"` ⇒ approve; anything else ⇒ deny). */
-  readonly answer: string
-  readonly commandId: string
-  readonly issuedAt: string
-}
-
-const isAffirmative = (answer: string): boolean => {
-  const a = answer.trim().toLowerCase()
-  return a === "y" || a === "yes"
-}
-
-export const buildApprovalRespondCommand = (
-  args: BuildApprovalRespondArgs,
-): ApprovalRespondCommand =>
-  buildApprovalRespond(
-    buildDeps(args.sessionId),
-    args.approvalId,
-    isAffirmative(args.answer) ? "approve" : "deny",
-    { commandId: args.commandId, issuedAt: args.issuedAt },
-  )

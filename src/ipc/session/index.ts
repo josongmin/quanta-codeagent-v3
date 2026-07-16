@@ -1,4 +1,21 @@
 export type {
+  AttachHandshake,
+  BuildApprovalRespondArgs,
+  RunSessionHandshakeResult,
+  SessionApprovalAnswer,
+  SessionApprovalFlow,
+  SessionApprovalFlowDeps,
+  SessionHandshakeHandoff,
+} from "./attach-flow"
+export {
+  buildApprovalRespondCommand,
+  buildRespondForAnswer,
+  createAttachHandshake,
+  createSessionApprovalFlow,
+  HANDSHAKE_DISCOVERY_SESSION_ID,
+  runSessionHandshake,
+} from "./attach-flow"
+export type {
   ConnectedSessionTransport,
   CreateSessionTransportBridgeOpts,
   SessionTransportBridge,
@@ -27,6 +44,20 @@ export {
   SessionDuplicateCommandError,
   typedErrorFromRejectedMessage,
 } from "./errors"
+export type {
+  CreateSessionHandleOpts,
+  SessionHandle,
+  SessionHandleSnapshot,
+  SessionTurnCorrelationLossReason,
+  SessionTurnEndEvent,
+  TurnEndCorrelator,
+} from "./handle"
+export {
+  createSessionHandle,
+  createTurnEndCorrelator,
+  SessionHandleClosedError,
+  SessionTurnCorrelationLostError,
+} from "./handle"
 export type { BindSessionTransportServerOpts, SessionTransportServer } from "./server"
 export { bindSessionTransportServer } from "./server"
 export { type CreateSessionStdioClientOpts, createSessionStdioClient } from "./stdio-client"

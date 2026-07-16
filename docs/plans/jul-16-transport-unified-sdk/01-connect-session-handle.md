@@ -34,7 +34,11 @@ const session = await connect({
   onApproval: async (req) => decision,          // 기존 ApprovalDecisionResult SSOT 타입 재사용
   onConnectionState: (s) => {...},              // "connected"(payload.resume: "replayed"|"snapshot_fallback")
                                                 //  | "closed"(reason) — v1은 통지까지, 자동재접속 없음
-  resumeFromSeq?,                               // 수동 재접속용(메모리 tail 한정 — 05가 durable로 승격)
+  // ⛔ resumeFromSeq 없음 (jul-16 적대어딧 KILL로 v1에서 제거): handshake ready는
+  //    snapshot 프레임에서만 settle하는데 브리지는 서빙 가능한 커서에 events-only
+  //    (커서==tip이면 0프레임)로 답함 — ack-less 프로토콜에서 caught-up resume을
+  //    handshake가 알 길이 구조적으로 없어 영구 hang. 05가 raw client resume
+  //    watcher 경유로 소유. lastSeq()는 순수 관측으로 유지.
 })
 
 // ② Codex형 사이드카 (자식 spawn — lifecycle은 transport가 소유)
@@ -48,8 +52,8 @@ const end = await session.awaitTurnEnd()    // 승계 상관(§3.2) — approval
 await session.close()
 ```
 
-- **미제공(정직)**: in-process transport 공개(외부 in-process = createAnalysisAgent, MASTER §3.3) · 자동 reconnect · durable resume(05 — 여기서는 `resumeFromSeq`+`lastSeq()` 페어의 메모리 tail 재접속만).
-- **SessionHandle** = `SessionVerbSurface<CommandReceipt>` + `subscribe/snapshot/close/sessionId` + `awaitTurnEnd` + `onConnectionState` + `onCommandRejected` + `lastSeq()`(수동 재접속 커서 — 명칭 통일: raw 클라의 currentResumeFromSeq를 이 이름으로 노출). `CommandReceipt = {commandId, submitted: true}` — 전송까지만 약속(MASTER §3.2).
+- **미제공(정직)**: in-process transport 공개(외부 in-process = createAnalysisAgent, MASTER §3.3) · 자동 reconnect · **resume 일체**(jul-16 적대어딧 KILL로 `resumeFromSeq` 옵션 자체를 제거 — 위 주석 참조; 메모리 tail이든 durable이든 door-level resume은 05가 raw client resume watcher로 소유).
+- **SessionHandle** = `SessionVerbSurface<CommandReceipt>` + `subscribe/snapshot/close/sessionId` + `awaitTurnEnd` + `onConnectionState` + `onCommandRejected` + `lastSeq()`(순수 관측 커서 — 명칭 통일: raw 클라의 currentResumeFromSeq를 이 이름으로 노출; 05의 resume이 소비할 값). `CommandReceipt = {commandId, submitted: true}` — 전송까지만 약속(MASTER §3.2).
 - **snapshot()**: wire = 최근 수신 snapshot 캐시(신선도 필드 포함) — dispatch성 재조회 아님을 타입/문서에 명시.
 
 ## 2. 구현 슬라이스
@@ -86,16 +90,20 @@ verb는 전송 성공 시 `{commandId, submitted}` resolve. 서버 거부(reject
 
 ## 4. Acceptance
 
-- [ ] S0 스파이크 판정 기록(satisfies 성립 여부·turn.cancel 경로·rejected reason 확장 안전성)
-- [ ] **외부 소비 실증**: repo 밖 빈 디렉토리 + `file:` 의존 + `tsc --noEmit`(connect 타입 포함) + ws/stdio 각 1 시나리오 — in-repo alias import로 대체 금지(vacuous)
-- [ ] approval 낀 턴에서 awaitTurnEnd 정상 종료(승계 상관) + 상관 소실 시 typed error(hang 금지) 유닛
-- [ ] dispatch-에러(예: empty_turn_input)가 wire 클라에 rejected로 표면화 — red-on-injection: S5 승격 코드 제거 시 침묵 hang 재현
-- [ ] 버전 불일치: **lenient 디코더 탑재 클라**→신서버 typed error 왕복 (기출하 구클라는 현행 침묵 유지가 정답 — S5 모집단 정직화 반영, vacuous "구클라" 문구 금지)
-- [ ] 연결사망: 서버 프로세스 kill → onConnectionState("closed") 통지 (ws·stdio 각각)
-- [ ] conformance: 정규화 계약 아래 3-way 동일 + oracle 대조 (transport별 "다름이 정답" positive 단언은 R2 F2대로 02 acceptance 소유 — 01은 현행 inproc 문서화 단언까지)
-- [ ] S1 치환 후 기존 attach/runtime/web-daemon 테스트 무수정 green
-- [ ] 신규 export가 public-surface 스냅샷에 등록 + `toSessionHandle`/loopback **부재** 확인(내부 전용 증명)
-- [ ] rejected 전 사유 각각 typed error 유닛 (카운트는 S0-3 인코딩 판정 따름: issue 재사용=5종 / 신규 reason=6종)
+> **갱신 2026-07-17 (적대어딧 2방향 반영):** `resumeFromSeq` 옵션은 KILL 판정으로
+> **descope**(§1 주석) — resume 관련 acceptance는 이 티켓에 없음(05 소유).
+> 체크 표기는 E3 worktree 기준 실상.
+
+- [x] S0 스파이크 판정 기록(satisfies 성립 여부·turn.cancel 경로·rejected reason 확장 안전성) — §0에 판정 3건 기록됨
+- [x] **외부 소비 실증** — ⚠️ **shim-조건부로만 실증됨**: repo 밖 디렉토리 + `file:` 의존 + `tsc --noEmit`는 통과했으나 **USAGE §9의 alias shim(`paths` @/* 매핑) + ambient `.d.ts` 2본 수동 로딩이 전제**다(`.d.ts` 부재라 순정 `file:`+import만으로는 불성립 — jul-4 P8이 `.d.ts` 산출 시 무조건부로 승격). ws/stdio 시나리오는 in-repo 실루프 e2e(`tests/integration/sdk-connect-session-handle-e2e.test.ts`) + stdio 단챙크 유닛으로 커버
+- [x] approval 낀 턴에서 awaitTurnEnd 정상 종료(승계 상관) + 상관 소실 시 typed error(hang 금지) 유닛 — 상관 소실 8종 전부(no_turn_run/approval_denied/**approval_voided**/continuation_failed(재발행 실패+respond 발송실패)/connection_closed/handle_closed/**superseded**) `tests/unit/ipc/session-handle.test.ts` + e2e
+- [x] dispatch-에러(예: empty_turn_input)가 wire 클라에 rejected로 표면화 — red-on-injection 문구 포함(`tests/unit/ipc/transport-dispatch-error-rejected.test.ts`)
+- [x] 버전 불일치: **lenient 디코더 탑재 클라**→신서버 typed error 왕복 (`tests/unit/ipc/transport-version-skew.test.ts`; 기출하 구 피어는 침묵 유지가 정답 — S7 카탈로그 명기)
+- [x] 연결사망: 서버 프로세스 kill → onConnectionState("closed") 통지 (ws·stdio 각각 — `session-transport-liveness.test.ts` + `session-stdio-spawn.test.ts` 실 child kill)
+- [x] conformance: 정규화 계약 아래 동일 + oracle 대조 (`session-handle-conformance.test.ts`; 봉인 negative paired-control 포함 — jul-16 어딧 F5/L-1; transport별 positive 단언은 R2 F2대로 02 소유)
+- [x] S1 치환 후 기존 attach/runtime/web-daemon 테스트 무수정 green
+- [x] 신규 export가 public-surface 스냅샷에 등록 + `toSessionHandle`/loopback **부재** 확인(내부 전용 증명) — `tests/unit/sdk/public-surface.test.ts`(+공개 시그니처 참조 타입 `SessionTransportClientRejection`/`ImageBlock` 재수출, 어딧 F4)
+- [x] rejected 전 사유 각각 typed error 유닛 (S0-3 판정=issue 재사용 ⇒ **5종**, `tests/unit/ipc/rejected-typed-errors.test.ts`)
 
 ## 5. Hazards / 금지
 

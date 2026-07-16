@@ -69,6 +69,75 @@ const DEFAULT_STDERR_TAIL_CHARS = 8 * 1024
  *  channel must not hang on a stranger's fd. */
 const STDERR_SETTLE_MS = 250
 
+/* --- hoisted stream/timer helpers (god-FN ratchet, jul-16 audit HIGH-3) ---- */
+
+/** Pump the child's stdout into `onChunk` (decoded text) until EOF/tear.
+ *  A torn stream (child death / reader cancel) is swallowed — the exit path
+ *  owns the terminal notification. */
+const pumpChildStdout = (
+  stdout: ReadableStream<Uint8Array>,
+  onChunk: (text: string) => void,
+): { cancel: () => void } => {
+  const reader = stdout.getReader()
+  const decoder = new TextDecoder()
+  void (async () => {
+    try {
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        if (value !== undefined) onChunk(decoder.decode(value, { stream: true }))
+      }
+    } catch {
+      // Torn stream (child death / reader cancel) — the exit path notifies.
+    }
+  })()
+  return { cancel: () => void reader.cancel().catch(() => undefined) }
+}
+
+/** Drain the child's stderr COMPLETELY (a full pipe wedges the child) while
+ *  retaining only the last `tailCap` characters. `done` resolves at EOF/tear;
+ *  the tail keeps whatever it has on a torn stream. */
+const drainStderrTail = (
+  stderr: ReadableStream<Uint8Array>,
+  tailCap: number,
+): { readonly done: Promise<void>; tail: () => string; cancel: () => void } => {
+  const reader = stderr.getReader()
+  const decoder = new TextDecoder()
+  let tail = ""
+  const done = (async () => {
+    try {
+      while (true) {
+        const { done: eof, value } = await reader.read()
+        if (eof) break
+        if (value !== undefined) {
+          tail = (tail + decoder.decode(value, { stream: true })).slice(-tailCap)
+        }
+      }
+    } catch {
+      // Torn stream — the exit path notifies; the tail keeps what it has.
+    }
+  })()
+  return { done, tail: () => tail, cancel: () => void reader.cancel().catch(() => undefined) }
+}
+
+/** The SIGTERM→SIGKILL escalation timer: armed at most once, unref'd (never
+ *  keeps the process alive), and cleared when the child exits on its own. */
+const createSigkillEscalation = (kill: () => void, graceMs: number) => {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return {
+    arm(): void {
+      if (timer !== undefined) return
+      timer = setTimeout(kill, graceMs)
+      timer.unref()
+    },
+    clear(): void {
+      if (timer === undefined) return
+      clearTimeout(timer)
+      timer = undefined
+    },
+  }
+}
+
 export const createSessionStdioSpawnTransport = (
   opts: CreateSessionStdioSpawnTransportOpts,
 ): SessionStdioSpawnTransport => {
@@ -87,8 +156,6 @@ export const createSessionStdioSpawnTransport = (
 
   const closeSignal = createSessionTransportCloseSignal()
   let closeRequested = false
-  let stderrTail = ""
-  let graceTimer: ReturnType<typeof setTimeout> | undefined
 
   // --- stdout → data-only reader port (framing stays in ./stdio) ------------
   let stdoutDataHandler: ((chunk: Buffer | string) => void) | undefined
@@ -100,40 +167,10 @@ export const createSessionStdioSpawnTransport = (
       if (event === "data" && stdoutDataHandler === handler) stdoutDataHandler = undefined
     },
   }
-  const stdoutReader = child.stdout.getReader()
-  const stdoutDecoder = new TextDecoder()
-  const pumpStdout = async (): Promise<void> => {
-    try {
-      while (true) {
-        const { done, value } = await stdoutReader.read()
-        if (done) break
-        if (value !== undefined) {
-          stdoutDataHandler?.(stdoutDecoder.decode(value, { stream: true }))
-        }
-      }
-    } catch {
-      // Torn stream (child death / reader cancel) — the exit path notifies.
-    }
-  }
-  void pumpStdout()
+  const stdoutPump = pumpChildStdout(child.stdout, (text) => stdoutDataHandler?.(text))
 
   // --- stderr drain: always consumed, bounded tail retained -----------------
-  const stderrReader = child.stderr.getReader()
-  const stderrDecoder = new TextDecoder()
-  const pumpStderr = async (): Promise<void> => {
-    try {
-      while (true) {
-        const { done, value } = await stderrReader.read()
-        if (done) break
-        if (value !== undefined) {
-          stderrTail = (stderrTail + stderrDecoder.decode(value, { stream: true })).slice(-tailCap)
-        }
-      }
-    } catch {
-      // Torn stream — the exit path notifies; the tail keeps what it has.
-    }
-  }
-  const stderrDone = pumpStderr()
+  const stderr = drainStderrTail(child.stderr, tailCap)
 
   // --- stdin → writer port (flush per frame: FileSink buffers) --------------
   const stdinPort = {
@@ -148,32 +185,33 @@ export const createSessionStdioSpawnTransport = (
 
   const childGone = (): boolean => child.exitCode !== null || child.signalCode !== null
 
+  const sigkill = createSigkillEscalation(() => {
+    try {
+      child.kill("SIGKILL")
+    } catch {
+      // Child already gone.
+    }
+  }, graceMs)
+
   const summarizeExit = (): string => {
     if (closeRequested) return "local_close"
     const base = `child_exit code=${child.exitCode} signal=${child.signalCode}`
-    const tail = stderrTail.trim()
+    const tail = stderr.tail().trim()
     return tail.length > 0 ? `${base} stderr_tail: ${tail}` : base
-  }
-
-  const releaseStreams = (): void => {
-    void stdoutReader.cancel().catch(() => undefined)
-    void stderrReader.cancel().catch(() => undefined)
   }
 
   // Exit observer — the ONE place the terminal notification for a dead child
   // is composed. Bounded stderr settle first so a crash's last words make it
   // into the reason; then latch, then tear the framing down.
   const onExited = async (): Promise<void> => {
-    if (graceTimer !== undefined) {
-      clearTimeout(graceTimer)
-      graceTimer = undefined
-    }
+    sigkill.clear()
     await Promise.race([
-      stderrDone,
+      stderr.done,
       new Promise<void>((resolve) => setTimeout(resolve, STDERR_SETTLE_MS).unref()),
     ])
     closeSignal.notify({ reason: summarizeExit() })
-    releaseStreams()
+    stdoutPump.cancel()
+    stderr.cancel()
     try {
       // Self-exit paths never went through terminate(): release our write end
       // of the dead child's stdin pipe (fd hygiene — don't wait for GC).
@@ -202,16 +240,7 @@ export const createSessionStdioSpawnTransport = (
       } catch {
         // Child raced to exit — reap below.
       }
-      if (graceTimer === undefined) {
-        graceTimer = setTimeout(() => {
-          try {
-            child.kill("SIGKILL")
-          } catch {
-            // Child already gone.
-          }
-        }, graceMs)
-        graceTimer.unref()
-      }
+      sigkill.arm()
     }
     await child.exited
   }

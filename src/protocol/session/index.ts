@@ -105,6 +105,7 @@ export type {
   SessionSnapshotLite,
   SessionStateView,
 } from "./snapshot"
+export type { CommandReceipt, SessionVerbSurface } from "./verb-surface"
 export {
   isSessionProtocolVersion,
   SESSION_PROTOCOL_VERSION,

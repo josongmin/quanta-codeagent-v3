@@ -25,27 +25,33 @@
  */
 
 import {
+  type SessionApprovalAnswer as AttachApprovalAnswer,
+  createSessionApprovalFlow,
   createSessionTransportClient,
+  type SessionApprovalFlow,
   type SessionTransport,
   type SessionTransportMessage,
   wrapWebSocketLikeAsSessionTransport,
 } from "@/ipc/session"
 import {
-  type ApprovalRespondCommand,
-  buildApprovalRespond,
   buildTurnCancel,
-  buildTurnRun,
   type CommandBuildDeps,
   type SessionCommand,
   type SessionEvent,
 } from "@/protocol/session"
-import { buildApprovalRespondCommand, buildLineCommands } from "./commands"
+import { buildLineCommands } from "./commands"
 import {
   type AttachHandshake,
   createAttachHandshake,
   HANDSHAKE_DISCOVERY_SESSION_ID,
 } from "./handshake"
 import { renderSessionEvent } from "./render"
+
+/** UUX-1-19 — the prompter's RICH decision. MOVED (S3, jul-16 SDK ticket 01)
+ *  to the hoisted attach flow (`@/ipc/session/attach-flow`) as
+ *  `SessionApprovalAnswer`; re-exported under the attach slice's historical
+ *  name so every import site stays unmodified. */
+export type { SessionApprovalAnswer as AttachApprovalAnswer } from "@/ipc/session"
 
 /** Subset of the WHATWG/Bun `WebSocket` the attach client needs — also the
  *  shape `wrapWebSocketLikeAsSessionTransport` consumes. The global Bun
@@ -65,20 +71,6 @@ export type AttachSocketCtor = new (
   url: string,
   protocols?: string | readonly string[],
 ) => AttachSocket
-
-/** UUX-1-19 (jul-10 W4) — the attach prompter's RICH decision, mirroring what
- *  the wire (`ApprovalRespondCommand`) actually carries: the kernel scheduler
- *  forwards `scope` + `steer` verbatim to `host.resolveApproval`, so the
- *  attach surface can offer [a]lways-session and deny+s[t]eer as first-class
- *  verbs instead of collapsing everything onto y/N. A plain string answer is
- *  the LEGACY shape (y/yes ⇒ approve, else deny) and stays accepted. */
-export interface AttachApprovalAnswer {
-  readonly decision: "approve" | "deny"
-  /** Only meaningful on `approve` (the wire's standing-grant scopes). */
-  readonly scope?: "once" | "session" | "session_prefix"
-  /** Only meaningful on `deny` (the wire's corrective steer). */
-  readonly steer?: string
-}
 
 export interface AttachToDaemonOptions {
   /** WS URL of the daemon session endpoint, e.g. `ws://127.0.0.1:4096/`. */
@@ -128,34 +120,6 @@ const withAuthQuery = (url: string, token: string | undefined): string => {
  *  fallback is dormant by construction. */
 const ATTACH_CLOCK: CommandBuildDeps["clock"] = { now: () => new Date() }
 
-/** UUX-1-19 — map the prompter's answer onto the wire. A STRING answer keeps
- *  the legacy y/N mapping (`buildApprovalRespondCommand`, byte-identical); a
- *  rich {@link AttachApprovalAnswer} carries `scope`/`steer` verbatim — the
- *  kernel scheduler forwards both to `host.resolveApproval`. A steer is only
- *  attached to a DENY and never as an empty string (the normalizer SSOT's
- *  no-phantom-steer rule, mirrored at the wire boundary) — that policy stays
- *  HERE; the hoisted `buildApprovalRespond` owns only the wire assembly. */
-const buildRespondForAnswer = (args: {
-  readonly sessionId: string
-  readonly approvalId: string
-  readonly answer: string | AttachApprovalAnswer
-  readonly commandId: string
-  readonly issuedAt: string
-}): ApprovalRespondCommand => {
-  const { sessionId, approvalId, answer, commandId, issuedAt } = args
-  if (typeof answer === "string") {
-    return buildApprovalRespondCommand({ sessionId, approvalId, answer, commandId, issuedAt })
-  }
-  return buildApprovalRespond({ sessionId, clock: ATTACH_CLOCK }, approvalId, answer.decision, {
-    commandId,
-    issuedAt,
-    ...(answer.decision === "approve" && answer.scope !== undefined ? { scope: answer.scope } : {}),
-    ...(answer.decision === "deny" && answer.steer !== undefined && answer.steer.trim().length > 0
-      ? { steer: answer.steer }
-      : {}),
-  })
-}
-
 const resolveCtor = (override: AttachSocketCtor | undefined): AttachSocketCtor => {
   if (override !== undefined) return override
   const g = globalThis as { WebSocket?: AttachSocketCtor }
@@ -194,15 +158,46 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
     resolveDone = resolve
   })
 
-  // Serialize approval prompts so two near-simultaneous requests don't garble
-  // the terminal; each awaits the prior.
-  let approvalChain: Promise<void> = Promise.resolve()
-
   const sendCommand = async (command: SessionCommand): Promise<void> => {
     // Send straight through the transport (bypassing the client's seed-id
     // validation) so the command carries the CANONICAL id the daemon expects.
     await transport.send({ kind: "command", command })
   }
+
+  // Handshake-readiness gate shared by the read loop AND the approval flow
+  // (bounded — a handshake that never settles fails visibly, not silently).
+  const waitForReady = async (): Promise<boolean> => {
+    const start = Date.now()
+    while (!handshake.ready && !closed) {
+      if (Date.now() - start > 10_000) return false
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    return handshake.ready && !closed
+  }
+
+  // S3 (jul-16 SDK ticket 01) — the approval round-trip (serialized prompts →
+  // respond → ADR-0540 marker-gated turn.run re-issue) is the HOISTED shared
+  // flow; this surface supplies only its own seams: the TTY prompter, the
+  // pre-handshake banner, and the loud sendBroken latch on a dead socket.
+  // Continuation reporting stays unwired here (attach has no awaitTurnEnd).
+  const approvalFlow: SessionApprovalFlow = createSessionApprovalFlow({
+    waitForReady,
+    sessionId: () => handshake.sessionId,
+    serverAutoContinues: () => handshake.capabilities?.serverAutoContinues === true,
+    promptApproval: (reason) => opts.promptApproval(reason),
+    sendCommand,
+    newCommandId,
+    issuedAt,
+    onUnanswerable: (reason) => {
+      opts.write(
+        `\n[approval "${reason}" arrived before the handshake completed — cannot respond; it stays unanswered/denied on the daemon side]\n`,
+      )
+    },
+    onRespondSendFailed: () => {
+      sendBroken = true
+      opts.write("\n[disconnected from daemon (approval response not delivered)]\n")
+    },
+  })
 
   const handleEvent = (event: SessionEvent): void => {
     const chunk = renderSessionEvent(event)
@@ -216,66 +211,7 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
       return
     }
     if (event.type === "approval.requested") {
-      const approvalId = event.approval.approvalId
-      const reason = event.approval.reason
-      approvalChain = approvalChain.then(async () => {
-        // WS-B (jul-10, UUX-3-03) — a PRE-HANDSHAKE approval is no longer
-        // silently dropped: the serialized chain WAITS for the handshake
-        // (bounded, same 10s the read loop uses) and resolves the canonical
-        // session id then. Only when the handshake never completes do we fail
-        // CLOSED with a VISIBLE banner (we structurally cannot respond without
-        // a session id — the daemon's own lease keeps the ask fail-closed).
-        const ready = await waitForReady()
-        const sid = handshake.sessionId
-        if (!ready || sid === undefined) {
-          opts.write(
-            `\n[approval "${reason}" arrived before the handshake completed — cannot respond; it stays unanswered/denied on the daemon side]\n`,
-          )
-          return
-        }
-        // A throwing/garbage prompter fail-safes to a literal "n" so the
-        // approval is DENIED, never approved and never left hanging. (#5)
-        const answer = await opts.promptApproval(reason).catch(() => "n")
-        // UUX-1-19 — string answers keep the legacy y/N mapping; a rich answer
-        // rides the wire's scope/steer (see {@link buildRespondForAnswer}).
-        const respond = buildRespondForAnswer({
-          sessionId: sid,
-          approvalId,
-          answer,
-          commandId: newCommandId(),
-          issuedAt: issuedAt(),
-        })
-        // Audit R3 MED-2 — a respond send failure must be LOUD and terminal
-        // (parity with the line-input path): latch sendBroken, banner, and
-        // never fire the follow-up turn.run against a dead socket.
-        try {
-          await sendCommand(respond)
-        } catch {
-          sendBroken = true
-          opts.write("\n[disconnected from daemon (approval response not delivered)]\n")
-          return
-        }
-        // ADR-0512 P3 — the kernel does NOT auto-continue a resolved approval: a
-        // fresh `turn.run` is what claims the grant and re-dispatches the
-        // approved tool. So on APPROVE, re-run the suspended turn (a bare
-        // `turn.run`, no `input.append`). A deny aborts ⇒ no continuation.
-        // ADR-0540 W1-B — UNLESS the daemon declared the `serverAutoContinues`
-        // capability marker (handshake snapshot): then the DAEMON re-issues the
-        // continuation and this client must not (defensive `!== true` read ⇒ a
-        // legacy daemon without the field keeps the client-owned re-issue,
-        // byte-identical).
-        if (
-          respond.decision === "approve" &&
-          handshake.capabilities?.serverAutoContinues !== true
-        ) {
-          await sendCommand(
-            buildTurnRun(
-              { sessionId: sid, clock: ATTACH_CLOCK },
-              { commandId: newCommandId(), issuedAt: issuedAt() },
-            ),
-          ).catch(() => undefined)
-        }
-      })
+      approvalFlow.handleApprovalRequested(event.approval)
     }
   }
 
@@ -350,17 +286,9 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
 
   // stdin read loop — each line becomes input.append + turn.run, but only once
   // the handshake is READY (so commands carry the canonical id the daemon
-  // accepts). Lines typed before readiness are still consumed in order; we wait
+  // accepts; the shared `waitForReady` gate is declared above the approval
+  // flow). Lines typed before readiness are still consumed in order; we wait
   // for readiness per line.
-  const waitForReady = async (): Promise<boolean> => {
-    const start = Date.now()
-    while (!handshake.ready && !closed) {
-      if (Date.now() - start > 10_000) return false
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    }
-    return handshake.ready && !closed
-  }
-
   const readLoop = async (): Promise<void> => {
     try {
       for await (const line of opts.stdin) {

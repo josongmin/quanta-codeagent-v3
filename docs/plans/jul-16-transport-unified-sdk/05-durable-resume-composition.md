@@ -13,7 +13,7 @@
 
 ## 1. 01과의 관계 (경계 명확화 — R1 MED 반영)
 
-- 01은 `session.lastSeq()` + `connect({resumeFromSeq})` 페어로 **수동 재접속**(메모리 tail 한정, ahead-of-tip이면 full-snapshot 폴백)까지. 그것은 오늘 살아있는 시맨틱([planSessionReplay](../../../src/ipc/session/bridge.ts))의 노출이지 durable이 아니다.
+- ~~01은 `session.lastSeq()` + `connect({resumeFromSeq})` 페어로 **수동 재접속**까지~~ **정정(jul-16 구현 적대어딧 KILL)**: 01의 `connect({resumeFromSeq})`는 **descope됨** — handshake ready가 snapshot 프레임에서만 settle하는데 [planSessionReplay](../../../src/ipc/session/bridge.ts)는 서빙 가능한 커서에 events-only(커서==tip이면 0프레임)로 답해 **영구 hang이 구조적**(ack-less라 caught-up 신호 부재). 01이 노출하는 것은 관측용 `lastSeq()`뿐. ⇒ **05의 스코프가 커짐**: 메모리-tail resume의 door-level 노출부터 durable까지 전부 이 티켓 소유(경로는 raw client `connect({resumeFromSeq})` resume watcher — 이미 main 랜딩 — 를 태우고, caught-up 신호 문제를 함께 풀어야 함: 예. resume-ack/served-marker additive 프레임 또는 handshake-외 재접속 프로토콜).
 - 05가 승격하는 것: 재시작-후 폴백 3경로(behind-window/ahead-of-tip/gap)가 온디스크 로그 조회로 대체 + `connect({resume})` 1급 옵션 + resume 실패의 정직한 강등 — **표면화 채널(R2 F5로 명명)**: 01이 예약한 `onConnectionState`의 connected 페이로드 `resume: "replayed" | "snapshot_fallback"` 필드를 소비(조용한 강등 금지).
 
 ## 2. 스코프 (좁게)
