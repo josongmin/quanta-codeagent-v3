@@ -324,6 +324,7 @@ const buildSetup = async (
     briefStore: { get: () => false, set: () => undefined, snapshot: () => false },
     llm: llmStub,
     planMode: false,
+    providerRateLimitRemainingPercent: undefined,
     metrics: undefined as never,
     state: undefined as never,
     mcpClients: [],

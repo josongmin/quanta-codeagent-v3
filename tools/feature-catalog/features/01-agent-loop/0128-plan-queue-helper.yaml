@@ -18,13 +18,13 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "pure internal typed follow-up primitive (helper-only), no UI affordance on any surface"
+    web: "CLI `/queue` only; no web queue affordance."
 purpose: |
   Typed primitive that lets a host accept user input while a turn is in flight
   and dispatch the queued items on the next turn boundary. Captures FollowUp
   context (pausedReason / arrivedDuringTurn / source / …) so a replayer can
-  judge staleness. Pure helper — wiring into loop dispatch is left to the host
-  per the helper-only deferred-wire idiom.
+  judge staleness. The interactive CLI constructs one store per REPL, exposes
+  `/queue`, and late-binds `sendNow` to the loop-owned external prompt queue.
 evidence:
   code:
     - src/agent/plan-queue.ts
@@ -41,4 +41,4 @@ deliberate_hold: null
 notes: |
   Modernizes the mid-turn UX gap left by sibling agents that either freeze the
   UI or simply prepend follow-ups to the next prompt without context. The
-  12-field FollowUp envelope is the portable piece — actual UX is host-side.
+  12-field FollowUp envelope is the portable piece; CLI host wiring is live.

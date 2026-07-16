@@ -12,35 +12,30 @@
  *
  * Default-OFF byte-identical (RFC §1.2): when neither
  * `QUANTA_PLAYBOOK_TRIGGER=on` nor the explicit boolean opt-in is set, the
- * helper returns a NOOP handle and allocates NOTHING (no watcher, no
- * controller, no fs.stat). The env precedence (env wins over flag=false)
+ * helper returns a NOOP handle and allocates NOTHING (no loader, watcher,
+ * controller, or fs access). The env precedence (env wins over flag=false)
  * is documented in ADR-0293.
  *
  * No-throw: every public surface returns a handle. Construction failures
- * (registry root missing, watcher.start ok:false) surface via `logger.warn`
- * + NOOP handle. Sink throws DO NOT bubble — the wrapped sink catches
+ * (registry load failure, watcher.start ok:false) surface via `logger.warn`
+ * + a typed operator notice / NOOP handle. Sink throws DO NOT bubble — the wrapped sink catches
  * + reports via `logger.warn`.
  *
- * UUX-1-24 honesty: because the registry is still the empty placeholder,
- * an ACTIVE wire also emits ONE warn on the operator-notice bus at engage
- * time ("no playbooks registered — fires will never dispatch"), and a
- * missing registry root warns too (the default logger is a noop, so the
- * bus is the only channel a real session hears).
+ * An empty successful scan emits one warning on the operator-notice bus at
+ * engage time. Invalid files and root failures surface typed loader details.
  *
- * Slice posture: leaf-level. Imports `@/skill/playbook` (the wire +
- * controller types) and `node:fs` (existsSync — synchronous because we
- * fail fast on session bootstrap, not in a hot path). NO `@/agent` runtime
- * imports beyond the structural `PlaybookPlanQueueSink` type from the
- * playbook barrel.
+ * Slice posture: leaf-level. Imports `@/skill/playbook` (loader, wire, and
+ * controller types). NO `@/agent` runtime imports beyond the structural
+ * `PlaybookPlanQueueSink` type from the playbook barrel.
  */
 
-import { existsSync, statSync } from "node:fs"
 import { resolve as resolvePath } from "node:path"
 import { emitOperatorNotice, errMessage, gateOn } from "@/shared"
 import {
+  createDiskPlaybookRegistry,
   createInlineTriggerWatcher,
+  type InlineTriggerWatcherPort,
   type PlaybookPlanQueueSink,
-  type PlaybookRegistry,
   startPlaybookFromTrigger,
 } from "@/skill/playbook"
 /** Handle returned by {@link maybeStartPlaybookTriggerWire}. `stop()` is
@@ -62,6 +57,8 @@ export interface PlaybookTriggerWireOptions {
   readonly registryRoot?: string
   readonly logger?: { warn: (m: string) => void }
   readonly now?: () => number
+  /** Closed-port test seam. Default allocates the production fs watcher. */
+  readonly watcherFactory?: () => InlineTriggerWatcherPort
 }
 
 /** Inert handle reused for every default-OFF / no-op path. Shared singleton
@@ -73,14 +70,7 @@ const NOOP_HANDLE: PlaybookTriggerWireHandle = Object.freeze({
   isActive: () => false,
 })
 
-/** Empty registry — the CLI bind opt-in does NOT scan SKILL.md files today
- *  (that's a follow-up wire). A real registry can be injected later by a
- *  surface-composition step; for now the trigger fires + dispatches against
- *  whatever the watcher sees, with this stand-in keeping `enabled: true`
- *  byte-identical to "no registrations matched". */
-const EMPTY_REGISTRY: PlaybookRegistry = {
-  list: () => [],
-}
+const NOOP_LOGGER = Object.freeze({ warn: (_message: string): void => undefined })
 
 /** True when the CLI opt-in is active. Env value MUST be the literal `"on"`
  *  (case-sensitive); `"1"` / `"true"` / `"off"` / `"ON"` all evaluate false.
@@ -109,57 +99,39 @@ const safeSink = (
   },
 })
 
-/** Validate the registry root resolves to an actual directory. Returns the
- *  resolved absolute path on success; `undefined` on miss (the caller logs
- *  + returns NOOP). */
-const validateRoot = (root: string): string | undefined => {
-  try {
-    if (!existsSync(root)) return undefined
-    if (!statSync(root).isDirectory()) return undefined
-    return root
-  } catch {
-    return undefined
-  }
-}
-
 /** CLI auto-bind opt-in for the inline-trigger watcher. See file-level
  *  JSDoc for env/flag precedence + default-OFF guarantees. */
 export const maybeStartPlaybookTriggerWire = (
   opts: PlaybookTriggerWireOptions,
 ): PlaybookTriggerWireHandle => {
-  const logger = opts.logger ?? { warn: () => undefined }
   if (!isOptedIn(opts.env, opts.cliFlag)) return NOOP_HANDLE
+  const logger = opts.logger ?? NOOP_LOGGER
 
   const root = resolvePath(opts.registryRoot ?? `${process.cwd()}/.quanta/playbooks`)
-  const validated = validateRoot(root)
-  if (validated === undefined) {
-    logger.warn(`[playbook-trigger] registry root not found or not a directory: ${root}`)
-    // UUX-1-24 — the operator OPTED IN; a silently-skipped watcher would look
-    // like a working feature. The default logger is a noop (the session loop
-    // passes none), so surface the miss on the operator-notice bus too.
+  const registry = createDiskPlaybookRegistry(root)
+  const loaded = registry.lastReload()
+  if (!loaded.ok) {
+    for (const problem of loaded.issues) {
+      logger.warn(
+        `[playbook-trigger] registry load failed (${problem.code}) at ${problem.path}: ${problem.message}`,
+      )
+    }
+    const first = loaded.issues[0]
     emitOperatorNotice({
       severity: "warn",
       source: "playbook-trigger",
-      message: `trigger enabled but the registry root is missing: ${root}`,
+      message: `trigger enabled but registry load failed: ${first?.path ?? root}: ${first?.message ?? "unknown error"}`,
       hint: "watcher not started",
     })
     return NOOP_HANDLE
   }
 
-  // UUX-1-24 — HONESTY over silence: the CLI bind still ships the EMPTY
-  // registry placeholder (no .quanta/playbooks/*.md loader was ever built), so
-  // every trigger fire resolves against zero registrations and can NEVER
-  // dispatch. Until a real registry is injected by a composition step, say so
-  // ONCE at engage time instead of letting the opt-in masquerade as working.
-  // The check reads the registry the controller ACTUALLY gets, so wiring a
-  // real one later silences the notice with no further edit here.
-  const registry = EMPTY_REGISTRY
   if (registry.list().length === 0) {
     emitOperatorNotice({
       severity: "warn",
       source: "playbook-trigger",
       message: "trigger enabled but no playbooks registered — fires will never dispatch",
-      hint: `registry loader not built yet; ${root} (.quanta/playbooks) is watched but its *.md files are not loaded`,
+      hint: `${root} contains no valid top-level *.md playbooks`,
     })
   }
 
@@ -167,11 +139,11 @@ export const maybeStartPlaybookTriggerWire = (
   try {
     controller = startPlaybookFromTrigger({
       enabled: true,
-      watcher: createInlineTriggerWatcher(),
+      watcher: (opts.watcherFactory ?? createInlineTriggerWatcher)(),
       registry,
       planQueueSink: safeSink(opts.planQueueSink, logger),
       threadId: opts.threadId,
-      defaultRoot: validated,
+      defaultRoot: root,
     })
   } catch (e) {
     const reason = errMessage(e)

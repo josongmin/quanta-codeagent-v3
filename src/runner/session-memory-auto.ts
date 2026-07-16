@@ -27,8 +27,8 @@ import {
 import { assembleMemoryAuto } from "@/memory/auto-trigger"
 import { ChildProcessGitPort } from "@/memory/consolidate/git"
 import { resolveMemoryDirPaths } from "@/memory/consolidate/paths"
-import { loadMemorySummary } from "@/memory/consolidate/reader"
 import { LlmPhase2Port } from "@/memory/consolidate/phase2-llm"
+import { loadMemorySummary } from "@/memory/consolidate/reader"
 import type { NodeFsLike } from "@/memory/consolidate/writer"
 import {
   DEFAULT_INJECT_MAX_BYTES,
@@ -37,6 +37,7 @@ import {
 } from "@/memory/cross-session"
 import { type DreamOutcomeKind, INITIAL_DREAM_STATE } from "@/memory/dream/types"
 import { JsonlFileStage1Store, type Stage1OutputsStore } from "@/memory/stage1-store"
+import { redactSecrets } from "@/security"
 import { errMessage, gateOn, throwIfAborted } from "@/shared"
 
 const noopWarn = (_msg: string): void => {}
@@ -437,6 +438,7 @@ export const buildSessionMemoryAutoWires = async (
       enabled: true,
       port: buildPhase1PortFromLlm(input.llm),
       store: phase1Store,
+      redact: (content) => redactSecrets(content, { origin: "memory_distill" }).text,
       threadId: input.sessionId,
       defer: lane.defer,
     },

@@ -239,6 +239,7 @@ export const makeFakeSessionSetup = (
   briefStore: createBriefStore(),
   llm: makeFakeLlm(),
   planMode: false,
+  providerRateLimitRemainingPercent: undefined,
   metrics: undefined,
   state: undefined,
   mcpClients: [],

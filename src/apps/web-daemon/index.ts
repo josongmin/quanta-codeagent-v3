@@ -7,12 +7,12 @@
  *
  * Env knobs (all optional):
  *   QUANTA_WEB_PORT        - TCP port (default `4096`)
- *   QUANTA_WEB_BIND        - bind address (default `0.0.0.0` so LAN
- *                            devices on the same Wi-Fi reach the daemon;
- *                            set `127.0.0.1` to restrict to loopback)
+ *   QUANTA_WEB_BIND        - bind address (default `127.0.0.1`)
  *   QUANTA_WEB_AUTH_TOKEN  - bearer token; when set, every WS upgrade
  *                            must carry `Authorization: Bearer <token>`
  *                            or `?token=<token>` in the URL
+ *   QUANTA_WEB_ALLOW_UNAUTHENTICATED_WILDCARD - exact `1` acknowledges
+ *                            unauthenticated wildcard/LAN exposure
  *
  * The daemon remains library-shaped first, but when no explicit
  * `runtimeFactory` override is supplied we lazily load the production
@@ -25,7 +25,7 @@ import { isFollowerCoControlEnabled } from "@/agent/thread-follower"
 import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { type SupportedReadModels, supported } from "@/protocol/session"
 import type { RuntimeFacade } from "@/sdk/runtime"
-import { errMessage, gateOn } from "@/shared"
+import { errMessage, gateOn, gateOnStrict } from "@/shared"
 import type { ObservableRuntimeFacade } from "./runtime-factory"
 import {
   type AgentStatePorts,
@@ -39,7 +39,7 @@ import {
 import type { WebDaemonConfig, WebDaemonHandle } from "./types"
 
 const DEFAULT_PORT = 4096
-const DEFAULT_BIND = "0.0.0.0"
+const DEFAULT_BIND = "127.0.0.1"
 
 const parsePort = (raw: string | undefined): number => {
   if (raw === undefined || raw.length === 0) return DEFAULT_PORT
@@ -56,8 +56,54 @@ const parseBind = (raw: string | undefined): string => {
 }
 
 const parseAuthToken = (raw: string | undefined): string | undefined => {
-  if (raw === undefined || raw.length === 0) return undefined
+  if (raw === undefined || raw.trim().length === 0) return undefined
   return raw
+}
+
+const isWildcardBind = (bind: string): boolean => {
+  const normalized = bind.trim().toLowerCase()
+  if (normalized === "0.0.0.0" || normalized === "::" || normalized === "[::]") return true
+  return /^(?:0{1,4}:){7}0{1,4}$/.test(normalized)
+}
+
+const assertSafeBindPolicy = (config: {
+  readonly bind: string
+  readonly authToken: string | undefined
+  readonly allowUnauthenticatedWildcard: boolean
+}): void => {
+  if (
+    !isWildcardBind(config.bind) ||
+    config.authToken !== undefined ||
+    config.allowUnauthenticatedWildcard
+  ) {
+    return
+  }
+  throw new Error(
+    "web-daemon: wildcard bind requires QUANTA_WEB_AUTH_TOKEN or " +
+      "QUANTA_WEB_ALLOW_UNAUTHENTICATED_WILDCARD=1",
+  )
+}
+
+interface ResolvedNetworkConfig {
+  readonly bind: string
+  readonly authToken: string | undefined
+  readonly allowUnauthenticatedWildcard: boolean
+}
+
+const resolveNetworkConfig = (
+  overrides: Partial<WebDaemonConfig> | undefined,
+  env: Record<string, string | undefined>,
+): ResolvedNetworkConfig => {
+  const bind = overrides?.bind ?? parseBind(env.QUANTA_WEB_BIND)
+  const authToken = parseAuthToken(
+    overrides?.authToken !== undefined ? overrides.authToken : env.QUANTA_WEB_AUTH_TOKEN,
+  )
+  const allowUnauthenticatedWildcard =
+    overrides?.allowUnauthenticatedWildcard ??
+    gateOnStrict(env, "QUANTA_WEB_ALLOW_UNAUTHENTICATED_WILDCARD")
+  const config = { bind, authToken, allowUnauthenticatedWildcard }
+  assertSafeBindPolicy(config)
+  return config
 }
 
 /**
@@ -233,6 +279,41 @@ const buildSupportedReadModels = (args: {
       : { status: "unsupported" },
 })
 
+const buildServerConfig = (args: {
+  readonly overrides: Partial<WebDaemonConfig> | undefined
+  readonly network: ResolvedNetworkConfig
+  readonly runtimeFactory: () => Promise<RuntimeFacade>
+  readonly supportedReadModels: SupportedReadModels
+  readonly observabilityPorts: ObservabilityPorts | undefined
+  readonly canvasPorts: CanvasPorts | undefined
+  readonly canvasArtifactFeed: WebDaemonServerConfig["canvasArtifactFeed"]
+  readonly artifactPreviewResolver: WebDaemonServerConfig["artifactPreviewResolver"]
+  readonly agentStatePorts: AgentStatePorts | undefined
+  readonly subagentSource: WebDaemonServerConfig["subagentSource"]
+  readonly userInputPorts: UserInputPorts | undefined
+  readonly controlRequestPorts: ControlRequestPorts | undefined
+  readonly followerCoControl: FollowerCoControlDispatcher | undefined
+}): WebDaemonServerConfig => ({
+  port: args.overrides?.port ?? parsePort(process.env.QUANTA_WEB_PORT),
+  ...args.network,
+  runtimeFactory: args.runtimeFactory,
+  sessionConfig: args.overrides?.sessionConfig ?? {},
+  supportedReadModels: args.supportedReadModels,
+  ...(args.observabilityPorts !== undefined ? { observabilityPorts: args.observabilityPorts } : {}),
+  ...(args.canvasPorts !== undefined ? { canvasPorts: args.canvasPorts } : {}),
+  ...(args.canvasArtifactFeed !== undefined ? { canvasArtifactFeed: args.canvasArtifactFeed } : {}),
+  ...(args.artifactPreviewResolver !== undefined
+    ? { artifactPreviewResolver: args.artifactPreviewResolver }
+    : {}),
+  ...(args.agentStatePorts !== undefined ? { agentStatePorts: args.agentStatePorts } : {}),
+  ...(args.subagentSource !== undefined ? { subagentSource: args.subagentSource } : {}),
+  ...(args.userInputPorts !== undefined ? { userInputPorts: args.userInputPorts } : {}),
+  ...(args.controlRequestPorts !== undefined
+    ? { controlRequestPorts: args.controlRequestPorts }
+    : {}),
+  ...(args.followerCoControl !== undefined ? { followerCoControl: args.followerCoControl } : {}),
+})
+
 /**
  * Boot the daemon. Accepts an optional override so test code (and a future
  * composition root) can inject a real `runtimeFactory` without parsing env.
@@ -241,6 +322,8 @@ const buildSupportedReadModels = (args: {
  * than to boot a daemon that cannot serve a session.
  */
 export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDaemonHandle> => {
+  const network = resolveNetworkConfig(overrides, process.env)
+
   // OTLP span export (ADR-0268) — same boot wire as the CLI, for the daemon
   // process. When QUANTA_OTEL_ENDPOINT is set, the daemon's session spans ship
   // to the collector; Default-OFF no-op otherwise. Torn down in `shutdown`
@@ -291,26 +374,21 @@ export const main = async (overrides?: Partial<WebDaemonConfig>): Promise<WebDae
   const canvasArtifactFeed = observableFacade?.canvasArtifact?.sink
   const artifactPreviewResolver = observableFacade?.artifactPreviewResolver
 
-  const config: WebDaemonServerConfig = {
-    port: overrides?.port ?? parsePort(process.env.QUANTA_WEB_PORT),
-    bind: overrides?.bind ?? parseBind(process.env.QUANTA_WEB_BIND),
-    authToken:
-      overrides?.authToken !== undefined
-        ? overrides.authToken
-        : parseAuthToken(process.env.QUANTA_WEB_AUTH_TOKEN),
+  const config = buildServerConfig({
+    overrides,
+    network,
     runtimeFactory,
-    sessionConfig: overrides?.sessionConfig ?? {},
     supportedReadModels,
-    ...(observabilityPorts !== undefined ? { observabilityPorts } : {}),
-    ...(canvasPorts !== undefined ? { canvasPorts } : {}),
-    ...(canvasArtifactFeed !== undefined ? { canvasArtifactFeed } : {}),
-    ...(artifactPreviewResolver !== undefined ? { artifactPreviewResolver } : {}),
-    ...(agentStatePorts !== undefined ? { agentStatePorts } : {}),
-    ...(subagentSource !== undefined ? { subagentSource } : {}),
-    ...(userInputPorts !== undefined ? { userInputPorts } : {}),
-    ...(controlRequestPorts !== undefined ? { controlRequestPorts } : {}),
-    ...(followerCoControl !== undefined ? { followerCoControl } : {}),
-  }
+    observabilityPorts,
+    canvasPorts,
+    canvasArtifactFeed,
+    artifactPreviewResolver,
+    agentStatePorts,
+    subagentSource,
+    userInputPorts,
+    controlRequestPorts,
+    followerCoControl,
+  })
 
   // Port-collision fallback: if the requested port is taken (EADDRINUSE
   // surfaces as `Failed to start server. Is port X in use?` from Bun),

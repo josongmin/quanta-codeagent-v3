@@ -32,6 +32,7 @@ import type { Phase1Port, Stage1StorePort } from "../consolidate"
 import { runPhase1 } from "../consolidate"
 import type { Stage1Entry, Stage1OutputsStore } from "../stage1-store"
 import type {
+  DistillRedactor,
   MemoryAutoTrigger,
   PromoteContext,
   SessionEndInput,
@@ -60,6 +61,36 @@ const jaccard = (a: Set<string>, b: Set<string>): number => {
   return union === 0 ? 0 : inter / union
 }
 
+const redactMessage = (
+  message: { role: string; content: unknown },
+  redact: DistillRedactor,
+): { role: string; content: unknown } => {
+  if (typeof message.content === "string") {
+    return { role: message.role, content: redact(message.content) }
+  }
+  if (!Array.isArray(message.content)) return message
+  return {
+    role: message.role,
+    content: message.content.map((block): unknown => {
+      if (
+        block !== null &&
+        typeof block === "object" &&
+        "type" in block &&
+        block.type === "text" &&
+        "text" in block
+      ) {
+        const text = (block as { text: unknown }).text
+        if (typeof text === "string") return { ...block, text: redact(text) }
+      }
+      return block
+    }),
+  }
+}
+
+const missingRedactor = (): never => {
+  throw new Error("memory auto-trigger requires a distill redactor")
+}
+
 /** Inject opts — concrete dependencies the default impl needs. */
 export interface DefaultMemoryAutoTriggerOpts {
   /** Phase 1 distill LLM seam. */
@@ -68,6 +99,8 @@ export interface DefaultMemoryAutoTriggerOpts {
   readonly phase1Store: Stage1StorePort
   /** Usage/selection cache the trigger reads + writes. */
   readonly stage1Store: Stage1OutputsStore
+  /** Required host adapter that removes secrets before Phase 1. */
+  readonly redact: DistillRedactor
   /** Injected clock — `Date.now` in production, fixed in tests. */
   readonly now: () => number
   /** Promotion policy. Defaults to {@link DEFAULT_TRIGGER_POLICY}. */
@@ -80,6 +113,7 @@ export class DefaultMemoryAutoTrigger implements MemoryAutoTrigger {
   private readonly phase1Port: Phase1Port
   private readonly phase1Store: Stage1StorePort
   private readonly stage1Store: Stage1OutputsStore
+  private readonly redact: DistillRedactor
   private readonly now: () => number
   private readonly policy: TriggerPolicy
   private readonly logWarn: (msg: string) => void
@@ -88,6 +122,7 @@ export class DefaultMemoryAutoTrigger implements MemoryAutoTrigger {
     this.phase1Port = opts.phase1Port
     this.phase1Store = opts.phase1Store
     this.stage1Store = opts.stage1Store
+    this.redact = typeof opts.redact === "function" ? opts.redact : missingRedactor
     this.now = opts.now
     this.policy = opts.policy ?? DEFAULT_TRIGGER_POLICY
     this.logWarn = opts.logWarn ?? ((): void => {})
@@ -105,11 +140,14 @@ export class DefaultMemoryAutoTrigger implements MemoryAutoTrigger {
     // failure or store failure. Abort is propagated as `AbortError`.
     let outcome: Awaited<ReturnType<typeof runPhase1>>
     try {
+      const rolloutMessages = input.rolloutMessages.map((message) =>
+        redactMessage(message, this.redact),
+      )
       outcome = await runPhase1(
         {
           threadId: input.threadId,
           sessionId: input.sessionId,
-          rolloutMessages: input.rolloutMessages,
+          rolloutMessages,
           turnCount: input.turnCount,
           memoryMode: "enabled",
           now: this.now,

@@ -1,3 +1,4 @@
+import { parseAgentArgs, type ToolProfileToken } from "@/host/runtime/agent-args"
 import { isFalsyToken } from "@/shared"
 import { readCliKnob } from "../cli-knobs-accessor"
 import { isPathLikeToken } from "../resume"
@@ -128,7 +129,50 @@ export const gitCoChangeEnabled = (): boolean =>
  * by {@link argvPrompt} (so the value is skipped, not treated as a positional)
  * and {@link argvImages} (which extracts `--image` values).
  */
-const VALUED_FLAGS = ["--state", "--resume", "--observe-dir", "--title", "--image"] as const
+const VALUED_FLAGS = [
+  "--state",
+  "--resume",
+  "--observe-dir",
+  "--title",
+  "--image",
+  "--tool-profile",
+] as const
+
+/**
+ * Resolve the shipping CLI's tool-profile flag through the canonical host
+ * parser. Only profile tokens are projected into the parser's interactive
+ * shape; positional prompt tokens and CLI-local flags remain owned here.
+ */
+export const resolveToolProfileFlag = (
+  argv: readonly string[] = process.argv.slice(2),
+): ToolProfileToken | undefined => {
+  const profileArgv: string[] = ["--mode", "interactive"]
+  for (let i = 0; i < argv.length; i++) {
+    const token = argv[i]
+    if (token === "--tool-profile") {
+      profileArgv.push(token)
+      const value = argv[i + 1]
+      if (value !== undefined) {
+        profileArgv.push(value)
+        i += 1
+      }
+      continue
+    }
+    if (token?.startsWith("--tool-profile=")) profileArgv.push(token)
+  }
+  if (profileArgv.length === 2) return undefined
+  return parseAgentArgs(profileArgv).toolProfile
+}
+
+/** Validate and apply the explicit CLI profile to the bootstrap env authority. */
+export const applyToolProfileFlag = (
+  argv: readonly string[] = process.argv.slice(2),
+  env: NodeJS.ProcessEnv = process.env,
+): ToolProfileToken | undefined => {
+  const profile = resolveToolProfileFlag(argv)
+  if (profile !== undefined) env.QUANTA_TOOL_PROFILE = profile
+  return profile
+}
 
 /**
  * Build the seed prompt from positional (non-flag) argv tokens.

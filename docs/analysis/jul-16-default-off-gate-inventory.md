@@ -1,29 +1,32 @@
 # default-OFF 게이트 전수 어딧 인벤토리 (2026-07-16)
 
-목적: fc 카탈로그 기준 default-OFF 게이트 기능 전수 → **src 실코드 대조 어딧** → e2e 검증 후 켜기(or kill) 캠페인의 SSOT 체크리스트.
+목적: fc 카탈로그 기준 default-OFF 게이트 기능 전수 → **src 실코드 대조 어딧** → e2e 검증 후 켜기(or kill) 캠페인의 supporting inventory. 실행 SSOT는 `docs/plans/jul-16-default-off-sota-plus-plus/00-index.md`다.
 
 방법: 카탈로그 yaml 1차 스캔(8-way) → src 대조 2차 어딧(11-way 병렬): 게이트 실존(파일 확인)·unset시 실제 default·배선 상태·ON경로 테스트 유무·CLI_FEATURE_GATES seed 여부. **카탈로그 prose는 신뢰하지 않고 게이트 코드 사이트를 직접 확인함.**
 
-## 분류 체계
+## 판정 체계 (3R 교정)
 
-| class | 의미 | 다음 액션 |
-|---|---|---|
-| **A** | WIRED + ON경로 e2e/integration 있음 | 바로 flip 후보 (e2e 재실행으로 확증 후 켜기) |
-| **B** | WIRED이나 ON경로 e2e 없음 (unit/hellgate뿐) | **e2e 먼저 만들고** 켜기 |
-| **C** | built-not-wired (composition-root 배선 필요) | 배선 or kill 결정 |
-| **D** | hold (외부의존/의도적 보류) | 켤 수 없음, 보류 사유 해소가 선행 |
-| **X** | 카탈로그 오류 — 이미 ON이거나 seed로 사실상 ON | 카탈로그 수정 + "켤 목록"에서 제외 |
+기존 A/B/C/D/X는 activation, surface default, wiring, proof, lifecycle을 한 글자에 섞어 flip/delete 판단에 사용할 수 없다. 아래 표의 기존 class는 탐색용 legacy grouping일 뿐이며, 실행 권위는 다음 5축 ledger다.
 
-집계(대략): A ≈ 75 · B ≈ 75 · C ≈ 25 · D ≈ 17 · X ≈ 25+seed
+| 축 | 값 |
+|---|---|
+| activation | `always` · `inverse-kill-switch` · `env/config` · `host-seeded` · `preset` · `resource/command` · `port-present` · `unwired` |
+| effective default | surface별 `on` · `off` · `resource` · `na` · `unknown` (`cli/web/bench/headless/daemon`) |
+| reachability | `wired` · `producer-only` · `consumer-only` · `seam-only` · `forward-contract` |
+| proof | `unit` · `wire` · `real-loop` · `external-e2e` + 별도 `off_identity`/rollback receipt |
+| decision | `enable-now` · `measure-first` · `repair-first` · `hold` · `delete-proven-duplicate` |
+
+삭제는 `production consumer 0 + 고유 behavior 0 + superseded_by/sunset 증거`를 모두 요구한다. built-not-wired, e2e 부재, roadmap 부재만으로는 삭제하지 않는다. 기존 대략 집계와 85/85 수치는 재현 가능한 feature-to-test ledger가 없어 promotion 근거로 사용 금지다.
 
 ## 크로스커팅 findings (어딧에서 나온 것)
 
-1. **CLI_FEATURE_GATES seed 19종** ([cli-feature-gates.ts:37](../../src/apps/cli/cli-feature-gates.ts#L37), 직접 확인): 미설정 시 "1" 시드 → **인터랙티브 CLI에선 사실상 default-ON**. bench/daemon/headless/eval은 여전히 OFF. "default-OFF" 후보 중 STALE_READ_GUARD·READ_DEDUP·MIDTURN_CAPTURE·RATELIMIT_NOTICE·SUBAGENT_FOLLOWUP·CONVERSATION_ACTIONS·AT_AUTOCOMPLETE 등이 여기 걸림 → X표 참조.
-2. **default-ON 오분류 클러스터**: QUANTA_SUBAGENT/QUANTA_SKILLS `?? true` (internal.ts:335/406) → 시스템 스킬 번들 6종·subagent 블록은 이미 라이브. QUANTA_FS_JAIL은 **역게이트**(기본 ON, `=off`로 끔). gh_pr_edit_labels/gh_pr_open/scripted_replace/grep-flags/bash-background/atomic-write는 BASE로 항상 ON.
+1. **CLI effective-default seed 27종**: `CLI_FEATURE_GATES` 19 behavior gates와 tool-surface manifest의 CLI-default 8 tool gates를 CLI entrypoint가 합성한다 ([index.ts:42](../../src/apps/cli/index.ts#L42)). 따라서 19종만 센 기존 모수는 과소 집계다. 이 seed는 interactive CLI 기준이며, 각 non-CLI surface는 별도로 계산해야 한다.
+2. **default-ON/가용성 오분류 클러스터**: QUANTA_SUBAGENT/QUANTA_SKILLS `?? true` (internal.ts:335/406) → 시스템 스킬 번들 6종·subagent 블록은 이미 라이브. QUANTA_FS_JAIL은 **역게이트**(기본 ON, `=off`로 끔). scripted_replace/grep-flags/bash-background/atomic-write는 항상 라이브지만, **gh_pr_*는 always-ON이 아님**: GitHub surface는 `QUANTA_GIT_TOOLS` opt-in이고, `gh_pr_open`은 추가로 `authorLLM + gitRunner` 배선이 있어야만 등록됨.
 3. **bench measure-first인데 preset 선탑재**: `QUANTA_BENCH_LLM_SELECT`·`LOCATION_FANOUT`이 이미 agentless-v7-oracle-multifile 프리셋에 들어감(jun-30 RFC 승인) — "measure-first hold" 서사는 이 둘에 한해 이미 무효.
-4. **dead-seam 클러스터(C)**: prompt-suggestion·fast-apply(agent측)·recovery-router-codexSpecRoute(jul-15 발견과 일치)·retrieval 체인(reranker/embed-cache/semantic-search-port/multimodal)·approval-SM producer — 코드+테스트 완비, 배선만 없음.
-5. **어딧끼리 모순 → 재검증 필요**: 0315/0316/0317(web-daemon/web-frontend/tauri)을 어딧이 D(hold)로 분류했으나 **web/Tauri 서피스는 실사용 중**(jul-15 subagent panel web 랜딩 등) — 카탈로그 hold 서술이 stale이거나 어딧 오판. flip 캠페인 전 직접 확인.
-6. **켜도 실효 없는 함정**: syntax-aware-chunking은 WIRED지만 tree-sitter-wasms grammar ABI mismatch로 실 AST 경로 차단(graceful fallback) — 켜기 전 grammar 업그레이드 필요. lane-manager는 env(QUANTA_LANE_MAX_CONCURRENCY) 문서만 있고 **reader 코드가 없음**.
+4. **reachability 교정**: prompt-suggestion은 CLI turn-completion에서 호출되는 live opt-in이고, plan-queue와 `/profile`도 live다. recovery-router·lane-manager·bug-fix-proposal-queue는 production caller가 없는 seam-only다. playbook-trigger는 confined disk registry에서 실제 registration을 로드해 external prompt queue까지 dispatch한다.
+5. **surface 상태 오분류 수정**: `0315 web-daemon-surface`는 L3 + `surface_integration.web: full`, `0316 web-frontend-surface`도 L2지만 `surface_integration.web: full`이다. D(hold)로 묶을 대상이 아니며, **hold 성격이 남는 건 `0317 tauri-desktop-shell`의 scaffold/unverified 상태뿐**.
+6. **read 계열 분리**: syntax-aware index chunking은 production indexer가 parser를 주입한다. read-outline도 이제 `QUANTA_READ_OUTLINE=1`일 때 runner composition root가 tool-local parser port를 주입하며, 별도 `QUANTA_SYNTAX_CHUNK` gate와 독립적으로 동작한다.
+7. **P0 web 기본값 모순 해결**: daemon 기본 bind는 `127.0.0.1`로 교정됐다. IPv4/IPv6 wildcard는 non-empty token 또는 strict `QUANTA_WEB_ALLOW_UNAUTHENTICATED_WILDCARD=1` 없이는 listen 전에 fail-closed한다.
 
 ---
 
@@ -38,7 +41,7 @@
 | refusal-fallback-recovery | 01 | QUANTA_REFUSAL_FALLBACK(+_PROMPT) | refusal-fallback-recovery-hellgate (runAgent) | =1 |
 | subagent-agent-type | 01 | QUANTA_SUBAGENT_TYPED_KIND | typed-kind-live-wire-hellgate | =1 |
 | subagent-fs-ownership-enforce | 01 | QUANTA_FS_OWNERSHIP_ENFORCE | ownership-dispatch-e2e-hellgate | =1 |
-| subagent-introspect-tools | 01 | QUANTA_SUBAGENT_INTROSPECT | subagent-introspect-hellgate + turn-wake | =on; FOLLOWUP은 seed로 CLI 이미 ON |
+| subagent-introspect-tools | 01 | QUANTA_SUBAGENT_INTROSPECT | subagent-introspect-hellgate + turn-wake | **CLI effective-default ON**; flip 후보에서 제외 |
 | subagent-model-override | 01 | agent tool input(model/role/effort) | spawn 테스트 | 입력 필드; env 없음 |
 | subagent-role-identity | 01 | .quanta/agents/*.md | named-agent-spawn-hellgate | 정의 파일 존재 시 자동 |
 | branch-search-progress | 01 | DI(BranchSearchAnchor) | anchor-hellgate | caller 주입형 |
@@ -117,7 +120,7 @@
 | dispatch-guard-wiring | 01 | config.dispatchGuard | loop e2e 없음 |
 | idle-monitor-snooze | 01 | QUANTA_IDLE_* | ⚠️SUPPRESS 기본 "1" — 사실상 ON. CLI 전용 |
 | subagent-multi-agent-bounds | 01 | config.subagent.enable6Tools 등 | live-assembly hellgate뿐 |
-| plan-queue-helper | 01 | helper (env 없음) | loop wire 관찰 안 됨 (CLI import 부분) |
+| plan-queue-helper | 01 | helper (env 없음) | **CLI에서 store 생성 + `/queue` + sendNow live**; STUB 아님 |
 | refusal-stop-reason-branching | 01 | config.stopReasonPolicy | 33 unit; 기본 consumer 미실현 |
 | response-in-progress | 01 | provider 이벤트 의존 | OpenAI Responses 필요 |
 | projects-kb | 02 | QUANTA_PROJECTS_KB | unit뿐 |
@@ -143,24 +146,24 @@
 | 0171-pii-redaction (+0399 wire) | 03 | config.redaction.pii | dispatch fold unit뿐 |
 | 0209-per-tool-checkpoint | 03 | assembly opt-in | CLI repl만 |
 | 0210-three-way-restore | 03 | /rewind-tool | ⚠️카탈로그 "미등록" stale — 등록돼 있음 |
-| 0213-tool-profile-preset | 03 | /profile | --tool-profile 플래그 미구현 |
+| 0213-tool-profile-preset | 03 | /profile + --tool-profile | `/profile`과 startup flag가 같은 session authority를 사용하며 split/equal form 모두 값 검증 후 prompt에서 제거됨 |
 | 0295-bash-mode-sandbox | 03 | bash input mode="read" | 런타임 선택형; e2e 없음 |
 | 0164-secret-detection + 0412 tool | 03 | QUANTA_SECRET_CHECK_TOOL=on | 스캐너는 무게이트, tool만 게이트 |
 | 0497-guardian-assessor | 03 | QUANTA_GUARDIAN_ASSESSOR (strict) | integration 없음 |
 | jun6-exfil-scouting | 03 | QUANTA_EXFIL_SCOUTING + _K (K 필수) | advisory-only |
 | 99-landlock-phase2 | 03 | Linux+bwrap 존재 | 실 bwrap e2e 없음 |
-| per-tool-granular-registry | 04 | AgentConfig.granularRegistry | auto-record hook 미배선 (hold) |
+| per-tool-granular-registry | 04 | AgentConfig.granularRegistry | producer는 `QUANTA_PER_TOOL_RECORD=on`에서 live; raw snapshot consumer가 없음 |
 | env-build-dynamic-context | 04 | 주입형 | 22 unit |
 | glob-rules | 04 | config.globRules | composition root 미자동배선 |
 | pre-compact-hitl | 04 | onPreCompact 콜백 | unit뿐 |
 | delta-token-accounting | 04 | QUANTA_DELTA_TOKEN_COUNT (strict) | 전용 e2e 없음 |
 | microcompact | 04 | QUANTA_MICROCOMPACT | keep/floor/interval 기본값 없음(no-heuristics) |
 | issue-hint-expected-actual | 04 | QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL | 부모 게이트도 필요 |
-| syntax-aware-chunking | 04 | QUANTA_SYNTAX_CHUNK / READ_OUTLINE | ⚠️grammar ABI mismatch로 실 AST 차단 — 켜기 전 업그레이드 |
+| syntax-aware-chunking / read-outline | 04 | QUANTA_SYNTAX_CHUNK / QUANTA_READ_OUTLINE | 두 독립 gate 모두 production parser composition live; unsupported/parse failure는 visible line fallback |
 | on-session-minted / multi-source-vendor / model-tag 계열 | 04 | 콜백/호출형 | glob-rules 통합 미완 |
 | consolidator-session-hook / distill-redaction / line-citation 3종 / phase2-promotion / phase2-auto-trigger / stage1-wire | 05 | config/env 혼합 | phase2 e2e는 sibling이 커버; 개별 loop e2e 없음 |
 | 0218-subagent-mode-typed | 06 | QUANTA_SUBAGENT_TYPED_KIND 연동 | |
-| 0293/0301-playbook-trigger | 06 | QUANTA_PLAYBOOK_TRIGGER / --playbook-trigger | registry-from-disk 미완 |
+| 0293/0301-playbook-trigger | 06 | QUANTA_PLAYBOOK_TRIGGER / --playbook-trigger | confined disk registry + named dispatch + external prompt queue live; default flip은 별도 판단 |
 | 0393-delegate-tool | 06 | cfg.delegation | |
 | 04-seam skill overrides | 06 | SKILL.md model:/effort: | loop 테스트 있음(준A) |
 | 0404-lsp-rename | 06 | QUANTA_LSP_TOOLS=full | |
@@ -200,13 +203,12 @@
 | 기능 | 섹션 | 상태 | kill/배선 판단 재료 |
 |---|---|---|---|
 | inline-trigger-wiring | 01 | 호스트 wirer 미실행 | 0293 playbook-trigger가 유사 기능 — 중복 검토 |
-| lane-manager-parallel | 01 | **env reader 자체가 없음** (문서만) | kill 유력 or ADR-0285 재개 |
+| lane-manager-parallel | 01 | env reader와 production consumer 없음 | seam-only. 대체/중복 증거 전에는 delete 금지; host owner를 정하거나 deliberate hold 유지 |
 | spec-to-test-gen-devin | 01 | 호출자 0 | |
 | voice-input-stt-slice | 02 | 어댑터 완비, 주입 0 | voice-live(B)와 통합 검토 |
 | ci-finding / gh-pr-code-tour | 02 | ci-bot mode 전용 (interactive 미도달) | promotion_path 문서화돼 있음 |
 | conflict-parser-lib | 02 | 순수 lib, caller 0 | fix-merge-conflicts skill이 미래 소비자 |
 | node-repl-persistent-kernel | 02 | tool 등록 자체가 없음 | |
-| apply-patch-structured | 02 | slice wired, tool 엔드포인트 dead seam | ⚠️manifest `default: {cli:"on"}` vs 실상 불일치 |
 | 0235-shell-snapshot-runshell | 03 | 포트 정의만, 주입 0 | |
 | 076-deny-and-steer | 03 | steerInjection emit되나 loop이 안 먹음 | jul-15 dead-seam 류 |
 | multimodal-embedding / search-pipeline-composer / embed-cache / semantic-search-port / reranker-port / model-tag ×2 / side-chat(L1) | 04 | retrieval 체인 전체가 배선 대기 | 켜려면 pipeline-composition-root-wire(QUANTA_PIPELINE)로 묶어서 |
@@ -217,7 +219,7 @@
 | llm-record-replay | 08 | barrel fence (side-agent에선 live) | 의도적 — 유지 |
 | 0311-gh-actions-trigger / from-pr CLI | 09 | daemon/headless만·CLI 배선 hold | Tier0 실배달 축적 후 |
 | fast-apply-wire (agent측) | 09 | tool측 완료, dispatch 어댑터 미구현 | ADR-0417 A1 |
-| prompt-suggestion | 10 | orchestrator 완비, 서피스 통합 0 | dead seam 명시 |
+| prompt-suggestion | 10 | CLI turn-completion wire live | suppression state 4종을 `false`로 고정한 partial bug 수리 후 enable 심사 |
 
 ## D — hold (~17)
 
@@ -229,7 +231,7 @@
 | memory-telemetry-port (04) | seam-only; 실 어댑터는 별도 기능 |
 | llm-adapter-mantle (08) | @anthropic-ai/mantle-sdk 미출시 |
 | 0461-token-refresh-scheduler (09) | 정직한 prod rotator 부재 |
-| 0315/0316/0317 web-daemon·frontend·tauri (10) | ⚠️어딧은 D인데 **실사용 중인 서피스와 모순** — 카탈로그 hold 서술 stale 의심, 직접 재검증 필요 |
+| 0317 tauri-desktop-shell (10) | L2 scaffold + zero tests + cargo build 미검증. source/manifests는 있으나 shipping-wired로 닫기엔 증거 부족 |
 | bench: effort-ladder / submit-review | 진짜 measure-first (preset 0회, e2e 0) |
 | bench: llm-select / location-fanout | measure-first 명분이나 **이미 v7 preset 탑재** — hold 서사 무효, 측정으로 정리해야 |
 
@@ -241,10 +243,10 @@
 |---|---|
 | async-shell-background | bash BASE tool의 timeout_behavior 파라미터 — 항상 라이브 |
 | atomic-write + hash-precondition | edit BASE 경로 — expected_hash는 옵션 파라미터 |
-| gh_pr_edit_labels / gh_pr_open | ghTools에서 무조건 등록 (mutating인데 게이트 없음 — **역방향 리스크, 게이트 신설 검토**) |
 | scripted_replace | BASE_TOOL_NAMES 포함 |
 | grep-rg-flags | 정적 서피스, 항상 활성 |
 | 01-fsjailerror | **기본 ON** (QUANTA_FS_JAIL=off가 escape hatch — 역게이트) |
+| apply-patch-structured | manifest SSOT + CLI seed 경로로 **CLI에서는 이미 default-ON**, bench/web/headless는 opt-in |
 | QUANTA_SUBAGENT / QUANTA_SKILLS | `?? true` default-ON (RFC 의도적 예외) |
 | 시스템 스킬 번들 6종 (product-onboard/ctk-git/debug-blame/engineering/git-log-search 등) | skills 기본ON이라 discovery부터 라이브 |
 | assemble-tooling-core / tier1-skill-block / tier1-subagent-block | 상동 |
@@ -252,17 +254,34 @@
 | 0297 knobs (HISTORY/MULTILINE/REWIND/MEMORY_SLASH) | 기본 ON |
 | idle-monitor QUANTA_IDLE_SUPPRESS | 기본 "1" |
 
-**CLI_FEATURE_GATES seed로 인터랙티브 CLI에서 사실상 ON (19종)** — bench/daemon/headless는 OFF:
+**CLI behavior seed로 인터랙티브 CLI에서 사실상 ON (19종)**:
 QUANTA_ENABLE_ENV_PROBE · **QUANTA_STALE_READ_GUARD** · QUANTA_UNTRUSTED_ENVELOPE · **QUANTA_READ_DEDUP** · QUANTA_TEAM_DAG/BROKER/IDLE · **QUANTA_SUBAGENT_FOLLOWUP** · QUANTA_AT_AUTOCOMPLETE · QUANTA_EXTERNAL_EDITOR · QUANTA_KEYBINDINGS · **QUANTA_RATELIMIT_NOTICE** · QUANTA_MODE_CYCLE · **QUANTA_MIDTURN_CAPTURE** · QUANTA_MIDTURN_VISIBLE · QUANTA_PREFLIGHT_CHECK · QUANTA_BRACKETED_PASTE · **QUANTA_CONVERSATION_ACTIONS** · QUANTA_SPINNER_STALL
 
-(볼드 = 위 A/B 표에도 등장 — "켤 목록"에서 제외하거나 non-CLI 서피스 기준으로만 취급할 것)
+(여기에 tool-surface manifest가 CLI-default로 seed하는 8 tool gates가 더해져 effective-default universe는 27종이다. bench/daemon/headless는 blanket OFF로 추정하지 말고 각 composition root에서 별도 계산한다.)
 
 ---
 
-## flip 캠페인 권장 순서
+# 3R current-HEAD audit verdict (2026-07-16)
 
-1. **X 정리 먼저** (카탈로그 수정 + gh_pr mutating 무게이트 리스크 판단) — 모수 정확화
-2. **A류 flip**: 기존 e2e 재실행(green 확인) → 켜기. 행동변경류(prompt-directive, delegation-suppress 등)는 measure-first 원칙 유지
-3. **B류**: jul-15 레시피(`runAgent × scripted-LLM`)로 ON경로 e2e 신설 → flip. 함정 2건 선처리(syntax-chunk grammar, REWIND default 모순)
-4. **C류**: dead-seam은 살릴 것/kill 분류 (retrieval 체인은 QUANTA_PIPELINE 묶음으로 일괄 판단)
-5. **D류**: bench llm-select/location-fanout은 "이미 preset 탑재" 모순부터 측정으로 해소
+이전의 `85/85 green`, `STRONG 41 / MEDIUM 30 / WEAK 14`, `A≈66 / B≈85`는 feature id, test path, command, exit code, revision을 연결한 receipt가 저장돼 있지 않다. 일부 focused rails가 green인 사실과 전수 promotion proof는 다르므로 수치는 **unverified**로 강등한다. DOF-00 ledger는 175행/27 CLI seed를 고정했지만 unknown surface 851, unknown value 2,354가 남아 있으므로 전수 batch flip은 계속 금지다.
+
+| 판정 | 기능 | 다음 액션 |
+|---|---|---|
+| security-blocking | web daemon bind/auth | default loopback 또는 non-loopback auth-required + negative test |
+| live-bug | shipping `--tool-profile` | valued argv parser를 단일 SSOT로 합치고 prompt 오염 RED rail 수리 |
+| live-partial | prompt-suggestion | plan/rate-limit/elicitation/permission live state를 wire한 뒤 ON 심사 |
+| live | plan-queue, `/profile`, goal-continuation | kill 목록에서 제거; 실제 default와 proof만 정정 |
+| producer-only | per-tool recorder | consumer를 정하거나 explicit telemetry-only로 demote |
+| repair-first | read-outline | read tool composition root에 parser 주입; syntax index chunking과 분리 |
+| operationally inert | playbook-trigger + 241 | `.quanta/playbooks/*.md` registry loader와 real dispatch proof |
+| seam-only | lane-manager, bug-fix queue, recovery-router | owner/consumer를 정해 wire하거나 hold; duplicate 증거 전 delete 금지 |
+| catalog-stale | prompt-suggestion, tool-profile, plan-queue, stale-read-guard, fsjail, objective-goal 등 | YAML 수정 후 `bun fc validate && bun fc build && bun fc diff` |
+
+## 실행 원칙
+
+1. machine-readable ledger와 catalog drift를 먼저 닫는다.
+2. 보안·prompt corruption·silent-inert 경로를 default flip보다 먼저 수리한다.
+3. safe/read-only/observability는 explicit-OFF와 상속 matrix가 있으면 enable-now로 처리한다.
+4. 제어흐름·품질·비용 변화는 paired A/B 후 default를 바꾼다.
+5. browser/network/mutating/provider-cost 기능은 default-OFF라도 `policy_gated_live`면 목표 달성으로 센다.
+6. 삭제는 proven duplicate만 허용하며, 단순 무소비자는 `seam-only/hold`로 남긴다.

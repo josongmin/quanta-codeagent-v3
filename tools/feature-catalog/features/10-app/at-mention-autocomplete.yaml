@@ -10,7 +10,7 @@ monitoring: n-a
 modes: [interactive]
 configurable: partial
 owners: ["@songmin"]
-labels: ["surface:core"]
+labels: ["surface:core", "default-on-cli", "inverse-kill-switch"]
 depends_on: []
 surface_integration:
   cli: full
@@ -26,9 +26,9 @@ purpose: |
   mention token), Esc dismiss. Activates quanta's EXISTING mention-injection
   backend (parser/resolver, already loop-wired via mentionInjector) by adding the
   missing input-surface UX + a NEW AtCandidateProvider listing port (the existing
-  resolver is target→body one-directional and cannot enumerate). Default-OFF
-  behind QUANTA_AT_AUTOCOMPLETE=1 — absent ⇒ `@` is an ordinary char and every
-  keypress path is byte-identical. Deterministic prefix→substring 2-tier ranking
+  resolver is target→body one-directional and cannot enumerate). The shipping CLI
+  seeds an unset `QUANTA_AT_AUTOCOMPLETE` to `1`; an explicit falsy value preserves
+  the ordinary-character rollback path. Deterministic prefix→substring 2-tier ranking
   (no new fuzzy heuristic). Async resolve is race-guarded by an epoch latch; a
   thrown/synchronous sub-lister failure is isolated (NO-THROW), never wiping
   file candidates.
@@ -53,8 +53,8 @@ evidence:
     contract: []
 knobs:
   - name: QUANTA_AT_AUTOCOMPLETE
-    default: "undefined (off)"
-    purpose: "'1' ⇒ @-dropdown; absent ⇒ @ ordinary char, byte-identical"
+    default: "CLI unset -> 1 (on); explicit 0/off/false/no disables"
+    purpose: "CLI input dropdown gate; explicit falsy rollback keeps @ as an ordinary character"
 deliberate_hold:
   reason: |
     skill/plugin/app candidate kinds are graceful-empty (those registries expose

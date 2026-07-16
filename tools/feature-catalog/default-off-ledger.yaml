@@ -1,0 +1,439 @@
+version: 1
+scope:
+  catalog_label: default-off
+  include_runtime_cli_seed_features: true
+  limitations:
+    - The bounded denominator is the union of catalog rows labelled default-off and mapped live CLI seed owners.
+    - Campaign-wide exclusions are not yet structured in the catalog, so this ledger does not claim all 1027 rows are classified.
+    - Unknown is retained where no current runtime or receipt authority was established; null receipts do not inherit prose counts.
+
+runtime_cli_seed_mappings:
+  QUANTA_ENABLE_ENV_PROBE: env-probe
+  QUANTA_STALE_READ_GUARD: stale-read-guard
+  QUANTA_UNTRUSTED_ENVELOPE: untrusted-source-envelope
+  QUANTA_READ_DEDUP: read-file-unchanged-dedup
+  QUANTA_TEAM_DAG: team-dag-coordination
+  QUANTA_TEAM_BROKER: team-broker-coordination
+  QUANTA_TEAM_IDLE: team-idle-barrier-coordination
+  QUANTA_SUBAGENT_FOLLOWUP: subagent-introspect-tools
+  QUANTA_AT_AUTOCOMPLETE: at-mention-autocomplete
+  QUANTA_EXTERNAL_EDITOR: external-editor-compose
+  QUANTA_KEYBINDINGS: keybindings-config
+  QUANTA_RATELIMIT_NOTICE: ratelimit-snapshot-render
+  QUANTA_MODE_CYCLE: mode-cycle-pill
+  QUANTA_MIDTURN_CAPTURE: mid-turn-interruption
+  QUANTA_MIDTURN_VISIBLE: mid-turn-interruption
+  QUANTA_PREFLIGHT_CHECK: cli-jun11-repl-input-ux
+  QUANTA_BRACKETED_PASTE: cli-jun11-repl-input-ux
+  QUANTA_CONVERSATION_ACTIONS: conversation-action-steering
+  QUANTA_SPINNER_STALL: spinner-stall-detection
+  QUANTA_ENABLE_STRUCTURED_PATCH: apply-patch-structured-result
+  QUANTA_SUBAGENT: tier1-subagent-block
+  QUANTA_SUBAGENT_6TOOLS: subagent-6-tools
+  QUANTA_SUBAGENT_BATCH: spawn-batch-tool
+  QUANTA_SUBAGENT_INTROSPECT: subagent-introspect-tools
+  QUANTA_COVERAGE_TOOL: code-coverage
+  QUANTA_PROMPT_CACHE_STATUS: prompt-cache-observability
+  QUANTA_SIDE_AGENT: background-side-agent
+
+row_defaults:
+  unknown: &unknown_row
+    gate_owner: [unknown]
+    activation: unknown
+    effective_default: { cli: unknown, web: unknown, bench: unknown, headless: unknown, daemon: unknown }
+    reachability: unknown
+    proof: { on: unknown, off_identity: unknown, receipt: null }
+    risk: unknown
+    decision: unknown
+    owner_seam: unknown
+    rollback: unknown
+    duplicate_of: null
+    lifecycle_evidence: null
+  cli_on: &cli_on_row
+    gate_owner: [unknown]
+    activation: host-seeded
+    effective_default: { cli: on, web: unknown, bench: unknown, headless: unknown, daemon: unknown }
+    reachability: unknown
+    proof: { on: unknown, off_identity: unknown, receipt: null }
+    risk: unknown
+    decision: unknown
+    owner_seam: unknown
+    rollback: explicit gate value other than 1
+    duplicate_of: null
+    lifecycle_evidence: null
+
+rows:
+  - <<: *unknown_row
+    feature_id: adaptive-thinking
+  - <<: *unknown_row
+    feature_id: adversarial-repro-knob
+  - <<: *unknown_row
+    feature_id: agent-jobs-batch
+  - <<: *unknown_row
+    feature_id: ai-session-title
+  - <<: *cli_on_row
+    feature_id: apply-patch-structured-result
+    gate_owner: [QUANTA_ENABLE_STRUCTURED_PATCH]
+  - <<: *unknown_row
+    feature_id: approval-gate-wire
+  - <<: *unknown_row
+    feature_id: appshot-verify-loop
+  - <<: *unknown_row
+    feature_id: assistant-language-auto-detect
+  - <<: *unknown_row
+    feature_id: ast-grep-tool
+  - <<: *cli_on_row
+    feature_id: at-mention-autocomplete
+    gate_owner: [QUANTA_AT_AUTOCOMPLETE]
+  - <<: *unknown_row
+    feature_id: auto-dream-cross-session
+  - <<: *unknown_row
+    feature_id: auto-mode-rule-overlay
+  - <<: *unknown_row
+    feature_id: automation-engine-wire
+  - <<: *unknown_row
+    feature_id: automation-tool-inbox-cli
+  - <<: *unknown_row
+    feature_id: background-compaction
+  - <<: *cli_on_row
+    feature_id: background-side-agent
+    gate_owner: [QUANTA_SIDE_AGENT]
+  - <<: *unknown_row
+    feature_id: bash-mode-per-call-sandbox
+  - <<: *unknown_row
+    feature_id: bench-find-refs-steer
+  - <<: *unknown_row
+    feature_id: bench-trajectory-record
+  - <<: *unknown_row
+    feature_id: branch-search-progress
+  - <<: *unknown_row
+    feature_id: bridge-attestation
+  - <<: *unknown_row
+    feature_id: budget-probe-ledger-wire
+  - <<: *unknown_row
+    feature_id: canvas-web-components
+  - <<: *unknown_row
+    feature_id: circumvention-detector
+  - <<: *cli_on_row
+    feature_id: cli-jun11-repl-input-ux
+    gate_owner: [QUANTA_PREFLIGHT_CHECK, QUANTA_BRACKETED_PASTE]
+  - <<: *unknown_row
+    feature_id: cli-jun11-turn-input-layer
+  - <<: *unknown_row
+    feature_id: closeout-critic-gate
+  - <<: *cli_on_row
+    feature_id: code-coverage
+    gate_owner: [QUANTA_COVERAGE_TOOL]
+  - <<: *unknown_row
+    feature_id: code-mode-js-runtime
+  - <<: *unknown_row
+    feature_id: codebase-indexer
+  - <<: *unknown_row
+    feature_id: codex-r2-compaction-event-emit
+  - <<: *unknown_row
+    feature_id: codex-r2-context-change-injection-wire
+  - <<: *unknown_row
+    feature_id: codex-r2-disk-persistence-and-env-swap
+  - <<: *unknown_row
+    feature_id: codex-r2-mention-injection-pipeline
+  - <<: *unknown_row
+    feature_id: codex-r2-multi-process-flock
+  - <<: *unknown_row
+    feature_id: codex-r2-observability-decorators
+  - <<: *unknown_row
+    feature_id: codex-r2-plugin-system
+  - <<: *unknown_row
+    feature_id: codex-r2-sqlite-session-registry
+  - <<: *unknown_row
+    feature_id: codex-r2-system-prompt-cache-and-audit
+  - <<: *unknown_row
+    feature_id: codex-r2-typed-event-store
+  - <<: *unknown_row
+    feature_id: collect-evidence
+  - <<: *unknown_row
+    feature_id: command-hooks
+  - <<: *unknown_row
+    feature_id: compaction-visibility
+  - <<: *unknown_row
+    feature_id: conflict-parser-lib
+  - <<: *cli_on_row
+    feature_id: conversation-action-steering
+    gate_owner: [QUANTA_CONVERSATION_ACTIONS]
+  - <<: *unknown_row
+    feature_id: debug-inspect
+  - <<: *unknown_row
+    feature_id: dockersandbox
+  - <<: *unknown_row
+    feature_id: dxt-user-config
+  - <<: *unknown_row
+    feature_id: edit-repair-loop
+  - <<: *unknown_row
+    feature_id: effort-classifier
+  - <<: *unknown_row
+    feature_id: embed-cache
+  - <<: *cli_on_row
+    feature_id: env-probe
+    gate_owner: [QUANTA_ENABLE_ENV_PROBE]
+  - <<: *cli_on_row
+    feature_id: external-editor-compose
+    gate_owner: [QUANTA_EXTERNAL_EDITOR]
+  - <<: *unknown_row
+    feature_id: fast-apply-fallback
+  - <<: *unknown_row
+    feature_id: fast-apply-merge
+  - <<: *unknown_row
+    feature_id: fast-apply-wire
+  - <<: *unknown_row
+    feature_id: fault-evidence-knob
+  - <<: *unknown_row
+    feature_id: flock-operations-telemetry
+  - <<: *unknown_row
+    feature_id: force-background
+  - <<: *unknown_row
+    feature_id: gh-pr-code-tour
+  - <<: *unknown_row
+    feature_id: git-co-change
+  - <<: *unknown_row
+    feature_id: git-directive-emit-leaf
+  - <<: *unknown_row
+    feature_id: git-directive-emit-protocol
+  - <<: *unknown_row
+    feature_id: github-actions-trigger-adapter
+  - <<: *unknown_row
+    feature_id: github-pr-from-pr-cli
+  - <<: *unknown_row
+    feature_id: github-webhook-host-scaffold
+  - <<: *unknown_row
+    feature_id: guardian-per-action-assessment
+  - <<: *unknown_row
+    feature_id: identity-mid-session-prompt-rebuild
+  - <<: *unknown_row
+    feature_id: image-gen
+  - <<: *unknown_row
+    feature_id: infertooltier-secure-by-default-fallback
+  - <<: *unknown_row
+    feature_id: issue-hint-expected-actual-opt-in
+  - <<: *unknown_row
+    feature_id: item-stream-fine-grained
+  - <<: *unknown_row
+    feature_id: jun7-manifest-codex-compat
+  - <<: *unknown_row
+    feature_id: jwks-agent-identity
+  - <<: *cli_on_row
+    feature_id: keybindings-config
+    gate_owner: [QUANTA_KEYBINDINGS]
+  - <<: *unknown_row
+    feature_id: lane-manager-parallel
+  - <<: *unknown_row
+    feature_id: llm-record-replay
+  - <<: *unknown_row
+    feature_id: loadreporules-cwd
+  - <<: *unknown_row
+    feature_id: localize-phase-knob
+  - <<: *unknown_row
+    feature_id: mcp-launch-governance
+  - <<: *unknown_row
+    feature_id: mcp-tasks-live
+  - <<: *unknown_row
+    feature_id: mcp-tool-annotations-content
+  - <<: *unknown_row
+    feature_id: memory-cross-session-inject
+  - <<: *unknown_row
+    feature_id: message-batches-client-core
+  - <<: *cli_on_row
+    feature_id: mid-turn-interruption
+    gate_owner: [QUANTA_MIDTURN_CAPTURE, QUANTA_MIDTURN_VISIBLE]
+  - <<: *unknown_row
+    feature_id: mid-turn-steering
+  - <<: *cli_on_row
+    feature_id: mode-cycle-pill
+    gate_owner: [QUANTA_MODE_CYCLE]
+  - <<: *unknown_row
+    feature_id: model-preset-sticky-resolver
+  - <<: *unknown_row
+    feature_id: model-tag-auto-hook
+  - <<: *unknown_row
+    feature_id: model-tag-versioning
+  - <<: *unknown_row
+    feature_id: multi-source-rules-vendor-detector
+  - <<: *unknown_row
+    feature_id: n6-pty-attach
+  - <<: *unknown_row
+    feature_id: ndjson-introspection
+  - <<: *unknown_row
+    feature_id: no-patch-breaker-knob
+  - <<: *unknown_row
+    feature_id: node-repl-persistent-kernel
+  - <<: *unknown_row
+    feature_id: notebook-edit-cell-tool
+  - <<: *unknown_row
+    feature_id: notify-presence-suppression
+  - <<: *unknown_row
+    feature_id: observability-live-wire
+  - <<: *unknown_row
+    feature_id: observability-wire
+  - <<: *unknown_row
+    feature_id: observability-ws-sink
+  - <<: *unknown_row
+    feature_id: office-authoring
+  - <<: *unknown_row
+    feature_id: passive-vcs-classify
+  - <<: *unknown_row
+    feature_id: patch-budget-admission
+  - <<: *unknown_row
+    feature_id: patch-hygiene-knob
+  - <<: *unknown_row
+    feature_id: per-hunk-diff-accept-reject
+  - <<: *unknown_row
+    feature_id: per-tool-checkpoint-granularity
+  - <<: *unknown_row
+    feature_id: per-tool-granular-registry
+  - <<: *unknown_row
+    feature_id: pipeline-composition-root-wire
+  - <<: *unknown_row
+    feature_id: platform-base-shell-argv
+  - <<: *unknown_row
+    feature_id: playbook-trigger-cli-bind
+  - <<: *unknown_row
+    feature_id: playbook-trigger-flag-echo
+  - <<: *unknown_row
+    feature_id: pptx-authoring
+  - <<: *unknown_row
+    feature_id: pre-compact-hitl
+  - <<: *unknown_row
+    feature_id: precedence-rule-r3-p1
+  - <<: *unknown_row
+    feature_id: prefix-rule-dsl
+  - <<: *unknown_row
+    feature_id: primary-rail-knob
+  - <<: *unknown_row
+    feature_id: product-onboard-skill
+  - <<: *unknown_row
+    feature_id: projects-kb
+  - <<: *cli_on_row
+    feature_id: prompt-cache-observability
+    gate_owner: [QUANTA_PROMPT_CACHE_STATUS]
+  - <<: *unknown_row
+    feature_id: prompt-suggestion
+  - <<: *unknown_row
+    feature_id: proof-driven-bench-closure
+  - <<: *unknown_row
+    feature_id: radar-cards-proposal-queue
+  - <<: *unknown_row
+    feature_id: ratelimit-dual-window-snapshot
+  - <<: *cli_on_row
+    feature_id: ratelimit-snapshot-render
+    gate_owner: [QUANTA_RATELIMIT_NOTICE]
+  - <<: *cli_on_row
+    feature_id: read-file-unchanged-dedup
+    gate_owner: [QUANTA_READ_DEDUP]
+  - <<: *unknown_row
+    feature_id: realtime-websocket-codex
+  - <<: *unknown_row
+    feature_id: reasoning-carryover
+  - <<: *unknown_row
+    feature_id: recovery-router-codex-spec
+  - <<: *unknown_row
+    feature_id: remote-runner
+  - <<: *unknown_row
+    feature_id: repair-escalation-knob
+  - <<: *unknown_row
+    feature_id: repl-slash-ctx-mega-wire
+  - <<: *unknown_row
+    feature_id: repro-doubt-knob
+  - <<: *unknown_row
+    feature_id: repro-test-mwe-vote
+  - <<: *unknown_row
+    feature_id: response-in-progress
+  - <<: *unknown_row
+    feature_id: retry-transient-knob
+  - <<: *unknown_row
+    feature_id: run-ledger-attribution
+  - <<: *unknown_row
+    feature_id: run-tests
+  - <<: *unknown_row
+    feature_id: run-workflow
+  - <<: *unknown_row
+    feature_id: sandbox-escalation
+  - <<: *unknown_row
+    feature_id: search-pipeline-composer
+  - <<: *unknown_row
+    feature_id: semantic-search-port
+  - <<: *unknown_row
+    feature_id: session-prewarm-ttfm
+  - <<: *unknown_row
+    feature_id: shadow-verify
+  - <<: *unknown_row
+    feature_id: shell-snapshot-runshell-wire
+  - <<: *unknown_row
+    feature_id: side-agent-os-process-daemon
+  - <<: *unknown_row
+    feature_id: skill-mcp-deps
+  - <<: *cli_on_row
+    feature_id: spawn-batch-tool
+    gate_owner: [QUANTA_SUBAGENT_BATCH]
+  - <<: *unknown_row
+    feature_id: spec-fidelity-steer-knob
+  - <<: *cli_on_row
+    feature_id: spinner-stall-detection
+    gate_owner: [QUANTA_SPINNER_STALL]
+  - <<: *unknown_row
+    feature_id: stage1-phase2-consume-and-vendor-glob-wire
+  - <<: *cli_on_row
+    feature_id: stale-read-guard
+    gate_owner: [QUANTA_STALE_READ_GUARD]
+  - <<: *unknown_row
+    feature_id: streaming-boomerang
+  - <<: *unknown_row
+    feature_id: streaming-cancellation-primitive
+  - <<: *unknown_row
+    feature_id: structured-output-mode
+  - <<: *cli_on_row
+    feature_id: subagent-6-tools
+    gate_owner: [QUANTA_SUBAGENT_6TOOLS]
+  - <<: *unknown_row
+    feature_id: subagent-fs-ownership-enforce
+  - <<: *cli_on_row
+    feature_id: subagent-introspect-tools
+    gate_owner: [QUANTA_SUBAGENT_FOLLOWUP, QUANTA_SUBAGENT_INTROSPECT]
+  - <<: *unknown_row
+    feature_id: subagent-read-inbox
+  - <<: *unknown_row
+    feature_id: subagent-resume-replay
+  - <<: *unknown_row
+    feature_id: surface-composition-wire-r1
+  - <<: *unknown_row
+    feature_id: surface-wire-r2
+  - <<: *unknown_row
+    feature_id: syntax-aware-chunking
+  - <<: *cli_on_row
+    feature_id: team-broker-coordination
+    gate_owner: [QUANTA_TEAM_BROKER]
+  - <<: *cli_on_row
+    feature_id: team-dag-coordination
+    gate_owner: [QUANTA_TEAM_DAG]
+  - <<: *cli_on_row
+    feature_id: team-idle-barrier-coordination
+    gate_owner: [QUANTA_TEAM_IDLE]
+  - <<: *unknown_row
+    feature_id: template-literal-windsurf
+  - <<: *unknown_row
+    feature_id: three-way-restore
+  - <<: *cli_on_row
+    feature_id: tier1-subagent-block
+    gate_owner: [QUANTA_SUBAGENT]
+  - <<: *unknown_row
+    feature_id: tool-interrupt-block
+  - <<: *cli_on_row
+    feature_id: untrusted-source-envelope
+    gate_owner: [QUANTA_UNTRUSTED_ENVELOPE]
+  - <<: *unknown_row
+    feature_id: verification-plan-knob
+  - <<: *unknown_row
+    feature_id: voice-input-stt-slice
+  - <<: *unknown_row
+    feature_id: vscode-chatsessions-surface
+  - <<: *unknown_row
+    feature_id: web-agent-state-channel
+  - <<: *unknown_row
+    feature_id: worktree-tool

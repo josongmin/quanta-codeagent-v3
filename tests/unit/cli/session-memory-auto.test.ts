@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -134,6 +134,8 @@ describe("session-memory-auto", () => {
     })
     expect(out).toBeDefined()
     expect(out?.memoryConsolidator.enabled).toBe(true)
+    const rawKey = "AKIAIOSFODNN7EXAMPLE"
+    expect(out?.memoryConsolidator.redact?.(`key=${rawKey}`)).not.toContain(rawKey)
     out?.dispose()
   })
 

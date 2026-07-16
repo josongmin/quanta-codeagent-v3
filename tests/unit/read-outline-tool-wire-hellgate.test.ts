@@ -19,7 +19,7 @@ import { fakeParser, type ParsedFile, type ParseOutcome } from "@/retrieval"
 import { __resetRuntimeConfig } from "@/shared"
 import { __resetKnobOverrides } from "@/shared/knob-overrides"
 import type { ToolContext, ToolResult } from "@/tool"
-import { makeReadTool } from "@/tool/read"
+import { makeReadTool, type ReadOutlineParserPort } from "@/tool/read"
 
 const ctx = (cwd: string): ToolContext => ({ cwd, signal: new AbortController().signal })
 
@@ -89,7 +89,7 @@ describe("read outline tool wire hellgate", () => {
     const tool = makeReadTool(undefined, fp)
     const res = await run(tool, { path, outline: true }, dir)
     expect(res.ok).toBe(true)
-    expect(res.output).toContain("no outline")
+    expect(res.output).toContain("no outline: outline disabled")
     // The actual content is line-numbered (the normal read).
     expect(res.output).toContain("1\tfunction add(a, b) {")
     // Parser never consulted when the knob is off.
@@ -104,7 +104,41 @@ describe("read outline tool wire hellgate", () => {
     const tool = makeReadTool(undefined, fp)
     const res = await run(tool, { path, outline: true }, dir)
     expect(res.ok).toBe(true)
-    expect(res.output).toContain("no outline")
+    expect(res.output).toContain("unsupported language or missing parser grammar")
+    expect(res.output).toContain("1\tfunction add(a, b) {")
+  })
+
+  test.each([
+    ["unsupported-language", "unsupported language"],
+    ["missing-grammar", "missing parser grammar"],
+    ["parse-error", "source parse failed"],
+  ] as const)("typed %s fallback is visible", async (reason, message) => {
+    process.env.QUANTA_READ_OUTLINE = "1"
+    __resetRuntimeConfig()
+    const { dir, path } = mkFile("foo.ts", FILE_BODY)
+    const parser: ReadOutlineParserPort = {
+      parse: async () => ({ ok: false, reason }),
+    }
+
+    const res = await run(makeReadTool(undefined, parser), { path, outline: true }, dir)
+
+    expect(res.ok).toBe(true)
+    expect(res.output).toContain(`no outline: ${message}`)
+    expect(res.output).toContain("1\tfunction add(a, b) {")
+  })
+
+  test("throwing parser degrades visibly instead of escaping", async () => {
+    process.env.QUANTA_READ_OUTLINE = "1"
+    __resetRuntimeConfig()
+    const { dir, path } = mkFile("foo.ts", FILE_BODY)
+    const parser: ReadOutlineParserPort = {
+      parse: () => Promise.reject(new Error("broken adapter")),
+    }
+
+    const res = await run(makeReadTool(undefined, parser), { path, outline: true }, dir)
+
+    expect(res.ok).toBe(true)
+    expect(res.output).toContain("no outline: source parse failed")
     expect(res.output).toContain("1\tfunction add(a, b) {")
   })
 

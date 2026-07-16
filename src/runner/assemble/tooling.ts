@@ -1,7 +1,9 @@
 import { type AgentConfig, type MemoryToolsDeps, type MemoryWriteGuard, memoryTools } from "@/agent"
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import { instrumentToolsForExport, type StructuredLogger } from "@/observability"
+import { createTreeSitterParser } from "@/retrieval/code-parser"
 import type { OsSandboxProfile } from "@/runtime"
+import { runtimeConfig } from "@/shared"
 import {
   buildDefaultTools,
   type ProjectsKbSlot,
@@ -244,6 +246,7 @@ const buildOriginMap = (
 const buildDefaultToolPorts = (
   input: Pick<ToolingAssembleInput, "sandboxProfile" | "structuredPatch" | "projectsKb">,
 ): Parameters<typeof buildDefaultTools>[0] => ({
+  ...(runtimeConfig().readOutline ? { readOutlineParser: createTreeSitterParser() } : {}),
   ...(input.sandboxProfile !== undefined ? { sandboxProfile: input.sandboxProfile } : {}),
   ...(input.structuredPatch === true ? { structuredPatch: true } : {}),
   ...(input.projectsKb !== undefined ? { projectsKb: input.projectsKb } : {}),

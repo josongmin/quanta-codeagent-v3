@@ -606,20 +606,35 @@ const scanFlags = (argv: readonly string[]): FlagAcc => {
       i++
       continue
     }
+    // The shipping CLI accepts the conventional `--tool-profile=value` spelling.
+    // Keep this exception narrow: every other valued flag remains split-form only.
+    const inlineToolProfile = a.startsWith("--tool-profile=")
+      ? { flag: "--tool-profile", value: a.slice("--tool-profile=".length) }
+      : undefined
+    const flag = inlineToolProfile?.flag ?? a
+
     // Every token at a loop-head position is a flag (values are consumed via
     // takeValue + i+=2 and never reach here). Dedup recognized + unknown alike;
     // unknown flags still throw below.
-    if (a.startsWith("-")) markSeen(a)
+    if (flag.startsWith("-")) markSeen(flag)
 
     // OCP dispatch: a known non-dial flag is a single table entry. Value-taking
     // specs consume argv[i+1] via takeValue (i += 2); boolean specs advance one.
-    const spec = FLAG_HANDLERS[a]
+    const spec = FLAG_HANDLERS[flag]
     if (spec !== undefined) {
       if (spec.takesValue) {
-        spec.apply(acc, takeValue(argv, i, a), a)
-        i += 2
+        if (inlineToolProfile !== undefined) {
+          if (inlineToolProfile.value.length === 0) {
+            throw new AgentArgsError(`flag '${flag}' requires a value`)
+          }
+          spec.apply(acc, inlineToolProfile.value, flag)
+          i += 1
+        } else {
+          spec.apply(acc, takeValue(argv, i, flag), flag)
+          i += 2
+        }
       } else {
-        spec.apply(acc, undefined, a)
+        spec.apply(acc, undefined, flag)
         i += 1
       }
       continue

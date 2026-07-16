@@ -16,6 +16,7 @@ import type { McpConnectorDiscoveryPort } from "./mcp-connector"
 import type { PermissionPatternProposePort } from "./permission-propose"
 import type { ProjectsKbSlot } from "./projects-kb"
 import type { PtySessionPort } from "./pty"
+import type { ReadOutlineParserPort } from "./read"
 import type { ReflectPort } from "./reflect"
 
 /**
@@ -42,6 +43,9 @@ import type { ReflectPort } from "./reflect"
  */
 export interface DefaultToolPorts {
   fs?: FileSystemPort
+  /** Parser for `read({ outline:true })`. The host wires this only while
+   *  `QUANTA_READ_OUTLINE` is enabled; absent keeps the default read singleton. */
+  readOutlineParser?: ReadOutlineParserPort
   diagnostics?: DiagnosticsProvider
   /** ADR-0280 — when a host-wired `AutomationEnginePort` is passed,
    *  `automation_update` is appended to the default tool set. Absent ⇒

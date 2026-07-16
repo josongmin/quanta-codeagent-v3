@@ -17,11 +17,14 @@
 
 import { describe, expect, test } from "bun:test"
 import { SUGGESTION_MODE_SYSTEM_PROMPT } from "@/agent/prompt-suggestion"
+import { createMidTurnApprovalChannel } from "@/apps/cli/repl/mid-turn-approval-channel"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import {
+  buildPromptSuggestionTurnCompletionAdapter,
   buildSuggestFnAdapter,
   maybeCreatePromptSuggestionWire,
   type PromptSuggestionRunArgs,
+  type PromptSuggestionStatePorts,
 } from "../../../src/apps/cli/repl/prompt-suggestion-wire"
 
 const ON = { QUANTA_ENABLE_PROMPT_SUGGESTION: "1" } as const
@@ -119,6 +122,89 @@ describe("prompt-suggestion-wire — gate-ON adapter + port", () => {
     await wire?.run(baseArgs({ signal: ac.signal }))
     expect(renders).toEqual([])
     expect(calls.length).toBe(0)
+  })
+})
+
+describe("prompt-suggestion-wire — production turn-completion state adapter", () => {
+  const knownCalmState = (
+    overrides: Partial<PromptSuggestionStatePorts> = {},
+  ): PromptSuggestionStatePorts => ({
+    planMode: () => false,
+    providerRateLimitRemainingPercent: () => 100,
+    pendingPromptLabels: () => [],
+    ...overrides,
+  })
+
+  const buildTurnCompletion = (state: PromptSuggestionStatePorts) => {
+    const { llm, calls } = stubLlm([textDelta("<suggestion>push the branch</suggestion>")])
+    const renders: string[] = []
+    const wire = maybeCreatePromptSuggestionWire(ON, llm, (text) => renders.push(text))
+    const adapter = buildPromptSuggestionTurnCompletionAdapter(wire, state)
+    return { adapter, calls, renders }
+  }
+
+  test("fully known calm state is the only state that reaches the suggestion model", async () => {
+    const { adapter, calls, renders } = buildTurnCompletion(knownCalmState())
+    await adapter?.run({ messages: baseArgs().messages })
+    expect(calls.length).toBe(1)
+    expect(renders).toEqual(["push the branch"])
+  })
+
+  test.each([
+    ["plan mode", knownCalmState({ planMode: () => true })],
+    [
+      "provider rate limit exhausted",
+      knownCalmState({ providerRateLimitRemainingPercent: () => 0 }),
+    ],
+  ] as const)("live %s suppresses before the model call", async (_name, state) => {
+    const { adapter, calls, renders } = buildTurnCompletion(state)
+    await adapter?.run({ messages: baseArgs().messages })
+    expect(calls.length).toBe(0)
+    expect(renders).toEqual([])
+  })
+
+  test.each([
+    "elicitation",
+    "approval",
+  ] as const)("queued %s suppresses through the live channel snapshot", async (label) => {
+    const channel = createMidTurnApprovalChannel()
+    const pending = channel.awaitLine(undefined, label)
+    const { adapter, calls, renders } = buildTurnCompletion(
+      knownCalmState({ pendingPromptLabels: () => channel.pendingLabels?.() }),
+    )
+
+    await adapter?.run({ messages: baseArgs().messages })
+
+    expect(calls.length).toBe(0)
+    expect(renders).toEqual([])
+    channel.clear("turn_teardown")
+    await pending
+  })
+
+  test.each([
+    ["missing plan probe", knownCalmState({ planMode: undefined })],
+    [
+      "missing provider rate-limit probe",
+      knownCalmState({ providerRateLimitRemainingPercent: undefined }),
+    ],
+    [
+      "provider has not reported state",
+      knownCalmState({ providerRateLimitRemainingPercent: () => undefined }),
+    ],
+    ["missing pending-prompt probe", knownCalmState({ pendingPromptLabels: undefined })],
+    [
+      "throwing state probe",
+      knownCalmState({
+        pendingPromptLabels: () => {
+          throw new Error("state unavailable")
+        },
+      }),
+    ],
+  ] as const)("fail-closed: %s suppresses instead of inferring false", async (_name, state) => {
+    const { adapter, calls, renders } = buildTurnCompletion(state)
+    await adapter?.run({ messages: baseArgs().messages })
+    expect(calls.length).toBe(0)
+    expect(renders).toEqual([])
   })
 })
 

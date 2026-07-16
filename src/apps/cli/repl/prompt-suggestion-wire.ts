@@ -90,6 +90,19 @@ export interface PromptSuggestionRunArgs {
   readonly signal?: AbortSignal
 }
 
+/** Live CLI state ports read at turn completion. Every port is optional so a
+ *  partially composed surface is representable; the adapter treats any absent,
+ *  throwing, or malformed result as unknown and suppresses fail-closed. */
+export interface PromptSuggestionStatePorts {
+  readonly planMode?: (() => boolean | undefined) | undefined
+  readonly providerRateLimitRemainingPercent?: (() => number | undefined) | undefined
+  readonly pendingPromptLabels?: (() => readonly (string | undefined)[] | undefined) | undefined
+}
+
+export interface PromptSuggestionTurnCompletionAdapter {
+  run(args: Omit<PromptSuggestionRunArgs, "state">): Promise<void>
+}
+
 /** Options for {@link maybeCreatePromptSuggestionWire}. */
 export interface PromptSuggestionWireOptions {
   /** How many trailing transcript messages to feed the suggestion model.
@@ -100,6 +113,65 @@ export interface PromptSuggestionWireOptions {
 }
 
 const DEFAULT_TAIL_MESSAGES = 8
+
+const resolvePromptSuggestionState = (
+  ports: PromptSuggestionStatePorts,
+): AppStateView | undefined => {
+  try {
+    const planMode = ports.planMode?.()
+    const remaining = ports.providerRateLimitRemainingPercent?.()
+    const labels = ports.pendingPromptLabels?.()
+    if (
+      typeof planMode !== "boolean" ||
+      remaining === undefined ||
+      !Number.isFinite(remaining) ||
+      remaining < 0 ||
+      remaining > 100 ||
+      labels === undefined
+    ) {
+      return undefined
+    }
+
+    const elicitationActive = labels.some(
+      (label) => label === "elicitation" || label === "user-input",
+    )
+    const pendingPermission = labels.some((label) => label === "approval" || label === "prompt")
+    const allLabelsClassified = labels.every(
+      (label) =>
+        label === "elicitation" ||
+        label === "user-input" ||
+        label === "approval" ||
+        label === "prompt",
+    )
+    if (!allLabelsClassified) return undefined
+
+    return {
+      planMode,
+      rateLimited: remaining <= 0,
+      elicitationActive,
+      pendingPermission,
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/** Production after-turn adapter. It snapshots every authoritative state port
+ *  immediately before the suggestion gate; unknown state returns without even
+ *  invoking the wire, so the model is never called on an inferred `false`. */
+export const buildPromptSuggestionTurnCompletionAdapter = (
+  wire: PromptSuggestionWire | null,
+  statePorts: PromptSuggestionStatePorts,
+): PromptSuggestionTurnCompletionAdapter | null => {
+  if (wire === null) return null
+  return {
+    run: async (args): Promise<void> => {
+      const state = resolvePromptSuggestionState(statePorts)
+      if (state === undefined) return
+      await wire.run({ ...args, state })
+    },
+  }
+}
 
 /** Flatten a transcript message to plain text for the suggestion context.
  *  Only `text` blocks survive — tool_use / thinking / images carry no signal

@@ -17,6 +17,7 @@ import {
   assembleMemoryAuto,
   DEFAULT_TRIGGER_POLICY,
   DefaultMemoryAutoTrigger,
+  type DefaultMemoryAutoTriggerOpts,
   type MemoryAutoTrigger,
   TriggerError,
 } from "../../../src/memory/auto-trigger"
@@ -37,6 +38,7 @@ import {
   type Stage1Entry,
   type Stage1OutputsStore,
 } from "../../../src/memory/stage1-store"
+import { redactSecrets } from "../../../src/security"
 
 // ─── Helpers ────────────────────────────────────────────────────────────
 
@@ -52,6 +54,8 @@ const mkClock = (start = 1_700_000_000_000) => {
     },
   }
 }
+
+const identityRedactor = (content: string): string => content
 
 const mkPhase1OkPort = (
   result: {
@@ -153,6 +157,7 @@ describe("HELL-MAT-01: onSessionEnd calls phase1.distill AND stage1.put", () => 
       phase1Store,
       stage1Store,
       now: clk.now,
+      redact: identityRedactor,
     })
     const outcome = await trigger.onSessionEnd(baseSessionEnd())
     expect(distillSpy).toHaveBeenCalledTimes(1)
@@ -164,6 +169,69 @@ describe("HELL-MAT-01: onSessionEnd calls phase1.distill AND stage1.put", () => 
     const stored = stage1Store.get("thr-1")
     expect(stored).not.toBeNull()
     expect(stored?.rolloutSummary).toBe("alpha beta")
+  })
+
+  test("redacts rollout secrets before Phase 1 sees them", async () => {
+    const clk = mkClock()
+    const stage1Store: Stage1OutputsStore = new InMemoryStage1Store({ now: clk.now })
+    const { port: phase1Store } = mkRecordingPhase1Store()
+    const rawKey = "AKIAIOSFODNN7EXAMPLE"
+    let phase1Input: Parameters<Phase1Port["distill"]>[0] | undefined
+    const distillSpy = mock(async (input: Parameters<Phase1Port["distill"]>[0]) => {
+      phase1Input = input
+      return {
+        rolloutSummary: "redacted summary",
+        rawMemory: "- redacted memory",
+        preferenceSignals: [],
+      }
+    })
+    const trigger = new DefaultMemoryAutoTrigger({
+      phase1Port: { distill: distillSpy },
+      phase1Store,
+      stage1Store,
+      now: clk.now,
+      redact: (text) => redactSecrets(text, { origin: "memory_distill" }).text,
+    })
+
+    const input = baseSessionEnd()
+    input.rolloutMessages = [
+      { role: "user", content: `deploy with ${rawKey}` },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: `rotate ${rawKey}` },
+          { type: "tool_use", id: "tool-1", input: { path: "/tmp/release" } },
+        ],
+      },
+    ]
+    await trigger.onSessionEnd(input)
+
+    expect(distillSpy).toHaveBeenCalledTimes(1)
+    expect(JSON.stringify(phase1Input?.rolloutMessages)).not.toContain(rawKey)
+    expect(phase1Input?.rolloutMessages[1]?.content).toEqual([
+      { type: "text", text: expect.not.stringContaining(rawKey) },
+      { type: "tool_use", id: "tool-1", input: { path: "/tmp/release" } },
+    ])
+  })
+
+  test("missing redactor fails closed before Phase 1", async () => {
+    const clk = mkClock()
+    const stage1Store: Stage1OutputsStore = new InMemoryStage1Store({ now: clk.now })
+    const { port: phase1Store, upserts } = mkRecordingPhase1Store()
+    const distillSpy = mock(mkPhase1OkPort().distill)
+    const trigger = new DefaultMemoryAutoTrigger({
+      phase1Port: { distill: distillSpy },
+      phase1Store,
+      stage1Store,
+      now: clk.now,
+    } as unknown as DefaultMemoryAutoTriggerOpts)
+
+    const outcome = await trigger.onSessionEnd(baseSessionEnd())
+
+    expect(outcome.kind).toBe("error")
+    if (outcome.kind === "error") expect(outcome.error.reason).toBe("phase1_throw")
+    expect(distillSpy).not.toHaveBeenCalled()
+    expect(upserts).toHaveLength(0)
   })
 })
 
@@ -188,6 +256,7 @@ describe("HELL-MAT-02: similarity above threshold ⇒ promote (markSelectedForPh
       phase1Store,
       stage1Store,
       now: clk.now,
+      redact: identityRedactor,
       policy: { promoteThreshold: 0.5, minUsageCount: 0 },
     })
     const outcome = await trigger.onSessionEnd(baseSessionEnd())
@@ -218,6 +287,7 @@ describe("HELL-MAT-03: similarity below threshold ⇒ stored but NOT promoted", 
       phase1Store,
       stage1Store,
       now: clk.now,
+      redact: identityRedactor,
     })
     const outcome = await trigger.onSessionEnd(baseSessionEnd())
     expect(outcome.kind).toBe("stored")
@@ -246,6 +316,7 @@ describe("HELL-MAT-04: minUsageCount unmet ⇒ promote skipped", () => {
       phase1Store,
       stage1Store,
       now: clk.now,
+      redact: identityRedactor,
       policy: { promoteThreshold: 0.5, minUsageCount: 5 },
     })
     const outcome = await trigger.onSessionEnd(baseSessionEnd())
@@ -267,6 +338,7 @@ describe("HELL-MAT-05: phase1 throws ⇒ graceful TriggerError outcome + warn (n
       phase1Store,
       stage1Store,
       now: clk.now,
+      redact: identityRedactor,
       logWarn: (m) => warns.push(m),
     })
     const outcome = await trigger.onSessionEnd(baseSessionEnd())
@@ -300,6 +372,7 @@ describe("HELL-MAT-06: LRU-pruned store is compatible (trigger does not break)",
       phase1Store,
       stage1Store,
       now: clk.now,
+      redact: identityRedactor,
     })
     const outcome = await trigger.onSessionEnd(baseSessionEnd())
     expect(outcome.kind).toBe("stored")
@@ -320,6 +393,7 @@ describe("HELL-MAT-07: concurrent session-end (3 parallel) isolated", () => {
       phase1Store,
       stage1Store,
       now: clk.now,
+      redact: identityRedactor,
     })
     const results = await Promise.all([
       trigger.onSessionEnd(baseSessionEnd({ threadId: "thrA" })),
@@ -344,6 +418,7 @@ describe("HELL-MAT-08: duplicate threadId session-end twice is idempotent (repla
       phase1Store,
       stage1Store,
       now: clk.now,
+      redact: identityRedactor,
     })
     await trigger.onSessionEnd(baseSessionEnd({ threadId: "thr-dup" }))
     clk.advance(1000)
@@ -370,6 +445,7 @@ describe("HELL-MAT-09: empty session (0 messages) skips trigger entirely", () =>
       phase1Store,
       stage1Store,
       now: clk.now,
+      redact: identityRedactor,
     })
     const outcome = await trigger.onSessionEnd(baseSessionEnd({ messages: 0 }))
     expect(outcome.kind).toBe("skipped")
@@ -413,6 +489,7 @@ describe("HELL-MAT-11: threshold 0 ⇒ every entry promotes (edge)", () => {
       phase1Store,
       stage1Store,
       now: clk.now,
+      redact: identityRedactor,
       policy: { promoteThreshold: 0, minUsageCount: 0 },
     })
     const outcome = await trigger.onSessionEnd(baseSessionEnd())
@@ -440,6 +517,7 @@ describe("HELL-MAT-12: threshold > 1 ⇒ nothing promotes", () => {
       phase1Store,
       stage1Store,
       now: clk.now,
+      redact: identityRedactor,
       policy: { promoteThreshold: 1.5, minUsageCount: 0 },
     })
     const outcome = await trigger.onSessionEnd(baseSessionEnd())
@@ -469,6 +547,7 @@ describe("HELL-MAT-13: stage1 invalidated mid-trigger ⇒ graceful (no throw)", 
       phase1Store,
       stage1Store: evictingStore,
       now: clk.now,
+      redact: identityRedactor,
     })
     const outcome = await trigger.onSessionEnd(baseSessionEnd())
     expect(outcome.kind).toBe("stored")
@@ -488,6 +567,7 @@ describe("HELL-MAT-14: clock backwards does not crash", () => {
       phase1Store,
       stage1Store,
       now: () => t,
+      redact: identityRedactor,
     })
     await trigger.onSessionEnd(baseSessionEnd({ threadId: "thr-c1" }))
     // Move clock BACKWARDS.
@@ -668,6 +748,7 @@ describe("HELL-MAT-20: AbortSignal abort ⇒ propagates AbortError, cleanup", ()
       phase1Store,
       stage1Store,
       now: clk.now,
+      redact: identityRedactor,
     })
     ctrl.abort()
     let caught: unknown
@@ -760,6 +841,7 @@ describe("port shape: DefaultMemoryAutoTrigger implements MemoryAutoTrigger", ()
       phase1Store,
       stage1Store,
       now: clk.now,
+      redact: identityRedactor,
     })
     expect(typeof t.onSessionEnd).toBe("function")
     expect(typeof t.onSessionStart).toBe("function")

@@ -32,6 +32,13 @@ export {
   startPlaybookAutoDispatch,
 } from "./auto-dispatch"
 export {
+  createDiskPlaybookRegistry,
+  type DiskPlaybookRegistry,
+  type DiskPlaybookRegistryIssue,
+  type DiskPlaybookRegistryIssueCode,
+  type DiskPlaybookRegistryReloadResult,
+} from "./disk-registry"
+export {
   buildMacroRegistry,
   expandProcedure,
   expandStep,

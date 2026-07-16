@@ -5,7 +5,6 @@ import { homedir } from "node:os"
 // gap — the runtime, backed by this same Node decoder, accepts them).
 import { TextDecoder } from "node:util"
 import { z } from "zod"
-import type { CodeParserPort } from "@/retrieval/code-parser"
 import { classifyPath } from "@/security"
 import { escapeBoundary, runtimeConfig } from "@/shared"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
@@ -14,6 +13,13 @@ import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 import { resolveEditBase } from "../worktree/cwd-override"
 import { isNotebook, renderNotebook } from "./ipynb"
 import { DEFAULT_OUTLINE_BUDGET, renderOutline } from "./outline"
+import type { ReadOutlineParseFailure, ReadOutlineParserPort } from "./parser-port"
+
+export type {
+  ReadOutlineDecl,
+  ReadOutlineParsedFile,
+  ReadOutlineParserPort,
+} from "./parser-port"
 
 /** Recognise the two file-missing shapes the injected {@link FileSystemPort}
  *  raises: (a) the OS `ENOENT` (errno -2) from `stat()` via `@/storage`'s
@@ -477,29 +483,47 @@ const tryReadDedup = (
 /** RFC jun-6 — try the outline render. Returns a `ToolResult` ONLY when the
  *  caller requested `outline:true`, the `QUANTA_READ_OUTLINE` knob is on, a
  *  parser is wired, AND the parse succeeds for a supported language. On ANY
- *  miss (knob off, no parser, unsupported language, parse error) returns
- *  `null` so the caller falls through to the normal line-range read — with a
- *  one-line `(no outline: …)` note prepended via {@link OUTLINE_FALLBACK_NOTE}
- *  when the request was made but could not be served. NO-THROW. */
+ *  miss (knob off, no parser, unsupported language, parse error) returns a
+ *  typed fallback reason so the caller can prepend a specific `(no outline:
+ *  …)` note to the normal line-range read. NO-THROW. */
+type OutlineAttempt =
+  | { readonly kind: "rendered"; readonly result: ToolResult }
+  | { readonly kind: "fallback"; readonly reason: string }
+
+const fallbackReason = (reason: ReadOutlineParseFailure): string => {
+  switch (reason) {
+    case "unsupported-language":
+      return "unsupported language"
+    case "missing-grammar":
+      return "missing parser grammar"
+    case "no-grammar":
+      return "unsupported language or missing parser grammar"
+    case "parse-error":
+      return "source parse failed"
+  }
+}
+
 const tryRenderOutline = async (
-  parser: CodeParserPort | undefined,
+  parser: ReadOutlineParserPort | undefined,
   path: string,
   text: string,
   budget: number | undefined,
-): Promise<ToolResult | null> => {
-  if (!runtimeConfig().readOutline) return null
-  if (parser === undefined) return null
-  const outcome = await parser.parse(path, text)
-  if (!outcome.ok) return null
+): Promise<OutlineAttempt> => {
+  if (!runtimeConfig().readOutline) return { kind: "fallback", reason: "outline disabled" }
+  if (parser === undefined) return { kind: "fallback", reason: "parser unavailable" }
+  let outcome: Awaited<ReturnType<ReadOutlineParserPort["parse"]>>
+  try {
+    outcome = await parser.parse(path, text)
+  } catch {
+    return { kind: "fallback", reason: "source parse failed" }
+  }
+  if (!outcome.ok) return { kind: "fallback", reason: fallbackReason(outcome.reason) }
   const body = renderOutline(text, outcome.parsed, budget ?? DEFAULT_OUTLINE_BUDGET)
-  return { ok: true, output: body }
+  return { kind: "rendered", result: { ok: true, output: body } }
 }
 
-/** The note prepended to a line-range read when `outline:true` was requested
- *  but could not be served (no parser / unsupported language / parse error /
- *  knob off). Keeps the degrade explicit + actionable. */
-const OUTLINE_FALLBACK_NOTE =
-  "(no outline: unsupported language or outline disabled; showing line-range read)\n"
+const renderOutlineFallbackNote = (reason: string): string =>
+  `(no outline: ${reason}; showing line-range read)\n`
 
 const schema = z.object({
   path: z.string().describe("File path (absolute or relative to cwd)"),
@@ -535,7 +559,7 @@ const DEFAULT_LIMIT = 2000
  *  tests pass an in-memory port for isolation. */
 export const makeReadTool = (
   fs: FileSystemPort = defaultFileSystemPort,
-  parser?: CodeParserPort,
+  parser?: ReadOutlineParserPort,
 ): Tool<Input> =>
   defineTool<Input>({
     name: "read",
@@ -576,17 +600,19 @@ export const makeReadTool = (
       // …)` note when the request could not be served (degrades to the normal
       // read below). NO-THROW. Inert (this whole block skipped) when `outline`
       // is unset ⇒ every non-outline read is byte-identical.
+      let outlineFallbackReason: string | undefined
       if (input.outline === true) {
-        const outlined = await tryRenderOutline(
+        const attempt = await tryRenderOutline(
           parser,
           outcome.info.path,
           outcome.text,
           input.outlineBudget,
         )
-        if (outlined !== null) {
-          yield { type: "result", result: outlined }
+        if (attempt.kind === "rendered") {
+          yield { type: "result", result: attempt.result }
           return
         }
+        outlineFallbackReason = attempt.reason
       }
 
       // H9 read-side dedup — the EFFECTIVE range is the resolved (offset, limit)
@@ -608,7 +634,8 @@ export const makeReadTool = (
       }
       // When `outline:true` was requested but could not be served, prepend the
       // explicit degrade note so the model knows why it got line-ranges.
-      const outlineNote = input.outline === true ? OUTLINE_FALLBACK_NOTE : ""
+      const outlineNote =
+        outlineFallbackReason !== undefined ? renderOutlineFallbackNote(outlineFallbackReason) : ""
       yield {
         type: "result",
         result: {

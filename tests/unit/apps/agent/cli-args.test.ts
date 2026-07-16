@@ -88,6 +88,11 @@ describe("parseAgentArgs — happy paths", () => {
       expect(a.exhaustion).toBe(v)
     }
   })
+
+  test("--tool-profile=value is accepted for shipping CLI parity", () => {
+    const a = parseAgentArgs(["--mode", "interactive", "--tool-profile=ask"])
+    expect(a.toolProfile).toBe("ask")
+  })
 })
 
 describe("parseAgentArgs — error paths", () => {

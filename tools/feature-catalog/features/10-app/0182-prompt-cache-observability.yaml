@@ -10,7 +10,7 @@ monitoring: integrated
 modes: [interactive, headless]
 configurable: integrated
 config_refs:
-  env: []
+  env: [QUANTA_PROMPT_CACHE_STATUS]
 owners: ["@songmin"]
 labels: ["adr-0182", "tier:1", "observability", "prompt-cache"]
 depends_on:
@@ -37,9 +37,10 @@ purpose: |
   agent. Default pricing table (`default-pricing.ts`) covers Claude
   family; cache hit = 10% of input rate (90% discount).
   Tier-1 builder `buildPromptCacheBlock` (`src/agent/tier1/prompt-cache.ts`)
-  surfaces `prompt_cache_status` into the agent's tool set ONLY when the host
-  wired a `PromptCacheObserver` (gate `QUANTA_PROMPT_CACHE_STATUS`); otherwise
-  returns `[]` (DEFAULT-OFF, byte-identical). The SAME observer instance backs
+  surfaces `prompt_cache_status` into the agent's tool set only when the host
+  wired a `PromptCacheObserver` and the `QUANTA_PROMPT_CACHE_STATUS` gate is on.
+  The CLI tool manifest seeds an unset gate to `1`; explicit falsy values or an
+  absent observer return `[]`. The SAME observer instance backs
   both this tool and the loop's usage feed so the rendered snapshot reflects the
   buckets observed this session.
 evidence:
@@ -60,7 +61,10 @@ evidence:
       - tests/unit/tier1-prompt-cache-hellgate.test.ts
     integration: []
     contract: []
-knobs: []
+knobs:
+  - name: QUANTA_PROMPT_CACHE_STATUS
+    default: "CLI unset -> 1 (on); other surfaces follow host config"
+    purpose: "Expose the read-only prompt_cache_status tool when its observer port exists; explicit falsy value rolls back"
 deliberate_hold: null
 notes: |
   Hit rate denominator-zero → 0 (NaN guard). Negative-savings guard

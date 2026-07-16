@@ -10,9 +10,8 @@
  * has its own pinned spec.
  *
  * Every parse-form the legacy chain accepted is enumerated:
- *  - value forms: ONLY `--x v` (space-separated). `--x=v` is NOT a recognized
- *    form — it is an unknown flag (pinned below as adversarial), so the
- *    refactor must NOT start splitting on `=`.
+ *  - value forms: `--x v` (space-separated), plus the shipping-CLI parity
+ *    exception `--tool-profile=v`. Other `--x=v` forms remain unknown.
  *  - boolean flags (`--dry-run`, `--sticky-model`, `--no-auto-background`,
  *    `--playbook-trigger`) take no value.
  *  - alias: `-p` ⇔ `--prompt` (canonicalized for the dup guard).
@@ -103,6 +102,11 @@ const OK_CASES: { name: string; argv: string[]; expected: AgentArgs }[] = [
     name: "exhaustion enum",
     argv: ["--mode", "interactive", "--exhaustion", "stop-with-summary"],
     expected: { mode: "interactive", dials: {}, help: false, exhaustion: "stop-with-summary" },
+  },
+  {
+    name: "tool profile inline value",
+    argv: ["--mode", "interactive", "--tool-profile=ask"],
+    expected: { mode: "interactive", dials: {}, help: false, toolProfile: "ask" },
   },
   {
     name: "all ADR-0236 mega-wire flags together",

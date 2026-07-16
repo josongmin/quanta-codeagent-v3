@@ -27,6 +27,9 @@
 
 import type { Stage1Entry } from "../stage1-store"
 
+/** Host-injected secret redactor applied before rollout content reaches Phase 1. */
+export type DistillRedactor = (content: string) => string
+
 /** Input to {@link MemoryAutoTrigger.onSessionEnd}. */
 export interface SessionEndInput {
   /** Stable thread id — Stage 1 PK. Empty ⇒ trigger skips. */

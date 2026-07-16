@@ -15,13 +15,17 @@
  * sliced.
  */
 
-import type { DeclNode, ParsedFile } from "@/retrieval/code-parser"
+import type { ReadOutlineDecl, ReadOutlineParsedFile } from "./parser-port"
 
 const DEFAULT_BUDGET = 4000
 
 /** Push the verbatim signature lines [startLine .. signatureEndLine]. Returns
  *  the resolved (clamped) signature end line for the caller's body math. */
-const pushSignature = (decl: DeclNode, srcLines: readonly string[], out: string[]): number => {
+const pushSignature = (
+  decl: ReadOutlineDecl,
+  srcLines: readonly string[],
+  out: string[],
+): number => {
   const sigStart = Math.max(1, decl.startLine)
   const sigEnd = Math.max(sigStart, Math.min(decl.signatureEndLine, srcLines.length))
   for (let ln = sigStart; ln <= sigEnd; ln++) {
@@ -33,7 +37,11 @@ const pushSignature = (decl: DeclNode, srcLines: readonly string[], out: string[
 
 /** Push the `// … (<N> lines)` body indicator for a LEAF decl (none if the
  *  decl has no body). Indent mirrors the signature's leading whitespace. */
-const pushBodyIndicator = (decl: DeclNode, srcLines: readonly string[], out: string[]): void => {
+const pushBodyIndicator = (
+  decl: ReadOutlineDecl,
+  srcLines: readonly string[],
+  out: string[],
+): void => {
   const bodyLines = decl.endLine - decl.signatureEndLine
   if (bodyLines <= 0) return
   const sigText = srcLines[Math.max(0, decl.startLine - 1)] ?? ""
@@ -45,7 +53,7 @@ const pushBodyIndicator = (decl: DeclNode, srcLines: readonly string[], out: str
 /** Render one decl (recursively) into outline lines. Containers emit their
  *  header, each child's outline, and the closing line; leaves emit their
  *  signature + a body indicator. Surrogate-safe (whole-line operations). */
-const renderDecl = (decl: DeclNode, srcLines: readonly string[], out: string[]): void => {
+const renderDecl = (decl: ReadOutlineDecl, srcLines: readonly string[], out: string[]): void => {
   const sigEnd = pushSignature(decl, srcLines, out)
   if (decl.children.length === 0) {
     pushBodyIndicator(decl, srcLines, out)
@@ -70,7 +78,7 @@ const renderDecl = (decl: DeclNode, srcLines: readonly string[], out: string[]):
  */
 export const renderOutline = (
   text: string,
-  parsed: ParsedFile,
+  parsed: ReadOutlineParsedFile,
   budget: number = DEFAULT_BUDGET,
 ): string => {
   const srcLines = text.split("\n")
@@ -87,11 +95,15 @@ export const renderOutline = (
     renderDecl(decl, srcLines, declLines)
     const block = declLines.join("\n")
     // Budget cut happens at a DECL boundary (whole-line, surrogate-safe). The
-    // first decl always renders so a tiny budget still produces a useful head.
+    // first decl always renders so a tiny budget still produces a useful head,
+    // with an explicit marker when that head alone exceeds the requested cap.
     const projected = size + (pieces.length > 0 ? 1 : 0) + block.length
     if (rendered > 0 && projected > budget) {
-      pieces.push(`// … (${decls.length - i} more declarations elided)`)
+      pieces.push(`// … (outline budget reached; ${decls.length - i} more declarations elided)`)
       return pieces.join("\n")
+    }
+    if (rendered === 0 && projected > budget) {
+      pieces.push(`// … (outline budget exceeded by first declaration; showing it in full)`)
     }
     pieces.push(block)
     size = projected

@@ -21,7 +21,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "pure internal session-end promotion pipeline (src/memory/auto-trigger/, default-OFF) — Phase1 distill to Phase2 promote scoring, no UI affordance on any surface"
+    web: "server-side session-end promotion pipeline; default-ON unless QUANTA_MEMORY_AUTO=off, with no browser configuration/readout surface"
 purpose: |
   Closes the cross-session knowledge gap by wiring session-end Phase 1
   distill → stage1 store → similarity-based Phase 2 promotion under a
@@ -44,6 +44,10 @@ purpose: |
   wired trigger unless `QUANTA_MEMORY_AUTO=off` (parseEnvFlag defaultOn:true at
   wire.ts:50 / agent-arg-builder.ts:228); only the explicit `=off` opt-out yields
   `null` (no allocation, byte-identical legacy).
+
+  Before Phase 1 sees a rollout, the host-injected `DistillRedactor` sanitizes
+  string and text-block content. The production session-memory host supplies
+  `redactSecrets`; a missing adapter fails closed before the LLM call.
 evidence:
   code:
     - src/memory/auto-trigger/port.ts
@@ -51,6 +55,7 @@ evidence:
     - src/memory/auto-trigger/default-trigger.ts
     - src/memory/auto-trigger/index.ts
     - src/apps/agent/index.ts
+    - src/runner/session-memory-auto.ts
   adrs:
     - docs/decisions/0281-memory-auto-trigger.md
     - docs/decisions/0068-codex-2-phase-memory-consolidator.md
@@ -82,6 +87,9 @@ knobs:
   - name: DefaultMemoryAutoTriggerOpts.stage1Store
     default: 'undefined'
     purpose: 'Stage1OutputsStore (usage/selection cache)'
+  - name: DefaultMemoryAutoTriggerOpts.redact
+    default: 'required; missing adapter fails closed'
+    purpose: 'Host-injected secret redaction before Phase 1 receives rollout content'
   - name: DefaultMemoryAutoTriggerOpts.logWarn
     default: 'no-op'
     purpose: 'diagnostic sink'

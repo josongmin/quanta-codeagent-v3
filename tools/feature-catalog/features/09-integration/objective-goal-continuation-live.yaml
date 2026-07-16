@@ -47,11 +47,9 @@ purpose: |
 
   3. COMMAND + CHIP — `/goal <objective>` records the active goal (or shows it
      with no args); the status-bar goal chip renders only while a goal is
-     active (QUANTA_PILL_GOAL default-ON, so no idle clutter). `/goal` with the
-     store un-wired prints the not-wired posture (`QUANTA_OBJECTIVE_TOOLS=1` to
-     record, `QUANTA_GOAL_ENFORCE=1` to pursue) and exits 0 — default-OFF
-     byte-identical, intentional (not the env-gated exit-2 not-wired contract,
-     since `/goal`'s wiring is sessionId-presence, not an env flag).
+     active (QUANTA_PILL_GOAL default-ON, so no idle clutter). The objective store
+     is minted for the CLI surface; `QUANTA_GOAL_ENFORCE=1` controls only whether
+     the idle continuation ticker pursues the recorded goal.
 
   Sibling to objective-budget-enforce: that entry gates the BUDGET half
   (`budget_limited` status suppresses continuation when a cap is exhausted);
@@ -92,14 +90,6 @@ knobs:
       byte-identical (the objective is recorded but never auto-pursued). ON ⇒
       each idle tick with an active goal enqueues a continuation turn until the
       goal is completed / paused / budget-limited.
-  - name: QUANTA_OBJECTIVE_TOOLS
-    where: src/apps/cli/repl/surface-compose.ts
-    default: 'unset (OFF)'
-    purpose: |
-      Wires the objective tools / shared store on the surface. Without it the
-      `/goal` slot has no store to bind and the command prints the not-wired
-      posture. (The `/goal` slot is additionally bound only for persistent
-      sessions — ephemeral threads have no goal to pursue.)
   - name: QUANTA_PILL_GOAL
     where: src/apps/cli/status-pills.ts
     default: 'unset (ON)'

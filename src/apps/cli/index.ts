@@ -1,10 +1,12 @@
 import { SessionBootstrapError } from "@/host/bootstrap"
+import { AgentArgsError } from "@/host/runtime"
 import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { selectRemoteRunner } from "@/remote"
 import { errMessage, logger, setTerminalIo } from "@/shared"
 import { seedEnvVarsForSurface } from "@/tool"
 import { CLI_FEATURE_GATE_NAMES } from "./cli-feature-gates"
 import { loadEnvFiles } from "./dotenv"
+import { applyToolProfileFlag } from "./internal/argv"
 import { runRemoteCmd } from "./remote-cmd"
 import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
 import { SessionStartupError } from "./repl/session-startup-error"
@@ -259,6 +261,11 @@ const main = async (): Promise<void> => {
     process.exit(0)
   }
 
+  // DOF-11 — validate the shipping CLI's profile flag before session/LLM
+  // assembly, then seed the existing bootstrap authority. `/profile` mutates
+  // the ToolProfileSessionState created from this same env input.
+  applyToolProfileFlag(rawArgs, process.env)
+
   // Delegate to the REPL/one-shot orchestrator. All agent assembly, resume
   // state machine, interactive loop and per-turn save plumbing lives there.
   await runRepl()
@@ -279,6 +286,10 @@ const main = async (): Promise<void> => {
 installUnhandledRejectionDefense()
 
 main().catch((e) => {
+  if (e instanceof AgentArgsError) {
+    logger.error(e.message)
+    process.exit(64)
+  }
   if (e instanceof SessionBootstrapError || e instanceof SessionStartupError) {
     logger.error(e.message)
     process.exit(e.exitCode)

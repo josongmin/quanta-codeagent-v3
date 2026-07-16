@@ -12,6 +12,7 @@
 
 export { DefaultMemoryAutoTrigger, type DefaultMemoryAutoTriggerOpts } from "./default-trigger"
 export type {
+  DistillRedactor,
   MemoryAutoTrigger,
   PromoteContext,
   SessionEndInput,

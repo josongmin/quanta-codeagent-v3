@@ -53,6 +53,7 @@ evidence:
 knobs: []
 deliberate_hold: null
 notes: |
-  Closes the `recovery-router-codex-spec` catalog deliberate-hold.
+  Closes typed emitter reachability only. `RetryingLLM` / `FallbackLLM`
+  composition through `recovery-router-codex-spec` remains deferred.
   `exactOptionalPropertyTypes` discipline — `Knobs` shapes omit fields
   rather than set undefined.

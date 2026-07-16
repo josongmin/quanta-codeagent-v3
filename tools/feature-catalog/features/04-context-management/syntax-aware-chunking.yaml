@@ -43,8 +43,11 @@ purpose: |
       `(no outline: …)` note) on unsupported languages / parse errors. Gated
       by `QUANTA_READ_OUTLINE`.
 
-  The `CodeParserPort` is closed + NO-THROW (unknown ext / parse error ⇒ a
-  typed `{ok:false}` outcome ⇒ the caller falls back). Lazy WASM: the runtime
+  The retrieval-owned `CodeParserPort` remains closed + NO-THROW. The read tool
+  consumes a narrower tool-local `ReadOutlineParserPort`; the runner composition
+  root injects the real tree-sitter parser only when `QUANTA_READ_OUTLINE=1`, so
+  `@/tool` does not cross-import `@/retrieval`. Unknown ext / parse error yields
+  a typed fallback and visible line-range degrade. Lazy WASM: the runtime
   inits once + a grammar loads once per language on first parse; a default-OFF
   session constructs NO parser and loads NO WASM. Determinism: pinned grammar
   bytes + a deterministic pre-order traversal + source-order emission; no
@@ -68,11 +71,13 @@ evidence:
     - src/retrieval/code-parser/lang-table.ts
     - src/retrieval/code-parser/tree-sitter.ts
     - src/retrieval/code-parser/index.ts
+    - src/tool/read/parser-port.ts
     - src/retrieval/indexer/chunker-syntactic.ts
     - src/retrieval/indexer/default-scanner.ts
     - src/retrieval/indexer/types.ts
     - src/tool/read/outline.ts
     - src/tool/read/index.ts
+    - src/runner/assemble/tooling.ts
     - src/shared/runtime-config.ts
     - src/runner/knobs/knobs/read-outline.ts
   adrs: ["docs/plans/jun-6-syntax-aware-chunking.md", 277]
@@ -83,6 +88,7 @@ evidence:
       - tests/unit/read-outline-tool-wire-hellgate.test.ts
     integration:
       - tests/integration/syntax-chunk-real-wasm-code-parser.test.ts
+      - tests/integration/read-outline-production-wire.test.ts
     contract: []
 knobs:
   - name: QUANTA_SYNTAX_CHUNK
@@ -98,8 +104,8 @@ notes: |
   Placed under `src/retrieval/code-parser/` (a sub-slice of @/retrieval, which
   already loads vendor SDKs as direct node modules) so it inherits the
   `@/shared`-only fence with no new tsconfig alias / biome fence churn. The
-  read tool imports the `CodeParserPort` TYPE from @/retrieval (permitted —
-  not in the @/tool import block-list). `DeclNode.kind` reuses the LSP
+  runner composition root adapts `CodeParserPort` to the tool-local outline
+  port; the read slice does not import @/retrieval. `DeclNode.kind` reuses the LSP
   `SymbolKind` vocabulary so a future outline-backed-by-LSP swap is clean.
   Complementary to `lsp_document_symbol` (that spawns an external server;
   this is self-contained + offline + deterministic).

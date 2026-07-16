@@ -537,6 +537,7 @@ export {
   ptyTools,
   type TmuxExec,
 } from "./pty"
+export type { ReadOutlineParserPort } from "./read"
 export { ToolRegistry } from "./registry"
 export { requestPlanExitTool } from "./request-plan-exit"
 export { requestUserInputTool } from "./request-user-input"
@@ -821,7 +822,9 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
 }
 
 const buildBaseDefaultTools = (ports: DefaultToolPorts): Tool[] => [
-  (ports.fs !== undefined ? makeReadTool(ports.fs) : readTool) as Tool,
+  (ports.fs !== undefined || ports.readOutlineParser !== undefined
+    ? makeReadTool(ports.fs ?? defaultFileSystemPort, ports.readOutlineParser)
+    : readTool) as Tool,
   (ports.fs !== undefined ? makeWriteTool(ports.fs) : writeTool) as Tool,
   (ports.fs !== undefined ? makeEditTool(ports.fs) : editTool) as Tool,
   // Phase 4: `scripted_replace` is registered by default — the LLM only routes

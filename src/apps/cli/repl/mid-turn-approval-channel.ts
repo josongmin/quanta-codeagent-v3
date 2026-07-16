@@ -81,6 +81,11 @@ export interface MidTurnApprovalChannel {
    *  true iff it was consumed (so the caller skips the normal follow-up
    *  routing). Settling the head promotes — and renders — the next waiter. */
   tryResolve(line: string): boolean
+  /** Read-only snapshot of every queued ask label, in FIFO order. Surface
+   *  adapters use this to suppress competing prompt UI without consuming or
+   *  reclassifying an ask. An absent label remains absent so callers can fail
+   *  closed instead of inventing a safe state. */
+  pendingLabels?(): readonly (string | undefined)[]
   /** Session loop turn teardown: release EVERY queued waiter with the given
    *  cause so a turn that ends with unanswered asks can never hang any of them
    *  — and each prompt can attribute WHY it was released (typed, never a fake
@@ -194,6 +199,9 @@ export const createMidTurnApprovalChannel = (): MidTurnApprovalChannel => {
       // further captured line could be routed at it.
       activateHead()
       return true
+    },
+    pendingLabels(): readonly (string | undefined)[] {
+      return queue.map((waiter) => waiter.label)
     },
     clear(cause: MidTurnReleaseCause): void {
       // Flush EVERYONE typed — including queued waiters whose prompt never
