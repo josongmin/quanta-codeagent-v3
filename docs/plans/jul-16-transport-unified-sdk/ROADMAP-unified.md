@@ -78,7 +78,9 @@ S0 판정 반영해 S1–S7([01](01-connect-session-handle.md) §2): builder hoi
 - **02 serve --stdio** (SDK, M): headless input.transport 주입 배선 + heartbeat hoist + transport 스탬프 seam. CLI_FEATURE_GATES 금지, `quanta mcp-server`가 등록/stdout 규율 선례.
 - **03-B 번들 소비+copy 삭제** (SDK, M): 기존 hellgate 개편 동반(readFileSync throw). codec의 @/shared value import tree-shake 확인.
 
-### Wave 4 — durability 합류 (⚡스파이크 판정 반영으로 재편, 07-16)
+### Wave 4 — durability 합류 (⚡스파이크 판정 반영으로 재편, 07-16) — **W4-b ✅ + 05 코어 ✅ (07-17 밤샘)**
+
+> W4-b LANDED(527f78811): `JsonlSessionEventLog`(codec 재사용·pid lock·torn-tail 자가치유 vs 중간파손 fail-loud 양방향 구속)+`QUANTA_SESSION_EVENT_LOG_DIR`(unset=InMemory 4중 봉인)+seq 연속성 seam(재시작 시 initialState.seq=log tip, red-on-injection tripwire 상주). 05 코어 LANDED(a38ee957f): bridge 폴백 3경로가 durable 로그 세그먼트 replay(pigeonhole 밀도증명 병합)+클라 `resume:"replayed"|"snapshot_fallback"` wire-관측 표면화+재시작 크라운 e2e(eventId 동일성). 잔여 = connect() opts 노출 1줄(E3 랜딩 후) + W4-a(0540 트랙 몫). fsync/revision 연속성/구로그 마이그레이션은 문서화된 v1 한계.
 
 > **0-4 스파이크 verdict = GO-with-rescope** ([w2-replay-spike-verdict.md](w2-replay-spike-verdict.md)): 문자적 "결정적 full-turn replay"(구 W2 item 4)는 NO-GO 확정 — 그리고 **지을 필요 없음**. 승인 durability의 실제 달성 경로는 checkpoint+rehydrate+exactly-once. 추가로 item 0(이벤트로그)×item 4(replay)는 합성 불가(SessionEvent 256-clamp — 이벤트 로그는 replay 원료가 못 됨)이므로 **두 트랙으로 분리, 상호 비블로킹**:
 
