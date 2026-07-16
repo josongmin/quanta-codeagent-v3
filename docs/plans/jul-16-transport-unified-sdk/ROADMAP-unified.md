@@ -69,7 +69,9 @@ ADR-0540 핸드오프의 6-7파일 풀사이클 그대로 + 마커 스펙 준수
 
 **왜 01보다 먼저**: W1-B가 더 작고(0540 트랙 모멘텀 живой — W1-A 방금 랜딩), 01의 attach-flow hoist(S3)가 **마커-aware 최종형을 한 번에 hoist**하게 됨(랜딩 순서 반대면 hoist 후 한 번 더 수정).
 
-### Wave 2 — SDK 01 본체: connect + SessionHandle (SDK 트랙, L)
+### Wave 2 — ✅ SDK 01 LANDED (c89bc49c1, 07-17 밤샘 — 적대어딧 2R 수렴)
+
+> P1(f7e6e288e session.created 수선 · d5df558b1 liveness+spawn · e6b1d128a builders+rejected/버전스큐 승격) → E3 통합(verb표면 타입핀·wire핸들 승계상관·attach-flow byte-identical hoist·conformance oracle·외부소비 실증) → 어딧 2어태커가 실행 repro hang 3개 적발(KILL: resumeFromSeq caught-up 영구 hang→**정직한 descope, 05로 이관**; HIGH: parked turn.cancel→approval_voided / begin 고아화→superseded) → 전량 수정+red-on-injection → 통합배터리 823/823. 잔여: `.d.ts`(jul-4 P8 — 외부실증은 shim-조건부로 정직 명기), door-level resume(05, caught-up 신호 설계 필요).
 
 S0 판정 반영해 S1–S7([01](01-connect-session-handle.md) §2): builder hoist → verb 표면 → **마커-aware attach-flow hoist** → liveness → 프로토콜 수선 2건(dispatch-error→rejected, 버전 lenient reject) → conformance(loopback oracle+정규화 클로즈드 리스트) → 외부 소비 실증(+jul-4 P8 `.d.ts` 당김). 헬게이트 규율(RED e2e 선행+적대어딧 ≥3R).
 
