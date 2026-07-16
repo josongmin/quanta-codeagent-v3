@@ -304,11 +304,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   // the session dispatch tail (clients see the `serverAutoContinues` capability
   // marker and skip their own re-issue). Gate OFF ⇒ `unsub` is null and NOTHING
   // was subscribed (byte-identical legacy client-owned continuation).
-  const { unsub: approvalContinuationUnsub0 } = setupApprovalContinuation(
-    sharedSession,
-    process.env,
-  )
-  let approvalContinuationUnsub = approvalContinuationUnsub0
+  let approvalContinuationUnsub = setupApprovalContinuation(sharedSession, process.env).unsub
 
   // UUX-1-11 — readout sources for `GET /readout/:name`. The production
   // runtime-factory exposes a `readoutSources` getter (agents / plan / skills /
