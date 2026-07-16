@@ -235,8 +235,9 @@ export interface ApprovalRespondCommand extends SessionCommandEnvelope<"approval
   readonly decision: "approve" | "deny"
   /** ADR-0512 P3 — once-vs-session scope on an `approve` of a skill-scope
    *  ESCALATION (`once` ⇒ dispatch WITHOUT widening). Ignored on a normal
-   *  approval. Mirrors the canonical `ApprovalRespondCommand`. */
-  readonly scope?: "once" | "session"
+   *  approval. Mirrors the canonical `ApprovalRespondCommand` (#20
+   *  `session_prefix` = standing prefix grant). */
+  readonly scope?: "once" | "session" | "session_prefix"
   /** ADR-0512 P3 — corrective steer on a `deny` of a skill-scope ESCALATION
    *  (the `deny_and_steer` verb). Absent ⇒ a plain decline. */
   readonly steer?: string

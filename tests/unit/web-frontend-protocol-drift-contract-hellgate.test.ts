@@ -609,11 +609,10 @@ const DELIBERATE_TOOLCHAIN_NARROWINGS: Readonly<Record<string, ApprovedFieldNarr
  * then DELETE the entry — the stale-pin test below forces the deletion.
  */
 const KNOWN_UNMIRRORED_LAG: Readonly<Record<string, ApprovedFieldNarrowing>> = {
-  "ApprovalRespondCommand.scope": {
-    copy: '"once" | "session"',
-    canonical: '"once" | "session" | "session_prefix"',
-    why: "#20 `session_prefix` (standing prefix grants) landed canonically and was never mirrored. Compatible: the frontend only WRITES this field and writes a subset the daemon accepts.",
-  },
+  // (empty — the jul-16 landing-time find, `ApprovalRespondCommand.scope`
+  // missing `session_prefix`, was mirrored and its pin deleted as the
+  // stale-pin ratchet demands. Add entries ONLY for wire-compatible lag,
+  // with the exact canonical/copy pair + why.)
 }
 
 const APPROVED_FIELD_NARROWINGS: Readonly<Record<string, ApprovedFieldNarrowing>> = {
