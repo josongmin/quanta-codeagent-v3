@@ -74,10 +74,13 @@ S0 판정 반영해 S1–S7([01](01-connect-session-handle.md) §2): builder hoi
 - **02 serve --stdio** (SDK, M): headless input.transport 주입 배선 + heartbeat hoist + transport 스탬프 seam. CLI_FEATURE_GATES 금지, `quanta mcp-server`가 등록/stdout 규율 선례.
 - **03-B 번들 소비+copy 삭제** (SDK, M): 기존 hellgate 개편 동반(readFileSync throw). codec의 @/shared value import tree-shake 확인.
 
-### Wave 4 — durability 합류 (0-4 스파이크 GO 시에만)
+### Wave 4 — durability 합류 (⚡스파이크 판정 반영으로 재편, 07-16)
 
-- **W2** (0540, L+): 온디스크 KernelEventLogPort(JSONL) → state.ts:108 rehydrate → persist-before-await + replay short-circuit → crash-resume 마커 확장 → crown hellgate(SIGKILL→재시작→재surface→디스패치). **seq 연속성 요구 이행**(로그 tip에서 이어 발급 — SDK 05가 witness).
-- **SDK 05** (S): W2 랜딩 후 `connect({resume})` 합류 — bridge 폴백 3경로에 로그 포트 주입 + 강등 표면화(onConnectionState resume 필드).
+> **0-4 스파이크 verdict = GO-with-rescope** ([w2-replay-spike-verdict.md](w2-replay-spike-verdict.md)): 문자적 "결정적 full-turn replay"(구 W2 item 4)는 NO-GO 확정 — 그리고 **지을 필요 없음**. 승인 durability의 실제 달성 경로는 checkpoint+rehydrate+exactly-once. 추가로 item 0(이벤트로그)×item 4(replay)는 합성 불가(SessionEvent 256-clamp — 이벤트 로그는 replay 원료가 못 됨)이므로 **두 트랙으로 분리, 상호 비블로킹**:
+
+- **W4-a — 승인 durability** (0540 트랙, **M로 하향**, 신규 substrate 0): 승인점 checkpoint(기존 무손실 세션 스냅샷 스토어에 additive — 승인 throw 시점에 메모리에 완전 실존하는 assistant 메시지+settled tool_result들을 "버리지 않기") → rehydrate(state.ts:108 + **host pending Map 재시드 필수** — 없으면 답변이 silent no-op, 이게 crown hellgate가 red여야 할 지점) → exactly-once 재개 실행기(오늘의 deferred가 이미 재샘플+선행툴 중복실행이므로 이것만으로도 순개선). crown hellgate: SIGKILL→재시작→재surface→답변→디스패치 + exactly-once 단언.
+- **W4-b — 온디스크 이벤트로그** (티켓 05 전용 독립 트랙): wire `connect({resume})`의 replay 원료. seq 연속성 요구(로그 tip에서 이어 발급) 유지. **SDK 05의 blocker는 이제 이것만** — W4-a와 순서 무관.
+- **SDK 05** (S): W4-b 랜딩 후 합류 — bridge 폴백 3경로에 로그 포트 주입 + 강등 표면화(onConnectionState resume 필드). 재시작 후 pendingApproval 재렌더는 W4-a의 스냅샷 경로로 공짜.
 
 ### Wave 5 — seam 붕괴 + fence 재평가 (endgame)
 
@@ -90,7 +93,7 @@ W1-B+W2 후 driveSessionTurn `for(;;)`가 vestigial → turn primitive를 engine
 ## 판정 포인트 (계획이 바뀌는 곳)
 
 1. **0-1 S0**: satisfies 불성립 ⇒ 01은 어댑터-only로 후퇴(acceptance 대체 경로 계획에 있음).
-2. **0-4 replay 스파이크**: NO-GO ⇒ Wave 4 전체 동결, 05는 BLOCKED 유지, W2 보류 — durability는 "same-process 재접속(이미 됨)"까지가 정직한 한계로 공식화.
+2. **0-4 replay 스파이크**: ✅ 판정 완료(GO-with-rescope) — Wave 4를 W4-a/W4-b 분리로 재편(위 §Wave 4). 문자적 replay는 NO-GO였으나 durability 목표는 checkpoint 경로로 생존.
 3. **0-3 verify**: 버그 확증 ⇒ 수선 방향 결정(seq+1 vs snapshot-정본 공식화) 별도 소슬라이스.
 
 ## 공통 규율 (전 웨이브)

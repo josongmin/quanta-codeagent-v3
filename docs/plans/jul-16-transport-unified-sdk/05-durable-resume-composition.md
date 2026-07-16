@@ -22,13 +22,15 @@
 
 **짓지 않는 것**: 온디스크 로그 자체(포맷/rotation/fsync — ADR-0540 W2) · pending-approval rehydrate/replay short-circuit(W2 항목 1-5) · persistence-sqlite 통합(orthogonal 판정 유지).
 
-## 3. 착수 조건 (선행 신호 — R1 LOW 반영 추가)
+## 3. 착수 조건 (⚡07-16 스파이크 판정으로 좁아짐)
 
-1. ADR-0540 W2 온디스크 KernelEventLogPort main 랜딩.
-2. **seq 연속성 보장 확인**: 재시작 시 커널 seq가 0부터 재시작하는 현행([bridge.ts:71-77](../../../src/ipc/session/bridge.ts) 주석 명시)이 W2에서 "로그 tip에서 이어 발급"으로 바뀌는지 — W2 명세는 영속만 다루고 seq 연속성은 미커밋 상태다. **연속성이 없으면 resume 시맨틱 자체가 정의 불가** → W2에 요구사항으로 전달(이 티켓이 그 요구의 witness).
+> **W2 replay 스파이크 판정**([w2-replay-spike-verdict.md](w2-replay-spike-verdict.md)): 구 "W2 전체"가 아니라 **item 0(온디스크 이벤트로그, W4-b 트랙)만이 이 티켓의 blocker**다. 승인 durability(W4-a: checkpoint+rehydrate+exactly-once)와는 상호 비블로킹 — 그쪽이 늦어도 이 티켓은 W4-b+01만으로 착수 가능. 재시작 후 pendingApproval 재렌더는 W4-a의 스냅샷 경로에서 공짜로 옴(이 티켓 스코프 아님).
+
+1. **W4-b 온디스크 KernelEventLogPort main 랜딩** (구 W2 item 0 — 이제 티켓 05 전용 독립 트랙).
+2. **seq 연속성 보장 확인**: 재시작 시 커널 seq가 0부터 재시작하는 현행([bridge.ts:71-77](../../../src/ipc/session/bridge.ts) 주석 명시)이 "로그 tip에서 이어 발급"으로 바뀌는지 — **연속성이 없으면 resume 시맨틱 자체가 정의 불가** (요구는 ADR-0540 W2 item 0에 전달돼 있음, 이 티켓이 witness).
 3. 이 계획 01 랜딩.
 
-그 전에 하는 일 없음(설계 선반영 금지 — W2 포맷/seq 결정에 종속).
+그 전에 하는 일 없음(설계 선반영 금지 — W4-b 포맷/seq 결정에 종속).
 
 ## 4. Acceptance
 
