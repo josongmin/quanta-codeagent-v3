@@ -1,49 +1,48 @@
 id: runner-side-chat
-title: side-chat — isolated agent loop without history pollution (Claude A9)
+title: Side conversation - isolated host-owned agent loop
 section: 6
-subsystem: 사이드 챗 격리 루프 (Claude Code A9 흡수)
+subsystem: Host runtime side conversation
 order: 111
 maturity: L4
 status: stable
-ui_surfaces: [n-a]
+ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "tier:1", "absorbed:claude-code"]
-depends_on: [model-swap-retry, fallback-kinds-policy, llm-factory, response-in-progress, assemble-compaction-core]
+depends_on: [runtime-sdk-cutover]
 config_refs:
   env: []
 surface_integration:
   cli: full
   web: missing
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-16"
   evidence:
-    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "CLI-only /side slash with no web handler (SlashPalette stubs do not execute, B2); no web render path for side-chat results"
+    cli: "The CLI /side slash injects the host session starter; the host builds a fresh read-only registry and isolated AgentConfig before runAgent."
+    web: "No web slash or result renderer exists."
 purpose: |
-  Claude Code A9 패턴 흡수: 메인 history를 오염시키지 않는 격리 agent loop. /side 슬래시
-  + sideChat() 진입점이 별도 SessionWriter로 분기, 메인 envelope는 무수정. 도구는
-  20-tool read-only allowlist + 17-tool forbidden deny-default(쓰기/실행/네트워크 도구는
-  side-chat에서 항상 거부). context 상속 3-mode — none(빈 context) / system(시스템 프롬프트만) /
-  last-turn(직전 turn 컨텍스트까지 전달). usage tally는 메인 turn에 tee로 누적(input/output
-  cumulative token) — 비용 가시성 유지.
+  A user-initiated side conversation runs with a fresh message list, a physically
+  filtered read-only registry, capped turns, and a separate usage tally. The
+  host owner deliberately does not spread the parent AgentConfig, so parent
+  hooks, memory, approval state, Radar, and mutable stores cannot leak into
+  the auxiliary run. The former runner duplicate and non-LLM side-chat stub
+  were removed; this host implementation is the sole authority.
 evidence:
   code:
-    - src/runner/orchestrate/side-chat.ts
+    - src/host/runtime/internal/context-binding/side-conversation.ts
+    - src/host/runtime/internal/context-binding.ts
     - src/apps/cli/side-cmd.ts
   adrs: []
   tests:
     unit:
-      - tests/unit/runner/side-chat.test.ts
+      - tests/unit/host/runtime-side-conversation-isolation-hellgate.test.ts
       - tests/unit/cli/side-cmd.test.ts
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
-notes: |
-  Negative invariant — side-chat은 메인 SessionWriter에 절대 write하지 않는다(envelope
-  append-only는 메인 한정). 17-tool forbidden 목록은 deny-default(allowlist에 없으면 거부)
-  로 도구 추가 시 자동 차단. usage tally는 입출력 토큰만 누적, 메인 turn end에 합산해서
-  비용 underreport 방지.
+deliberate_hold:
+  reason: "CLI-only surface; no web side-conversation renderer exists."
+  promotion_path: "Add a web command handler and render the separately accounted result."
+notes: "Isolation is structural: only llm, registry, stream, permission, system, cwd, messages, signal, and maxTurns enter the child AgentConfig."

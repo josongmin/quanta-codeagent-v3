@@ -1,9 +1,5 @@
 import { EFFORT_LEVELS, effortToTokenBudget, type SkillScopeView, type WorkingState } from "@/agent"
 import {
-  defaultGranularRegistry,
-  type GranularRegistryPort,
-} from "@/agent/checkpoint/granular-registry"
-import {
   type ConversationCheckpointStore,
   defaultConversationCheckpointStore,
 } from "@/agent/conversation-checkpoint"
@@ -56,7 +52,6 @@ import {
 import { type ComposerHandle, createComposerHandle } from "./ctx-adapters/composer-edit-adapter"
 import { createItemStore } from "./item-store"
 import { buildPerToolCheckpointWire } from "./per-tool-checkpoint-wire"
-import { createPerToolSnapshotRecorder } from "./per-tool-snapshot-recorder"
 import {
   createPlaybookTriggerSurfaceSeam,
   type PlaybookTriggerSurfaceSeam,
@@ -213,6 +208,8 @@ export interface ReplSurfaceWires {
    *  the `/background` slot above. Absent ⇒ Ctrl+B + `/background` are unwired
    *  (default-OFF byte-identical). */
   readonly backgroundPortal?: BackgroundTurnPortal
+  /** Clears the bounded `/rewind-tool` anchor registry when this session closes. */
+  readonly disposePerToolRecord?: () => void
 }
 
 /** Build a fresh per-session wire bundle. Pure — no I/O, no env reads beyond
@@ -255,47 +252,6 @@ export const composeSurfaceWires = (
           list: () => MODE_CYCLE.map((p) => p.key),
         }
       : undefined
-  const granularRegistry: GranularRegistryPort = defaultGranularRegistry()
-  let registryToolMapper: RuntimeFacadeComposeOptions["registryToolMapper"] | undefined
-  // ADR-0309 Wire 3 — per-tool auto-record cadence. Env-gated:
-  // `QUANTA_PER_TOOL_RECORD=on` ⇒ wrap every tool in the session registry
-  // with a pre-execute snapshot recorder. Absent / any other value ⇒
-  // tools execute byte-identical, registry stays empty.
-  if (gateOn(envSource, "QUANTA_PER_TOOL_RECORD")) {
-    const recorder = createPerToolSnapshotRecorder({
-      registry: granularRegistry,
-      readFile: async (path: string): Promise<string | null> => {
-        try {
-          const { readFile } = await import("node:fs/promises")
-          return await readFile(path, "utf8")
-        } catch {
-          return null
-        }
-      },
-      getCurrentMessages: () => state.history,
-      getCurrentTurn: () => state.history.length,
-      extractPaths: (toolName: string, input: unknown): readonly string[] => {
-        // Conservative extractor — only the file-MUTATING tools yield a
-        // `filesBefore` set for /rewind-tool restore. `read` is read-only:
-        // it never mutates, so capturing its target over-snapshots without
-        // any restore value (and could thrash the recorder) — excluded.
-        if (toolName === "write" || toolName === "edit" || toolName === "scripted_replace") {
-          const p = (input as { path?: unknown } | null)?.path
-          return typeof p === "string" ? [p] : []
-        }
-        // apply_patch input is `{ patch }`, NOT `{ path }` — parse the V4A
-        // directive headers so the targets a patch touches are snapshotted.
-        if (toolName === "apply_patch") {
-          const patch = (input as { patch?: unknown } | null)?.patch
-          return typeof patch === "string" ? extractApplyPatchPaths(patch) : []
-        }
-        // Bash + non-file tools yield empty filesBefore.
-        return []
-      },
-      logger,
-    })
-    registryToolMapper = (tool) => recorder.wrapTool(tool)
-  }
   // Prompt-assembled + S3 reasoning holder — SINGLE SSOT for `/context`. The
   // loop's `onPromptAssembled` sink writes the latest assembled-prompt breakdown
   // each turn (and clears the prior turn's reasoning split); the surface stream
@@ -349,15 +305,15 @@ export const composeSurfaceWires = (
   const shadowOdb: ShadowOdb | undefined = isEnvTruthy(envSource.QUANTA_SHADOW)
     ? defaultShadowOdb()
     : undefined
-  // ADR-0203/0205 — `/rewind-tool` per-tool-checkpoint wire. Gated on
-  // QUANTA_PER_TOOL_CHECKPOINT and requires the shadow ODB (the files leg
+  // `/rewind-tool` record lifecycle. `QUANTA_PER_TOOL_RECORD` is the sole
+  // producer gate and requires shadow ODB for the files restore leg.
   // rewinds against it). Builds ONE session-scoped granular policy whose
   // `.registry` is shared between the dispatch producer (threaded into
   // `shadowCheckpoint.granularPolicy` below) and the `/rewind-tool` consumer
   // (buildReplSlashCtx perToolRegistry/perToolRestorePort). Absent ⇒ slot
   // omitted ⇒ `/rewind-tool` prints "not wired" (byte-identical).
   const perToolCkpt =
-    isEnvTruthy(envSource.QUANTA_PER_TOOL_CHECKPOINT) && shadowOdb !== undefined
+    gateOn(envSource, "QUANTA_PER_TOOL_RECORD") && shadowOdb !== undefined
       ? buildPerToolCheckpointWire({
           shadowOdb,
           conversationStore: convStore,
@@ -466,9 +422,7 @@ export const composeSurfaceWires = (
           } satisfies RuntimeFacadeComposeOptions["radar"],
         }
       : {}),
-    granularRegistry,
     onPromptAssembled: contextUsageHolder.sink,
-    ...(registryToolMapper !== undefined ? { registryToolMapper } : {}),
     ...(workingStateEnabled
       ? {
           workingState: { enabled: true },
@@ -986,6 +940,7 @@ export const composeSurfaceWires = (
     // Threaded to the session loop for the Ctrl+B detach (its `.view()` is wired
     // into `/background` above). Spread by-presence so default-OFF omits it.
     ...(backgroundPortal !== undefined ? { backgroundPortal } : {}),
+    ...(perToolCkpt !== undefined ? { disposePerToolRecord: perToolCkpt.dispose } : {}),
   }
 }
 

@@ -4,7 +4,7 @@ import { escalatingKill, withSpawnedChild } from "./guarded-spawn"
 import { applyLocalEnv } from "./local-env"
 import { withProxyEnv } from "./network-proxy"
 import { defaultPpidWalkKiller } from "./process-tree"
-import { DEFAULT_ENV_ALLOWLIST, scrubEnv } from "./sandbox"
+import { DEFAULT_ENV_ALLOWLIST, SandboxUnavailableError, scrubEnv } from "./sandbox"
 import { asScrubbedEnv, bunScrubbedSpawner } from "./scrubbed-spawn"
 import { buildBaseShellArgv, discoverShells, resolveWinShellMode } from "./shell-argv"
 import { getShellSandbox } from "./shell-sandbox-holder"
@@ -84,6 +84,13 @@ const foldSandboxStatus = (
   return prior
 }
 
+/** Explicit restrictive CLI profiles are an enforcement contract, not a
+ * best-effort preference. The installed slot is the existing wire authority;
+ * a missing or partial wrapper must stop before `Bun.spawn` can run an
+ * unsandboxed shell. */
+const requiresFullSandboxEnforcement = (profile: string): boolean =>
+  profile === "read-only" || profile === "workspace-write"
+
 /** Run a command through the system shell. Captures stdout/stderr, never
  *  throws on non-zero exit (the caller decides what a failure means).
  *
@@ -161,7 +168,7 @@ export const runShell = async (
   // (typically the bash tool's `mode="read"` Seatbelt read-only profile).
   // The session-wide slot still runs on top of the per-call result so a
   // session policy that further constrains the call still applies. Order:
-  //   per-call wrap → slot wrap → snapshot restore.
+  //   snapshot restore → per-call wrap → slot wrap.
   // P16/ADR-0529 — platform-aware base shell argv. POSIX hosts resolve bash to
   // an absolute executable BEFORE sandbox wrapping, so Seatbelt/bwrap cannot
   // turn a bare `bash` into an opaque execvp failure by changing PATH. Win32
@@ -179,6 +186,10 @@ export const runShell = async (
     return { stdout: "", stderr: argvDecision.reason, exitCode: 127, timedOut: false }
   }
   const baseArgv: ReadonlyArray<string> = argvDecision.argv
+  // Restore before sandbox wrapping. Sandbox adapters prepend their own
+  // executable, so restoring afterward cannot find the `*sh -c` command.
+  const snap = options.shellSnapshot
+  const restoredArgv = snap !== undefined ? snap.restore(snap.handle, baseArgv).argv : [...baseArgv]
   const perCallWrap = options.perCallWrap
   // T08 (audit L8 M2) — track whether ANY wrap layer actually sandboxed the
   // spawn vs degraded to passthrough, so an `onSandboxStatus` observer learns
@@ -193,18 +204,27 @@ export const runShell = async (
 
   let perCallArgv: string[]
   if (perCallWrap !== undefined) {
-    const wrapped = await perCallWrap(baseArgv, cwd)
+    const wrapped = await perCallWrap(restoredArgv, cwd)
     perCallArgv = wrapped.argv
     anyWrapLayerRan = true
     if (onSandboxStatus !== undefined) sandboxStatus = foldSandboxStatus(sandboxStatus, wrapped)
   } else {
-    perCallArgv = [...baseArgv]
+    perCallArgv = restoredArgv
   }
 
   const slot = getShellSandbox()
   let sandboxedArgv: string[]
   if (slot !== undefined) {
     const wrapped = await slot.wrap(perCallArgv, cwd)
+    if (
+      requiresFullSandboxEnforcement(slot.policy.profile) &&
+      (!wrapped.sandboxApplied || wrapped.degradeReason !== undefined)
+    ) {
+      throw new SandboxUnavailableError(
+        `QUANTA_SANDBOX=${slot.policy.profile} cannot be enforced: ` +
+          (wrapped.degradeReason ?? "sandbox wrapper was not applied"),
+      )
+    }
     sandboxedArgv = wrapped.argv
     anyWrapLayerRan = true
     if (onSandboxStatus !== undefined) sandboxStatus = foldSandboxStatus(sandboxStatus, wrapped)
@@ -221,11 +241,7 @@ export const runShell = async (
       anyWrapLayerRan ? sandboxStatus : { applied: false, reason: "no-sandbox-installed" },
     )
   }
-  // ADR-0204 wire — when a snapshot seam is supplied, restore wraps the argv
-  // so the spawned shell sources the captured per-turn env. Absent ⇒
-  // `sandboxedArgv` flows through unchanged (byte-identical legacy).
-  const snap = options.shellSnapshot
-  const argv = snap !== undefined ? snap.restore(snap.handle, sandboxedArgv).argv : sandboxedArgv
+  const argv = sandboxedArgv
   const proc = bunScrubbedSpawner(argv, {
     cwd,
     env,

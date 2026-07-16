@@ -1,5 +1,4 @@
 import type { AgentConfig } from "@/agent"
-import type { GranularRegistryPort } from "@/agent/checkpoint/granular-registry"
 import type { ObjectivePort } from "@/agent/objective"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import {
@@ -35,9 +34,8 @@ type RuntimeCreateHostArgs = Omit<CreateRuntimeFacadeArgs, "boot" | "compose">
 
 export interface RuntimeFacadeComposeOptions {
   readonly automationEngine?: NonNullable<RuntimeContextAutomationEngineView>
-  readonly granularRegistry?: GranularRegistryPort
   readonly registryToolMapper?: (tool: Tool) => Tool
-  /** Per-turn prompt-assembled sink (mirrors `granularRegistry`). When set, it
+  /** Per-turn prompt-assembled sink. When set, it
    *  is patched onto the runtime context state so the built `AgentConfig` carries
    *  `onPromptAssembled` and the loop fires it each turn (REPL `/context` live
    *  breakdown). Absent ⇒ slot omitted ⇒ `AgentConfig.onPromptAssembled`
@@ -218,7 +216,6 @@ const patchRuntimeContextState = (
  *  a new `registry`) stay as explicit branches below. ADR-0512 added
  *  `onSkillScopeReady` to this set. */
 const PASS_THROUGH_COMPOSE_KEYS = [
-  "granularRegistry",
   "onPromptAssembled",
   "workingState",
   "onWorkingStateReady",

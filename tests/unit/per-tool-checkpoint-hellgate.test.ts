@@ -254,6 +254,39 @@ describe("GranularCheckpointPolicy recordAnchorSha (HELL-C7..C10)", () => {
     expect(list[0]?.sha).toBe("sha-4")
     expect(list[1]?.sha).toBe("sha-3")
   })
+
+  test("HELL-C10b: actual dispatched tool-call id is the rewind tag identity", () => {
+    const policy = buildToolPolicy()
+    const anchor = {
+      workspace: "/ws",
+      turnId: "turn-1",
+      toolName: "edit_file",
+      toolCallId: "call_real_42",
+    }
+    const tag = policy.computeTag(anchor)
+    expect(tag).toBe("tool:edit_file:call_real_42")
+    policy.recordAnchorSha(tag as string, "abc123", anchor)
+    expect(policy.registry.lookup("tool:edit_file:call_real_42")?.toolCallId).toBe("call_real_42")
+  })
+
+  test("HELL-C10c: record lifecycle clears all bounded anchors on session close", () => {
+    const policy = buildToolPolicy()
+    const tag = policy.computeTag({
+      workspace: "/ws",
+      turnId: "turn-1",
+      toolName: "edit_file",
+      toolCallId: "call_close_1",
+    }) as string
+    policy.recordAnchorSha(tag, "abc123", {
+      workspace: "/ws",
+      turnId: "turn-1",
+      toolName: "edit_file",
+      toolCallId: "call_close_1",
+    })
+    expect(policy.registry.list()).toHaveLength(1)
+    policy.registry.clear()
+    expect(policy.registry.list()).toEqual([])
+  })
 })
 
 /* ================================================================== */

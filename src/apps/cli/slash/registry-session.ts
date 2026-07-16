@@ -5,7 +5,7 @@
  * transcript, or a session-time side-loop:
  *
  *   - `/retry-with` — `@/llm` model-swap rebroadcast (ADR-0065/0066).
- *   - `/side`       — Claude A9 isolated agent loop via `SideConversationPort`.
+ *   - `/side`       — Claude A9 isolated agent loop via the host runtime starter.
  *   - `/why`        — meta-LLM reasoning query over a recorded tool call.
  *   - `/debug`      — runtime debug-tracer toggle (session-scoped state).
  *
@@ -21,12 +21,12 @@
 
 import { ALL_INBOUND_MODES, invertInboundModeOnce, parseInboundMode } from "@/agent/inbound-mode"
 import { runDebugCmd } from "../debug-cmd"
-import { goalCmd } from "./goal-cmd"
 import { hooksCmd } from "../hooks-cmd"
 import { retryWithCmd } from "../retry-with"
 import { sideCmd } from "../side-cmd"
 import type { SlashCommand } from "../slash-contract"
 import { whyCmd } from "../why-cmd"
+import { goalCmd } from "./goal-cmd"
 
 /** Track D — `/debug` runtime toggle. Pure handler in `../debug-cmd`; the
  *  slash adapter delegates and applies the new state back through the
@@ -109,7 +109,8 @@ const summarizeNowCmd: SlashCommand = {
  *  holder's running turn — NOT a second writer. Absent surface ⇒ "not wired". */
 const steerCmd: SlashCommand = {
   name: "/steer",
-  describe: "Steer the current turn: inject one message into the in-flight turn (T02 follower verb)",
+  describe:
+    "Steer the current turn: inject one message into the in-flight turn (T02 follower verb)",
   category: "session",
   async run(args, ctx) {
     if (ctx.conversationActions === undefined) {

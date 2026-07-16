@@ -64,7 +64,7 @@ evidence:
     - docs/decisions/0207-stage1-outputs-persist.md
   tests:
     unit:
-      - tests/unit/memory/auto-trigger-hellgate.test.ts
+      - tests/unit/memory-consolidator-hook-hellgate.test.ts
     integration: []
     contract: []
 knobs:

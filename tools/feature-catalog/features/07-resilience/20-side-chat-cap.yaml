@@ -1,54 +1,40 @@
 id: side-chat-cap
-title: Side-chat isolation 5-invariant — Claude Code A9 absorption
+title: Side conversation isolation invariants
 section: 7
-subsystem: 격리 ephemeral agent loop
+subsystem: Host runtime side conversation
 order: 20
 maturity: L4
 status: stable
 ui_surfaces: [cli]
 monitoring: n-a
-modes: [n-a]
+modes: [interactive]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "resilience-primitive", "absorbed:claude-code"]
-depends_on: [assemble-config, prompt-source-payload-widening, runner-run-interactive, model-swap-retry, runner-persist-turn]
+depends_on: [runtime-sdk-cutover]
 config_refs:
   env: []
 surface_integration:
   cli: full
   web: missing
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-16"
   evidence:
-    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "no side-chat web handler or verb; SlashPalette Server-routed commands are non-executing prefill stubs (B2) and no SessionCommand verb (B3)"
+    cli: "The /side command reaches the host-owned isolated AgentConfig."
+    web: "No web command or renderer."
 purpose: |
-  사용자의 lookup 질문("어디서 X 정의됨?", "test 커맨드?")을 메인 대화의 history/
-  working-state/cost에 섞지 않고 격리된 mini agent loop으로 처리. 5-invariant 락-인:
-  (I1) caller의 `messages` 배열 NEVER 변형 — 자체 message list 구성, (I2) main
-  session의 `store`/`sessionId` 비전파 — 합성 ephemeral id `side:<id>:<nonce>`,
-  store:undefined로 memory가 working-state에 write 안 함, (I3) tool registry는
-  read-only allowlist로 새 인스턴스 — mutating tools가 *물리적으로 부재*, 권한
-  거부가 아님, (I4) `SIDE_CHAT_MAX_TURNS_CAP=5` HARD CAP — caller가 더 높이
-  설정해도 capped, (I5) cost(input/output tokens)는 결과에 분리 반환 — 메인
-  session의 metrics/store에는 사라지지 않음. side-conversation(ADR-0046,
-  one-shot single-stream)과 subagent(ADR-0041, lifecycle-managed worktree)와
-  명확히 직교.
+  Side conversations receive a fresh message array, read-only registry,
+  bounded turns, and separate usage tally. The child configuration excludes
+  parent hooks, stores, approval state, memory, and Radar by construction.
 evidence:
   code:
-    - src/runner/orchestrate/side-chat.ts
-    - src/runner/orchestrate/index.ts
+    - src/host/runtime/internal/context-binding/side-conversation.ts
     - src/apps/cli/side-cmd.ts
   adrs: []
   tests:
-    unit:
-      - tests/unit/runner/side-chat.test.ts
-    integration: []
+    unit: [tests/unit/host/runtime-side-conversation-isolation-hellgate.test.ts]
+    integration: [tests/integration/side-conversation-e2e.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null
-notes: |
-  `contextInheritance` 기본 "system" — main history 미반영(Claude A9 fresh-thread
-  의도). Default read-only allowlist는 side-conversation의 allowlist와 거의
-  같지만 `request_user_input` 제외(side-chat은 비대화) + `file_tree_summary`/
-  `parse_test_failure` 추가(분석 lookup용).
+notes: "The previous runner implementation was removed as a duplicate owner."

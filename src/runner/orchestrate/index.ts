@@ -44,17 +44,3 @@ export type {
   SessionTurnResult,
 } from "./session-turn-driver"
 export { runSessionTurn as driveSessionTurn } from "./session-turn-driver"
-export type {
-  SideChatContextInheritance,
-  SideChatInput,
-  SideChatResult,
-} from "./side-chat"
-export {
-  buildSideChatHistory,
-  buildSideChatRegistry,
-  extractAnswerText,
-  runSideChat,
-  SIDE_CHAT_DEFAULT_READ_ONLY,
-  SIDE_CHAT_FORBIDDEN,
-  SIDE_CHAT_MAX_TURNS_CAP,
-} from "./side-chat"

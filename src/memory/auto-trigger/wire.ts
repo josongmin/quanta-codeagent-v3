@@ -28,10 +28,9 @@
  * reachable via `QUANTA_MEMORY_AUTO=off`. The function is PURE w.r.t.
  * its input env view; no `process.env` reads.
  *
- * The return shape carries the resolved `TriggerPolicy` only — the
- * host wires the concrete `MemoryAutoTrigger` / `CrossSessionInjector`
- * because those need a `Phase1Port` (LLM seam) + stage1 stores the
- * surface owns.
+ * The return shape carries the resolved `TriggerPolicy`; the session-memory
+ * composition root threads it into the live consolidator hook alongside its
+ * Phase 1 and Stage-1 stores.
  */
 
 import { parseEnvFlag } from "@/shared"

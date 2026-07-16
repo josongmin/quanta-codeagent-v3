@@ -29,6 +29,10 @@ purpose: |
   prune) + 2 adapter (in-memory LRU / jsonl-file append-only). jsonl 0600
   권한, replay double-write 방지 (replaying flag). idle-long-task sample heuristic
   (pure, store push는 caller).
+
+  Bug-fix suggestions use the same RadarCard owner, not a second in-memory
+  proposal queue. Their typed immutable metadata records source, hypothesis,
+  and verify intent; both stores deep-clone and freeze it at the boundary.
 evidence:
   code:
     - src/radar/port.ts
@@ -47,6 +51,7 @@ evidence:
     unit:
       - tests/unit/radar/radar-hellgate.test.ts
       - tests/unit/radar/radar-e2e-hellgate.test.ts
+      - tests/unit/radar/bug-fix-card-hellgate.test.ts
 knobs: [QUANTA_RADAR, QUANTA_RADAR_FILE, QUANTA_RADAR_TASK_MS, QUANTA_RADAR_PRUNE_MS]
 deliberate_hold:
   reason: |

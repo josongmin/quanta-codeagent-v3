@@ -2,8 +2,7 @@
  * `/rewind-tool` producer+consumer wire (ADR-0203 + ADR-0205).
  *
  * Builds a SESSION-SCOPED per-tool-checkpoint `GranularCheckpointPolicy`
- * (the `lookup`-bearing ADR-0203 registry — NOT the orthogonal ADR-0300
- * `GranularRegistryPort` content store) together with the matching
+ * (the `lookup`-bearing ADR-0203 registry) together with the matching
  * `ThreeWayRestorePort`, so the REPL surface can both (a) thread the policy
  * into `AgentConfig.shadowCheckpoint.granularPolicy` as the dispatch-wrap
  * PRODUCER and (b) feed the policy's `.registry` + the restore port into the
@@ -12,7 +11,7 @@
  *
  * # Default-OFF
  *
- * The composition root only calls this when `QUANTA_PER_TOOL_CHECKPOINT` is
+ * The composition root only calls this when `QUANTA_PER_TOOL_RECORD` is
  * truthy AND a shadow ODB exists. Absent ⇒ nothing is built, no AgentConfig
  * field is set, and `/rewind-tool` prints "not wired in this surface"
  * byte-identical.
@@ -66,6 +65,8 @@ export interface PerToolCheckpointWire {
   readonly registry: GranularRegistry
   /** The 3-way restore port for the `/rewind-tool` `perToolRestorePort` arg. */
   readonly restore: ThreeWayRestorePort
+  /** End the session-owned record lifecycle and release retained anchor metadata. */
+  dispose(): void
 }
 
 /** Build the per-tool-checkpoint producer+consumer triple. Pure / no I/O at
@@ -78,12 +79,16 @@ export const buildPerToolCheckpointWire = (
   // the base mode to be per-mutating to anchor on each call). The wrap still
   // short-circuits when mode is "off".
   const base = defaultCheckpointPolicy({ mode: "per-mutating", odb: deps.shadowOdb })
-  const policy = defaultGranularCheckpointPolicy({ base, granularity: "tool" })
+  const policy = defaultGranularCheckpointPolicy({
+    base,
+    granularity: "tool",
+    maxRegistryEntries: 50,
+  })
   const restore = defaultThreeWayRestore({
     registry: policy.registry,
     workspace: deps.workspace,
     shadowOdb: deps.shadowOdb,
     ...(deps.conversationStore !== undefined ? { conversationStore: deps.conversationStore } : {}),
   })
-  return { policy, registry: policy.registry, restore }
+  return { policy, registry: policy.registry, restore, dispose: () => policy.registry.clear() }
 }

@@ -101,13 +101,10 @@ const persistTranslatedSession = async (
   return id
 }
 
-/** Providers the `import` subcommand accepts. `unknown` is intentionally
- *  excluded — it is a typed sentinel, never a user-supplied value. */
-const IMPORT_PROVIDERS: readonly Exclude<ExternalAgentProvider, "unknown">[] = [
-  "claude_code",
-  "cursor",
-  "aider",
-]
+/** Providers with a real session translator that the CLI may persist. Stub
+ * providers stay detectable for config migration but are rejected here so an
+ * empty translated session can never be reported as an import success. */
+const IMPORT_PROVIDERS: readonly Exclude<ExternalAgentProvider, "unknown">[] = ["claude_code"]
 
 const hasFlag = (args: string[], flag: string): boolean => args.includes(flag)
 const errLine = (verb: string, reason: string): string => `session ${verb}: ${reason}\n`
@@ -141,13 +138,11 @@ const parseImportArgs = (
 
   const provider = args.find((a) => !a.startsWith("--"))
   if (provider === undefined) {
-    deps.err(errLine("import", "missing <provider> (claude_code | cursor | aider)"))
+    deps.err(errLine("import", "missing <provider> (claude_code)"))
     return { ok: false, code: 1 }
   }
   if (!IMPORT_PROVIDERS.includes(provider as Exclude<ExternalAgentProvider, "unknown">)) {
-    deps.err(
-      errLine("import", `unknown provider: ${provider} (expected claude_code | cursor | aider)`),
-    )
+    deps.err(errLine("import", `unknown provider: ${provider} (expected claude_code)`))
     return { ok: false, code: 1 }
   }
   return {

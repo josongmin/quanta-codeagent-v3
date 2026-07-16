@@ -1,58 +1,33 @@
 id: slice-runner-layer2
-title: '`@/runner` 슬라이스 — surface-agnostic Layer-2 오케스트레이션'
+title: Runner Layer-2 orchestration slice
 section: 10
-subsystem: Surface-agnostic Layer-2 (RFC may-22)
+subsystem: Surface-agnostic Layer-2
 order: 20
 maturity: L4
-status: new
+status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli", "absorbed:codex"]
-depends_on: [runner-assemble-builders, assemble-config, prompt-source-payload-widening, runner-run-interactive, runner-persist-turn]
+depends_on: [runner-assemble-builders, assemble-config, runner-persist-turn]
 surface_integration:
   cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-16"
   evidence:
-    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "pure internal surface-agnostic orchestration engine (assemble/orchestrate/session-ops); no user-visible browser affordance of its own; frontend does not import @/runner"
-purpose: |
-  `src/runner/` 슬라이스 — CLI/Web/Tauri/Codex/Claude 어느 표면에서도 동일하게 호출 가능한
-  Layer-2 오케스트레이션 모듈. 3 sub-slice 배럴: `assemble/` (8 builder: llm/store/memory/
-  subagent/skill/compaction/verify/tooling/streaming/config) + `orchestrate/` (run-once /
-  resume-fsm / persist-turn / prompt-payload / side-chat) + `session-ops/`
-  (list-tui + 도메인 ops). ENV/argv/stdio/console 의존을 표면 진입(apps/cli, apps/web,
-  apps/tauri)으로 밀어내고 본 슬라이스는 typed config + 주입된 port (WriteSink, PromptSource,
-  StdioReader, logger) 로만 동작. byte-identical default-OFF — 어느 표면도 본 슬라이스를
-  강제로 와이어링하지 않으며 기존 흐름은 그대로.
+    cli: "Runner owns generic assembly, turn orchestration, and session operations; side conversation moved to host runtime."
+    web: "Surface-agnostic internal slice."
+purpose: "Keep environment and UI dependencies out of reusable Layer-2 orchestration."
 evidence:
-  code:
-    - src/runner/index.ts
-    - src/runner/assemble/index.ts
-    - src/runner/orchestrate/index.ts
-    - src/runner/session-ops/index.ts
+  code: [src/runner/index.ts, src/runner/assemble/index.ts, src/runner/orchestrate/index.ts, src/runner/session-ops/index.ts]
   adrs: []
   tests:
-    unit:
-      - tests/unit/runner-slice-boundary.test.ts
-      - tests/unit/runner/run-once-multimodal.test.ts
-      - tests/unit/runner/side-chat.test.ts
+    unit: [tests/unit/runner-slice-boundary.test.ts, tests/unit/runner/run-once-multimodal.test.ts]
     integration: []
     contract: []
 knobs: []
 deliberate_hold: null
-notes: |
-  10 architecture invariants (런타임 + biome 이중 강제): (1) apps/** import 금지, (2)
-  @/rules/@/patch/@/migration 직접 import 금지, (3) process.env / process.argv read 금지,
-  (4) 모든 sub-slice barrel(index.ts) 존재, (5) raw process.stdin/stdout/stderr 금지
-  (WriteSink/InputStream port 주입), (6) console.* 금지 (@/shared#logger 또는 주입된
-  log port 사용), (7) Bun.env/Bun.argv/Deno.env/Deno.args/import.meta.env 금지, (8)
-  node:readline/readline/promises/tty/repl 금지 (CLI-only), (9) `import { env, argv,
-  stdin } from "node:process"` 명명 import 금지 (literal-rename bypass 차단), (10)
-  tsconfig `@/runner` alias 등록 + biome `src/runner/**` override. Legacy
-  `run-interactive` / `prompt-source` helper files는 제거됐고, 동일 역할은
-  surface-side runtime host + prompt-payload / run-once split이 맡는다.
+notes: "Runner has no side-chat implementation after ownership consolidation."

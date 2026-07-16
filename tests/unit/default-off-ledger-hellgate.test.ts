@@ -20,7 +20,11 @@ describe("DOF-00 default-off authority ledger hellgate", () => {
     expect(report.runtimeCliSeedCount).toBe(27)
     expect(report.eligibleFeatureIds.length).toBeGreaterThanOrEqual(150)
     expect(report.eligibleFeatureIds).toEqual([...report.eligibleFeatureIds].sort())
-    expect(report.unknownSurfaceCount).toBeGreaterThan(0)
+    // DOF-00 completion invariant: every eligible row resolves every surface
+    // default (zero `unknown` cells). Construction-phase allowed unknowns; the
+    // finished ledger must not. Remaining `unknown` *values* are proof tiers
+    // only (features with genuinely no ON-path test), never surface cells.
+    expect(report.unknownSurfaceCount).toBe(0)
     expect(report.summary).toContain(`eligible=${report.eligibleFeatureIds.length}`)
     expect(report.errors).toEqual([])
   })

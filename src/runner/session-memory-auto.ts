@@ -439,6 +439,7 @@ export const buildSessionMemoryAutoWires = async (
       port: buildPhase1PortFromLlm(input.llm),
       store: phase1Store,
       redact: (content) => redactSecrets(content, { origin: "memory_distill" }).text,
+      promotionPolicy: auto.policy,
       threadId: input.sessionId,
       defer: lane.defer,
     },

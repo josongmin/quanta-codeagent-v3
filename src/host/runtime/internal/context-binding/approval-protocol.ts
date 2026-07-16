@@ -293,26 +293,22 @@ export const runWithProtocol = async <T>(
   // at scope exit were NOT consumed by this turn run and are stale — clear
   // them so an approval is good for exactly one turn (audit L5 H-1).
   const armedAtEntry = new Set(deps.leases.keys())
-  // Abandoned-approval drain (audit U2/#12): an approval that was ALREADY
-  // pending when this scope began carries over the full turn. If it is STILL
-  // pending at scope exit it was never resolved before the turn moved on —
-  // the surface that held its `approvalId` is gone, so it can never be
-  // matched and would otherwise leak in `pending` for the host's lifetime.
-  // Snapshot at entry and drop the survivors in `finally`. The approval THIS
-  // scope itself creates (when `onConfirm` throws) is added AFTER this
-  // snapshot, so it gets a one-turn grace: it survives to its resolution, or
-  // is drained by the NEXT scope if still unresolved. Mirrors the lease
-  // drain above; no arbitrary cap, nesting-safe (each scope drains only what
-  // it carried in).
-  const pendingAtEntry = new Set(deps.pending.keys())
   try {
     return await work()
   } finally {
     slot.current = previous
     if (pushedSurface) deps.surfaceConfirms.pop()
     for (const approvalId of armedAtEntry) deps.leases.delete(approvalId)
-    for (const approvalId of pendingAtEntry) deps.pending.delete(approvalId)
   }
+}
+
+/** Session close is a terminal lifecycle event. A later protocol scope is not:
+ * it must leave the kernel-owned pending approval addressable by
+ * `approval.respond`. */
+export const cancelPendingApprovals = (deps: ApprovalProtocolDeps): void => {
+  for (const approvalId of deps.pending.keys()) deps.base.approvalStateMachine?.cancel(approvalId)
+  deps.pending.clear()
+  deps.leases.clear()
 }
 
 type ResolveOpts =
@@ -411,6 +407,10 @@ export const resolveApprovalDecision = async (
   const record = deps.pending.get(approvalId)
   if (record === undefined) return
   deps.pending.delete(approvalId)
+  // `resolveApprovalDecision` is reached only from the host's
+  // `approval.respond` boundary. Settle the matching canonical record now,
+  // never when `RuntimeApprovalRequiredError` first suspends the turn.
+  deps.base.approvalStateMachine?.settle(approvalId, decision === "approve" ? "approve" : "deny")
   // ADR-0512 P3 — an ESCALATION approval (the minted approval carried
   // `scopeContext`) resolves to a RICH `ConfirmDecision` so the surface's
   // 4-verb card is genuinely reachable: `allow_once` (scope:"once" ⇒ the

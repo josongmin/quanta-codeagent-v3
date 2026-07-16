@@ -10,10 +10,12 @@ import type { Database, Statement } from "bun:sqlite"
 export const INSERT_SQL = `
     INSERT INTO automations
       (id, title, rule_json, prompt, next_run_at, last_run_at, status,
-       last_error, created_at, fire_count, model, model_fallbacks)
+       last_error, created_at, fire_count, model, model_fallbacks, kind,
+       target_thread_id, inherited_policy)
     VALUES
       ($id, $title, $rule, $prompt, $next_run_at, NULL, 'scheduled',
-       NULL, $created_at, 0, $model, $model_fallbacks)
+       NULL, $created_at, 0, $model, $model_fallbacks, $kind,
+       $target_thread_id, $inherited_policy)
   `
 
 export const EXISTS_SQL = "SELECT 1 AS n FROM automations WHERE id = ?"
@@ -37,6 +39,13 @@ export const NEXT_SQL = `
   `
 
 export const GET_SQL = "SELECT * FROM automations WHERE id = ?"
+
+export const LIVE_HEARTBEAT_FOR_THREAD_SQL = `
+  SELECT 1 AS n FROM automations
+  WHERE kind = 'heartbeat' AND target_thread_id = ?
+    AND status IN ('scheduled', 'running')
+  LIMIT 1
+`
 
 export const UPDATE_ON_RUN_SQL = `
     UPDATE automations SET
@@ -91,6 +100,7 @@ export interface PreparedStatements {
   readonly cancel: Statement
   readonly next: Statement
   readonly get: Statement
+  readonly liveHeartbeatForThread: Statement
   readonly updateOnRun: Statement
   readonly claim: Statement
   readonly insertRun: Statement
@@ -105,6 +115,7 @@ export const prepareStatements = (db: Database): PreparedStatements => ({
   cancel: db.query(CANCEL_SQL),
   next: db.query(NEXT_SQL),
   get: db.query(GET_SQL),
+  liveHeartbeatForThread: db.query(LIVE_HEARTBEAT_FOR_THREAD_SQL),
   updateOnRun: db.query(UPDATE_ON_RUN_SQL),
   claim: db.query(CLAIM_SQL),
   insertRun: db.query(INSERT_RUN_SQL),

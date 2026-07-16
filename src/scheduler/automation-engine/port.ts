@@ -24,7 +24,7 @@
  * directory + `../types` (shared `RRule`).
  */
 
-import type { RRule } from "../types"
+import type { HeartbeatPolicySnapshot, RRule } from "../types"
 
 /** 5-arm engine lifecycle. Distinct from `AutomationStatus` (host UX) — the
  *  engine only cares about fire-eligibility, so `paused` collapses to
@@ -92,6 +92,11 @@ export interface EngineAutomation {
   /** B2 — ordered fallback probe list (Codex `automations.model_fallbacks`).
    *  KEY OMITTED when absent. */
   readonly modelFallbacks?: ReadonlyArray<string>
+  /** H8 — thread-bound automations retain the routing contract in the
+   * production engine. Omitted means a detached cron fire. */
+  readonly kind?: "heartbeat"
+  readonly targetThreadId?: string
+  readonly inheritedPolicy?: HeartbeatPolicySnapshot
 }
 
 /** Input to `schedule()` — caller already computed `nextRunAt`. */
@@ -107,6 +112,11 @@ export interface ScheduleInput {
   readonly model?: string
   /** B2 — OPTIONAL ordered fallback probe list. Absent ⇒ omitted. */
   readonly modelFallbacks?: ReadonlyArray<string>
+  /** H8 — a heartbeat needs both routing fields; the engine validates this
+   * before persistence and rejects a second live heartbeat for the thread. */
+  readonly kind?: "heartbeat"
+  readonly targetThreadId?: string
+  readonly inheritedPolicy?: HeartbeatPolicySnapshot
 }
 
 /**
@@ -148,6 +158,7 @@ export type EngineErrorResult =
   | { readonly ok: false; readonly code: "not-found"; readonly message: string }
   | { readonly ok: false; readonly code: "io-failed"; readonly message: string }
   | { readonly ok: false; readonly code: "invalid-input"; readonly message: string }
+  | { readonly ok: false; readonly code: "heartbeat-thread-occupied"; readonly message: string }
 
 /**
  * The 5-verb closed engine seam.

@@ -384,10 +384,8 @@ const RULES: readonly Rule[] = [
     why: "Use `node:crypto.randomBytes`/`randomUUID` — Math.random's collision space is too small under parallel runs.",
     allowlist: {
       "agent/retry.ts": "documented non-security jitter; centralized helper, no cross-use",
-      "runner/orchestrate/side-chat.ts":
-        "non-security side-chat nonce for in-process turn correlation — not used for collision resistance.",
       "host/runtime/internal/context-binding.ts":
-        "mintSideConversationSessionId — non-security side-conversation id for in-process turn correlation; identical posture to runner/orchestrate/side-chat.ts, not used for collision resistance.",
+        "mintSideConversationSessionId — non-security side-conversation id for in-process turn correlation, not used for collision resistance.",
       "host/runtime/internal/context-binding/side-conversation.ts":
         "God-module split of context-binding.ts — the SAME `mintSideConversationSessionId` relocated verbatim; non-security side-conversation id for in-process turn correlation, not used for collision resistance.",
     },

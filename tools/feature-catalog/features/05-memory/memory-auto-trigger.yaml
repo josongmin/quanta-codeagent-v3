@@ -1,16 +1,16 @@
 id: memory-auto-trigger
-title: ADR-0281 — Memory auto-trigger (session-end → phase1 → phase2 promote)
+title: Memory auto promotion through the live session-end consolidator
 section: 5
-subsystem: 장기 메모리 — E3 productization (cross-session 자동 누적, Phase A)
+subsystem: Long-term memory
 order: 281
-maturity: L3
+maturity: L4
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 owners: ["@songmin"]
-labels: ["surface:core", "default-on", "absorbed:cursor", "absorbed:codex"]
+labels: ["surface:core", "default-on", "absorbed:codex"]
 depends_on: [codex-2-phase-consolidator, stage1-store-agent-port, consolidator-session-hook]
 config_refs:
   env: [QUANTA_MEMORY_AUTO, QUANTA_MEMORY_THRESHOLD, QUANTA_MEMORY_MIN_USAGE]
@@ -18,100 +18,28 @@ surface_integration:
   cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-16"
   evidence:
-    cli: "runs in the interactive CLI — 4/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "server-side session-end promotion pipeline; default-ON unless QUANTA_MEMORY_AUTO=off, with no browser configuration/readout surface"
+    cli: "The live session-end consolidator owns phase-1 distillation, redaction, usage initialization, promotion, and persistence."
+    web: "Server-side pipeline with no browser control surface."
 purpose: |
-  Closes the cross-session knowledge gap by wiring session-end Phase 1
-  distill → stage1 store → similarity-based Phase 2 promotion under a
-  single closed `MemoryAutoTrigger` port. The default lexical-Jaccard
-  scoring adapter compares the new Stage 1 entry's `rolloutSummary`
-  token set against the union of all sibling selected-for-phase2
-  entries; entries that score ≥ `promoteThreshold` (default 0.7) AND
-  meet `usageCount ≥ minUsageCount` (default 1) are promoted via
-  `markSelectedForPhase2`. Pairs with ADR-0282 cross-session inject:
-  the next session reads the promoted subset at session-start.
-
-  No-throw contract (mirrors ADR-0114 session-end hook): Phase 1
-  failure / stage1 put failure / scorer throw collapse to
-  `{kind:"error", error: TriggerError}` + injected `logWarn` callback.
-  Abort signals are propagated unchanged so callers can distinguish
-  cancellation. Empty session (0 messages) skips the LLM call
-  entirely.
-
-  Default-ON (ADR-0413): composition root's `assembleMemoryAuto(env)` returns the
-  wired trigger unless `QUANTA_MEMORY_AUTO=off` (parseEnvFlag defaultOn:true at
-  wire.ts:50 / agent-arg-builder.ts:228); only the explicit `=off` opt-out yields
-  `null` (no allocation, byte-identical legacy).
-
-  Before Phase 1 sees a rollout, the host-injected `DistillRedactor` sanitizes
-  string and text-block content. The production session-memory host supplies
-  `redactSecrets`; a missing adapter fails closed before the LLM call.
+  The session-end consolidator is the only memory-promotion authority. It
+  resolves the environment policy once, fails closed on missing redaction,
+  initializes new stage-1 usage at one, then evaluates promotion before
+  injecting the result. The removed DefaultMemoryAutoTrigger no longer creates
+  a competing lifecycle.
 evidence:
   code:
-    - src/memory/auto-trigger/port.ts
-    - src/memory/auto-trigger/types.ts
-    - src/memory/auto-trigger/default-trigger.ts
     - src/memory/auto-trigger/index.ts
-    - src/apps/agent/index.ts
+    - src/memory/auto-trigger/types.ts
+    - src/memory/auto-trigger/wire.ts
+    - src/agent/memory-consolidator-hook.ts
     - src/runner/session-memory-auto.ts
-  adrs:
-    - docs/decisions/0281-memory-auto-trigger.md
-    - docs/decisions/0068-codex-2-phase-memory-consolidator.md
-    - docs/decisions/0207-stage1-outputs-persist.md
+  adrs: [281, 68, 207]
   tests:
-    unit:
-      - tests/unit/memory/auto-trigger-hellgate.test.ts
-    integration: []
+    unit: [tests/unit/memory-consolidator-hook-hellgate.test.ts]
+    integration: [tests/integration/memory-auto-trigger-session-end-e2e.test.ts]
     contract: []
-knobs:
-  - name: QUANTA_MEMORY_AUTO
-    default: 'on'
-    purpose: 'auto-trigger 활성; DEFAULT-ON (ADR-0413), `=off`로만 비활성'
-  - name: QUANTA_MEMORY_THRESHOLD
-    default: 'undefined'
-    purpose: 'phase2 promote threshold (default 0.7, range 0..1 for default Jaccard)'
-  - name: QUANTA_MEMORY_MIN_USAGE
-    default: 'on'
-    purpose: 'minimum usageCount gate'
-  - name: DEFAULT_TRIGGER_POLICY
-    default: 'undefined'
-    purpose: '{promoteThreshold:0.7, minUsageCount:1}'
-  - name: DefaultMemoryAutoTriggerOpts.phase1Port
-    default: 'undefined'
-    purpose: 'LLM-backed Phase1Port (distill seam)'
-  - name: DefaultMemoryAutoTriggerOpts.phase1Store
-    default: 'undefined'
-    purpose: 'Stage1StorePort (watermark sink)'
-  - name: DefaultMemoryAutoTriggerOpts.stage1Store
-    default: 'undefined'
-    purpose: 'Stage1OutputsStore (usage/selection cache)'
-  - name: DefaultMemoryAutoTriggerOpts.redact
-    default: 'required; missing adapter fails closed'
-    purpose: 'Host-injected secret redaction before Phase 1 receives rollout content'
-  - name: DefaultMemoryAutoTriggerOpts.logWarn
-    default: 'no-op'
-    purpose: 'diagnostic sink'
-deliberate_hold:
-  reason: |
-    Embedding-based similarity is the obvious next-step swap (현재는
-    simple lexical jaccard). The port is closed and the scorer is the
-    single replaceable axis — embedding cosine, LLM judge, or hybrid
-    score adapters all ship against the same `shouldPromote` predicate
-    without touching the pipeline. Holding the swap for a follow-up
-    ADR (needs an embedder seam decision: reuse @/agent's existing
-    OpenAI embedder, plug a slice-local one, or DI via composition).
-  promotion_path: |
-    1. ADR follow-up picks the embedder seam (likely reuse
-       agent's OpenAIEmbedder via injected EmbedderPort);
-    2. write `EmbeddingMemoryAutoTrigger implements MemoryAutoTrigger`
-       (new adapter, ~80 LOC);
-    3. composition root selects adapter by env knob
-       (QUANTA_MEMORY_SCORER=lexical|embedding).
-notes: |
-  Pairs with `memory-cross-session-inject` (ADR-0282 — the read half).
-  Anti-leak invariant: `SessionEndOutcome` carries only enum / id /
-  bool — never `rolloutSummary` / `rawMemory` bytes. Verified by
-  HELL-MAT-05 (phase1 throw path) and HELL-MAT-09 (empty session
-  short-circuit asserts distill NOT called).
+knobs: [QUANTA_MEMORY_AUTO, QUANTA_MEMORY_THRESHOLD, QUANTA_MEMORY_MIN_USAGE]
+deliberate_hold: null
+notes: "Explicit QUANTA_MEMORY_AUTO=off preserves the no-allocation path."

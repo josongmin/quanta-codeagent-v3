@@ -2,7 +2,7 @@
  * H8 last-mile — heartbeat enqueue → thread-resume + posture binding (ADR-0480).
  *
  * The scheduler runtime already FORWARDS `{ targetThreadId, inheritedPolicy }`
- * into `AgentLoopPort.enqueueUserMessage` (`scheduler/runtime.ts:243-256`), but
+ * into `AgentLoopPort.enqueueUserMessage` through the automation engine, but
  * every host `AgentLoopPort` impl historically DROPPED the second `opts`
  * argument (a bare `externalPromptQueue.push(message)`), so a heartbeat fire
  * silently degraded to a fresh prompt on the CURRENT session's queue — no
@@ -20,8 +20,8 @@
  *
  * SECURITY (the load-bearing core): the posture clamp. A heartbeat must NEVER
  * grant more than the MOST-RESTRICTIVE of {inherited, current}. The
- * `inheritedPolicy` is round-tripped through JSONL as OPAQUE strings
- * (`store-jsonl.ts:218`); a forged/tampered snapshot must not widen authority.
+ * `inheritedPolicy` is persisted by the automation engine as opaque strings;
+ * a forged/tampered snapshot must not widen authority.
  * Two fail-closed disciplines:
  *   - an `approvalPolicy` value OUTSIDE the closed `PermissionMode` vocabulary
  *     maps to the MOST-restrictive mode (`default`), NEVER the most permissive;
@@ -32,7 +32,7 @@
  * Closed-port DI: the binder reaches into NO global. The live-thread id, the
  * permission cell, and the push sink are all injected. No `Date.now` /
  * `Math.random` / `process.env` here (the runtime stamps `at`; the binder needs
- * no clock — it is a pure routing + clamp over injected cells).
+ * no clock - it is a pure routing + clamp over injected cells).
  */
 
 import { isPermissionMode, type PermissionMode } from "@/permission"

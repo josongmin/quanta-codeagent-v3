@@ -123,7 +123,6 @@ export interface RuntimeContextSnapshot {
   readonly memorySummaryMd?: AgentConfig["memorySummaryMd"]
   readonly stage1OutputsStore?: AgentConfig["stage1OutputsStore"]
   readonly memoryConsolidator?: AgentConfig["memoryConsolidator"]
-  readonly granularRegistry?: AgentConfig["granularRegistry"]
   readonly onPromptAssembled?: AgentConfig["onPromptAssembled"]
   readonly workingState?: AgentConfig["workingState"]
   readonly onWorkingStateReady?: AgentConfig["onWorkingStateReady"]
@@ -188,7 +187,6 @@ export type RuntimeContextPatch = Partial<
     | "memorySummaryMd"
     | "stage1OutputsStore"
     | "memoryConsolidator"
-    | "granularRegistry"
     | "onPromptAssembled"
     | "workingState"
     | "onWorkingStateReady"

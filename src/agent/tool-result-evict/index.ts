@@ -8,4 +8,6 @@ export {
   type EvictionSpillPort,
   type MicrocompactInput,
   type MicrocompactResult,
+  MicrocompactTuningError,
+  validateMicrocompactTuning,
 } from "./types"

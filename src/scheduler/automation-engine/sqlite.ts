@@ -68,7 +68,10 @@ export const ensureAutomationEngineSchema = (db: Database): void => {
       claim_token     TEXT,
       claimed_at      INTEGER,
       model           TEXT,
-      model_fallbacks TEXT
+      model_fallbacks TEXT,
+      kind            TEXT,
+      target_thread_id TEXT,
+      inherited_policy TEXT
     )
   `)
   // T10 — additive migration for DBs created before the claim/finalize run
@@ -81,9 +84,19 @@ export const ensureAutomationEngineSchema = (db: Database): void => {
   // array string; NULL ⇒ key omitted on read.
   ensureColumn(db, "automations", "model", "TEXT")
   ensureColumn(db, "automations", "model_fallbacks", "TEXT")
+  ensureColumn(db, "automations", "kind", "TEXT")
+  ensureColumn(db, "automations", "target_thread_id", "TEXT")
+  ensureColumn(db, "automations", "inherited_policy", "TEXT")
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_automations_next_run
       ON automations(status, next_run_at)
+  `)
+  // H8 — the database, not an in-process preflight, owns the one-live-
+  // heartbeat-per-thread invariant across concurrent scheduler instances.
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_automations_live_heartbeat_thread
+      ON automations(target_thread_id)
+      WHERE kind = 'heartbeat' AND status IN ('scheduled', 'running')
   `)
 
   db.exec(`

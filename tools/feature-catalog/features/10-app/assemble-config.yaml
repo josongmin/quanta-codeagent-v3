@@ -1,7 +1,7 @@
 id: assemble-config
-title: assembleConfig — per-turn AgentConfig composer (surface-agnostic)
+title: assembleConfig - per-turn AgentConfig composer
 section: 10
-subsystem: Runner assembly layer (ADR-0024 split)
+subsystem: Runner assembly layer
 order: 12
 maturity: L5
 status: stable
@@ -11,46 +11,23 @@ modes: [interactive]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:cli"]
-depends_on: [runner-assemble-builders, prompt-source-payload-widening, effort-5-tier, fallback-kinds-policy, llm-factory]
-config_refs:
-  env: []
+depends_on: [runner-assemble-builders, fallback-kinds-policy, llm-factory]
 surface_integration:
   cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-16"
   evidence:
-    cli: "runs in the interactive CLI — 3/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "pure surface-agnostic type-safe composer primitive, no user-visible affordance"
-purpose: |
-  Pure type-safe composer that turns already-built collaborators
-  (`SessionDeps`: llm / registry / stream / permission / store / embedder /
-  …) + message history into the immutable `AgentConfig` shape `runAgent`
-  consumes. NO env / argv reads — every input is explicit. Naming is
-  deliberate: surface-agnostic builder family (`buildLLMCore` etc.) each
-  INSTANTIATE one collaborator; `assembleConfig` *composes* them. Every
-  conditional default-OFF spread is preserved byte-for-byte from the prior
-  inline block on the CLI entry. Used by `run-once`, `side-chat`, and the
-  runtime-SDK session host. Each surface (CLI / Web / Tauri) maps its own
-  input source (ENV / HTTP body / IPC payload) → `SessionDeps` first, then
-  calls this.
+    cli: "The surface composes collaborators into an AgentConfig; side conversations are owned by host runtime rather than this runner seam."
+    web: "Surface-agnostic composer."
+purpose: "Compose explicit collaborators and history into AgentConfig without reading env or argv."
 evidence:
-  code:
-    - src/runner/assemble/config.ts
-    - src/runner/orchestrate/run-once.ts
-    - src/runner/orchestrate/side-chat.ts
-    - src/host/runtime/session-host.ts
+  code: [src/runner/assemble/config.ts, src/runner/orchestrate/run-once.ts, src/host/runtime/session-host.ts]
   adrs: [24]
   tests:
-    unit: [tests/unit/cli/surface-wire-r2-hellgate.test.ts]
-    integration:
-      - tests/integration/cli-export-assembly.test.ts
+    unit: [tests/unit/assemble.test.ts]
+    integration: [tests/integration/cli-export-assembly.test.ts]
     contract: []
 knobs: []
 deliberate_hold: null
-notes: |
-  Thin `apps/cli/config-assemble.ts` shim은 제거됐다. Current import path는
-  `src/runner/assemble/config.ts` 직접 import 또는 `session-host` closure capture다.
-  The "assemble" vs "build" separation is documented inline in `config.ts`
-  JSDoc — important reading for new surfaces to understand which factory
-  family to extend.
+notes: "Conditional optional spreads retain default-off behavior."

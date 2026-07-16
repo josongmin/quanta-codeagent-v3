@@ -55,8 +55,15 @@ const DEFAULT_MAX_REGISTRY_ENTRIES = 200
 const US = "\x1f"
 
 /** Build the tool-grain tag in the canonical format. Pure. */
-const toolTag = (toolName: string, turnId: string, callIndex: number): CheckpointTag =>
-  `tool:${toolName}:${turnId}:${callIndex}`
+const toolTag = (
+  toolName: string,
+  turnId: string,
+  callIndex: number,
+  toolCallId?: string,
+): CheckpointTag =>
+  toolCallId !== undefined && toolCallId.length > 0
+    ? `tool:${toolName}:${toolCallId}`
+    : `tool:${toolName}:${turnId}:${callIndex}`
 
 /** Build the turn-grain tag. Pure. */
 const turnTag = (turnId: string): CheckpointTag => `turn:${turnId}`
@@ -134,6 +141,15 @@ const buildCallIndexCounter = (): ((workspace: string, turnId: string) => number
     return next
   }
 }
+
+const anchorMetadata = (
+  anchorCtx: AnchorContext,
+): Omit<GranularCheckpointEntry, "tag" | "granularity" | "sha" | "takenAt"> => ({
+  ...(anchorCtx.toolName !== undefined ? { toolName: anchorCtx.toolName } : {}),
+  ...(anchorCtx.toolCallId !== undefined ? { toolCallId: anchorCtx.toolCallId } : {}),
+  ...(anchorCtx.turnId !== undefined ? { turnId: anchorCtx.turnId } : {}),
+  ...(anchorCtx.callIndex !== undefined ? { callIndex: anchorCtx.callIndex } : {}),
+})
 
 /* ------------------------------------------------------------------ */
 /* Default policy                                                      */
@@ -228,7 +244,7 @@ export const defaultGranularCheckpointPolicy = (
     if (granularity === "tool") {
       const tn = anchorCtx.toolName ?? "unknown"
       const idx = anchorCtx.callIndex ?? nextCallIndex(anchorCtx.workspace, turnId)
-      return toolTag(tn, turnId, idx)
+      return toolTag(tn, turnId, idx, anchorCtx.toolCallId)
     }
     if (granularity === "skill") {
       const sn = anchorCtx.skillName ?? "unknown"
@@ -259,9 +275,7 @@ export const defaultGranularCheckpointPolicy = (
       granularity,
       sha,
       takenAt: now(),
-      ...(anchorCtx.toolName !== undefined ? { toolName: anchorCtx.toolName } : {}),
-      ...(anchorCtx.turnId !== undefined ? { turnId: anchorCtx.turnId } : {}),
-      ...(anchorCtx.callIndex !== undefined ? { callIndex: anchorCtx.callIndex } : {}),
+      ...anchorMetadata(anchorCtx),
     }
     internalRegistry.insert(entry)
   }

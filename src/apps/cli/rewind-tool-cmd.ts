@@ -17,7 +17,7 @@
  *
  * Default-OFF: `ctx.perToolCheckpoint` absent ⇒ D-6 not-wired posture +
  * exit 2, with a hint naming WHICH of the two gates is missing — the slot
- * is built only when BOTH `QUANTA_PER_TOOL_CHECKPOINT` AND `QUANTA_SHADOW`
+ * is built only when BOTH `QUANTA_PER_TOOL_RECORD` AND `QUANTA_SHADOW`
  * are on (UUX-6-17: the old single "not wired" line hid the dual-flag
  * requirement entirely).
  *
@@ -81,7 +81,7 @@ declare module "./slash-commands" {
  *  This mirror of that dual condition exists ONLY to render an honest
  *  not-wired hint (UUX-6-17) — it grants nothing. Same truthiness predicate
  *  as the composer (`parseEnvFlag(raw, false)`). */
-const PER_TOOL_CHECKPOINT_GATES = ["QUANTA_PER_TOOL_CHECKPOINT", "QUANTA_SHADOW"] as const
+const PER_TOOL_CHECKPOINT_GATES = ["QUANTA_PER_TOOL_RECORD", "QUANTA_SHADOW"] as const
 
 /** Which of the two wiring gates are NOT set in `env`. Exported for the
  *  hellgate; the command calls it with `process.env`. */

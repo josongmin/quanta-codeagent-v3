@@ -8,7 +8,7 @@
 
 import type { Database } from "bun:sqlite"
 import { errMessage } from "@/shared"
-import type { RRule, Weekday } from "../../types"
+import type { HeartbeatPolicySnapshot, RRule, Weekday } from "../../types"
 import type {
   AutomationRun,
   ClaimedRun,
@@ -47,6 +47,9 @@ interface AutomationRow {
   claimed_at: number | null
   model: string | null
   model_fallbacks: string | null
+  kind: string | null
+  target_thread_id: string | null
+  inherited_policy: string | null
 }
 
 const isEngineStatus = (s: string): s is EngineStatus =>
@@ -96,6 +99,30 @@ const parseModelFallbacks = (raw: string | null): ReadonlyArray<string> | undefi
   return parsed
 }
 
+const parseHeartbeatPolicy = (raw: string | null): HeartbeatPolicySnapshot | undefined => {
+  if (raw === null) return undefined
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return undefined
+  }
+  if (typeof parsed !== "object" || parsed === null) return undefined
+  const p = parsed as Partial<HeartbeatPolicySnapshot>
+  if (
+    typeof p.approvalPolicy !== "string" ||
+    typeof p.sandboxPolicy !== "string" ||
+    typeof p.collaborationMode !== "string"
+  ) {
+    return undefined
+  }
+  return Object.freeze({
+    approvalPolicy: p.approvalPolicy,
+    sandboxPolicy: p.sandboxPolicy,
+    collaborationMode: p.collaborationMode,
+  })
+}
+
 const rowToEngineAutomation = (row: AutomationRow): EngineAutomation | undefined => {
   if (!isEngineStatus(row.status)) return undefined
   const rule = parseRuleJson(row.rule_json)
@@ -111,6 +138,13 @@ const rowToEngineAutomation = (row: AutomationRow): EngineAutomation | undefined
     fireCount: row.fire_count,
   } as const
   const modelFallbacks = parseModelFallbacks(row.model_fallbacks)
+  const inheritedPolicy = parseHeartbeatPolicy(row.inherited_policy)
+  if (
+    (row.kind !== null && row.kind !== "heartbeat") ||
+    (row.kind === "heartbeat" && (row.target_thread_id === null || inheritedPolicy === undefined))
+  ) {
+    return undefined
+  }
   return {
     ...base,
     ...(row.last_run_at !== null ? { lastRunAt: row.last_run_at } : {}),
@@ -119,6 +153,9 @@ const rowToEngineAutomation = (row: AutomationRow): EngineAutomation | undefined
     ...(row.claimed_at !== null ? { claimedAt: row.claimed_at } : {}),
     ...(row.model !== null ? { model: row.model } : {}),
     ...(modelFallbacks !== undefined ? { modelFallbacks } : {}),
+    ...(row.kind === "heartbeat" ? { kind: "heartbeat" as const } : {}),
+    ...(row.target_thread_id !== null ? { targetThreadId: row.target_thread_id } : {}),
+    ...(inheritedPolicy !== undefined ? { inheritedPolicy } : {}),
   }
 }
 
@@ -139,6 +176,30 @@ export const schedule = (
       message: "id is empty",
     })
   }
+  if (input.kind === "heartbeat") {
+    if (input.targetThreadId === undefined || input.targetThreadId.length === 0) {
+      return Promise.resolve({
+        ok: false,
+        code: "invalid-input",
+        message: "heartbeat requires targetThreadId",
+      })
+    }
+    if (input.inheritedPolicy === undefined) {
+      return Promise.resolve({
+        ok: false,
+        code: "invalid-input",
+        message: "heartbeat requires inheritedPolicy",
+      })
+    }
+    const live = deps.stmts.liveHeartbeatForThread.get(input.targetThreadId)
+    if (live !== null) {
+      return Promise.resolve({
+        ok: false,
+        code: "heartbeat-thread-occupied",
+        message: `thread '${input.targetThreadId}' already has a live heartbeat`,
+      })
+    }
+  }
   try {
     const dup = deps.stmts.exists.get(input.id)
     if (dup !== null) {
@@ -158,8 +219,19 @@ export const schedule = (
       $model: input.model ?? null,
       $model_fallbacks:
         input.modelFallbacks !== undefined ? JSON.stringify(input.modelFallbacks) : null,
+      $kind: input.kind ?? null,
+      $target_thread_id: input.targetThreadId ?? null,
+      $inherited_policy:
+        input.inheritedPolicy !== undefined ? JSON.stringify(input.inheritedPolicy) : null,
     })
   } catch (e) {
+    if (input.kind === "heartbeat" && String(e).includes("idx_automations_live_heartbeat_thread")) {
+      return Promise.resolve({
+        ok: false,
+        code: "heartbeat-thread-occupied",
+        message: `thread '${input.targetThreadId ?? ""}' already has a live heartbeat`,
+      })
+    }
     return Promise.resolve(ioFail(`schedule failed: ${errMessage(e)}`))
   }
   const row = deps.stmts.get.get(input.id) as AutomationRow | null

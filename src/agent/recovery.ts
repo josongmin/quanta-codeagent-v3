@@ -1,6 +1,7 @@
-import { type assembleFromEvents, isRefusalStopReason } from "@/llm"
+import { type assembleFromEvents, createDefaultRecoveryRouter, isRefusalStopReason } from "@/llm"
+import { LLMError } from "@/shared"
 import { DEFAULT_REFUSAL_FALLBACK_PROMPT } from "./refusal-fallback"
-import { classifyLLMError } from "./retry"
+import { classifyLLMError, isPromptTooLong } from "./retry"
 import type { StopAction, StopReasonPolicy } from "./stop-reason"
 import type { TurnState } from "./turn-context"
 import type { AgentConfig } from "./types"
@@ -17,6 +18,7 @@ const MAX_CONSECUTIVE_EMPTIES = 2
  *  refusal loop and pressures the model past real safety boundaries, and `n>1`
  *  is forbidden without measurement ([[no-heuristics-only-validated]]). */
 const MAX_REFUSAL_FALLBACKS = 1
+const defaultRecoveryRouter = createDefaultRecoveryRouter()
 
 /** Per-kind same-turn recovery budget caps (ADR documented in this module
  *  header + the conversation_action_noop branch of loop.ts). Frozen so a test
@@ -217,6 +219,8 @@ export const decideOnStreamError = (
   message: string,
   rec: RecoveryState,
 ): RecoveryAction => {
+  const typed = decideTypedStreamError(error, message, rec)
+  if (typed !== undefined) return typed
   const kind = classifyLLMError(error)
   if (kind === "retryable") {
     if (rec.streamRetries >= MAX_TURN_STREAM_RETRIES) {
@@ -228,6 +232,41 @@ export const decideOnStreamError = (
   }
   if (kind === "prompt_too_long") return { do: "compact" }
   return { do: "error", reason: message }
+}
+
+/**
+ * The outer turn-recovery owner consumes the Codex typed router. `RetryingLLM`
+ * remains a separate decorator policy for pre-stream transport retries. A
+ * fallback-class error reaches here only after any `FallbackLLM` chain has
+ * exhausted its own provider-selection attempt, so the outer owner preserves
+ * the bounded retry budget instead of inventing a provider-selection shim.
+ */
+const decideTypedStreamError = (
+  error: unknown,
+  message: string,
+  rec: RecoveryState,
+): RecoveryAction | undefined => {
+  if (!(error instanceof LLMError) || error.kind === "unknown") return undefined
+  // Preserve the existing provider-message PTL signal: many adapters can only
+  // classify the HTTP status as bad_request even though the body names overflow.
+  if (isPromptTooLong(error)) return { do: "compact" }
+  switch (defaultRecoveryRouter.route(error.kind)) {
+    case "reactive_compaction":
+      return { do: "compact" }
+    case "hitl_handoff":
+      return { do: "error", reason: `LLM requires operator intervention: ${message}` }
+    case "fatal":
+      return { do: "error", reason: message }
+    case "retry_after_backoff":
+    case "fallback_provider":
+    case "retry_same_turn": {
+      if (rec.streamRetries >= MAX_TURN_STREAM_RETRIES)
+        return { do: "error", reason: `LLM stream failed after retries: ${message}` }
+      const attempt = rec.streamRetries
+      rec.streamRetries += 1
+      return { do: "backoff", attempt }
+    }
+  }
 }
 
 /** Pure policy for a successfully assembled turn: decide whether it is final,

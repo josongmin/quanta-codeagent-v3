@@ -41,6 +41,7 @@ evidence:
   tests:
     unit:
       - tests/unit/vendor-rules-detector-hellgate.test.ts
+      - tests/unit/vendor-glob-unconsumed-failclosed-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
@@ -48,9 +49,22 @@ deliberate_hold:
   reason: |
     Wiring으로 @/agent/glob-rules.ts 합류는 별 슬라이스 — detector만 신설하고
     loadGlobRules 합성은 후속. Default-OFF로 byte-identical 유지.
+    DOF-40 재확인 @b92b3798f: composer(loadGlobRulesWithVendors)는 존재하나
+    production call-site 0 — live 경로 rule-indicator.ts:260은 legacy
+    loadGlobRules(cwd) 호출. 즉 detectAll은 여전히 seam-only.
   promotion_path: |
-    @/agent/glob-rules.ts:loadGlobRules가 createDefaultVendorDetector().detectAll()
-    호출해 결과를 기존 GlobRule[] 모양으로 어댑팅 + renderGlobRulesBlock 통합.
+    @/agent/glob-rules.ts:loadGlobRulesWithVendors 가 이미 detectAll 을
+    호출·GlobRule[] 로 어댑팅. 승격 = src/apps/cli/rule-indicator.ts (미소유,
+    별 leaf) 의 loadGlobRules(cwd) → loadGlobRulesWithVendors(cwd, {
+    vendorDetectorEnabled:true, onUnconsumed:<진단싱크> }) 교체.
+    promotion owner: @songmin.
 notes: |
   fast-glob 미사용 — PathKind 3종(file/dir/mode-dir) 닫힌 enum이면 충분.
   새 vendor 추가는 vendor-table.ts 한 줄 + (필요 시) ParserKind 확장.
+
+  DOF-40 fail-closed: detectAll 의 DetectionResult.errors (파싱 실패한
+  vendor 파일) 는 loadGlobRulesWithVendors 가 이전엔 silent drop 했으나,
+  이제 onUnconsumed sink 로 parse_error 로 표면화 (silent partial 제거).
+  detector 자체는 이미 no-throw + errors 누적 (port.ts DetectorError SSOT);
+  이 하드닝은 consumer 측 swallow 를 닫음. 커버: vendor-glob-unconsumed-
+  failclosed-hellgate.test.ts (red-on-injection 검증됨).

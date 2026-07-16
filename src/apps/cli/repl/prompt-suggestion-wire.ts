@@ -99,6 +99,25 @@ export interface PromptSuggestionStatePorts {
   readonly pendingPromptLabels?: (() => readonly (string | undefined)[] | undefined) | undefined
 }
 
+type RateLimitTelemetry =
+  | { readonly kind: "known"; readonly remainingPercent: number }
+  | { readonly kind: "unavailable" }
+  | { readonly kind: "unsafe" }
+
+const resolveRateLimitTelemetry = (
+  port: PromptSuggestionStatePorts["providerRateLimitRemainingPercent"],
+): RateLimitTelemetry => {
+  if (port === undefined) return { kind: "unavailable" }
+  try {
+    const remaining = port()
+    if (remaining === undefined) return { kind: "unavailable" }
+    if (!Number.isFinite(remaining) || remaining < 0 || remaining > 100) return { kind: "unsafe" }
+    return { kind: "known", remainingPercent: remaining }
+  } catch {
+    return { kind: "unsafe" }
+  }
+}
+
 export interface PromptSuggestionTurnCompletionAdapter {
   run(args: Omit<PromptSuggestionRunArgs, "state">): Promise<void>
 }
@@ -119,15 +138,12 @@ const resolvePromptSuggestionState = (
 ): AppStateView | undefined => {
   try {
     const planMode = ports.planMode?.()
-    const remaining = ports.providerRateLimitRemainingPercent?.()
     const labels = ports.pendingPromptLabels?.()
+    const rateLimitTelemetry = resolveRateLimitTelemetry(ports.providerRateLimitRemainingPercent)
     if (
       typeof planMode !== "boolean" ||
-      remaining === undefined ||
-      !Number.isFinite(remaining) ||
-      remaining < 0 ||
-      remaining > 100 ||
-      labels === undefined
+      labels === undefined ||
+      rateLimitTelemetry.kind === "unsafe"
     ) {
       return undefined
     }
@@ -147,7 +163,7 @@ const resolvePromptSuggestionState = (
 
     return {
       planMode,
-      rateLimited: remaining <= 0,
+      rateLimited: rateLimitTelemetry.kind === "known" && rateLimitTelemetry.remainingPercent <= 0,
       elicitationActive,
       pendingPermission,
     }

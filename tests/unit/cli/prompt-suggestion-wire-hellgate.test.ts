@@ -183,14 +183,6 @@ describe("prompt-suggestion-wire — production turn-completion state adapter", 
 
   test.each([
     ["missing plan probe", knownCalmState({ planMode: undefined })],
-    [
-      "missing provider rate-limit probe",
-      knownCalmState({ providerRateLimitRemainingPercent: undefined }),
-    ],
-    [
-      "provider has not reported state",
-      knownCalmState({ providerRateLimitRemainingPercent: () => undefined }),
-    ],
     ["missing pending-prompt probe", knownCalmState({ pendingPromptLabels: undefined })],
     [
       "throwing state probe",
@@ -200,11 +192,31 @@ describe("prompt-suggestion-wire — production turn-completion state adapter", 
         },
       }),
     ],
+    [
+      "malformed provider telemetry",
+      knownCalmState({ providerRateLimitRemainingPercent: () => Number.NaN }),
+    ],
   ] as const)("fail-closed: %s suppresses instead of inferring false", async (_name, state) => {
     const { adapter, calls, renders } = buildTurnCompletion(state)
     await adapter?.run({ messages: baseArgs().messages })
     expect(calls.length).toBe(0)
     expect(renders).toEqual([])
+  })
+
+  test.each([
+    [
+      "missing provider rate-limit probe",
+      knownCalmState({ providerRateLimitRemainingPercent: undefined }),
+    ],
+    [
+      "provider has not reported telemetry",
+      knownCalmState({ providerRateLimitRemainingPercent: () => undefined }),
+    ],
+  ] as const)("unavailable %s permits a suggestion", async (_name, state) => {
+    const { adapter, calls, renders } = buildTurnCompletion(state)
+    await adapter?.run({ messages: baseArgs().messages })
+    expect(calls.length).toBe(1)
+    expect(renders).toEqual(["push the branch"])
   })
 })
 

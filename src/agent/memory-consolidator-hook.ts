@@ -35,6 +35,7 @@ import {
   type Stage1StorePort,
   type WatermarkState,
 } from "@/memory"
+import { DEFAULT_TRIGGER_POLICY, type TriggerPolicy } from "@/memory/auto-trigger"
 import type { Stage1Entry, Stage1OutputsStore } from "@/memory/stage1-store"
 import { errMessage } from "@/shared"
 import type { Stage1Record, Stage1StorePortV2 } from "./memory/stage1-store"
@@ -89,6 +90,8 @@ export interface ConsolidatorHookInput {
         threadId?: string
         /** Optional redactor — see {@link DistillRedactor}. */
         redact?: DistillRedactor
+        /** Resolved memory-auto promotion policy. */
+        promotionPolicy?: TriggerPolicy
       }
     | undefined
   /** Session id — fallback for `threadId` when consolidator.threadId is unset. */
@@ -170,8 +173,10 @@ const mirrorStage1ToOutputsStore = (
   slot: Stage1OutputsStore | undefined,
   out: Phase1Outcome & { kind: "distilled" },
   generatedAtMs: number,
+  policy: TriggerPolicy,
 ): void => {
   if (slot === undefined) return
+  const selected = shouldPromoteForInjection(out.stage1.rolloutSummary, slot, policy)
   const entry: Stage1Entry = {
     threadId: out.stage1.threadId,
     sourceUpdatedAt: out.stage1.sourceUpdatedAt,
@@ -179,11 +184,44 @@ const mirrorStage1ToOutputsStore = (
     rolloutSummary: out.stage1.rolloutSummary,
     generatedAt: generatedAtMs,
     rolloutSlug: out.stage1.rolloutSlug,
-    usageCount: 0,
+    // The completed source session is the first observed use. Without this
+    // seed, the injector's minUsage:1 defense can never admit a new row.
+    usageCount: 1,
     lastUsage: generatedAtMs,
-    selectedForPhase2: true,
+    selectedForPhase2: selected,
+    ...(selected ? { selectedForPhase2SourceUpdatedAt: out.stage1.sourceUpdatedAt } : {}),
   }
   slot.put(entry)
+}
+
+const tokenize = (text: string): Set<string> =>
+  new Set(text.toLowerCase().match(/[a-z0-9]+/g) ?? [])
+
+const lexicalOverlap = (summary: string, siblings: readonly Stage1Entry[]): number => {
+  const candidate = tokenize(summary)
+  if (candidate.size === 0) return 0
+  const corpus = new Set<string>()
+  for (const sibling of siblings) {
+    for (const token of tokenize(sibling.rolloutSummary)) corpus.add(token)
+  }
+  if (corpus.size === 0) return 0
+  let intersection = 0
+  for (const token of candidate) if (corpus.has(token)) intersection++
+  return intersection / (candidate.size + corpus.size - intersection)
+}
+
+const shouldPromoteForInjection = (
+  summary: string,
+  store: Stage1OutputsStore,
+  policy: TriggerPolicy,
+): boolean => {
+  if (1 < policy.minUsageCount || policy.promoteThreshold > 1) return false
+  if (policy.promoteThreshold <= 0) return true
+  const siblings = store.list()
+  // The first durable entry has no corpus to score against; keeping it makes
+  // default-on cross-session memory reachable without a synthetic touch.
+  if (siblings.length === 0) return true
+  return lexicalOverlap(summary, siblings) >= policy.promoteThreshold
 }
 
 /** Run the consolidator hook. ALL failure paths return an outcome — the
@@ -200,40 +238,37 @@ export const runMemoryConsolidatorHook = async (
   return result
 }
 
-const runMemoryConsolidatorHookInner = async (
+type ResolvedConsolidator = {
+  readonly cfg: NonNullable<ConsolidatorHookInput["consolidator"]> & {
+    readonly port: Phase1Port
+    readonly store: Stage1StorePort
+  }
+  readonly threadId: string
+}
+
+const resolveConsolidator = (
   input: ConsolidatorHookInput,
-): Promise<ConsolidatorHookOutcome> => {
+): ResolvedConsolidator | ConsolidatorHookOutcome => {
   const cfg = input.consolidator
-  // Opt-in: consolidator must be configured AND either `enabled` true OR
-  // `forceSummarization` true (SOTA Cursor — explicit manual trigger).
-  if (cfg === undefined) {
+  if (cfg === undefined || (cfg.enabled !== true && cfg.forceSummarization !== true)) {
     return { kind: "skipped", reason: "consolidator_disabled" }
   }
-  if (cfg.enabled !== true && cfg.forceSummarization !== true) {
-    return { kind: "skipped", reason: "consolidator_disabled" }
-  }
-  // Session-error skip: a session that ended in error should not have
-  // its tainted rollout fed to the distill (RolloutTaintedError semantics
-  // at the consolidator layer would still catch a malicious payload, but
-  // we skip earlier to save the LLM call). `forceSummarization` does NOT
-  // override this — a force is intent-to-distill on success, not on a
-  // failed run.
-  if (!input.sessionOk) {
-    return { kind: "skipped", reason: "session_errored" }
-  }
-  // Required ports/store: absent ⇒ structured skip (no throw). A host
-  // that sets `enabled: true` but forgets the port/store learns via the
-  // log, the session still finishes cleanly.
-  if (cfg.port === undefined) {
-    return { kind: "skipped", reason: "port_missing" }
-  }
-  if (cfg.store === undefined) {
-    return { kind: "skipped", reason: "store_missing" }
-  }
+  if (!input.sessionOk) return { kind: "skipped", reason: "session_errored" }
+  if (cfg.port === undefined) return { kind: "skipped", reason: "port_missing" }
+  if (cfg.store === undefined) return { kind: "skipped", reason: "store_missing" }
   const threadId = cfg.threadId ?? input.sessionId
   if (threadId === undefined || threadId.length === 0) {
     return { kind: "skipped", reason: "thread_id_missing" }
   }
+  return { cfg: { ...cfg, port: cfg.port, store: cfg.store }, threadId }
+}
+
+const runMemoryConsolidatorHookInner = async (
+  input: ConsolidatorHookInput,
+): Promise<ConsolidatorHookOutcome> => {
+  const resolved = resolveConsolidator(input)
+  if ("kind" in resolved) return resolved
+  const { cfg, threadId } = resolved
   const phase1Input: Phase1Input = {
     threadId,
     sessionId: input.sessionId ?? threadId,
@@ -263,7 +298,12 @@ const runMemoryConsolidatorHookInner = async (
     return { kind: "skipped", reason: outcome.reason }
   }
   try {
-    mirrorStage1ToOutputsStore(input.stage1OutputsStore, outcome, (input.now ?? Date.now)())
+    mirrorStage1ToOutputsStore(
+      input.stage1OutputsStore,
+      outcome,
+      (input.now ?? Date.now)(),
+      cfg.promotionPolicy ?? DEFAULT_TRIGGER_POLICY,
+    )
   } catch (e) {
     return {
       kind: "error",

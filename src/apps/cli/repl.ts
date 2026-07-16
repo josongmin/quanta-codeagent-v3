@@ -398,21 +398,25 @@ export const runRepl = async (): Promise<void> => {
     // CLI-06 (ADR-0307) — the per-turn loop wiring is assembled in
     // `repl/session-loop-options.ts` (same host-slimming pattern as
     // `repl/factories/`); the host owns only entry routing + compose.
-    await runSessionLoop(
-      await buildSessionLoopOptions({
-        setup,
-        surfaceState,
-        wires,
-        rfc09,
-        featureCfg,
-        env: process.env,
-        // #8 (jun-6) — host binds stdin for the in-turn reader (only consumed
-        // when QUANTA_MIDTURN_CAPTURE=1; the loop/reader slice never poke stdin).
-        inTurnStdin: process.stdin,
-        // ADR-0528 L2 — accepted crash-resume task seeded as the first turn.
-        ...(crashResumeSeeds !== undefined ? { seedPrompts: crashResumeSeeds } : {}),
-      }),
-    )
+    try {
+      await runSessionLoop(
+        await buildSessionLoopOptions({
+          setup,
+          surfaceState,
+          wires,
+          rfc09,
+          featureCfg,
+          env: process.env,
+          // #8 (jun-6) — host binds stdin for the in-turn reader (only consumed
+          // when QUANTA_MIDTURN_CAPTURE=1; the loop/reader slice never poke stdin).
+          inTurnStdin: process.stdin,
+          // ADR-0528 L2 — accepted crash-resume task seeded as the first turn.
+          ...(crashResumeSeeds !== undefined ? { seedPrompts: crashResumeSeeds } : {}),
+        }),
+      )
+    } finally {
+      wires.disposePerToolRecord?.()
+    }
   } finally {
     // Track T — tear down ring-buffer panel BEFORE other chrome dispose so
     // any DECSTBM reset lands first. Idempotent + no-op when not allocated.

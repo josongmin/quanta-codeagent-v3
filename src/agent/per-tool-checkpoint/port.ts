@@ -125,6 +125,8 @@ export interface GranularCheckpointEntry {
   readonly takenAt: number
   /** Optional tool name (present iff granularity === "tool"). */
   readonly toolName?: string
+  /** Actual dispatched tool-call identity when the dispatch seam supplied it. */
+  readonly toolCallId?: string
   /** Optional turn id (present for tool / turn / skill grain when caller
    *  supplied a turnId via `ToolContext`). */
   readonly turnId?: string
@@ -208,6 +210,8 @@ export interface AnchorContext {
   readonly workspace: string
   readonly turnId?: string
   readonly toolName?: string
+  /** Actual dispatched call identity. When present it is the canonical tool tag suffix. */
+  readonly toolCallId?: string
   /** Per-turn monotonic call index supplied by the caller (typically the
    *  wrap maintains a counter per (workspace, turnId) pair and increments
    *  it on every destructive call within the turn). */

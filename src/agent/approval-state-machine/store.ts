@@ -79,6 +79,7 @@ const freezeRequest = (r: ApprovalRequest): ApprovalRequest => {
 /** Build the initial pending record. Pure — clock value passed in. */
 const buildPending = (
   init: {
+    id?: string
     threadId: string
     kind: ApprovalKind
     reason: string
@@ -90,7 +91,7 @@ const buildPending = (
 ): ApprovalRequest => {
   const opts = normalizeOptions(init.options)
   return {
-    id: randomUUID(),
+    id: isString(init.id) && init.id.length > 0 ? init.id : randomUUID(),
     threadId: isString(init.threadId) ? init.threadId : "",
     kind: APPROVAL_KIND.has(init.kind) ? init.kind : "permission",
     reason: isString(init.reason) ? init.reason : "",
@@ -366,6 +367,11 @@ export const createApprovalStateMachine = (opts?: {
                 resumeStep: "",
               }
         const pending = buildPending(safe, at)
+        // A kernel replay can deliver the same deferred approval more than
+        // once. Preserve the original attribution rather than double-starting
+        // its ledger entry or adding another objective blocker.
+        const existing = requests.get(pending.id)
+        if (existing !== undefined) return existing
         // Best-effort attribution — failure must not propagate.
         const blockerId = attributeObjective(objective, pending.threadId, pending.reason)
         const runEntryId = attributeLedger(

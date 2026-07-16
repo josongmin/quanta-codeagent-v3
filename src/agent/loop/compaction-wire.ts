@@ -17,7 +17,11 @@ import type { BreakerVerdict, CompactionBreaker } from "../compaction-breaker"
 import { appendSummary, type ConversationSummaryArchive } from "../conversation-summary-archive"
 import { buildPostCompactEmit, buildPreCompactHook } from "../loop-helpers"
 import { buildTurnContext } from "../prompt"
-import { createEvictionSpillPort, microcompactToolResults } from "../tool-result-evict"
+import {
+  createEvictionSpillPort,
+  MicrocompactTuningError,
+  microcompactToolResults,
+} from "../tool-result-evict"
 import type { AgentConfig } from "../types"
 import {
   configuredModel,
@@ -91,15 +95,36 @@ const maybeMicrocompact = (
   const spill = createEvictionSpillPort({
     spillDir: join(config.cwd, ".quanta", "tool-output"),
   })
-  const result = microcompactToolResults({
-    messages: snapshot,
-    keepRecent: cfg.microcompactKeepRecent ?? DEFAULT_MICROCOMPACT_KEEP_RECENT,
-    tokensSavedFloor: cfg.microcompactFloorTokens ?? DEFAULT_MICROCOMPACT_FLOOR_TOKENS,
-    spill,
-  })
-  // Stamp the cadence clock on every fire ATTEMPT (whether or not it changed),
-  // so a repeated no-op clear does not re-scan every turn.
+  // Stamp the cadence clock on every fire ATTEMPT (whether or not it changed,
+  // AND whether or not the tuning refused), so a repeated no-op / refused clear
+  // does not re-scan (or re-throw) every turn.
   lastMicrocompactAt.set(sessionKey, now)
+  // DOF-40 fail-closed — the resolved tuning below is env-safe (`parsePositiveInt`
+  // yields a positive int or `undefined`, and the `??` defaults are valid named
+  // constants). But the core is the SSOT bound: if any tuning value is out of
+  // bounds (a future per-session injection path, or a bad wire default) it THROWS
+  // a typed `MicrocompactTuningError` BEFORE touching the transcript. We fail
+  // CLOSED — emit a visible signal and skip the pass (NO eviction, NO wm.replace)
+  // rather than crash the turn or (the old bug) silently mis-evict.
+  let result: ReturnType<typeof microcompactToolResults>
+  try {
+    result = microcompactToolResults({
+      messages: snapshot,
+      keepRecent: cfg.microcompactKeepRecent ?? DEFAULT_MICROCOMPACT_KEEP_RECENT,
+      tokensSavedFloor: cfg.microcompactFloorTokens ?? DEFAULT_MICROCOMPACT_FLOOR_TOKENS,
+      spill,
+    })
+  } catch (e) {
+    if (e instanceof MicrocompactTuningError) {
+      // Visible refusal (attributable, not swallowed): the pass is skipped, the
+      // transcript is UNTOUCHED. A misconfigured microcompaction degrades to a
+      // no-op, never a silent wrong eviction.
+      emitRecovery(config, "compact", "microcompact-refused")
+      logger.warn(`maybeMicrocompact: refused invalid tuning — ${errMessage(e)}`)
+      return false
+    }
+    throw e
+  }
   if (!result.changed) return false
 
   // CRITICAL (§4.6): install via `wm.replace`, which flows through the
@@ -170,7 +195,9 @@ export const compactNowOnDemand = async (
   // param (not a hard import in the body) keeps the seam testable — a spy stands in
   // for it; the default performs the REAL reset so the live wire is correct without
   // the (out-of-lane) caller having to pass it.
-  resetClassifier: (classifier: AgentConfig["effortClassifier"]) => void = defaultResetEffortClassifier,
+  resetClassifier: (
+    classifier: AgentConfig["effortClassifier"],
+  ) => void = defaultResetEffortClassifier,
 ): Promise<boolean> => {
   if (!config.compaction) return false
   const result = await compactIfNeeded({
@@ -190,6 +217,10 @@ export const compactNowOnDemand = async (
   if (!result.compacted) return false
   const beforeMessages = [...wm.snapshot()]
   const before = beforeMessages.length
+  // CLI consumers observe compaction through the existing recovery event. The
+  // archive/history callback below is optional, so manual compaction must emit
+  // here independently just as proactive, reactive, and micro paths do.
+  if (config.stream !== undefined) emitRecovery(config, "compact", "manual")
   // jul-3 — emit the typed compaction narrative for the ON-DEMAND `/summarize-now`
   // verb. Every OTHER compaction site (proactive tier-2 ~L409, tier-1 micro ~L112)
   // emits a `compaction_event`; this hand-triggered path did NOT, so a manual

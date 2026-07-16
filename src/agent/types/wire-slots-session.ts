@@ -22,7 +22,6 @@ import type { ApprovalStateMachinePort } from "../approval-state-machine"
 import type { BudgetMeter, TaskBudget } from "../budget"
 import type { BudgetLedger } from "../budget-ledger"
 import type { CapEnforcer } from "../cap-enforcer"
-import type { GranularRegistryPort } from "../checkpoint/granular-registry"
 import type {
   ControlEffectApplier,
   ControlRequestContext,
@@ -429,15 +428,6 @@ export interface WireSlotsSessionConfig {
    * local default.
    */
   responsesContinuation?: { store: ResponsesContinuationStore }
-  /**
-   * ADR-0300 — per-tool granular checkpoint registry. Sibling of
-   * {@link conversationCheckpoint} for ADR-0124's conversation face:
-   * this slot owns per-tool-call file+task snapshots that the
-   * rewind-tool slash + future auto-recovery hook consume. Absent ⇒
-   * slot OMITTED (default-OFF byte-identical). Caller-side composition
-   * only — loop NEVER reads it.
-   */
-  granularRegistry?: GranularRegistryPort
   /**
    * ADR-0143 OS-sandbox port slot (helper-only). When set, future
    * shell/exec consumers wire through this port (Seatbelt on macOS / Landlock

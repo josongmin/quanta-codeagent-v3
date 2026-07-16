@@ -1,5 +1,10 @@
 import type { Message, ToolResultBlock } from "@/llm"
-import { EVICTED_PLACEHOLDER, type MicrocompactInput, type MicrocompactResult } from "./types"
+import {
+  EVICTED_PLACEHOLDER,
+  type MicrocompactInput,
+  type MicrocompactResult,
+  validateMicrocompactTuning,
+} from "./types"
 
 /**
  * Pure tool-result eviction pre-pass (RFC §4.3). No `Date.now`, no
@@ -89,6 +94,12 @@ const clearedBody = (original: ToolResultBlock, spill: MicrocompactInput["spill"
  */
 export const microcompactToolResults = (input: MicrocompactInput): MicrocompactResult => {
   const { messages, keepRecent, tokensSavedFloor } = input
+  // DOF-40 fail-closed — refuse an out-of-bounds boundary BEFORE any scan/evict.
+  // `keepRecent<=0` would evict the live working set; a non-integer `keepRecent`
+  // corrupts the protect-slice; a `NaN`/negative `tokensSavedFloor` defeats the
+  // floor gate (`<= NaN` is always false ⇒ unbounded commit). A typed throw makes
+  // that visible; the wire fails-closed (skips the pass) instead of crashing.
+  validateMicrocompactTuning(keepRecent, tokensSavedFloor)
   const refs = collectToolResults(messages)
   // Protect the LAST `keepRecent` tool_results (the live working set); a
   // non-positive keepRecent protects none. Everything earlier is a candidate.

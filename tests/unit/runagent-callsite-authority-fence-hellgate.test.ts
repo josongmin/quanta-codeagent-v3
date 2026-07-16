@@ -113,11 +113,6 @@ const ALLOWLIST: readonly Allowed[] = [
     kind: "runner-orchestration",
     why: "Runner single-turn orchestration — top-level `runAgent(assembleConfig(...))`.",
   },
-  {
-    path: "src/runner/orchestrate/side-chat.ts",
-    kind: "runner-orchestration",
-    why: "Runner side-chat orchestration — isolated top-level run.",
-  },
   // ── host-eval-entry: bench/eval harness roots — one fresh top-level run per task.
   // (The runner core's `driver/agent-phase.ts` was a DEAD duplicate of the app
   //  driver's agent phase — ZERO runtime callers after the dead orchestrator

@@ -50,15 +50,15 @@ export type ApprovalStatus = "pending" | "approved" | "denied" | "expired" | "ca
 
 /** A single approval record.
  *
- *  IDs are minted internally via `crypto.randomUUID()` — callers never supply
- *  one. `blockerId` / `runEntryId` are populated only when the matching port
+ *  IDs are minted internally via `crypto.randomUUID()` unless a kernel-owned
+ *  approval id is supplied at request time. `blockerId` / `runEntryId` are populated only when the matching port
  *  (objective / ledger) was supplied to `createApprovalStateMachine` AND the
  *  attribution call did not throw.
  *
  *  All fields are readonly: returned records are frozen so a reader cannot
  *  mutate machine state by holding a reference. */
 export interface ApprovalRequest {
-  /** Unique approval id (caller never supplies — minted via `crypto.randomUUID`). */
+  /** Unique approval id. */
   readonly id: string
   /** Thread that initiated the approval — drives Objective attribution. */
   readonly threadId: string
@@ -127,6 +127,8 @@ export interface ApprovalSnapshot {
  */
 export interface ApprovalStateMachinePort {
   request(req: {
+    /** Kernel-owned identity for a deferred approval. Absent ⇒ mint locally. */
+    id?: string
     threadId: string
     kind: ApprovalKind
     reason: string

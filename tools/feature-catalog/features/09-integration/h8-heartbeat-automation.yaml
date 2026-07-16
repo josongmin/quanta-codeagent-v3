@@ -1,7 +1,7 @@
 id: heartbeat-automation
-title: Heartbeat automation — thread-attached repeating agent (kind cron|heartbeat)
+title: Heartbeat automation through the canonical engine
 section: 9
-subsystem: Scheduler / scheduled agent (H8, Codex automation kind 흡수)
+subsystem: Scheduler / scheduled agent
 order: 162
 maturity: L5
 status: stable
@@ -11,65 +11,29 @@ modes: [daemon, headless, interactive]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex"]
-depends_on: [scheduler-automation-lifecycle, scheduler-runtime, scheduler-model-reroute, per-thread-permissions]
+depends_on: [scheduler-automation-lifecycle, scheduler-model-reroute, per-thread-permissions]
 surface_integration:
   cli: full
   web: missing
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-16"
   evidence:
-    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "scheduled-agent management is CLI-only; SessionCommand has no schedule/background verb (B3) and no web slash handler exists; web heartbeat frame is unrelated connection keepalive"
-purpose: |
-  Codex automation `kind: cron | heartbeat` 흡수. 기존 automation은 cron(thread-
-  detached, fresh fire)뿐이었음. heartbeat는 기존 대화 THREAD에 붙어 매 fire를 그
-  thread로 라우팅하고 그 thread의 권한/샌드박스/collab posture를 상속(escalate 안 함).
-
-  데이터모델 (types.ts):
-    - `AutomationKind = "cron" | "heartbeat"`, `Automation.kind?`(ABSENT ⇒ cron,
-      byte-identical legacy).
-    - `Automation.targetThreadId?` + `inheritedPolicy?: HeartbeatPolicySnapshot`
-      (approvalPolicy/sandboxPolicy/collaborationMode — 생성시 thread에서 캡처).
-    - `AgentLoopPort.enqueueUserMessage` opts에 `targetThreadId?`/`inheritedPolicy?`
-      추가(host가 실제 thread 라우팅 바인딩).
-
-  fire 라우팅 (runtime.ts step 5): heartbeat + targetThreadId면 enqueue opts에
-  targetThreadId + inheritedPolicy 포함; cron(absent kind)은 byte-identical(modelOverride만).
-
-  생성-경계 불변식 (heartbeat.ts, PURE): `validateHeartbeatCandidate(candidate,
-  existing)` — heartbeat는 targetThreadId+policy 필수, thread당 1 ACTIVE heartbeat
-  (같은 id=update는 허용). `activeHeartbeatForThread` 헬퍼.
-
-  JSONL round-trip: 신규 필드는 store-jsonl `parseAutomation`이 보존(부분 policy는
-  drop=never half-inherited); cron 행엔 kind 키 없음(byte-identical).
+    cli: "The SQLite automation engine enforces one active heartbeat per target thread and preserves inherited policy."
+    web: "No web scheduler management surface."
+purpose: "Attach recurring work to an existing thread while retaining the restrictive inherited permission and sandbox posture."
 evidence:
-  adrs: [481, 480, 453]
   code:
-    - src/scheduler/types.ts
-    - src/scheduler/heartbeat.ts
-    - src/scheduler/runtime.ts
-    - src/scheduler/store-jsonl.ts
+    - src/scheduler/automation-engine/port.ts
+    - src/scheduler/automation-engine/sqlite.ts
+    - src/scheduler/automation-engine/sqlite/operations.ts
     - src/apps/cli/repl/heartbeat-binder.ts
+  adrs: [481, 480, 453]
   tests:
     unit:
-      - tests/unit/scheduler/heartbeat-automation-hellgate.test.ts
+      - tests/unit/scheduler/automation-engine-heartbeat-hellgate.test.ts
       - tests/unit/heartbeat-binder-resume-hellgate.test.ts
-    integration:
-      - tests/unit/scheduler/heartbeat-fire-routing-e2e-hellgate.test.ts
-      - tests/unit/heartbeat-binder-e2e-hellgate.test.ts
+    integration: []
     contract: []
 knobs: []
-notes: |
-  L5 (ADR-0480 host bind LANDED): 데이터모델 + fire 라우팅 + 직렬화 + 생성 불변식 +
-  HOST enqueue 바인딩까지 전부 wired. 이전 L4 잔여였던 "host enqueue 바인딩"(매 host
-  AgentLoopPort impl이 opts를 drop)이 닫힘 — `src/apps/cli/repl/heartbeat-binder.ts`의
-  closed-port `HeartbeatThreadBinder` + `heartbeatEnqueueHandler`가 cron-vs-heartbeat
-  분기를 한다: targetThreadId 없으면 byte-identical 직접 push(cron), 있으면 binder.resume이
-  same-thread 면 inherited posture를 per-turn permission cell(per-thread-permissions)에
-  CLAMP 후 재적용하고 prompt를 그 thread 큐에 push. cross-thread/missing ⇒ loud
-  typed `thread-not-found`(오라우팅 금지). SECURITY: posture clamp = 절대 escalate 금지
-  — forged/unknown approvalPolicy ⇒ most-restrictive(default) fail-closed, snapshot은
-  current cell과의 most-restrictive meet으로 clamp(둘 중 더 안전한 쪽). NO-THROW(push
-  fault ⇒ enqueue-failed). default cron이라 기존 automation byte-identical.
-  잔여: cross-thread(web-daemon/background host)용 foreign-thread loading binder는 같은
-  port의 future impl(P2, 스코프 밖).
+deliberate_hold: null
+notes: "A malformed or partial inherited policy is rejected rather than widened."

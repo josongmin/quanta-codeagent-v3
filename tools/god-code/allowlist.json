@@ -10,7 +10,6 @@
   "functions": [
     "src/agent/approval-state-machine/store.ts::createApprovalStateMachine",
     "src/agent/budget-ledger.ts::defaultBudgetLedger",
-    "src/agent/lane-manager/default-manager.ts::defaultLaneManager",
     "src/agent/loop/session-bootstrap.ts::createRunAgentContext",
     "src/agent/memory-tools.ts::memoryTools",
     "src/agent/memory/stage1-store/in-memory.ts::inMemoryStage1Store",
@@ -18,7 +17,6 @@
     "src/agent/objective/store.ts::createObjectiveStore",
     "src/agent/plan/snapshot.ts::fromSnapshot",
     "src/agent/session-resource-registry/disk-adapter/disk-store.ts::createDiskSessionResourceRegistry",
-    "src/agent/side-chat/default-manager.ts::defaultSideChatManager",
     "src/agent/stream-callbacks.ts::createStreamDispatcher",
     "src/agent/subagent-mailbox/store.ts::createSubagentMailbox",
     "src/agent/subagent-persistence-store/hydrating-scheduler.ts::persistentBackgroundSubagentScheduler",

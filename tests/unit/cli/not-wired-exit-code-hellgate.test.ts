@@ -7,7 +7,7 @@
  * (UUX-2-22). Specific liar sites verified REAL in the jul-10 audit:
  *   - UUX-5-09  /dream without QUANTA_AUTO_DREAM
  *   - UUX-4-27  /onboard not-wired exit 0
- *   - UUX-6-17  /rewind-tool dual-flag opacity (QUANTA_PER_TOOL_CHECKPOINT
+ *   - UUX-6-17  /rewind-tool dual-flag opacity (QUANTA_PER_TOOL_RECORD
  *               AND QUANTA_SHADOW both required; the message never said
  *               which one is missing)
  *   - UUX-1-23  side chat HARD-THROWS "side chat not wired" instead of the
@@ -93,10 +93,10 @@ describe("D-6 — notWired helper contract", () => {
     const cap = capture()
     notWired(cap.out, {
       feature: "/rewind-tool",
-      gate: ["QUANTA_PER_TOOL_CHECKPOINT", "QUANTA_SHADOW"],
+      gate: ["QUANTA_PER_TOOL_RECORD", "QUANTA_SHADOW"],
     })
     const t = cap.text()
-    expect(t).toContain("hint: set QUANTA_PER_TOOL_CHECKPOINT=1")
+    expect(t).toContain("hint: set QUANTA_PER_TOOL_RECORD=1")
     expect(t).toContain("QUANTA_SHADOW=1")
   })
 
@@ -166,25 +166,22 @@ describe("UUX-4-27 — /onboard not-wired exit code", () => {
 
 describe("UUX-6-17 — /rewind-tool says WHICH flag is missing", () => {
   test("missingPerToolCheckpointGates enumerates exactly the unset flags", () => {
-    expect(missingPerToolCheckpointGates({})).toEqual([
-      "QUANTA_PER_TOOL_CHECKPOINT",
-      "QUANTA_SHADOW",
-    ])
-    expect(missingPerToolCheckpointGates({ QUANTA_PER_TOOL_CHECKPOINT: "1" })).toEqual([
+    expect(missingPerToolCheckpointGates({})).toEqual(["QUANTA_PER_TOOL_RECORD", "QUANTA_SHADOW"])
+    expect(missingPerToolCheckpointGates({ QUANTA_PER_TOOL_RECORD: "1" })).toEqual([
       "QUANTA_SHADOW",
     ])
     expect(missingPerToolCheckpointGates({ QUANTA_SHADOW: "1" })).toEqual([
-      "QUANTA_PER_TOOL_CHECKPOINT",
+      "QUANTA_PER_TOOL_RECORD",
     ])
     expect(
-      missingPerToolCheckpointGates({ QUANTA_PER_TOOL_CHECKPOINT: "1", QUANTA_SHADOW: "on" }),
+      missingPerToolCheckpointGates({ QUANTA_PER_TOOL_RECORD: "1", QUANTA_SHADOW: "on" }),
     ).toEqual([])
   })
 
   test("unwired ⇒ exit 2 + hint naming the missing flag(s)", async () => {
-    const savedCkpt = process.env.QUANTA_PER_TOOL_CHECKPOINT
+    const savedCkpt = process.env.QUANTA_PER_TOOL_RECORD
     const savedShadow = process.env.QUANTA_SHADOW
-    delete process.env.QUANTA_PER_TOOL_CHECKPOINT
+    delete process.env.QUANTA_PER_TOOL_RECORD
     process.env.QUANTA_SHADOW = "1"
     try {
       const { ctx, out } = buildCtx()
@@ -192,11 +189,11 @@ describe("UUX-6-17 — /rewind-tool says WHICH flag is missing", () => {
       expect(code).toBe(2)
       expect(out()).toContain("not wired")
       // The ONE missing flag is named; the satisfied one is not blamed.
-      expect(out()).toContain("hint: set QUANTA_PER_TOOL_CHECKPOINT=1")
+      expect(out()).toContain("hint: set QUANTA_PER_TOOL_RECORD=1")
       expect(out()).not.toContain("QUANTA_SHADOW=1")
     } finally {
-      if (savedCkpt === undefined) delete process.env.QUANTA_PER_TOOL_CHECKPOINT
-      else process.env.QUANTA_PER_TOOL_CHECKPOINT = savedCkpt
+      if (savedCkpt === undefined) delete process.env.QUANTA_PER_TOOL_RECORD
+      else process.env.QUANTA_PER_TOOL_RECORD = savedCkpt
       if (savedShadow === undefined) delete process.env.QUANTA_SHADOW
       else process.env.QUANTA_SHADOW = savedShadow
     }

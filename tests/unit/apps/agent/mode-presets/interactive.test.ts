@@ -118,7 +118,6 @@ describe("interactive.runMode — hermetic via seams.runAgent", () => {
       reinjectEveryN: 3,
     } as never
     const stage1OutputsStore = { put: () => undefined } as never
-    const granularRegistry = { register: () => undefined } as never
     const base = {
       llm: fakeLlm,
       registry: new ToolRegistry(defaultTools),
@@ -137,7 +136,6 @@ describe("interactive.runMode — hermetic via seams.runAgent", () => {
       toolProfileState,
       identityModeState,
       focusChain,
-      granularRegistry,
     } as unknown as RuntimeAgentConfigBase
 
     const { runtimeContext, runtime } = await createRuntimeFromAgentConfigBase({

@@ -52,3 +52,43 @@ export interface MicrocompactResult {
   readonly toolsCleared: number
   readonly tokensSavedEstimate: number
 }
+
+/**
+ * DOF-40 fail-closed hardening — the typed refusal the pure core throws when the
+ * tuning it is HANDED is out of bounds (NOT "absent": absent is the wire's job,
+ * it substitutes named safe defaults BEFORE calling the core). A bad boundary
+ * that once silently mis-evicted (`keepRecent<=0` ⇒ ALL tool_results evicted incl.
+ * the live working set; a non-integer `keepRecent` ⇒ bogus slice arithmetic; a
+ * `NaN` `tokensSavedFloor` ⇒ the floor gate `<= NaN` is ALWAYS false ⇒ unbounded
+ * commit) must now become a VISIBLE typed failure the wire fails-closed on, never
+ * a silent wrong eviction. This is a refusal, NOT an invented threshold — the
+ * bounds are the type contract (`keepRecent` ≥ 1 integer; `tokensSavedFloor` a
+ * finite ≥ 0 integer), not a heuristic magnitude.
+ */
+export class MicrocompactTuningError extends Error {
+  readonly param: "keepRecent" | "tokensSavedFloor"
+  readonly value: number
+  constructor(param: "keepRecent" | "tokensSavedFloor", value: number) {
+    super(
+      `microcompact tuning out of bounds: ${param}=${String(value)} — ` +
+        (param === "keepRecent"
+          ? "keepRecent must be a positive integer (≥1) so at least one recent tool_result is retained"
+          : "tokensSavedFloor must be a finite non-negative integer"),
+    )
+    this.name = "MicrocompactTuningError"
+    this.param = param
+    this.value = value
+  }
+}
+
+/** Validate the tuning the core was HANDED. Throws {@link MicrocompactTuningError}
+ *  on any out-of-bounds value (see that error's contract). Pure; no default
+ *  substitution here — the wire supplies validated named defaults for the
+ *  env-ABSENT case, and this guard makes a bad IN-RANGE value fail visibly instead
+ *  of silently mis-evicting. */
+export const validateMicrocompactTuning = (keepRecent: number, tokensSavedFloor: number): void => {
+  if (!Number.isInteger(keepRecent) || keepRecent < 1)
+    throw new MicrocompactTuningError("keepRecent", keepRecent)
+  if (!Number.isInteger(tokensSavedFloor) || tokensSavedFloor < 0)
+    throw new MicrocompactTuningError("tokensSavedFloor", tokensSavedFloor)
+}

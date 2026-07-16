@@ -1,27 +1,24 @@
 /**
- * ★ HELLGATE — runtime approval `pending` map leak (audit #12).
+ * ★ HELLGATE — runtime approval pending lifecycle.
  *
  * The runtime approval-protocol controller adds a `PendingRuntimeApprovalRecord`
  * to a `pending` Map every time `onConfirm` throws `RuntimeApprovalRequiredError`
  * (an approval awaiting a surface decision). The ONLY removal was
- * `resolveApproval`. So an approval that is requested but NEVER resolved (turn
- * aborted, surface dismissed, user moved on) leaked in `pending` for the host's
- * entire lifetime — unbounded on a long-lived host with frequent prompts.
+ * `resolveApproval`. A later protocol scope is NOT a terminal event, however:
+ * the kernel still owns the same `approvalId` in `awaiting_approval` and may
+ * dispatch `approval.respond` after unrelated host work. Dropping it early
+ * makes the kernel card unresolvable and incorrectly turns a deferred pause
+ * into a denial.
  *
- * FIX: `runWithProtocol` snapshots the pending keys at scope ENTRY and, in
- * `finally`, drops the survivors — an approval that was already pending when the
- * scope began AND is still pending when it exits carried a full turn unresolved
- * and can never be matched again (its `approvalId` holder is gone). The approval
- * the scope itself creates is added AFTER the snapshot, so it gets a one-turn
- * grace (survives to its resolution, or is drained by the NEXT scope). No
- * arbitrary cap; nesting-safe (each scope drains only what it carried in).
- *
- * These tests pin: (1) the just-created approval survives its own scope,
- * (2) an abandoned approval is drained by the next scope, (3) the resolve→lease
- * flow is intact, (4) resolveApproval still removes immediately, and
- * (5) N abandoned approvals stay bounded (no monotonic growth).
+ * These tests pin: (1) an approval remains pending across later scopes,
+ * (2) its original identity still resolves into a lease, and (3) only an
+ * explicit response clears the pending record.
  */
 import { describe, expect, test } from "bun:test"
+import { type ApprovalGateRequest, createApprovalGate } from "@/agent/approval-gate-wire"
+import { createApprovalStateMachine } from "@/agent/approval-state-machine"
+import { createObjectiveStore } from "@/agent/objective"
+import { createRunLedger } from "@/agent/run-ledger"
 import {
   createRuntimeApprovalProtocolController,
   RuntimeApprovalRequiredError,
@@ -30,12 +27,18 @@ import type { ToolAction } from "@/permission"
 
 type Ctrl = ReturnType<typeof createRuntimeApprovalProtocolController>
 
-const makeCtrl = (): { ctrl: Ctrl; slot: { current: (a: ToolAction) => Promise<boolean> } } => {
+const makeCtrl = (
+  approvalStateMachine?: ReturnType<typeof createApprovalStateMachine>,
+): { ctrl: Ctrl; slot: { current: (a: ToolAction) => Promise<boolean> } } => {
   // The controller sets `slot.current = onConfirm` for the duration of a
   // runWithProtocol scope and restores `previous` after; init with a no-op.
   const slot = { current: (async () => true) as (a: ToolAction) => Promise<boolean> }
   const registry = { extractShellCommand: () => null } // actionKey = action.tool
-  const base = { registry, approvalProtocol: { confirmSlot: slot } }
+  const base = {
+    registry,
+    approvalProtocol: { confirmSlot: slot },
+    ...(approvalStateMachine !== undefined ? { approvalStateMachine } : {}),
+  }
   const ctrl = createRuntimeApprovalProtocolController(
     base as unknown as Parameters<typeof createRuntimeApprovalProtocolController>[0],
   )
@@ -43,6 +46,14 @@ const makeCtrl = (): { ctrl: Ctrl; slot: { current: (a: ToolAction) => Promise<b
 }
 
 const action = (tool = "bash"): ToolAction => ({ tool, input: {}, isReadOnly: false })
+
+const approvalRequest = (): ApprovalGateRequest => ({
+  threadId: "session-approval",
+  kind: "permission",
+  reason: "mutating action needs approval",
+  proposedAction: "bash apply change",
+  resumeStep: "approval.respond",
+})
 
 /** Run a scope whose work triggers ONE approval (onConfirm throws). Returns the
  *  thrown approvalId. The error propagates out of runWithProtocol (after its
@@ -63,25 +74,80 @@ const requestApprovalInScope = async (
   throw new Error("expected RuntimeApprovalRequiredError")
 }
 
-describe("runtime approval pending-map leak (#12)", () => {
-  test("1. the just-created approval SURVIVES its own scope (one-turn grace)", async () => {
+describe("runtime approval pending lifecycle", () => {
+  test("1. the just-created approval survives its own scope", async () => {
     const { ctrl, slot } = makeCtrl()
     await requestApprovalInScope(ctrl, slot, action())
-    // Added during work, AFTER the entry snapshot ⇒ not drained by this scope.
     expect(ctrl.__pendingSize()).toBe(1)
   })
 
-  test("2. an ABANDONED approval is drained by the NEXT scope (the leak fix)", async () => {
+  test("2. a deferred approval stays pending through a later scope and its original id resolves", async () => {
     const { ctrl, slot } = makeCtrl()
-    await requestApprovalInScope(ctrl, slot, action())
+    const id = await requestApprovalInScope(ctrl, slot, action())
     expect(ctrl.__pendingSize()).toBe(1)
-    // A subsequent unrelated scope: the carried-over approval is still pending
-    // at this scope's exit ⇒ drained.
+    // A later scope is not a cancellation/expiry/session-close event. The
+    // kernel still owns `id`, so this must remain resolvable.
     await ctrl.runWithProtocol(async () => {})
+    expect(ctrl.__pendingSize()).toBe(1)
+
+    await ctrl.resolveApproval(id, "approve")
     expect(ctrl.__pendingSize()).toBe(0)
+    let confirmed = false
+    await ctrl.runWithProtocol(async () => {
+      confirmed = await slot.current(action())
+    })
+    expect(confirmed).toBe(true)
   })
 
-  test("3. resolve→lease flow intact: a resolved approval is claimed (no re-prompt)", async () => {
+  test("3. gate deferred error keeps attribution pending until the host resolves the same kernel id", async () => {
+    const objective = createObjectiveStore()
+    const ledger = createRunLedger()
+    const approvalStateMachine = createApprovalStateMachine({ objective, ledger })
+    objective.set("session-approval", { goal: "finish safely" })
+    const { ctrl, slot } = makeCtrl(approvalStateMachine)
+    const gate = createApprovalGate({ approvalSM: approvalStateMachine })
+    let id = ""
+
+    try {
+      await ctrl.runWithProtocol(async () => {
+        await gate.open(approvalRequest(), async () => ({
+          decision: (await slot.current(action())) ? "approve" : "deny",
+        }))
+      })
+    } catch (error) {
+      if (error instanceof RuntimeApprovalRequiredError) id = error.approval.approvalId
+      else throw error
+    }
+
+    expect(approvalStateMachine.get(id)?.status).toBe("pending")
+    expect(ledger.get(id)?.status).toBe("waiting")
+    expect(objective.get("session-approval")?.blockers).toHaveLength(1)
+
+    await ctrl.resolveApproval(id, "approve")
+    expect(approvalStateMachine.get(id)?.status).toBe("approved")
+    expect(ledger.get(id)?.status).toBe("completed")
+    expect(objective.get("session-approval")?.blockers).toHaveLength(0)
+  })
+
+  test("4. session close is terminal and cancels a deferred approval", async () => {
+    const approvalStateMachine = createApprovalStateMachine()
+    const { ctrl, slot } = makeCtrl(approvalStateMachine)
+    const id = await requestApprovalInScope(ctrl, slot, action())
+    approvalStateMachine.request({
+      id,
+      threadId: "session-approval",
+      kind: "permission",
+      reason: "mutating action needs approval",
+      proposedAction: "bash apply change",
+      resumeStep: "approval.respond",
+    })
+
+    ctrl.close()
+    expect(ctrl.__pendingSize()).toBe(0)
+    expect(approvalStateMachine.get(id)?.status).toBe("cancelled")
+  })
+
+  test("5. resolve→lease flow intact: a resolved approval is claimed (no re-prompt)", async () => {
     const { ctrl, slot } = makeCtrl()
     const id = await requestApprovalInScope(ctrl, slot, action("bash"))
     ctrl.resolveApproval(id, "approve") // mints a single-use lease
@@ -96,7 +162,7 @@ describe("runtime approval pending-map leak (#12)", () => {
     expect(ctrl.__pendingSize()).toBe(0)
   })
 
-  test("4. resolveApproval(deny) removes the entry immediately (no lease, no leak)", async () => {
+  test("6. resolveApproval(deny) removes the entry immediately (no lease, no leak)", async () => {
     const { ctrl, slot } = makeCtrl()
     const id = await requestApprovalInScope(ctrl, slot, action())
     expect(ctrl.__pendingSize()).toBe(1)
@@ -108,18 +174,5 @@ describe("runtime approval pending-map leak (#12)", () => {
         await slot.current(action())
       }),
     ).rejects.toBeInstanceOf(RuntimeApprovalRequiredError)
-  })
-
-  test("5. N abandoned approvals stay BOUNDED (no monotonic growth)", async () => {
-    const { ctrl, slot } = makeCtrl()
-    for (let i = 0; i < 50; i++) {
-      // Each scope drains the prior turn's carried-over approval, then creates
-      // its own ⇒ size never exceeds the one-turn-grace window.
-      await requestApprovalInScope(ctrl, slot, action(`tool-${i}`))
-      expect(ctrl.__pendingSize()).toBeLessThanOrEqual(1)
-    }
-    // One final empty scope drains the last survivor.
-    await ctrl.runWithProtocol(async () => {})
-    expect(ctrl.__pendingSize()).toBe(0)
   })
 })

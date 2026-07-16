@@ -318,6 +318,9 @@ const takeAnchor = async (
         workspace: req.ctx.cwd,
         ...(typeof turnId === "string" && turnId.length > 0 ? { turnId } : {}),
         toolName: req.call.name,
+        ...(typeof req.call.id === "string" && req.call.id.length > 0
+          ? { toolCallId: req.call.id }
+          : {}),
       }
       const tag = gp.computeTag(anchorCtx)
       if (tag !== null && tag !== undefined) gp.recordAnchorSha(tag, sha, anchorCtx)

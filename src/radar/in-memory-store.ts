@@ -14,7 +14,7 @@
 
 import { err, ok, omitUndef, type Result } from "@/shared"
 import type { RadarOpError, RadarStore } from "./port"
-import type { CardStatus, ProposeOpts, RadarCard } from "./types"
+import type { BugFixProposalMetadata, CardStatus, ProposeOpts, RadarCard } from "./types"
 
 export interface InMemoryRadarStoreOpts {
   /** Maximum number of cards retained across ALL statuses. Default: 256. */
@@ -33,7 +33,22 @@ const defaultMintId = (): (() => string) => {
   }
 }
 
-const freezeCard = (c: RadarCard): RadarCard => Object.freeze({ ...c })
+const freezeBugFix = (metadata: BugFixProposalMetadata): BugFixProposalMetadata =>
+  Object.freeze({
+    errorSummary: metadata.errorSummary,
+    file: metadata.file,
+    line: metadata.line,
+    hypothesisRanked: Object.freeze(
+      metadata.hypothesisRanked.map((hypothesis) => Object.freeze({ ...hypothesis })),
+    ),
+    ...(metadata.verifyRail !== undefined ? { verifyRail: metadata.verifyRail } : {}),
+  })
+
+const freezeCard = (c: RadarCard): RadarCard =>
+  Object.freeze({
+    ...c,
+    ...(c.bugFix !== undefined ? { bugFix: freezeBugFix(c.bugFix) } : {}),
+  })
 
 export class InMemoryRadarStore implements RadarStore {
   private readonly cap: number
@@ -56,6 +71,7 @@ export class InMemoryRadarStore implements RadarStore {
       createdAtMs: opts.createdAtMs,
       status: "active" as const,
       engagementCount: 0,
+      ...(opts.bugFix !== undefined ? { bugFix: opts.bugFix } : {}),
     }
     const card: RadarCard = freezeCard(omitUndef(base) as RadarCard)
     this.cards.set(id, card)
