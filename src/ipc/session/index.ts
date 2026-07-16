@@ -5,7 +5,14 @@ export type {
   SessionTransportBridgeErrorArgs,
 } from "./bridge"
 export { createSessionTransportBridge, planSessionReplay } from "./bridge"
-export type { CreateSessionTransportClientOpts, SessionTransportClient } from "./client"
+export type {
+  CreateSessionTransportClientOpts,
+  SessionTransportClient,
+  SessionTransportConnectionClosed,
+  SessionTransportConnectionConnected,
+  SessionTransportConnectionResume,
+  SessionTransportConnectionState,
+} from "./client"
 export { createSessionTransportClient } from "./client"
 export {
   decodeSessionTransportMessage,
@@ -24,12 +31,18 @@ export {
   type StdioWriter,
 } from "./transports/stdio"
 export {
+  type CreateSessionStdioSpawnTransportOpts,
+  createSessionStdioSpawnTransport,
+  type SessionStdioSpawnTransport,
+} from "./transports/stdio-spawn"
+export {
   type SessionWebSocketLike,
   wrapWebSocketLikeAsSessionTransport,
 } from "./transports/websocket"
 export type {
   SessionReplayPlan,
   SessionTransport,
+  SessionTransportCloseInfo,
   SessionTransportConnectMessage,
   SessionTransportHandler,
   SessionTransportHeartbeatMessage,

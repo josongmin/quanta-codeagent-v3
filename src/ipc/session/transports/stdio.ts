@@ -1,5 +1,6 @@
 import { encodeSessionTransportMessage, tryDecodeSessionTransportMessage } from "../codec"
 import type { SessionTransport, SessionTransportHandler } from "../types"
+import { createSessionTransportCloseSignal } from "./close-signal"
 
 /** Hard ceiling on a single un-terminated line's accumulated length. A peer
  *  that never sends a `\n` (malicious, wedged, or a half-written frame from a
@@ -15,6 +16,14 @@ import type { SessionTransport, SessionTransportHandler } from "../types"
  *  units), a conservative proxy for byte length for the framing's purpose. */
 const MAX_FRAME_CHARS = 32 * 1024 * 1024
 
+/** Read-side port — deliberately `data`-only. Reader LIFECYCLE events
+ *  (`end` / `close` / `error`, i.e. EOF semantics) are intentionally NOT part
+ *  of this port and NOT wired by the transport: keeping the port minimal keeps
+ *  every existing fixture structurally assignable, and EOF semantics belong to
+ *  ticket 02 (`serve --stdio`). Process-death liveness for spawn-owned
+ *  children is covered by `./stdio-spawn` via child-exit instead. What IS
+ *  notified here (S4): owner `close()`, a throwing writer (broken pipe), and
+ *  the frame-cap wedge-guard teardown — all via `onClose`. */
 export interface StdioReader {
   on(event: "data", handler: (chunk: Buffer | string) => void): unknown
   off?(event: "data", handler: (chunk: Buffer | string) => void): unknown
@@ -49,22 +58,27 @@ export const createSessionStdioTransport = (
   opts: CreateSessionStdioTransportOpts,
 ): SessionTransport => {
   const handlers = new Set<SessionTransportHandler>()
+  const closeSignal = createSessionTransportCloseSignal()
   let closed = false
   let buffer = ""
 
   // Single teardown path — detaches the read listener, clears handlers, drops
-  // the buffer, and is idempotent. Shared by `close()` (owner-initiated) and
-  // the frame-size DoS guard (a wedged peer must be reaped the same way).
-  const teardown = (): void => {
-    if (closed) return
-    closed = true
-    handlers.clear()
-    if (typeof opts.reader.off === "function") {
-      opts.reader.off("data", onData)
-    } else if (typeof opts.reader.removeListener === "function") {
-      opts.reader.removeListener("data", onData)
+  // the buffer, latches the S4 close notification, and is idempotent (the
+  // once-latch keeps the FIRST reason). Shared by `close()` (owner-initiated),
+  // a throwing writer (broken pipe), and the frame-size DoS guard (a wedged
+  // peer must be reaped the same way).
+  const teardown = (reason: string): void => {
+    if (!closed) {
+      closed = true
+      handlers.clear()
+      if (typeof opts.reader.off === "function") {
+        opts.reader.off("data", onData)
+      } else if (typeof opts.reader.removeListener === "function") {
+        opts.reader.removeListener("data", onData)
+      }
+      buffer = ""
     }
-    buffer = ""
+    closeSignal.notify({ reason })
   }
 
   const onData = (chunk: Buffer | string): void => {
@@ -81,7 +95,7 @@ export const createSessionStdioTransport = (
     // grow without bound. A peer that wedges mid-frame tears the transport
     // down instead of exhausting the heap. Checked AFTER draining complete
     // lines so a burst of many small valid frames never trips it.
-    if (buffer.length > MAX_FRAME_CHARS) teardown()
+    if (buffer.length > MAX_FRAME_CHARS) teardown("frame_too_large")
   }
 
   opts.reader.on("data", onData)
@@ -89,7 +103,16 @@ export const createSessionStdioTransport = (
   return {
     async send(message) {
       if (closed) return
-      opts.writer.write(`${encodeSessionTransportMessage(message)}\n`)
+      try {
+        opts.writer.write(`${encodeSessionTransportMessage(message)}\n`)
+      } catch (error) {
+        // A throwing writer is a dead peer (EPIPE-class). Tear down and notify
+        // the liveness channel, then rethrow so the caller-visible rejection
+        // behavior is exactly what it was pre-S4.
+        const detail = error instanceof Error ? error.message : String(error)
+        teardown(`writer_error (${detail})`)
+        throw error
+      }
     },
     onMessage(handler) {
       handlers.add(handler)
@@ -97,8 +120,11 @@ export const createSessionStdioTransport = (
         handlers.delete(handler)
       }
     },
+    onClose(handler) {
+      return closeSignal.subscribe(handler)
+    },
     async close() {
-      teardown()
+      teardown("local_close")
     },
   }
 }
