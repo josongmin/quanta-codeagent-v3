@@ -24,9 +24,24 @@
  */
 
 import { logger } from "@/shared"
-import { createIntrospectTools, type MailboxSendPort } from "@/subagent"
+import { createIntrospectTools, type DeliveryPort } from "@/subagent"
 import type { Tool } from "@/tool"
+import { formatPeerBody } from "../subagent-mailbox"
+import {
+  createSubagentDeliveryController,
+  createTargetResolver,
+  type DeliveryMailboxPort,
+  type SubagentControlRegistry,
+} from "../subagent-delivery"
 import type { AgentConfig } from "../types"
+
+/** Deterministic-friendly delivery id: `del-<mailboxAgentId|root>-<seq>`. A pure
+ *  monotonic counter (no clock / no randomness) so replay is byte-stable —
+ *  mirrors the runner's deterministic child-id posture (ADR-0416). */
+const makeDeliveryIdFactory = (scope: string): (() => string) => {
+  let seq = 0
+  return () => `del-${scope}-${(seq += 1)}`
+}
 
 // ALBB-12 claim 1 — once-per-process guard so a genuinely-split surface warns
 // exactly once (never spams across sessions), mirroring `wireCloseoutCritic`.
@@ -60,33 +75,59 @@ export const buildSubagentIntrospectBlock = (config: AgentConfig): Tool[] => {
     return []
   }
 
-  // The real MailboxPort has a `send` whose shape matches MailboxSendPort
-  // exactly; adopt it directly (structural).
-  const mailbox = config.subagentMailbox as MailboxSendPort | undefined
+  // WS3 (RFC §4.3–4.4) — `followup_task` now consumes the delivery CONTROLLER
+  // instead of sequencing mailbox-send + wake itself. Build it only when the
+  // followup substrate (mailbox + wake) is wired; otherwise `delivery` is absent
+  // and `createIntrospectTools` skips `followup_task` (default-OFF, byte-identical).
+  //
+  // The `TurnWakeRegistry` is the concrete control registry, but its duck-typed
+  // `ControlEndpoint` exposes `interrupt()/steer()` as `string` (slice fence), so
+  // adapt it to the TYPED `SubagentControlRegistry` here — the real endpoints
+  // registered by the runner ARE `SubagentControlEndpoint`, so the returned
+  // values genuinely inhabit the closed unions (this is a re-typing, not a lie).
+  const mailbox = config.subagentMailbox as DeliveryMailboxPort | undefined
   const wake = config.subagentTurnWake
+  const delivery =
+    wantFollowup && mailbox !== undefined && wake !== undefined
+      ? (() => {
+          const control = wake as unknown as SubagentControlRegistry
+          const controller = createSubagentDeliveryController({
+            control,
+            mailbox,
+            // RFC §4.5 — the ONE reused peer sanitizer/formatter (redact → escape
+            // → untrusted provenance). Steer/interrupt injection never sees a raw
+            // teammate body. (Redaction is wired by the mailbox host under
+            // QUANTA_TEAM_PEER_MSG; default identity ⇒ byte-identical when unwired.)
+            formatPeer: (from, kind, body) => formatPeerBody({ from, kind, body }),
+            resolveTarget: createTargetResolver({
+              registry,
+              control,
+              // F-E (jul-7 audit) — gate followup_task by THIS agent's own lineage
+              // (its deterministic `mailboxAgentId` label). Absent (root) ⇒ tree-
+              // scoped via ROOT_LINEAGE. Self-guard from the child's own task id.
+              ...(config.mailboxAgentId !== undefined
+                ? { requesterLineage: config.mailboxAgentId }
+                : {}),
+              ...(config.subagentTaskId !== undefined ? { ownTaskId: config.subagentTaskId } : {}),
+            }),
+            newDeliveryId: makeDeliveryIdFactory(config.mailboxAgentId ?? "root"),
+            // WS4 steer capability not wired ⇒ mode:"steer" ⇒ mode_disabled reject
+            // (RFC §9 — never a silent queue). Flip to a QUANTA_SUBAGENT_STEER gate
+            // when WS4 lands.
+            steerEnabled: false,
+          })
+          return controller as DeliveryPort
+        })()
+      : undefined
 
   return createIntrospectTools({
     registry,
     ...(config.subagentAgentMeta !== undefined ? { agentMeta: config.subagentAgentMeta } : {}),
-    ...(mailbox !== undefined ? { mailbox } : {}),
-    ...(wake !== undefined ? { wake } : {}),
-    // BUG#4 fix — `followup_task`'s `agentId` is the registry TASK id, but the
-    // target child reads its inbox under a DISJOINT mailbox label (`root/N`).
-    // The wake registry records that mapping at child-spawn (`register(taskId,
-    // …, mailboxLabel)`); resolve the delivery address through it so the message
-    // reaches the child's real inbox instead of a phantom task-id address. Absent
-    // a binding (`labelOf` ⇒ undefined) the handler falls back to the id verbatim.
-    ...(wake !== undefined ? { resolveLabel: (id: string) => wake.labelOf(id) } : {}),
-    // BUG#4 self-target guard — reject a child `followup_task`-ing its OWN loop.
-    // The child carries its registry task id as `subagentTaskId`; absent (root /
-    // non-spawned) ⇒ no guard (root is never a valid target anyway).
-    ...(config.subagentTaskId !== undefined ? { ownAgentId: config.subagentTaskId } : {}),
+    ...(delivery !== undefined ? { delivery } : {}),
     ...(config.mailboxAgentId !== undefined ? { callerLabel: config.mailboxAgentId } : {}),
-    // F-B/F-E (jul-7 audit) — scope list_agents enumeration + gate followup_task by THIS
-    // agent's own lineage. The agent's deterministic label (`mailboxAgentId`, ADR-0416) IS
-    // the lineage the spawn owners ledger stamps its children under, so a child sees/nudges
-    // only its own subtree + owner-less host-seeded tasks. Absent (root, no label) ⇒
-    // unscoped list (top authority) + tree-scoped followup via ROOT_LINEAGE fallback.
+    // F-B (jul-7 audit) — scope list_agents enumeration by THIS agent's own lineage
+    // so a child sees only its own subtree + owner-less host-seeded tasks. Absent
+    // (root, no label) ⇒ unscoped list (top authority).
     ...(config.mailboxAgentId !== undefined ? { requesterLineage: config.mailboxAgentId } : {}),
     ...(wantList ? { enableIntrospect: true } : {}),
     ...(wantFollowup ? { enableFollowup: true } : {}),

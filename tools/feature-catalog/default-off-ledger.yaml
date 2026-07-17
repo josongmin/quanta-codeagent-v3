@@ -176,7 +176,7 @@ rows:
     activation: env/config
     effective_default: { cli: off, web: off, bench: na, headless: off, daemon: off }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: security
     decision: enable-now
     owner_seam: src/permission/classifier.ts
@@ -320,7 +320,7 @@ rows:
     activation: env/config
     effective_default: { cli: off, web: off, bench: na, headless: off, daemon: off }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: security
     decision: measure-first
     owner_seam: src/permission/classifier.ts
@@ -706,7 +706,7 @@ rows:
     reachability: wired
     proof: { on: wire, off_identity: wire, receipt: null }
     risk: behavioral-cost
-    decision: repair-first
+    decision: enable-now
     owner_seam: src/tool/apply-patch.ts
     rollback: port 미주입(V4A 실패 throw)
     duplicate_of: null
@@ -836,7 +836,7 @@ rows:
     activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: security
     decision: measure-first
     owner_seam: src/permission/reviewer.ts
@@ -980,7 +980,7 @@ rows:
     activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: security
     decision: enable-now
     owner_seam: src/config/mcp-governance.ts
@@ -1004,7 +1004,7 @@ rows:
     activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: security
     decision: measure-first
     owner_seam: src/mcp/client.ts
@@ -1124,7 +1124,7 @@ rows:
     activation: env/config
     effective_default: { cli: off, web: off, bench: na, headless: off, daemon: na }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: security
     decision: measure-first
     owner_seam: src/tool/pty/index.ts
@@ -1736,9 +1736,9 @@ rows:
     activation: unwired
     effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: security
-    decision: repair-first
+    decision: enable-now
     owner_seam: src/runtime/shell-snapshot/index.ts
     rollback: runShellWithSnapshot 미호출
     duplicate_of: null

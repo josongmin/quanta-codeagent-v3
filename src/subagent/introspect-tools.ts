@@ -24,11 +24,11 @@
  */
 
 import { z } from "zod"
+import { type DeliveryMode, parseDeliveryMode } from "@/shared"
 import type { Tool, ToolEvent } from "@/tool"
-import { ownersForRegistry, ROOT_LINEAGE } from "./agent-tool"
+import { ownersForRegistry } from "./agent-tool"
 import type { AgentMetaRegistry } from "./agent-meta"
 import type { TaskRecord, TaskRegistry } from "./registry"
-import type { TurnWakeRegistry } from "./turn-wake"
 
 // ─── shared error shape ──────────────────────────────────────────────────────
 
@@ -56,6 +56,48 @@ export interface MailboxSendPort {
     body: string
     correlationId?: string
   }): unknown
+}
+
+// ─── delivery port (WS3 — RFC jul-18 §4.4) ──────────────────────────────────
+//
+// The `followup_task` tool no longer sequences mailbox-send + wake itself; it
+// hands a canonical delivery request to the `@/agent` controller and renders its
+// closed outcome. These are DUCK-TYPED mirrors of
+// `@/agent/subagent-delivery/{types,ports}` so this slice stays fenced (@/subagent
+// may only reach @/tool + @/shared; the host adapts the real controller onto this
+// mirror at wire time). Structural identity is asserted at the wire site.
+
+/** Mirror of `SubagentDeliveryRequest` — the caller intent the tool builds. */
+export interface DeliveryRequestMirror {
+  readonly targetTaskId: string
+  readonly from: string
+  readonly body: string
+  readonly mode: DeliveryMode
+  readonly activation: "passive" | "ensure-turn"
+  readonly expectedTurnId?: string
+  readonly correlationId?: string
+}
+
+/** Mirror of the discriminated `SubagentDeliveryOutcome`. The tool reads `kind`
+ *  + the per-arm fields it maps back onto {@link FollowupTaskOutput}. */
+export type DeliveryOutcomeMirror =
+  | { readonly kind: "accepted"; readonly effect: "steer_pending"; readonly targetTurnId: string }
+  | {
+      readonly kind: "applied"
+      readonly effectiveMode: "queue" | "interrupt"
+      readonly effect: "queued" | "woke" | "interrupted"
+    }
+  | {
+      readonly kind: "degraded"
+      readonly effectiveMode: "queue"
+      readonly effect: "queued" | "woke"
+      readonly reason: string
+    }
+  | { readonly kind: "rejected"; readonly reason: string }
+
+/** Narrow mirror of `SubagentDeliveryPort` — the ONE method followup consumes. */
+export interface DeliveryPort {
+  deliver(req: DeliveryRequestMirror): DeliveryOutcomeMirror
 }
 
 // ─── list_agents ─────────────────────────────────────────────────────────────
@@ -183,11 +225,20 @@ export const FollowupTaskInputSchema = z
       .min(1)
       .max(8192)
       .describe("Message delivered to the target before triggering its turn (8KB cap)."),
+    mode: z
+      .enum(["queue", "steer", "interrupt"])
+      .optional()
+      .describe(
+        "Delivery timing (default queue). queue = delivered for the target's next turn; " +
+          "interrupt = stop the current turn and handle now; steer = inject into the current " +
+          "turn without aborting (requires the steer capability, else rejected).",
+      ),
     interrupt: z
       .boolean()
       .optional()
       .describe(
-        "When true, stop the target's current task and handle this immediately. Default false = queue for the next turn.",
+        "DEPRECATED — use mode:\"interrupt\". When true (and mode is absent), stop the target's " +
+          "current task and handle this immediately. Supplying BOTH mode and interrupt is rejected.",
       ),
   })
   .strict()
@@ -198,80 +249,110 @@ export type FollowupTaskOutput =
   | {
       readonly kind: "success"
       readonly delivered: true
-      /** true ⇒ woke an idle child immediately; false ⇒ queued (mid-turn). */
+      /** true ⇒ woke an idle child immediately (or an accepted steer / interrupt
+       *  scheduled a turn); false ⇒ queued (mid-turn, drains next turn). */
       readonly triggered: boolean
+      /** The controller's effective mode — `queue` when a live mode degraded, so
+       *  the model sees the ACTUAL behavior, not the request (RFC §4.6). */
+      readonly effectiveMode: "queue" | "steer" | "interrupt"
     }
   | IntrospectError
 
 export interface FollowupTaskDeps {
-  readonly registry: TaskRegistry
-  readonly mailbox: MailboxSendPort
-  readonly wake: TurnWakeRegistry
+  /** WS3 — the narrow delivery controller (RFC §4.4). The tool builds a canonical
+   *  request and renders the closed outcome; it NO LONGER sequences mailbox-send +
+   *  wake itself. Ownership / self / settled / label-resolution all live in the
+   *  controller now (RFC §4.3). */
+  readonly delivery: DeliveryPort
   /** Caller's mailbox label (sender). Defaults to "parent" when the host did
    *  not derive one. */
   readonly callerLabel: string
-  /** Maps an agentId (registry task id) to its mailbox label. Returns
-   *  `undefined` for an unknown id; absent dep ⇒ the id is used verbatim. */
-  readonly resolveLabel?: (agentId: string) => string | undefined
-  /** When set, a `followup_task` whose `agentId` equals this is rejected with
-   *  `cause:"self_target"` (a child must not re-trigger its own loop). Absent ⇒
-   *  no self-target guard (host did not inject own id). */
-  readonly ownAgentId?: string
-  /** F-E (jul-7 audit) — the requesting agent's lineage. followup_task DELIVERS a
-   *  message AND triggers/interrupts a turn on the target by id; gate it so a sibling
-   *  lineage cannot inject into (or `interrupt:true` abort) another lineage's child.
-   *  Absent ⇒ root; owner-less target ⇒ legacy (byte-identical). */
-  readonly requesterLineage?: string
 }
 
-/** Pure, synchronous, no-throw deliver-and-trigger. */
+/** Map a controller reject/degrade reason onto the tool's legacy
+ *  `IntrospectError.cause` so existing callers/telemetry keep their vocabulary
+ *  across the migration. */
+const rejectCause = (reason: string): string => {
+  switch (reason) {
+    case "target_unknown":
+      return "id_unknown"
+    case "target_settled":
+      return "settled"
+    case "ownership_denied":
+      return "denied"
+    case "self_target":
+      return "self_target"
+    case "invalid_input":
+      return "input_invalid"
+    case "mode_disabled":
+      return "mode_disabled"
+    default:
+      return reason
+  }
+}
+
+/** Resolve the effective delivery mode from the (migrating) schema. Compat rule
+ *  (RFC §4.4): `interrupt:true` is honored ONLY when `mode` is absent; supplying
+ *  BOTH is `invalid_input`. Effective = `mode ?? (interrupt ? "interrupt" : "queue")`.
+ *  Returns `undefined` for the both-supplied conflict. */
+const effectiveMode = (input: FollowupTaskInput): DeliveryMode | undefined => {
+  if (input.mode !== undefined && input.interrupt !== undefined) return undefined // conflict
+  if (input.mode !== undefined) return parseDeliveryMode(input.mode)
+  return input.interrupt === true ? "interrupt" : "queue"
+}
+
+/** Pure, synchronous, no-throw deliver-and-trigger. Delegates the whole
+ *  decide/apply to the injected {@link DeliveryPort}; only the schema-compat mode
+ *  resolution + outcome→output mapping live here. */
 export const handleFollowupTask = (
   input: FollowupTaskInput,
   deps: FollowupTaskDeps,
 ): FollowupTaskOutput => {
-  if (deps.ownAgentId !== undefined && input.agentId === deps.ownAgentId) {
-    return err("cannot followup_task your own loop", "self_target")
-  }
-  const rec = deps.registry.get(input.agentId)
-  // root is the main loop — never in the registry. An unknown id covers both a
-  // genuinely-unknown id AND a root-targeting attempt (non-root only policy).
-  if (rec === undefined) {
+  const mode = effectiveMode(input)
+  if (mode === undefined) {
     return err(
-      `No agent found with id ${input.agentId} (target must be a non-root child)`,
-      "id_unknown",
+      "supply either mode or interrupt, not both (interrupt is deprecated — use mode)",
+      "input_invalid",
     )
   }
-  // F-E — lineage gate BEFORE any delivery/trigger: a message injected into (or an
-  // `interrupt:true` abort of) a foreign lineage's child is refused (mirrors wait/send/
-  // output, tree-scoped via `?? ROOT_LINEAGE`). Owner-less target ⇒ legacy (byte-identical).
-  const recordedOwner = ownersForRegistry(deps.registry).get(input.agentId)
-  if (recordedOwner !== undefined && recordedOwner !== (deps.requesterLineage ?? ROOT_LINEAGE)) {
-    return err(
-      `Cannot followup_task ${input.agentId}: it belongs to a different agent lineage (ownership denied).`,
-      "denied",
-    )
+  // followup_task always guarantees an eligible child gets a turn (ensure-turn);
+  // `subagent_send_message` owns the passive queue path (RFC §3.1).
+  const outcome = deps.delivery.deliver({
+    targetTaskId: input.agentId,
+    from: deps.callerLabel,
+    body: input.message,
+    mode,
+    activation: "ensure-turn",
+  })
+  switch (outcome.kind) {
+    case "rejected":
+      return err(`followup_task ${input.agentId} rejected: ${outcome.reason}`, rejectCause(outcome.reason))
+    case "accepted":
+      // Steer admitted (pending); a turn WILL consume it at the safe point.
+      return { kind: "success", delivered: true, triggered: true, effectiveMode: "steer" }
+    case "applied":
+      return {
+        kind: "success",
+        delivered: true,
+        triggered: outcome.effect === "woke" || outcome.effect === "interrupted",
+        effectiveMode: outcome.effectiveMode,
+      }
+    case "degraded":
+      // The payload WAS delivered (retained in the mailbox); the live mode
+      // downgraded to queue. Honest surfacing: delivered, effective queue.
+      if (outcome.reason === "no_waker" || outcome.reason === "control_unavailable") {
+        return err(
+          `delivered to ${input.agentId} but it has no live turn-wake receiver (message queued for next read)`,
+          "no_waker",
+        )
+      }
+      return {
+        kind: "success",
+        delivered: true,
+        triggered: outcome.effect === "woke",
+        effectiveMode: "queue",
+      }
   }
-  if (rec.status !== "running") {
-    return err(`target ${input.agentId} is not running (status=${rec.status})`, "settled")
-  }
-
-  // 1) Deliver via the mailbox (NO-THROW; inherits quota/escape protections).
-  const to = deps.resolveLabel?.(input.agentId) ?? input.agentId
-  deps.mailbox.send({ from: deps.callerLabel, to, kind: "request", body: input.message })
-
-  // 2) Trigger the target's turn via the wake registry.
-  const reason = input.interrupt === true ? "interrupt" : "followup"
-  const outcome = deps.wake.wake(input.agentId, reason)
-  if (outcome === "no-receiver") {
-    // Honest degradation: the message WAS delivered, but no live turn-wake
-    // receiver exists to trigger a turn. The target sees the message on its
-    // next read.
-    return err(
-      `delivered to ${input.agentId} but it has no live turn-wake receiver (message queued for next read)`,
-      "no_waker",
-    )
-  }
-  return { kind: "success", delivered: true, triggered: outcome === "woke" }
 }
 
 // ─── tool builder ────────────────────────────────────────────────────────────
@@ -293,22 +374,20 @@ const renderListed = (out: { agents: readonly ListedAgent[] }): string => {
 
 /**
  * Deps for the introspect tool builder. `list_agents` needs only `registry`
- * (+ optional `agentMeta`). `followup_task` additionally needs `mailbox` +
- * `wake` + `callerLabel`; when those are absent ONLY `list_agents` is built
+ * (+ optional `agentMeta`). `followup_task` additionally needs the WS3
+ * {@link DeliveryPort} (+ `callerLabel`); absent ⇒ ONLY `list_agents` is built
  * (so a host can enable enumeration without followup).
  */
 export interface IntrospectToolsDeps {
   readonly registry: TaskRegistry
   readonly agentMeta?: AgentMetaRegistry
-  /** Followup substrate. When all three are present, `followup_task` is built. */
-  readonly mailbox?: MailboxSendPort
-  readonly wake?: TurnWakeRegistry
+  /** WS3 — the delivery controller. When present, `followup_task` is built.
+   *  Ownership / self / settled / label-resolution / wake now live in it. */
+  readonly delivery?: DeliveryPort
   readonly callerLabel?: string
-  readonly resolveLabel?: (agentId: string) => string | undefined
-  readonly ownAgentId?: string
   /** Gate: build `list_agents` only when true. */
   readonly enableIntrospect?: boolean
-  /** Gate: build `followup_task` only when true AND the substrate exists. */
+  /** Gate: build `followup_task` only when true AND the delivery port exists. */
   readonly enableFollowup?: boolean
   /** F-B (jul-7 audit) — the enumerating agent's own lineage label, forwarded into
    *  `list_agents` so enumeration is lineage-scoped. Absent ⇒ unscoped (byte-identical). */
@@ -344,13 +423,14 @@ const listAgentsTool = (deps: IntrospectToolsDeps): Tool<ListAgentsInput> => ({
 })
 
 const followupTaskTool = (
-  deps: IntrospectToolsDeps & { mailbox: MailboxSendPort; wake: TurnWakeRegistry },
+  deps: IntrospectToolsDeps & { delivery: DeliveryPort },
 ): Tool<FollowupTaskInput> => ({
   name: "followup_task",
   description:
     "Send a message to an existing non-root child subagent AND trigger a turn in it. " +
     "If the target is mid-turn the message is queued and starts its next turn. " +
-    "Set interrupt:true to stop its current task and handle the message immediately.",
+    'Set mode:"interrupt" to stop its current task and handle the message immediately, ' +
+    'or mode:"steer" to inject into its current turn without aborting.',
   inputSchema: FollowupTaskInputSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
@@ -362,20 +442,15 @@ const followupTaskTool = (
       return
     }
     const out = handleFollowupTask(parsed.data, {
-      registry: deps.registry,
-      mailbox: deps.mailbox,
-      wake: deps.wake,
+      delivery: deps.delivery,
       callerLabel: deps.callerLabel ?? "parent",
-      ...(deps.resolveLabel !== undefined ? { resolveLabel: deps.resolveLabel } : {}),
-      ...(deps.ownAgentId !== undefined ? { ownAgentId: deps.ownAgentId } : {}),
-      ...(deps.requesterLineage !== undefined ? { requesterLineage: deps.requesterLineage } : {}),
     })
     if (out.kind === "error") {
       yield errorEvent(out)
       return
     }
     yield successEvent(
-      `delivered to ${input.agentId}; turn ${out.triggered ? "started" : "queued for next turn"}`,
+      `delivered to ${input.agentId}; turn ${out.triggered ? "started" : "queued for next turn"} (${out.effectiveMode})`,
       out,
     )
   },
@@ -383,17 +458,17 @@ const followupTaskTool = (
 
 /**
  * Build the introspection tools per the gates. Returns `list_agents` when
- * `enableIntrospect`; `followup_task` when `enableFollowup` AND the followup
- * substrate (`mailbox` + `wake`) is wired. Gates OFF / substrate absent ⇒ the
- * corresponding tool is simply not built (default-OFF, byte-identical).
+ * `enableIntrospect`; `followup_task` when `enableFollowup` AND the WS3
+ * {@link DeliveryPort} is wired. Gates OFF / port absent ⇒ the corresponding
+ * tool is simply not built (default-OFF, byte-identical).
  */
 export const createIntrospectTools = (deps: IntrospectToolsDeps): Tool[] => {
   const tools: Tool[] = []
   if (deps.enableIntrospect === true) {
     tools.push(listAgentsTool(deps) as Tool)
   }
-  if (deps.enableFollowup === true && deps.mailbox !== undefined && deps.wake !== undefined) {
-    tools.push(followupTaskTool({ ...deps, mailbox: deps.mailbox, wake: deps.wake }) as Tool)
+  if (deps.enableFollowup === true && deps.delivery !== undefined) {
+    tools.push(followupTaskTool({ ...deps, delivery: deps.delivery }) as Tool)
   }
   return tools
 }

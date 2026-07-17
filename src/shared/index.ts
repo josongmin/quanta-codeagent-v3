@@ -18,6 +18,14 @@ export {
 export { assertNever } from "./assert-never"
 export { byteCompare } from "./byte-compare"
 export { chunkBatches } from "./chunk"
+export type { ActivationPolicy, DeliveryMode } from "./delivery-mode"
+export {
+  ALL_ACTIVATION_POLICIES,
+  ALL_DELIVERY_MODES,
+  isDeliveryMode,
+  parseActivationPolicy,
+  parseDeliveryMode,
+} from "./delivery-mode"
 export {
   gateDisabled,
   gateDisabledStrict,

@@ -80,17 +80,47 @@ import {
   type SubagentLifecycleEvent,
   SubagentTurnGate,
   type TaskRegistry,
-  type TurnWakeRegistry,
 } from "@/subagent"
 import type { SubagentRequest, SubagentResult, SubagentRunner } from "../subagent/types"
+import type { ConversationActionPort } from "./conversation-action"
+import { createConversationActionSurface } from "./conversation-action-surface"
 import { runAgent } from "./loop"
 import { canExposeSpawnTools, childDepthOf, effectiveCap, SpawnLineageError } from "./spawn-depth"
 import { emitSpawnDepthDecision } from "./spawn-depth-telemetry"
+import {
+  type ChildControlSurface,
+  createChildControlEndpoint,
+  createChildControlSurface,
+} from "./subagent-control-endpoint"
+import type { SubagentControlEndpoint } from "./subagent-delivery/ports"
 import { buildChildConfig } from "./subagent-runner-child-config"
 import type { ToolNamespaceStrategy } from "./subagent-tool-namespace"
 import type { AgentConfig, AgentOutcome } from "./types"
 
 export { UnknownSubagentModelError } from "./subagent-runner-overrides"
+
+/** WS2 (RFC jul-18 §4.2) — the child steer-queue hard bound. A remote-steer
+ *  burst that overflows this degrades ONCE to a mailbox queue (`action_queue_full`,
+ *  handled by WS3); the surface never grows past it. */
+const CHILD_STEER_QUEUE_CAPACITY = 8
+/** WS2 — the child steer max input size (bytes), reused by the steer authority.
+ *  Mirrors the `followup_task` 8KB message cap so a delivered steer body and a
+ *  mailbox message share one ceiling. */
+const CHILD_STEER_MAX_INPUT_BYTES = 8192
+
+/** WS2 — the control bits threaded onto the child config ONLY when the control
+ *  capability is wired (a shared wake registry + a `req.taskId`). The child
+ *  loop reads `conversationActionPort` (drains one action per turn) and writes
+ *  `activeTurnRef.current` (the endpoint's steer closure reads it). Absent ⇒ the
+ *  prior child config shape (RFC §4.2 RED rail). */
+interface ChildControlWiring {
+  readonly conversationActionPort: ConversationActionPort
+  readonly activeTurnRef: NonNullable<AgentConfig["activeTurnRef"]>
+  /** The bounded steer-submission surface (retained for WS3's loop drain). Held
+   *  here so a future wiring can hand it to the loop's finalization port; not
+   *  yet consumed by the loop (WS3). */
+  readonly steerSurface: ChildControlSurface
+}
 
 // RFC jul-13 §4.2 (rev.4 MIN-CAP) — the runner's depth ceiling is the SAME
 // `effectiveCap(opts.maxDepth) = min(spawnDepthCap() policy, opts.maxDepth ?? +∞)`
@@ -167,6 +197,7 @@ interface ChildExecution {
   mailboxIds: { agentId: string; parentId: string }
   toolNamespace: ToolNamespaceStrategy | undefined
   turnGate: SubagentTurnGate | undefined
+  control: ChildControlWiring | undefined
   spawnedAsTaskId: string | undefined
   run: typeof runAgent
   withWorktree: typeof withWorktree
@@ -182,12 +213,23 @@ const executeChild = async ({
   mailboxIds,
   toolNamespace,
   turnGate,
+  control,
   spawnedAsTaskId,
   run,
   withWorktree: wt,
 }: ChildExecution): Promise<SubagentResult> => {
   const configAt = (cwd: string): AgentConfig =>
-    buildChildConfig(parent, req, cwd, mailboxIds, toolNamespace, turnGate, spawnedAsTaskId)
+    buildChildConfig(
+      parent,
+      req,
+      cwd,
+      mailboxIds,
+      toolNamespace,
+      turnGate,
+      spawnedAsTaskId,
+      undefined, // childRuntime — use the default `runtimeConfig()`
+      control,
+    )
   if (!isolate) return toResult(await run(configAt(requestedCwd)))
   const outcome = await wt(subagentId, requestedCwd, async (worktreePath) =>
     run(configAt(worktreePath)),
@@ -570,7 +612,7 @@ export const createSubagentRunner = (
     // wake registry OR absent `req.taskId` ⇒ `gate` undefined + no waker
     // (byte-identical legacy / foreground path). The disposer runs in
     // `finally` so a wake on a finished child reports `no-receiver`.
-    const wakerWiring = registerChildWaker(parent.subagentTurnWake, req.taskId, mailboxIds.agentId)
+    const wakerWiring = registerChildWaker(parent, req.taskId, mailboxIds.agentId)
     const turnGate = wakerWiring?.gate
 
     try {
@@ -583,6 +625,7 @@ export const createSubagentRunner = (
         mailboxIds,
         toolNamespace,
         turnGate,
+        control: wakerWiring?.control,
         spawnedAsTaskId,
         run,
         withWorktree: wt,
@@ -626,33 +669,61 @@ export const createSubagentRunner = (
 }
 
 /**
- * ADR-0437 follow-up — mint a per-child {@link SubagentTurnGate} and register a
- * {@link import("@/subagent").Waker} bridging the host's shared
- * {@link TurnWakeRegistry} to that gate, keyed by the child's registry task id.
+ * ADR-0437 follow-up + WS2 (RFC jul-18 §4.2) — mint a per-child
+ * {@link SubagentTurnGate} + a bounded {@link ChildControlSurface} + the child
+ * {@link ConversationActionSurface}, build ONE typed
+ * {@link SubagentControlEndpoint} over that private state, and register it into
+ * the host's shared control registry under the child's registry task id.
  *
  * Returns `undefined` when there is no wake substrate (`wake` registry absent)
- * OR no task id to key on — both cases are the byte-identical default-OFF path
- * (no gate is wired onto the child, so its loop finishes immediately on
- * completion exactly as before). When wired, the returned `gate` is threaded
- * onto the child config and the `dispose` MUST be called when the child loop
- * ends (unregisters the waker AND releases any park).
+ * OR no task id to key on — both cases are the byte-identical default-OFF path:
+ * NO gate, NO conversation-action surface, and NO `activeTurnRef` are wired onto
+ * the child (the prior child config shape), so its loop finishes immediately on
+ * completion exactly as before (RFC §4.2 RED rail). When wired, the returned
+ * `gate` + `control` bundle are threaded onto the child config and `dispose`
+ * MUST be called when the child loop ends (unregisters the endpoint AND its
+ * derived legacy waker + label, and releases any park).
  */
 const registerChildWaker = (
-  wake: TurnWakeRegistry | undefined,
+  parent: AgentConfig,
   taskId: string | undefined,
   mailboxLabel: string,
-): { gate: SubagentTurnGate; dispose: () => void } | undefined => {
+): { gate: SubagentTurnGate; control: ChildControlWiring; dispose: () => void } | undefined => {
+  const wake = parent.subagentTurnWake
   if (wake === undefined || taskId === undefined) return undefined
   const gate = new SubagentTurnGate()
-  // The waker maps the gate's `woke`/`queued` 1:1 onto the registry's
-  // `WakeOutcome` (the third outcome, `no-receiver`, is produced by the
-  // registry itself when no waker is registered — never by the waker). The
-  // mailbox label is bound alongside so `followup_task` can translate this
-  // child's task id → its inbox address (`root/N`) and deliver to the REAL
-  // mailbox the child drains, not the phantom task-id address (BUG#4 fix).
-  const unregister = wake.register(taskId, (reason: string) => gate.wake(reason), mailboxLabel)
+  // The child's generic control queue (cancel/summarize/steer-injection seam)
+  // AND its active-turn holder. The loop OWNS `.current` (writes a fresh header
+  // per turn); the endpoint's steer closure only READS it. Allocated ONLY here,
+  // on the wired path — the default-OFF child never gets one (byte-identical).
+  const actionSurface = createConversationActionSurface()
+  // The bounded typed steer-submission surface (retains deliveryId + envelope).
+  const steerSurface = createChildControlSurface({
+    steerConfig: { maxInputBytes: CHILD_STEER_MAX_INPUT_BYTES },
+    capacity: CHILD_STEER_QUEUE_CAPACITY,
+  })
+  // The typed endpoint over the child's PRIVATE state. `wake("followup")` is the
+  // gate's idle/busy wake (identical to the legacy waker); `interrupt()` maps
+  // gate state to the closed outcome; `steer()` delegates to the bounded surface.
+  const endpoint: SubagentControlEndpoint = createChildControlEndpoint({
+    gate,
+    surface: steerSurface,
+    activeTurnRef: actionSurface.activeTurnRef,
+    mailboxLabel,
+    wake: (reason: string) => gate.wake(reason),
+  })
+  // Register the typed endpoint (superset of the legacy waker): the registry
+  // derives the `followup_task`-facing waker from it and binds the mailbox label
+  // so `followup_task` reaches the child's real inbox (`root/N`), not its task
+  // id (BUG#4 fix). Last-writer-safe disposal.
+  const unregister = wake.registerEndpoint(taskId, endpoint)
   return {
     gate,
+    control: {
+      conversationActionPort: actionSurface.port,
+      activeTurnRef: actionSurface.activeTurnRef,
+      steerSurface,
+    },
     dispose: (): void => {
       unregister()
       gate.dispose()
