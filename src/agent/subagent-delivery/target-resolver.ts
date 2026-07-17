@@ -19,8 +19,8 @@
  */
 
 import { ownersForRegistry, ROOT_LINEAGE, type TaskRegistry } from "@/subagent"
-import type { SubagentControlRegistry } from "./ports"
 import type { TargetResolution } from "./controller"
+import type { SubagentControlRegistry } from "./ports"
 
 export interface TargetResolverDeps {
   readonly registry: TaskRegistry

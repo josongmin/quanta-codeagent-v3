@@ -14,6 +14,7 @@ import {
 } from "../compaction"
 import type { BackgroundSummarizationController } from "../compaction/index"
 import type { BreakerVerdict, CompactionBreaker } from "../compaction-breaker"
+import type { RecoveryProvenance } from "../recovery-reason"
 import { appendSummary, type ConversationSummaryArchive } from "../conversation-summary-archive"
 import { buildPostCompactEmit, buildPreCompactHook } from "../loop-helpers"
 import { buildTurnContext } from "../prompt"
@@ -387,6 +388,27 @@ const buildCompactIfNeededOptions = (a: {
       : {}),
     ...(postCompactEmit !== undefined ? { postCompactEmit } : {}),
     ...(objectiveSetNextActions !== undefined ? { objectiveSetNextActions } : {}),
+    // DOF-40 wire — stamp the REAL current turn id (`turnId`, derived at the
+    // maybeCompact call-site from `config.run?.turn ?? turn`) and route an
+    // attribution FAILURE to the operator-observable recovery channel (the same
+    // `emitRecovery(config,"compact",…)` stream event surfaces `proactive-failed`
+    // / `bg-install-stale`). WITHOUT this, the core (`compactIfNeeded`) accepted
+    // `attributedTurnId`/`onAttributionFailure` but the production wire NEVER
+    // passed them — the turn was UNSTAMPED live and a dropped async attribution
+    // only hit `logger.warn` (invisible to a surface). Gated on an ACTIVE emit
+    // consumer (`postCompactEmit`), exactly like `recoveryReason`: with no
+    // consumer wired neither field is spread ⇒ the emit helper early-returns and
+    // the legacy path is byte-identical. `onAttributionFailure` fires only inside
+    // `compactIfNeeded`'s own try/catch AFTER `postCompactEmit` throws, so it is
+    // unreachable unless `postCompactEmit` is present — routing it here (rather
+    // than to a sink-to-nowhere) makes the failure a REAL recovery event.
+    ...(postCompactEmit !== undefined
+      ? {
+          attributedTurnId: turnId,
+          onAttributionFailure: (_p: RecoveryProvenance, e: unknown): void =>
+            emitRecovery(config, "compact", `attribution-failed: ${errMessage(e)}`),
+        }
+      : {}),
     ...(postCompactEmit !== undefined || objectiveSetNextActions !== undefined
       ? { recoveryReason: "token_budget_exceeded" as const }
       : {}),

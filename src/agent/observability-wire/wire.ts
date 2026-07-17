@@ -24,7 +24,10 @@
  * wire is a leaf module.
  */
 
-import type { ApprovalStateMachinePort } from "@/agent/approval-state-machine"
+import type {
+  ApprovalAttributionGap,
+  ApprovalStateMachinePort,
+} from "@/agent/approval-state-machine"
 import { createApprovalStateMachine } from "@/agent/approval-state-machine"
 import type { ObjectivePort } from "@/agent/objective"
 import { createObjectiveStore } from "@/agent/objective"
@@ -100,6 +103,51 @@ const tryConstruct = <T>(
 }
 
 /**
+ * DOF-40 — build the approval attribution-gap sink threaded into the SM as
+ * `onUnattributed`. Routes each fail-closed gap the SM emits (a terminal
+ * mutator on an un-attributable id) to a REAL consumer:
+ *
+ *   1. `logger.warn` with STRUCTURED meta — the guaranteed operator-visible
+ *      floor. Always fires, even when no `onApprovalGap` observer is supplied,
+ *      so the gap is NEVER a silent drop / dead wire. Mirrors the same
+ *      structured-log channel the subscribe/unsubscribe failure paths use.
+ *   2. The optional `onApprovalGap` operator observer (parallel to
+ *      `onPortError`), when supplied — fanned NO-THROW so a hostile callback
+ *      cannot break the SM mutator contract (double-guard: the SM store also
+ *      guards its own `onUnattributed` invocation).
+ *
+ * Returns `undefined` when there is genuinely nothing to route to — but note
+ * the logger floor means we ALWAYS have a consumer, so the sink is always
+ * built in the enabled path. (The OFF path never reaches this: the SM is
+ * constructed inside `constructHandleParts`, which only runs when the gate is
+ * on ⇒ SM built WITHOUT the sink ⇒ byte-identical legacy.)
+ */
+const makeApprovalGapSink = (
+  onApprovalGap: ObservabilityWireOpts["onApprovalGap"],
+): ((gap: ApprovalAttributionGap) => void) => {
+  return (gap: ApprovalAttributionGap): void => {
+    // (1) Structured observability floor — an operator reading the process log
+    //     sees WHICH approvalId resolved with no producer (missing audit trail).
+    logger.warn("observability-wire.approval-gap: un-attributed approval resolution", {
+      approvalId: gap.approvalId,
+      op: gap.op,
+      ...(gap.decision !== undefined ? { decision: gap.decision } : {}),
+      at: gap.at,
+    })
+    // (2) Optional structured observer — fanned NO-THROW.
+    if (onApprovalGap !== undefined) {
+      try {
+        onApprovalGap(gap)
+      } catch (e) {
+        // A throwing observer must not break the SM mutator's null contract
+        // (the SM store already swallows, but we double-guard the fan-out).
+        logger.warn(`observability-wire.approval-gap.observer: ${errMessage(e)}`)
+      }
+    }
+  }
+}
+
+/**
  * The singular noop detach closure — re-used for both the default-OFF code
  * path AND as the fallback when subscription fails. Hoisted so the
  * default-OFF code path allocates ZERO closures (byte-identical legacy).
@@ -166,6 +214,11 @@ const constructHandleParts = (
       if (now !== undefined) asmOpts.now = now
       if (objective !== undefined) asmOpts.objective = objective
       if (runLedger !== undefined) asmOpts.ledger = runLedger
+      // DOF-40 — route the SM's fail-closed attribution-gap producer to a REAL
+      // consumer (logger floor + optional operator observer). Only reached in
+      // the enabled path (constructHandleParts) ⇒ OFF stays byte-identical (SM
+      // built with NO onUnattributed, gaps silently return `null` as before).
+      asmOpts.onUnattributed = makeApprovalGapSink(opts.onApprovalGap)
       return createApprovalStateMachine(asmOpts)
     },
     reporter,

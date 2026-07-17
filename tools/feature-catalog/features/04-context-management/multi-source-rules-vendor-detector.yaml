@@ -42,6 +42,7 @@ evidence:
     unit:
       - tests/unit/vendor-rules-detector-hellgate.test.ts
       - tests/unit/vendor-glob-unconsumed-failclosed-hellgate.test.ts
+      - tests/unit/stage1-phase2-consume-and-vendor-glob-e2e-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
@@ -68,3 +69,11 @@ notes: |
   detector 자체는 이미 no-throw + errors 누적 (port.ts DetectorError SSOT);
   이 하드닝은 consumer 측 swallow 를 닫음. 커버: vendor-glob-unconsumed-
   failclosed-hellgate.test.ts (red-on-injection 검증됨).
+
+  DOF-40 END-TO-END usability proof (여전히 seam-only — production caller
+  = rule-indicator.ts:260 미소유): REAL createDefaultVendorDetector 가 real
+  .windsurfrules fixture 를 walk → loadGlobRulesWithVendors → selectGlobRules
+  → renderGlobRulesBlock 가 방출한 PROMPT STRING 안에 vendor body 도달을
+  실증 (detector 가 실제로 rule 을 prompt 까지 밀어넣음). chmod-000
+  .clinerules 파일로 real parse_error → onUnconsumed 실증. 커버:
+  stage1-phase2-consume-and-vendor-glob-e2e-hellgate.test.ts.

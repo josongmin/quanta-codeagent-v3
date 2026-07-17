@@ -103,7 +103,7 @@ describe("SubagentControlEndpoint — typed commands only", () => {
       expect(keys).not.toContain(banned)
     }
     // Deep: no enumerable value on the endpoint is an AbortController or the ref.
-    for (const v of Object.values(endpoint as Record<string, unknown>)) {
+    for (const v of Object.values(endpoint as unknown as Record<string, unknown>)) {
       expect(v instanceof AbortController).toBe(false)
       expect(v instanceof SubagentTurnGate).toBe(false)
     }

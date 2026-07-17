@@ -12,6 +12,7 @@
  * or a send on a reject) makes the corresponding rail RED.
  */
 import { describe, expect, it } from "bun:test"
+import type { TargetResolution } from "@/agent/subagent-delivery/controller"
 import { createSubagentDeliveryController } from "@/agent/subagent-delivery/controller"
 import type {
   DeliveryIdFactory,
@@ -95,7 +96,10 @@ const spyRegistry = (endpoints: Record<string, SubagentControlEndpoint>) => {
 
 const ids = (): DeliveryIdFactory => {
   let n = 0
-  return () => `del-${(n += 1)}`
+  return () => {
+    n += 1
+    return `del-${n}`
+  }
 }
 
 /** A target resolver over a small in-memory table: running/settled/unknown +
@@ -106,24 +110,24 @@ const resolver = (
   opts: { requesterLineage?: string; ownTaskId?: string } = {},
 ) => {
   return {
-    resolve(targetTaskId: string) {
+    resolve(targetTaskId: string): TargetResolution {
       // Self-target + lineage are folded into resolution (the host closes over
       // ownTaskId / requesterLineage / owners ledger), so the controller stays a
       // pure decide/apply leaf.
       if (opts.ownTaskId !== undefined && targetTaskId === opts.ownTaskId) {
-        return { kind: "self" as const }
+        return { kind: "self" }
       }
       const row = table[targetTaskId]
-      if (row === undefined) return { kind: "unknown" as const }
-      if (row.state !== "running") return { kind: "settled" as const }
+      if (row === undefined) return { kind: "unknown" }
+      if (row.state !== "running") return { kind: "settled" }
       if (
         opts.requesterLineage !== undefined &&
         row.owner !== undefined &&
         row.owner !== opts.requesterLineage
       ) {
-        return { kind: "ownership_denied" as const }
+        return { kind: "ownership_denied" }
       }
-      return { kind: "running" as const, mailboxLabel: undefined }
+      return { kind: "running" }
     },
   }
 }

@@ -26,8 +26,8 @@
 import { z } from "zod"
 import { type DeliveryMode, parseDeliveryMode } from "@/shared"
 import type { Tool, ToolEvent } from "@/tool"
-import { ownersForRegistry } from "./agent-tool"
 import type { AgentMetaRegistry } from "./agent-meta"
+import { ownersForRegistry } from "./agent-tool"
 import type { TaskRecord, TaskRegistry } from "./registry"
 
 // ─── shared error shape ──────────────────────────────────────────────────────
@@ -237,7 +237,7 @@ export const FollowupTaskInputSchema = z
       .boolean()
       .optional()
       .describe(
-        "DEPRECATED — use mode:\"interrupt\". When true (and mode is absent), stop the target's " +
+        'DEPRECATED — use mode:"interrupt". When true (and mode is absent), stop the target\'s ' +
           "current task and handle this immediately. Supplying BOTH mode and interrupt is rejected.",
       ),
   })
@@ -326,7 +326,10 @@ export const handleFollowupTask = (
   })
   switch (outcome.kind) {
     case "rejected":
-      return err(`followup_task ${input.agentId} rejected: ${outcome.reason}`, rejectCause(outcome.reason))
+      return err(
+        `followup_task ${input.agentId} rejected: ${outcome.reason}`,
+        rejectCause(outcome.reason),
+      )
     case "accepted":
       // Steer admitted (pending); a turn WILL consume it at the safe point.
       return { kind: "success", delivered: true, triggered: true, effectiveMode: "steer" }

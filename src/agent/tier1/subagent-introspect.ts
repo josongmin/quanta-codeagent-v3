@@ -26,13 +26,13 @@
 import { logger } from "@/shared"
 import { createIntrospectTools, type DeliveryPort } from "@/subagent"
 import type { Tool } from "@/tool"
-import { formatPeerBody } from "../subagent-mailbox"
 import {
   createSubagentDeliveryController,
   createTargetResolver,
   type DeliveryMailboxPort,
   type SubagentControlRegistry,
 } from "../subagent-delivery"
+import { formatPeerBody } from "../subagent-mailbox"
 import type { AgentConfig } from "../types"
 
 /** Deterministic-friendly delivery id: `del-<mailboxAgentId|root>-<seq>`. A pure
@@ -40,7 +40,10 @@ import type { AgentConfig } from "../types"
  *  mirrors the runner's deterministic child-id posture (ADR-0416). */
 const makeDeliveryIdFactory = (scope: string): (() => string) => {
   let seq = 0
-  return () => `del-${scope}-${(seq += 1)}`
+  return () => {
+    seq += 1
+    return `del-${scope}-${seq}`
+  }
 }
 
 // ALBB-12 claim 1 — once-per-process guard so a genuinely-split surface warns

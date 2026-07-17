@@ -15,6 +15,7 @@ import {
 } from "../../src/agent/subagent-delivery"
 import { buildSubagentIntrospectBlock } from "../../src/agent/tier1/subagent-introspect"
 import type { AgentConfig } from "../../src/agent/types"
+import { logger } from "../../src/shared"
 import {
   AgentMetaRegistry,
   createIntrospectTools,
@@ -29,7 +30,6 @@ import {
   type WakeOutcome,
 } from "../../src/subagent"
 import { ownersForRegistry } from "../../src/subagent/agent-tool"
-import { logger } from "../../src/shared"
 import type { Tool, ToolEvent } from "../../src/tool"
 
 const ctxLess = { cwd: "/tmp", signal: new AbortController().signal }
@@ -236,8 +236,15 @@ describe("list_agents — RFC-04 / ADR-0437", () => {
 describe("list_agents — F-B lineage enumeration gate", () => {
   const trivialRunner: SubagentRunner = async () => ({ ok: true, finalText: "x", turns: 1 })
 
-  const stampChild = async (reg: TaskRegistry, lineage: string, prompt: string): Promise<string> => {
-    const s = await handleSpawnAgent({ prompt }, { runner: trivialRunner, registry: reg, requesterLineage: lineage })
+  const stampChild = async (
+    reg: TaskRegistry,
+    lineage: string,
+    prompt: string,
+  ): Promise<string> => {
+    const s = await handleSpawnAgent(
+      { prompt },
+      { runner: trivialRunner, registry: reg, requesterLineage: lineage },
+    )
     if (s.kind !== "success") throw new Error("spawn failed")
     await reg.waitForSettle(s.agentId)
     return s.agentId
@@ -342,7 +349,10 @@ describe("followup_task — RFC-04 / ADR-0437", () => {
       }),
       newDeliveryId: (() => {
         let n = 0
-        return () => `del-${(n += 1)}`
+        return () => {
+          n += 1
+          return `del-${n}`
+        }
       })(),
       steerEnabled: false,
     })
@@ -510,7 +520,11 @@ describe("introspect default-OFF + gating — RFC-04 §8.15", () => {
 
   // WS3: `followup_task` is built when the delivery CONTROLLER is wired (not raw
   // mailbox+wake). Build a minimal controller over the registry/wake/mailbox.
-  const makeDelivery = (reg: TaskRegistry, wake: TurnWakeRegistry, mb: ReturnType<typeof fakeMailbox>) => {
+  const makeDelivery = (
+    reg: TaskRegistry,
+    wake: TurnWakeRegistry,
+    mb: ReturnType<typeof fakeMailbox>,
+  ) => {
     const control = wake as unknown as SubagentControlRegistry
     return createSubagentDeliveryController({
       control,
@@ -519,7 +533,10 @@ describe("introspect default-OFF + gating — RFC-04 §8.15", () => {
       resolveTarget: createTargetResolver({ registry: reg, control }),
       newDeliveryId: (() => {
         let n = 0
-        return () => `del-${(n += 1)}`
+        return () => {
+          n += 1
+          return `del-${n}`
+        }
       })(),
       steerEnabled: false,
     })

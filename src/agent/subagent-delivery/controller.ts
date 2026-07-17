@@ -26,7 +26,6 @@
  * ledger + requester lineage).
  */
 
-import { type DeliveryDegradeReason, steerRejectionToDelivery } from "./types"
 import type {
   DeliveryIdFactory,
   InterruptControlOutcome,
@@ -39,6 +38,7 @@ import type {
   SubagentSteerFinalizationPort,
   WakeControlOutcome,
 } from "./ports"
+import { type DeliveryDegradeReason, steerRejectionToDelivery } from "./types"
 
 /** Narrow mailbox send port. Returns the minted message's `id` so the controller
  *  can stamp `messageId` on the outcome. The real `MailboxPort.send` returns a
@@ -248,9 +248,10 @@ export const createSubagentDeliveryController = (
     label: string | undefined,
   ): SubagentDeliveryOutcome => {
     const deliveryId = deps.newDeliveryId()
-    // Gate: steer capability not wired ⇒ reject mode_disabled BEFORE any mutation
-    // (RFC §9 — never a silent queue). The controller-level `steerEnabled` guard
-    // fires earlier (in `deliver`); this is the endpoint-absent fallback path.
+    // The `steerEnabled` gate (mode_disabled) fired earlier in `deliver`; reaching
+    // here means steer is wired. No control endpoint for a running target ⇒ one
+    // mailbox fallback + typed `control_unavailable` degrade (RFC §5.3) — the
+    // payload is retained, never a reject.
     if (endpoint === undefined) {
       const messageId = enqueue(req, label)
       return degradeOutcome(deliveryId, "steer", "control_unavailable", "queued", messageId)

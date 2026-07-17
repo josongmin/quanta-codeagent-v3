@@ -10,6 +10,7 @@
  * approval-state-machine / shadow-verify) + the attribution slice.
  */
 
+export type { ApprovalAttributionGap } from "@/agent/approval-state-machine"
 export {
   OBSERVABILITY_WIRE_SLOTS,
   type ObservabilityHookBus,

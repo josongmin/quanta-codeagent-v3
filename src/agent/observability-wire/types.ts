@@ -47,7 +47,10 @@
  * dependency.
  */
 
-import type { ApprovalStateMachinePort } from "@/agent/approval-state-machine"
+import type {
+  ApprovalAttributionGap,
+  ApprovalStateMachinePort,
+} from "@/agent/approval-state-machine"
 import type { ObjectivePort } from "@/agent/objective"
 import type { RunLedgerPort } from "@/agent/run-ledger"
 import type { ShadowVerifyPort } from "@/agent/shadow-verify"
@@ -122,6 +125,30 @@ export interface ObservabilityWireOpts {
    * (byte-identical default-OFF for callers that do not observe).
    */
   readonly onPortError?: (err: ObservabilityWirePortError) => void
+  /**
+   * DOF-40 approval attribution-gap sink. A RUNTIME (post-wire) observer for
+   * the fail-closed audit gap the approval state machine emits when a terminal
+   * mutator (`settle` / `expire` / `cancel`) hits an `approvalId` it holds NO
+   * pending record for — i.e. a producer never `request(id)`ed it, so the
+   * resolution attributes NOTHING to the Objective / Run Ledger. This wires the
+   * SM's own `onUnattributed` producer (already fail-closed at the store) to a
+   * REAL consumer the operator can observe.
+   *
+   * Distinct from {@link onPortError} (a CONSTRUCT-time port/subscription
+   * failure): a gap fires LONG after wiring, on every un-attributable
+   * resolution, so it is NOT recorded in the point-in-time
+   * {@link ObservabilityWireHandle.degraded} report (which is frozen at return
+   * and scoped to wiring breakages). Instead, EVERY gap is emitted to the
+   * process {@link logger} at `warn` with structured meta (the guaranteed
+   * operator-visible floor), and — when supplied — ALSO fanned to this
+   * observer. Absent ⇒ the logger floor still fires (a real consumer either
+   * way); NEVER a silent drop, NEVER a dead wire.
+   *
+   * The observer is invoked NO-THROW: a hostile callback cannot break the SM
+   * mutator's `null`-return contract (the SM store guards it, and the wire's
+   * routing double-guards).
+   */
+  readonly onApprovalGap?: (gap: ApprovalAttributionGap) => void
 }
 
 /** The wire slots that can independently fail to construct/subscribe. */
