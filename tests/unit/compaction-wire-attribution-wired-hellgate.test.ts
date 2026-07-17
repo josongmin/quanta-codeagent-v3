@@ -209,6 +209,36 @@ describe("DOF-40 WIRE — attribution stamped + failure-routed through maybeComp
     expect(seen[0]?.attributedTurnId).toBe("t4")
   })
 
+  test("(c') objective-only wire (hooks ABSENT) still turn-tags the persisted next-action", async () => {
+    // A config with an objective store but NO hooks: attributedTurnId must STILL
+    // be stamped (gated on EITHER consumer) so the objective record self-attributes
+    // `[turn t<N>]`. onAttributionFailure stays gated on postCompactEmit (absent).
+    const cap: Captured = { stream: [] }
+    const calls: string[][] = []
+    const cfg = {
+      llm: new FakeSummarizerLLM(),
+      system: "sys",
+      cwd: "/tmp",
+      compaction: { thresholdTokens: 100, keepRecentTurns: 1 },
+      sessionId: "sess-obj",
+      run: { runId: "r", turn: 8 },
+      // NO hooks — objective store only.
+      objective: {
+        setNextActions: (_tid: string, actions: readonly string[]) => {
+          calls.push([...actions])
+        },
+      },
+      stream: { emit: (e: AgentEvent) => cap.stream.push(e) },
+    } as unknown as AgentConfig
+    await runWire(cfg, fakeWm(overThreshold()), 8)
+    expect(calls.length).toBe(1)
+    const action = calls[0]?.[0] ?? ""
+    expect(action).toContain("agent compacted")
+    // TEETH: without the widened gate (postCompactEmit-only) this tag was absent
+    // for an objective-only config.
+    expect(action).toContain("[turn t8]")
+  })
+
   test("(d) OFF — NO hooks wired ⇒ no attribution-failed recovery, compaction still succeeds", async () => {
     const cap: Captured = { stream: [] }
     // No `hooks` key ⇒ buildPostCompactEmit returns undefined ⇒ neither

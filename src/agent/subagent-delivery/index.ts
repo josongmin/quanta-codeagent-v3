@@ -6,8 +6,13 @@
 
 export {
   createSubagentDeliveryController,
+  createSubagentSteerFinalization,
   type DeliveryMailboxPort,
+  makeSteerRetentionStore,
   type PeerFormatter,
+  type RetainedSteer,
+  type SteerFinalizationDeps,
+  type SteerRetentionStore,
   type SubagentDeliveryControllerDeps,
   type TargetResolution,
 } from "./controller"

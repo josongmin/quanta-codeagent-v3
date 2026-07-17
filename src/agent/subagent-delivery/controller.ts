@@ -34,6 +34,7 @@ import type {
   SubagentControlRegistry,
   SubagentDeliveryOutcome,
   SubagentDeliveryPort,
+  SubagentDeliveryReceipt,
   SubagentDeliveryRequest,
   SubagentSteerFinalizationPort,
   WakeControlOutcome,
@@ -97,9 +98,130 @@ export interface SubagentDeliveryControllerDeps {
    *  exactly once. WS3 only STORES it (does not drain); WS4 wires the safe-point
    *  drain that calls it. */
   readonly finalization?: SubagentSteerFinalizationPort
+  /** WS4 — the shared retention store. When present, an ACCEPTED steer's address
+   *  + sanitized body are retained here (keyed by `deliveryId`) so the loop's
+   *  {@link createSubagentSteerFinalization} port can perform the ONE mailbox
+   *  fallback from the retained envelope without a second payload registry
+   *  (RFC §4.3). Absent ⇒ WS3 behavior (accepted with no retention wired). */
+  readonly steerRetention?: SteerRetentionStore
 }
 
 const DEFAULT_MAX_BODY_BYTES = 8192
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WS4 (RFC jul-18 §3.5, §4.3) — steer RETENTION + the loop's finalization port.
+//
+// An accepted steer is admission-only: the controller returns `accepted` and the
+// PAYLOAD is retained here (keyed by `deliveryId`) so the loop can later close it
+// EXACTLY ONCE — `finalizeApplied` (consumed at the safe point), `finalizeFallback`
+// (late reject / interrupt supersession / budget exhaustion ⇒ the ONE mailbox
+// fallback from the retained envelope), or `finalizeCancelled` (session teardown).
+//
+// Retention is a plain data map (RFC §4.3 — "keeps pending actions as data, avoids
+// callback-bearing queue entries and a second payload registry"). The mailbox
+// mutation stays in ONE owner (the mailbox send port). A finalize on an already-
+// closed or never-admitted id is INERT (a stale callback must never double-emit a
+// receipt or double-send a mailbox copy — RFC §5.8–5.9, DoD #5).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The retained address+body for an accepted steer — the minimum the ONE mailbox
+ *  fallback needs (`from`/`to`/`body`, plus optional correlation). The `body` is
+ *  the ALREADY-sanitized peer string (the same `formattedBody` the steer action
+ *  carries) so a fallback re-send never re-mangles or re-trusts the payload. */
+export interface RetainedSteer {
+  readonly from: string
+  readonly to: string
+  readonly body: string
+  readonly correlationId?: string
+}
+
+/** A monotonic single-slot-per-delivery retention store shared by the controller
+ *  (registers at admission) and the finalization port (reads/deletes at close).
+ *  `take` is remove-and-return so a delivery can be closed EXACTLY ONCE. */
+export interface SteerRetentionStore {
+  retain(deliveryId: string, entry: RetainedSteer): void
+  take(deliveryId: string): RetainedSteer | undefined
+  has(deliveryId: string): boolean
+  size(): number
+}
+
+export const makeSteerRetentionStore = (): SteerRetentionStore => {
+  const map = new Map<string, RetainedSteer>()
+  return {
+    retain(deliveryId, entry): void {
+      map.set(deliveryId, entry)
+    },
+    take(deliveryId): RetainedSteer | undefined {
+      const entry = map.get(deliveryId)
+      if (entry !== undefined) map.delete(deliveryId)
+      return entry
+    },
+    has(deliveryId): boolean {
+      return map.has(deliveryId)
+    },
+    size(): number {
+      return map.size
+    },
+  }
+}
+
+export interface SteerFinalizationDeps {
+  readonly store: SteerRetentionStore
+  readonly mailbox: DeliveryMailboxPort
+  /** Where a correlated final {@link SubagentDeliveryReceipt} is delivered (the
+   *  host wires the tool-result / observability sink). */
+  readonly onReceipt: (receipt: SubagentDeliveryReceipt) => void
+}
+
+/**
+ * Build the loop's {@link SubagentSteerFinalizationPort} (RFC §4.3). Each accepted
+ * delivery terminates in EXACTLY ONE receipt:
+ *   - `finalizeApplied`   ⇒ one `applied` receipt; NO mailbox copy (the model saw
+ *                            the injection at the safe point — RFC §3.4).
+ *   - `finalizeFallback`  ⇒ the ONE mailbox fallback from the retained envelope +
+ *                            one `degraded` receipt with the typed reason.
+ *   - `finalizeCancelled` ⇒ one `cancelled` receipt; NO mailbox copy.
+ * `take` empties the retention slot so a stale/duplicate finalize is inert (no
+ * second receipt, no second send).
+ */
+export const createSubagentSteerFinalization = (
+  deps: SteerFinalizationDeps,
+): SubagentSteerFinalizationPort => {
+  const { store, mailbox, onReceipt } = deps
+  return {
+    finalizeApplied(deliveryId, targetTurnId): void {
+      // The retained payload was consumed by the model at the safe point — DROP
+      // it (no mailbox copy) and emit the correlated applied receipt.
+      if (!store.has(deliveryId)) return
+      store.take(deliveryId)
+      onReceipt({ deliveryId, kind: "applied", effectiveMode: "steer", targetTurnId })
+    },
+    finalizeFallback(deliveryId, reason): void {
+      const retained = store.take(deliveryId)
+      if (retained === undefined) return // stale / never-admitted ⇒ inert
+      const msg = mailbox.send({
+        from: retained.from,
+        to: retained.to,
+        kind: "request",
+        body: retained.body,
+        ...(retained.correlationId !== undefined ? { correlationId: retained.correlationId } : {}),
+      })
+      onReceipt({
+        deliveryId,
+        kind: "degraded",
+        effectiveMode: "queue",
+        reason,
+        effect: "queued",
+        messageId: msg.id,
+      })
+    },
+    finalizeCancelled(deliveryId, reason): void {
+      if (!store.has(deliveryId)) return
+      store.take(deliveryId)
+      onReceipt({ deliveryId, kind: "cancelled", reason })
+    },
+  }
+}
 
 /** A queue-mode `applied` outcome (queued | woke). */
 const applyOutcome = (
@@ -139,194 +261,228 @@ const degradeOutcome = (
 const wakeToEffect = (w: WakeControlOutcome): "queued" | "woke" | "no_waker" =>
   w === "woke" ? "woke" : w === "queued" ? "queued" : "no_waker"
 
+/** WS4 — retain an ACCEPTED steer's address + sanitized body into the shared
+ *  retention store (when wired) so the loop's finalization port can perform the
+ *  ONE mailbox fallback from the retained envelope (RFC §4.3). The `body` is the
+ *  SAME `formattedBody` the steer action carries, so a fallback never re-mangles
+ *  or re-trusts the payload. No-op when no retention store is wired. */
+const retainAcceptedSteer = (
+  deps: SubagentDeliveryControllerDeps,
+  req: SubagentDeliveryRequest,
+  label: string | undefined,
+  deliveryId: string,
+  formattedBody: string,
+): void => {
+  deps.steerRetention?.retain(deliveryId, {
+    from: req.from,
+    to: label ?? deps.control.labelOf(req.targetTaskId) ?? req.targetTaskId,
+    body: formattedBody,
+    ...(req.correlationId !== undefined ? { correlationId: req.correlationId } : {}),
+  })
+}
+
+/** Enqueue the payload once and return its message id (the ONE mailbox mutation
+ *  on any queue/degrade path). Resolves the delivery address to the child's
+ *  mailbox label (task id → `root/N`); falls back to the task id when no label is
+ *  bound. Module-level so the three mode handlers share one impl (SE size gate). */
+const enqueue = (
+  deps: SubagentDeliveryControllerDeps,
+  req: SubagentDeliveryRequest,
+  label: string | undefined,
+): string => {
+  const to = label ?? deps.control.labelOf(req.targetTaskId) ?? req.targetTaskId
+  const msg = deps.mailbox.send({
+    from: req.from,
+    to,
+    kind: "request",
+    body: req.body,
+    ...(req.correlationId !== undefined ? { correlationId: req.correlationId } : {}),
+  })
+  return msg.id
+}
+
+/** Queue delivery: send once, then (ensure-turn only) wake. Passive never wakes.
+ *  A missing endpoint / no-receiver on ensure-turn is a typed retained-payload
+ *  degrade, never a reject (delivery already occurred). */
+const doQueue = (
+  deps: SubagentDeliveryControllerDeps,
+  req: SubagentDeliveryRequest,
+  endpoint: SubagentControlEndpoint | undefined,
+  label: string | undefined,
+): SubagentDeliveryOutcome => {
+  const deliveryId = deps.newDeliveryId()
+  const messageId = enqueue(deps, req, label)
+  if (req.activation === "passive") return applyOutcome(deliveryId, "queued", messageId)
+  // ensure-turn: a follow-up guarantees an eligible child gets a turn.
+  if (endpoint === undefined) {
+    // Running but no control endpoint registered — payload retained, but we
+    // cannot schedule a turn. Typed degrade (RFC §5.3), NOT a reject.
+    return degradeOutcome(deliveryId, "queue", "control_unavailable", "queued", messageId)
+  }
+  const effect = wakeToEffect(endpoint.wake())
+  if (effect === "no_waker") {
+    return degradeOutcome(deliveryId, "queue", "no_waker", "queued", messageId)
+  }
+  return applyOutcome(deliveryId, effect, messageId)
+}
+
+/** The `applied/interrupt` outcome arm — the SAME literal shape for every
+ *  interrupt effect that guarantees a turn WILL run (`interrupted_active` /
+ *  `woke_idle` / `not_armed`). */
+const interruptApplied = (
+  deliveryId: string,
+  messageId: string,
+  targetTurnId: string,
+): SubagentDeliveryOutcome => ({
+  kind: "applied",
+  deliveryId,
+  requestedMode: "interrupt",
+  effectiveMode: "interrupt",
+  effect: "interrupted",
+  messageId,
+  targetTurnId,
+})
+
+const doInterrupt = (
+  deps: SubagentDeliveryControllerDeps,
+  req: SubagentDeliveryRequest,
+  endpoint: SubagentControlEndpoint | undefined,
+  label: string | undefined,
+): SubagentDeliveryOutcome => {
+  const deliveryId = deps.newDeliveryId()
+  // RFC §3.4 — enqueue FIRST, then fire the per-turn abort. If control fails, the
+  // queued payload is recoverable and the outcome is a typed degrade.
+  const messageId = enqueue(deps, req, label)
+  if (endpoint === undefined) {
+    return degradeOutcome(deliveryId, "interrupt", "control_unavailable", "queued", messageId)
+  }
+  const outcome: InterruptControlOutcome = endpoint.interrupt()
+  const turnId = req.expectedTurnId ?? ""
+  switch (outcome) {
+    case "interrupted_active":
+      return interruptApplied(deliveryId, messageId, turnId)
+    case "already_interrupted":
+      // A prior interrupt already aborted; this one shares the pending resume and
+      // queues in FIFO order. Typed degrade (RFC §5.5).
+      return degradeOutcome(deliveryId, "interrupt", "already_interrupted", "queued", messageId)
+    case "woke_idle":
+      // Nothing was in flight to abort; the fresh turn drains the queued payload —
+      // an interrupt of an idle child collapses to queue+ensure-turn and a turn
+      // WILL run, so this is `applied`, not a degrade (RFC §3.1).
+      return interruptApplied(deliveryId, messageId, turnId)
+    case "not_armed":
+      // The child has entered no turn yet (nothing armed, nothing parked); the
+      // payload is queued and a turn runs once the loop parks — same collapse as
+      // woke_idle (a turn WILL run).
+      return interruptApplied(deliveryId, messageId, turnId)
+  }
+}
+
+const doSteer = (
+  deps: SubagentDeliveryControllerDeps,
+  req: SubagentDeliveryRequest,
+  endpoint: SubagentControlEndpoint | undefined,
+  label: string | undefined,
+): SubagentDeliveryOutcome => {
+  const deliveryId = deps.newDeliveryId()
+  // The `steerEnabled` gate (mode_disabled) fired earlier in `deliver`; reaching
+  // here means steer is wired. No control endpoint for a running target ⇒ one
+  // mailbox fallback + typed `control_unavailable` degrade (RFC §5.3) — the
+  // payload is retained, never a reject.
+  if (endpoint === undefined) {
+    const messageId = enqueue(deps, req, label)
+    return degradeOutcome(deliveryId, "steer", "control_unavailable", "queued", messageId)
+  }
+  // Build the SANITIZED envelope (RFC §4.5) — a raw teammate body may never be
+  // injected as a trusted string. `expectedTurnId` is honored for steer; when the
+  // caller omitted it there is no active turn to target ⇒ the endpoint's steer
+  // authority returns `no_active_turn` and we fall back.
+  const submission = {
+    deliveryId,
+    envelope: {
+      from: req.from,
+      formattedBody: deps.formatPeer(req.from, "request", req.body),
+      ...(req.correlationId !== undefined ? { correlationId: req.correlationId } : {}),
+    },
+    expectedTurnId: req.expectedTurnId ?? "",
+  }
+  const outcome: SteerSubmitOutcome = endpoint.steer(submission)
+  if (outcome === "accepted") {
+    // Admission only — NO mailbox copy (RFC §3.4). The correlated applied /
+    // degraded receipt arrives later from the loop's safe point (WS4 seam:
+    // `deps.finalization`). RETAIN the address + sanitized body so a later
+    // `finalizeFallback` can perform the ONE mailbox fallback (RFC §4.3).
+    retainAcceptedSteer(deps, req, label, deliveryId, submission.envelope.formattedBody)
+    return {
+      kind: "accepted",
+      deliveryId,
+      requestedMode: "steer",
+      effect: "steer_pending",
+      targetTurnId: submission.expectedTurnId,
+    }
+  }
+  // Rejected admission ⇒ one mailbox fallback + a typed degrade, using the SSOT
+  // bridge for the steer-authority reasons (RFC §7 — no second fallback table).
+  const messageId = enqueue(deps, req, label)
+  const reason = steerSubmitToDegrade(outcome)
+  return degradeOutcome(deliveryId, "steer", reason, "queued", messageId)
+}
+
+/** Validate + resolve the target BEFORE any mutation (RFC §3.2, §5.1–5.2). Returns
+ *  a `rejected` outcome (never a mutation), or `{ endpoint, label }` to apply. */
+const admitDelivery = (
+  deps: SubagentDeliveryControllerDeps,
+  req: SubagentDeliveryRequest,
+  maxBytes: number,
+):
+  | { readonly rejected: SubagentDeliveryOutcome }
+  | {
+      readonly endpoint: SubagentControlEndpoint | undefined
+      readonly label: string | undefined
+    } => {
+  if (typeof req.body !== "string" || req.body.length === 0) {
+    return { rejected: { kind: "rejected", reason: "invalid_input" } }
+  }
+  if (byteLength(req.body) > maxBytes) {
+    return { rejected: { kind: "rejected", reason: "invalid_input" } }
+  }
+  // Steer gate — reject mode_disabled BEFORE target lookup / mutation (RFC §9:
+  // gate OFF ⇒ mode_disabled, never a silent queue).
+  if (req.mode === "steer" && !deps.steerEnabled) {
+    return { rejected: { kind: "rejected", reason: "mode_disabled" } }
+  }
+  const target = deps.resolveTarget(req.targetTaskId)
+  switch (target.kind) {
+    case "unknown":
+      return { rejected: { kind: "rejected", reason: "target_unknown" } }
+    case "settled":
+      return { rejected: { kind: "rejected", reason: "target_settled" } }
+    case "ownership_denied":
+      return { rejected: { kind: "rejected", reason: "ownership_denied" } }
+    case "self":
+      return { rejected: { kind: "rejected", reason: "self_target" } }
+    case "running":
+      return { endpoint: deps.control.endpointFor(req.targetTaskId), label: target.mailboxLabel }
+  }
+}
+
 export const createSubagentDeliveryController = (
   deps: SubagentDeliveryControllerDeps,
 ): SubagentDeliveryPort => {
   const maxBytes = deps.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES
-
-  /** Enqueue the payload once and return its message id (the ONE mailbox
-   *  mutation on any queue/degrade path). Resolves the delivery address to the
-   *  child's mailbox label (task id → `root/N`); falls back to the task id when
-   *  no label is bound. */
-  const enqueue = (req: SubagentDeliveryRequest, label: string | undefined): string => {
-    const to = label ?? deps.control.labelOf(req.targetTaskId) ?? req.targetTaskId
-    const msg = deps.mailbox.send({
-      from: req.from,
-      to,
-      kind: "request",
-      body: req.body,
-      ...(req.correlationId !== undefined ? { correlationId: req.correlationId } : {}),
-    })
-    return msg.id
-  }
-
-  /** Queue delivery: send once, then (ensure-turn only) wake. Passive never
-   *  wakes. A missing endpoint / no-receiver on ensure-turn is a typed
-   *  retained-payload degrade, never a reject (delivery already occurred). */
-  const doQueue = (
-    req: SubagentDeliveryRequest,
-    endpoint: SubagentControlEndpoint | undefined,
-    label: string | undefined,
-  ): SubagentDeliveryOutcome => {
-    const deliveryId = deps.newDeliveryId()
-    const messageId = enqueue(req, label)
-    if (req.activation === "passive") return applyOutcome(deliveryId, "queued", messageId)
-    // ensure-turn: a follow-up guarantees an eligible child gets a turn.
-    if (endpoint === undefined) {
-      // Running but no control endpoint registered — payload retained, but we
-      // cannot schedule a turn. Typed degrade (RFC §5.3), NOT a reject.
-      return degradeOutcome(deliveryId, "queue", "control_unavailable", "queued", messageId)
-    }
-    const effect = wakeToEffect(endpoint.wake())
-    if (effect === "no_waker") {
-      return degradeOutcome(deliveryId, "queue", "no_waker", "queued", messageId)
-    }
-    return applyOutcome(deliveryId, effect, messageId)
-  }
-
-  const doInterrupt = (
-    req: SubagentDeliveryRequest,
-    endpoint: SubagentControlEndpoint | undefined,
-    label: string | undefined,
-  ): SubagentDeliveryOutcome => {
-    const deliveryId = deps.newDeliveryId()
-    // RFC §3.4 — enqueue FIRST, then fire the per-turn abort. If control fails,
-    // the queued payload is recoverable and the outcome is a typed degrade.
-    const messageId = enqueue(req, label)
-    if (endpoint === undefined) {
-      return degradeOutcome(deliveryId, "interrupt", "control_unavailable", "queued", messageId)
-    }
-    const outcome: InterruptControlOutcome = endpoint.interrupt()
-    switch (outcome) {
-      case "interrupted_active":
-        return {
-          kind: "applied",
-          deliveryId,
-          requestedMode: "interrupt",
-          effectiveMode: "interrupt",
-          effect: "interrupted",
-          messageId,
-          targetTurnId: req.expectedTurnId ?? "",
-        }
-      case "already_interrupted":
-        // A prior interrupt already aborted; this one shares the pending resume
-        // and queues in FIFO order. Typed degrade (RFC §5.5).
-        return degradeOutcome(deliveryId, "interrupt", "already_interrupted", "queued", messageId)
-      case "woke_idle":
-        // Nothing was in flight to abort; the fresh turn drains the queued
-        // payload — an interrupt of an idle child collapses to queue+ensure-turn
-        // and a turn WILL run, so this is `applied`, not a degrade (RFC §3.1).
-        return {
-          kind: "applied",
-          deliveryId,
-          requestedMode: "interrupt",
-          effectiveMode: "interrupt",
-          effect: "interrupted",
-          messageId,
-          targetTurnId: req.expectedTurnId ?? "",
-        }
-      case "not_armed":
-        // The child has entered no turn yet (nothing armed, nothing parked); the
-        // payload is queued and a turn runs once the loop parks — same collapse
-        // as woke_idle (a turn WILL run). Applied; the interrupt-applied arm's
-        // effect literal is always "interrupted".
-        return {
-          kind: "applied",
-          deliveryId,
-          requestedMode: "interrupt",
-          effectiveMode: "interrupt",
-          effect: "interrupted",
-          messageId,
-          targetTurnId: req.expectedTurnId ?? "",
-        }
-    }
-  }
-
-  const doSteer = (
-    req: SubagentDeliveryRequest,
-    endpoint: SubagentControlEndpoint | undefined,
-    label: string | undefined,
-  ): SubagentDeliveryOutcome => {
-    const deliveryId = deps.newDeliveryId()
-    // The `steerEnabled` gate (mode_disabled) fired earlier in `deliver`; reaching
-    // here means steer is wired. No control endpoint for a running target ⇒ one
-    // mailbox fallback + typed `control_unavailable` degrade (RFC §5.3) — the
-    // payload is retained, never a reject.
-    if (endpoint === undefined) {
-      const messageId = enqueue(req, label)
-      return degradeOutcome(deliveryId, "steer", "control_unavailable", "queued", messageId)
-    }
-    // Build the SANITIZED envelope (RFC §4.5) — a raw teammate body may never be
-    // injected as a trusted string. `expectedTurnId` is honored for steer; when
-    // the caller omitted it there is no active turn to target ⇒ the endpoint's
-    // steer authority returns `no_active_turn` and we fall back.
-    const submission = {
-      deliveryId,
-      envelope: {
-        from: req.from,
-        formattedBody: deps.formatPeer(req.from, "request", req.body),
-        ...(req.correlationId !== undefined ? { correlationId: req.correlationId } : {}),
-      },
-      expectedTurnId: req.expectedTurnId ?? "",
-    }
-    const outcome: SteerSubmitOutcome = endpoint.steer(submission)
-    if (outcome === "accepted") {
-      // Admission only — NO mailbox copy (RFC §3.4). The correlated applied /
-      // degraded receipt arrives later from the loop's safe point (WS4 seam:
-      // `deps.finalization`).
-      return {
-        kind: "accepted",
-        deliveryId,
-        requestedMode: "steer",
-        effect: "steer_pending",
-        targetTurnId: submission.expectedTurnId,
-      }
-    }
-    // Rejected admission ⇒ one mailbox fallback + a typed degrade, using the SSOT
-    // bridge for the steer-authority reasons (RFC §7 — no second fallback table).
-    const messageId = enqueue(req, label)
-    const reason = steerSubmitToDegrade(outcome)
-    return degradeOutcome(deliveryId, "steer", reason, "queued", messageId)
-  }
-
   return {
     deliver(req: SubagentDeliveryRequest): SubagentDeliveryOutcome {
-      // 1) Input validation BEFORE any lookup/mutation (RFC §3.2).
-      if (typeof req.body !== "string" || req.body.length === 0) {
-        return { kind: "rejected", reason: "invalid_input" }
-      }
-      if (byteLength(req.body) > maxBytes) {
-        return { kind: "rejected", reason: "invalid_input" }
-      }
-      // 2) Steer gate — reject mode_disabled BEFORE target lookup / mutation
-      //    (RFC §9: gate OFF ⇒ mode_disabled, never a silent queue).
-      if (req.mode === "steer" && !deps.steerEnabled) {
-        return { kind: "rejected", reason: "mode_disabled" }
-      }
-      // 3) Target validation BEFORE any mutation (RFC §5.1–5.2).
-      const target = deps.resolveTarget(req.targetTaskId)
-      switch (target.kind) {
-        case "unknown":
-          return { kind: "rejected", reason: "target_unknown" }
-        case "settled":
-          return { kind: "rejected", reason: "target_settled" }
-        case "ownership_denied":
-          return { kind: "rejected", reason: "ownership_denied" }
-        case "self":
-          return { kind: "rejected", reason: "self_target" }
-        case "running":
-          break
-      }
-      // 4) Resolve endpoint + label, then apply EXACTLY ONE effect.
-      const endpoint = deps.control.endpointFor(req.targetTaskId)
-      const label = target.mailboxLabel
+      const admission = admitDelivery(deps, req, maxBytes)
+      if ("rejected" in admission) return admission.rejected
+      const { endpoint, label } = admission
+      // Apply EXACTLY ONE effect for the requested mode.
       switch (req.mode) {
         case "queue":
-          return doQueue(req, endpoint, label)
+          return doQueue(deps, req, endpoint, label)
         case "interrupt":
-          return doInterrupt(req, endpoint, label)
+          return doInterrupt(deps, req, endpoint, label)
         case "steer":
-          return doSteer(req, endpoint, label)
+          return doSteer(deps, req, endpoint, label)
       }
     },
   }

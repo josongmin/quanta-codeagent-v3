@@ -173,12 +173,25 @@ const buildChildBase = (
  *  cognitive-complexity cap. */
 const childControlConfig = (
   control: ChildControlWiring | undefined,
-): Pick<AgentConfig, "conversationActionPort" | "activeTurnRef"> | Record<string, never> =>
+):
+  | Pick<
+      AgentConfig,
+      "conversationActionPort" | "activeTurnRef" | "childSteerDrain" | "steerFinalization"
+    >
+  | Record<string, never> =>
   control === undefined
     ? {}
     : {
         conversationActionPort: control.conversationActionPort,
         activeTurnRef: control.activeTurnRef,
+        // WS4 — thread the steer drain view + finalization ONLY when present
+        // (steer plane wired). Absent ⇒ no safe-point drain (byte-identical).
+        ...(control.childSteerDrain !== undefined
+          ? { childSteerDrain: control.childSteerDrain }
+          : {}),
+        ...(control.steerFinalization !== undefined
+          ? { steerFinalization: control.steerFinalization }
+          : {}),
       }
 
 const buildChildInheritedConfig = (
@@ -227,6 +240,10 @@ const buildChildInheritedConfig = (
 export interface ChildControlWiring {
   readonly conversationActionPort: NonNullable<AgentConfig["conversationActionPort"]>
   readonly activeTurnRef: NonNullable<AgentConfig["activeTurnRef"]>
+  /** WS4 — loop-facing steer drain view + finalization port, present only when
+   *  the session steer plane exists (gate ON). Absent ⇒ no safe-point drain. */
+  readonly childSteerDrain?: NonNullable<AgentConfig["childSteerDrain"]>
+  readonly steerFinalization?: NonNullable<AgentConfig["steerFinalization"]>
 }
 
 /** Assemble the child-only config; intentionally omits parent durable state. */

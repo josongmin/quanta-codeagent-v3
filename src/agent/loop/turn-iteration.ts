@@ -220,6 +220,107 @@ export const drainConversationActionsMidTurn = async (args: {
   return "continue"
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// WS4 (RFC jul-18 §3.5) — post-stream STEER SAFE-POINT drain.
+//
+// `steer` cannot rewrite a provider response already being sampled; it means:
+// admitted during an active steerable turn, then consumed at the earliest
+// transcript-safe boundary BEFORE that logical turn is allowed to finish. The
+// conversation-action queue is polled at turn start + same-turn retry boundaries,
+// but an `end_turn` response can finish before another retry poll — so this drain
+// runs in `runTurn` right before `step.done` is honored on an otherwise-final
+// turn. It injects the sanitized envelope into the SAME turn header and asks the
+// loop for ONE more model call, closing every accepted steer EXACTLY ONCE via the
+// finalization port. An interrupt/lifetime abort SUPERSEDES a pending steer.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Hard cap on the number of EXTRA same-turn model calls the safe-point may spend
+ *  on admitted steers within one logical turn. Mirrors the child steer-queue
+ *  capacity (subagent-runner `CHILD_STEER_QUEUE_CAPACITY = 8`) so the safe-point's
+ *  extra-round budget and the surface's admission bound agree — a burst that
+ *  overflows either degrades to mailbox, never to unbounded model calls
+ *  (RFC §3.5 "bounded … remaining same-turn rounds + remote-steer backlog"). */
+export const STEER_SAFEPOINT_MAX_ROUNDS = 8
+
+/** Per-`runTurn` mutable buffer for the safe-point drain. `drained` is the local
+ *  FIFO the surface is emptied into (so ordering is owned by the loop, one applied
+ *  per round); `applied` counts extra rounds spent (the budget). */
+export interface SteerSafePointState {
+  drained: import("../subagent-delivery/ports").SubagentSteerSubmission[]
+  applied: number
+}
+
+export const freshSteerSafePointState = (): SteerSafePointState => ({ drained: [], applied: 0 })
+
+/** The safe-point decision: `continue:true` ⇒ the loop re-streams the SAME turn
+ *  for one more model call (a steer was injected); `continue:false` ⇒ honor the
+ *  original `step.done` (no pending steer, superseded, or budget exhausted). */
+export type SteerSafePointOutcome = { readonly continue: boolean }
+
+const STEER_HALT: SteerSafePointOutcome = { continue: false }
+const STEER_CONTINUE: SteerSafePointOutcome = { continue: true }
+
+/**
+ * WS4 — the post-stream steer safe-point. Called by {@link runTurn} ONLY when a
+ * turn is about to finish on an `end_turn` (`completed`) response.
+ *
+ *   1. No drain view wired ⇒ `{continue:false}` (BYTE-IDENTICAL default-OFF — the
+ *      whole seam is one `undefined` property read; nothing else is touched).
+ *   2. Interrupt / lifetime abort observed ⇒ SUPERSEDE: every pending steer (local
+ *      buffer + freshly drained) is preserved via ONE mailbox fallback with
+ *      `superseded_by_interrupt`; honor the finish (`{continue:false}`). The fresh
+ *      turn's interrupt payload keeps deterministic precedence.
+ *   3. No steer pending ⇒ `{continue:false}` (behaves exactly as today).
+ *   4. Budget exhausted (`applied >= cap`) ⇒ every remaining pending steer degrades
+ *      to mailbox with `same_turn_budget_exhausted`; honor the finish.
+ *   5. Otherwise take ONE (FIFO), append the sanitized injection into the SAME
+ *      turn's working memory, `finalizeApplied`, and ask for one more model call.
+ *
+ * NEVER interrupts and NEVER creates a mailbox duplicate for an applied steer
+ * (RFC §3.4). The injection is the peer-formatted `formattedBody` — never the raw
+ * teammate body (RFC §4.5).
+ */
+export const applySteerSafePoint = (
+  cfg: AgentConfig,
+  wm: WorkingMemory<Message>,
+  state: SteerSafePointState,
+  superseded: boolean,
+): SteerSafePointOutcome => {
+  const drain = cfg.childSteerDrain
+  if (drain === undefined) return STEER_HALT // gate OFF — byte-identical
+  const fin = cfg.steerFinalization
+  if (superseded) {
+    // Interrupt / lifetime abort wins: preserve every pending steer as a queue
+    // fallback (never applied), so the fresh turn's interrupt payload has
+    // deterministic precedence and neither payload is duplicated (RFC §5.6).
+    for (const s of state.drained) fin?.finalizeFallback(s.deliveryId, "superseded_by_interrupt")
+    for (const s of drain.drainSteers())
+      fin?.finalizeFallback(s.deliveryId, "superseded_by_interrupt")
+    state.drained = []
+    return STEER_HALT
+  }
+  // Pull any newly-admitted steers into the loop-owned FIFO buffer.
+  for (const s of drain.drainSteers()) state.drained.push(s)
+  if (state.drained.length === 0) return STEER_HALT // nothing pending — as today
+  if (state.applied >= STEER_SAFEPOINT_MAX_ROUNDS) {
+    // Same-turn round budget exhausted: degrade every remaining pending steer to
+    // mailbox once (RFC §3.4 admission pressure) and let the turn finish.
+    for (const s of state.drained) fin?.finalizeFallback(s.deliveryId, "same_turn_budget_exhausted")
+    state.drained = []
+    return STEER_HALT
+  }
+  const next = state.drained.shift()
+  if (next === undefined) return STEER_HALT
+  const turnId = cfg.activeTurnRef?.current.currentTurn?.turnId ?? next.expectedTurnId
+  // Keep the SAME turn header/id — the outer loop set it once and `runTurn` never
+  // re-stamps it, so this trailing user message lands in the current turn. The
+  // sanitized `formattedBody` is injected (never the raw body — RFC §4.5).
+  wm.append({ role: "user", content: [{ type: "text", text: next.envelope.formattedBody }] })
+  fin?.finalizeApplied(next.deliveryId, turnId)
+  state.applied += 1
+  return STEER_CONTINUE
+}
+
 /** Loop-control fix (jun-25): how many trailing turns (inclusive of the last)
  *  carry the budget-tail reminder. K≈3 gives the model a short runway to land
  *  the plane without spamming every turn. Frozen — a test asserting the tail

@@ -114,10 +114,22 @@ export const buildSubagentIntrospectBlock = (config: AgentConfig): Tool[] => {
               ...(config.subagentTaskId !== undefined ? { ownTaskId: config.subagentTaskId } : {}),
             }),
             newDeliveryId: makeDeliveryIdFactory(config.mailboxAgentId ?? "root"),
-            // WS4 steer capability not wired ⇒ mode:"steer" ⇒ mode_disabled reject
-            // (RFC §9 — never a silent queue). Flip to a QUANTA_SUBAGENT_STEER gate
-            // when WS4 lands.
-            steerEnabled: false,
+            // WS4 (RFC §9) — steer is enabled ONLY when the QUANTA_SUBAGENT_STEER
+            // gate flipped `subagent.enableSteer` AND the session steer plane was
+            // minted (the composition root wires both together). Gate OFF ⇒
+            // `mode:"steer"` ⇒ `mode_disabled` reject (never a silent queue).
+            steerEnabled: sub.enableSteer === true && sub.steerPlane !== undefined,
+            // Share the session retention store so an accepted steer's payload is
+            // retained where the child loop's finalization port reads it — one
+            // payload map, no second registry (RFC §4.3). Absent plane ⇒ omitted
+            // ⇒ WS3 behavior (accepted with no retention; steerEnabled is false
+            // anyway, so `doSteer` is never reached).
+            ...(sub.steerPlane !== undefined
+              ? {
+                  steerRetention: sub.steerPlane.retention,
+                  finalization: sub.steerPlane.finalization,
+                }
+              : {}),
           })
           return controller as DeliveryPort
         })()

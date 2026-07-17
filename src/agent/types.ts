@@ -639,6 +639,26 @@ export interface AgentConfig
    *  (byte-identical legacy). */
   steerBarrier?: () => Promise<void>
   /**
+   * WS4 (RFC jul-18 §3.5) — the child's bounded steer-submission DRAIN view.
+   * Present ONLY on a child whose control endpoint was wired under
+   * `QUANTA_SUBAGENT_STEER` (the runner threads it). The post-stream safe-point
+   * in `same-turn-engine.runTurn` drains ACCEPTED steers here at the earliest
+   * transcript-safe boundary before an `end_turn` turn finishes, injecting the
+   * sanitized envelope into the SAME turn (one extra model call per admitted
+   * steer, FIFO). Absent ⇒ the loop performs NO safe-point drain (byte-identical
+   * default-OFF — the whole seam is one `undefined` property read).
+   */
+  childSteerDrain?: {
+    drainSteers(): readonly import("./subagent-delivery/ports").SubagentSteerSubmission[]
+    pendingSteers(): number
+  }
+  /** WS4 — the finalization port the safe-point calls to close every accepted
+   *  steer EXACTLY ONCE (applied on consumption; fallback on interrupt
+   *  supersession / budget exhaustion; cancelled on teardown — RFC §3.3, §4.3).
+   *  Threaded together with {@link childSteerDrain}; absent ⇒ no finalization
+   *  (byte-identical). */
+  steerFinalization?: import("./subagent-delivery/ports").SubagentSteerFinalizationPort
+  /**
    * Correlation context (RFC-0002 §5.1). Absent ⇒ the loop behaves
    * byte-identically (project-standard optional-context pattern, like
    * `metrics?`/`hooks?`). When present the loop maintains a per-turn working

@@ -89,6 +89,12 @@ notes: |
   going through gate.open, so no request(id) is produced; the host's
   settle(approvalId) then hits an unknown SM id. Pre-DOF-40 that returned null
   silently (audit trail dropped). DOF-40 makes it explicit via the SM's
-  `onUnattributed` gap sink (approval-state-machine feature) — but wiring that
-  sink at the composition root is the promotion owner recorded there
-  (observability-wire / web-daemon), outside this slice's fence.
+  `onUnattributed` gap sink (approval-state-machine feature). WIRED (2026-07-18):
+  the composition-root promotion owner — the observability wire
+  (`src/agent/observability-wire/wire.ts`) — now passes `onUnattributed` to a
+  REAL consumer (a structured `logger.warn` operator floor + an optional
+  `onApprovalGap` observer on ObservabilityWireOpts), so this residual
+  always-confirm gap SURFACES in production under `QUANTA_OBSERVABILITY=on`
+  instead of dropping silently. Still outside THIS slice's fence — the wiring
+  lives in the observability-wire slice (see approval-state-machine promotion
+  path), pinned by tests/unit/observability-wire-approval-gap-hellgate.test.ts.

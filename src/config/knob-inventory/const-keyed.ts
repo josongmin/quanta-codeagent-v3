@@ -61,6 +61,16 @@ export const CONST_KEYED: readonly KnobInventoryEntry[] = [
     readSite: "agent/optional-ports.ts",
   },
   {
+    envKey: "QUANTA_SUBAGENT_STEER",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      'Targeted child steer — mode:"steer" delivery + post-stream safe-point (RFC jul-18 WS4; requires QUANTA_SUBAGENT_FOLLOWUP; opt-in).',
+    readSite: "agent/optional-ports.ts",
+  },
+  {
     envKey: "QUANTA_REFUSAL_FALLBACK",
     kind: "bool",
     default: false,

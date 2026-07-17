@@ -78,6 +78,7 @@ evidence:
     unit:
       - tests/unit/approval-state-machine-hellgate.test.ts
       - tests/unit/approval-attribution-gap-hellgate.test.ts
+      - tests/unit/observability-wire-approval-gap-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -111,16 +112,22 @@ deliberate_hold:
     + RunLedger.waiting() it implies. Promote to L3 once a real producer is
     wired and a surface consumes the state.
 
-    DOF-40 fail-closed gap sink PROMOTION OWNER: the `onUnattributed` observer
-    is a leaf seam here. Routing it to real telemetry / RunLedger belongs to a
-    composition root NOT owned by this slice — the observability wire
-    (`src/agent/observability-wire/wire.ts`, where `createApprovalStateMachine`
-    is constructed) and/or the web-daemon runtime factory. That root must pass
-    `onUnattributed` (e.g. emit a `logger.warn` + a `run-ledger` gap entry) so
-    the deferred always-confirm path's un-attributed settle
-    (`src/host/runtime/internal/context-binding/approval-protocol.ts:413`)
-    surfaces in production. Until then the sink is absent in prod ⇒ the gap is
-    detectable only in-test (this slice cannot reach across the fence).
+    DOF-40 fail-closed gap sink — WIRED (2026-07-18). The promotion owner was
+    the observability wire root (`src/agent/observability-wire/wire.ts`, where
+    `createApprovalStateMachine` is constructed). That root now passes
+    `onUnattributed` = `makeApprovalGapSink(opts.onApprovalGap)`, routing every
+    gap to a REAL consumer: a structured `logger.warn`
+    ("observability-wire.approval-gap: …" with {approvalId, op, decision?, at})
+    as the always-on operator floor, PLUS an optional `onApprovalGap` observer
+    on `ObservabilityWireOpts` (parallel to `onPortError`). So the deferred
+    always-confirm path's un-attributed settle
+    (`src/host/runtime/internal/context-binding/approval-protocol.ts:413`) now
+    surfaces in production whenever `QUANTA_OBSERVABILITY` is on. Default-OFF is
+    byte-identical: gate off ⇒ no SM is built ⇒ no sink ⇒ gap returns null
+    silently as before (pinned by observability-wire-approval-gap-hellgate).
+    RESIDUAL: a `run-ledger` gap ENTRY (vs the logger floor) is a further
+    enrichment left to the run-ledger slice owner — not required for the seam
+    to have a real consumer (the logger floor always fires).
 notes: |
   Slice fence verified: imports = `node:crypto` (randomUUID) + types-only from
   `@/agent/objective` + `@/agent/run-ledger`. NO `@/agent` core, NO `@/apps`,

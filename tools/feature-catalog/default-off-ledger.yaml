@@ -103,7 +103,7 @@ rows:
     gate_owner: [AgentConfig.approvalStateMachine]
     activation: port-present
     effective_default: { cli: off, web: off, bench: na, headless: off, daemon: off }
-    reachability: consumer-only
+    reachability: wired
     proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: repair-first
@@ -547,7 +547,7 @@ rows:
     gate_owner: [AgentConfig.postCompactEmit]
     activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: seam-only
+    reachability: wired
     proof: { on: wire, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold

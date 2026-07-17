@@ -24,7 +24,7 @@
  */
 
 import { z } from "zod"
-import { type DeliveryMode, parseDeliveryMode } from "@/shared"
+import type { DeliveryMode } from "@/shared"
 import type { Tool, ToolEvent } from "@/tool"
 import type { AgentMetaRegistry } from "./agent-meta"
 import { ownersForRegistry } from "./agent-tool"
@@ -230,15 +230,10 @@ export const FollowupTaskInputSchema = z
       .optional()
       .describe(
         "Delivery timing (default queue). queue = delivered for the target's next turn; " +
-          "interrupt = stop the current turn and handle now; steer = inject into the current " +
-          "turn without aborting (requires the steer capability, else rejected).",
-      ),
-    interrupt: z
-      .boolean()
-      .optional()
-      .describe(
-        'DEPRECATED — use mode:"interrupt". When true (and mode is absent), stop the target\'s ' +
-          "current task and handle this immediately. Supplying BOTH mode and interrupt is rejected.",
+          "interrupt = abort the target's CURRENT turn so it reports-and-continues now (the " +
+          "child stays running — this is NOT a kill; forceStop/task_stop is the separate " +
+          "terminal path); steer = inject into the current turn without aborting (requires the " +
+          "steer capability, else rejected).",
       ),
   })
   .strict()
@@ -291,30 +286,20 @@ const rejectCause = (reason: string): string => {
   }
 }
 
-/** Resolve the effective delivery mode from the (migrating) schema. Compat rule
- *  (RFC §4.4): `interrupt:true` is honored ONLY when `mode` is absent; supplying
- *  BOTH is `invalid_input`. Effective = `mode ?? (interrupt ? "interrupt" : "queue")`.
- *  Returns `undefined` for the both-supplied conflict. */
-const effectiveMode = (input: FollowupTaskInput): DeliveryMode | undefined => {
-  if (input.mode !== undefined && input.interrupt !== undefined) return undefined // conflict
-  if (input.mode !== undefined) return parseDeliveryMode(input.mode)
-  return input.interrupt === true ? "interrupt" : "queue"
-}
+/** Resolve the effective delivery mode from the schema. The deprecated
+ *  `interrupt?: boolean` was deleted post-migration (RFC §4.4 "No indefinite dual
+ *  truth"); the zod-validated `mode` enum is now the sole source of truth,
+ *  defaulting to `queue` when omitted. */
+const effectiveMode = (input: FollowupTaskInput): DeliveryMode => input.mode ?? "queue"
 
 /** Pure, synchronous, no-throw deliver-and-trigger. Delegates the whole
- *  decide/apply to the injected {@link DeliveryPort}; only the schema-compat mode
- *  resolution + outcome→output mapping live here. */
+ *  decide/apply to the injected {@link DeliveryPort}; only the mode resolution +
+ *  outcome→output mapping live here. */
 export const handleFollowupTask = (
   input: FollowupTaskInput,
   deps: FollowupTaskDeps,
 ): FollowupTaskOutput => {
   const mode = effectiveMode(input)
-  if (mode === undefined) {
-    return err(
-      "supply either mode or interrupt, not both (interrupt is deprecated — use mode)",
-      "input_invalid",
-    )
-  }
   // followup_task always guarantees an eligible child gets a turn (ensure-turn);
   // `subagent_send_message` owns the passive queue path (RFC §3.1).
   const outcome = deps.delivery.deliver({
@@ -431,9 +416,12 @@ const followupTaskTool = (
   name: "followup_task",
   description:
     "Send a message to an existing non-root child subagent AND trigger a turn in it. " +
-    "If the target is mid-turn the message is queued and starts its next turn. " +
-    'Set mode:"interrupt" to stop its current task and handle the message immediately, ' +
-    'or mode:"steer" to inject into its current turn without aborting.',
+    'Three delivery modes (default mode:"queue"): queue = if the target is mid-turn the ' +
+    "message is queued and drains at its next turn; " +
+    'mode:"interrupt" = abort the target\'s CURRENT turn so it reports-and-continues on the ' +
+    "message immediately — the child stays running (this is NOT a kill; forceStop/task_stop " +
+    'is the separate terminal path); mode:"steer" = inject into its current turn without ' +
+    "aborting (requires the steer capability, else rejected).",
   inputSchema: FollowupTaskInputSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,

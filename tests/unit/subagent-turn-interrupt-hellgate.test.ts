@@ -1,5 +1,5 @@
 /**
- * Hellgate — RFC-04 §11 / ADR-0437 follow-up: `followup_task(interrupt:true)`
+ * Hellgate — RFC-04 §11 / ADR-0437 follow-up: `followup_task(mode:"interrupt")`
  * ACTUALLY interrupts a busy child's in-flight turn.
  *
  * Closes the last functional gap: before this, `wake(reason)` ignored the
@@ -17,7 +17,7 @@
  *     controller (a fired interrupt never pre-aborts the next turn); IDLE
  *     interrupt = plain wake (no abort); followup NEVER aborts (regression).
  *   - END-TO-END (REAL `runAgent` child loop): a BUSY child (its turn blocked in
- *     an in-flight LLM stream) + `followup_task(interrupt:true)` ⇒ the in-flight
+ *     an in-flight LLM stream) + `followup_task(mode:"interrupt")` ⇒ the in-flight
  *     stream's signal FIRES (the turn unwinds) AND a SECOND OBSERVABLE turn runs
  *     (fresh stream). A BUSY child + followup (non-interrupt) does NOT abort the
  *     in-flight stream (it completes, then the queued turn runs). An IDLE child +
@@ -263,12 +263,12 @@ describe("end-to-end — followup_task(interrupt) aborts a busy child mid-turn",
     expect(llm.calls).toBe(1)
     expect(wake.has("busy-child")).toBe(true)
 
-    // followup_task(interrupt:true) against the BUSY child.
+    // followup_task(mode:"interrupt") against the BUSY child.
     const mailbox = fakeMailbox()
     const reg = new TaskRegistry()
     reg.register({ id: "busy-child", description: "child" })
     const out = handleFollowupTask(
-      { agentId: "busy-child", message: "STOP and do this instead", interrupt: true },
+      { agentId: "busy-child", message: "STOP and do this instead", mode: "interrupt" },
       followupDeps(reg, mailbox, wake),
     )
     expect(out.kind).toBe("success")
@@ -352,7 +352,7 @@ describe("end-to-end — followup_task(interrupt) aborts a busy child mid-turn",
     const reg = new TaskRegistry()
     reg.register({ id: "idle-child", description: "child" })
     const out = handleFollowupTask(
-      { agentId: "idle-child", message: "more", interrupt: true },
+      { agentId: "idle-child", message: "more", mode: "interrupt" },
       followupDeps(reg, mailbox, wake),
     )
     expect(out.kind).toBe("success")
@@ -372,7 +372,7 @@ describe("end-to-end — followup_task(interrupt) aborts a busy child mid-turn",
     reg.register({ id: "child-NW", description: "child" })
     const mailbox = fakeMailbox()
     const out = handleFollowupTask(
-      { agentId: "child-NW", message: "hi", interrupt: true },
+      { agentId: "child-NW", message: "hi", mode: "interrupt" },
       followupDeps(reg, mailbox, wake),
     )
     expect(out.kind).toBe("error")

@@ -14,10 +14,10 @@ import {
 } from "../compaction"
 import type { BackgroundSummarizationController } from "../compaction/index"
 import type { BreakerVerdict, CompactionBreaker } from "../compaction-breaker"
-import type { RecoveryProvenance } from "../recovery-reason"
 import { appendSummary, type ConversationSummaryArchive } from "../conversation-summary-archive"
 import { buildPostCompactEmit, buildPreCompactHook } from "../loop-helpers"
 import { buildTurnContext } from "../prompt"
+import type { RecoveryProvenance } from "../recovery-reason"
 import {
   createEvictionSpillPort,
   MicrocompactTuningError,
@@ -343,6 +343,38 @@ const buildObjectiveSetNextActions = (
       }
     : undefined
 
+/** DOF-40 wire — the attribution fields passed into {@link compactIfNeeded} for a
+ *  proactive tier-2 run. `attributedTurnId` STAMPS the REAL current turn (`turnId`,
+ *  derived at the maybeCompact call-site from `config.run?.turn ?? turn`) whenever
+ *  EITHER emit consumer is active (the hook `postCompactEmit` OR the objective
+ *  callback) so the emitted provenance AND the persisted objective next-action both
+ *  self-attribute. `onAttributionFailure` routes a dropped/failed async attribution
+ *  to the operator-observable recovery channel (the same `emitRecovery(config,
+ *  "compact",…)` stream event surfacing `proactive-failed` / `bg-install-stale`)
+ *  instead of the pre-DOF-40 hidden `logger.warn`; it fires ONLY inside
+ *  `compactIfNeeded`'s catch AFTER `postCompactEmit` throws, so it is gated on
+ *  `postCompactEmit` precisely to never be a sink-to-nowhere. NEITHER consumer wired
+ *  ⇒ an EMPTY object ⇒ nothing spread ⇒ the legacy path is byte-identical. */
+const buildDof40Attribution = (
+  config: AgentConfig,
+  turnId: string,
+  postCompactEmit: unknown,
+  objectiveSetNextActions: unknown,
+): {
+  attributedTurnId?: string
+  onAttributionFailure?: (p: RecoveryProvenance, e: unknown) => void
+} => ({
+  ...(postCompactEmit !== undefined || objectiveSetNextActions !== undefined
+    ? { attributedTurnId: turnId }
+    : {}),
+  ...(postCompactEmit !== undefined
+    ? {
+        onAttributionFailure: (_p: RecoveryProvenance, e: unknown): void =>
+          emitRecovery(config, "compact", `attribution-failed: ${errMessage(e)}`),
+      }
+    : {}),
+})
+
 /** Assemble the {@link compactIfNeeded} options for a tier-2 proactive run: the
  *  ~10 conditional (default-OFF) fields — model-derived threshold, authoritative
  *  baseline trigger (D4/D5), thresholds, hooks, objective callback, preflight —
@@ -388,27 +420,12 @@ const buildCompactIfNeededOptions = (a: {
       : {}),
     ...(postCompactEmit !== undefined ? { postCompactEmit } : {}),
     ...(objectiveSetNextActions !== undefined ? { objectiveSetNextActions } : {}),
-    // DOF-40 wire — stamp the REAL current turn id (`turnId`, derived at the
-    // maybeCompact call-site from `config.run?.turn ?? turn`) and route an
-    // attribution FAILURE to the operator-observable recovery channel (the same
-    // `emitRecovery(config,"compact",…)` stream event surfaces `proactive-failed`
-    // / `bg-install-stale`). WITHOUT this, the core (`compactIfNeeded`) accepted
-    // `attributedTurnId`/`onAttributionFailure` but the production wire NEVER
-    // passed them — the turn was UNSTAMPED live and a dropped async attribution
-    // only hit `logger.warn` (invisible to a surface). Gated on an ACTIVE emit
-    // consumer (`postCompactEmit`), exactly like `recoveryReason`: with no
-    // consumer wired neither field is spread ⇒ the emit helper early-returns and
-    // the legacy path is byte-identical. `onAttributionFailure` fires only inside
-    // `compactIfNeeded`'s own try/catch AFTER `postCompactEmit` throws, so it is
-    // unreachable unless `postCompactEmit` is present — routing it here (rather
-    // than to a sink-to-nowhere) makes the failure a REAL recovery event.
-    ...(postCompactEmit !== undefined
-      ? {
-          attributedTurnId: turnId,
-          onAttributionFailure: (_p: RecoveryProvenance, e: unknown): void =>
-            emitRecovery(config, "compact", `attribution-failed: ${errMessage(e)}`),
-        }
-      : {}),
+    // DOF-40 wire — stamp the REAL current turn id + route attribution failures to
+    // the recovery channel. Extracted to {@link buildDof40Attribution} so this
+    // options assembler's cognitive complexity stays under the biome cap; the
+    // helper returns an EMPTY object (nothing spread ⇒ byte-identical) when neither
+    // emit consumer is wired.
+    ...buildDof40Attribution(config, turnId, postCompactEmit, objectiveSetNextActions),
     ...(postCompactEmit !== undefined || objectiveSetNextActions !== undefined
       ? { recoveryReason: "token_budget_exceeded" as const }
       : {}),

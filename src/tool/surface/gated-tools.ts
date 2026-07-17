@@ -495,7 +495,7 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     default: { cli: "on" },
     risk: "spawns-subagent",
     adr: "0041",
-    note: 'Deliver a message to an existing child subagent AND trigger/interrupt its turn (the agent↔agent ACTIVE-call companion to the passive subagent_send_message mailbox). Wired via optional-ports `wireOptionalAgentPorts` (which also mints the TurnWakeRegistry + mailbox substrate). The gate `QUANTA_SUBAGENT_FOLLOWUP` now routes through the canonical `gateOn` SSOT (accepts `1`/`on`/`true`/`yes`) like every other gate — the old strict `=== "on"` special case is gone — so apps/cli seeds it via the normal `=1` seed loop. CLI default-ON; bench/web opt-in.',
+    note: 'Deliver a message to an existing child subagent AND trigger a turn in it (the agent↔agent ACTIVE-call companion to the passive subagent_send_message mailbox). Delivery timing is chosen by `mode` (default `queue`): `queue` drains at the target\'s next turn, `mode:"interrupt"` aborts its current turn to report-and-continue now (the child stays running — NOT a kill; forceStop/task_stop is the separate terminal path), `mode:"steer"` injects into the live turn without aborting (needs the steer capability). Wired via optional-ports `wireOptionalAgentPorts` (which also mints the TurnWakeRegistry + mailbox substrate). The gate `QUANTA_SUBAGENT_FOLLOWUP` now routes through the canonical `gateOn` SSOT (accepts `1`/`on`/`true`/`yes`) like every other gate — the old strict `=== "on"` special case is gone — so apps/cli seeds it via the normal `=1` seed loop. CLI default-ON; bench/web opt-in.',
   },
   {
     name: "list_mcp_tasks",

@@ -6,7 +6,11 @@ import { applyAction, EMPTY_TOOL_HISTORY } from "./recovery-executor"
 import { resolveActiveModelId } from "./skill-gate"
 import { streamConsume } from "./stream-consume"
 import { buildTurnSessionView, classifyTurnAbort } from "./turn-gate"
-import { drainConversationActionsMidTurn } from "./turn-iteration"
+import {
+  applySteerSafePoint,
+  drainConversationActionsMidTurn,
+  freshSteerSafePointState,
+} from "./turn-iteration"
 import type { TurnResult } from "./types"
 
 export const runTurn = async (
@@ -24,6 +28,11 @@ export const runTurn = async (
       : undefined
   if (hookPromptPending !== undefined) hookPromptPending.length = 0
   let streamRound = 0
+  // WS4 (RFC jul-18 §3.5) — the loop-owned steer FIFO buffer + extra-round budget
+  // for THIS turn invocation. Only ever touched when the child steer-drain view is
+  // wired (gate ON); default-OFF this stays an empty `{drained:[],applied:0}` that
+  // `applySteerSafePoint` returns from after ONE property read.
+  const steerSafePoint = freshSteerSafePointState()
   for (;;) {
     if (config.signal.aborted || gate?.wasInterrupted() === true) {
       bgCompaction?.cancelIfPending()
@@ -127,6 +136,21 @@ export const runTurn = async (
       // (skill/sticky swap), not the base `config.llm`. Previously dropped here.
       activeModel,
     )
-    if (step.done) return step.result
+    if (step.done) {
+      // WS4 (RFC jul-18 §3.5) — POST-STREAM STEER SAFE-POINT. Only an otherwise-
+      // FINAL (`completed` / end_turn) turn is a safe boundary to inject a pending
+      // steer + re-stream the SAME turn; a `tools`/`error`/`refusal` step already
+      // continues or terminates on its own merit and is left byte-identical. When
+      // no drain view is wired (gate OFF) `applySteerSafePoint` returns after ONE
+      // property read, so this whole branch is byte-identical default-OFF.
+      if (config.childSteerDrain !== undefined && step.result.kind === "completed") {
+        // An interrupt/lifetime abort that landed by now SUPERSEDES the pending
+        // steer (it is preserved via mailbox fallback, never applied).
+        const superseded = config.signal.aborted || gate?.wasInterrupted() === true
+        const decision = applySteerSafePoint(config, wm, steerSafePoint, superseded)
+        if (decision.continue) continue // re-stream the SAME turn with the injection
+      }
+      return step.result
+    }
   }
 }

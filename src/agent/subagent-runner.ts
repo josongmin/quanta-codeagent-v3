@@ -92,7 +92,7 @@ import {
   createChildControlEndpoint,
   createChildControlSurface,
 } from "./subagent-control-endpoint"
-import type { SubagentControlEndpoint } from "./subagent-delivery/ports"
+import type { SubagentControlEndpoint, SubagentSteerSubmission } from "./subagent-delivery/ports"
 import { buildChildConfig } from "./subagent-runner-child-config"
 import type { ToolNamespaceStrategy } from "./subagent-tool-namespace"
 import type { AgentConfig, AgentOutcome } from "./types"
@@ -116,10 +116,13 @@ const CHILD_STEER_MAX_INPUT_BYTES = 8192
 interface ChildControlWiring {
   readonly conversationActionPort: ConversationActionPort
   readonly activeTurnRef: NonNullable<AgentConfig["activeTurnRef"]>
-  /** The bounded steer-submission surface (retained for WS3's loop drain). Held
-   *  here so a future wiring can hand it to the loop's finalization port; not
-   *  yet consumed by the loop (WS3). */
+  /** The bounded steer-submission surface (retained for the loop drain). */
   readonly steerSurface: ChildControlSurface
+  /** WS4 — the loop-facing steer drain view + finalization port, threaded onto
+   *  the child config ONLY when the session steer plane exists (gate ON). Absent
+   *  ⇒ the child loop runs NO safe-point drain (byte-identical default-OFF). */
+  readonly childSteerDrain?: NonNullable<AgentConfig["childSteerDrain"]>
+  readonly steerFinalization?: NonNullable<AgentConfig["steerFinalization"]>
 }
 
 // RFC jul-13 §4.2 (rev.4 MIN-CAP) — the runner's depth ceiling is the SAME
@@ -717,16 +720,40 @@ const registerChildWaker = (
   // so `followup_task` reaches the child's real inbox (`root/N`), not its task
   // id (BUG#4 fix). Last-writer-safe disposal.
   const unregister = wake.registerEndpoint(taskId, endpoint)
+  // WS4 — thread the loop-facing steer drain view + finalization port ONLY when
+  // the session steer plane exists (QUANTA_SUBAGENT_STEER on). Absent ⇒ the child
+  // loop runs no post-stream safe-point drain (byte-identical default-OFF).
+  const steerPlane = parent.subagent?.steerPlane
+  const steerWiring =
+    steerPlane !== undefined
+      ? {
+          childSteerDrain: {
+            drainSteers: (): readonly SubagentSteerSubmission[] => steerSurface.drainSteers(),
+            pendingSteers: (): number => steerSurface.pendingSteers(),
+          },
+          steerFinalization: steerPlane.finalization,
+        }
+      : {}
   return {
     gate,
     control: {
       conversationActionPort: actionSurface.port,
       activeTurnRef: actionSurface.activeTurnRef,
       steerSurface,
+      ...steerWiring,
     },
     dispose: (): void => {
       unregister()
       gate.dispose()
+      // WS4 (RFC §5.9) — session teardown: an accepted steer still admitted but
+      // never consumed must terminate in EXACTLY ONE `cancelled` receipt (no stale
+      // callback). Drain the surface and finalize each with `session_aborted`.
+      // No-op when no steer plane (byte-identical) or the queue is empty.
+      if (steerPlane !== undefined) {
+        for (const s of steerSurface.drainSteers()) {
+          steerPlane.finalization.finalizeCancelled(s.deliveryId, "session_aborted")
+        }
+      }
     },
   }
 }

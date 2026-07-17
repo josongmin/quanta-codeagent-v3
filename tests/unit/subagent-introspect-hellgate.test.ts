@@ -20,6 +20,7 @@ import {
   AgentMetaRegistry,
   createIntrospectTools,
   createSubagent6Tools,
+  FollowupTaskInputSchema,
   handleFollowupTask,
   handleListAgents,
   handleSpawnAgent,
@@ -385,10 +386,29 @@ describe("followup_task — RFC-04 / ADR-0437", () => {
   })
 
   // 9. interrupt
-  test("interrupt:true passes reason 'interrupt' to the waker", () => {
+  test("mode:\"interrupt\" passes reason 'interrupt' to the waker", () => {
     const s = setup("woke")
-    handleFollowupTask({ agentId: s.target, message: "now", interrupt: true }, deps(s))
+    handleFollowupTask({ agentId: s.target, message: "now", mode: "interrupt" }, deps(s))
     expect(s.wakeCalls).toEqual(["interrupt"])
+  })
+
+  // 9b. WS5 — the deprecated `interrupt?: boolean` was DELETED (RFC §4.4 "No
+  // indefinite dual truth"). The `.strict()` schema now REJECTS it as an unknown
+  // key, so the boolean cannot be silently re-introduced. This pins the deletion:
+  // before WS5 the field existed and this parse SUCCEEDED (RED); now it fails.
+  test('WS5: deprecated interrupt boolean is GONE — {interrupt:true} rejected as unknown key; mode:"interrupt" is the path', () => {
+    const rejected = FollowupTaskInputSchema.safeParse({
+      agentId: "a",
+      message: "m",
+      interrupt: true,
+    })
+    expect(rejected.success).toBe(false) // unknown-key rejection (strict schema)
+    const supported = FollowupTaskInputSchema.safeParse({
+      agentId: "a",
+      message: "m",
+      mode: "interrupt",
+    })
+    expect(supported.success).toBe(true)
   })
 
   // 10. target not found ⇒ no side effect
@@ -458,12 +478,12 @@ describe("followup_task — RFC-04 / ADR-0437", () => {
 
   // jul-7 re-audit F-E [HIGH]: followup_task DELIVERS a message AND triggers/interrupts a
   // turn on the target by id, with no lineage gate — a sibling could inject into (or
-  // interrupt:true ABORT) another lineage's running child. Gate it like wait/send/output.
+  // mode:"interrupt" ABORT) another lineage's running child. Gate it like wait/send/output.
   test("F-E: cross-lineage followup_task ⇒ ownership_denied, NO send, NO wake", () => {
     const s = setup("woke")
     ownersForRegistry(s.reg).set(s.target, "agent-A") // target owned by lineage A
     const out = handleFollowupTask(
-      { agentId: s.target, message: "INJECT", interrupt: true },
+      { agentId: s.target, message: "INJECT", mode: "interrupt" },
       deps(s, { requesterLineage: "agent-B" }), // sibling B attacks
     )
     expect(out.kind).toBe("error")

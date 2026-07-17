@@ -18,10 +18,10 @@ surface_integration:
   cli: full
   web: missing
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-18"
   evidence:
-    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "user value rides the post_compact event + objective.setNextActions; post_compact is dropped at the context-binding.ts default arm (B1) and the loop wiring is deferred (contract-only, unwired)"
+    cli: "runs in the interactive CLI — evidence file(s) reachable from src/apps/cli/index.ts import graph; DOF-40 loop wiring now LIVE (compaction-wire.ts buildCompactIfNeededOptions stamps attributedTurnId from config.run.turn ?? turn + routes onAttributionFailure to the recovery stream event operators observe)"
+    web: "user value rides the post_compact event + objective.setNextActions; the proactive loop wire (compaction-wire.ts) now passes attributedTurnId + onAttributionFailure (DOF-40 seam→wired); web emitter surface still missing (post_compact not yet bound at the web daemon)"
 purpose: |
   Compaction은 그동안 silent internal optimization이었음 — 사용자는 왜 잊었는지,
   어디서 재개해야 하는지 알 수 없어 신뢰가 깨졌음. ADR-0409은 compaction을
@@ -59,6 +59,7 @@ evidence:
     - src/agent/recovery-reason/index.ts
     - src/agent/hooks.ts
     - src/agent/compaction.ts
+    - src/agent/loop/compaction-wire.ts
   adrs: [409]
   tests:
     unit:
@@ -71,6 +72,7 @@ evidence:
       - tests/unit/compaction-summarizer.test.ts
       - tests/unit/loop-reactive-compaction-emit-hellgate.test.ts
       - tests/unit/compaction-attribution-race-failclosed-hellgate.test.ts
+      - tests/unit/compaction-wire-attribution-wired-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
@@ -101,5 +103,27 @@ notes: |
   string은 `[turn <id>]` tag append(resume contract 불변). OFF byte-identical:
   callback/turn 미주입 ⇒ provenance 미생성. 신규 hellgate 10 tests(26 expects),
   red-on-injection(stamp revert ⇒ ordering+sync-stamp+fail-closed 5 RED) 확인.
-  compaction.ts +60/-1, recovery-reason/types.ts +13. 잔여: loop.ts 와이어링
-  (config.run.turn → attributedTurnId 주입)은 여전히 deferred(이 wave는 seam만).
+  compaction.ts +60/-1, recovery-reason/types.ts +13.
+
+  2026-07-18 DOF-40 WIRE (seam→wired): 이전 wave의 잔여였던 loop 와이어링을 닫음.
+  `compactIfNeeded`는 Wave-A부터 `attributedTurnId`/`onAttributionFailure`를
+  받았으나 PRODUCTION 와이어(`compaction-wire.ts` buildCompactIfNeededOptions)가
+  둘 다 안 넘겨 DEAD WIRE였음 — 프로덕션에서 turn이 UNSTAMPED이고 dropped async
+  attribution은 `logger.warn`만 쳐서 surface에 안 보였음. Fix: buildCompactIfNeededOptions가
+  `postCompactEmit` 활성(=실 consumer 존재) gate 아래에서 (a) REAL current turn
+  (`turnId` = maybeCompact 콜사이트의 `config.run?.turn ?? turn` 파생)을
+  `attributedTurnId`로 stamp, (b) `onAttributionFailure`를
+  `emitRecovery(config,"compact","attribution-failed: …")` — proactive-failed/
+  bg-install-stale와 같은 operator-observable recovery stream 이벤트 채널로 라우팅.
+  OFF byte-identical: hooks 미주입 ⇒ postCompactEmit undefined ⇒ 두 필드 다 미-spread
+  ⇒ legacy silent path. 신규 wire hellgate 7 tests(compaction-wire-attribution-wired-
+  hellgate): (a) config.run.turn로 attributed(loop turn arg와 다른 값으로 stub 아님을
+  증명), (a') 다른 run.turn이면 stamp 바뀜(하드코딩 아님), (b) bus emit reject ⇒
+  attribution-failed recovery 이벤트 발화(REAL sink), OFF/absence-identity 3.
+  red-on-injection: 와이어 블록 strip ⇒ (a)(a')(b)(c) 4 RED, restore ⇒ 7 pass.
+  🔑 발견: HookBus는 subscriber throw를 내부에서 catch하므로 throwing subscriber로는
+  onAttributionFailure에 도달 못함 — 실제 도달 경로는 `postCompactEmit` 클로저
+  자체(=`hooks.emit`)가 reject할 때뿐(테스트가 이 realistic 경로로 검증, 조작된
+  sink 아님). compaction-wire.ts +19(import 1 + 옵션 spread 블록), 소스/테스트
+  tsc 0 / biome 0(선존 rebuildBgInstallAgainstLive complexity 경고는 무관·비차단).
+  잔여: web daemon post_compact 바인딩(surface_integration.web=missing).
