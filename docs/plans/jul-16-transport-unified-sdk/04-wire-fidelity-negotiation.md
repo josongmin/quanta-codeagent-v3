@@ -1,7 +1,12 @@
 # Ticket 04 — wire fidelity opt-in (full payload)
 
 - **Date:** 2026-07-16
-- **Status:** DRAFT v2 — **R1 HIGH 반영 재설계.** 구현 미착수. 이 계획에서 리스크 최고 티켓 — 착수 전 자체 미니 RFC 1회 더 권장.
+- **Status:** DRAFT v3 — **미니RFC 완료(07-17): [04-mini-rfc.md](04-mini-rfc.md)가 구현 SSOT.** 착수 가능(조건부 — J의 `resumed` 프레임과 codec kind 병합 조율 후 rebase 재검증).
+- **⚡RFC가 이 티켓의 전제를 정정한 3건** (충돌 시 RFC 우선):
+  1. §1-1 "full은 4레이어 관통" → **AgentEvent 층 변경 0**: full payload는 이미 host-bridge 입구에 도달(tool_result.preview=redaction-적용 전 전문, tool_call.input 원본) — "full"의 정직한 정의는 model-parity.
+  2. 캐스케이드 공포(W1-B 46파일) → **구조적 회피**: 03-A hellgate가 optional additive(`argsFull?`)를 이미 선인가 — required 필드였던 W1-B와 달리 copy/리터럴 강제 sync 0.
+  3. blast radius 정정: bench driver·cost aggregator는 AgentEvent 축이라 범위 밖 / **신규 발견**: fetch-handler HTTP readout이 아카이브를 협상 없이 서빙하는 bridge-필터 우회로(v1=trusted 허용+명시핀) / strip은 bridge sendMessages 단일 chokepoint(live·tail·dup·durable-replay 4경로).
+  협상 채널 = **peer-로컬 fidelity-ack 컨트롤 프레임** 확정(manifest·rejected 재활용 각 KILL). S4는 `turn.usage` 신규 이벤트 대신 `SessionStateView.lastTokenUsage?` 1필드 권고. 크기 **L 유지**, 5슬라이스(각 default-safe, S1=생산게이트+무조건-strip 안전핀 선행).
 - **기능:** 클라가 opt-in하면 SessionEvent가 tool args/result **전문** + mid-turn usage를 운반. 기본 = 현행 preview, 전 소비자 byte-identical.
 - **왜:** ~256자 truncate는 웹 UI용 설계인데 01로 열리는 외부 소비자(오케스트레이터·관측 도구)에겐 부족. "embed rebase" 기각(MASTER §1.3) 후 두 문이 수렴할 유일하게 정직한 경로.
 - **ROI:** wire로 embed급 관찰가능성. 미협상 클라 무영향.
