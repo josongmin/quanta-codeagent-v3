@@ -8,14 +8,14 @@
 
 **R3 최종 (2026-07-16)**: R2-후 편집 11건 자체가 미검증이라 3라운드째 투입(적대어딧 ≥3회 하드룰) — F1-F9 반영 9건 전부 정상, 신규 코드 인용 2건 line-exact, 잔여 = MED 2(02 acceptance 3-way 스코프 충돌 조건화 / 03-A↔04 방향 규칙 명시)·LOW 4(버전스큐 구제 모집단을 "구 피어 공히"로 대칭화, resumeFromSeq 다이어그램 잔여 토큰, 05 의존 +01, MASTER §7 단서) → **전부 반영 완료. 판정: CLEAN — 계획 문서로서 수렴 종료.** 다음 감사 표면은 구현물(01 S0 스파이크부터).
 
-| 티켓 | 내용 | Effort | 상태 | 의존 |
+| 티켓 | 내용 | Effort | 상태 (07-17) | 의존 |
 |---|---|---|---|---|
-| [00](00-MASTER-PLAN.md) | MASTER — evidence(R1 정정)·목표 아키텍처 v2·경계·hazards | — | DRAFT v2 | — |
-| [01](01-connect-session-handle.md) | `connect()`(ws/stdio) + generic verb 표면 + hoist 3종 + liveness/버전스큐/rejected 채널 + conformance 정규화 계약 | **L** (S0 스파이크 선행) | DRAFT v2 | — |
-| [02](02-serve-stdio-entrypoint.md) | `quanta serve --stdio` + heartbeat hoist + transport 스탬프 seam | M | DRAFT v2 | 01 |
-| [03](03-protocol-copy-drift-guard.md) | **기존 hellgate에** field-shape 대조 추가(A) → 번들 소비+copy 삭제(B) → 클라 수렴 평가(C) | XS+M+XS | DRAFT v2 | A즉시 / B←01 |
-| [04](04-wire-fidelity-negotiation.md) | fidelity opt-in full payload (4레이어 additive 관통 + peer-로컬 협상) | **L** | DRAFT v2 (최고 리스크 — 착수 전 미니 RFC 권장) | 01, 03-A |
-| [05](05-durable-resume-composition.md) | `connect({resume})` durable resume | S | **BLOCKED**←ADR-0540 W2 (+seq 연속성 요구 전달) | 01 |
+| [00](00-MASTER-PLAN.md) | MASTER — evidence·목표 아키텍처 v2·경계·hazards | — | SSOT (실행순서는 [ROADMAP-unified](ROADMAP-unified.md)) | — |
+| [01](01-connect-session-handle.md) | `connect()`(ws/stdio) + verb 표면 + hoist + liveness/버전스큐 + conformance | L | ✅ **LANDED** c89bc49c1 (적대어딧 2R — hang 3종 사멸, resumeFromSeq는 05로 descope) | — |
+| [02](02-serve-stdio-entrypoint.md) | `quanta serve --stdio` + heartbeat hoist + transport 스탬프 seam | M | 🔄 구현 중 (RED e2e 선행) | 01✅ |
+| [03](03-protocol-copy-drift-guard.md) | field-shape 라쳇(A) → 번들 소비(B) → 클라 수렴 평가(C) | XS+M+XS | A ✅ 896b0ae86(+실드리프트 해소 764b70215) / B·C 잔여 | B←01✅ |
+| [04](04-wire-fidelity-negotiation.md) | fidelity opt-in full payload | L | 미니RFC ✅ [04-mini-rfc.md](04-mini-rfc.md)(전제 정정 3건) — 착수 가능 | 01✅, 03-A✅ |
+| [05](05-durable-resume-composition.md) | durable resume | S+M | 코어 ✅ a38ee957f(W4-b 527f78811 위) / door-resume(`resumed` 프레임) 🔄 구현 중 | 01✅ |
 
 ## 인접 워크스트림 경계 (중복 금지 지도)
 
