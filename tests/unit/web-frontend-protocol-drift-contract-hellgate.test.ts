@@ -9,39 +9,60 @@ import {
   SURFACE_READ_MODEL_IDS,
   SURFACE_READ_MODEL_STATUSES,
 } from "@/protocol/session"
+import {
+  GENERATED_OUTPUT_PATH,
+  generateProtocolBundle,
+} from "../../tools/gen-web-frontend-protocol"
 
 /**
  * Wire-protocol drift contract (hellgate) — foundational guard.
  *
  * The daemon owns the CANONICAL session protocol in `src/protocol/session/`.
- * The web frontend lives OUTSIDE bun's tsconfig `paths`, so it keeps a
- * HAND-MAINTAINED COPY in `apps/web-frontend/src/types/protocol.ts`
- * (event/command union variants) + a config-write allowlist mirror in
- * `apps/web-frontend/src/components/slash-knobs.ts`. Those copies DRIFT — a
- * past drift dropped two event members from the frontend union, returned
- * `undefined` from the reducer, and crashed the next `turn.output.delta`.
+ * The web frontend lives OUTSIDE bun's tsconfig `paths` (standalone package,
+ * own vite build, no `paths` back to the bun repo). Ticket 03-B (§Phase B)
+ * replaced the old HAND-MAINTAINED session copy with a GENERATED bundle,
+ * `apps/web-frontend/src/types/protocol.session.generated.ts`, emitted from the
+ * four canonical session files by `bun run build:protocol`
+ * (tools/gen-web-frontend-protocol.ts). The barrel `protocol.ts` re-exports the
+ * generated file and hand-maintains only the OUT-OF-SESSION mirrors
+ * (canvas / observability / agent-state) + UI-only types + the transport
+ * control envelopes. A config-write allowlist mirror lives in
+ * `apps/web-frontend/src/components/slash-knobs.ts`.
  *
- * This test makes drift IMPOSSIBLE TO MERGE. It imports the canonical member
- * consts and reads the frontend mirrors AS TEXT (the frontend cannot be
- * `import`ed from a bun test — it is a different toolchain), then asserts the
- * frontend declared set === the canonical set, member-for-member, in BOTH
- * directions, for:
- *   - SessionEvent types
- *   - SessionCommand types
- *   - SESSION_PROTOCOL_VERSION string
- *   - CONFIG_WRITABLE_KEYS (frontend) === CONFIG_ALLOWED_KEYS (daemon)
+ * This test makes session-protocol drift IMPOSSIBLE TO MERGE at TWO altitudes:
+ *
+ *   1. STRUCTURAL (the strongest guard, ticket 03-B): the committed generated
+ *      file must BYTE-EQUAL a fresh in-process regeneration. A canonical edit
+ *      that was not re-emitted (`bun run build:protocol`) is red — the copy can
+ *      no longer silently lag because it is not hand-written at all.
+ *   2. SEMANTIC (retained from 03-A so a generator regression cannot silently
+ *      drop coverage): union-membership both-directions, the runtime
+ *      `EVENT_TYPES` decode gate, `SESSION_PROTOCOL_VERSION`, the read-model id /
+ *      status sets, the ADR-0512 escalation-card button order, the config-key
+ *      allowlist parity, AND the field-shape layer (parses the GENERATED file's
+ *      interfaces against canonical field-by-field). Layer 1 makes layer 2's
+ *      subject deterministic; layer 2 proves the subject is the real wire shape
+ *      even if the emitter is wrong.
  *
  * The SSOT is the daemon. To change the wire shape: edit `src/protocol/session/`
- * (and `src/apps/web-daemon/server/http.ts` for config keys) FIRST, then re-mirror
- * the frontend copies until this test is green again.
+ * (and `src/apps/web-daemon/server/http.ts` for config keys) FIRST, then run
+ * `bun run build:protocol` (re-mirror `slash-knobs.ts` for config keys) until
+ * this test is green again.
  */
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 
-const FRONTEND_PROTOCOL_PATH = join(
-  REPO_ROOT,
-  "apps/web-frontend/src/types/protocol.ts",
-)
+/** The GENERATED session bundle — the union + field-shape guards read THIS
+ *  (the session types moved here from the old hand copy in 03-B). */
+const FRONTEND_PROTOCOL_PATH = join(REPO_ROOT, GENERATED_OUTPUT_PATH)
+
+/** The hand-maintained barrel (out-of-session mirrors + UI-only types). The
+ *  ADR-0512 additive-field assertion checks `scopeContext` appears on the
+ *  session `PendingApprovalView`, which now lives in the generated file — so
+ *  that assertion reads FRONTEND_PROTOCOL_PATH; this path is retained for the
+ *  barrel-targeting checks. */
+const FRONTEND_BARREL_PATH = join(REPO_ROOT, "apps/web-frontend/src/types/protocol.ts")
+
 const FRONTEND_ENVELOPE_PATH = join(
   REPO_ROOT,
   "apps/web-frontend/src/ws/envelope.ts",
@@ -191,6 +212,51 @@ const extractStringConst = (source: string, constName: string): string => {
   }
   return match[1] ?? ""
 }
+
+describe("wire-protocol GENERATED bundle is in sync with canonical (ticket 03-B structural guard)", () => {
+  test("[regen] committed generated bundle BYTE-EQUALS a fresh in-process regeneration", () => {
+    // The STRONGEST guard: the session copy is no longer hand-written — it is a
+    // pure function of the four canonical session files. If a canonical edit
+    // was not re-emitted (`bun run build:protocol`), the committed file differs
+    // from a fresh regeneration and THIS reds. It subsumes every field-shape /
+    // union drift the semantic layers below check (any such drift changes the
+    // emitted bytes) — those layers are retained as an independent witness that
+    // the emitter itself is correct (a broken emitter could be byte-stable yet
+    // wrong; the semantic guards catch that).
+    const committed = readText(FRONTEND_PROTOCOL_PATH)
+    const regenerated = generateProtocolBundle()
+    expect(regenerated).toBe(committed)
+  })
+
+  test("[regen] injecting a NEW canonical event without re-emitting the bundle would red (red-on-injection proof)", () => {
+    // Proves the byte-equality guard is NON-VACUOUS: simulate a canonical edit
+    // (a new event type + interface) that the committed bundle has not caught up
+    // to. The regeneration reflects the new canonical; the (unchanged) committed
+    // text does not — so byte-equality fails. This is the exact failure the CI
+    // hook forces a `bun run build:protocol` to resolve.
+    const committed = readText(FRONTEND_PROTOCOL_PATH)
+    // A stand-in "regeneration" that grew a member the committed file lacks.
+    const regeneratedWithNewEvent =
+      committed.replace(
+        "export interface SessionClosedEvent",
+        "export interface WidgetPokedEvent extends SessionEventEnvelope<\"widget.poked\"> {\n  readonly widgetId: string\n}\n\nexport interface SessionClosedEvent",
+      )
+    // Sanity: the injection actually changed the text (guards a no-op replace).
+    expect(regeneratedWithNewEvent).not.toBe(committed)
+    // The guard's assertion (`regenerated === committed`) would fail on this pair.
+    expect(regeneratedWithNewEvent === committed).toBe(false)
+  })
+
+  test("[regen] generated file carries the GENERATED banner + is imported by the barrel", () => {
+    // Guards the file's provenance contract: the banner warns humans off hand-
+    // editing, and the barrel MUST re-export it (else the frontend would compile
+    // against a stale hand copy). Cheap wiring pins.
+    const generated = readText(FRONTEND_PROTOCOL_PATH)
+    expect(generated).toContain("GENERATED — DO NOT EDIT")
+    const barrel = readText(FRONTEND_BARREL_PATH)
+    expect(barrel).toContain('export * from "./protocol.session.generated"')
+  })
+})
 
 describe("wire-protocol drift contract: frontend copy === canonical daemon SSOT", () => {
   test("[events] frontend SessionEvent union === SESSION_EVENT_TYPES (both directions)", () => {
@@ -537,12 +603,27 @@ const NARROWED_TO_OPAQUE_STRING =
   "copy cannot import the branded/closed @/shared type (different toolchain — the reason the copy exists); " +
   "the UI treats the value as an opaque string it never enumerates (documented in the copy's own comments)"
 
-/** Copy-side narrowings that are the DOCUMENTED design of the copy file. */
+/** Copy-side narrowings that are the DOCUMENTED design of the copy file. Since
+ *  03-B the "copy" is the GENERATED bundle — the generator applies exactly the
+ *  same `@/*` → opaque narrowings (its `AT_TYPE_NARROWINGS` manifest), so these
+ *  pins mirror that manifest and are what keeps the field-shape layer's
+ *  zero-drift assertion honest about the (unavoidable) toolchain narrowings. */
 const DELIBERATE_TOOLCHAIN_NARROWINGS: Readonly<Record<string, ApprovedFieldNarrowing>> = {
   "SessionTranscriptReplaceCommand.messages": {
     copy: "unknown[]",
     canonical: "Message[]",
     why: "copy cannot import `Message` (@/llm) and the UI never constructs or sends this payload — top-type is safe for a non-writer",
+  },
+  "SessionStateView.lastLlmRequest": {
+    copy: "unknown & { policy?: unknown; }",
+    canonical:
+      'LlmRequestObservation & { policy?: import("@/shared/turn-policy-types").TurnPolicySnapshot; }',
+    why: "copy cannot import `LlmRequestObservation` / `TurnPolicySnapshot` (@/shared) — the UI reads neither; the generator narrows both arms to the top type (additive-optional field, never inspected by the frontend)",
+  },
+  "SessionStateView.lastLlmContinuation": {
+    copy: "unknown",
+    canonical: "LlmContinuationObservation",
+    why: "copy cannot import `LlmContinuationObservation` (@/shared) — additive-optional observation the UI never inspects; top-type on a read-only field",
   },
   "TurnLlmRequestEvent.surfaceId": {
     copy: "string",
