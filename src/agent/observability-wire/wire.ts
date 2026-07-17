@@ -35,21 +35,66 @@ import type { ShadowVerifyPort } from "@/agent/shadow-verify"
 import { createShadowVerify } from "@/agent/shadow-verify"
 import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
 import { errMessage, logger } from "@/shared"
-import type { ObservabilityWireHandle, ObservabilityWireOpts } from "./types"
+import type {
+  ObservabilityWireHandle,
+  ObservabilityWireOpts,
+  ObservabilityWirePortError,
+  ObservabilityWireSlot,
+} from "./types"
 
 /**
- * Try to construct a port; on throw, return `undefined`. The wire's
- * "single factory failure does not zero out the handle" promise is
- * enforced by wrapping every construction call site in this helper.
- *
- * NO-LOG by design: a host that wants to surface construction failures
- * threads its own try/catch outside the wire — keeping the wire's signal
- * surface tight to the public handle shape.
+ * DOF-40 — a fail-closed sink threaded through construction so a slot that
+ * throws is RECORDED (which slot went offline) instead of silently collapsed
+ * to `undefined`. Accumulates a `degraded` report + fans each failure to the
+ * optional `onPortError` observer.
  */
-const tryConstruct = <T>(factory: () => T): T | undefined => {
+interface DegradeReporter {
+  readonly report: (slot: ObservabilityWireSlot, error: unknown) => void
+  readonly errors: ObservabilityWirePortError[]
+}
+
+const makeDegradeReporter = (
+  onPortError: ObservabilityWireOpts["onPortError"],
+): DegradeReporter => {
+  const errors: ObservabilityWirePortError[] = []
+  return {
+    errors,
+    report: (slot, error): void => {
+      const entry: ObservabilityWirePortError = { slot, message: errMessage(error), error }
+      errors.push(entry)
+      if (onPortError !== undefined) {
+        // Observer must never break wiring — a throwing observer is swallowed
+        // (the `degraded` report still carries the entry either way).
+        try {
+          onPortError(entry)
+        } catch {
+          // swallow — defense-in-depth
+        }
+      }
+    },
+  }
+}
+
+/**
+ * Try to construct a port; on throw, return `undefined` AND record the
+ * failure against `slot` via the reporter. The wire's "single factory
+ * failure does not zero out the handle" promise is enforced by wrapping
+ * every construction call site in this helper.
+ *
+ * DOF-40 — the failure is NO LONGER silent: it lands in the reporter's
+ * `degraded` list + fires `onPortError`, so an operator can see WHICH slot
+ * went offline. (Previously NO-LOG-by-design: an absent slot was ambiguous
+ * between "opted out" and "threw".)
+ */
+const tryConstruct = <T>(
+  slot: ObservabilityWireSlot,
+  factory: () => T,
+  reporter: DegradeReporter,
+): T | undefined => {
   try {
     return factory()
-  } catch {
+  } catch (error) {
+    reporter.report(slot, error)
     return undefined
   }
 }
@@ -71,6 +116,9 @@ const noopDetach = (): void => undefined
  */
 const NOOP_HANDLE: ObservabilityWireHandle = Object.freeze({
   detach: noopDetach,
+  // Gate-OFF ⇒ nothing was wired ⇒ nothing can be degraded. Frozen empty
+  // array shared so the default-OFF path allocates zero.
+  degraded: Object.freeze([]) as readonly ObservabilityWirePortError[],
 })
 
 /**
@@ -81,6 +129,7 @@ const NOOP_HANDLE: ObservabilityWireHandle = Object.freeze({
  */
 const constructHandleParts = (
   opts: ObservabilityWireOpts,
+  reporter: DegradeReporter,
 ): {
   readonly objective: ObjectivePort | undefined
   readonly runLedger: RunLedgerPort | undefined
@@ -92,12 +141,16 @@ const constructHandleParts = (
 
   // 1) Objective + RunLedger first — they have no inter-dependency, so
   //    construction order is irrelevant. Each is independently failure-
-  //    isolated.
+  //    isolated + failure-REPORTED (DOF-40).
   const objective = tryConstruct(
+    "objective",
     (): ObjectivePort => createObjectiveStore(now !== undefined ? { now } : {}),
+    reporter,
   )
   const runLedger = tryConstruct(
+    "runLedger",
     (): RunLedgerPort => createRunLedger(now !== undefined ? { now } : {}),
+    reporter,
   )
 
   // 2) ApprovalStateMachine cross-wires over the two above. We MUST pass
@@ -106,32 +159,40 @@ const constructHandleParts = (
   //    call inside the ASM. Both slot fields are optional on the
   //    `createApprovalStateMachine` opts (ADR-0403 store accepts both as
   //    `undefined`), so a partial-degrade still yields a working ASM.
-  const approvalStateMachine = tryConstruct((): ApprovalStateMachinePort => {
-    const asmOpts: Parameters<typeof createApprovalStateMachine>[0] = {}
-    if (now !== undefined) asmOpts.now = now
-    if (objective !== undefined) asmOpts.objective = objective
-    if (runLedger !== undefined) asmOpts.ledger = runLedger
-    return createApprovalStateMachine(asmOpts)
-  })
+  const approvalStateMachine = tryConstruct(
+    "approvalStateMachine",
+    (): ApprovalStateMachinePort => {
+      const asmOpts: Parameters<typeof createApprovalStateMachine>[0] = {}
+      if (now !== undefined) asmOpts.now = now
+      if (objective !== undefined) asmOpts.objective = objective
+      if (runLedger !== undefined) asmOpts.ledger = runLedger
+      return createApprovalStateMachine(asmOpts)
+    },
+    reporter,
+  )
 
   // 3) ShadowVerify needs the real adapters (worktree + V4A + LSP/test).
   //    Missing `repoRoot` ⇒ skip (the adapter signature requires a string;
   //    we honor the contract that shadowVerify is undefined without a fs
-  //    anchor). Construction itself is failure-isolated.
+  //    anchor). Construction itself is failure-isolated + reported.
   const shadowVerify =
     opts.repoRoot !== undefined
-      ? tryConstruct((): ShadowVerifyPort => {
-          const deps = createShadowVerifyAdapters(opts.repoRoot as string)
-          return createShadowVerify(deps)
-        })
+      ? tryConstruct(
+          "shadowVerify",
+          (): ShadowVerifyPort => {
+            const deps = createShadowVerifyAdapters(opts.repoRoot as string)
+            return createShadowVerify(deps)
+          },
+          reporter,
+        )
       : undefined
 
   // 4) Attribution subscription — only when (a) the ledger is alive AND
   //    (b) a hookBus was provided. A throwing `subscribe()` degrades to a
   //    noop detach (the ports above stay populated; the slice still
-  //    surfaces wave-1/2 outputs to the caller — only the wave-2 hook-
-  //    driven attribution is silently inert).
-  const detachSubscription = setupSubscription(opts, runLedger)
+  //    surfaces wave-1/2 outputs to the caller). DOF-40: the failure is now
+  //    reported against the "attribution" slot (was silently inert).
+  const detachSubscription = setupSubscription(opts, runLedger, reporter)
 
   return {
     objective,
@@ -159,9 +220,17 @@ const constructHandleParts = (
 const setupSubscription = (
   opts: ObservabilityWireOpts,
   runLedger: RunLedgerPort | undefined,
+  reporter: DegradeReporter,
 ): (() => void) => {
+  // Opt-out branches (host chose not to wire attribution) are NOT failures —
+  // they must NOT be reported as degraded (an operator reading `degraded`
+  // must see only real breakages, never voluntary absences).
   if (runLedger === undefined || opts.hookBus === undefined) return noopDetach
-  const subscriber = tryConstruct(() => createRunLedgerHookSubscriber({ ledger: runLedger }))
+  const subscriber = tryConstruct(
+    "attribution",
+    () => createRunLedgerHookSubscriber({ ledger: runLedger }),
+    reporter,
+  )
   if (subscriber === undefined) return noopDetach
 
   // Adapt the typed `RunLedgerHookHandler` (input = `ObservedToolEvent`)
@@ -174,8 +243,11 @@ const setupSubscription = (
   try {
     unsubscribe = opts.hookBus.subscribe("post_tool_use", handler)
   } catch (e) {
-    // Hook bus rejected the registration — log + fall back to noop detach.
+    // Hook bus rejected the registration — DOF-40: SURFACE it (report +
+    // legacy log) + fall back to noop detach. Previously log-only, which
+    // never reached the handle's `degraded` report.
     logger.warn(`observability-wire.subscribe: ${errMessage(e)}`)
+    reporter.report("attribution", e)
     return noopDetach
   }
 
@@ -217,7 +289,8 @@ export const wireObservability = (opts: ObservabilityWireOpts = {}): Observabili
   // QUANTA_OBSERVABILITY === "on" flips the gate).
   if (opts.enabled !== true) return NOOP_HANDLE
 
-  const parts = constructHandleParts(opts)
+  const reporter = makeDegradeReporter(opts.onPortError)
+  const parts = constructHandleParts(opts, reporter)
   const handle: ObservabilityWireHandle = {
     ...(parts.objective !== undefined ? { objective: parts.objective } : {}),
     ...(parts.runLedger !== undefined ? { runLedger: parts.runLedger } : {}),
@@ -226,6 +299,9 @@ export const wireObservability = (opts: ObservabilityWireOpts = {}): Observabili
       : {}),
     ...(parts.shadowVerify !== undefined ? { shadowVerify: parts.shadowVerify } : {}),
     detach: parts.detachSubscription,
+    // DOF-40 — the fail-closed report. Frozen so a caller cannot mutate the
+    // slice's failure record. Empty when the wire was clean.
+    degraded: Object.freeze(reporter.errors) as readonly ObservabilityWirePortError[],
   }
   return handle
 }

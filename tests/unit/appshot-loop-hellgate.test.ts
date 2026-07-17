@@ -28,10 +28,19 @@ import {
   type AppshotArtifactSink,
   type AppshotPort,
   clampIter,
+  isRealJudgePass,
+  judgeVerdict,
   runAppshotLoop,
   type ScaffoldResult,
   type VerifyVerdict,
 } from "@/tool/appshot"
+
+/** A REAL-judge PASS — the ONLY verdict the loop honors as success (branded via
+ *  `judgeVerdict`). A plain `{ pass: true, notes }` literal is a fabricated pass
+ *  the loop MUST refuse (see the fail-closed suite below). */
+const realPass = (notes: string): VerifyVerdict => judgeVerdict(true, notes)
+/** A real-judge FAIL (branding a fail is harmless; the adapter has one path). */
+const realFail = (notes: string): VerifyVerdict => judgeVerdict(false, notes)
 
 /* ------------------------------------------------------------------ */
 /* fakes                                                              */
@@ -81,7 +90,9 @@ class FakeAppshotPort implements AppshotPort {
     if (this.opts.throwOn === "verify") throw new Error("judge 500")
     const scripted = this.opts.verdicts?.[this.verifyIdx]
     this.verifyIdx++
-    return scripted ?? this.opts.defaultVerdict ?? { pass: false, notes: "not yet" }
+    // Default = a REAL-judge fail (branded) so the fake models a genuine judge;
+    // tests that need a fabricated (unbranded) pass pass a literal via `verdicts`.
+    return scripted ?? this.opts.defaultVerdict ?? realFail("not yet")
   }
 }
 
@@ -110,7 +121,7 @@ class RecordingSink implements AppshotArtifactSink {
 
 describe("appshot loop — A. pass stops early", () => {
   test("a pass verdict ends the loop after ONE iteration", async () => {
-    const port = new FakeAppshotPort({ defaultVerdict: { pass: true, notes: "looks right" } })
+    const port = new FakeAppshotPort({ defaultVerdict: realPass("looks right") })
     const r = await runAppshotLoop(
       { port, now: fakeClock() },
       {
@@ -132,7 +143,7 @@ describe("appshot loop — A. pass stops early", () => {
 
 describe("appshot loop — B. bounded (no infinite loop)", () => {
   test("a never-pass verdict runs EXACTLY maxIter then exhausts", async () => {
-    const port = new FakeAppshotPort({ defaultVerdict: { pass: false, notes: "off-center" } })
+    const port = new FakeAppshotPort({ defaultVerdict: realFail("off-center") })
     const r = await runAppshotLoop(
       { port, now: fakeClock() },
       {
@@ -166,7 +177,7 @@ describe("appshot loop — C. iteration cap clamped", () => {
   })
 
   test("a huge maxIter request can never exceed the hard cap of iterations", async () => {
-    const port = new FakeAppshotPort({ defaultVerdict: { pass: false, notes: "n" } })
+    const port = new FakeAppshotPort({ defaultVerdict: realFail("n") })
     const r = await runAppshotLoop(
       { port, now: fakeClock() },
       {
@@ -179,7 +190,7 @@ describe("appshot loop — C. iteration cap clamped", () => {
   })
 
   test("a zero maxIter still runs the MIN (never an empty loop)", async () => {
-    const port = new FakeAppshotPort({ defaultVerdict: { pass: true, notes: "ok" } })
+    const port = new FakeAppshotPort({ defaultVerdict: realPass("ok") })
     const r = await runAppshotLoop(
       { port, now: fakeClock() },
       {
@@ -310,10 +321,7 @@ describe("appshot loop — J. artifact registration", () => {
     const sink = new RecordingSink()
     // Two iterations (fail then pass) ⇒ two scaffolds ⇒ two register calls.
     const port = new FakeAppshotPort({
-      verdicts: [
-        { pass: false, notes: "fix it" },
-        { pass: true, notes: "good" },
-      ],
+      verdicts: [realFail("fix it"), realPass("good")],
     })
     const r = await runAppshotLoop(
       { port, now: fakeClock(), artifactSink: sink },
@@ -332,7 +340,7 @@ describe("appshot loop — J. artifact registration", () => {
   })
 
   test("no sink ⇒ no registration, no artifactId (byte-identical)", async () => {
-    const port = new FakeAppshotPort({ defaultVerdict: { pass: true, notes: "ok" } })
+    const port = new FakeAppshotPort({ defaultVerdict: realPass("ok") })
     const r = await runAppshotLoop(
       { port, now: fakeClock() },
       {
@@ -345,7 +353,7 @@ describe("appshot loop — J. artifact registration", () => {
   })
 
   test("a throwing sink never breaks the loop", async () => {
-    const port = new FakeAppshotPort({ defaultVerdict: { pass: true, notes: "ok" } })
+    const port = new FakeAppshotPort({ defaultVerdict: realPass("ok") })
     const throwingSink: AppshotArtifactSink = {
       register() {
         throw new Error("sink down")
@@ -371,11 +379,7 @@ describe("appshot loop — J. artifact registration", () => {
 describe("appshot loop — K. feedback threading (edit arrow)", () => {
   test("each failing verdict's notes are fed into the NEXT scaffold's feedback", async () => {
     const port = new FakeAppshotPort({
-      verdicts: [
-        { pass: false, notes: "button too small" },
-        { pass: false, notes: "wrong color" },
-        { pass: true, notes: "good" },
-      ],
+      verdicts: [realFail("button too small"), realFail("wrong color"), realPass("good")],
     })
     await runAppshotLoop(
       { port, now: fakeClock() },

@@ -113,7 +113,44 @@ export interface ObservabilityWireOpts {
   readonly repoRoot?: string
   readonly now?: () => number
   readonly hookBus?: ObservabilityHookBus
+  /**
+   * DOF-40 fail-closed seam. Invoked ONCE per port/subscription slot whose
+   * factory or subscription threw during wiring — so a partial-wire failure
+   * is SURFACED (which slot went offline is signalled), never silently
+   * dropped. Absent ⇒ the failure is still recorded in the handle's
+   * {@link ObservabilityWireHandle.degraded} report, but no callback fires
+   * (byte-identical default-OFF for callers that do not observe).
+   */
+  readonly onPortError?: (err: ObservabilityWirePortError) => void
 }
+
+/** The wire slots that can independently fail to construct/subscribe. */
+export type ObservabilityWireSlot =
+  | "objective"
+  | "runLedger"
+  | "approvalStateMachine"
+  | "shadowVerify"
+  | "attribution"
+
+/** A surfaced partial-wire failure: which slot went offline + the cause. */
+export interface ObservabilityWirePortError {
+  readonly slot: ObservabilityWireSlot
+  readonly message: string
+  readonly error: unknown
+}
+
+/**
+ * A closed enumeration of every wire slot — used both as the offline-report
+ * key space and as the drift guard for {@link ObservabilityWireSlot}. Adding a
+ * slot to the union WITHOUT adding it here is a compile error.
+ */
+export const OBSERVABILITY_WIRE_SLOTS = [
+  "objective",
+  "runLedger",
+  "approvalStateMachine",
+  "shadowVerify",
+  "attribution",
+] as const satisfies readonly ObservabilityWireSlot[]
 
 /**
  * Return shape of {@link wireObservability}. Every port field is OPTIONAL:
@@ -136,4 +173,13 @@ export interface ObservabilityWireHandle {
   readonly approvalStateMachine?: ApprovalStateMachinePort
   readonly shadowVerify?: ShadowVerifyPort
   readonly detach: () => void
+  /**
+   * DOF-40 fail-closed report. Lists EVERY slot whose factory/subscription
+   * threw during wiring (empty when the wire was clean or gate-OFF). A
+   * partial-wire failure is thus VISIBLE on the returned handle — an
+   * operator can read `degraded` to learn WHICH port is offline instead of
+   * inferring it from an absent slot (which is ambiguous: absent can mean
+   * "opted out" OR "threw"). Present on EVERY handle including the noop.
+   */
+  readonly degraded: readonly ObservabilityWirePortError[]
 }

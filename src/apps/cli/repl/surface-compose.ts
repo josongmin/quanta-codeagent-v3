@@ -160,8 +160,11 @@ export interface ReplSurfaceWires {
    *  not the store. */
   readonly objectiveStore: ObjectivePort
   /** Install the `/queue` `sendNow` injection target once the loop owns its
-   *  `ExternalPromptQueue`. Until installed, `sendNow` returns a typed
-   *  "send-not-possible" (the entry is still removed — see `PlanQueueStore`). */
+   *  `ExternalPromptQueue`. Until installed, `sendNow` returns the TRANSIENT
+   *  typed `send-not-ready` and KEEPS the entry (fail-closed timing window —
+   *  the send is never a silent drop; the operator retries once the loop is
+   *  up). After install, a terminal sink rejection maps to `send-not-possible`
+   *  and removes the entry — see `PlanQueueStore.sendNow`. */
   readonly setPlanQueueSendNow: (
     fn: ((inj: SendNowInjection) => { ok: true } | { ok: false; reason: string }) | undefined,
   ) => void
@@ -536,17 +539,24 @@ export const composeSurfaceWires = (
 
   // `/queue` — surface-owned plan-queue store. The `sendNow` target is the
   // loop-owned `ExternalPromptQueue`, installed via `setPlanQueueSendNow` once
-  // the loop is up; until then `sendNow` reports "send-not-possible" (and the
-  // entry is removed, per the store contract).
+  // the loop is up; until then `sendNow` reports the TRANSIENT "send-not-ready"
+  // and KEEPS the entry (fail-closed timing window — never a silent drop, per
+  // the store contract).
   let planQueueSendNow:
     | ((inj: SendNowInjection) => { ok: true } | { ok: false; reason: string })
     | undefined
   const planQueueStore = defaultPlanQueueStore({
     sendNowSink: {
+      // Fail-closed timing window: the sink closure exists at store-
+      // construction, but the loop-owned `ExternalPromptQueue` target is
+      // late-bound via `setPlanQueueSendNow`. Until it lands, flag the
+      // rejection `retryable:true` so the store maps it to the TRANSIENT
+      // `send-not-ready` and KEEPS the entry — a `/queue send-now` fired in
+      // the first-turn window is an explicit "try again", never a silent drop.
       inject: (inj) =>
         planQueueSendNow !== undefined
           ? planQueueSendNow(inj)
-          : { ok: false, reason: "send target not installed yet" },
+          : { ok: false, reason: "send target not installed yet", retryable: true },
     },
   })
   const setPlanQueueSendNow = (

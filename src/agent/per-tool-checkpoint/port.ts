@@ -134,6 +134,27 @@ export interface GranularCheckpointEntry {
   readonly callIndex?: number
 }
 
+/** Typed, read-only producer-only INSPECTION view of the registry's bounded
+ *  state. This is NOT a second snapshot authority — it is a pure projection
+ *  over the SAME in-memory tag→SHA store, surfaced so a telemetry / test /
+ *  operator surface can prove the retention bounds hold (record→inspect)
+ *  WITHOUT enumerating every entry or reaching into the closure.
+ *
+ *  DoF-15 classification: PRODUCER-ONLY. Nothing in the loop consumes these
+ *  numbers to drive behaviour — they exist purely so the bounded-retention
+ *  contract is observable. */
+export interface GranularRegistryStats {
+  /** Live tagged-anchor count. Always `<= entryCap`. */
+  readonly entryCount: number
+  /** The LRU cap the registry was constructed with (post-clamp, `>= 1`). */
+  readonly entryCap: number
+  /** Live size of the internal per-`(workspace, turnId)` call-index counter.
+   *  Bounded by `counterCap`; reset to 0 on {@link GranularRegistry.clear}. */
+  readonly counterCount: number
+  /** The cap on the call-index counter map (post-clamp, `>= 1`). */
+  readonly counterCap: number
+}
+
 /** In-memory registry of tagged shadow-ODB anchors. Per-session, no
  *  persistence — survives the lifetime of the granular-policy instance.
  *  Pure surface (no I/O): the registry is populated as a side effect of
@@ -145,7 +166,12 @@ export interface GranularRegistry {
   /** Look up an entry by tag. Returns `null` when the tag is unknown.
    *  Tags are case-sensitive. */
   lookup(tag: CheckpointTag): GranularCheckpointEntry | null
-  /** Drop all entries. Mirrors `ConversationCheckpointStore.clear`. */
+  /** Typed producer-only inspection accessor over the bounded state. Pure —
+   *  no mutation. See {@link GranularRegistryStats}. */
+  stats(): GranularRegistryStats
+  /** Drop ALL producer state — both the tagged anchors AND the per-turn
+   *  call-index counter. Called on session teardown so nothing survives a
+   *  session boundary. Mirrors `ConversationCheckpointStore.clear`. */
   clear(): void
 }
 

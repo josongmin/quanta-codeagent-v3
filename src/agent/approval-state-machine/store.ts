@@ -25,7 +25,9 @@ import type { ObjectivePort } from "@/agent/objective"
 import type { RunLedgerPort } from "@/agent/run-ledger"
 import { errMessage, logger } from "@/shared"
 import type {
+  ApprovalAttributionGap,
   ApprovalDecision,
+  ApprovalGapOp,
   ApprovalKind,
   ApprovalRequest,
   ApprovalSnapshot,
@@ -269,9 +271,18 @@ export const createApprovalStateMachine = (opts?: {
   objective?: ObjectivePort
   ledger?: RunLedgerPort
   maxRetained?: number
+  /** FAIL-CLOSED audit-gap sink (DOF-40). Invoked when a terminal mutator
+   *  (`settle` / `expire` / `cancel`) is called for an id the machine has NO
+   *  record of — i.e. a producer never `request()`ed it, so the resolution
+   *  attributes NOTHING. The observer surfaces the missing audit trail instead
+   *  of the swallowed `null`. Absent ⇒ byte-identical legacy (zero calls). The
+   *  sink itself is invoked NO-THROW — a throwing observer cannot break the
+   *  mutator's `null`-return contract. */
+  onUnattributed?: (gap: ApprovalAttributionGap) => void
 }): ApprovalStateMachinePort => {
   const objective = opts?.objective
   const ledger = opts?.ledger
+  const onUnattributed = opts?.onUnattributed
   const maxRetained =
     typeof opts?.maxRetained === "number" &&
     Number.isFinite(opts.maxRetained) &&
@@ -333,17 +344,48 @@ export const createApprovalStateMachine = (opts?: {
     return true
   }
 
+  /** FAIL-CLOSED audit-gap emit (DOF-40). A terminal mutator hit an id with NO
+   *  record ⇒ the resolution can attribute nothing (missing producer). Surface
+   *  it through the injected observer so the un-attributed escalation is never
+   *  silently dropped. NO-THROW: a throwing observer cannot break the mutator.
+   *  Absent observer ⇒ zero work (byte-identical legacy). */
+  const emitGap = (op: ApprovalGapOp, id: string, decision?: ApprovalDecision): void => {
+    if (onUnattributed === undefined) return
+    try {
+      const gap: ApprovalAttributionGap = {
+        approvalId: isString(id) ? id : "",
+        op,
+        ...(decision !== undefined ? { decision } : {}),
+        at: clock(),
+      }
+      onUnattributed(Object.freeze(gap))
+    } catch (e) {
+      // Observer failure must not break the mutator's null-return contract.
+      logger.warn(`approval-state.attr.gapObserver: ${errMessage(e)}`)
+    }
+  }
+
   /** Lookup + run `fn` on a pending entry. Returns null on unknown id; returns
    *  the existing entry unchanged on an already-settled record (idempotent
-   *  no-op). NO-THROW. */
+   *  no-op). On an UNKNOWN id emits a fail-closed attribution-gap under `op`
+   *  (DOF-40) before returning null — an already-settled record is NOT a gap
+   *  (it WAS attributed). NO-THROW. */
   const onlyIfPending = (
     id: string,
+    op: ApprovalGapOp,
     fn: (cur: ApprovalRequest) => ApprovalRequest,
+    decision?: ApprovalDecision,
   ): ApprovalRequest | null => {
     try {
-      if (!isString(id)) return null
+      if (!isString(id)) {
+        emitGap(op, id, decision)
+        return null
+      }
       const cur = requests.get(id)
-      if (cur === undefined) return null
+      if (cur === undefined) {
+        emitGap(op, id, decision)
+        return null
+      }
       if (cur.status !== "pending") return cur
       return store(fn(cur))
     } catch {
@@ -405,28 +447,36 @@ export const createApprovalStateMachine = (opts?: {
 
     settle(id, decision, settleOpts): ApprovalRequest | null {
       // Idempotent: settling an already-settled record is a no-op returning it.
-      return onlyIfPending(id, (cur) => {
-        const d = APPROVAL_DECISION.has(decision) ? decision : "deny"
-        const status: ApprovalStatus = d === "deny" ? "denied" : "approved"
-        const modifiedAction =
-          d === "modify" && settleOpts && isString(settleOpts.modifiedAction)
-            ? settleOpts.modifiedAction
-            : undefined
-        const next: ApprovalRequest = {
-          ...cur,
-          status,
-          settledAt: clock(),
-          decision: d,
-          ...(modifiedAction !== undefined ? { modifiedAction } : {}),
-        }
-        clearObjectiveBlocker(objective, cur.threadId, cur.blockerId)
-        settleLedger(ledger, cur.runEntryId, decisionToLedgerStatus(d))
-        return next
-      })
+      // The gap decision mirrors the SM's own coercion so an unknown-id gap
+      // reports the SAME decision the mutator would have applied.
+      const dForGap = APPROVAL_DECISION.has(decision) ? decision : "deny"
+      return onlyIfPending(
+        id,
+        "settle",
+        (cur) => {
+          const d = APPROVAL_DECISION.has(decision) ? decision : "deny"
+          const status: ApprovalStatus = d === "deny" ? "denied" : "approved"
+          const modifiedAction =
+            d === "modify" && settleOpts && isString(settleOpts.modifiedAction)
+              ? settleOpts.modifiedAction
+              : undefined
+          const next: ApprovalRequest = {
+            ...cur,
+            status,
+            settledAt: clock(),
+            decision: d,
+            ...(modifiedAction !== undefined ? { modifiedAction } : {}),
+          }
+          clearObjectiveBlocker(objective, cur.threadId, cur.blockerId)
+          settleLedger(ledger, cur.runEntryId, decisionToLedgerStatus(d))
+          return next
+        },
+        dForGap,
+      )
     },
 
     expire(id): ApprovalRequest | null {
-      return onlyIfPending(id, (cur) => {
+      return onlyIfPending(id, "expire", (cur) => {
         const next: ApprovalRequest = { ...cur, status: "expired", settledAt: clock() }
         clearObjectiveBlocker(objective, cur.threadId, cur.blockerId)
         settleLedger(ledger, cur.runEntryId, statusToLedgerStatus("expired"))
@@ -435,7 +485,7 @@ export const createApprovalStateMachine = (opts?: {
     },
 
     cancel(id): ApprovalRequest | null {
-      return onlyIfPending(id, (cur) => {
+      return onlyIfPending(id, "cancel", (cur) => {
         const next: ApprovalRequest = { ...cur, status: "cancelled", settledAt: clock() }
         clearObjectiveBlocker(objective, cur.threadId, cur.blockerId)
         settleLedger(ledger, cur.runEntryId, statusToLedgerStatus("cancelled"))

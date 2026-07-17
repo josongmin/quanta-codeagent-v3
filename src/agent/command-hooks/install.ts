@@ -22,6 +22,16 @@ import type { CommandHookDeps, CommandHookGate } from "./types"
  *  the observer events run the command but ignore its verdict. */
 const TOOL_GATING_EVENT = "pre_tool_use"
 
+/** Events whose command-hook verdict can BLOCK the action (`deny`). If the hook
+ *  runner throws for one of these (exec-adapter EMFILE/OOM/bug), the security
+ *  intent is fail-CLOSED — we must translate the throw into a `deny` here rather
+ *  than let it propagate to `HookBus.runHandler`, whose catch-and-continue would
+ *  fail-OPEN and pass the guarded tool through as if no hook were configured. */
+const DENY_CAPABLE_EVENTS: ReadonlySet<HookEvent["type"]> = new Set([
+  "pre_tool_use",
+  "user_prompt_submit",
+])
+
 /** Adapt a HookBus {@link HookEvent} into the runner's {@link CommandHookEvent}.
  *  Pulls the tool name (for matcher gating) from tool-shaped events. */
 const toCommandHookEvent = (event: HookEvent): CommandHookEvent => {
@@ -61,7 +71,20 @@ export const installCommandHooks = (
 
   for (const type of eventTypes) {
     bus.on(type, async (event) => {
-      const verdict = await runCommandHooks(gate, deps, toCommandHookEvent(event))
+      let verdict: Awaited<ReturnType<typeof runCommandHooks>>
+      try {
+        verdict = await runCommandHooks(gate, deps, toCommandHookEvent(event))
+      } catch (err) {
+        // Fail-CLOSED on a deny-capable event: an exec-adapter throw must block
+        // the guarded action, NOT silently pass it through via the bus's catch.
+        if (DENY_CAPABLE_EVENTS.has(type)) {
+          const reason = err instanceof Error ? err.message : String(err)
+          return { deny: `command-hook execution failed (fail-closed): ${reason}` }
+        }
+        // Observer events (post_tool_use*, permission_request, …) cannot block;
+        // a throw there has no gating impact — let the bus continue.
+        return undefined
+      }
       if (verdict.deny !== null) return { deny: verdict.deny.reason }
       // updatedInput only meaningful on the tool-gating event.
       if (type === TOOL_GATING_EVENT && "updatedInput" in verdict) {

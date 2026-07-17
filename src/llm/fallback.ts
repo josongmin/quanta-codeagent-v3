@@ -1,6 +1,7 @@
 import { LLMError } from "@/shared"
 import type { LlmSurfaceId, LlmTransportId } from "@/shared/llm-route-types"
 import type { LLMPort } from "./ports"
+import { isFallbackKind } from "./retry"
 import type { StreamEvent, StreamInput } from "./types"
 
 /**
@@ -82,34 +83,26 @@ export interface FallbackLLMOptions {
   metrics?: FallbackMetricSink
 }
 
-/** Kinds that warrant switching to the next provider. STRUCTURED — no regex
- *  on `e.message`. Adapters set `LLMError.kind` at the boundary
- *  ({@link LLMError.fromSdkError}); this set is the policy.
- *
- *  - `overloaded`       529-class: this provider is over capacity → try next.
- *  - `server_error`     Non-529 5xx: provider-side bug → try next.
- *  - `network`          Transport failure (ECONNRESET / EPIPE / DNS): peer
- *                       reachability is the issue → another provider may work.
- *  - `not_implemented`  Stub adapter (e.g. ADR-0094 Phase-1 `chatgpt-oauth`):
- *                       this provider physically cannot serve the turn, but a
- *                       fully-wired sibling provider can.
- *
- *  Explicitly NOT triggers (every provider would fail identically):
- *  `auth`, `bad_request`, `not_found`, `stream_corrupt`, `aborted`,
- *  `rate_limit` (latter is same-turn retried, not fallback'd), `unknown`. */
-const FALLBACK_KINDS = new Set<import("@/shared").LLMErrorKind>([
-  "overloaded",
-  "server_error",
-  "network",
-  "not_implemented",
-])
-
 /** True iff `e` is a provider-overload / provider-side failure that warrants
  *  switching providers. Only {@link LLMError} is ever a trigger; unknown
- *  error types are treated as non-fallback (rethrown immediately). */
+ *  error types are treated as non-fallback (rethrown immediately).
+ *
+ *  DOF-30 single authority: the kind policy is DERIVED from the one
+ *  `codexSpecRoute` table via {@link isFallbackKind} — this file no longer
+ *  carries its own `FALLBACK_KINDS` set (removed). The kinds that warrant a
+ *  provider swap are EXACTLY those the table routes to `fallback_provider`:
+ *  `overloaded` (529 over-capacity), `server_error` (non-529 5xx),
+ *  `network` (transport failure), `not_implemented` (stub adapter — a sibling
+ *  provider can serve). Explicitly NOT triggers (every provider fails
+ *  identically): `auth`, `bad_request`, `not_found`, `stream_corrupt`,
+ *  `aborted`, `rate_limit` (same-turn retried, not fallback'd), `unknown`,
+ *  and the HITL / compaction kinds. STRUCTURED — no regex on `e.message`;
+ *  adapters set `LLMError.kind` at the boundary ({@link LLMError.fromSdkError}).
+ *  Proven byte-identical to the removed `FALLBACK_KINDS` set for all 18 kinds
+ *  (tests/unit/retry-decorator-policy-hellgate.test.ts). */
 export const isFallbackTrigger = (e: unknown): boolean => {
   if (!(e instanceof LLMError)) return false
-  return FALLBACK_KINDS.has(e.kind)
+  return isFallbackKind(e.kind)
 }
 
 const throwIfAborted = (signal: AbortSignal | undefined): void => {

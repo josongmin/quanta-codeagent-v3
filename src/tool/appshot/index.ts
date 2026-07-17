@@ -25,10 +25,12 @@ export {
 export type {
   AppSpec,
   AppshotArtifactSink,
+  AppshotAvailability,
   AppshotPort,
   ScaffoldResult,
   VerifyVerdict,
 } from "./port"
+export { isRealJudgePass, judgeVerdict } from "./port"
 export {
   makeJailedScaffold,
   renderScaffoldHtml,

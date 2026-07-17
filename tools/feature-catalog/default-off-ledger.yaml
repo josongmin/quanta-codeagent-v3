@@ -44,7 +44,7 @@ rows:
     activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: provider-cost
     decision: measure-first
     owner_seam: src/agent/loop/skill-gate.ts
@@ -104,7 +104,7 @@ rows:
     activation: port-present
     effective_default: { cli: off, web: off, bench: na, headless: off, daemon: off }
     reachability: consumer-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: repair-first
     owner_seam: src/agent/approval-gate-wire/wire.ts
@@ -116,7 +116,7 @@ rows:
     activation: env/config
     effective_default: { cli: off, web: off, bench: na, headless: off, daemon: na }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: provider-cost
     decision: repair-first
     owner_seam: src/tool/appshot/loop.ts
@@ -188,7 +188,7 @@ rows:
     activation: env/config
     effective_default: { cli: off, web: off, bench: na, headless: off, daemon: off }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: provider-cost
     decision: enable-now
     owner_seam: src/scheduler/runtime-wire.ts
@@ -272,7 +272,7 @@ rows:
     activation: port-present
     effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: repair-first
     owner_seam: src/agent/branch-search/anchor.ts
@@ -391,7 +391,7 @@ rows:
     gate_owner: [QUANTA_INDEX]
     activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: producer-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
@@ -403,7 +403,7 @@ rows:
     gate_owner: [AgentConfig.compactionEventEmit]
     activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: seam-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
@@ -415,7 +415,7 @@ rows:
     gate_owner: [AgentConfig.contextEventsForTurn]
     activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: seam-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
@@ -439,7 +439,7 @@ rows:
     gate_owner: [AgentConfig.activatePlugins]
     activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: producer-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
@@ -463,7 +463,7 @@ rows:
     gate_owner: [CodexR2MetricsConfig]
     activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: seam-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
@@ -475,7 +475,7 @@ rows:
     gate_owner: [AgentConfig.activatePlugins]
     activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: producer-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
@@ -487,7 +487,7 @@ rows:
     gate_owner: [SqliteRegistryConfig.databasePath]
     activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: seam-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: mutating
     decision: hold
@@ -499,7 +499,7 @@ rows:
     gate_owner: [AgentConfig.systemPromptCache]
     activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: seam-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
@@ -536,7 +536,7 @@ rows:
     activation: env/config
     effective_default: { cli: off, web: na, bench: na, headless: off, daemon: off }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: security
     decision: repair-first
     owner_seam: src/agent/command-hooks/runner.ts
@@ -548,7 +548,7 @@ rows:
     activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: seam-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
     owner_seam: src/agent/compaction.ts
@@ -559,7 +559,7 @@ rows:
     gate_owner: [parseConflicts caller-import]
     activation: unwired
     effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
-    reachability: seam-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
@@ -631,7 +631,7 @@ rows:
     gate_owner: [AgentConfig.effortClassifier]
     activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: producer-only
+    reachability: wired
     proof: { on: wire, off_identity: wire, receipt: null }
     risk: behavioral-cost
     decision: hold
@@ -679,7 +679,7 @@ rows:
     gate_owner: [QUANTA_FAST_APPLY]
     activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: producer-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
@@ -691,7 +691,7 @@ rows:
     gate_owner: [QUANTA_FAST_APPLY_MERGE, QUANTA_FAST_APPLY_MODEL]
     activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: producer-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: mutating
     decision: hold
@@ -703,7 +703,7 @@ rows:
     gate_owner: [FastApplyFallbackPort DI]
     activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: producer-only
+    reachability: wired
     proof: { on: wire, off_identity: wire, receipt: null }
     risk: behavioral-cost
     decision: repair-first
@@ -1135,7 +1135,7 @@ rows:
     gate_owner: [QUANTA_NDJSON_INGEST_PORT]
     activation: port-present
     effective_default: { cli: off, web: na, bench: na, headless: off, daemon: na }
-    reachability: producer-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: repair-first
@@ -1196,7 +1196,7 @@ rows:
     activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: measure-first
     owner_seam: src/apps/agent/index.ts
@@ -1291,7 +1291,7 @@ rows:
     gate_owner: [defaultGranularCheckpointPolicy DI]
     activation: unwired
     effective_default: { cli: off, web: na, bench: na, headless: off, daemon: na }
-    reachability: seam-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
@@ -1363,7 +1363,7 @@ rows:
     gate_owner: [AgentConfig.onPreCompact]
     activation: port-present
     effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
-    reachability: seam-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: measure-first
@@ -1483,7 +1483,7 @@ rows:
     gate_owner: [parseDualWindowSnapshot caller]
     activation: unwired
     effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
-    reachability: producer-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: external
     decision: repair-first
@@ -1544,7 +1544,7 @@ rows:
     activation: unwired
     effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: repair-first
     owner_seam: src/llm/retry/index.ts
@@ -1639,7 +1639,7 @@ rows:
     gate_owner: [runLedger subscriber DI]
     activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: producer-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: repair-first
@@ -1723,7 +1723,7 @@ rows:
     gate_owner: [QUANTA_SHADOW_VERIFY]
     activation: env/config
     effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
-    reachability: seam-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: repair-first
@@ -1735,7 +1735,7 @@ rows:
     gate_owner: [ShellSnapshotPort DI]
     activation: unwired
     effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
-    reachability: seam-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: security
     decision: repair-first
@@ -1855,8 +1855,8 @@ rows:
     gate_owner: [StreamInput.responseFormat]
     activation: port-present
     effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
-    reachability: producer-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: repair-first
     owner_seam: src/llm/structured-output.ts
@@ -1915,7 +1915,7 @@ rows:
     gate_owner: [resumeInterruptedHandles DI]
     activation: unwired
     effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
-    reachability: producer-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: repair-first
@@ -2071,7 +2071,7 @@ rows:
     gate_owner: [recorder+transcriber DI]
     activation: unwired
     effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
-    reachability: seam-only
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: network
     decision: hold

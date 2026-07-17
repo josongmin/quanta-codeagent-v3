@@ -41,7 +41,16 @@ purpose: |
   approved (idempotent on already-settled, settledAt not re-bumped on no-op);
   settle(deny) ⇒ denied; expire from pending ⇒ expired (no-op on settled);
   cancel from pending ⇒ cancelled (no-op on settled); any mutator on unknown
-  id ⇒ null (no exception). Attribution invariants: when optional `objective`
+  id ⇒ null (no exception). DOF-40 FAIL-CLOSED audit-gap: a terminal mutator
+  (settle/expire/cancel) on an UNKNOWN id still returns null, but ALSO emits an
+  `ApprovalAttributionGap` ({approvalId, op, decision?, at}) to the injected
+  `onUnattributed` observer when supplied — so a deferred approval whose
+  producer never called `request(id)` (the web/SDK always-confirm path mints an
+  approvalId + throws RuntimeApprovalRequiredError WITHOUT going through
+  gate.open, then the host relays settle(approvalId)) surfaces the missing
+  audit trail instead of silently dropping it. Observer absent ⇒ byte-identical
+  legacy null return (zero calls, clock untouched). A throwing observer is
+  swallowed (NO-THROW). Attribution invariants: when optional `objective`
   / `ledger` ports are supplied, `request()` calls
   `objective.addBlocker({reason, waitingOn:"user"})` (captures newest blocker
   id) + `ledger.start({id:<approvalId>, kind:"exec", owner:threadId,
@@ -68,6 +77,7 @@ evidence:
   tests:
     unit:
       - tests/unit/approval-state-machine-hellgate.test.ts
+      - tests/unit/approval-attribution-gap-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -81,6 +91,9 @@ knobs:
   - name: ledger
     where: createApprovalStateMachine({ ledger })
     purpose: optional RunLedgerPort — when supplied, request() starts a kind="exec" entry transitioned to waiting/user and settle/expire/cancel terminate it as completed (approve/modify) or stopped (deny/expire/cancel). Attribution failures do not propagate.
+  - name: onUnattributed
+    where: createApprovalStateMachine({ onUnattributed })
+    purpose: DOF-40 fail-closed audit-gap sink — invoked with an ApprovalAttributionGap when a terminal mutator (settle/expire/cancel) is called for an id with NO pending record (producer never called request(id)), so a missing audit trail is surfaced instead of the swallowed null. Absent ⇒ byte-identical legacy (zero calls). Observer throws are swallowed (NO-THROW).
 deliberate_hold:
   reason: |
     PORT + STORE wave. The closed port + in-memory store are hellgate-proven,
@@ -97,6 +110,17 @@ deliberate_hold:
     pause with `reason`, `resumeStep`, and the back-refs to Objective.blockers
     + RunLedger.waiting() it implies. Promote to L3 once a real producer is
     wired and a surface consumes the state.
+
+    DOF-40 fail-closed gap sink PROMOTION OWNER: the `onUnattributed` observer
+    is a leaf seam here. Routing it to real telemetry / RunLedger belongs to a
+    composition root NOT owned by this slice — the observability wire
+    (`src/agent/observability-wire/wire.ts`, where `createApprovalStateMachine`
+    is constructed) and/or the web-daemon runtime factory. That root must pass
+    `onUnattributed` (e.g. emit a `logger.warn` + a `run-ledger` gap entry) so
+    the deferred always-confirm path's un-attributed settle
+    (`src/host/runtime/internal/context-binding/approval-protocol.ts:413`)
+    surfaces in production. Until then the sink is absent in prod ⇒ the gap is
+    detectable only in-test (this slice cannot reach across the fence).
 notes: |
   Slice fence verified: imports = `node:crypto` (randomUUID) + types-only from
   `@/agent/objective` + `@/agent/run-ledger`. NO `@/agent` core, NO `@/apps`,

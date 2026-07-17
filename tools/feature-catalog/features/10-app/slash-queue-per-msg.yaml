@@ -29,11 +29,17 @@ purpose: |
   vocabulary; this slice closes the operator-management gap. `sendNow`
   is the distinctive one — it bypasses the paused state and injects
   into the NEXT turn WITHOUT aborting the active one (steering bypass
-  invariant, pinned by HELL-S3).
+  invariant, pinned by HELL-S3). DOF-40: the REPL composition root
+  (surface-compose.ts) DOES wire a concrete SendNowSink over the loop-
+  owned ExternalPromptQueue; the residual first-turn timing window (sink
+  present, downstream target late-bound) is now FAIL-CLOSED — sendNow
+  returns the TRANSIENT `send-not-ready` and KEEPS the entry rather than
+  silently dropping it.
 evidence:
   code:
     - src/agent/plan-queue.ts
     - src/apps/cli/queue-cmd.ts
+    - src/apps/cli/repl/surface-compose.ts
     - src/apps/cli/slash-commands.ts
     - src/observability/metrics/instrument-plan-queue.ts
   adrs: [228, 128, 37]
@@ -41,6 +47,7 @@ evidence:
     unit:
       - tests/unit/queue-per-msg-mutators-hellgate.test.ts
       - tests/unit/cli/queue-cmd-hellgate.test.ts
+      - tests/unit/plan-queue-sendnow-failclosed-hellgate.test.ts
       - tests/unit/slash-commands.test.ts
       - tests/unit/observability-metrics-instrument-extra-hellgate.test.ts
     integration: []
@@ -48,20 +55,29 @@ evidence:
 knobs: []
 deliberate_hold:
   reason: |
-    `SendNowSink` is a closed port — the composition root has not yet
-    wired a concrete sink for the REPL surface. Until wired, every
-    `/queue send-now` returns `send-not-possible` (typed) and removes
-    the entry; the other 3 mutators work standalone. Helper-only,
-    deferred-wire posture (voice-matched to ADR-0128's original
-    landing).
+    DOF-40 UPDATE: the REPL composition root NOW wires a concrete
+    SendNowSink over the loop-owned ExternalPromptQueue
+    (surface-compose.ts `planQueueStore = defaultPlanQueueStore({sendNowSink})`,
+    `ctx.planQueue` wired in the dispatch builder). The one residual is
+    the first-turn LATE-BIND timing window: the sink closure exists at
+    store construction but its downstream target
+    (`setPlanQueueSendNow` → ExternalPromptQueue.push) is installed by the
+    loop after this bundle is built. That window is now FAIL-CLOSED —
+    sendNow returns the TRANSIENT `send-not-ready` and KEEPS the entry
+    (never a silent drop; operator retries once the loop is up). The hold
+    remains only because web parity (B2/B3 SlashPalette + SessionCommand
+    queue verb) is still absent.
   promotion_path: |
-    1. REPL composition root constructs a SendNowSink whose `inject`
-       appends to the next-turn user-message buffer (the same buffer
-       PromptSource.next() reads on the next turn boundary).
-    2. Pass the sink via `defaultPlanQueueStore({sendNowSink})` at
+    1. [DONE] REPL composition root constructs a SendNowSink over the
+       loop-owned ExternalPromptQueue.
+    2. [DONE] Pass the sink via `defaultPlanQueueStore({sendNowSink})` at
        session start.
-    3. Wire `ctx.planQueue` in the SlashContext builder so `/queue`
-       is functional in the live REPL.
+    3. [DONE] Wire `ctx.planQueue` in the SlashContext dispatch builder so
+       `/queue` is functional in the live REPL.
+    4. [DONE — DOF-40] Make the first-turn late-bind window fail-closed
+       (`send-not-ready`, entry kept). Owner: DOF-40 leaf.
+    5. [RESIDUAL] Web-surface parity: add the `/queue` verb to SlashPalette
+       + a SessionCommand queue verb and supply `ctx.planQueue` web-side.
 notes: |
   Trailing-slot append to BUILTINS — no collision with `/rewind-tool`,
   `/fork`, or the W2-5 web/paste/edit cluster. The 4 mutator surface
@@ -69,6 +85,9 @@ notes: |
   state vs ADR-0128's pre-mutator behaviour. `retry` is
   remove-and-re-enqueue (fresh id + enqueuedAtMs); `edit` validates
   trim-empty / >64KiB and runs collapse-with-sibling merge; `delete`
-  cleans up empty thread keys; `sendNow` removes BEFORE sink call
-  (sink throw → typed send-not-possible). No external libraries
-  added — pure node:crypto + plane-clean type-only @/shared import.
+  cleans up empty thread keys; `sendNow` PROBES the sink before any
+  queue mutation (DOF-40) so a TRANSIENT `send-not-ready` can KEEP the
+  entry (fail-closed timing window), while a terminal outcome
+  (delivered / sink-throw / no-sink / non-retryable reject → typed
+  send-not-possible) removes it. No external libraries added — pure
+  node:crypto + plane-clean type-only @/shared import.

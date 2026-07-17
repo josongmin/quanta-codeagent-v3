@@ -42,7 +42,25 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    Seam-only (DOF-30 verified @c2f0dd1c2): `runShellWithSnapshot` has ZERO
+    production call sites — `src/runner/assemble/config.ts:153` declares the
+    per-turn shell-snapshot config block + the CLI `--shell-snapshot` flag, but
+    no bash/exec dispatch path threads a `ShellSnapshotPort` into a real
+    `runShellWithSnapshot(...)` invocation. Absent port ⇒ the legacy direct
+    spawner runs ⇒ byte-identical default-OFF. Unique primitive preserved: the
+    security invariant that a snapshot is captured BEFORE (and restored AFTER)
+    an operator-approved shell command runs, so a mutating command is bounded by
+    a restorable filesystem checkpoint — no other slice owns this shell-scoped
+    snapshot/restore contract.
+  promotion_path: |
+    Promotion owner = the bash/exec tool dispatch (src/tool + the runner
+    `assemble/config.ts` shell-snapshot block): inject a Bun-spawner-backed
+    `ShellSnapshotPort` under the `--shell-snapshot` gate and route the
+    operator-approved command through `runShellWithSnapshot(...)` instead of the
+    direct spawner. Security-risk row ⇒ opt-in explicit, first-class, never a
+    silent default flip.
 notes: |
   ADR-0204 leaf entry 는 closed-port + adapters; 본 entry 는 runShell
   옵션 fold 만 추가 (assembly layer가 wire). file-store 모드 0600 /

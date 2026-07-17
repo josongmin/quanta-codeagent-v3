@@ -57,3 +57,9 @@ notes: |
   Pairs with `seatbelt-profile-compiler` (macOS backend) and the
   `OsSandbox` port (the platform-aware router that picks the right
   backend for the current OS).
+  SUPERSEDED behavior (DOF-40): the phase-1 "run unsandboxed + tag
+  degradeReason" fallback described above was FAIL-OPEN. As of DOF-40 the
+  live port (`linux.ts` / `default.ts` / `landlock-native.ts`) is FAIL-CLOSED:
+  a REQUESTED-but-unenforceable sandbox emits a typed refusal
+  (`refusal.ts::sandboxUnavailableRefusal`, exit 126, empty stdout) and the
+  command NEVER runs. See feature `landlock-phase2`.

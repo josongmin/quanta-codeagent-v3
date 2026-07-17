@@ -279,13 +279,21 @@ describe("D. linuxOsSandbox.spawn — dispatch", () => {
     expect(Object.hasOwn(r, "degradeReason")).toBe(false)
   })
 
-  test("HELL-LX-D19: neither backend → degraded passthrough + 'linux-bwrap-missing'", async () => {
-    const { spawner, calls } = makeSpawner()
+  test("HELL-LX-D19: neither backend + RESTRICTIVE profile → FAIL-CLOSED refusal, spawner NEVER called (DOF-40)", async () => {
+    const { spawner, calls } = makeSpawner({ exitCode: 0, stdout: "RAN-UNSANDBOXED", stderr: "" })
     const sb = linuxOsSandbox({ spawner, which: whichNone })
     const r = await sb.spawn({ command: ["x"], cwd: "/ws" }, POLICY_WW)
-    expect((calls[0] as SpawnCall).argv).toEqual(["x"])
+    // LOAD-BEARING: the command was REFUSED — the spawner was never invoked, so
+    // no host side effect could occur. (Old behavior ran it and returned
+    // sandboxApplied:false — that was fail-OPEN.)
+    expect(calls.length).toBe(0)
+    expect(r.exitCode).toBe(126)
+    // Not a silent unsandboxed run: the injected spawner's stdout never surfaces.
+    expect(r.stdout).toBe("")
+    expect(r.stdout.includes("RAN-UNSANDBOXED")).toBe(false)
     expect(r.sandboxApplied).toBe(false)
-    expect((r.degradeReason as string).startsWith("linux-bwrap-missing")).toBe(true)
+    expect(r.degradeReason).toBe("linux-bwrap-missing")
+    expect(r.stderr.includes("REFUSED")).toBe(true)
   })
 
   test("HELL-LX-D20: spawner throws → exit 127 + stderr describes failure", async () => {

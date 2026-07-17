@@ -24,6 +24,7 @@ import {
   type PromptAssembledSnapshot,
   snapshotToBreakdownInput,
 } from "@/agent/context/usage-breakdown"
+import { type CanvasSourceOptions, fanOutIsolated } from "./canvas-fanout"
 
 export interface CanvasUsageSourceHandle {
   /** Wire into `AgentConfig.onPromptAssembled`. Computes + fans out the view. */
@@ -32,12 +33,21 @@ export interface CanvasUsageSourceHandle {
   readonly subscribe: (handler: (view: ContextUsageBreakdown) => void) => () => void
   /** The most recent view, or undefined before the first turn. */
   readonly latest: () => ContextUsageBreakdown | undefined
+  /** Cumulative count of subscriber deliveries that THREW (health signal). */
+  readonly failureCount: () => number
 }
 
 /** Create a fresh canvas usage source. One per daemon (shared across the
- *  daemon's connections, like the shared session). */
-export const createCanvasUsageSource = (): CanvasUsageSourceHandle => {
+ *  daemon's connections, like the shared session).
+ *
+ * DOF-40 — fail-closed: a throwing subscriber is ISOLATED (siblings still
+ * fed) but the failure is OBSERVABLE via the optional `onSubscriberError`
+ * seam. Default-OFF byte-identical. */
+export const createCanvasUsageSource = (
+  opts: CanvasSourceOptions = {},
+): CanvasUsageSourceHandle => {
   let latest: ContextUsageBreakdown | undefined
+  let failures = 0
   const subscribers = new Set<(view: ContextUsageBreakdown) => void>()
   return {
     sink: (snapshot) => {
@@ -45,13 +55,7 @@ export const createCanvasUsageSource = (): CanvasUsageSourceHandle => {
       // is bound to the loop's own `estimateTokens`. NO second token heuristic.
       const view = buildUsageBreakdownDefault(snapshotToBreakdownInput(snapshot))
       latest = view
-      for (const fn of subscribers) {
-        try {
-          fn(view)
-        } catch {
-          // A throwing subscriber must not break the fan-out to siblings.
-        }
-      }
+      failures += fanOutIsolated(subscribers, view, opts.onSubscriberError)
     },
     subscribe: (handler) => {
       subscribers.add(handler)
@@ -60,5 +64,6 @@ export const createCanvasUsageSource = (): CanvasUsageSourceHandle => {
       }
     },
     latest: () => latest,
+    failureCount: () => failures,
   }
 }

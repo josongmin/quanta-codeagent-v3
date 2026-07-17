@@ -44,5 +44,20 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    Seam-only (DOF-30 verified @c2f0dd1c2): the template-literal expander
+    (`src/skill/playbook/template-literal/default-expander.ts`) is not exposed
+    on any barrel and has zero production consumer — the live rule/skill loaders
+    do not construct a `TemplateExpander`, so a SKILL.md template literal is left
+    verbatim (byte-identical default-OFF). Unique primitive preserved: the
+    Windsurf-style `${...}` template-literal expansion contract for playbook /
+    SKILL.md bodies, a sibling to the ADR-0203 `!macro` surface (both usable in
+    one SKILL.md, host chooses composition order).
+  promotion_path: |
+    Promotion owner = the skill/playbook loader (`src/skill/playbook/*` +
+    `src/skill/registry`): expose the expander on the playbook barrel and thread
+    a `TemplateExpander` into the SKILL.md body assembly so a template literal
+    expands at load time, then promote to L3. Engine swap (nunjucks/handlebars)
+    is a one-line `TemplateExpander` port body change.
 notes: 'ADR-0203 `!macro`와 sibling — 같은 SKILL.md에 둘 다 사용 가능. 합성 순서는 host 자유 (slice가 강제 안 함). HELL-TL-14는 default-OFF (template expander 미주입 시 `!macro` surface byte-identical) 봉인. exactOptionalPropertyTypes: OMIT은 slice 내부 코딩 스타일 — 프로젝트 wide tsconfig는 그대로. nunjucks/handlebars swap은 TemplateExpander port body 한 줄 교체로 가능.'

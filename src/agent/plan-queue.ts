@@ -44,7 +44,11 @@
  *   bypasses the paused state via an injected `SendNowSink` — it does NOT
  *   abort/interrupt the current turn. When no sink is wired, `sendNow`
  *   returns `{ok:false, error:"send-not-possible"}` (byte-identical to a
- *   store with no mutators).
+ *   store with no mutators). When the sink IS wired but its downstream
+ *   target is not installed yet (the composition-root timing window),
+ *   `sendNow` returns the TRANSIENT `{ok:false, error:"send-not-ready"}`
+ *   and KEEPS the entry (fail-closed — a send in the window is never a
+ *   silent drop; the operator can retry).
  *
  * Body decomposition: the public types + leaf helpers live in
  * `./plan-queue-shared` (re-exported below for back-compat); the per-method
@@ -136,14 +140,27 @@ export interface PlanQueueStore {
    *  reachable (already gone from the array) so `delete` on a drained
    *  id is `not-found`. */
   delete(entryId: string): Result<void, QueueMutateError>
-  /** Send the entry NOW (paused state ignored). Removes the entry from
-   *  the queue AND hands its payload to the wired {@link SendNowSink}.
-   *  Does NOT abort/interrupt the active turn (steering bypass — the
-   *  injection lands at the NEXT turn boundary). Returns
-   *  `send-not-possible` when no sink is wired or the sink rejects. The
-   *  entry is removed BEFORE the sink call so a sink-side throw does not
-   *  leave the entry in a half-state; if the sink rejects, the caller
-   *  observes a removed entry + a typed error and can re-enqueue. */
+  /** Send the entry NOW (paused state ignored). Hands its payload to the
+   *  wired {@link SendNowSink} and, on delivery / terminal failure, removes
+   *  the entry from the queue. Does NOT abort/interrupt the active turn
+   *  (steering bypass — the injection lands at the NEXT turn boundary).
+   *
+   *  Outcome is ALWAYS explicit + typed (never a silent drop):
+   *    - `{ok:true}`               — delivered; entry removed.
+   *    - `send-not-possible`       — TERMINAL: no sink wired, sink threw, or
+   *                                  sink rejected without `retryable`. Entry
+   *                                  removed; caller may re-enqueue.
+   *    - `send-not-ready`          — TRANSIENT: sink wired but downstream
+   *                                  target not installed yet (composition-root
+   *                                  timing window). FAIL-CLOSED: entry is
+   *                                  KEPT so the caller can retry; nothing was
+   *                                  delivered downstream (no double-send).
+   *    - `not-found`               — id does not match a LIVE entry.
+   *
+   *  The sink is probed BEFORE any queue mutation so a `send-not-ready`
+   *  outcome can preserve the entry; a sink-side throw is caught and mapped
+   *  to the TERMINAL `send-not-possible` (a throw cannot be classified
+   *  retryable). Exactly ONE `inject` call per invocation. */
   sendNow(entryId: string): Result<void, QueueMutateError>
 }
 

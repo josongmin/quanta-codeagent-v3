@@ -70,6 +70,16 @@ deliberate_hold:
       먼저 안전하게 착륙시키고 후속에서 와이어
     - conversation-checkpoint / fork 연동 (스냅샷 시 살아 있는 커널 핸들
       같이 보존) — checkpoint 슬라이스 쪽에서 합의된 후
+  promotion_path: |
+    Seam-only (DOF-30 verified @c2f0dd1c2): the persistent REPL kernel
+    (`src/runtime/node-repl/`) has zero production consumer — no tool is
+    registered, no surface constructs it. Promotion owner = the tool registry
+    (`src/tool/index.ts` + `src/agent/mode.ts` gated-tools): register a
+    `node_repl_exec` tool behind a `QUANTA_NODE_REPL` gate that drives the
+    kernel's execute-poll line protocol, then promote to L3. Unique primitive
+    preserved: a stateful, variable-persistent Node kernel (stdin/stdout line
+    protocol with collision-resistant sentinel framing) — no other slice owns a
+    persistent cross-tool-call execution kernel.
 notes: |
   Sibling 시 import 방향: src/runtime/node-repl/ → @/shared 만. 다른
   슬라이스 역참조 없음. tsconfig `@/runtime/*` alias 이미 존재해서 추가

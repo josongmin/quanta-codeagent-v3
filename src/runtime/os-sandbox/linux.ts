@@ -25,6 +25,7 @@ import { errMessage } from "@/shared"
 import { compileBubblewrapArgs } from "./bubblewrap"
 import { spawnViaBubblewrap } from "./landlock"
 import { compileLandlockCliArgs, LANDLOCK_CLI_NETWORK_DEFERRED_MARKER } from "./landlock-cli"
+import { sandboxUnavailableRefusal } from "./refusal"
 import type {
   OsSandbox,
   OsSandboxConfig,
@@ -136,10 +137,12 @@ export const linuxOsSandbox = (cfg?: OsSandboxConfig): OsSandbox => {
       }
       const backend = await detectLinuxSandboxBackend(cfg)
       if (backend === null) {
-        return passthrough(spec, spawner, {
-          sandboxApplied: false,
-          degradeReason: "linux-bwrap-missing",
-        })
+        // FAIL-CLOSED (DOF-40): a RESTRICTIVE sandbox was REQUESTED (profile is
+        // not off/danger — those short-circuited above) but NEITHER bwrap NOR
+        // landlock-cli is on PATH. We MUST NOT run the command unsandboxed while
+        // the caller believes it is fenced. Emit a TYPED REFUSAL and NEVER touch
+        // the spawner: the command does not execute, no host side effects.
+        return sandboxUnavailableRefusal("linux-bwrap-missing")
       }
       if (backend === "bubblewrap") {
         return spawnViaBubblewrap(spec, policy, spawner)

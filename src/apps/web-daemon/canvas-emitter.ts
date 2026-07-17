@@ -38,6 +38,7 @@ import {
 } from "@/protocol/canvas"
 import type { ArtifactRef } from "@/protocol/session"
 import { diffOps, isBinary, resolveEnvCaps } from "@/runner/diff-ops"
+import { errMessage } from "@/shared"
 
 /* ------------------------------------------------------------------ */
 /* Lossless adapters (daemon-side; pure)                              */
@@ -110,6 +111,14 @@ export interface CanvasEmitterOptions {
   readonly maxLines?: number
   /** Clock seam (default `Date.now`). */
   readonly now?: () => number
+  /**
+   * DOF-40 fail-closed seam. Invoked when a LIVE-connection `ws.send` /
+   * `send` THROWS (a dead socket). The throw is still isolated (the turn is
+   * never broken) but is now SURFACED here instead of silently swallowed.
+   * Absent ⇒ legacy swallow (byte-identical default-OFF). The observer
+   * itself is guarded — a throwing observer never breaks the turn.
+   */
+  readonly onSendError?: (err: { readonly error: unknown; readonly message: string }) => void
 }
 
 /** A tool file mutation to render. `before`/`after` are the full pre/post text
@@ -135,6 +144,8 @@ export interface CanvasEmitterHandle {
   readonly feedArtifactReady: (ref: ArtifactRef) => void
   /** Stop emitting (idempotent). After this every feed is a no-op. */
   readonly stop: () => void
+  /** DOF-40 — cumulative count of send throws surfaced/swallowed (health). */
+  readonly sendFailureCount: () => number
 }
 
 /**
@@ -213,14 +224,25 @@ export const createCanvasEmitter = (opts: CanvasEmitterOptions = {}): CanvasEmit
   }
   const now = opts.now ?? Date.now
   let stopped = false
+  let sendFailures = 0
 
   const emit = (msg: CanvasMessage): void => {
     if (stopped) return
     try {
       if (opts.send !== undefined) opts.send(msg)
       if (opts.ws !== undefined) opts.ws.send(encodeCanvasFrame(msg))
-    } catch {
-      // Dead/throwing sink — swallow so a turn is never broken by a bad socket.
+    } catch (error) {
+      // Dead/throwing sink — the turn is NEVER broken by a bad socket. DOF-40:
+      // the failure is now SURFACED (count + optional observer) rather than
+      // unconditionally silent. The observer itself is guarded.
+      sendFailures += 1
+      if (opts.onSendError !== undefined) {
+        try {
+          opts.onSendError({ error, message: errMessage(error) })
+        } catch {
+          // observer threw — swallow (turn safety is load-bearing).
+        }
+      }
     }
   }
 
@@ -240,5 +262,6 @@ export const createCanvasEmitter = (opts: CanvasEmitterOptions = {}): CanvasEmit
     stop: () => {
       stopped = true
     },
+    sendFailureCount: () => sendFailures,
   }
 }

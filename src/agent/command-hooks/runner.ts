@@ -246,8 +246,11 @@ export const runCommandHooks = async (
 
   // Serialize the payload ONCE. The Claude Code contract: the hook reads its
   // input as JSON on stdin. The payload is data, not code — it is NEVER part of
-  // the command string.
-  const stdinJson = serializePayload(event)
+  // the command string. Bounded to `gate.maxOutputBytes` (the symmetric IO cap)
+  // so a pathological / model-derived payload can NEVER produce an unbounded
+  // stdin write to the arbitrary-shell child (defense-in-depth: independent of
+  // any bound the HookBus / caller may already apply).
+  const stdinJson = serializePayload(event, gate.maxOutputBytes)
 
   let deny: { reason: string } | null = null
   let updatedInput: unknown
@@ -282,18 +285,41 @@ export const runCommandHooks = async (
 
 /** Serialize the event into the Claude Code stdin shape. We include the quanta
  *  event type + (optional) tool name + the raw payload so a hook script can
- *  branch on `hook_event_name` like Claude Code does. */
-const serializePayload = (event: CommandHookEvent): string => {
-  const envelope = {
-    hook_event_name: event.type,
-    ...(event.toolName !== undefined ? { tool_name: event.toolName } : {}),
-    payload: event.payload,
-  }
+ *  branch on `hook_event_name` like Claude Code does.
+ *
+ *  BOUNDED (SECURITY) — the serialized envelope is capped at `maxBytes` (UTF-8).
+ *  The event payload can be model- or tool-derived and therefore arbitrarily
+ *  large; writing it unbounded to the arbitrary-shell child's stdin is a
+ *  resource-exhaustion surface. When the full envelope would exceed the cap we
+ *  DROP the payload and send a minimal safe envelope that still carries the
+ *  event type + tool name (so the hook fires and can branch on
+ *  `hook_event_name`) plus an explicit `payload_truncated: true` marker. This
+ *  never throws and never emits an over-cap buffer. Circular / non-serializable
+ *  payloads fall into the same minimal-envelope path. */
+const serializePayload = (event: CommandHookEvent, maxBytes: number): string => {
+  const minimal = (): string =>
+    JSON.stringify({
+      hook_event_name: event.type,
+      ...(event.toolName !== undefined ? { tool_name: event.toolName } : {}),
+      payload: null,
+      payload_truncated: true,
+    })
+  let full: string
   try {
-    return JSON.stringify(envelope)
+    full = JSON.stringify({
+      hook_event_name: event.type,
+      ...(event.toolName !== undefined ? { tool_name: event.toolName } : {}),
+      payload: event.payload,
+    })
   } catch {
-    // Circular / non-serializable payload — send a minimal safe envelope so the
-    // command still runs and observes the event type (never throw).
-    return JSON.stringify({ hook_event_name: event.type, payload: null })
+    // Circular / non-serializable payload — send the minimal safe envelope so
+    // the command still runs and observes the event type (never throw).
+    return minimal()
   }
+  // A valid cap bounds the write; a non-positive / non-finite cap disables the
+  // bound (defensive — the gate always resolves a positive default).
+  if (maxBytes > 0 && Number.isFinite(maxBytes) && Buffer.byteLength(full, "utf8") > maxBytes) {
+    return minimal()
+  }
+  return full
 }

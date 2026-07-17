@@ -31,6 +31,7 @@
  */
 
 import { errMessage } from "@/shared"
+import { sandboxUnavailableRefusal } from "./refusal"
 import type {
   OsSandbox,
   OsSandboxConfig,
@@ -316,13 +317,16 @@ export const nativeLandlockOsSandbox = (cfg?: NativeLandlockConfig): OsSandbox =
         return passthrough(spec, spawner, { sandboxApplied: false })
       }
 
-      // No binding loaded → degraded passthrough so the upstream chain
-      // (default.ts) can detect the gap and route to Phase 2.
+      // No binding loaded → FAIL-CLOSED (DOF-40). In the COMPOSED default.ts
+      // chain this branch is unreachable (the caller only invokes this adapter
+      // after `detectNativeLandlock() !== null`), but this adapter is EXPORTED
+      // and a DIRECT caller with `{binding: null}` would otherwise run the
+      // command unsandboxed. A REQUESTED sandbox that cannot be enforced must
+      // refuse the spawn — never a silent unsandboxed run. `degradeReason`
+      // stays the SAME typed tag so the upstream chain's gap-detection is
+      // unchanged; the difference is the command no longer executes.
       if (binding === null) {
-        return passthrough(spec, spawner, {
-          sandboxApplied: false,
-          degradeReason: "native-binding-unavailable",
-        })
+        return sandboxUnavailableRefusal("native-binding-unavailable")
       }
 
       const napiPolicy = mapPolicyToNapi(policy, spec.cwd)

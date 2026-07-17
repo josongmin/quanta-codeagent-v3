@@ -89,6 +89,36 @@ export interface ApprovalSnapshot {
   readonly approvals: readonly ApprovalRequest[]
 }
 
+/** The terminal operation that reached the machine with NO matching pending
+ *  record — i.e. a producer never `request()`ed this id, so the resolution can
+ *  attribute NOTHING to the Objective / Run Ledger. */
+export type ApprovalGapOp = "settle" | "expire" | "cancel"
+
+/**
+ * FAIL-CLOSED audit-gap signal (DOF-40 producer→consumer wire).
+ *
+ * A HITL escalation resolves through a terminal mutator (`settle` / `expire` /
+ * `cancel`) keyed by an `approvalId`. When the machine holds NO record for that
+ * id, the resolution CANNOT be attributed to the Objective / Run Ledger — the
+ * audit trail for that escalation would be SILENTLY dropped (the mutator's
+ * `null` return is indistinguishable from a benign already-settled no-op).
+ *
+ * This record is emitted to the injected `onUnattributed` observer so the
+ * missing attribution is SURFACED, never swallowed. It is the explicit
+ * fail-closed path for the case where the deferred (web/SDK) approval producer
+ * did not feed the machine a `request(id)` before the host relayed the decision.
+ */
+export interface ApprovalAttributionGap {
+  /** The kernel/host approvalId that had no pending SM record. */
+  readonly approvalId: string
+  /** Which terminal operation hit the missing record. */
+  readonly op: ApprovalGapOp
+  /** The decision carried by a `settle` gap (absent for expire / cancel). */
+  readonly decision?: ApprovalDecision
+  /** Machine clock at the moment the gap was detected. */
+  readonly at: number
+}
+
 /**
  * Closed port over the approval state machine.
  *
@@ -124,6 +154,14 @@ export interface ApprovalSnapshot {
  *   - `expire` from `pending`         ⇒ `"expired"`   (no-op if already settled)
  *   - `cancel` from `pending`         ⇒ `"cancelled"` (no-op if already settled)
  *   - Any mutator on unknown id       ⇒ `null`        (no exception)
+ *
+ * FAIL-CLOSED audit-gap (DOF-40): a terminal mutator (`settle` / `expire` /
+ * `cancel`) on an UNKNOWN id still returns `null`, but ALSO emits an
+ * `ApprovalAttributionGap` to the injected `onUnattributed` observer (when
+ * supplied) so a missing producer (`request(id)` never called) surfaces the
+ * un-attributed escalation instead of silently dropping the audit trail. When
+ * `onUnattributed` is absent this is a compile-/run-time noop — byte-identical
+ * to the legacy null return.
  */
 export interface ApprovalStateMachinePort {
   request(req: {

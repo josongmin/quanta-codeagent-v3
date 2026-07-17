@@ -42,6 +42,8 @@ export {
   type PerCallSandboxConfig,
   type PerCallSandboxPort,
 } from "./per-call"
+// DOF-40 — fail-closed refusal for a requested-but-unavailable sandbox.
+export { SANDBOX_UNAVAILABLE_EXIT_CODE, sandboxUnavailableRefusal } from "./refusal"
 export { compileSeatbeltProfile } from "./seatbelt"
 export {
   diffProfiles,

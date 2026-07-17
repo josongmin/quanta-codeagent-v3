@@ -49,6 +49,16 @@ import type {
 
 const DEFAULT_MAX_REGISTRY_ENTRIES = 200
 
+/** Cap on the per-`(workspace, turnId)` call-index counter map. A single
+ *  very-long session touching many turns must NOT grow this map without
+ *  bound (the tags themselves are LRU-capped, but the counter is a distinct
+ *  producer-side structure). We LRU-evict the oldest `(workspace, turnId)`
+ *  key past this cap. Evicting a stale key only means a re-touched turn
+ *  restarts its call-index at 0 — the tag stays unique because the actual
+ *  dispatched `toolCallId` (when present) is the tag identity, and a turn
+ *  old enough to have been evicted is not concurrently anchoring anyway. */
+const DEFAULT_MAX_CALL_INDEX_KEYS = 1000
+
 /** ASCII unit separator — same delimiter the ADR-0121 dedup map uses. Used
  *  ONLY for the (workspace, turnId) per-turn call-index counter; never
  *  appears in tags surfaced to callers. */
@@ -87,8 +97,13 @@ interface InternalRegistry extends GranularRegistry {
 /** Build the default in-memory `GranularRegistry`. LRU-evicts when over
  *  `maxEntries`. Map preserves insertion order so the eviction can pop the
  *  oldest entry in O(1). The returned object's PUBLIC surface is exactly
- *  `GranularRegistry`; `insert` is for the policy's eyes only. */
-const buildRegistry = (maxEntries: number): InternalRegistry => {
+ *  `GranularRegistry`; `insert` is for the policy's eyes only.
+ *
+ *  The `counter` is threaded in (NOT owned) so `clear()` resets the WHOLE
+ *  producer state — both anchors AND the per-turn call-index map — and
+ *  `stats()` can report the counter's live size. There is exactly ONE
+ *  registry per policy instance: this stays a single snapshot authority. */
+const buildRegistry = (maxEntries: number, counter: CallIndexCounter): InternalRegistry => {
   const cap = Math.max(1, Math.floor(maxEntries))
   const entries = new Map<CheckpointTag, GranularCheckpointEntry>()
 
@@ -112,8 +127,20 @@ const buildRegistry = (maxEntries: number): InternalRegistry => {
       const e = entries.get(tag)
       return e === undefined ? null : e
     },
+    stats() {
+      return {
+        entryCount: entries.size,
+        entryCap: cap,
+        counterCount: counter.size(),
+        counterCap: DEFAULT_MAX_CALL_INDEX_KEYS,
+      }
+    },
     clear() {
       entries.clear()
+      // Teardown MUST leave zero producer state — reset the sibling counter
+      // too, else a long session's `(workspace, turnId)` keys survive the
+      // session boundary (the DoF-15 unbounded-growth gap).
+      counter.reset()
     },
     insert(entry) {
       // Replacement: delete then set so the tag moves to "newest" position.
@@ -128,17 +155,46 @@ const buildRegistry = (maxEntries: number): InternalRegistry => {
 /* Per-(workspace, turn) call-index counter                            */
 /* ------------------------------------------------------------------ */
 
-/** A monotonic counter keyed by `<workspace><US><turnId>`. Returns the
- *  NEXT call-index for that pair (0 for the first call). Used by the
- *  EffectChannel wrap (caller of `computeTag`) to disambiguate concurrent
- *  destructive calls within the same turn. */
-const buildCallIndexCounter = (): ((workspace: string, turnId: string) => number) => {
+/** A bounded, resettable, inspectable monotonic counter keyed by
+ *  `<workspace><US><turnId>`. `next()` returns the NEXT call-index for that
+ *  pair (0 for the first call). Used by the EffectChannel wrap (caller of
+ *  `computeTag`) to disambiguate concurrent destructive calls within the
+ *  same turn.
+ *
+ *  Bounded: LRU-evicts the oldest key past `cap` so a long-lived session
+ *  cannot grow the map without bound. Resettable: `reset()` clears ALL keys
+ *  so session teardown leaves ZERO producer state behind. Inspectable:
+ *  `size()` surfaces the live key count for the registry `stats()` accessor. */
+interface CallIndexCounter {
+  next(workspace: string, turnId: string): number
+  size(): number
+  reset(): void
+}
+
+const buildCallIndexCounter = (maxKeys: number): CallIndexCounter => {
+  const cap = Math.max(1, Math.floor(maxKeys))
+  // Map preserves insertion order ⇒ oldest key is `keys().next()`.
   const counter = new Map<string, number>()
-  return (workspace, turnId) => {
-    const key = `${workspace}${US}${turnId}`
-    const next = counter.get(key) ?? 0
-    counter.set(key, next + 1)
-    return next
+  return {
+    next(workspace, turnId) {
+      const key = `${workspace}${US}${turnId}`
+      const current = counter.get(key) ?? 0
+      // Move key to newest position so LRU eviction drops truly-stale turns.
+      if (counter.has(key)) counter.delete(key)
+      counter.set(key, current + 1)
+      while (counter.size > cap) {
+        const oldest = counter.keys().next().value
+        if (oldest === undefined) break
+        counter.delete(oldest)
+      }
+      return current
+    },
+    size() {
+      return counter.size
+    },
+    reset() {
+      counter.clear()
+    },
   }
 }
 
@@ -161,19 +217,27 @@ export const defaultGranularCheckpointPolicy = (
 ): GranularCheckpointPolicy => {
   const granularity: CheckpointGranularity = cfg.granularity
   const now: () => number = cfg.now ?? Date.now
-  const internalRegistry = buildRegistry(cfg.maxRegistryEntries ?? DEFAULT_MAX_REGISTRY_ENTRIES)
+  // Call-index counter ONLY relevant for tool-grain; allocated unconditionally
+  // because the policy is constructed once and the counter is tiny (and now
+  // bounded). Built BEFORE the registry so `clear()` can reset it and
+  // `stats()` can read its size.
+  const callIndexCounter = buildCallIndexCounter(DEFAULT_MAX_CALL_INDEX_KEYS)
+  const nextCallIndex = (workspace: string, turnId: string): number =>
+    callIndexCounter.next(workspace, turnId)
+
+  const internalRegistry = buildRegistry(
+    cfg.maxRegistryEntries ?? DEFAULT_MAX_REGISTRY_ENTRIES,
+    callIndexCounter,
+  )
   // Public face — `insert` is hidden from external callers.
   const registry: GranularRegistry = {
     list: () => internalRegistry.list(),
     lookup: (tag) => internalRegistry.lookup(tag),
+    stats: () => internalRegistry.stats(),
     clear: () => {
       internalRegistry.clear()
     },
   }
-
-  // Call-index counter ONLY relevant for tool-grain; allocated unconditionally
-  // because the policy is constructed once and the counter is tiny.
-  const nextCallIndex = buildCallIndexCounter()
 
   const base: CheckpointPolicy = cfg.base
 
@@ -299,4 +363,5 @@ export const __test = {
   buildRegistry,
   buildCallIndexCounter,
   DEFAULT_MAX_REGISTRY_ENTRIES,
+  DEFAULT_MAX_CALL_INDEX_KEYS,
 }

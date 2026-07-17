@@ -31,7 +31,13 @@ import type { BrowserHandle, BrowserPort } from "@/browser"
 import type { ImageBlock, LLMPort, Message, StreamEvent } from "@/llm"
 import { assembleFromEvents } from "@/llm"
 import { errMessage } from "@/shared"
-import { type AppSpec, type AppshotPort, makeJailedScaffold, type VerifyVerdict } from "@/tool"
+import {
+  type AppSpec,
+  type AppshotPort,
+  judgeVerdict,
+  makeJailedScaffold,
+  type VerifyVerdict,
+} from "@/tool"
 import { type BrowserSession, createBrowserSession } from "@/tool/browser/session-holder"
 
 /** Wired port plus a session teardown hook. */
@@ -83,14 +89,19 @@ const judgeMessage = (shot: Uint8Array, spec: AppSpec): Message => {
 
 /** Parse the judge's assistant text into a typed verdict. `PASS` (case-insensitive,
  *  leading token) ⇒ pass; anything else ⇒ fail. The remaining text is the critique.
- *  Empty text ⇒ a fail with a fixed note (never a throw). */
+ *  Empty text ⇒ a fail with a fixed note (never a throw).
+ *
+ *  Verdicts are minted via `judgeVerdict` — the BRANDED constructor — because
+ *  this is a REAL judge result (a live LLM stream). The loop honors a `pass` ONLY
+ *  when branded (fail-closed: a fabricated / unbranded `{ pass: true }` is refused
+ *  as `unverified_pass`). A branded FAIL is harmless. */
 const parseVerdict = (text: string): VerifyVerdict => {
   const trimmed = text.trim()
-  if (trimmed.length === 0) return { pass: false, notes: "judge returned an empty verdict" }
+  if (trimmed.length === 0) return judgeVerdict(false, "judge returned an empty verdict")
   const isPass = /^pass\b/i.test(trimmed)
   // Strip the leading PASS/FAIL token from the surfaced critique when present.
   const notes = trimmed.replace(/^(pass|fail)\b[\s:.\-—]*/i, "").trim() || trimmed
-  return { pass: isPass, notes }
+  return judgeVerdict(isPass, notes)
 }
 
 /** Run the judge once, assembling the streamed assistant text. Throws on a

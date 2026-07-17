@@ -42,7 +42,23 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    Seam-only (DOF-30 verified @c2f0dd1c2): `defaultStreamer(...)` in
+    `src/agent/streaming-boomerang/default-streamer.ts` has NO external consumer
+    — every reference is slice-local (the sibling `subagent-typed/boomerang`
+    success/failure projections are a DIFFERENT, already-wired primitive). No
+    host loop, tool, or surface constructs this streamer. Importing changes no
+    behaviour (default-OFF). Unique primitive preserved: the Roo-style
+    orchestrator "boomerang" streaming shape (a sub-task's streamed result is
+    projected back into the parent turn as a single typed outcome) — parked as an
+    L2 catalogued orphan rather than deleted so the absorbed design stays visible.
+  promotion_path: |
+    Promotion owner = the subagent/orchestrator delegation runner
+    (`src/agent/subagent-typed/*`): when an orchestrator mode drives streamed
+    sub-task execution, construct `defaultStreamer(...)` as the streaming
+    projection so partial sub-task output surfaces incrementally in the parent
+    turn, then promote to L3.
 notes: |
   Roo absorption — `.extracted_source/roo-cline/**` 코퍼스의 orchestrator 모드
   flow에서 채택. ADR-0218은 `delegate(req): Promise<BoomerangResult>` (단일 결과

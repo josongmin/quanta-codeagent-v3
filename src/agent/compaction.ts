@@ -217,7 +217,8 @@ export interface CompactInput {
     isFirstCompaction: boolean
   }) => Promise<{ abortReason: string | null }>
   /** ADR-0409 — `post_compact` emission bridge. Absent ⇒ existing path
-   *  byte-identical. NO-THROW: emitter errors are swallowed. */
+   *  byte-identical. NO-THROW: emitter errors are surfaced via
+   *  {@link CompactInput.onAttributionFailure} (or logged) then swallowed. */
   postCompactEmit?: (provenance: RecoveryProvenance) => void | Promise<void>
   /** ADR-0409 — threadId for provenance + Objective wire. */
   threadId?: string
@@ -226,6 +227,31 @@ export interface CompactInput {
   objectiveSetNextActions?: (threadId: string, actions: readonly string[]) => void
   /** ADR-0409 — explicit reason override (default `"token_budget_exceeded"`). */
   recoveryReason?: RecoveryReason
+  /**
+   * DOF-40 — the turn id this compaction belongs to. When present it is STAMPED
+   * synchronously into the emitted {@link RecoveryProvenance}
+   * (`attributedTurnId`) at the moment the provenance object is built — BEFORE
+   * the async `postCompactEmit` is awaited. A subscriber/objective handler that
+   * resolves LATE (after the loop advanced to the next turn) therefore reads the
+   * turn id from the payload it was handed, never from ambient "current turn"
+   * state that has since moved on. This makes compaction attribution
+   * deterministic: a late async handler cannot mis-attribute the event to the
+   * wrong turn. Absent ⇒ `attributedTurnId` is OMITTED (exactOptional
+   * byte-identical) — the legacy silent path is unchanged.
+   */
+  attributedTurnId?: string
+  /**
+   * DOF-40 fail-closed — invoked when `postCompactEmit` THROWS (the async
+   * attribution failed / was dropped). Receives the STAMPED provenance so the
+   * failure is attributable to the correct turn, not silently lost. A
+   * compaction attribution must never vanish: with no sink wired the failure is
+   * still logged (`logger.warn`), but a host that wants the drop surfaced in its
+   * agent-state stream passes this. NO-THROW itself: a throwing sink is
+   * caught + logged so it cannot escalate a swallowed emit into an aborted turn.
+   * Absent ⇒ log-only (byte-identical to the pre-DOF-40 swallow apart from the
+   * log line that already existed).
+   */
+  onAttributionFailure?: (provenance: RecoveryProvenance, error: unknown) => void
 }
 
 export type CompactResult =
@@ -741,6 +767,14 @@ const emitPostCompactIfWired = async (
   messages: Message[],
 ): Promise<void> => {
   if (input.postCompactEmit === undefined && input.objectiveSetNextActions === undefined) return
+  // DOF-40 — STAMP the attribution ids into the provenance SYNCHRONOUSLY here,
+  // BEFORE the async `postCompactEmit` is awaited below. `attributedTurnId` /
+  // `attributedThreadId` are read from `input` at this instant (the compaction's
+  // own turn), so a subscriber that resolves LATE — after the loop advanced to
+  // turn N+1 — attributes the event to the turn carried ON THE PAYLOAD, not to
+  // ambient "current turn" state that has since moved on. exactOptional: a field
+  // is OMITTED (never `: undefined`) when the caller did not stamp it, keeping
+  // the legacy path byte-identical.
   const provenance: RecoveryProvenance = {
     reason: input.recoveryReason ?? "token_budget_exceeded",
     tokensBefore,
@@ -749,17 +783,37 @@ const emitPostCompactIfWired = async (
     turnsKept: suffixLen,
     resumeStep: `resume after compaction — kept last ${suffixLen} turn(s), summarized ${prefixLen}`,
     compactedAt: Date.now(),
+    ...(input.attributedTurnId !== undefined ? { attributedTurnId: input.attributedTurnId } : {}),
+    ...(input.threadId !== undefined ? { attributedThreadId: input.threadId } : {}),
   }
   try {
     await input.postCompactEmit?.(provenance)
   } catch (e) {
-    // side-channel — log + swallow.
+    // DOF-40 fail-closed — a dropped/failed async attribution must NOT vanish
+    // silently. Surface it (with the STAMPED provenance so it is attributable to
+    // the correct turn) via the caller's sink when wired, always logging too.
+    // The sink itself is guarded so a throwing sink cannot turn a swallowed emit
+    // into an aborted turn (the no-throw contract of this whole seam).
     logger.warn(`compaction.postCompactEmit: ${errMessage(e)}`)
+    if (input.onAttributionFailure !== undefined) {
+      try {
+        input.onAttributionFailure(provenance, e)
+      } catch (sinkErr) {
+        logger.warn(`compaction.onAttributionFailure: ${errMessage(sinkErr)}`)
+      }
+    }
   }
   if (input.objectiveSetNextActions !== undefined && input.threadId !== undefined) {
     try {
+      // DOF-40 — carry the stamped turn id into the action string when present so
+      // the objective record is self-attributing (a persisted next-action read
+      // later is tied to the turn that produced it, not a since-advanced ambient
+      // turn). Appended AFTER the existing text so the resume contract is
+      // unchanged; omitted entirely when no turn was stamped (byte-identical).
+      const turnTag =
+        provenance.attributedTurnId !== undefined ? ` [turn ${provenance.attributedTurnId}]` : ""
       input.objectiveSetNextActions(input.threadId, [
-        `agent compacted: reason ${provenance.reason} — ${provenance.resumeStep}`,
+        `agent compacted: reason ${provenance.reason} — ${provenance.resumeStep}${turnTag}`,
       ])
     } catch (e) {
       // side-channel — log + swallow.

@@ -13,6 +13,14 @@
  */
 
 export { CodexSpecRouter, codexSpecRoute, codexSpecRouterEmittedActions } from "./codex-spec-router"
+// DOF-30 — single-authority decorator predicates derived from `codexSpecRoute`.
+// `RetryingLLM` (src/agent/retry.ts) and `FallbackLLM` (src/llm/fallback.ts)
+// consume these instead of carrying their own hardcoded kind sets.
+export {
+  isFallbackKind,
+  type RetryDisposition,
+  retryDispositionForKind,
+} from "./decorator-policy"
 export type { RecoveryAction, RecoveryRouter } from "./port"
 export { createDefaultRecoveryRouter } from "./recovery-router"
 // ADR-0237 — layer-owned arm `tooManyFailedAttempts` (default-OFF decorator).

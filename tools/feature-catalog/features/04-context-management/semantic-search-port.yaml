@@ -74,6 +74,16 @@ deliberate_hold:
       코퍼스 크기가 정당화되면 별도 ADR
     - tool wiring (semantic_search 같은 새 도구 surface) — primitive만 먼저 안전
       착륙, wiring은 후속
+  promotion_path: |
+    Seam-only (DOF-30 verified @c2f0dd1c2): the only consumer is
+    `src/runner/assemble/pipeline.ts:93 adaptSemanticIndex()`, a hardcoded
+    empty-stub returning `[]` (headless). Promotion owner = the runner
+    search-pipeline root (`src/runner/assemble/pipeline.ts` +
+    `search-index-backend.ts`): replace the `adaptSemanticIndex()` stub with a
+    real ADR-0159 EmbeddingPort-backed `SemanticIndex` under `QUANTA_INDEX`, so
+    hybrid lexical+semantic retrieval consults a live index instead of the stub,
+    then promote to L3. Unique primitive preserved: the closed `SemanticIndex`
+    port contract (cosine query with ~1e-9 mathematically-verified accuracy).
 notes: |
   Sibling 시 import 방향: src/retrieval/semantic/ → @/shared (Result/ok/err) 만.
   다른 슬라이스 / 다른 retrieval 파일 역참조 없음. 기존 src/retrieval/{embedders,

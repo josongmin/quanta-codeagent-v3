@@ -70,6 +70,7 @@ evidence:
       - tests/unit/compaction-breaker-hellgate.test.ts
       - tests/unit/compaction-summarizer.test.ts
       - tests/unit/loop-reactive-compaction-emit-hellgate.test.ts
+      - tests/unit/compaction-attribution-race-failclosed-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
@@ -88,3 +89,17 @@ notes: |
   clearing(block 보존 → orphan-safe, spill persist, wm.replace 배선 LIVE) — 별도 슬라이스
   `src/agent/tool-result-evict/` + fc `microcompact-tool-result-evict.yaml`. 두 메커니즘은
   알고리즘·safety profile·cost가 다르므로 카탈로그에서 conflate 금지.
+
+  2026-07-16 DOF-40 (compaction attribution race, fail-closed): post_compact emit는
+  ASYNC(`postCompactEmit`)라 handler가 turn 경계 뒤에 resolve하면 provenance에 turn
+  id가 없어 ambient "current turn"을 읽어 WRONG turn에 mis-attribute / drop됐음. Fix:
+  `RecoveryProvenance`에 `attributedTurnId?` / `attributedThreadId?` 추가(leaf type,
+  omitted-when-absent exactOptional), `compactIfNeeded`가 emit 직전 SYNCHRONOUS로
+  stamp → late async handler는 payload의 stamp로 결정론적 attribution(ambient state
+  안 읽음). Fail-closed: emit throw 시 stamped provenance를 `onAttributionFailure`
+  sink로 surface(silent drop 금지), sink도 no-throw로 contained. Objective action
+  string은 `[turn <id>]` tag append(resume contract 불변). OFF byte-identical:
+  callback/turn 미주입 ⇒ provenance 미생성. 신규 hellgate 10 tests(26 expects),
+  red-on-injection(stamp revert ⇒ ordering+sync-stamp+fail-closed 5 RED) 확인.
+  compaction.ts +60/-1, recovery-reason/types.ts +13. 잔여: loop.ts 와이어링
+  (config.run.turn → attributedTurnId 주입)은 여전히 deferred(이 wave는 seam만).

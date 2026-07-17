@@ -12,7 +12,9 @@
 
 export { createApprovalStateMachine } from "./store"
 export type {
+  ApprovalAttributionGap,
   ApprovalDecision,
+  ApprovalGapOp,
   ApprovalKind,
   ApprovalRequest,
   ApprovalSnapshot,

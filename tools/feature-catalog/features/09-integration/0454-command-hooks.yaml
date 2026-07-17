@@ -44,7 +44,13 @@ purpose: |
   time) + at least one binding + a permission decision (CommandHookPermissionPort,
   consulted once per event). INJECTION-SAFE: the user command is the argv tail
   verbatim, NEVER concatenated with the payload; the payload reaches the command
-  only as JSON on stdin. Confinement reuses LocalSandbox (scrubEnv env-allowlist,
+  only as JSON on stdin. STDIN-BOUNDED (DOF-40): the JSON envelope written to the
+  arbitrary-shell child's stdin is capped at the gate's IO bound (maxOutputBytes,
+  default 1MB) — an over-cap payload is DROPPED and replaced with a minimal safe
+  envelope carrying the event type + payload_truncated:true (the hook still fires,
+  bounded), so a model-/tool-derived payload can never produce an unbounded stdin
+  write; defense-in-depth, independent of the HookBus payload cap. Confinement
+  reuses LocalSandbox (scrubEnv env-allowlist,
   timeout default 30s, output cap default 1MB, dotfile-skipping shell,
   SIGTERM→SIGKILL escalation). Fail-closed: timeout ⇒ deny; exit≠0 ⇒ deny.
 
@@ -70,6 +76,7 @@ evidence:
   tests:
     unit:
       - tests/unit/command-hooks-hellgate.test.ts
+      - tests/unit/command-hooks-fail-closed-hardening-hellgate.test.ts
       - tests/unit/apps/agent/command-hooks-wire-hellgate.test.ts
       - tests/unit/command-hooks-trust-gate-hellgate.test.ts
       - tests/unit/command-hooks-trust-gate-migration-e2e.test.ts
@@ -95,7 +102,7 @@ knobs:
   - name: CommandHookConfig.maxOutputBytes
     type: 'number?'
     default: '1048576'
-    notes: 'Per-command combined stdout/stderr byte cap.'
+    notes: 'Symmetric IO cap. Per-command combined stdout/stderr byte cap AND (DOF-40) the ceiling on the JSON envelope written to the child stdin — an over-cap payload is dropped for a minimal safe envelope (payload_truncated:true) so stdin is never an unbounded write.'
   - name: CommandHookConfig.envAllowlist
     type: 'string[]?'
     default: 'DEFAULT_ENV_ALLOWLIST'
@@ -125,4 +132,10 @@ notes: |
   (the dangerous direction here is turning execution ON). Sealed by 25 hellgate
   cases incl. injection-safety (a $(rm -rf /) payload never enters the command
   string), permission refusal, opt-in/ack enforcement, and default-OFF
-  byte-identical.
+  byte-identical. DOF-40 fail-closed hardening adds 9 more cases (tests/unit/
+  command-hooks-fail-closed-hardening-hellgate.test.ts): the ON-proof through the
+  real config->gate->installCommandHooks->HookBus->spawn-port chain (exact event,
+  no direct shell), three separate fail-closed controls (empty-ack THROWS before
+  any handler is armed; armed-toggle-no-binding never spawns; unset => zero
+  HookBus subscription), and the stdin-bound (over-cap payload dropped, hook still
+  fires) with a red-on-injection guard proving the cap is load-bearing.

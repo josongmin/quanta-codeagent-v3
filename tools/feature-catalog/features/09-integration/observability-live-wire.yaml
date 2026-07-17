@@ -61,6 +61,7 @@ evidence:
   tests:
     unit:
       - tests/unit/observability-live-wire-hellgate.test.ts
+      - tests/unit/observability-wire-failclosed-hellgate.test.ts
     integration: []
     contract: []
 knobs:
@@ -85,3 +86,17 @@ notes: |
   21 hellgate cases / 70 expects (HookBus subscribe/unsubscribe via fake
   bus, gated AgentConfig slot population, RuntimeFacade getters, emitter
   receives live ports, idempotent re-wire, byte-identical default-OFF).
+  DOF-40 (2026-07-17, partial-wire fail-closed): `wireObservability`
+  previously degraded a throwing port factory / hookBus.subscribe() to an
+  `undefined` slot with NO signal — an absent slot was AMBIGUOUS between
+  "host opted out" and "the factory threw" (SILENTLY offline). The wire now
+  RECORDS every failed slot in a frozen `handle.degraded:
+  ObservabilityWirePortError[]` report (empty when clean/gate-OFF) AND routes
+  each failure to an optional `onPortError` observer — so WHICH port went
+  offline is VISIBLE. Opt-out (no hookBus / no repoRoot) is NOT a failure ⇒
+  never reported. Sibling isolation preserved (one throwing slot leaves the
+  other three populated). Gate-OFF returns the shared frozen NOOP handle
+  (degraded=[]) BEFORE any reporter/factory runs ⇒ byte-identical. A throwing
+  observer never breaks wiring. `OBSERVABILITY_WIRE_SLOTS` is the closed slot
+  enumeration (drift guard). 9 hellgate cases
+  (observability-wire-failclosed-hellgate.test.ts).

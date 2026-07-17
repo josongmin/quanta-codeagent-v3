@@ -24,7 +24,14 @@
  * duck-typed capture shape (mirrored from `@/tool`'s `ToolDiffSink`); it never
  * imports `@/agent/loop` or `@/apps/cli`. The `@/tool` slice never imports this
  * — the composition root is the only bridge.
+ *
+ * DOF-40 — fail-closed: a throwing subscriber is ISOLATED (siblings still
+ * fed) but the failure is now OBSERVABLE via the optional `onSubscriberError`
+ * seam, not silently starved. Default-OFF byte-identical: no observer ⇒
+ * legacy swallow.
  */
+
+import { type CanvasSourceOptions, fanOutIsolated } from "./canvas-fanout"
 
 /** A captured tool mutation: the full pre/post file text + correlation id. */
 export interface CapturedToolDiff {
@@ -39,23 +46,24 @@ export interface CanvasToolDiffSourceHandle {
   readonly sink: { capture(input: CapturedToolDiff): void }
   /** Subscribe to subsequent captures. Returns an unsubscribe closure. */
   readonly subscribe: (handler: (diff: CapturedToolDiff) => void) => () => void
+  /** Cumulative count of subscriber deliveries that THREW (health signal). */
+  readonly failureCount: () => number
 }
 
 /** Create a fresh canvas tool-diff source. One per daemon (shared across the
  *  daemon's connections, like the shared session + usage source). */
-export const createCanvasToolDiffSource = (): CanvasToolDiffSourceHandle => {
+export const createCanvasToolDiffSource = (
+  opts: CanvasSourceOptions = {},
+): CanvasToolDiffSourceHandle => {
   const subscribers = new Set<(diff: CapturedToolDiff) => void>()
+  let failures = 0
   return {
     sink: {
       capture: (input) => {
-        for (const fn of subscribers) {
-          try {
-            fn(input)
-          } catch {
-            // A throwing subscriber must not break the fan-out to siblings or
-            // the tool's successful mutation (the file is already written).
-          }
-        }
+        // Isolate throws (siblings + the already-written file are safe) AND
+        // surface them via the optional observer. Absent observer ⇒ legacy
+        // swallow (byte-identical).
+        failures += fanOutIsolated(subscribers, input, opts.onSubscriberError)
       },
     },
     subscribe: (handler) => {
@@ -64,5 +72,6 @@ export const createCanvasToolDiffSource = (): CanvasToolDiffSourceHandle => {
         subscribers.delete(handler)
       }
     },
+    failureCount: () => failures,
   }
 }

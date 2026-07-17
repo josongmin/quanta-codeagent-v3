@@ -42,12 +42,42 @@ evidence:
   tests:
     unit:
       - tests/unit/per-tool-checkpoint-hellgate.test.ts
+      - tests/unit/per-tool-record-lifecycle-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    DoF-15 (jul-16 default-OFF SOTA++ board): the per-tool RECORD producer is
+    LIVE under `QUANTA_PER_TOOL_RECORD=on` (surface-compose wires the granular
+    policy into the dispatch-wrap producer + the /rewind-tool consumer), but
+    the DEFAULT stays OFF. Decision (c): deliberately HOLD the producer with
+    BOUNDED retention + a typed PRODUCER-ONLY inspection accessor — NOT a
+    second snapshot authority. The single ADR-0209 `GranularRegistry` (tag→SHA)
+    is the sole authority; the deleted ADR-0300 raw-content store was NOT
+    resurrected.
+    Retention policy (bounds proven in per-tool-record-lifecycle-hellgate):
+      - anchors LRU-capped at `maxRegistryEntries` (default 200, min 1);
+      - the per-(workspace,turnId) call-index counter LRU-capped at
+        DEFAULT_MAX_CALL_INDEX_KEYS (1000) — the pre-DoF-15 unbounded vector;
+      - `registry.clear()` resets BOTH anchors AND the counter, and is called
+        on session teardown via `disposePerToolRecord` (repl.ts finally block);
+      - OFF path wraps ZERO tools: `wireCheckpointedEffectChannel` returns the
+        SAME channel reference (no wrap, no registry allocation).
+    Inspection is PRODUCER-ONLY: `registry.stats()` is a pure read-only
+    projection ({entryCount, entryCap, counterCount, counterCap}); nothing in
+    the loop consumes it to drive behaviour.
+  promotion_path: |
+    To flip the default ON, wire the `/rewind-tool` RESTORE consumer as the
+    canonical product consumer (the raw checkpoint adapter → /rewind-tool) at
+    the CLI composition root — a change to `src/apps/cli/repl/surface-compose.ts`
+    (a forbidden composition root for the DoF-15 leaf; returned as a text
+    follow-up). No new snapshot store is permitted — the promotion re-uses the
+    existing ADR-0209 registry + ADR-0210 three-way-restore port.
 notes: |
   4-arm trigger × granularity 호환성 매트릭스는 ADR 본문 표 참조.
   pre-destructive 모드에서는 base가 turn-dedup 으로 거절하면 tool-grain도
   거절 — legacy posture 존중 (cooperative). skill grain 은 enum-stable
   reserved (Codex skill boundary 와이어 예정).
+  DoF-15 retention: registry `stats()` (producer-only inspection) + bounded
+  call-index counter + teardown-clear. See deliberate_hold above.

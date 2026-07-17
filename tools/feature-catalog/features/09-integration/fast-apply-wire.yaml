@@ -70,29 +70,45 @@ evidence:
   tests:
     unit:
       - tests/unit/apply-patch-fast-apply-wire-hellgate.test.ts
-    integration: []
+      - tests/unit/agent/optional-ports-wire.test.ts
+    integration:
+      - tests/integration/runtime-fast-apply-fallback.test.ts
     contract: []
 knobs: []
 config_refs:
   env: []
-deliberate_hold:
-  reason: |
-    The TOOL-SIDE wire is complete + default-OFF. The remaining piece is the
-    AGENT-SIDE composition-root: the adapter mapping the real
-    `RoleModelResolver` + `dispatchSideConversation` onto `RoleResolverLike` /
-    `SideConversationLike`, plus the dispatch seam threading
-    `AgentConfig.fastApplyFallback` onto `ToolContext.fastApplyFallback`. Until
-    that lands the slot is inert and the tool path is byte-identical. `loop.ts`
-    / `prompt-pipeline.ts` are deliberately untouched (ADR-0417 §A1
-    effort-classifier prompt-hook is a separate deferred piece; user in-flight
-    on ADR-0418 there).
-  promotion_path: |
-    Follow-up ADR: (1) build the composition-root fallback adapter, (2) thread
-    `AgentConfig.fastApplyFallback` onto `ToolContext.fastApplyFallback` in the
-    dispatch seam, (3) close ADR-0417 §A1 effort-classifier prompt-hook wire.
+deliberate_hold: null
 notes: |
   ADR-0421, closes ADR-0417 gap A2 apply-wire. Error classification is
   `instanceof` on the closed `@/patch` error classes; the retry count is a
   hard 1 — no fuzzy repair (per [[no-heuristics-only-validated]]). Hellgate
   was RED (12/18) before the wire, GREEN (18/18) after; the 6 port-absent
   cases passed at RED, proving the default-OFF path was already byte-identical.
+
+  WIRE-FINISH LANDED (was deliberate_hold; hold now RESOLVED). The
+  composition-root pieces the prior hold deferred have SHIPPED and are proven
+  END-TO-END, so this row is no longer producer-only:
+    1. adapter — `src/agent/optional-ports.ts` (`wireOptionalAgentPorts`,
+       `QUANTA_FAST_APPLY=on`) builds the concrete `createFastApplyFallback`,
+       mapping the real `RoleModelResolver` + `dispatchSideConversation` onto
+       `RoleResolverLike` / `SideConversationLike`.
+    2. dispatch seam — `src/agent/dispatch/tool-context.ts:139` threads
+       `AgentConfig.fastApplyFallback` onto `ToolContext.fastApplyFallback`.
+    3. consumer — `src/tool/apply-patch.ts:696` reads `ctx.fastApplyFallback`
+       and calls `tryFastApplyFallback` → `fallback.attempt(...)` on a
+       recoverable V4A failure, retrying the applier ONCE.
+  END-TO-END proof: `tests/integration/runtime-fast-apply-fallback.test.ts`
+  drives the REAL runtime + REAL `apply_patch` tool with a scripted LLM: a
+  genuine anchor-drift patch throws `PatchAnchorNotFoundError`, the real
+  fallback dispatches ONE side-conversation (`sideConversationCalls===1`), and
+  the re-emitted patch APPLIES — observed as `f.txt` bytes going
+  `alpha\nbeta\n` → `alpha\nBETA\n`. OFF paired control (`QUANTA_FAST_APPLY`
+  unset): same LLM + same drift patch ⇒ file UNCHANGED, `sideConversationCalls
+  ===0` (byte-identical). Red-on-injection: disabling the consumer branch in
+  apply-patch.ts flips the ON rescue RED (file stays `beta`) while OFF stays
+  green — proving the mutation is attributable to the wire, not vacuous. All
+  three wire files (apply-patch.ts, fast-apply-fallback/runner.ts,
+  optional-ports.ts) report REACHED by `tools/feature-catalog/reachability.ts`.
+  Ledger row proposed change: reachability producer-only→wired,
+  activation unwired→env/config (`QUANTA_FAST_APPLY`), decision repair-first→
+  keep-default-off, proof on/off_identity wire→unit+integration.

@@ -45,5 +45,22 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    Producer-only (DOF-30 verified @c2f0dd1c2): the `AgentConfig.typedEventStore`
+    config SLOT has no reader. The concrete store IS live — the main assembler
+    (`src/host/runtime/agent-config-assembler.ts:832`) builds
+    `createInMemoryTypedHistoryEventStore()` and threads it as the POSITIONAL
+    `store` dep into `installCodexR2Wires`, where the context-change +
+    compaction-emit + mention producers append to it — but that path does NOT go
+    through the `cfg.typedEventStore` slot the ledger row names. So the SLOT
+    itself is byte-identical default-OFF. Unique primitive preserved: the
+    closed-union typed history-event store (ADR-0320 records every variant;
+    widening requires a new ADR) as a first-class injectable AgentConfig slot.
+  promotion_path: |
+    Promotion owner = `installCodexR2Wires` (`src/agent/codex-r2-wire-install/`)
+    + `agent-config-assembler.ts`: promote the positional `store` dep to read
+    `cfg.typedEventStore` (caller-override-precedence) so a host can inject a
+    durable/on-disk typed-event store instead of the in-memory default, then
+    promote to L3.
 notes: 'Closed-set extension log in ADR-0320 body records every variant addition; widening the union requires a new ADR.'
