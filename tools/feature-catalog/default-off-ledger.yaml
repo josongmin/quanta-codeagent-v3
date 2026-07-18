@@ -249,7 +249,9 @@ rows:
     activation: env/config
     effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
     reachability: wired
-    proof: { on: unknown, off_identity: unit, receipt: null }
+    # ON/OFF prompt composition is covered by bench-prompt-steer-hellgate;
+    # efficacy/F2P receipt remains intentionally absent.
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: measure-first
     owner_seam: src/runner/batch/eval/driver.ts
@@ -593,11 +595,18 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: dockersandbox
-    gate_owner: [QUANTA_SANDBOX]
-    activation: env/config
+    # TRUTH-FIX (jul-18): `DockerSandbox` class (sandbox.ts:306) is only DEFINED +
+    # re-exported (runtime/index.ts:43) — grep shows ZERO `new DockerSandbox` in
+    # production (test-only). `QUANTA_SANDBOX` actually selects the OS-level
+    # landlock/seatbelt sandbox, NOT this class; no selector ever constructs it.
+    # So reachability wired→seam-only (Wave C's 5/20 spot-check missed this row).
+    # Held: strong container-isolation forward path, needs a live backend selector
+    # + a running Docker daemon.
+    gate_owner: [DockerSandbox constructor caller]
+    activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: wired
-    proof: { on: wire, off_identity: unit, receipt: null }
+    reachability: seam-only
+    proof: { on: unit, off_identity: unit, receipt: null }
     risk: security
     decision: hold
     owner_seam: src/runtime/sandbox.ts
@@ -941,15 +950,20 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: llm-record-replay
-    gate_owner: [replay caller-import]
-    activation: unwired
+    # TRUTH-FIX (jul-18): `replayLlmPort` IS imported + wired into the live LLM
+    # factory at src/llm/factory.ts:444, gated by `QUANTA_LLM_REPLAY=<jsonl>` (it
+    # wraps the real stream path for deterministic e2e/bench replay). So it has a
+    # live consumer → reachability consumer-only→wired, activation→env/config.
+    # Held: default-OFF test/bench determinism seam (unset ⇒ byte-identical).
+    gate_owner: [QUANTA_LLM_REPLAY]
+    activation: env/config
     effective_default: { cli: na, web: na, bench: off, headless: off, daemon: na }
-    reachability: consumer-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
     owner_seam: src/llm/replay/index.ts
-    rollback: 명시적 import 전용(barrel 미노출)
+    rollback: unset QUANTA_LLM_REPLAY
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: loadreporules-cwd
