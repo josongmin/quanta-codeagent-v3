@@ -299,7 +299,7 @@ describe("quanta serve --stdio — spawned session.v1 server (ticket 02)", () =>
   // CLI attach가 daemon 세션에서 쓰는 그 flow와 동형. 서버 핵심(gate/stamp/
   // EOF/SIGTERM/stdout-purity/기본 턴) 7개는 완성; 이 위임 배선은 kernel
   // approval 경로를 건드리는 별도 작업으로 분리.
-  test.skip(
+  test(
     "APPROVAL round-trip: a gated bash tool parks the turn; onApproval approves; the tool REALLY executes (marker file) and the turn completes",
     async () => {
       const dir = mkTmp()

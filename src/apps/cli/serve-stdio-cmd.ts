@@ -426,6 +426,13 @@ const serveOverStdio = async (io: ServeStdioCmdIo, args: ServeStdioArgs): Promis
         transport,
         // GAP-3 — stamp the HONEST transport onto `capabilities.transport`.
         sessionTransport: "stdio",
+        // 02 approval wire-delegation — this surface has NO inline operator; a
+        // mid-turn ask is DEFERRED onto the wire (kernel `awaiting_approval` +
+        // `approval.requested`) for the `connect({onApproval})` client to resolve
+        // via `approval.respond` + a re-issued `turn.run`. Unless the caller set
+        // the inline auto-approve gate (which then wins), a gated tool parks here
+        // rather than being silently denied at the base `onConfirm`.
+        approvalDelivery: "wire",
         cwd: args.cwd,
         env: sessionEnv,
         homeDir: process.env.HOME ?? "/tmp",

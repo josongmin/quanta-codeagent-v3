@@ -30,12 +30,15 @@ export interface HeadlessApprovalWiring {
    *  `confirmSlot` (the runtime swaps it to its controller mid-turn; the gate +
    *  sandbox-escalation read through this), mirroring the CLI composition. */
   readonly onConfirm: SurfaceConfirm
-  /** Present ONLY when the gate is ON. Passed on the runtime bootstrap overlay
-   *  (`overlay.approvalProtocol`); shape matches `RuntimeApprovalProtocolConfig`.
-   *  `confirmSlot.current` MUST stay mutable — `runWithProtocol` reassigns it. */
+  /** Present when a delivery mode ARMS the runtime approval protocol — the INLINE
+   *  gate (`interactive: true`, same-turn auto-resolve) OR the jul-18 WIRE-DEFER
+   *  mode (`interactive: false`, mint+throw ⇒ a wire round-trip). Passed on the
+   *  runtime bootstrap overlay (`overlay.approvalProtocol`); shape matches
+   *  `RuntimeApprovalProtocolConfig`. `confirmSlot.current` MUST stay mutable —
+   *  `runWithProtocol` reassigns it. Absent ⇒ the OFF deferred-deny composition. */
   readonly approvalProtocol?: {
     readonly confirmSlot: { current: SurfaceConfirm }
-    readonly interactive: true
+    readonly interactive: boolean
   }
 }
 
@@ -44,14 +47,49 @@ export interface HeadlessApprovalWiring {
  *  re-run). No `approvalProtocol` ⇒ the runtime keeps the deferred throw protocol. */
 const deferredWiring = (): HeadlessApprovalWiring => ({ onConfirm: async () => false })
 
+/** jul-18 (02 serve --stdio) — WIRE-DEFER: arm the approval-protocol overlay in
+ *  the DEFERRED (non-interactive) posture. The base `onConfirm` is a deny (it is
+ *  NEVER reached: with `interactive:false` `runOnConfirm` mints a pending approval
+ *  and throws `RuntimeApprovalRequiredError` BEFORE consulting the slot). The
+ *  `confirmSlot.current` is that same reference so `runWithProtocol` pushes NO
+ *  surface confirm — the throw path stays clean (a WIRE client, not an inline
+ *  operator, resolves the ask via `approval.respond`). This is the third mode
+ *  the ADR-0540 W1-A doc named ("wire-defer") but left unimplemented; it differs
+ *  from OFF-deny by ARMING the overlay (⇒ kernel `awaiting_approval` +
+ *  `approval.requested` wire event) and from inline by staying NON-interactive
+ *  (⇒ no same-turn auto-resolve). */
+const wireDeferWiring = (): HeadlessApprovalWiring => {
+  // The base `onConfirm` the AgentConfig carries MUST route through the SAME
+  // `confirmSlot` the runtime swaps (`runWithProtocol` sets `slot.current` to the
+  // runtime approval controller's throwing onConfirm at scope entry) — exactly
+  // like the inline path. Otherwise the agent would call this deny directly and
+  // NEVER reach `runOnConfirm`'s deferred mint+throw. With `interactive:false`
+  // the controller mints a pending approval + throws (the wire round-trip); the
+  // pre-swap slot value below is a fail-closed deny that is never reached.
+  const preSwapDeny: SurfaceConfirm = async () => false
+  const confirmSlot = { current: preSwapDeny }
+  const onConfirm: SurfaceConfirm = async (action: ToolAction) => await confirmSlot.current(action)
+  return { onConfirm, approvalProtocol: { confirmSlot, interactive: false } }
+}
+
 export const buildHeadlessApprovalWiring = (
   env: Record<string, string | undefined>,
+  opts?: { readonly wireDefer?: boolean },
 ): HeadlessApprovalWiring => {
-  if (!gateOn(env, HEADLESS_INLINE_APPROVAL_GATE)) return deferredWiring()
-  // Auto-policy surface: headless has no operator, so a mid-turn ask auto-approves
-  // INLINE (same turn) — the inline analogue of the deferred `resolveApproval`.
-  const surfaceOnConfirm: SurfaceConfirm = async () => true
-  const confirmSlot = { current: surfaceOnConfirm }
-  const onConfirm: SurfaceConfirm = async (action: ToolAction) => await confirmSlot.current(action)
-  return { onConfirm, approvalProtocol: { confirmSlot, interactive: true } }
+  // The inline auto-approve gate WINS when set (an explicit opt-in): a live-op
+  // analogue that resolves the ask in-turn with no wire round-trip.
+  if (gateOn(env, HEADLESS_INLINE_APPROVAL_GATE)) {
+    // Auto-policy surface: headless has no operator, so a mid-turn ask auto-approves
+    // INLINE (same turn) — the inline analogue of the deferred `resolveApproval`.
+    const surfaceOnConfirm: SurfaceConfirm = async () => true
+    const confirmSlot = { current: surfaceOnConfirm }
+    const onConfirm: SurfaceConfirm = async (action: ToolAction) =>
+      await confirmSlot.current(action)
+    return { onConfirm, approvalProtocol: { confirmSlot, interactive: true } }
+  }
+  // WIRE-DEFER (opt-in by the serve --stdio composition): a mid-turn ask parks
+  // the turn on the wire for the `connect({onApproval})` client to resolve.
+  if (opts?.wireDefer === true) return wireDeferWiring()
+  // Default OFF — deferred deny (byte-identical to the pre-jul-18 composition).
+  return deferredWiring()
 }

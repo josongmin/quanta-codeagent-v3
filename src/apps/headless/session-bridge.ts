@@ -49,7 +49,9 @@ const buildHeadlessRuntimeArgs = (
   // surface resolves a mid-turn ask in the SAME turn (no deferred throw + turn
   // re-run). OFF ⇒ deny + no `approvalProtocol` ⇒ byte-identical to the pre-W1
   // deferred composition (the `driveSessionTurn` `resolveApproval` re-run path).
-  const approval = buildHeadlessApprovalWiring(input.env ?? {})
+  const approval = buildHeadlessApprovalWiring(input.env ?? {}, {
+    wireDefer: input.approvalDelivery === "wire",
+  })
   // jul-16 GAP-3 (02 serve --stdio) — assemble the overlay from the approval
   // wiring PLUS the composition-declared wire transport stamp. Both slots are
   // presence-only: absent ⇒ the overlay key is omitted (byte-identical to the
