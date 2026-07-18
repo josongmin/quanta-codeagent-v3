@@ -21,3 +21,9 @@ crash/torn·lock·seq·replay·누출·게이트·v1정직성 7축 실행 repro 
 - GAP-1 → N 에이전트가 배선-회귀 e2e 진행 중
 - GAP-2(durable resume 클라 소비자 0) → J(05 door)가 채움
 - GAP-3(transport "inproc" 거짓 스탬프) → I(02 serve --stdio)가 채움
+
+## J(05 door) 어딧 follow-up (1f578f28f, 선존·05 무관)
+| # | 심각도 | 내용 | 처리 |
+|---|---|---|---|
+| J-MED-1 | MED(PRE-EXISTING) | bridge.ts:523-539이 peer.connected를 async handleConnect 전 동기 설정 → concurrent publishEvents가 handshake replay 창 중간에 live 이벤트 interleave(seq 순서 뒤바뀜). **pre-05 plain connect에도 동일** — resume이 재접속-후-drop 빈도를 높여 hit rate만 상승. resumed 마커는 여전히 strictly last, servedThroughSeq 정직. | fan-out gating 별도 티켓(live fan-out을 connect replay 완료까지 게이트 or per-peer send queue) |
+| J-LOW-1 | LOW | events-only resume이 다음 live snapshot까지 serverAutoContinues=false 시작(connect.ts:286). false→클라 재발행이라 safe-by-default, M-3 pending-approval seed도 대응 skip. consistent. | 무조치(문서화됨) |
