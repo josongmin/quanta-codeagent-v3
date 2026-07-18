@@ -19,16 +19,44 @@ import {
 } from "@/retrieval"
 import { createTreeSitterParser } from "@/retrieval/code-parser"
 import type { SearchPipeline } from "@/retrieval/pipeline"
-import { errMessage, gateOn, logger, runtimeConfig } from "@/shared"
+import {
+  emitOperatorNotice,
+  errMessage,
+  gateOn,
+  logger,
+  type OperatorNotice,
+  runtimeConfig,
+} from "@/shared"
 import { searchCodebaseTool, type Tool } from "@/tool"
 import { assemblePipeline, type PipelinePreset, type PipelineWireOverrides } from "./pipeline"
 import {
   buildSemanticBackend,
   type ChunkUpsertPort,
+  HASH_EMBED_MODEL_TAG,
   resolveIndexEmbedder,
   type SearchIndexMetrics,
   type SemanticReconcileBatch,
 } from "./search-index-backend"
+
+/** Honesty repair (structural audit R-A-adversarial): `QUANTA_INDEX=on` with NO
+ *  embedding provider/key silently resolves the 64-dim hash-BoW placeholder, so
+ *  `search_codebase` advertises a semantic capability it does not have (paraphrase
+ *  queries score near-zero yet return non-empty, non-semantic hits). The only
+ *  prior signal was a metric label — nothing operator-facing. This pure helper
+ *  maps the resolved provider label to a ONE-SHOT operator notice (or null for a
+ *  real provider) so the placeholder is no longer a silent degradation. */
+export const placeholderEmbedderNotice = (providerLabel: string): OperatorNotice | null =>
+  providerLabel === HASH_EMBED_MODEL_TAG
+    ? {
+        severity: "warn",
+        source: "search-index",
+        message:
+          "QUANTA_INDEX is on but no embedding provider is set — `search_codebase` runs a " +
+          "NON-SEMANTIC placeholder (lexical-quality hash vectors), so paraphrase/synonym " +
+          "queries will not match.",
+        hint: "Set VOYAGE_API_KEY / OPENAI_API_KEY / COHERE_API_KEY (or QUANTA_EMBED_PROVIDER) for real semantic search.",
+      }
+    : null
 
 export interface WiredSearchPipeline {
   readonly pipeline: SearchPipeline
@@ -207,6 +235,11 @@ const startIndexer = (
   const resolvedEmbedder = resolveIndexEmbedder(env, undefined, {
     ...(metrics !== undefined ? { metrics } : {}),
   })
+  // Honesty repair — surface the non-semantic placeholder ONCE (no-op for a real
+  // provider or when no operator-notice sink is installed; @/shared bus is
+  // no-throw). Emitted at index construction, not per query.
+  const placeholderNotice = placeholderEmbedderNotice(resolvedEmbedder.providerLabel)
+  if (placeholderNotice !== null) emitOperatorNotice(placeholderNotice)
   const sem = buildSemanticBackend(env, resolvedEmbedder.embed, {
     resolvedEmbedder,
     ...(metrics !== undefined ? { metrics } : {}),
