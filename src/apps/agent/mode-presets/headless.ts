@@ -29,6 +29,7 @@ import { wireOptionalAgentPorts } from "@/agent"
 import type { Message } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { logger } from "@/shared"
+import { gateOn } from "@/shared/env-flag"
 import { StdoutStream, type StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import {
@@ -40,6 +41,7 @@ import {
 import { exitCodeForOutcome } from "../run"
 import { StreamJsonSink } from "./stream-json-sink"
 import {
+  resolveModePresetGlobRules,
   resolveModePresetPromptSurfaceProfile,
   resolveModePresetRepoRules,
   resolveModePresetSystemPrompt,
@@ -65,6 +67,14 @@ const buildHeadlessBase = async (
   // WS4 R3 — headless (`quanta -p`, one-shot on the user's cwd) is a human-driven
   // real-repo surface, so it honors AGENTS.md/CLAUDE.md just like interactive.
   const repoRules = await resolveModePresetRepoRules(req.mode, req.base.repoRules, cwd)
+  // WS4 follow-on — multi-source vendor glob-rules (default-OFF `QUANTA_VENDOR_RULES`;
+  // trust-gated inside resolveModePresetGlobRules ⇒ empty on untrusted modes ⇒
+  // caller leaves globRules unset ⇒ OFF byte-identical).
+  const globRules = await resolveModePresetGlobRules(
+    req.mode,
+    cwd,
+    gateOn(process.env, "QUANTA_VENDOR_RULES"),
+  )
   const promptSurfaceProfile = resolveModePresetPromptSurfaceProfile(req.mode, req.base.system)
   // P26 — when a structured stdout contract is selected the agent loop must
   // emit INTO the StreamJsonSink (which encodes each AgentEvent → versioned
@@ -90,6 +100,7 @@ const buildHeadlessBase = async (
       system: resolveModePresetSystemPrompt(req.mode, req.base.system, cwd),
       ...(promptSurfaceProfile !== undefined ? { promptSurfaceProfile } : {}),
       ...(repoRules !== undefined ? { repoRules } : {}),
+      ...(globRules.length > 0 ? { globRules: { rules: globRules } } : {}),
       cwd,
       maxTurns: req.base.maxTurns ?? 20,
       // T01 (audit L5 H-2): inherit the composition-root's REAL signal. The

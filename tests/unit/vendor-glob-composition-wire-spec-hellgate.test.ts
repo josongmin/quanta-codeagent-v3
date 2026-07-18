@@ -56,33 +56,30 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import {
-  type GlobRule,
-  loadGlobRules,
-  loadGlobRulesWithVendors,
-} from "@/agent/glob-rules"
-import { type AgentMode, MODE_REPO_RULES_POLICY, modeLoadsRepoRules } from "@/agent/run-mode"
+import type { AgentConfig, AgentOutcome, RunMode } from "@/agent"
+import { type GlobRule, loadGlobRules, loadGlobRulesWithVendors } from "@/agent/glob-rules"
+import { type AgentMode, MODE_REPO_RULES_POLICY } from "@/agent/run-mode"
+import { resolveModePresetGlobRules } from "@/apps/agent/mode-presets/system"
+import type { LLMPort } from "@/llm"
+import type { PermissionContext } from "@/permission"
+import type { StreamPort } from "@/stream"
+import { defaultTools, ToolRegistry } from "@/tool"
+import type { AssembleRequest } from "../../src/apps/agent/assemble"
+import { runMode as headlessRun } from "../../src/apps/agent/mode-presets/headless"
+import { runMode as ideRun } from "../../src/apps/agent/mode-presets/ide"
 
-// ─── REFERENCE composition resolver (recommended production edit) ─────────────
-//
-// Mirrors `resolveModePresetRepoRules`: (1) TRUST GATE via `modeLoadsRepoRules`
-// — untrusted/hermetic modes get NOTHING; (2) FEATURE GATE default-OFF via the
-// `enabled` flag (the production edit resolves this from a `QUANTA_VENDOR_RULES`
-// env in the composition root); (3) composes via the REAL
-// `loadGlobRulesWithVendors`. Fail-open: a broken load never crashes session
-// start (returns []). Returns the `GlobRule[]` the wire assigns to
-// `cfg.globRules.rules`.
-const resolveVendorGlobRules = async (
+// WIRE LANDED (jul-19): this suite now verifies the REAL production resolver
+// `resolveModePresetGlobRules` (src/apps/agent/mode-presets/system.ts), wired
+// into the interactive/headless/ide base-builders behind the default-OFF
+// `QUANTA_VENDOR_RULES` gate. It composes the REAL trust gate
+// (`modeLoadsRepoRules`, encapsulated in the resolver) + REAL
+// `loadGlobRulesWithVendors`. §3's red-on-injection proves the trust gate is
+// load-bearing: a wire that skips it leaks untrusted vendor rules into ci-bot.
+const resolveVendorGlobRules = (
   mode: AgentMode,
   cwd: string,
   enabled: boolean,
-): Promise<GlobRule[]> => {
-  // TRUST GATE — batch/ci-bot/daemon stay rule-less (OmO security matrix). This
-  // is the load-bearing security line; removing it is the injection §3 targets.
-  if (!modeLoadsRepoRules(mode)) return []
-  // FEATURE GATE — default-OFF: gate-off ⇒ byte-identical legacy output.
-  return loadGlobRulesWithVendors(cwd, { vendorDetectorEnabled: enabled }).catch(() => [])
-}
+): Promise<GlobRule[]> => resolveModePresetGlobRules(mode, cwd, enabled)
 
 // Bodies that CANNOT appear in any legacy `.cursor/rules` / `.quanta/rules`
 // output — they live only in vendor files the legacy loader never reads. Their
@@ -107,8 +104,6 @@ const mkRepoWithVendorFiles = async (name: string): Promise<string> => {
   await writeFile(join(cwd, ".clinerules"), `# cline\n${CLINE_MARKER}\n`)
   return cwd
 }
-
-const bodies = (rules: GlobRule[]): string[] => rules.map((r) => r.body)
 
 // ══════════════════════════════════════════════════════════════════════
 //  §1 ON — trusted mode + gate-on ⇒ vendor bodies reach the composed set
@@ -138,32 +133,33 @@ describe("§1 ON — trusted mode + gate-on surfaces real vendor rules", () => {
 // ══════════════════════════════════════════════════════════════════════
 //  §2 OFF — gate-off ⇒ byte-identical legacy (vendor bodies ABSENT)
 // ══════════════════════════════════════════════════════════════════════
-describe("§2 OFF — gate-off is byte-identical legacy", () => {
-  test("interactive + disabled ⇒ composed set == legacy, no vendor body (paired: enabled adds it)", async () => {
+describe("§2 OFF — gate-off is byte-identical to the pre-wire dormant state", () => {
+  test("interactive + disabled ⇒ EMPTY (no globRules at all), paired: enabled adds legacy+vendor", async () => {
     const cwd = await mkRepoWithVendorFiles("off")
-    // Add a legacy rule so BOTH arms are non-empty — proves the ABSENCE of the
-    // vendor body is real, not just an empty render.
+    // Add a legacy `.cursor/rules` so the ON arm is provably non-empty from the
+    // legacy source too (proves ON composes legacy+vendor, OFF drops BOTH).
     await mkdir(join(cwd, ".cursor", "rules"), { recursive: true })
     await writeFile(
       join(cwd, ".cursor", "rules", "base.mdc"),
       "---\nalwaysApply: true\n---\nLEGACY-CURSOR-BODY-always\n",
     )
 
+    // DESIGN: `QUANTA_VENDOR_RULES` gates the ENTIRE glob-rules surface (legacy
+    // AND vendor). The glob-rules subsystem was DORMANT pre-wire (no producer of
+    // `cfg.globRules`), so the ONLY byte-identical OFF is the empty set — loading
+    // legacy `.cursor/rules` even when off would be an unmeasured behavior change.
     const off = await resolveVendorGlobRules("interactive", cwd, /*enabled*/ false)
-    const legacy = await loadGlobRules(cwd)
+    expect(off).toEqual([]) // OFF ⇒ caller leaves cfg.globRules unset ⇒ byte-identical
 
-    // OFF arm IS the legacy array — same bodies, same order (byte-identical).
-    expect(bodies(off)).toEqual(bodies(legacy))
-    expect(off.some((r) => r.body.includes(WINDSURF_MARKER))).toBe(false)
-    expect(off.some((r) => r.body.includes(CLINE_MARKER))).toBe(false)
-    // Non-empty guard: the legacy rule IS present on the OFF arm.
-    expect(off.some((r) => r.body.includes("LEGACY-CURSOR-BODY-always"))).toBe(true)
+    // Sanity: the fixture genuinely HAS loadable rules (so [] is a real gate
+    // effect, not an empty repo).
+    const legacyRaw = await loadGlobRules(cwd)
+    expect(legacyRaw.some((r) => r.body.includes("LEGACY-CURSOR-BODY-always"))).toBe(true)
 
-    // PAIRED CONTROL: enabling on the SAME fixture DOES add the vendor bodies.
+    // PAIRED CONTROL: enabling on the SAME fixture surfaces legacy + BOTH vendors.
     const on = await resolveVendorGlobRules("interactive", cwd, /*enabled*/ true)
     expect(on.some((r) => r.body.includes(WINDSURF_MARKER))).toBe(true)
     expect(on.some((r) => r.body.includes(CLINE_MARKER))).toBe(true)
-    // …and the legacy rule is STILL there (compose, not replace).
     expect(on.some((r) => r.body.includes("LEGACY-CURSOR-BODY-always"))).toBe(true)
   })
 })
@@ -223,4 +219,79 @@ describe("§4 DRIFT GUARD — every mode's vendor-wire behavior matches its poli
       }
     }
   })
+})
+
+// ══════════════════════════════════════════════════════════════════════
+//  §5 WIRING — the base-builders actually populate cfg.globRules end-to-end
+//  (mirrors mode-preset-repo-rules-wire §2; the resolver is proven above, this
+//   proves the trusted preset base-builders route through it onto the config).
+// ══════════════════════════════════════════════════════════════════════
+const fakeLlm: LLMPort = { model: "test", stream: async function* () {} } as unknown as LLMPort
+const fakeOutcome: AgentOutcome = { reason: "completed", turns: 1, messages: [] }
+const baseFor = (cwd: string): AssembleRequest["base"] => ({
+  llm: fakeLlm,
+  registry: new ToolRegistry(defaultTools),
+  stream: { emit: () => undefined } as StreamPort,
+  permission: { mode: "acceptEdits" } as PermissionContext,
+  messages: [],
+  system: "",
+  cwd,
+  maxTurns: 3,
+  signal: new AbortController().signal,
+})
+
+describe("§5 WIRING — trusted preset base-builders populate cfg.globRules", () => {
+  const drivers: ReadonlyArray<{
+    mode: RunMode
+    run: (req: AssembleRequest) => Promise<unknown>
+    extra: Partial<AssembleRequest>
+  }> = [
+    { mode: "headless", run: headlessRun, extra: { headless: { prompt: "go" } } },
+    { mode: "ide", run: ideRun, extra: {} },
+  ]
+
+  const captureCfg = async (
+    d: (typeof drivers)[number],
+    cwd: string,
+  ): Promise<AgentConfig | undefined> => {
+    let cfg: AgentConfig | undefined
+    await d.run({
+      mode: d.mode,
+      base: baseFor(cwd),
+      seams: {
+        runAgent: async (c: AgentConfig) => {
+          cfg = c
+          return fakeOutcome
+        },
+      },
+      ...d.extra,
+    } as AssembleRequest)
+    return cfg
+  }
+
+  for (const d of drivers) {
+    test(`${d.mode}: QUANTA_VENDOR_RULES=1 ⇒ cfg.globRules carries the vendor rule; unset ⇒ no globRules (byte-identical)`, async () => {
+      const cwd = await mkRepoWithVendorFiles(`wire-${d.mode}`)
+      const prev = process.env.QUANTA_VENDOR_RULES
+      try {
+        // ON — the base-builder resolves + attaches cfg.globRules from the wire.
+        process.env.QUANTA_VENDOR_RULES = "1"
+        const on = await captureCfg(d, cwd)
+        expect(
+          (on?.globRules?.rules ?? []).some((r) => r.body.includes(WINDSURF_MARKER)),
+          `${d.mode} ON must attach the vendor rule to cfg.globRules`,
+        ).toBe(true)
+
+        // OFF — unset ⇒ the base-builder leaves cfg.globRules unset (byte-identical
+        // to the pre-wire dormant state). red-on-injection: a builder that always
+        // attaches would fail this.
+        delete process.env.QUANTA_VENDOR_RULES
+        const off = await captureCfg(d, cwd)
+        expect(off?.globRules, `${d.mode} OFF must leave cfg.globRules unset`).toBeUndefined()
+      } finally {
+        if (prev === undefined) delete process.env.QUANTA_VENDOR_RULES
+        else process.env.QUANTA_VENDOR_RULES = prev
+      }
+    })
+  }
 })

@@ -11,6 +11,7 @@ import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import type { PermissionContext } from "@/permission"
 import { type ApprovalResolver, driveSessionTurn } from "@/runner/orchestrate"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
+import { gateOn } from "@/shared/env-flag"
 import { StdoutStream, type StreamPort, TeeStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import {
@@ -22,6 +23,7 @@ import {
 import { buildInteractiveTurnAssembler } from "../interactive-turn-assembler"
 import { exitCodeForOutcome } from "../run"
 import {
+  resolveModePresetGlobRules,
   resolveModePresetPromptSurfaceProfile,
   resolveModePresetRepoRules,
   resolveModePresetSystemPrompt,
@@ -84,6 +86,13 @@ const buildInteractiveBase = async (
   // centralized in `resolveModePresetRepoRules` so every human/automation preset
   // resolves rules identically (hell-audit R3 — was interactive-only).
   const repoRules = await resolveModePresetRepoRules(req.mode, req.base.repoRules, cwd)
+  // WS4 follow-on — multi-source vendor glob-rules (default-OFF `QUANTA_VENDOR_RULES`;
+  // trust-gated ⇒ empty on untrusted modes ⇒ globRules unset ⇒ OFF byte-identical).
+  const globRules = await resolveModePresetGlobRules(
+    req.mode,
+    cwd,
+    gateOn(process.env, "QUANTA_VENDOR_RULES"),
+  )
   return {
     ...req.base,
     llm: req.base.llm,
@@ -94,6 +103,7 @@ const buildInteractiveBase = async (
     system: resolveModePresetSystemPrompt(req.mode, req.base.system, cwd),
     ...(promptSurfaceProfile !== undefined ? { promptSurfaceProfile } : {}),
     ...(repoRules !== undefined ? { repoRules } : {}),
+    ...(globRules.length > 0 ? { globRules: { rules: globRules } } : {}),
     cwd,
     maxTurns: req.base.maxTurns ?? 200,
     signal,

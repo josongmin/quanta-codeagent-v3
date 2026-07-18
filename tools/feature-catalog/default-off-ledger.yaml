@@ -1149,15 +1149,23 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: multi-source-rules-vendor-detector
-    gate_owner: [detectAll caller DI]
-    activation: unwired
+    # WIRED (jul-19, Wave O): the detector now has a live producer —
+    # `resolveModePresetGlobRules` (mode-presets/system.ts) calls
+    # `loadGlobRulesWithVendors`→`detectAll` and the trusted base-builders
+    # (interactive/headless/ide) attach the result to `cfg.globRules`, gated
+    # default-OFF by `QUANTA_VENDOR_RULES`. SECURITY: routed through the SSOT
+    # `modeLoadsRepoRules` trust gate (batch/ci-bot/daemon stay rule-less) so an
+    # untrusted PR's .windsurfrules can't reach the trusted prompt. OFF (unset) ⇒
+    # cfg.globRules unset ⇒ byte-identical to the pre-wire dormant state.
+    gate_owner: [QUANTA_VENDOR_RULES]
+    activation: env/config
     effective_default: { cli: off, web: na, bench: na, headless: off, daemon: na }
-    reachability: seam-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
     risk: behavioral-cost
-    decision: hold
-    owner_seam: src/rules/vendor-detector/index.ts
-    rollback: detectAll 미호출
+    decision: measure-first
+    owner_seam: src/apps/agent/mode-presets/system.ts
+    rollback: QUANTA_VENDOR_RULES!=1 (globRules unset)
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: n6-pty-attach
