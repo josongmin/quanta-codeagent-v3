@@ -264,9 +264,82 @@ export const createSessionTransportBridge = (
     unsubscribe: (() => void) | undefined
     closed: boolean
     connected: boolean
+    /**
+     * J-MED-1 (jul-16 종합/J audit) — the per-peer SEND-SERIALIZATION tail.
+     * Every frame this peer receives — the connect handshake's replay answer
+     * (snapshot / tail / durable rescue + the ticket-05 `resumed` marker), a
+     * command's rejected/resync reply, and every live `publishEvents` /
+     * `publishSnapshot` fan-out — is emitted inside a task threaded through
+     * `enqueueSend`, so frames leave in strict enqueue order down a single
+     * channel.
+     *
+     * WHY (the audited out-of-order bug): `connect` flips `connected = true`
+     * SYNCHRONOUSLY and then `handleConnect` serves the replay through a chain
+     * of `await peer.send(...)`; on an async transport a concurrent
+     * `publishEvents` saw the peer already connected and interleaved its live
+     * frames BETWEEN the replay frames (e.g. 12, 14, 13, resumed). Serializing
+     * every emission makes the whole replay answer complete before any live
+     * frame enqueued after the connect can run — WITHOUT the naive "flip
+     * connected after replay" fix, which would instead DROP the live events
+     * that arrive during the replay (they gate out and are never re-served):
+     * here they simply queue behind the replay and flush after it.
+     *
+     * IDLE FAST-PATH: `enqueueSend` runs a task INLINE (no `.then` deferral)
+     * when the channel is quiescent (`pendingSends === 0`), so the uncontended
+     * case — the overwhelmingly common one, e.g. a reject reply with no
+     * concurrent handshake — keeps its pre-fix same-tick send timing. The tail
+     * only interposes when a send is genuinely in flight; that is exactly (and
+     * only) when an interleave could otherwise occur.
+     *
+     * The tail is `.catch`-guarded (engine.ts `transportDispatchQueue`
+     * precedent) so one poisoned send can never wedge the channel. Only frame
+     * EMISSION rides it — command DISPATCH (`handleCommand` → `onCommand` →
+     * kernel, which re-enters via `publishEvents`) stays OFF, so a dispatch
+     * that publishes cannot deadlock waiting on its own enqueued fan-out
+     * (ADR-0540 web-inline deadlock class).
+     */
+    sendChain: Promise<void>
+    /** Count of send tasks currently queued-or-running on `sendChain`. Zero ⇒
+     *  the channel is idle and `enqueueSend` may run the next task inline. */
+    pendingSends: number
   }
 
   const peers = new Set<Peer>()
+
+  /** Look up the live `Peer` record for a transport — the send helpers are
+   *  handed the raw `SessionTransport`, but per-peer serialization needs the
+   *  record's `sendChain`. A closed/unknown transport (none in `peers`) falls
+   *  back to a direct send so teardown-time diagnostics are never swallowed. */
+  const peerOf = (transport: SessionTransport): Peer | undefined => {
+    for (const peer of peers) if (peer.transport === transport) return peer
+    return undefined
+  }
+
+  /**
+   * Emit `task`'s frames on the peer's serialized send channel and return the
+   * awaitable run. When the channel is idle the task starts INLINE (preserving
+   * the pre-J-MED-1 same-tick timing every send previously had); when a send is
+   * already in flight the task chains onto the tail so it lands strictly after
+   * it. `pendingSends` gates the two; the stored-back tail swallows the task's
+   * own rejection so a failed send can never wedge the channel (the caller
+   * still observes THIS task's outcome through the returned, un-caught promise).
+   * A transport that is not a tracked peer (teardown race) runs the task
+   * directly — there is no peer state left to keep ordered.
+   */
+  const enqueueSend = (transport: SessionTransport, task: () => Promise<void>): Promise<void> => {
+    const peer = peerOf(transport)
+    if (peer === undefined) return task()
+    peer.pendingSends += 1
+    const decrement = (): void => {
+      peer.pendingSends -= 1
+    }
+    // Idle ⇒ run inline (this task IS the head of the chain); busy ⇒ chain.
+    const run = peer.pendingSends === 1 ? task() : peer.sendChain.then(task)
+    // The tail always advances so the NEXT enqueue serializes behind this one;
+    // `.finally(decrement)` keeps `pendingSends` honest whichever branch ran.
+    peer.sendChain = run.catch(() => undefined).finally(decrement)
+    return run
+  }
 
   const updateSnapshotState = (nextSnapshot: SessionSnapshotLite): void => {
     snapshot = cloneSnapshot(nextSnapshot)
@@ -457,6 +530,15 @@ export const createSessionTransportBridge = (
   }
 
   const handleCommand = async (peer: SessionTransport, command: SessionCommand): Promise<void> => {
+    // J-MED-1 scope: command REPLIES (reject / dispatch-failure frames) send
+    // DIRECT — they target only the issuing peer, and a command is only
+    // processed AFTER that peer's handshake settled (the `connected` gate), so
+    // a reply can never land mid-replay for a conforming client (sending a
+    // command before the handshake completes is a protocol violation). The
+    // ordering fix that J-MED-1 needs is on the fan-out that reaches OTHER peers
+    // (`publishEvents` / `publishSnapshot` — those ride the per-peer send tail),
+    // NOT on this peer's own reply. Command DISPATCH also stays off the tail (it
+    // re-enters via `publishEvents`) to avoid the self-wait deadlock.
     if (command.sessionId !== snapshot.sessionId) {
       await rejectCommand(peer, command, new SessionProtocolValidationError("session_id_mismatch"))
       return
@@ -468,11 +550,12 @@ export const createSessionTransportBridge = (
     }
 
     const actualRevision = currentRevisionOf(snapshot, tail)
-    if (command.expectedRevision !== undefined && command.expectedRevision !== actualRevision) {
+    const expectedRevision = command.expectedRevision
+    if (expectedRevision !== undefined && expectedRevision !== actualRevision) {
       await rejectCommand(
         peer,
         command,
-        new SessionRevisionConflictError(command.expectedRevision, actualRevision),
+        new SessionRevisionConflictError(expectedRevision, actualRevision),
       )
       return
     }
@@ -487,8 +570,8 @@ export const createSessionTransportBridge = (
       commandStates.delete(command.commandId)
       // Server-side diagnostic channel is PRESERVED (additive change)…
       reportBridgeError(peer, error)
-      // …and S5a promotes the failure to the issuing peer as a `rejected`
-      // frame — the wire is no longer silent about a dispatch-stage error.
+      // …and S5a promotes the failure to the issuing peer as a `rejected` frame
+      // — the wire is no longer silent about a dispatch-stage error.
       await rejectDispatchFailure(peer, command, error)
     }
   }
@@ -514,30 +597,46 @@ export const createSessionTransportBridge = (
         return { close: async () => undefined }
       }
 
-      const peer = {
+      const peer: Peer = {
         transport,
         closed: false,
         connected: false,
         unsubscribe: undefined as Peer["unsubscribe"],
+        sendChain: Promise.resolve(),
+        pendingSends: 0,
       }
+      // Track the peer BEFORE wiring `onMessage`, so a `connect` frame that
+      // arrives synchronously inside `onMessage` can already resolve its
+      // `Peer` record (and thus enqueue onto the real `sendChain`).
+      peers.add(peer)
       peer.unsubscribe = transport.onMessage((message) => {
         switch (message.kind) {
           case "connect":
+            // J-MED-1: flip `connected` AND enqueue the whole replay answer in
+            // the SAME synchronous tick. Any `publishEvents` that later sees
+            // `connected === true` necessarily enqueues its fan-out AFTER this
+            // handshake task, so the replay (incl. the `resumed` marker) always
+            // completes before the peer's first live frame — no interleave, and
+            // no loss (the live frame is queued, not dropped). `handleConnect`
+            // runs as ONE task so replay + resumed stay contiguous.
             peer.connected = true
-            return handleConnect(transport, message)
+            return enqueueSend(transport, () => handleConnect(transport, message))
           case "command":
             if (!peer.connected) {
-              return rejectConnect(
-                transport,
-                new SessionProtocolValidationError("handshake_required"),
+              return enqueueSend(transport, () =>
+                rejectConnect(transport, new SessionProtocolValidationError("handshake_required")),
               )
             }
+            // Command DISPATCH + its issuing-peer REPLIES both send DIRECT (see
+            // `handleCommand`): a command is post-handshake for a conforming
+            // peer, so its reply never races that peer's replay. Only the
+            // cross-peer fan-out (`publishEvents`/`publishSnapshot`) rides the
+            // send tail — that is where J-MED-1's ordering guarantee lives.
             return handleCommand(transport, message.command)
           default:
             return
         }
       })
-      peers.add(peer)
       return {
         close: async () => closePeer(peer),
       }
@@ -547,10 +646,13 @@ export const createSessionTransportBridge = (
     },
     async publishSnapshot(nextSnapshot) {
       updateSnapshotState(nextSnapshot)
+      const frame: SessionTransportMessage = { kind: "snapshot", snapshot }
       await Promise.all(
         [...peers]
           .filter((peer) => !peer.closed)
-          .map((peer) => sendMessages(peer.transport, [{ kind: "snapshot", snapshot }])),
+          // J-MED-1: fan out through the per-peer send tail so a snapshot push
+          // cannot cut into a peer's in-flight handshake replay either.
+          .map((peer) => enqueueSend(peer.transport, () => sendMessages(peer.transport, [frame]))),
       )
     },
     async publishEvents(events) {
@@ -567,7 +669,13 @@ export const createSessionTransportBridge = (
           // already reflected in the retained tail). Already-connected peers
           // still receive every live event (fan-out unchanged for them).
           .filter((peer) => !peer.closed && peer.connected)
-          .map((peer) => sendMessages(peer.transport, messages)),
+          // J-MED-1: enqueue the live fan-out onto the per-peer send tail. A
+          // peer whose `connect` was accepted this same tick has its handshake
+          // replay ALREADY on the tail (the dispatcher enqueues it before any
+          // await), so this live frame lands strictly AFTER the whole replay
+          // answer — the interleave is closed, and because the frame is QUEUED
+          // (not gated out) nothing is lost.
+          .map((peer) => enqueueSend(peer.transport, () => sendMessages(peer.transport, messages))),
       )
     },
     currentSnapshot() {
