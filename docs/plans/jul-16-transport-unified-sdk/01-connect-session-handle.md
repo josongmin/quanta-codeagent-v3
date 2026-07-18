@@ -95,7 +95,7 @@ verb는 전송 성공 시 `{commandId, submitted}` resolve. 서버 거부(reject
 > 체크 표기는 E3 worktree 기준 실상.
 
 - [x] S0 스파이크 판정 기록(satisfies 성립 여부·turn.cancel 경로·rejected reason 확장 안전성) — §0에 판정 3건 기록됨
-- [x] **외부 소비 실증** — ⚠️ **shim-조건부로만 실증됨**: repo 밖 디렉토리 + `file:` 의존 + `tsc --noEmit`는 통과했으나 **USAGE §9의 alias shim(`paths` @/* 매핑) + ambient `.d.ts` 2본 수동 로딩이 전제**다(`.d.ts` 부재라 순정 `file:`+import만으로는 불성립 — jul-4 P8이 `.d.ts` 산출 시 무조건부로 승격). ws/stdio 시나리오는 in-repo 실루프 e2e(`tests/integration/sdk-connect-session-handle-e2e.test.ts`) + stdio 단챙크 유닛으로 커버
+- [x] **외부 소비 실증** — ✅ **무조건부 승격됨**(jul-4 P8 `.d.ts` 산출, 6f2608fce): repo 밖 `file:` 의존 + 표준 라이브러리-소비 tsconfig(target es2022 + skipLibCheck, **alias shim·ambient .d.ts·bun-types 전부 불요**)로 `tsc --noEmit` exit 0 + 오사용 3종 @ts-expect-error 소비(비-vacuous). ws/stdio 시나리오는 in-repo 실루프 e2e(`tests/integration/sdk-connect-session-handle-e2e.test.ts`) + stdio 단챙크 유닛으로 커버
 - [x] approval 낀 턴에서 awaitTurnEnd 정상 종료(승계 상관) + 상관 소실 시 typed error(hang 금지) 유닛 — 상관 소실 7 reason 전부(no_turn_run/approval_denied/**approval_voided**/continuation_failed(재발행 실패+respond 발송실패 2 서브케이스)/connection_closed/handle_closed/**superseded**) `tests/unit/ipc/session-handle.test.ts` + e2e
 - [x] dispatch-에러(예: empty_turn_input)가 wire 클라에 rejected로 표면화 — red-on-injection 문구 포함(`tests/unit/ipc/transport-dispatch-error-rejected.test.ts`)
 - [x] 버전 불일치: **lenient 디코더 탑재 클라**→신서버 typed error 왕복 (`tests/unit/ipc/transport-version-skew.test.ts`; 기출하 구 피어는 침묵 유지가 정답 — S7 카탈로그 명기)

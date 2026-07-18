@@ -190,7 +190,7 @@ in-process 구현 = `toSessionHandle(runtimeSession)` 어댑터(자기가 만든
 
 ## 7. Acceptance (계획 전체)
 
-- [x] **외부 소비 실증** (01 LANDED c89bc49c1) — repo 밖 `file:` + `tsc --noEmit` 통과 + ws/stdio 시나리오 e2e. ⚠️ **shim-조건부**(USAGE §9 alias+ambient .d.ts) — jul-4 P8 `.d.ts` 산출 시 무조건부 승격 (진행 중)
+- [x] **외부 소비 실증** (01 LANDED c89bc49c1 + P8 .d.ts 6f2608fce) — repo 밖 `file:` + 표준 tsconfig(skipLibCheck, shim·ambient·bun-types 불요) `tsc --noEmit` exit 0 + ws/stdio 시나리오 e2e. **무조건부 승격 완료**
 - [x] conformance: RuntimeSession oracle vs wire 이벤트 시퀀스가 **명문화된 정규화 계약**(봉인 3-class + negative control) 아래 byte-equal (01 LANDED). transport-positive 단언은 02로 이관(스탬프 seam 소유)
 - [x] `SessionVerbSurface<R>` satisfies가 RuntimeSession 컴파일 성립 — S0 GO(f04f86974, 실 tsc pos/neg control), 영구 타입핀 랜딩 (01)
 - [x] dispatch-에러·버전 불일치가 wire 클라에 typed로 표면화 — lenient 디코더 탑재분부터, 기출하 구 피어는 침묵 유지 (01 LANDED — 선존 침묵 2종 수선)
