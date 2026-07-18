@@ -31,4 +31,4 @@ crash/torn·lock·seq·replay·누출·게이트·v1정직성 7축 실행 repro 
 ## 02 serve --stdio follow-up (a83e28cd4, 7/8 green)
 | # | 심각도 | 내용 | 처리 |
 |---|---|---|---|
-| 02-approval | MED | serve --stdio가 approval을 WIRE 클라(connect onApproval)에게 위임하려면 kernel `awaiting_approval`+`approval.requested` wire 이벤트→`approval.respond` 재개 경로 필요. headless approval은 W1-A inline auto / OFF deny 두 모드뿐 — "wire-defer"(onConfirm이 deny 대신 wire respond 대기) 3번째 모드 미구현. CLI attach가 daemon 세션서 쓰는 flow와 동형. e2e approval round-trip visible-skip. | serve wire-approval 위임 배선(kernel approval 경로) 별도 작업. 가설: session-bridge에서 transport 모드일 때 onConfirm을 wire-defer resolver로 |
+| ~~02-approval~~ ✅ DONE(5b4110f18) | MED | serve --stdio가 approval을 WIRE 클라(connect onApproval)에게 위임하려면 kernel `awaiting_approval`+`approval.requested` wire 이벤트→`approval.respond` 재개 경로 필요. headless approval은 W1-A inline auto / OFF deny 두 모드뿐 — "wire-defer"(onConfirm이 deny 대신 wire respond 대기) 3번째 모드 미구현. CLI attach가 daemon 세션서 쓰는 flow와 동형. e2e approval round-trip visible-skip. | serve wire-approval 위임 배선(kernel approval 경로) 별도 작업. 가설: session-bridge에서 transport 모드일 때 onConfirm을 wire-defer resolver로 |
