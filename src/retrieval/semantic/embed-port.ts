@@ -2,23 +2,19 @@
  * `Embedder` — closed port for any provider that turns text into a vector
  * (ADR-0254).
  *
- * Deliberately separate from `SemanticIndex` (it is INJECTED at index
- * construction time, not a field on the index). This split keeps the I/O
- * boundary (HTTP to OpenAI / local model) cleanly distinct from the pure
- * math of cosine similarity — tests can swap a deterministic stub without
- * touching the index implementation, and a production wiring round can
- * substitute a real embedder one file at a time.
+ * A standalone I/O boundary (HTTP to OpenAI / local model) that any
+ * consumer injects. Keeping it separate from vector-store / index concerns
+ * lets tests swap a deterministic stub for the real provider, and a
+ * production wiring round can substitute a real embedder one file at a
+ * time.
  */
 
 import type { Result } from "@/shared"
 import type { EmbeddingVector } from "./types"
 
 /**
- * Closed error union for embedder failure modes. Mirrors the relevant
- * cases of {@link SearchError} but lives separately so the embedder
- * surface stays minimal — the index decides how (or whether) to map
- * `EmbedError` onto `SearchError` (the in-memory adapter forwards both
- * variants verbatim).
+ * Closed error union for embedder failure modes. Kept minimal — a consumer
+ * decides how (or whether) to map `EmbedError` onto its own error surface.
  */
 export type EmbedError = { kind: "empty-text" } | { kind: "embed-failed"; cause: unknown }
 

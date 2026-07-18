@@ -27,6 +27,7 @@ import { sideCmd } from "../side-cmd"
 import type { SlashCommand } from "../slash-contract"
 import { whyCmd } from "../why-cmd"
 import { goalCmd } from "./goal-cmd"
+import { presetsCmd } from "./presets-cmd"
 
 /** Track D — `/debug` runtime toggle. Pure handler in `../debug-cmd`; the
  *  slash adapter delegates and applies the new state back through the
@@ -235,4 +236,5 @@ export const SESSION_SLASH_COMMANDS: readonly SlashCommand[] = [
   resumeTurnCmd,
   hooksCmd,
   goalCmd,
+  presetsCmd,
 ]

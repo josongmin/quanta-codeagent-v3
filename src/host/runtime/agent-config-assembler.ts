@@ -101,6 +101,7 @@ import type { WebSearchProvider } from "@/tool/web"
 import { providerFromEnv } from "@/tool/web/providers"
 import { buildAppshotPortWire } from "./appshot-port-wire"
 import { persistBudgetLedger } from "./budget-ledger-persist"
+import { buildAppPluginMentionDeps } from "./internal/mention-app-plugin-deps"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
 import { maybeWirePeerTeamMessaging } from "./peer-team-wire"
 import { maybeWirePiiRedaction } from "./pii-redaction-wire"
@@ -247,6 +248,7 @@ const mentionResolverDep = (cwd: string, env: AssemblerEnv) => ({
     cwd,
     env,
     ...buildMentionSymbolDeps(cwd, env),
+    ...buildAppPluginMentionDeps(cwd, env),
   }),
 })
 

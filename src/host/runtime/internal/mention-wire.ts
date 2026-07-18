@@ -28,6 +28,7 @@
 import type { AgentConfig } from "@/agent"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { buildDefaultMentionResolver } from "@/agent/mention-runner"
+import { buildAppPluginMentionDeps } from "./mention-app-plugin-deps"
 import { buildMentionSymbolDeps } from "./mention-symbol-deps"
 
 /** Install the mention-injector on a host-runtime AgentConfig. Returns the
@@ -39,6 +40,7 @@ export const installCliMentionInjector = (cfg: AgentConfig): AgentConfig => {
       cwd: cfg.cwd,
       env: process.env,
       ...buildMentionSymbolDeps(cfg.cwd, process.env),
+      ...buildAppPluginMentionDeps(cfg.cwd, process.env),
     })
     installCodexR2Wires(cfg, {
       mentionResolver,

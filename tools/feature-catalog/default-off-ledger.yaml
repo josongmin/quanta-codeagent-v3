@@ -404,7 +404,7 @@ rows:
     lifecycle_evidence: null
   - feature_id: codex-r2-compaction-event-emit
     gate_owner: [AgentConfig.compactionEventEmit]
-    activation: unwired
+    activation: port-present
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
@@ -416,7 +416,7 @@ rows:
     lifecycle_evidence: null
   - feature_id: codex-r2-context-change-injection-wire
     gate_owner: [AgentConfig.contextEventsForTurn]
-    activation: unwired
+    activation: port-present
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
@@ -440,7 +440,7 @@ rows:
     lifecycle_evidence: null
   - feature_id: codex-r2-mention-injection-pipeline
     gate_owner: [AgentConfig.activatePlugins]
-    activation: unwired
+    activation: port-present
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
@@ -464,7 +464,7 @@ rows:
     lifecycle_evidence: null
   - feature_id: codex-r2-observability-decorators
     gate_owner: [CodexR2MetricsConfig]
-    activation: unwired
+    activation: port-present
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
@@ -476,7 +476,7 @@ rows:
     lifecycle_evidence: null
   - feature_id: codex-r2-plugin-system
     gate_owner: [AgentConfig.activatePlugins]
-    activation: unwired
+    activation: resource/command
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
@@ -487,8 +487,8 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: codex-r2-sqlite-session-registry
-    gate_owner: [SqliteRegistryConfig.databasePath]
-    activation: unwired
+    gate_owner: [QUANTA_SESSION_REGISTRY_SQLITE_PATH]
+    activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
@@ -500,7 +500,7 @@ rows:
     lifecycle_evidence: null
   - feature_id: codex-r2-system-prompt-cache-and-audit
     gate_owner: [AgentConfig.systemPromptCache]
-    activation: unwired
+    activation: port-present
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
@@ -550,7 +550,7 @@ rows:
     gate_owner: [AgentConfig.postCompactEmit]
     activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: wired
+    reachability: producer-only
     proof: { on: wire, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
@@ -560,7 +560,7 @@ rows:
     lifecycle_evidence: null
   - feature_id: conflict-parser-lib
     gate_owner: [parseConflicts caller-import]
-    activation: unwired
+    activation: resource/command
     effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
@@ -638,8 +638,8 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: effort-classifier
-    gate_owner: [AgentConfig.effortClassifier]
-    activation: unwired
+    gate_owner: [QUANTA_EFFORT_AUTO]
+    activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
     proof: { on: wire, off_identity: wire, receipt: null }
@@ -687,7 +687,7 @@ rows:
     lifecycle_evidence: null
   - feature_id: fast-apply-fallback
     gate_owner: [QUANTA_FAST_APPLY]
-    activation: unwired
+    activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
@@ -711,7 +711,7 @@ rows:
     lifecycle_evidence: null
   - feature_id: fast-apply-wire
     gate_owner: [FastApplyFallbackPort DI]
-    activation: unwired
+    activation: port-present
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
     proof: { on: wire, off_identity: wire, receipt: null }
@@ -1309,8 +1309,8 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: per-tool-checkpoint-granularity
-    gate_owner: [defaultGranularCheckpointPolicy DI]
-    activation: unwired
+    gate_owner: [QUANTA_PER_TOOL_RECORD]
+    activation: env/config
     effective_default: { cli: off, web: na, bench: na, headless: off, daemon: na }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
@@ -1502,7 +1502,7 @@ rows:
     lifecycle_evidence: null
   - feature_id: ratelimit-dual-window-snapshot
     gate_owner: [parseDualWindowSnapshot caller]
-    activation: unwired
+    activation: always
     effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
@@ -1562,7 +1562,7 @@ rows:
     lifecycle_evidence: null
   - feature_id: recovery-router-codex-spec
     gate_owner: [codexSpecRoute DI]
-    activation: unwired
+    activation: always
     effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
     reachability: wired
     proof: { on: wire, off_identity: unit, receipt: null }
@@ -1658,7 +1658,7 @@ rows:
     lifecycle_evidence: null
   - feature_id: run-ledger-attribution
     gate_owner: [runLedger subscriber DI]
-    activation: unwired
+    activation: port-present
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
@@ -1717,14 +1717,23 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: semantic-search-port
-    gate_owner: [SemanticIndex caller-import]
+    # CONSOLIDATED (jul-18, Wave M): the ADR-0254 text-in `SemanticIndex` port +
+    # in-memory cosine adapter were a PROVEN DUPLICATE of the live vector-in
+    # `SemanticIndex` in @/retrieval/pipeline (search-index-backend.ts:45); the
+    # text-in port had ZERO consumers. Deleted port.ts + in-memory-index.ts
+    # (createInMemoryIndex 0 callers); the deterministic headless Embedder seam
+    # survives (used live at pipeline.ts:41). tsc + fc check-evidence green.
+    gate_owner: [createHeadlessEmbedder caller-import]
     activation: unwired
     effective_default: { cli: off, web: na, bench: off, headless: off, daemon: off }
     reachability: seam-only
     proof: { on: unit, off_identity: unit, receipt: null }
+    # The text-in port was DELETED as a proven duplicate (Wave M); this row now
+    # tracks the surviving deterministic headless Embedder seam, which is a
+    # genuine dormant hold (used only by pipeline.ts:41's default embedder).
     risk: behavioral-cost
     decision: hold
-    owner_seam: src/retrieval/semantic/port.ts
+    owner_seam: src/retrieval/semantic/headless-embedder.ts
     rollback: consumer 없음(headless stub)
     duplicate_of: null
     lifecycle_evidence: null
@@ -1753,8 +1762,8 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: shell-snapshot-runshell-wire
-    gate_owner: [ShellSnapshotPort DI]
-    activation: unwired
+    gate_owner: [QUANTA_SHELL_SNAPSHOT]
+    activation: env/config
     effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
     reachability: wired
     proof: { on: wire, off_identity: unit, receipt: null }
@@ -1873,13 +1882,17 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: structured-output-mode
+    # TRUTH-FIX (jul-18): repair-first blocker ("Anthropic forced-tool unwired,
+    # ADR-0469") is STALE — `resolveAnthropicResponseFormat` IS consumed at
+    # anthropic-messages-codec.ts:256 → toAnthropicForcedTool (DOF-40 Wave B
+    # parity landed). Both OpenAI + Anthropic paths live ⇒ repair-first→measure-first.
     gate_owner: [StreamInput.responseFormat]
     activation: port-present
     effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
     reachability: wired
     proof: { on: wire, off_identity: unit, receipt: null }
     risk: behavioral-cost
-    decision: repair-first
+    decision: measure-first
     owner_seam: src/llm/structured-output.ts
     rollback: responseFormat 부재(response_format 없음)
     duplicate_of: null
@@ -1933,8 +1946,8 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: subagent-resume-replay
-    gate_owner: [resumeInterruptedHandles DI]
-    activation: unwired
+    gate_owner: [QUANTA_SUBAGENT_RESUME]
+    activation: env/config
     effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
@@ -1969,13 +1982,17 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: syntax-aware-chunking
+    # TRUTH-FIX (jul-18): repair-first blocker ("grammar ABI mismatch → silent
+    # no-op") is STALE — migrated off tree-sitter-wasms@0.1.13 to
+    # @vscode/tree-sitter-wasm@0.3.1 (tree-sitter.ts:40 resolve, wasm files
+    # present, 5 grammars load hasError=false). AST path LIVE ⇒ repair-first→measure-first.
     gate_owner: [QUANTA_SYNTAX_CHUNK, QUANTA_READ_OUTLINE]
     activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
     proof: { on: wire, off_identity: unit, receipt: null }
     risk: behavioral-cost
-    decision: repair-first
+    decision: measure-first
     owner_seam: src/tool/read/outline.ts
     rollback: 두 게이트 미설정(line-window 폴백)
     duplicate_of: null
@@ -2097,13 +2114,13 @@ rows:
     lifecycle_evidence: null
   - feature_id: voice-input-stt-slice
     gate_owner: [recorder+transcriber DI]
-    activation: unwired
+    activation: resource/command
     effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: network
     decision: hold
-    owner_seam: src/voice/index.ts
+    owner_seam: src/media/voice/index.ts
     rollback: surface가 recorder/transcriber 미주입
     duplicate_of: null
     lifecycle_evidence: null

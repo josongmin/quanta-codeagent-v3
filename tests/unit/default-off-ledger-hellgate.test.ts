@@ -71,4 +71,28 @@ describe("DOF-00 default-off authority ledger hellgate", () => {
       `runtime CLI default mismatch: ${known.feature_id} expected on, ledger has off`,
     ])
   })
+
+  test("drift ratchet: no row is reachability=wired AND activation=unwired", async () => {
+    const ledger = await loadDefaultOffLedger(LEDGER_PATH)
+    const drifted = ledger.rows.filter(
+      (row) => row.reachability === "wired" && row.activation === "unwired",
+    )
+    // A `wired` reachability asserts a live consumer; `unwired` activation says
+    // no caller wires it. The two cannot both be true — this pins the ledger
+    // against the stale-label drift that Wave L corrected (19 rows).
+    expect(drifted.map((r) => r.feature_id)).toEqual([])
+  })
+
+  test("red-on-injection: a wired+unwired row is flagged for exactly that feature", async () => {
+    const ledger = await loadDefaultOffLedger(LEDGER_PATH)
+    const mutated = clone(ledger)
+    const victim = mutated.rows.find((row) => row.reachability === "wired")
+    if (victim === undefined) throw new Error("fixture ledger must contain a wired row")
+    victim.activation = "unwired"
+
+    const report = await checkDefaultOffLedger(mutated, { catalogDir: CATALOG_DIR })
+    expect(report.errors).toContain(
+      `reachability=wired contradicts activation=unwired (a wired feature has a live consumer): ${victim.feature_id}`,
+    )
+  })
 })

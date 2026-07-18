@@ -141,6 +141,17 @@ const checkRowInvariants = (
       row.lifecycle_evidence === null
     )
       errors.push(`delete decision lacks duplicate or lifecycle evidence: ${row.feature_id}`)
+    // DRIFT RATCHET (jul-18, Wave L): `reachability: wired` asserts a LIVE
+    // consumer exists, which is logically incompatible with `activation:
+    // unwired` (= no caller wires it). This exact contradiction was the driver
+    // of ~19 stale rows (the codex-r2 wire family, fast-apply, effort-classifier,
+    // …) where the label rotted out of sync with the source. Pinning the
+    // invariant here fails RED the moment a row drifts back, forcing a
+    // reachability downgrade or an activation correction — never a silent lie.
+    if (row.reachability === "wired" && row.activation === "unwired")
+      errors.push(
+        `reachability=wired contradicts activation=unwired (a wired feature has a live consumer): ${row.feature_id}`,
+      )
   }
   return errors
 }
