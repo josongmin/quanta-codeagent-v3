@@ -317,4 +317,48 @@ describe("JsonlSessionEventLog substrate", () => {
 
     log.close()
   })
+
+  test("C-LOW-2: readFrom returns a seq-ASCENDING segment even when appends were locally reordered", () => {
+    // The scheduler appends some commit batches high-seq-FIRST (e.g. a terminal
+    // event at seq N then its trailing session.state.updated at seq N-1). A
+    // resume replay MUST hand the bridge an ascending segment regardless of
+    // insertion order — an unsorted segment would false-trip its contiguity gap
+    // guard. Insert a batch that is DESCENDING in append order and require the
+    // readFrom output to come back ascending.
+    const dir = freshDir()
+    const log = openLog(dir)
+    // Append order: 3, 2, 5, 4, 1 — deliberately NOT seq-sorted.
+    for (const seq of [3, 2, 5, 4, 1]) log.append(deltaEvent(seq, `p-${seq}`))
+    const segment = log.readFrom(1) // everything after seq 1
+    expect(segment.map((e) => e.seq)).toEqual([2, 3, 4, 5])
+    // Full window is ascending too (guards against a filter-only regression).
+    expect(log.readFrom(0).map((e) => e.seq)).toEqual([1, 2, 3, 4, 5])
+    log.close()
+    // Survives a reopen (recovery preserves the ascending contract).
+    const reopened = openLog(dir)
+    expect(reopened.readFrom(2).map((e) => e.seq)).toEqual([3, 4, 5])
+    reopened.close()
+  })
+
+  test("C-LOW-1: reclaiming a dead-pid lock also sweeps that pid's orphaned .tmp scratch file", () => {
+    const dir = freshDir()
+    const dead = spawnSync("true", { stdio: "ignore" })
+    expect(typeof dead.pid).toBe("number")
+    const deadPid = dead.pid as number
+    // Simulate the crash artifact: a stale lock owned by the dead pid AND its
+    // orphaned `<lock>.<pid>.tmp` scratch file (the writer crashed between the
+    // tmp write and the finally cleanup inside tryCreateLock).
+    const lockPath = join(dir, "s1.jsonl.lock")
+    const orphanTmp = `${lockPath}.${deadPid}.tmp`
+    writeFileSync(lockPath, String(deadPid))
+    writeFileSync(orphanTmp, String(deadPid))
+    expect(existsSync(orphanTmp)).toBe(true)
+
+    const warnings: string[] = []
+    const reclaimed = openLog(dir, "s1", (message) => warnings.push(message))
+    expect(warnings.some((message) => message.includes("stale"))).toBe(true)
+    // The orphaned .tmp is swept — no unbounded accumulation across crash cycles.
+    expect(existsSync(orphanTmp)).toBe(false)
+    reclaimed.close()
+  })
 })

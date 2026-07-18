@@ -24,7 +24,14 @@ export type {
 export { isSessionHostTurnEventType, SESSION_HOST_TURN_EVENT_TYPES, systemClock } from "./ports"
 export { type ReducerResult, reduceSessionCommand } from "./reducer"
 export { replaySnapshotLite } from "./replay-lite"
-export { dispatchSessionCommand, type KernelDispatchResult } from "./scheduler"
+export {
+  dispatchSessionCommand,
+  getKernelStreamAppendFailures,
+  getKernelTerminalAppendFailures,
+  type KernelDispatchResult,
+  setKernelStreamAppendErrorSink,
+  setKernelTerminalAppendErrorSink,
+} from "./scheduler"
 export {
   projectSessionHostTurnEvent,
   SESSION_HOST_TURN_EVENT_PROJECTION_REGISTRY,

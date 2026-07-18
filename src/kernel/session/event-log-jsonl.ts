@@ -172,6 +172,12 @@ const acquireSingleWriterLock = (lockPath: string, warn: (message: string) => vo
     }
     warn(`reclaiming stale event-log lock ${lockPath} (owner pid ${pid} is dead)`)
     rmSync(lockPath, { force: true })
+    // C-LOW-1 — the dead owner may ALSO have orphaned its `${lockPath}.<pid>.tmp`
+    // scratch file if it crashed between the `writeFileSync` and the `finally`
+    // cleanup inside `tryCreateLock`. That `.tmp` is keyed by the dead pid, so no
+    // live writer will ever reclaim it — sweep it here (best-effort) when we
+    // reclaim the dead pid's lock, bounding stray `.tmp` files to live writers.
+    rmSync(`${lockPath}.${pid}.tmp`, { force: true })
   }
   throw new JsonlSessionEventLogLockError(
     `could not acquire session event log lock ${lockPath} after stale-lock reclaim (a concurrent writer keeps re-locking)`,
@@ -292,7 +298,11 @@ export class JsonlSessionEventLog implements KernelEventLogPort, DurableSessionE
   }
 
   readFrom(afterSeq: number): SessionEvent[] {
-    return this.#events.filter((event) => event.seq > afterSeq)
+    // C-LOW-2 — the resume replay feed MUST be seq-ascending. Appends are
+    // monotonic in practice, but sort defensively so a resume cursor never
+    // receives an out-of-order segment (the bridge's contiguity check assumes
+    // ascending seq; an unsorted segment would false-trip the gap guard).
+    return this.#events.filter((event) => event.seq > afterSeq).sort((a, b) => a.seq - b.seq)
   }
 
   close(): void {
