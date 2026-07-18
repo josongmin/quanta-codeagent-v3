@@ -69,7 +69,7 @@ export const subagentSchema: KnobSchema<boolean> = {
 }
 
 /* ── branch-search (QUANTA_BENCH_BRANCH_SEARCH) ───────────────────────────── */
-interface BranchSearchValue {
+export interface BranchSearchValue {
   readonly defaultN: number
   readonly config: {
     readonly defaultN: number

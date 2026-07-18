@@ -4,7 +4,7 @@
   "type": "module",
   "exports": {
     "./sdk": {
-      "types": "./src/sdk/index.ts",
+      "types": "./dist/sdk/index.d.ts",
       "import": "./dist/sdk/index.js"
     }
   },
@@ -12,6 +12,7 @@
     "build:sdk": "bun build src/sdk/index.ts --outfile dist/sdk/index.js --target node --format esm",
     "build:protocol": "bun run tools/gen-web-frontend-protocol.ts",
     "build:protocol:check": "bun run tools/gen-web-frontend-protocol.ts --check",
+    "build:sdk:types": "bun run tools/dev/build-sdk-types.ts",
     "dev": "bun --hot run src/apps/cli/index.ts",
     "start": "bun run src/apps/cli/index.ts",
     "agent": "bun run src/apps/agent/index.ts",

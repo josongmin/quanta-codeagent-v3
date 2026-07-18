@@ -394,7 +394,7 @@ export const verifySelectSchema: KnobSchema<number> = {
 }
 
 /* ── localize-budget (QUANTA_BENCH_LOCALIZE_BUDGET) ───────────────────────── */
-interface LocalizeBudgetValue {
+export interface LocalizeBudgetValue {
   readonly topK?: number
   readonly maxTreeChars?: number
   readonly maxFiles?: number

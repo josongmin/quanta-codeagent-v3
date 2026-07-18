@@ -28,7 +28,7 @@
 
 import type { KnobSchema } from "../contracts"
 
-interface MustPassValue {
+export interface MustPassValue {
   readonly mustPass: boolean
   readonly maxTrips?: number
   /** `"sticky"` variant — sticky-red outcome gate (see verify-guard.ts). */

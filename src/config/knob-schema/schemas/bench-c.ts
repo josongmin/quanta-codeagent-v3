@@ -186,7 +186,7 @@ export const workingStateSchema: KnobSchema<true> = {
 }
 
 /* ── closeout-guard (QUANTA_BENCH_CLOSEOUT) — cross-surface, kind "enum" ───── */
-interface CloseoutGuardValue {
+export interface CloseoutGuardValue {
   readonly fourRule: boolean
 }
 const CLOSEOUT_TRUTHY = new Set(["1", "on", "true"])
@@ -211,7 +211,7 @@ export const closeoutGuardSchema: KnobSchema<CloseoutGuardValue> = {
 }
 
 /* ── multi-voter (QUANTA_MULTI_VOTER) — cross-surface, kind "string" ───────── */
-interface MultiVoterValue {
+export interface MultiVoterValue {
   readonly voters: number
   readonly quorum?: number
 }

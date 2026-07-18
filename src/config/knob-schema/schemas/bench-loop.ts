@@ -16,7 +16,7 @@ import type { KnobSchema } from "../contracts"
 const BENCH: readonly ["bench"] = ["bench"] as const
 
 /* ── localize-phase (QUANTA_BENCH_LOCALIZE_PHASE) ─────────────────────────── */
-interface LocalizePhaseValue {
+export interface LocalizePhaseValue {
   readonly phase1Turns: number
 }
 const parseLocalizePhase = (raw: string | undefined): LocalizePhaseValue | undefined => {
@@ -101,7 +101,7 @@ export const selectorModeSchema: KnobSchema<SelectorModeKnob> = {
 }
 
 /* ── repo-map (QUANTA_REPO_MAP) — cross-surface ⇒ home "runner-knobs" ─────── */
-interface RepoMapValue {
+export interface RepoMapValue {
   readonly enabled: true
 }
 const parseRepoMap = (raw: string | undefined): RepoMapValue | undefined =>
