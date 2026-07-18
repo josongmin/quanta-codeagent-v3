@@ -190,11 +190,11 @@ in-process 구현 = `toSessionHandle(runtimeSession)` 어댑터(자기가 만든
 
 ## 7. Acceptance (계획 전체)
 
-- [ ] **외부 소비 실증**: repo 밖 빈 디렉토리 + `file:` 의존 + `tsc --noEmit` 통과(connect 타입 포함) + ws/stdio 각 1 시나리오 실행 (01; `.d.ts` 산출은 jul-4 P8 게이트 종속 — 그쪽 미랜딩 시 이 항목이 그 티켓을 당긴다)
-- [ ] conformance: 같은 스크립트 → ws/stdio/loopback 이벤트 시퀀스가 **명문화된 정규화 계약** 아래 동일 + RuntimeSession oracle 대조 (01)
-- [ ] `SessionVerbSurface<R>` satisfies가 RuntimeSession·SessionHandle 양쪽 컴파일 성립 — **01 S0 판정 따름**(불성립 판정 시 이 항목은 어댑터-only acceptance로 대체, R2 F7)
-- [ ] dispatch-에러·버전 불일치가 wire 클라에 typed로 표면화 — lenient 디코더 탑재분부터, 기출하 구 피어는 현행 침묵 유지 (01 — 선존 침묵 2종 수선)
-- [ ] `quanta serve --stdio` OFF 시 byte-identical + ON 시 attach 동일 시나리오 (02)
-- [ ] field-shape 드리프트 주입 red / 기존 hellgate 계약 무약화 (03-A)
-- [ ] fidelity 미협상 클라 byte-identical (wire·in-proc 구독자·아카이브 전부) (04)
-- [ ] (post ADR-0540 W2) 재시작 후 `connect({resume})` 이벤트 replay 복원 (05)
+- [x] **외부 소비 실증** (01 LANDED c89bc49c1) — repo 밖 `file:` + `tsc --noEmit` 통과 + ws/stdio 시나리오 e2e. ⚠️ **shim-조건부**(USAGE §9 alias+ambient .d.ts) — jul-4 P8 `.d.ts` 산출 시 무조건부 승격 (진행 중)
+- [x] conformance: RuntimeSession oracle vs wire 이벤트 시퀀스가 **명문화된 정규화 계약**(봉인 3-class + negative control) 아래 byte-equal (01 LANDED). transport-positive 단언은 02로 이관(스탬프 seam 소유)
+- [x] `SessionVerbSurface<R>` satisfies가 RuntimeSession 컴파일 성립 — S0 GO(f04f86974, 실 tsc pos/neg control), 영구 타입핀 랜딩 (01)
+- [x] dispatch-에러·버전 불일치가 wire 클라에 typed로 표면화 — lenient 디코더 탑재분부터, 기출하 구 피어는 침묵 유지 (01 LANDED — 선존 침묵 2종 수선)
+- [ ] `quanta serve --stdio` OFF 시 byte-identical + ON 시 attach 동일 시나리오 (02 — 진행 중)
+- [x] field-shape 드리프트 주입 red / 기존 hellgate 계약 무약화 (03-A LANDED 896b0ae86) — 번들 소비(03-B 9080a8853)로 드리프트 구조적 불가화까지 완료
+- [ ] fidelity 미협상 클라 byte-identical (wire·in-proc 구독자·아카이브 전부) (04 — 미니RFC 완료, 본구현 대기)
+- [~] 재시작 후 durable resume 이벤트 replay 복원 — 코어 LANDED(a38ee957f CROWN e2e); door-level `connect({resume})`는 05door 진행 중
