@@ -23,6 +23,11 @@ export interface CreateSessionTransportClientOpts {
   readonly transport: SessionTransport
   readonly sessionId: string
   readonly resumeFromSeq?: number
+  /** Ticket 04 — request wire full fidelity on every `connect()`. The server
+   *  answers with a `fidelity` ack; the granted outcome surfaces on the
+   *  `connected` connection-state (`fidelity: "full" | "preview"`). Absent ⇒
+   *  preview-only (byte-identical). */
+  readonly requestedFidelity?: "full"
   /** S5 — typed surfacing of EVERY inbound `rejected` frame. Additive: absent
    *  ⇒ byte-identical behavior (rejected frames still flow to `onMessage`
    *  subscribers as before; this is the typed side-channel, not a filter). */
@@ -50,6 +55,14 @@ export interface SessionTransportConnectionConnected {
    *  live event resolves the watch as `"replayed"` — nothing was lost, and
    *  there is no degradation to surface before that. */
   readonly resume?: SessionTransportConnectionResume
+  /** Ticket 04 — the NEGOTIATED wire fidelity for this connection, surfaced once
+   *  the server's `fidelity` ack lands (or, for an old/silent server, resolved to
+   *  `"preview"` when the first snapshot/replay frame arrives without an ack — no
+   *  timer). Emitted as a SECOND `connected` state (submission → enrichment order,
+   *  like `resume`); UNSET on the submission emission and whenever the client did
+   *  not request full. Never a silent downgrade — a requested-but-refused full
+   *  surfaces explicitly as `"preview"`. */
+  readonly fidelity?: "full" | "preview"
 }
 
 export interface SessionTransportConnectionClosed {
@@ -174,6 +187,55 @@ const createResumeOutcomeWatcher = (
   }
 }
 
+/**
+ * Ticket 04 — per-connect fidelity-outcome watch. Armed (BEFORE the connect send)
+ * ONLY when the client requested full. The server answers with a `fidelity` ack
+ * (granted ⇒ "full", refused ⇒ "preview") that lands STRICTLY BEFORE the replay;
+ * an OLD/silent server sends no ack, so the first snapshot/event frame resolves
+ * the watch to "preview" (no timer — the ack-before-replay ordering guarantees a
+ * granting server's ack precedes that frame). Same submission → enrichment
+ * sequencing as the resume watch: an early outcome (derived inside the send await
+ * on a synchronous transport) is HELD and flushed right after the submission
+ * state. One slot — the latest connect wins it.
+ */
+const createFidelityOutcomeWatcher = (emitFidelity: (fidelity: "full" | "preview") => void) => {
+  let current:
+    | { armed: boolean; derived: "full" | "preview" | undefined; submissionEmitted: boolean }
+    | undefined
+  return {
+    arm(requested: boolean) {
+      current = requested
+        ? { armed: true, derived: undefined, submissionEmitted: false }
+        : undefined
+      return current
+    },
+    dropIfCurrent(watch: typeof current): void {
+      if (watch !== undefined && current === watch) current = undefined
+    },
+    flushAfterSubmission(watch: typeof current): void {
+      if (watch === undefined) return
+      watch.submissionEmitted = true
+      if (watch.derived !== undefined) emitFidelity(watch.derived)
+    },
+    observe(message: SessionTransportMessage): void {
+      if (current === undefined || !current.armed) return
+      if (message.kind === "fidelity") {
+        current.armed = false
+        current.derived = message.granted ? "full" : "preview"
+        if (current.submissionEmitted) emitFidelity(current.derived)
+      } else if (message.kind === "snapshot" || message.kind === "event") {
+        // First data frame with NO preceding ack ⇒ old/silent server ⇒ preview.
+        current.armed = false
+        current.derived = "preview"
+        if (current.submissionEmitted) emitFidelity(current.derived)
+      } else if (message.kind === "rejected" && message.target === "connect") {
+        current.armed = false
+        current = undefined
+      }
+    },
+  }
+}
+
 export const createSessionTransportClient = (
   opts: CreateSessionTransportClientOpts,
 ): SessionTransportClient => {
@@ -209,9 +271,17 @@ export const createSessionTransportClient = (
     }
   })
 
+  // Ticket 04 — fidelity-outcome surfacing (see createFidelityOutcomeWatcher).
+  const fidelityWatcher = createFidelityOutcomeWatcher((fidelity) => {
+    if (terminalState === undefined) {
+      emitState({ status: "connected", fidelity })
+    }
+  })
+
   const unsubscribe = opts.transport.onMessage((message) => {
     resumeFromSeq = nextResumeFromSeq(resumeFromSeq, message)
     resumeWatcher.observe(message)
+    fidelityWatcher.observe(message)
     if (message.kind === "rejected" && opts.onRejected !== undefined) {
       try {
         opts.onRejected({ message, error: typedErrorFromRejectedMessage(message) })
@@ -249,23 +319,30 @@ export const createSessionTransportClient = (
       // synchronous transport delivers the server's replay answer inside this
       // await, and the FIRST frame is the outcome carrier.
       const watch = resumeWatcher.arm(next !== undefined)
+      // Ticket 04 — arm the fidelity watch BEFORE the send (a synchronous
+      // transport delivers the ack inside this await). Requested iff the client
+      // opted into full fidelity.
+      const fidelityWatch = fidelityWatcher.arm(opts.requestedFidelity === "full")
       try {
         await opts.transport.send({
           kind: "connect",
           sessionId: opts.sessionId,
           ...(next !== undefined ? { resumeFromSeq: next } : {}),
+          ...(opts.requestedFidelity === "full" ? { requestedFidelity: "full" as const } : {}),
         })
       } catch (error) {
         resumeWatcher.dropIfCurrent(watch)
+        fidelityWatcher.dropIfCurrent(fidelityWatch)
         throw error
       }
       // Post-mortem connect() must not lie: once the terminal `closed` state
       // was delivered, a (silently dropped) connect frame is NOT a connection.
       if (terminalState === undefined) {
         emitState({ status: "connected" })
-        // Early-derived outcome (the reply landed during the send await) is
+        // Early-derived outcomes (the reply landed during the send await) are
         // flushed strictly AFTER the submission state, on every transport.
         resumeWatcher.flushAfterSubmission(watch)
+        fidelityWatcher.flushAfterSubmission(fidelityWatch)
       }
     },
     async sendCommand(command) {

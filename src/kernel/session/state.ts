@@ -6,6 +6,7 @@ import type {
   SessionSnapshotLite,
   SessionStateView,
 } from "@/protocol/session"
+import { fullFidelityEnabled } from "@/shared"
 import type { LlmContinuationObservation, LlmRequestObservation } from "@/shared/llm-route-types"
 import { SingleWriterLease } from "./lease"
 
@@ -134,6 +135,14 @@ export const toSessionStateView = (state: KernelSessionState): SessionStateView 
   ...(state.lastLlmRequest !== undefined ? { lastLlmRequest: state.lastLlmRequest } : {}),
   ...(state.lastLlmContinuation !== undefined
     ? { lastLlmContinuation: state.lastLlmContinuation }
+    : {}),
+  // Ticket 04 (S4) — project the accumulated mid-turn token usage onto the wire
+  // view, GATED on `QUANTA_SESSION_FULL_FIDELITY` (default-OFF ⇒ absent ⇒ byte-
+  // identical). Numeric-only ⇒ no redaction / peer-strip concern. The kernel
+  // already holds `state.lastTokenUsage` (bumped by the `usage` projection arm);
+  // this is the missing wire projection.
+  ...(fullFidelityEnabled(process.env) && state.lastTokenUsage !== undefined
+    ? { lastTokenUsage: { ...state.lastTokenUsage } }
     : {}),
 })
 

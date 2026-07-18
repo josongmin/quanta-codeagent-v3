@@ -13,7 +13,7 @@ import {
 } from "@/kernel/session"
 import type { SessionCommand, SessionEvent } from "@/protocol/session"
 import { SessionClosedError, SessionProtocolValidationError } from "@/protocol/session"
-import { errMessage, logger } from "@/shared"
+import { errMessage, fullFidelityEnabled, logger } from "@/shared"
 
 /**
  * S5a LOW-3 (jul-16 ticket 01) — dispatch-stage validation issues that are a
@@ -76,6 +76,12 @@ export const ensureTransportBridge = (
     snapshot: toSessionSnapshotLite(box.state),
     ...(replayWindow !== undefined ? { tailLimit: replayWindow } : {}),
     ...(durableLog !== undefined ? { durableLog } : {}),
+    // Ticket 04 — the bridge is the sole grant authority for wire full fidelity.
+    // Resolved from the SAME env gate the host runtime uses to PRODUCE the full
+    // fields (`wireRuntimePorts`), so production and grant never disagree. OFF ⇒
+    // every requesting connect is refused (granted:false) and the strip stays on
+    // for every peer (byte-identical default-OFF wire).
+    ...(fullFidelityEnabled(process.env) ? { fullFidelity: true } : {}),
     onCommand: async (command) => {
       // Sequence transport-issued commands on a single tail so they apply in
       // order. The tail MUST NOT stay rejected after one dispatch throws:

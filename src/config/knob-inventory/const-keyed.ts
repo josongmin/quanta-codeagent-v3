@@ -34,6 +34,23 @@ export const CONST_KEYED: readonly KnobInventoryEntry[] = [
       "shared/item-stream.ts (itemStreamEnabled; wired host/runtime context-binding + agent/optional-ports)",
   },
   {
+    // Ticket 04 (jul-16 transport-unified SDK) — wire fidelity opt-in. ON ⇒ the
+    // host bridge sets `argsFull`/`resultFull` (model-visible verbatim payload)
+    // alongside the preview on `tool.invoked`/`tool.completed`; the ipc bridge
+    // then STRIPS them for any wire peer that did not negotiate `requestedFidelity`
+    // (S2/S3). OFF ⇒ the fields are never produced ⇒ byte-identical on every
+    // consumer (wire, in-proc, JSONL log, sqlite archive). Read via gateOn at the
+    // host wiring seam (NOT loadFromEnv), so it is declared here.
+    envKey: "QUANTA_SESSION_FULL_FIDELITY",
+    kind: "bool",
+    default: false,
+    group: "observability",
+    home: "runtime-config",
+    describe: "Wire full-fidelity tool args/result (per-peer negotiated; opt-in).",
+    readSite:
+      "shared/full-fidelity.ts (fullFidelityEnabled; wired host/runtime context-binding + ipc/session bridge strip)",
+  },
+  {
     envKey: "QUANTA_FAST_APPLY",
     kind: "bool",
     default: false,

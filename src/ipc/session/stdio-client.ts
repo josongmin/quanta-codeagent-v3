@@ -15,6 +15,8 @@ export interface CreateSessionStdioClientOpts extends CreateSessionStdioTranspor
   readonly resumeFromSeq?: number
   /** S5 — typed `rejected` surfacing, forwarded to the transport client. */
   readonly onRejected?: CreateSessionTransportClientOpts["onRejected"]
+  /** Ticket 04 — request wire full fidelity, forwarded to the transport client. */
+  readonly requestedFidelity?: CreateSessionTransportClientOpts["requestedFidelity"]
 }
 
 export const createSessionStdioClient = (
@@ -28,6 +30,7 @@ export const createSessionStdioClient = (
     sessionId: opts.sessionId,
     ...(opts.resumeFromSeq !== undefined ? { resumeFromSeq: opts.resumeFromSeq } : {}),
     ...(opts.onRejected !== undefined ? { onRejected: opts.onRejected } : {}),
+    ...(opts.requestedFidelity !== undefined ? { requestedFidelity: opts.requestedFidelity } : {}),
   } satisfies CreateSessionTransportClientOpts)
 
 export type { StdioReader, StdioWriter }

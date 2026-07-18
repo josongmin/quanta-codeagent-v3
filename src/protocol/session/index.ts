@@ -105,6 +105,7 @@ export type {
   PendingApprovalView,
   SessionSnapshotLite,
   SessionStateView,
+  SessionTokenUsageView,
 } from "./snapshot"
 export type { CommandReceipt, SessionVerbSurface } from "./verb-surface"
 export {

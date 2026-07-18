@@ -22,6 +22,11 @@ export type RuntimeBase = RuntimeAgentConfigBase & {
    *  {@link createTurnStreamPort} runs a fresh {@link ItemStreamProjector} so the
    *  session wire carries `item.*` events. Absent ⇒ no projector, byte-identical. */
   itemStream?: boolean
+  /** Ticket 04 — `QUANTA_SESSION_FULL_FIDELITY` resolved ONCE at the composition
+   *  boundary ({@link wireRuntimePorts}). When true, each turn's bridge carries the
+   *  full model-visible tool args/result alongside the preview (the ipc bridge then
+   *  strips them per-peer, S3). Absent ⇒ preview-only, byte-identical. */
+  fullFidelity?: boolean
   /** A2 — the SINGLE per-session Canvas artifact registry (the SAME instance the
    *  `artifact_*` tools + generation-tool `artifactSink` write into), lifted onto
    *  the base by the composition root ONLY when `QUANTA_ARTIFACT_STORE` is on.

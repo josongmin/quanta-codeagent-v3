@@ -11,7 +11,7 @@ import type {
 import { buildSharedExecutionPlaneRuntimeAugments } from "@/runner/session-execution-plane"
 import { buildSessionMemoryAutoWires } from "@/runner/session-memory-auto"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
-import { itemStreamEnabled } from "@/shared"
+import { fullFidelityEnabled, itemStreamEnabled } from "@/shared"
 import { automationUpdateTool, ToolRegistry } from "@/tool"
 import { deriveCapabilityManifest } from "../../capabilities"
 import { installCliMentionInjector } from "../mention-wire"
@@ -52,7 +52,14 @@ export const wireRuntimePorts = (
   const wired = sanitizeRuntimeBase(wireOptionalAgentPorts(base, env))
   // T01 — resolve QUANTA_ITEM_STREAM here (env in scope) and stamp it onto the
   // base so the per-turn stream port can mint a projector without re-reading env.
-  return itemStreamEnabled(env) ? sanitizeRuntimeBase({ ...wired, itemStream: true }) : wired
+  const withItemStream = itemStreamEnabled(env)
+    ? sanitizeRuntimeBase({ ...wired, itemStream: true })
+    : wired
+  // Ticket 04 — resolve QUANTA_SESSION_FULL_FIDELITY at the SAME boundary and stamp
+  // it so the per-turn bridge carries the full tool payload (default-OFF absent).
+  return fullFidelityEnabled(env)
+    ? sanitizeRuntimeBase({ ...withItemStream, fullFidelity: true })
+    : withItemStream
 }
 
 export const buildCapabilityManifest = (base: RuntimeBase): CapabilityManifest =>

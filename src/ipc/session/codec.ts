@@ -10,7 +10,7 @@ import {
   SESSION_PROTOCOL_VERSION,
   SessionProtocolValidationError,
 } from "@/protocol/session"
-import type { SessionTransportMessage } from "./types"
+import type { SessionTransportConnectMessage, SessionTransportMessage } from "./types"
 
 /**
  * Control-frame version gate (audit L9 M18c). The `connect` / `rejected`
@@ -50,6 +50,7 @@ const decodeKind = (raw: string): SessionTransportMessage["kind"] => {
     case "snapshot":
     case "heartbeat":
     case "resumed":
+    case "fidelity":
       return envelope.kind
     default:
       throw new SessionProtocolValidationError("bad_transport_kind")
@@ -101,6 +102,11 @@ const decodeConnectMessage = (raw: string): SessionTransportMessage => {
     throw new SessionProtocolValidationError("bad_transport_resume_ack")
   }
   const resumeAck = envelope.resumeAck
+  // Ticket 04 — closed single-value enum: absent or literal "full" only.
+  if (envelope.requestedFidelity !== undefined && envelope.requestedFidelity !== "full") {
+    throw new SessionProtocolValidationError("bad_transport_requested_fidelity")
+  }
+  const requestedFidelity = envelope.requestedFidelity
   const surfaceSubscription =
     envelope.surfaceSubscription === undefined
       ? undefined
@@ -114,6 +120,7 @@ const decodeConnectMessage = (raw: string): SessionTransportMessage => {
     sessionId: decodeConnectSessionId(envelope.sessionId),
     ...(resumeFromSeq !== undefined ? { resumeFromSeq } : {}),
     ...(resumeAck === true ? { resumeAck: true as const } : {}),
+    ...(requestedFidelity === "full" ? { requestedFidelity: "full" as const } : {}),
     ...(surfaceSubscription !== undefined ? { surfaceSubscription } : {}),
   }
 }
@@ -138,6 +145,19 @@ const decodeResumedMessage = (raw: string): SessionTransportMessage => {
     throw new SessionProtocolValidationError("bad_transport_resume_mode")
   }
   return { kind: "resumed", sessionId, servedThroughSeq, mode }
+}
+
+/** Ticket 04 — the `fidelity` negotiation ack (see the type docblock in
+ *  `types.ts`). Same control-envelope discipline as every sibling: version gate
+ *  first, then a strict field-by-field decode. `granted` is a plain boolean. */
+const decodeFidelityMessage = (raw: string): SessionTransportMessage => {
+  const envelope = expectObject(JSON.parse(raw) as unknown)
+  requireProtocolVersion(envelope)
+  const sessionId = decodeString(envelope.sessionId, "bad_transport_session_id")
+  if (typeof envelope.granted !== "boolean") {
+    throw new SessionProtocolValidationError("bad_transport_fidelity_granted")
+  }
+  return { kind: "fidelity", sessionId, granted: envelope.granted }
 }
 
 const decodeRejectedMessage = (
@@ -200,18 +220,26 @@ const decodeHeartbeatMessage = (raw: string): SessionTransportMessage => {
   return { kind: "heartbeat", phase }
 }
 
+/** Encode a `connect` control envelope, folding its four additive opt-ins
+ *  (resume cursor / resume-ack / ticket-04 requestedFidelity / surface
+ *  subscription). Extracted so `encodeSessionTransportMessage`'s switch stays
+ *  under the cognitive-complexity ratchet as additive kinds accrue. */
+const encodeConnectEnvelope = (message: SessionTransportConnectMessage): string =>
+  encodeControlEnvelope({
+    kind: "connect",
+    sessionId: message.sessionId,
+    ...(message.resumeFromSeq !== undefined ? { resumeFromSeq: message.resumeFromSeq } : {}),
+    ...(message.resumeAck === true ? { resumeAck: true } : {}),
+    ...(message.requestedFidelity === "full" ? { requestedFidelity: "full" } : {}),
+    ...(message.surfaceSubscription !== undefined
+      ? { surfaceSubscription: message.surfaceSubscription }
+      : {}),
+  })
+
 export const encodeSessionTransportMessage = (message: SessionTransportMessage): string => {
   switch (message.kind) {
     case "connect":
-      return encodeControlEnvelope({
-        kind: "connect",
-        sessionId: message.sessionId,
-        ...(message.resumeFromSeq !== undefined ? { resumeFromSeq: message.resumeFromSeq } : {}),
-        ...(message.resumeAck === true ? { resumeAck: true } : {}),
-        ...(message.surfaceSubscription !== undefined
-          ? { surfaceSubscription: message.surfaceSubscription }
-          : {}),
-      })
+      return encodeConnectEnvelope(message)
     case "command":
       return encodeSessionCommand(message.command)
     case "event":
@@ -240,6 +268,12 @@ export const encodeSessionTransportMessage = (message: SessionTransportMessage):
         servedThroughSeq: message.servedThroughSeq,
         mode: message.mode,
       })
+    case "fidelity":
+      return encodeControlEnvelope({
+        kind: "fidelity",
+        sessionId: message.sessionId,
+        granted: message.granted,
+      })
   }
 }
 
@@ -259,6 +293,8 @@ export const decodeSessionTransportMessage = (raw: string): SessionTransportMess
       return decodeHeartbeatMessage(raw)
     case "resumed":
       return decodeResumedMessage(raw)
+    case "fidelity":
+      return decodeFidelityMessage(raw)
   }
 }
 

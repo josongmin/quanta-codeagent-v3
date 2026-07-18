@@ -48,6 +48,16 @@ export interface CreateSessionTransportBridgeOpts {
    *  from this log; the snapshot fallback remains for whatever the log cannot
    *  cover densely. Absent ⇒ byte-identical historical behavior. */
   readonly durableLog?: SessionDurableEventLogReader
+  /**
+   * Ticket 04 — the PRODUCTION fidelity gate (`QUANTA_SESSION_FULL_FIDELITY`),
+   * resolved at composition (engine.ts). The bridge is the sole grant authority:
+   * a connect's `requestedFidelity:"full"` is GRANTED only when this is true.
+   * Absent/false ⇒ every requesting connect is answered `granted:false` and the
+   * strip stays on for every peer — byte-identical default-OFF wire. Note the
+   * strip works regardless (peers default not-granted); this only enables the
+   * grant PATH.
+   */
+  readonly fullFidelity?: boolean
   readonly onCommand?: (command: SessionCommand) => void | Promise<void>
   readonly onCommandRejected?: (args: CommandRejectedArgs) => void
   readonly onBridgeError?: (args: SessionTransportBridgeErrorArgs) => void
@@ -180,6 +190,35 @@ const trimTail = (
 const toEventMessages = (events: readonly SessionEvent[]): SessionTransportMessage[] =>
   events.map((event) => ({ kind: "event", event }))
 
+/**
+ * Ticket 04 (S1/S3) — strip the full-fidelity fields from an event frame bound
+ * for a peer that did NOT negotiate `requestedFidelity`. This is the SERVER-SIDE
+ * SOLE DEFENSE (RFC §1.2): the passthrough codec cannot protect an old client, so
+ * a preview peer must never receive `argsFull`/`resultFull`/`fidelityDegraded`.
+ *
+ * Applies only to `tool.invoked` / `tool.completed` event frames (the only carriers
+ * of full fields). Every other frame passes through by identity — untouched, no
+ * clone — so the strip is a NO-OP for the overwhelmingly common non-tool frame and
+ * for a granted peer (see {@link sendMessages}).
+ */
+const stripFullFidelity = (message: SessionTransportMessage): SessionTransportMessage => {
+  if (message.kind !== "event") return message
+  const { event } = message
+  if (event.type !== "tool.invoked" && event.type !== "tool.completed") return message
+  if (!("argsFull" in event) && !("resultFull" in event) && !("fidelityDegraded" in event)) {
+    // No full fields present (gate OFF, or a plain event) — identity passthrough
+    // so the default-OFF wire is byte-identical (no needless re-clone/re-key).
+    return message
+  }
+  const {
+    argsFull: _a,
+    resultFull: _r,
+    fidelityDegraded: _d,
+    ...rest
+  } = event as unknown as Record<string, unknown>
+  return { kind: "event", event: rest as unknown as SessionEvent }
+}
+
 const toRejectedMessage = (args: {
   readonly sessionId: string
   readonly target: SessionTransportRejectedMessage["target"]
@@ -303,6 +342,14 @@ export const createSessionTransportBridge = (
     /** Count of send tasks currently queued-or-running on `sendChain`. Zero ⇒
      *  the channel is idle and `enqueueSend` may run the next task inline. */
     pendingSends: number
+    /**
+     * Ticket 04 (S2/S3) — whether THIS peer negotiated wire full fidelity. Set
+     * by `handleConnect` when the connect frame carried `requestedFidelity:"full"`
+     * AND the production gate granted it. FALSE by default (per-peer state lives
+     * for the connection lifetime — a reconnect must re-negotiate). Non-granted ⇒
+     * every event frame is stripped of full fields before send (`sendMessages`).
+     */
+    fidelityGranted: boolean
   }
 
   const peers = new Set<Peer>()
@@ -356,9 +403,16 @@ export const createSessionTransportBridge = (
     peer: SessionTransport,
     messages: readonly SessionTransportMessage[],
   ): Promise<void> => {
+    // Ticket 04 (S3) — the SINGLE strip chokepoint. EVERY peer-bound frame routes
+    // through here (live fan-out, snapshot broadcast, tail replay, durable-log
+    // replay, dup-command replay, reject replies), so conditioning the strip on
+    // the peer's negotiated fidelity here covers all four replay paths at once
+    // (RFC §3.2). A granted peer (or an in-proc/unknown transport, treated as
+    // trusted) passes through untouched.
+    const granted = peerOf(peer)?.fidelityGranted === true
     for (const message of messages) {
       try {
-        await peer.send(message)
+        await peer.send(granted ? message : stripFullFidelity(message))
       } catch (error) {
         reportBridgeError(peer, error)
         break
@@ -509,6 +563,27 @@ export const createSessionTransportBridge = (
       await rejectConnect(peer, new SessionProtocolValidationError("session_id_mismatch"))
       return
     }
+    // Ticket 04 (S2/S3) — fidelity negotiation, resolved BEFORE the replay so the
+    // ack lands strictly ahead of the first snapshot/event frame (ack-before-
+    // replay ⇒ no client timeout). A connect that REQUESTED full is granted iff
+    // the production gate (`opts.fullFidelity`) is on; we flip `peer.fidelityGranted`
+    // FIRST so `sendReplay`'s own frames (durable/tail rescue included) already
+    // pass the full fields through for a granted peer. A non-requesting connect
+    // gets no ack and stays stripped (byte-identical). The ack rides `sendMessages`
+    // (a control frame with no full fields ⇒ strip is a no-op on it).
+    // FAIL-CLOSED (04 audit MED): recompute the grant on EVERY connect frame,
+    // not only a requesting one — a granted peer that re-connects WITHOUT the
+    // request must be downgraded to preview (a stale grant would keep leaking
+    // full to a peer that no longer asked). Since strip is the server's sole
+    // defense, a re-negotiation that drops the request must clear the grant.
+    const granted = message.requestedFidelity === "full" && opts.fullFidelity === true
+    const peerRecord = peerOf(peer)
+    if (peerRecord !== undefined) peerRecord.fidelityGranted = granted
+    // The ack rides `sendMessages` only when the peer actually REQUESTED — a
+    // non-requesting connect gets no ack and stays byte-identical.
+    if (message.requestedFidelity === "full") {
+      await sendMessages(peer, [{ kind: "fidelity", sessionId: snapshot.sessionId, granted }])
+    }
     const served = await sendReplay(peer, message.resumeFromSeq)
     // Ticket 05 — the `resumed` served-marker, EXACTLY ONCE per requesting
     // connect, strictly AFTER the whole replay answer (snapshot fallback,
@@ -605,6 +680,8 @@ export const createSessionTransportBridge = (
         unsubscribe: undefined as Peer["unsubscribe"],
         sendChain: Promise.resolve(),
         pendingSends: 0,
+        // Ticket 04 — not granted until the connect handshake negotiates it.
+        fidelityGranted: false,
       }
       // Track the peer BEFORE wiring `onMessage`, so a `connect` frame that
       // arrives synchronously inside `onMessage` can already resolve its

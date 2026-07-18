@@ -29,6 +29,17 @@ export interface SessionTransportConnectMessage {
    */
   readonly resumeAck?: true
   readonly surfaceSubscription?: SurfaceSubscription
+  /**
+   * Ticket 04 (wire fidelity opt-in) — request the FULL model-visible tool
+   * args/result on this peer's wire. Closed single-value enum (`"full"`); absent
+   * = the current preview-only behavior. ADDITIVE OPT-IN: an already-shipped
+   * bridge ignores the unknown field (its connect decoder drops unrecognized
+   * keys) and never grants, so every existing flow keeps a byte-identical wire.
+   * The bridge answers a requesting connect with a {@link
+   * SessionTransportFidelityMessage `fidelity`} ack (granted true/false) BEFORE
+   * the replay, so a client never has to time out to learn the outcome.
+   */
+  readonly requestedFidelity?: "full"
 }
 
 export interface SessionTransportRejectedMessage {
@@ -93,6 +104,28 @@ export interface SessionTransportResumedMessage {
   readonly mode: "replay" | "snapshot"
 }
 
+/**
+ * Fidelity negotiation ACK. ADDITIVE 8th transport kind (same discipline as the
+ * heartbeat 6th / resumed 7th — the original kinds are untouched in meaning; an
+ * already-shipped peer's closed-kind decoder drops this frame silently via
+ * `tryDecodeSessionTransportMessage`, so it is wire-compatible additive).
+ *
+ * WHY (ticket 04, RFC §2): a peer opts into wire full fidelity via
+ * `connect.requestedFidelity`. The bridge is the SOLE authority on whether the
+ * production gate is on, so it answers each REQUESTING connect with EXACTLY ONE
+ * `fidelity` frame — `granted:true` when full is served on this peer, `false`
+ * when refused (gate OFF) — sent strictly BEFORE the replay answer. A client
+ * that requested but sees no `fidelity` frame by the time the snapshot/replay
+ * arrives is talking to an OLD server and settles on preview (no timer). The
+ * explicit `granted:false` distinguishes "server refused" from "server did not
+ * understand" (an honest diagnostic, RFC §2.1).
+ */
+export interface SessionTransportFidelityMessage {
+  readonly kind: "fidelity"
+  readonly sessionId: string
+  readonly granted: boolean
+}
+
 export type SessionTransportMessage =
   | SessionTransportConnectMessage
   | { readonly kind: "command"; readonly command: SessionCommand }
@@ -101,6 +134,7 @@ export type SessionTransportMessage =
   | { readonly kind: "snapshot"; readonly snapshot: SessionSnapshotLite }
   | SessionTransportHeartbeatMessage
   | SessionTransportResumedMessage
+  | SessionTransportFidelityMessage
 
 export type SessionTransportHandler = (message: SessionTransportMessage) => void | Promise<void>
 

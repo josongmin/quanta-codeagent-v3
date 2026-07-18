@@ -165,6 +165,8 @@ export const createHarness = async (args: {
   readonly resumeFromSeq?: number
   /** S5 — typed `rejected` surfacing (additive; absent ⇒ prior behavior). */
   readonly onRejected?: CreateSessionTransportClientOpts["onRejected"]
+  /** Ticket 04 (S5) — request wire full fidelity on the client connect. */
+  readonly requestedFidelity?: CreateSessionTransportClientOpts["requestedFidelity"]
 }): Promise<{
   readonly client: SessionTransportClient
   readonly server: SessionTransportServer
@@ -178,6 +180,9 @@ export const createHarness = async (args: {
       sessionId: args.sessionId ?? "session-1",
       ...(args.resumeFromSeq !== undefined ? { resumeFromSeq: args.resumeFromSeq } : {}),
       ...(args.onRejected !== undefined ? { onRejected: args.onRejected } : {}),
+      ...(args.requestedFidelity !== undefined
+        ? { requestedFidelity: args.requestedFidelity }
+        : {}),
     })
     const server = await createSessionStdioServer({
       reader: pair.server.reader,
@@ -200,6 +205,7 @@ export const createHarness = async (args: {
     sessionId: args.sessionId ?? "session-1",
     ...(args.resumeFromSeq !== undefined ? { resumeFromSeq: args.resumeFromSeq } : {}),
     ...(args.onRejected !== undefined ? { onRejected: args.onRejected } : {}),
+    ...(args.requestedFidelity !== undefined ? { requestedFidelity: args.requestedFidelity } : {}),
   })
   const server = await createSessionWebSocketServer({
     socket: pair.server,

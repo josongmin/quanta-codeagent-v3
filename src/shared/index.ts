@@ -51,6 +51,13 @@ export {
 } from "./errors"
 export type { ExecutionSurface } from "./execution-surface"
 export { EXECUTION_SURFACES } from "./execution-surface"
+export type { FullFidelityField } from "./full-fidelity"
+export {
+  capFullFidelityField,
+  FULL_FIDELITY_FLAG,
+  FULL_FIDELITY_MAX_CHARS,
+  fullFidelityEnabled,
+} from "./full-fidelity"
 export { isRecord } from "./is-record"
 export type {
   ItemStreamCompleted,

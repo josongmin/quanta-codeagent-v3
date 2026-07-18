@@ -118,6 +118,13 @@ export interface PendingApprovalView {
   readonly scopeContext?: ApprovalScopeContext
 }
 
+export interface SessionTokenUsageView {
+  readonly promptTokens?: number
+  readonly completionTokens?: number
+  readonly totalTokens?: number
+  readonly costMicroUsd?: number
+}
+
 export interface SessionStateView {
   readonly status: "idle" | "running" | "awaiting_approval" | "failed" | "closed"
   readonly draftInput: string
@@ -134,6 +141,7 @@ export interface SessionStateView {
     readonly policy?: unknown;
 }
   readonly lastLlmContinuation?: unknown
+  readonly lastTokenUsage?: SessionTokenUsageView
 }
 
 export interface SessionSnapshotLite {
@@ -163,7 +171,9 @@ export interface InputAppendCommand extends SessionCommandEnvelope<"input.append
   readonly images?: readonly ImageBlock[]
 }
 
-export interface TurnRunCommand extends SessionCommandEnvelope<"turn.run"> {}
+export interface TurnRunCommand extends SessionCommandEnvelope<"turn.run"> {
+  readonly causedByApprovalId?: string
+}
 
 export interface TurnCancelCommand extends SessionCommandEnvelope<"turn.cancel"> {}
 
@@ -280,6 +290,8 @@ export interface ToolInvokedEvent extends SessionEventEnvelope<"tool.invoked"> {
   readonly toolCallId: string
   readonly toolName: string
   readonly argsPreview?: string
+  readonly argsFull?: string
+  readonly fidelityDegraded?: true
 }
 
 export interface ToolCompletedEvent extends SessionEventEnvelope<"tool.completed"> {
@@ -288,6 +300,8 @@ export interface ToolCompletedEvent extends SessionEventEnvelope<"tool.completed
   readonly outcome: "ok" | "error" | "denied" | "timeout"
   readonly resultPreview?: string
   readonly durationMs?: number
+  readonly resultFull?: string
+  readonly fidelityDegraded?: true
 }
 
 export interface SkillScopeDecisionEvent extends SessionEventEnvelope<"skill.scope.decision"> {
