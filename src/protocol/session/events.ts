@@ -1,4 +1,4 @@
-import type { ImageBlock } from "@/llm"
+import type { ImageBlock } from "@/llm/types"
 import type { ItemStreamDeltaKind, ItemStreamItemType } from "@/shared/item-stream"
 import type {
   LlmSurfaceId,

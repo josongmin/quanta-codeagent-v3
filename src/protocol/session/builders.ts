@@ -9,7 +9,7 @@
  * layer (sdk runtime, ipc clients, app surfaces) without an up-import.
  */
 
-import type { ImageBlock, Message } from "@/llm"
+import type { ImageBlock, Message } from "@/llm/types"
 import type {
   ApprovalRespondCommand,
   InputAppendCommand,

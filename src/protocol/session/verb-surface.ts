@@ -22,7 +22,7 @@
  * `typecheck:all` would see it); `tsconfig.typecheck.src.json` covers src/.
  */
 
-import type { ImageBlock, Message } from "@/llm"
+import type { ImageBlock, Message } from "@/llm/types"
 import type {
   ApprovalRespondCommand,
   InputAppendCommand,

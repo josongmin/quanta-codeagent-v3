@@ -1,4 +1,4 @@
-import type { ImageBlock, Message } from "@/llm"
+import type { ImageBlock, Message } from "@/llm/types"
 
 export interface SessionCommandEnvelope<TType extends string> {
   readonly sessionId: string
