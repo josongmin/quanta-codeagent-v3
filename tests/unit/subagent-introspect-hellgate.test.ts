@@ -322,6 +322,7 @@ describe("followup_task — RFC-04 / ADR-0437", () => {
           return wakeReturn === "woke" ? "woke_idle" : "interrupted_active"
         },
         steer: () => "accepted",
+        currentTurnId: () => "turn-fake",
       })
     }
     return { reg, mb, wake, target, wakeCalls }
@@ -471,6 +472,7 @@ describe("followup_task — RFC-04 / ADR-0437", () => {
       wake: () => "woke",
       interrupt: () => "woke_idle",
       steer: () => "accepted",
+      currentTurnId: () => "turn-fake",
     })
     handleFollowupTask({ agentId: s.target, message: "x" }, deps(s))
     expect(s.mb.sent[0]?.to).toBe("child/0")
@@ -597,6 +599,7 @@ describe("introspect default-OFF + gating — RFC-04 §8.15", () => {
       wake: () => "woke",
       interrupt: () => "woke_idle",
       steer: () => "accepted",
+      currentTurnId: () => "turn-fake",
     })
     const tools = createIntrospectTools({
       registry: reg,

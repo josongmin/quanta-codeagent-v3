@@ -252,6 +252,24 @@ export interface SteerSafePointState {
 
 export const freshSteerSafePointState = (): SteerSafePointState => ({ drained: [], applied: 0 })
 
+/** R2-MED-1 — `applySteerSafePoint` injects ONE steer per re-stream and leaves the
+ *  rest buffered in `state.drained`; an abort that exits `runTurn` mid-multi-steer
+ *  re-stream would otherwise ORPHAN those buffered steers (no terminal receipt,
+ *  RFC §5.9 / DoD #5). Called from a `finally` around the turn loop: preserve each
+ *  via the ONE mailbox fallback + a correlated `superseded_by_interrupt` receipt
+ *  (exactly-once via the retention `take`), the SAME shape as the in-flight
+ *  supersede branch. No-op on normal completion (the safe point empties the buffer
+ *  on HALT) and gate-OFF (empty buffer) ⇒ byte-identical. */
+export const finalizeBufferedSteersOnAbort = (
+  cfg: AgentConfig,
+  state: SteerSafePointState,
+): void => {
+  if (state.drained.length === 0) return
+  const fin = cfg.steerFinalization
+  for (const s of state.drained) fin?.finalizeFallback(s.deliveryId, "superseded_by_interrupt")
+  state.drained = []
+}
+
 /** The safe-point decision: `continue:true` ⇒ the loop re-streams the SAME turn
  *  for one more model call (a steer was injected); `continue:false` ⇒ honor the
  *  original `step.done` (no pending steer, superseded, or budget exhausted). */
@@ -302,23 +320,38 @@ export const applySteerSafePoint = (
   // Pull any newly-admitted steers into the loop-owned FIFO buffer.
   for (const s of drain.drainSteers()) state.drained.push(s)
   if (state.drained.length === 0) return STEER_HALT // nothing pending — as today
-  if (state.applied >= STEER_SAFEPOINT_MAX_ROUNDS) {
-    // Same-turn round budget exhausted: degrade every remaining pending steer to
-    // mailbox once (RFC §3.4 admission pressure) and let the turn finish.
-    for (const s of state.drained) fin?.finalizeFallback(s.deliveryId, "same_turn_budget_exhausted")
-    state.drained = []
-    return STEER_HALT
+  const currentTurnId = cfg.activeTurnRef?.current.currentTurn?.turnId
+  // Apply the first buffered steer that TARGETS the current turn. A steer admitted
+  // against a PRIOR turn (the between-turns staleness window — `activeTurnRef` is
+  // not reset between turns) must NEVER be injected into a different turn
+  // (R2-HIGH-1, RFC §3.2/§3.5): fallback it to the mailbox once with the precise
+  // reason and try the next buffered steer. Mismatch fallbacks do NOT consume the
+  // same-turn round budget (nothing was injected).
+  while (state.drained.length > 0) {
+    const next = state.drained.shift()
+    if (next === undefined) break
+    if (currentTurnId === undefined || currentTurnId !== next.expectedTurnId) {
+      fin?.finalizeFallback(next.deliveryId, "expected_turn_mismatch")
+      continue
+    }
+    if (state.applied >= STEER_SAFEPOINT_MAX_ROUNDS) {
+      // Same-turn round budget exhausted: degrade this match + every remaining
+      // pending steer to mailbox once (RFC §3.4 admission pressure) and finish.
+      fin?.finalizeFallback(next.deliveryId, "same_turn_budget_exhausted")
+      for (const s of state.drained)
+        fin?.finalizeFallback(s.deliveryId, "same_turn_budget_exhausted")
+      state.drained = []
+      return STEER_HALT
+    }
+    // Keep the SAME turn header/id — the outer loop set it once and `runTurn` never
+    // re-stamps it, so this trailing user message lands in the current turn. The
+    // sanitized `formattedBody` is injected (never the raw body — RFC §4.5).
+    wm.append({ role: "user", content: [{ type: "text", text: next.envelope.formattedBody }] })
+    fin?.finalizeApplied(next.deliveryId, currentTurnId)
+    state.applied += 1
+    return STEER_CONTINUE
   }
-  const next = state.drained.shift()
-  if (next === undefined) return STEER_HALT
-  const turnId = cfg.activeTurnRef?.current.currentTurn?.turnId ?? next.expectedTurnId
-  // Keep the SAME turn header/id — the outer loop set it once and `runTurn` never
-  // re-stamps it, so this trailing user message lands in the current turn. The
-  // sanitized `formattedBody` is injected (never the raw body — RFC §4.5).
-  wm.append({ role: "user", content: [{ type: "text", text: next.envelope.formattedBody }] })
-  fin?.finalizeApplied(next.deliveryId, turnId)
-  state.applied += 1
-  return STEER_CONTINUE
+  return STEER_HALT
 }
 
 /** Loop-control fix (jun-25): how many trailing turns (inclusive of the last)

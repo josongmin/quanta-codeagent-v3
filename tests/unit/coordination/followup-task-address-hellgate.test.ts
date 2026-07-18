@@ -104,6 +104,7 @@ describe("handleFollowupTask — delivers to the resolved mailbox label (BUG#4)"
         wake: () => "woke",
         interrupt: () => "woke_idle",
         steer: () => "accepted",
+        currentTurnId: () => "turn-fake",
       })
     }
     return { registry, mailbox, wake, taskId, childLabel }

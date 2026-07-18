@@ -11,9 +11,10 @@
  *   - the disposer removes the endpoint AND its mailbox label together;
  *   - a STALE disposer cannot remove a REPLACEMENT endpoint for the same id
  *     (last-writer-safe);
- *   - capability/gate OFF keeps the prior child config shape (no
- *     conversation-action surface / activeTurnRef allocated) — asserted via the
- *     runner wiring;
+ *   - STEER capability OFF keeps the prior followup child config shape (RFC §9 —
+ *     no conversation-action port / activeTurnRef threaded to the child config;
+ *     the wake/interrupt endpoint is still registered) — asserted via the runner
+ *     wiring, both with followup fully off AND followup-on-steer-off;
  *   - bounded `submitSteer()` admission returns `queue_full` at capacity and
  *     NEVER grows unbounded / silently drops;
  *   - `interrupt()` maps gate state to the closed InterruptControlOutcome:
@@ -29,6 +30,7 @@ import {
   createChildControlEndpoint,
   createChildControlSurface,
 } from "@/agent/subagent-control-endpoint"
+import { makeSteerRetentionStore } from "@/agent/subagent-delivery"
 import type { PeerEnvelope, SubagentSteerSubmission } from "@/agent/subagent-delivery/ports"
 import { createSubagentRunner } from "@/agent/subagent-runner"
 import { makeTurnHeader } from "@/agent/turn-kind"
@@ -295,7 +297,7 @@ describe("createSubagentRunner — control capability gating (default-OFF byte-i
     expect(seen?.subagentTurnGate).toBeUndefined()
   })
 
-  test("wake registry + taskId ⇒ child config receives a conversation-action surface + activeTurnRef, and an endpoint is registered", async () => {
+  test("followup ON but steer OFF ⇒ NO conversationActionPort/activeTurnRef (RFC §9 byte-identity), but gate + endpoint registered", async () => {
     const wake = new TurnWakeRegistry()
     let seen: AgentConfig | undefined
     let endpointDuringRun: unknown
@@ -308,16 +310,95 @@ describe("createSubagentRunner — control capability gating (default-OFF byte-i
       run,
     })
     await runner(baseReq({ taskId: "t1" }))
-    // Control capability wired ⇒ the child got the surface's port + ref.
-    expect(seen?.conversationActionPort).toBeDefined()
-    expect(seen?.activeTurnRef).toBeDefined()
+    // MED-2 (hellaudit R1) — steer OFF ⇒ the child config is byte-identical to the
+    // pre-jul-18 followup baseline: NO conversation-action port / active-turn ref
+    // (the extra mid-turn drain must not exist). RFC §9.
+    expect(seen?.conversationActionPort).toBeUndefined()
+    expect(seen?.activeTurnRef).toBeUndefined()
+    // But the wake/interrupt endpoint (gate-backed) IS registered for followup.
     expect(seen?.subagentTurnGate).toBeDefined()
-    // ONE typed endpoint registered under the task id while the loop ran.
     expect(endpointDuringRun).toBeDefined()
     expect((endpointDuringRun as { mailboxLabel: string }).mailboxLabel).toBe("root/0")
     // Disposed in finally ⇒ endpoint + legacy waker both gone.
     expect(wake.endpointFor("t1")).toBeUndefined()
     expect(wake.has("t1")).toBe(false)
     expect(wake.wake("t1", "followup")).toBe("no-receiver")
+  })
+
+  test("followup ON + steer ON (steer plane) ⇒ child config receives conversationActionPort + activeTurnRef (paired control)", async () => {
+    const wake = new TurnWakeRegistry()
+    const steerPlane = {
+      retention: makeSteerRetentionStore(),
+      finalization: {
+        finalizeApplied: (): void => {},
+        finalizeFallback: (): void => {},
+        finalizeCancelled: (): void => {},
+      },
+    }
+    let seen: AgentConfig | undefined
+    const run = (async (c: AgentConfig) => {
+      seen = c
+      return { reason: "completed", turns: 1, messages: [] } as never
+    }) as never
+    const runner = createSubagentRunner(
+      parentCfg(
+        {
+          subagentTurnWake: wake,
+          subagent: { steerPlane } as NonNullable<AgentConfig["subagent"]>,
+        },
+        new OneShotLLM(),
+      ),
+      { run },
+    )
+    await runner(baseReq({ taskId: "t1" }))
+    // Steer ON ⇒ the loop-facing surface IS threaded (the safe-point drain needs it).
+    expect(seen?.conversationActionPort).toBeDefined()
+    expect(seen?.activeTurnRef).toBeDefined()
+    expect(seen?.subagentTurnGate).toBeDefined()
+  })
+})
+
+// ─── 6. HIGH-1 regression — omitted expectedTurnId (hellaudit R1) ──────────────
+//
+// `followup_task` has NO `expectedTurnId` schema field, so the controller submits
+// an EMPTY id. Pre-fix this flowed into the steer authority's `assertRequestShape`,
+// which THROWS `SteerInputInvalidError` on an empty id — crashing the entire
+// `mode:"steer"` product path on its designed happy input. Every prior rail used a
+// FAKE endpoint (`steer: () => "accepted"`) or an explicit non-empty id, so none
+// exercised this real seam. These drive the REAL surface/endpoint.
+describe("SubagentControlEndpoint — HIGH-1 regression (omitted expectedTurnId)", () => {
+  const steerConfig = { maxInputBytes: 8192 }
+
+  test("EMPTY expectedTurnId on a live steerable turn ⇒ accepted, NOT a throw", () => {
+    const surface = createChildControlSurface({ steerConfig, capacity: 4 })
+    const state = activeRef("turn-live").current
+    expect(() => surface.submitSteer(submission("d1", ""), state)).not.toThrow()
+    expect(surface.submitSteer(submission("d2", ""), state)).toBe("accepted")
+    // The admitted submission carries the caller's (empty) id verbatim; resolution
+    // happened for the steer-authority call only — the loop re-checks at drain.
+    expect(surface.pendingSteers()).toBe(2)
+  })
+
+  test("EMPTY expectedTurnId with NO active turn ⇒ no_active_turn (still no throw)", () => {
+    const surface = createChildControlSurface({ steerConfig, capacity: 4 })
+    const idle = { currentTurn: null, isInterrupted: false }
+    expect(surface.submitSteer(submission("d3", ""), idle)).toBe("no_active_turn")
+    expect(surface.pendingSteers()).toBe(0)
+  })
+
+  test("endpoint.currentTurnId() reads the live turn id (the controller's resolution source)", () => {
+    const gate = new SubagentTurnGate()
+    const surface = createChildControlSurface({ steerConfig, capacity: 4 })
+    const endpoint = createChildControlEndpoint({
+      gate,
+      surface,
+      activeTurnRef: activeRef("turn-abc"),
+      mailboxLabel: "root/0",
+      wake: () => "woke",
+    })
+    expect(endpoint.currentTurnId()).toBe("turn-abc")
+    // A non-empty explicit id is still honored verbatim (mismatch ⇒ turn_mismatch).
+    expect(endpoint.steer(submission("d4", "turn-abc"))).toBe("accepted")
+    expect(endpoint.steer(submission("d5", "other-turn"))).toBe("turn_mismatch")
   })
 })

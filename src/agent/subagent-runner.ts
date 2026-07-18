@@ -114,8 +114,11 @@ const CHILD_STEER_MAX_INPUT_BYTES = 8192
  *  `activeTurnRef.current` (the endpoint's steer closure reads it). Absent ⇒ the
  *  prior child config shape (RFC §4.2 RED rail). */
 interface ChildControlWiring {
-  readonly conversationActionPort: ConversationActionPort
-  readonly activeTurnRef: NonNullable<AgentConfig["activeTurnRef"]>
+  /** MED-2 — threaded onto the child config ONLY when the steer plane exists
+   *  (gate ON). Steer OFF ⇒ absent (byte-identical to the pre-jul-18 followup
+   *  child; the wake/interrupt endpoint needs neither). */
+  readonly conversationActionPort?: ConversationActionPort
+  readonly activeTurnRef?: NonNullable<AgentConfig["activeTurnRef"]>
   /** The bounded steer-submission surface (retained for the loop drain). */
   readonly steerSurface: ChildControlSurface
   /** WS4 — the loop-facing steer drain view + finalization port, threaded onto
@@ -737,9 +740,20 @@ const registerChildWaker = (
   return {
     gate,
     control: {
-      conversationActionPort: actionSurface.port,
-      activeTurnRef: actionSurface.activeTurnRef,
       steerSurface,
+      // MED-2 (hellaudit R1) — thread the loop-facing conversation-action port +
+      // active-turn ref onto the child config ONLY when the steer plane exists
+      // (QUANTA_SUBAGENT_STEER on). RFC §9: with steer OFF a followup-only child is
+      // byte-identical to the pre-jul-18 followup baseline (no extra mid-turn
+      // conversation-action drain). The endpoint is still registered for
+      // wake/interrupt (both gate-backed); its steer/currentTurnId reads are never
+      // reached with steer OFF (controller `steerEnabled` false ⇒ mode_disabled).
+      ...(steerPlane !== undefined
+        ? {
+            conversationActionPort: actionSurface.port,
+            activeTurnRef: actionSurface.activeTurnRef,
+          }
+        : {}),
       ...steerWiring,
     },
     dispose: (): void => {

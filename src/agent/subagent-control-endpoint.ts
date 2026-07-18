@@ -77,8 +77,11 @@ export const createChildControlSurface = (opts: {
   // the head is drained by the loop, the tail appended by `submitSteer`.
   const queue: SubagentSteerSubmission[] = []
 
-  const admissionSteerRequest = (submission: SubagentSteerSubmission): SteerRequest => ({
-    expectedTurnId: submission.expectedTurnId,
+  const admissionSteerRequest = (
+    submission: SubagentSteerSubmission,
+    expectedTurnId: string,
+  ): SteerRequest => ({
+    expectedTurnId,
     // The envelope body is the (already-sanitized) payload; `steer()` re-checks
     // emptiness/size, but the ADMISSION decision here only consults the
     // active-turn / expected-turn arms (the loop runs the full policy later).
@@ -88,9 +91,18 @@ export const createChildControlSurface = (opts: {
 
   return {
     submitSteer(submission: SubagentSteerSubmission, state: ActiveTurnState): SteerSubmitOutcome {
+      // Steer inherently targets "the current turn": an OMITTED (empty) expected
+      // turn id resolves to the live turn (defense-in-depth — the controller
+      // resolves it too). No live turn at all ⇒ `no_active_turn` WITHOUT calling
+      // the steer authority, whose `assertRequestShape` THROWS on an empty id
+      // (the HIGH-1 seam bug). A non-empty id is honored verbatim (mismatch ⇒
+      // `turn_mismatch`).
+      const effectiveTurnId =
+        submission.expectedTurnId.length > 0 ? submission.expectedTurnId : state.currentTurn?.turnId
+      if (effectiveTurnId === undefined) return "no_active_turn"
       // Delegate to the steer authority for the two admission-relevant arms.
       // A steerable, matching turn ⇒ `accepted`; then bound-check the FIFO.
-      const outcome = steer(admissionSteerRequest(submission), state, steerConfig)
+      const outcome = steer(admissionSteerRequest(submission, effectiveTurnId), state, steerConfig)
       if (outcome.kind === "rejected") {
         // Only the two ADMISSION arms map to a typed submit rejection. Any other
         // rejection (non-steerable / interrupted / size) still ADMITS to the
@@ -167,6 +179,11 @@ export const createChildControlEndpoint = (deps: {
       // the admission decision to the bounded surface. The endpoint never
       // mutates the ref and never exposes it.
       return surface.submitSteer(submission, activeTurnRef.current)
+    },
+    currentTurnId(): string | undefined {
+      // A typed READ of the live turn id (no mutable state escapes) so the
+      // controller can resolve an omitted `expectedTurnId` to "the current turn".
+      return activeTurnRef.current.currentTurn?.turnId
     },
   }
 }

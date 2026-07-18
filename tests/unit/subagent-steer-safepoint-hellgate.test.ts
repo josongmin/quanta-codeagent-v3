@@ -30,6 +30,12 @@
 import { describe, expect, test } from "bun:test"
 import { type AgentConfig, runAgent } from "@/agent"
 import {
+  applySteerSafePoint,
+  finalizeBufferedSteersOnAbort,
+  freshSteerSafePointState,
+  STEER_SAFEPOINT_MAX_ROUNDS,
+} from "@/agent/loop/turn-iteration"
+import {
   type ChildControlSurface,
   createChildControlSurface,
 } from "@/agent/subagent-control-endpoint"
@@ -42,14 +48,9 @@ import type {
   SubagentSteerSubmission,
 } from "@/agent/subagent-delivery/ports"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
+import { createWorkingMemory } from "@/memory"
 import type { PermissionContext } from "@/permission"
 import type { AgentEvent, StreamPort } from "@/stream"
-import {
-  applySteerSafePoint,
-  freshSteerSafePointState,
-  STEER_SAFEPOINT_MAX_ROUNDS,
-} from "@/agent/loop/turn-iteration"
-import { createWorkingMemory } from "@/memory"
 import { defaultTools, ToolRegistry } from "@/tool"
 
 // ─── doubles ─────────────────────────────────────────────────────────────────
@@ -399,11 +400,7 @@ describe("WS4 finalization port (RFC §3.3, §4.3)", () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe("WS4 applySteerSafePoint (loop helper, RFC §3.5)", () => {
-  const sub = (
-    deliveryId: string,
-    turnId: string,
-    body: string,
-  ): SubagentSteerSubmission => ({
+  const sub = (deliveryId: string, turnId: string, body: string): SubagentSteerSubmission => ({
     deliveryId,
     envelope: { from: "peer", formattedBody: fmtPeer("peer", body) },
     expectedTurnId: turnId,
@@ -415,9 +412,7 @@ describe("WS4 applySteerSafePoint (loop helper, RFC §3.5)", () => {
     pendingSteers: (): number => queue.length,
   })
 
-  const cfgWith = (
-    over: Partial<AgentConfig>,
-  ): AgentConfig =>
+  const cfgWith = (over: Partial<AgentConfig>): AgentConfig =>
     ({
       activeTurnRef: {
         current: {
@@ -510,5 +505,86 @@ describe("WS4 applySteerSafePoint (loop helper, RFC §3.5)", () => {
     expect(decision.continue).toBe(false)
     expect(fallbacks).toEqual([["s9", "same_turn_budget_exhausted"]])
     expect([...wm.snapshot()].length).toBe(0)
+  })
+
+  // ── Hellaudit R2 regression (cross-turn injection + orphaned buffer) ──────────
+
+  test("R2-HIGH-1: a steer admitted against a PRIOR turn is NOT injected into the current turn — expected_turn_mismatch fallback, no wm mutation", () => {
+    const wm = createWorkingMemory<Message>([])
+    const state = freshSteerSafePointState()
+    const fallbacks: Array<[string, string]> = []
+    // The buffered steer targets "T-PRIOR"; the live header (cfgWith default) is "T1".
+    const cfg = cfgWith({
+      childSteerDrain: cannedDrain([sub("s-stale", "T-PRIOR", "steer meant for a stale turn")]),
+      steerFinalization: {
+        finalizeApplied: () => {
+          throw new Error("R2-HIGH-1: a cross-turn steer must NEVER be applied")
+        },
+        finalizeFallback: (id, reason) => fallbacks.push([id, reason]),
+        finalizeCancelled: () => {},
+      },
+    })
+    const decision = applySteerSafePoint(cfg, wm, state, false)
+    expect([...wm.snapshot()].length).toBe(0) // NOT injected into T1
+    expect(fallbacks).toEqual([["s-stale", "expected_turn_mismatch"]])
+    expect(decision.continue).toBe(false) // no matching steer ⇒ halt
+    expect(state.applied).toBe(0)
+  })
+
+  test("R2-HIGH-1 mix: a stale-turn steer is fallback'd while a same-turn steer is applied in FIFO order", () => {
+    const wm = createWorkingMemory<Message>([])
+    const state = freshSteerSafePointState()
+    const applied: string[] = []
+    const fallbacks: Array<[string, string]> = []
+    const cfg = cfgWith({
+      // FIFO: stale first (must fallback, not block), then the current-turn steer.
+      childSteerDrain: cannedDrain([
+        sub("s-stale", "T-PRIOR", "stale"),
+        sub("s-live", "T1", "live"),
+      ]),
+      steerFinalization: {
+        finalizeApplied: (id) => applied.push(id),
+        finalizeFallback: (id, reason) => fallbacks.push([id, reason]),
+        finalizeCancelled: () => {},
+      },
+    })
+    const decision = applySteerSafePoint(cfg, wm, state, false)
+    expect(decision.continue).toBe(true) // the live steer was applied
+    expect(applied).toEqual(["s-live"])
+    expect(fallbacks).toEqual([["s-stale", "expected_turn_mismatch"]])
+    expect([...wm.snapshot()].length).toBe(1) // exactly the live injection
+    expect(state.applied).toBe(1)
+  })
+
+  test("R2-MED-1: steers left buffered when the turn aborts are finalized (superseded_by_interrupt), not orphaned", () => {
+    const state = freshSteerSafePointState()
+    state.drained.push(sub("b1", "T1", "x"), sub("b2", "T1", "y"))
+    const fallbacks: Array<[string, string]> = []
+    const cfg = cfgWith({
+      steerFinalization: {
+        finalizeApplied: () => {},
+        finalizeFallback: (id, reason) => fallbacks.push([id, reason]),
+        finalizeCancelled: () => {},
+      },
+    })
+    finalizeBufferedSteersOnAbort(cfg, state)
+    expect(fallbacks).toEqual([
+      ["b1", "superseded_by_interrupt"],
+      ["b2", "superseded_by_interrupt"],
+    ])
+    expect(state.drained.length).toBe(0) // buffer cleared (no double-finalize on a later call)
+  })
+
+  test("R2-MED-1 control: an empty buffer ⇒ finalizeBufferedSteersOnAbort is a no-op (byte-identical)", () => {
+    const touched: string[] = []
+    const cfg = cfgWith({
+      steerFinalization: {
+        finalizeApplied: (id) => touched.push(id),
+        finalizeFallback: (id) => touched.push(id),
+        finalizeCancelled: (id) => touched.push(id),
+      },
+    })
+    finalizeBufferedSteersOnAbort(cfg, freshSteerSafePointState())
+    expect(touched).toEqual([])
   })
 })

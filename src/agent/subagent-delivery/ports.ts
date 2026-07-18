@@ -58,6 +58,11 @@ export interface SubagentControlEndpoint {
   wake(): WakeControlOutcome
   interrupt(): InterruptControlOutcome
   steer(submission: SubagentSteerSubmission): SteerSubmitOutcome
+  /** The child's CURRENT active turn id (a typed READ — no mutable state escapes),
+   *  or `undefined` when no turn is in flight. Steer inherently targets "the
+   *  current turn": when a caller omits `expectedTurnId` the controller resolves it
+   *  from here rather than submitting an empty id into the throwing steer authority. */
+  currentTurnId(): string | undefined
 }
 
 /**

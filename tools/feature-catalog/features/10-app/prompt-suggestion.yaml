@@ -60,6 +60,7 @@ evidence:
     - src/agent/prompt-suggestion/orchestrator.ts
     - src/agent/prompt-suggestion/index.ts
     - src/apps/cli/repl/prompt-suggestion-wire.ts
+    - src/apps/cli/repl/session-loop.ts
   adrs: [467]
   tests:
     unit:

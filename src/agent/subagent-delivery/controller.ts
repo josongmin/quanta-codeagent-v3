@@ -82,8 +82,18 @@ export interface SubagentDeliveryControllerDeps {
   /** Typed control registry (endpointFor / labelOf). */
   readonly control: SubagentControlRegistry
   readonly mailbox: DeliveryMailboxPort
-  /** The reused peer formatter (RFC §4.5). */
+  /** The reused peer formatter (RFC §4.5) — redact → escape → untrusted provenance
+   *  — for the DIRECT-to-model steer injection. */
   readonly formatPeer: PeerFormatter
+  /** RFC §4.5 "one sanitizer, ALL modes" — the secret redactor applied to EVERY
+   *  body the controller places in the MAILBOX (queue / interrupt / all steer
+   *  fallbacks). The mailbox drain's own redactor is wired only under
+   *  `QUANTA_TEAM_PEER_MSG`, and the manual `subagent_read_messages` never redacts,
+   *  so redacting at the enqueue boundary makes a peer secret drain-independent
+   *  (hellaudit — a secret in a queued/fallback body must never reach the child
+   *  model raw). Default identity ⇒ byte-identical when unwired. Idempotent, so a
+   *  later drain-redactor re-pass is harmless. */
+  readonly redact?: (body: string) => string
   /** Validate target running-state + lineage + self BEFORE mutation. */
   readonly resolveTarget: (targetTaskId: string) => TargetResolution
   readonly newDeliveryId: DeliveryIdFactory
@@ -271,12 +281,19 @@ const retainAcceptedSteer = (
   req: SubagentDeliveryRequest,
   label: string | undefined,
   deliveryId: string,
-  formattedBody: string,
+  rawBody: string,
 ): void => {
+  // Retain the RAW (unformatted) body: a `finalizeFallback` re-enqueues this into
+  // the mailbox, and the mailbox DRAIN applies the peer formatter exactly once
+  // (same as the queue path's raw `enqueue`). Hellaudit R3-MED-1: retaining the
+  // already-`[teammate …]`-wrapped body double-wrapped it on the fallback drain.
   deps.steerRetention?.retain(deliveryId, {
     from: req.from,
     to: label ?? deps.control.labelOf(req.targetTaskId) ?? req.targetTaskId,
-    body: formattedBody,
+    // Redacted-but-unwrapped: a later `finalizeFallback` enqueues this and the
+    // mailbox drain wraps it ONCE (R3-MED-1), while the secret is already scrubbed
+    // (RFC §4.5, drain-independent). `redact` is idempotent.
+    body: redactBody(deps, rawBody),
     ...(req.correlationId !== undefined ? { correlationId: req.correlationId } : {}),
   })
 }
@@ -285,6 +302,11 @@ const retainAcceptedSteer = (
  *  on any queue/degrade path). Resolves the delivery address to the child's
  *  mailbox label (task id → `root/N`); falls back to the task id when no label is
  *  bound. Module-level so the three mode handlers share one impl (SE size gate). */
+/** RFC §4.5 — scrub secrets from a body bound for the MAILBOX (drain-independent;
+ *  see {@link SubagentDeliveryControllerDeps.redact}). Identity when unwired. */
+const redactBody = (deps: SubagentDeliveryControllerDeps, body: string): string =>
+  deps.redact ? deps.redact(body) : body
+
 const enqueue = (
   deps: SubagentDeliveryControllerDeps,
   req: SubagentDeliveryRequest,
@@ -295,7 +317,7 @@ const enqueue = (
     from: req.from,
     to,
     kind: "request",
-    body: req.body,
+    body: redactBody(deps, req.body),
     ...(req.correlationId !== undefined ? { correlationId: req.correlationId } : {}),
   })
   return msg.id
@@ -371,9 +393,11 @@ const doInterrupt = (
       // WILL run, so this is `applied`, not a degrade (RFC §3.1).
       return interruptApplied(deliveryId, messageId, turnId)
     case "not_armed":
-      // The child has entered no turn yet (nothing armed, nothing parked); the
-      // payload is queued and a turn runs once the loop parks — same collapse as
-      // woke_idle (a turn WILL run).
+      // The child has entered no turn yet (nothing armed, nothing parked) — it is
+      // mid-spawn. Delivery is still guaranteed WITHOUT a wake: a freshly-spawned
+      // child runs turn 1 (armTurn → run → only THEN can it park), and the payload
+      // (enqueued above, RFC §3.4) is drained at that turn's top. Same §3.1 idle
+      // collapse as woke_idle — a turn WILL run and consume the message.
       return interruptApplied(deliveryId, messageId, turnId)
   }
 }
@@ -393,10 +417,18 @@ const doSteer = (
     const messageId = enqueue(deps, req, label)
     return degradeOutcome(deliveryId, "steer", "control_unavailable", "queued", messageId)
   }
+  // Resolve the target turn. `expectedTurnId` is honored when the caller supplies
+  // it (a specific turn); steer inherently means "the current turn", so an OMITTED
+  // id resolves to the child's live turn via the endpoint's typed read. A truly
+  // absent active turn ⇒ ONE mailbox fallback + `no_active_turn` degrade (never an
+  // empty-string submission into the throwing steer authority — HIGH-1 fix).
+  const resolvedTurnId = req.expectedTurnId ?? endpoint.currentTurnId()
+  if (resolvedTurnId === undefined) {
+    const messageId = enqueue(deps, req, label)
+    return degradeOutcome(deliveryId, "steer", "no_active_turn", "queued", messageId)
+  }
   // Build the SANITIZED envelope (RFC §4.5) — a raw teammate body may never be
-  // injected as a trusted string. `expectedTurnId` is honored for steer; when the
-  // caller omitted it there is no active turn to target ⇒ the endpoint's steer
-  // authority returns `no_active_turn` and we fall back.
+  // injected as a trusted string.
   const submission = {
     deliveryId,
     envelope: {
@@ -404,7 +436,7 @@ const doSteer = (
       formattedBody: deps.formatPeer(req.from, "request", req.body),
       ...(req.correlationId !== undefined ? { correlationId: req.correlationId } : {}),
     },
-    expectedTurnId: req.expectedTurnId ?? "",
+    expectedTurnId: resolvedTurnId,
   }
   const outcome: SteerSubmitOutcome = endpoint.steer(submission)
   if (outcome === "accepted") {
@@ -412,7 +444,7 @@ const doSteer = (
     // degraded receipt arrives later from the loop's safe point (WS4 seam:
     // `deps.finalization`). RETAIN the address + sanitized body so a later
     // `finalizeFallback` can perform the ONE mailbox fallback (RFC §4.3).
-    retainAcceptedSteer(deps, req, label, deliveryId, submission.envelope.formattedBody)
+    retainAcceptedSteer(deps, req, label, deliveryId, req.body)
     return {
       kind: "accepted",
       deliveryId,

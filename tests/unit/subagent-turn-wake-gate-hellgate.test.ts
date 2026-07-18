@@ -290,6 +290,7 @@ describe("end-to-end — followup_task wakes a real runAgent child loop", () => 
       wake: () => gate.wake("followup"),
       interrupt: () => "interrupted_active",
       steer: () => "accepted",
+      currentTurnId: () => "turn-fake",
     })
     const reg = new TaskRegistry()
     reg.register({ id: "busy-1", description: "child" })

@@ -156,6 +156,7 @@ describe("subagent tool knobs — composition-root wire (ADR-0436/0437)", () => 
       },
       interrupt: () => "woke_idle",
       steer: () => "accepted",
+      currentTurnId: () => "turn-fake",
     })
 
     // Drive the actual registered tool via Tool.execute (true end-to-end).

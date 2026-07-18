@@ -182,8 +182,12 @@ const childControlConfig = (
   control === undefined
     ? {}
     : {
-        conversationActionPort: control.conversationActionPort,
-        activeTurnRef: control.activeTurnRef,
+        // MED-2 — thread the loop-facing port + ref ONLY when present (steer plane
+        // wired). Steer OFF ⇒ absent ⇒ byte-identical followup child (RFC §9).
+        ...(control.conversationActionPort !== undefined
+          ? { conversationActionPort: control.conversationActionPort }
+          : {}),
+        ...(control.activeTurnRef !== undefined ? { activeTurnRef: control.activeTurnRef } : {}),
         // WS4 — thread the steer drain view + finalization ONLY when present
         // (steer plane wired). Absent ⇒ no safe-point drain (byte-identical).
         ...(control.childSteerDrain !== undefined
@@ -238,8 +242,10 @@ const buildChildInheritedConfig = (
  *  the control capability is wired. Structurally the fields the child loop
  *  consumes; the runner owns the full {@link ChildControlSurface} + endpoint. */
 export interface ChildControlWiring {
-  readonly conversationActionPort: NonNullable<AgentConfig["conversationActionPort"]>
-  readonly activeTurnRef: NonNullable<AgentConfig["activeTurnRef"]>
+  /** MED-2 — present only when the steer plane exists (gate ON); steer OFF ⇒ the
+   *  child is byte-identical to the pre-jul-18 followup baseline (RFC §9). */
+  readonly conversationActionPort?: NonNullable<AgentConfig["conversationActionPort"]>
+  readonly activeTurnRef?: NonNullable<AgentConfig["activeTurnRef"]>
   /** WS4 — loop-facing steer drain view + finalization port, present only when
    *  the session steer plane exists (gate ON). Absent ⇒ no safe-point drain. */
   readonly childSteerDrain?: NonNullable<AgentConfig["childSteerDrain"]>

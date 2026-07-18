@@ -46,6 +46,7 @@ export interface ControlEndpoint {
   wake(): WakeOutcome
   interrupt(): string
   steer(submission: unknown): string
+  currentTurnId(): string | undefined
 }
 
 export class TurnWakeRegistry {

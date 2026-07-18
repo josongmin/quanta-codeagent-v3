@@ -23,6 +23,7 @@
  * inline (structurally identical `send`).
  */
 
+import { redactSecrets } from "@/security"
 import { logger } from "@/shared"
 import { createIntrospectTools, type DeliveryPort } from "@/subagent"
 import type { Tool } from "@/tool"
@@ -98,10 +99,22 @@ export const buildSubagentIntrospectBlock = (config: AgentConfig): Tool[] => {
             control,
             mailbox,
             // RFC §4.5 — the ONE reused peer sanitizer/formatter (redact → escape
-            // → untrusted provenance). Steer/interrupt injection never sees a raw
-            // teammate body. (Redaction is wired by the mailbox host under
-            // QUANTA_TEAM_PEER_MSG; default identity ⇒ byte-identical when unwired.)
-            formatPeer: (from, kind, body) => formatPeerBody({ from, kind, body }),
+            // → untrusted provenance). Steer/interrupt injection is delivered
+            // STRAIGHT to the child model (no mailbox drain to redact it later), so
+            // the real secret redactor MUST be applied here — the SAME
+            // `redactSecrets({origin:"tool_result"})` the queue auto-drain uses
+            // (peer-team-wire). Hellaudit R3-HIGH-1: this was previously the
+            // identity default ⇒ secrets in a steer body reached the child verbatim.
+            formatPeer: (from, kind, body) =>
+              formatPeerBody(
+                { from, kind, body },
+                (b) => redactSecrets(b, { origin: "tool_result" }).text,
+              ),
+            // RFC §4.5 "one sanitizer, ALL modes" — scrub secrets from EVERY body
+            // the controller enqueues to the mailbox (queue / interrupt / steer
+            // fallbacks), drain-independent (the mailbox drain redacts only under
+            // QUANTA_TEAM_PEER_MSG; manual subagent_read_messages never redacts).
+            redact: (b) => redactSecrets(b, { origin: "tool_result" }).text,
             resolveTarget: createTargetResolver({
               registry,
               control,

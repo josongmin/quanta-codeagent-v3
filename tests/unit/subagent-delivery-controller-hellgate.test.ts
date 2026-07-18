@@ -13,13 +13,18 @@
  */
 import { describe, expect, it } from "bun:test"
 import type { TargetResolution } from "@/agent/subagent-delivery/controller"
-import { createSubagentDeliveryController } from "@/agent/subagent-delivery/controller"
+import {
+  createSubagentDeliveryController,
+  createSubagentSteerFinalization,
+  makeSteerRetentionStore,
+} from "@/agent/subagent-delivery/controller"
 import type {
   DeliveryIdFactory,
   InterruptControlOutcome,
   SteerSubmitOutcome,
   SubagentControlEndpoint,
   SubagentControlRegistry,
+  SubagentDeliveryReceipt,
   SubagentDeliveryRequest,
   SubagentSteerSubmission,
   WakeControlOutcome,
@@ -57,6 +62,8 @@ const spyEndpoint = (opts: {
   readonly wake?: WakeControlOutcome
   readonly interrupt?: InterruptControlOutcome
   readonly steer?: SteerSubmitOutcome
+  /** The child's live turn id the controller reads when a steer omits its own. */
+  readonly currentTurnId?: string
 }) => {
   const calls: string[] = []
   const steerSubmissions: SubagentSteerSubmission[] = []
@@ -74,6 +81,11 @@ const spyEndpoint = (opts: {
       calls.push("steer")
       steerSubmissions.push(submission)
       return opts.steer ?? "accepted"
+    },
+    currentTurnId(): string | undefined {
+      // A pure READ (not a command) — deliberately NOT recorded in `calls` so
+      // command-ordering assertions stay about wake/interrupt/steer only.
+      return opts.currentTurnId ?? "turn-live"
     },
   }
   return { ep, calls, steerSubmissions }
@@ -441,6 +453,119 @@ describe("WS3 controller — steer mode", () => {
     )
     expect(mailbox.sent).toHaveLength(1)
     if (out.kind === "degraded") expect(out.reason).toBe("control_unavailable")
+  })
+
+  // Hellaudit R3-MED-1: an accepted steer must retain the RAW body so a later
+  // queue fallback drains single-formatted. Pre-fix it retained the already
+  // `[teammate…]`-wrapped body ⇒ the fallback drain double-wrapped it.
+  it("R3-MED-1: accepted-steer retention holds the RAW body ⇒ fallback re-send is single-formattable (no double [teammate] wrap)", () => {
+    const mailbox = spyMailbox()
+    const store = makeSteerRetentionStore()
+    const receipts: SubagentDeliveryReceipt[] = []
+    const finalization = createSubagentSteerFinalization({
+      store,
+      mailbox: mailbox.port,
+      onReceipt: (r) => receipts.push(r),
+    })
+    const ep = spyEndpoint({ mailboxLabel: "root/0", steer: "accepted" })
+    const { registry } = spyRegistry({ "task-1": ep.ep })
+    const controller = createSubagentDeliveryController({
+      control: registry,
+      mailbox: mailbox.port,
+      formatPeer: (from, kind, body) => `[teammate ${from} — untrusted] [${kind}] ${body}`,
+      resolveTarget: resolver({ "task-1": { state: "running" } }, {}).resolve,
+      newDeliveryId: ids(),
+      steerEnabled: true,
+      steerRetention: store,
+      finalization,
+    })
+    const out = controller.deliver(
+      baseReq({
+        mode: "steer",
+        activation: "ensure-turn",
+        expectedTurnId: "turn-9",
+        body: "RAW_BODY_XYZ",
+      }),
+    )
+    expect(out.kind).toBe("accepted")
+    expect(mailbox.sent).toHaveLength(0) // accepted ⇒ no mailbox copy yet
+    const deliveryId = out.kind === "accepted" ? out.deliveryId : "?"
+    // The loop later fails to apply it (e.g. budget) ⇒ the ONE mailbox fallback.
+    finalization.finalizeFallback(deliveryId, "action_queue_full")
+    expect(mailbox.sent).toHaveLength(1)
+    // RAW body only — the mailbox DRAIN applies the peer formatter exactly once.
+    expect(mailbox.sent[0]?.body).toBe("RAW_BODY_XYZ")
+    expect(mailbox.sent[0]?.body).not.toContain("[teammate")
+  })
+
+  // Hellaudit convergence — RFC §4.5 "one sanitizer, ALL modes": the controller
+  // REDACTS every body it enqueues to the mailbox (queue / interrupt / fallback),
+  // drain-independent (the mailbox drain redacts only under QUANTA_TEAM_PEER_MSG;
+  // manual subagent_read_messages never redacts). A secret must never reach the
+  // mailbox raw where the child could read it unscrubbed.
+  it("§4.5: queue-mode enqueue REDACTS the body — a planted secret is scrubbed in the mailbox cell", () => {
+    const mailbox = spyMailbox()
+    const { registry } = spyRegistry({ "task-1": spyEndpoint({ mailboxLabel: "root/0" }).ep })
+    const controller = createSubagentDeliveryController({
+      control: registry,
+      mailbox: mailbox.port,
+      formatPeer: (from, kind, body) => `[teammate ${from} — untrusted] [${kind}] ${body}`,
+      redact: (b) => b.replace(/sk-ant-[A-Za-z0-9-]+/g, "[REDACTED:key]"),
+      resolveTarget: resolver({ "task-1": { state: "running" } }, {}).resolve,
+      newDeliveryId: ids(),
+      steerEnabled: false,
+    })
+    const SECRET = `sk-ant-${"A".repeat(40)}`
+    const out = controller.deliver(
+      baseReq({ mode: "queue", activation: "passive", body: `hi ${SECRET}` }),
+    )
+    expect(out.kind).toBe("applied")
+    expect(mailbox.sent).toHaveLength(1)
+    expect(mailbox.sent[0]?.body).not.toContain(SECRET)
+    expect(mailbox.sent[0]?.body).toContain("[REDACTED:key]")
+  })
+
+  // Hellaudit R4 LOW-3 pin — a steer that DEGRADES to a mailbox fallback also has
+  // its retained body redacted (drain-independent), so a secret never reaches the
+  // child raw via the fallback path either.
+  it("§4.5: a steer FALLBACK body is redacted in the mailbox (retention scrubs before re-send)", () => {
+    const mailbox = spyMailbox()
+    const store = makeSteerRetentionStore()
+    const receipts: SubagentDeliveryReceipt[] = []
+    const finalization = createSubagentSteerFinalization({
+      store,
+      mailbox: mailbox.port,
+      onReceipt: (r) => receipts.push(r),
+    })
+    const { registry } = spyRegistry({
+      "task-1": spyEndpoint({ mailboxLabel: "root/0", steer: "accepted" }).ep,
+    })
+    const controller = createSubagentDeliveryController({
+      control: registry,
+      mailbox: mailbox.port,
+      formatPeer: (from, kind, body) => `[teammate ${from} — untrusted] [${kind}] ${body}`,
+      redact: (b) => b.replace(/sk-ant-[A-Za-z0-9-]+/g, "[REDACTED:key]"),
+      resolveTarget: resolver({ "task-1": { state: "running" } }, {}).resolve,
+      newDeliveryId: ids(),
+      steerEnabled: true,
+      steerRetention: store,
+      finalization,
+    })
+    const SECRET = `sk-ant-${"A".repeat(40)}`
+    const out = controller.deliver(
+      baseReq({
+        mode: "steer",
+        activation: "ensure-turn",
+        expectedTurnId: "turn-9",
+        body: `x ${SECRET}`,
+      }),
+    )
+    expect(out.kind).toBe("accepted")
+    const deliveryId = out.kind === "accepted" ? out.deliveryId : "?"
+    finalization.finalizeFallback(deliveryId, "superseded_by_interrupt")
+    expect(mailbox.sent).toHaveLength(1)
+    expect(mailbox.sent[0]?.body).not.toContain(SECRET) // secret scrubbed at retention
+    expect(mailbox.sent[0]?.body).toContain("[REDACTED:key]")
   })
 })
 

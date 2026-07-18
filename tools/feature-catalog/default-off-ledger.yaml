@@ -10,6 +10,7 @@ scope:
 runtime_cli_seed_mappings:
   QUANTA_ENABLE_ENV_PROBE: env-probe
   QUANTA_STALE_READ_GUARD: stale-read-guard
+  QUANTA_TOOL_INTERRUPT_BLOCK: tool-interrupt-block
   QUANTA_UNTRUSTED_ENVELOPE: untrusted-source-envelope
   QUANTA_READ_DEDUP: read-file-unchanged-dedup
   QUANTA_TEAM_DAG: team-dag-coordination
@@ -322,7 +323,7 @@ rows:
     reachability: wired
     proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: security
-    decision: measure-first
+    decision: enable-now
     owner_seam: src/permission/classifier.ts
     rollback: unset QUANTA_CIRCUMVENT_DETECT
     duplicate_of: null
@@ -838,7 +839,7 @@ rows:
     reachability: wired
     proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: security
-    decision: measure-first
+    decision: enable-now
     owner_seam: src/permission/reviewer.ts
     rollback: QUANTA_GUARDIAN_ASSESSOR=off
     duplicate_of: null
@@ -1012,15 +1013,21 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: memory-cross-session-inject
+    # TRUTH-FIX (jul-18): gate is `parseEnvFlag(QUANTA_MEMORY_AUTO, defaultOn=true)`
+    # at 3 assembly sites (agent-arg-builder.ts:228 host, memory-factory.ts:140
+    # runner, auto-trigger/wire.ts:49) — an OPT-OUT gate per ADR-0413, so it ships
+    # ON wherever an agent is assembled (host→cli, runner→bench/headless). The
+    # prior `off` + `!=on` rollback mislabelled it as opt-in. decision stays
+    # measure-first: bench-efficacy A/B (memory contamination on fresh boxes) open.
     gate_owner: [QUANTA_MEMORY_AUTO]
-    activation: env/config
-    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: off }
+    activation: inverse-kill-switch
+    effective_default: { cli: on, web: na, bench: on, headless: on, daemon: na }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: measure-first
     owner_seam: src/memory/cross-session/default-injector.ts
-    rollback: QUANTA_MEMORY_AUTO!=on
+    rollback: QUANTA_MEMORY_AUTO=off
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: message-batches-client-core
@@ -2032,15 +2039,22 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: tool-interrupt-block
+    # FLIP (jul-18): CLI-seeded default-ON as a protective correctness guard
+    # (same class as stale-read-guard / untrusted-envelope). W4 evidence: OFF
+    # byte-identical in normal operation (the critical-section wrapper is
+    # transparent unless an interrupt races a write) and the deferral is
+    # watchdog-bounded (cannot hang). No efficacy dimension ⇒ no A/B needed;
+    # risk reclassified behavioral-cost→platform (runtime robustness, not a
+    # prompt/behavior lever). Consumed at dispatch/tool-context.ts:23.
     gate_owner: [QUANTA_TOOL_INTERRUPT_BLOCK]
-    activation: env/config
-    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
+    activation: host-seeded
+    effective_default: { cli: on, web: na, bench: off, headless: off, daemon: na }
     reachability: wired
     proof: { on: wire, off_identity: unit, receipt: null }
-    risk: behavioral-cost
-    decision: measure-first
+    risk: platform
+    decision: enable-now
     owner_seam: src/tool/critical-section.ts
-    rollback: unset QUANTA_TOOL_INTERRUPT_BLOCK
+    rollback: QUANTA_TOOL_INTERRUPT_BLOCK=0
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: untrusted-source-envelope

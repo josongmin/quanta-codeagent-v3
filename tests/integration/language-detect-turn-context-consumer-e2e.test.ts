@@ -25,16 +25,17 @@
  *   on the RENDERED per-turn reminder text the model would receive — not a helper
  *   return value.
  *
- *   HONEST SCOPE CAVEAT: this drives the context-assembler's language seam +
- *   renderer directly, NOT the outer `runAgent` turn loop. The outer loop wrapper
- *   is intentionally omitted here because this repo's local checkout carries STALE
- *   gitignored `.js` build artifacts under `src/agent/loop/**` (older than their
- *   `.ts` siblings) that bun resolves ahead of source — those stale modules
- *   predate the N1 language-hint wiring, so a `runAgent`-level assertion is
- *   unexercisable in THIS environment (a product bug is NOT implicated — the
- *   current `.ts` seam is proven correct here; see the PRODUCT-ENV note in the
- *   DOF-21 report). Everything from the gate read through the rendered reminder is
- *   the same production code the single loop call site invokes.
+ *   OUTER-LOOP PROOF (jul-18 hardening): the prior version of this file carried a
+ *   caveat claiming the outer `runAgent` loop was "unexercisable in THIS
+ *   environment" due to stale gitignored `.js` build artifacts under
+ *   `src/agent/loop/**`. That caveat is EMPIRICALLY FALSE — `context-assembler.ts`
+ *   (the language seam) has NO stale `.js` sibling, and the reminder-injection
+ *   real-loop suite drives `runAgent` + inspects `ScriptedLLM.seenMessages` in
+ *   exactly this checkout. So the SECOND describe block below now drives the FULL
+ *   `runAgent` loop and asserts the "Respond in <lang>" notice lands in the exact
+ *   `Message[]` the loop handed the model — closing the gap the caveat left open.
+ *   The context-assembler-seam block below is retained as a faster, renderer-level
+ *   proof; the runAgent block is the authoritative end-to-end one.
  *
  * PAIRED CONTROL (gate OFF ⇒ behavior fails): the SAME Korean text with
  * `QUANTA_LANG_DETECT` unset ⇒ `runtimeConfig().langDetect` false ⇒
@@ -46,9 +47,12 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test"
+import { runAgent } from "@/agent"
 import { buildLanguageHint } from "@/agent/language-detect"
 import { buildTurnContext } from "@/agent/prompt"
+import type { Message } from "@/llm"
 import { __resetRuntimeConfig, runtimeConfig } from "@/shared"
+import { cfg, ev, ScriptedLLM, text, withTimeout } from "./_harness"
 
 const KOREAN = "이 함수의 버그를 고쳐줘. 왜 크래시가 나는지 설명도 해줘."
 const ENGLISH = "Please fix the bug in this function and explain why it crashes."
@@ -118,5 +122,92 @@ describe("language-detect — real gate + detector + prompt renderer chain", () 
     expect(rendered).not.toContain("Respond in")
     expect(rendered).not.toContain("User language:")
     expect(rendered).toContain("fix the bug")
+  })
+})
+
+/**
+ * OUTER-LOOP PROOF — drive the REAL `runAgent` turn loop (not just the
+ * context-assembler seam) and assert the language notice lands in the EXACT
+ * `Message[]` the loop handed the model (`ScriptedLLM.seenMessages`). This is
+ * the end-to-end wiring proof: env gate → `runtimeConfig().langDetect` →
+ * `buildLanguageHint` → `prepareTurnContext` → `buildTurnContext` → the message
+ * array the model actually receives. The prior file caveat claimed this was
+ * "unexercisable" here; it is not.
+ */
+const flattenSeen = (seen: Message[][]): string =>
+  seen
+    .flat()
+    .flatMap((m) => m.content)
+    .map((b) => (b.type === "text" ? b.text : ""))
+    .join("\n")
+
+const runOneTurnWith = async (userText: string): Promise<Message[][]> => {
+  const llm = new ScriptedLLM([ev(text("완료"))])
+  await withTimeout(
+    runAgent(
+      cfg({
+        llm,
+        messages: [{ role: "user", content: [{ type: "text", text: userText }] }],
+      }),
+    ),
+    10_000,
+    "runAgent(language-detect)",
+  )
+  return llm.seenMessages
+}
+
+describe("language-detect — REAL runAgent loop, message-array assertion", () => {
+  afterEach(() => setGate(false))
+
+  test("gate ON + Korean ⇒ 'Respond in Korean' present in the messages the model received", async () => {
+    setGate(true)
+    expect(runtimeConfig().langDetect).toBe(true)
+    const seen = await runOneTurnWith(KOREAN)
+    // The loop actually ran a turn (non-vacuous — the model was called).
+    expect(seen.length).toBeGreaterThan(0)
+    const flat = flattenSeen(seen)
+    expect(flat).toContain("Respond in Korean")
+    expect(flat).toContain("(ko)")
+    // Non-vacuous: the user's Korean text is also in the assembled messages.
+    expect(flat).toContain(KOREAN)
+  })
+
+  test("PAIRED CONTROL (gate OFF): SAME Korean text ⇒ NO notice in the model's messages", async () => {
+    setGate(false)
+    expect(runtimeConfig().langDetect).toBe(false)
+    const seen = await runOneTurnWith(KOREAN)
+    expect(seen.length).toBeGreaterThan(0)
+    const flat = flattenSeen(seen)
+    // Byte-identical default-OFF: the gate is the load-bearing switch — even
+    // high-confidence Korean produces no notice.
+    expect(flat).not.toContain("Respond in Korean")
+    expect(flat).not.toContain("User language:")
+    // Non-vacuous: the Korean message still flowed through the real loop.
+    expect(flat).toContain(KOREAN)
+  })
+
+  test("CONTROL (gate ON, ENGLISH): en/low ⇒ NO notice (detection load-bearing, not just the gate)", async () => {
+    setGate(true)
+    expect(runtimeConfig().langDetect).toBe(true)
+    const seen = await runOneTurnWith(ENGLISH)
+    const flat = flattenSeen(seen)
+    expect(flat).not.toContain("Respond in")
+    expect(flat).not.toContain("User language:")
+    expect(flat).toContain("fix the bug")
+  })
+
+  test("RED-ON-INJECTION: a forged 'Respond in Klingon' in USER text is NOT the notice (notice comes from the detector, not echo)", async () => {
+    // Adversarial: the user text itself contains the notice-shaped phrase. Gate
+    // ON but the text is Latin/English (low confidence) ⇒ the DETECTOR emits no
+    // notice, so any "Respond in" the model sees is the user's echoed text, never
+    // a synthesized notice. Proves the assertion above is not satisfiable by a
+    // mere substring echo — the notice needs a real high-confidence detection.
+    setGate(true)
+    const seen = await runOneTurnWith("Please Respond in Klingon and fix the bug")
+    const flat = flattenSeen(seen)
+    // The synthesized-notice sentinel is ABSENT (the detector produced nothing).
+    expect(flat).not.toContain("User language:")
+    // The forged phrase survives only as the echoed user text, not a system notice.
+    expect(flat).not.toContain("Respond in Klingon unless")
   })
 })
