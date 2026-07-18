@@ -278,6 +278,38 @@ export type SteerSafePointOutcome = { readonly continue: boolean }
 const STEER_HALT: SteerSafePointOutcome = { continue: false }
 const STEER_CONTINUE: SteerSafePointOutcome = { continue: true }
 
+/** A buffered steer targets the live turn iff a turn is active AND its
+ *  `expectedTurnId` equals that turn (RFC §3.2/§3.5). A steer admitted against a
+ *  PRIOR turn (the between-turns staleness window) is NOT same-turn — its honest
+ *  degrade reason is `expected_turn_mismatch`, never a same-turn reason. Shared by
+ *  the mismatch arm and the budget-exhausted tail so both stay in lockstep. */
+const steerTargetsTurn = (
+  currentTurnId: string | undefined,
+  s: import("../subagent-delivery/ports").SubagentSteerSubmission,
+): currentTurnId is string => currentTurnId !== undefined && currentTurnId === s.expectedTurnId
+
+/** Same-turn round budget exhausted (`applied >= cap`): degrade the current match
+ *  plus every remaining buffered steer to the mailbox once (RFC §3.4 admission
+ *  pressure) and clear the buffer. `matched` DID target the current turn (it passed
+ *  the mismatch arm), so budget is its honest reason. The remaining buffer is
+ *  UNCHECKED, though — it may hold prior-turn steers whose true reason is
+ *  `expected_turn_mismatch` (RFC §3.2/§3.5), so each is labeled by its OWN turn id
+ *  rather than blanket-budget. */
+const degradeOnBudgetExhausted = (
+  fin: import("../subagent-delivery/ports").SubagentSteerFinalizationPort | undefined,
+  matched: import("../subagent-delivery/ports").SubagentSteerSubmission,
+  state: SteerSafePointState,
+  currentTurnId: string | undefined,
+): void => {
+  fin?.finalizeFallback(matched.deliveryId, "same_turn_budget_exhausted")
+  for (const s of state.drained)
+    fin?.finalizeFallback(
+      s.deliveryId,
+      steerTargetsTurn(currentTurnId, s) ? "same_turn_budget_exhausted" : "expected_turn_mismatch",
+    )
+  state.drained = []
+}
+
 /**
  * WS4 — the post-stream steer safe-point. Called by {@link runTurn} ONLY when a
  * turn is about to finish on an `end_turn` (`completed`) response.
@@ -330,17 +362,12 @@ export const applySteerSafePoint = (
   while (state.drained.length > 0) {
     const next = state.drained.shift()
     if (next === undefined) break
-    if (currentTurnId === undefined || currentTurnId !== next.expectedTurnId) {
+    if (!steerTargetsTurn(currentTurnId, next)) {
       fin?.finalizeFallback(next.deliveryId, "expected_turn_mismatch")
       continue
     }
     if (state.applied >= STEER_SAFEPOINT_MAX_ROUNDS) {
-      // Same-turn round budget exhausted: degrade this match + every remaining
-      // pending steer to mailbox once (RFC §3.4 admission pressure) and finish.
-      fin?.finalizeFallback(next.deliveryId, "same_turn_budget_exhausted")
-      for (const s of state.drained)
-        fin?.finalizeFallback(s.deliveryId, "same_turn_budget_exhausted")
-      state.drained = []
+      degradeOnBudgetExhausted(fin, next, state, currentTurnId)
       return STEER_HALT
     }
     // Keep the SAME turn header/id — the outer loop set it once and `runTurn` never

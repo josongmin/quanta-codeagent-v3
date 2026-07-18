@@ -10,7 +10,14 @@ import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import type { LLMPort } from "@/llm"
 import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-model-override"
 import { projectAgentEventToAgentStateObservation } from "@/protocol/agent-state"
-import { gateOn, gateOnStrict, itemStreamEnabled, logger, runtimeConfig } from "@/shared"
+import {
+  emitOperatorNotice,
+  gateOn,
+  gateOnStrict,
+  itemStreamEnabled,
+  logger,
+  runtimeConfig,
+} from "@/shared"
 import type { AgentEvent } from "@/stream"
 import {
   ItemLifecycleTracker,
@@ -760,13 +767,16 @@ const wireFollowupDeps = <T extends OptionalPortBase>(base: T): T => {
  * controller (retains on admission) and every child loop (drains + finalizes).
  *
  * Default-OFF byte-identical: `enableSteer` unset ⇒ `base` returned verbatim (no
- * plane allocated). Caller-override-precedence: a pre-set `steerPlane` is kept.
- * The receipt sink is a no-op at this layer — the correlated `SubagentDelivery
- * Receipt` UI/telemetry consumer is owned by WS6 (jul-15 `peer_message` cascade);
- * the exactly-once + mailbox-fallback invariant is enforced by the finalization
- * port itself regardless of the sink, so a no-op sink is honest here.
+ * plane allocated ⇒ the `onReceipt` closure never exists). Caller-override-
+ * precedence: a pre-set `steerPlane` is kept.
+ * The receipt sink routes `degraded`/`cancelled` receipts onto the GLOBAL
+ * operator-notice bus (Item 1, jul-18) so a steer that fell back to the mailbox
+ * is operator-visible; `applied` is intentionally silent. A correlated
+ * `SubagentDeliveryReceipt` UI/telemetry cascade (WS6, jul-15 `peer_message`) may
+ * still layer on top. The exactly-once + mailbox-fallback invariant is enforced
+ * by the finalization port itself regardless of the sink.
  */
-const wireSteerPlane = <T extends OptionalPortBase>(base: T): T => {
+export const wireSteerPlane = <T extends OptionalPortBase>(base: T): T => {
   const sub = (base as Partial<AgentConfig>).subagent
   if (sub === undefined || sub.enableSteer !== true || sub.steerPlane !== undefined) return base
   const mailbox = (base as Partial<AgentConfig>).subagentMailbox
@@ -775,8 +785,31 @@ const wireSteerPlane = <T extends OptionalPortBase>(base: T): T => {
   const finalization = createSubagentSteerFinalization({
     store: retention,
     mailbox: mailbox as unknown as import("./subagent-delivery/controller").DeliveryMailboxPort,
-    // WS6 owns the correlated peer_message receipt cascade; no-op sink here.
-    onReceipt: () => {},
+    // Item 1 (jul-18) — surface async steer receipts on the existing GLOBAL
+    // operator-notice bus. A steer that DEGRADED to the mailbox (or was
+    // cancelled) is an operator signal the no-op sink used to silently swallow.
+    // `applied` (success) fires NO notice: a multi-round steer would emit one per
+    // consumed step (spam) and success is not an operator alert. `emitOperator
+    // Notice` is a no-throw global (no sink installed ⇒ inert), so it can never
+    // poison the finalization path. WS6 may still layer a correlated peer_message
+    // UI cascade on top of this later — this bus is the operator-visible floor.
+    onReceipt: (r) => {
+      if (r.kind === "degraded") {
+        emitOperatorNotice({
+          severity: "warn",
+          source: "subagent",
+          message: `steer to peer degraded to ${r.effectiveMode} (${r.reason})`,
+          hint: `delivered via mailbox msg ${r.messageId}`,
+        })
+      } else if (r.kind === "cancelled") {
+        emitOperatorNotice({
+          severity: "info",
+          source: "subagent",
+          message: `steer cancelled (${r.reason})`,
+        })
+      }
+      // `applied` (success) ⇒ NO notice (see closure header).
+    },
   })
   return { ...base, subagent: { ...sub, steerPlane: { retention, finalization } } } as T
 }

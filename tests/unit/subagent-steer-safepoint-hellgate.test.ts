@@ -507,6 +507,46 @@ describe("WS4 applySteerSafePoint (loop helper, RFC §3.5)", () => {
     expect([...wm.snapshot()].length).toBe(0)
   })
 
+  test("Item-2: budget-exhausted branch labels EACH remaining buffered steer by its OWN turn id — current-turn ⇒ same_turn_budget_exhausted, stale ⇒ expected_turn_mismatch (not blanket)", () => {
+    // Budget is already exhausted, so the FIRST current-turn match trips the
+    // budget branch. The remaining buffer is a MIX: one for the current turn (T1)
+    // and one for a STALE turn (T-PRIOR). Honesty gap being closed: the blanket
+    // loop used to label BOTH `same_turn_budget_exhausted`; the stale one never
+    // targeted this turn, so its true reason is `expected_turn_mismatch`.
+    const wm = createWorkingMemory<Message>([])
+    const state = freshSteerSafePointState()
+    state.applied = STEER_SAFEPOINT_MAX_ROUNDS // budget already at cap
+    const fallbacks: Array<[string, string]> = []
+    const cfg = cfgWith({
+      // FIFO: the match that trips the budget branch first (current turn), then a
+      // remaining current-turn steer and a remaining STALE-turn steer.
+      childSteerDrain: cannedDrain([
+        sub("s-hit", "T1", "the match that trips the budget check"),
+        sub("s-rest-live", "T1", "remaining, still this turn"),
+        sub("s-rest-stale", "T-PRIOR", "remaining, but a prior turn"),
+      ]),
+      steerFinalization: {
+        finalizeApplied: () => {
+          throw new Error("Item-2: nothing may be applied once the budget is exhausted")
+        },
+        finalizeFallback: (id, reason) => fallbacks.push([id, reason]),
+        finalizeCancelled: () => {},
+      },
+    })
+    const decision = applySteerSafePoint(cfg, wm, state, false)
+    expect(decision.continue).toBe(false) // STEER_HALT
+    // The match itself DID target this turn — budget is the honest reason.
+    // The remaining live item is also this turn ⇒ budget. The remaining stale
+    // item never targeted this turn ⇒ mismatch (NOT blanket budget).
+    expect(fallbacks).toEqual([
+      ["s-hit", "same_turn_budget_exhausted"],
+      ["s-rest-live", "same_turn_budget_exhausted"],
+      ["s-rest-stale", "expected_turn_mismatch"],
+    ])
+    expect([...wm.snapshot()].length).toBe(0) // nothing injected
+    expect(state.drained.length).toBe(0) // buffer cleared
+  })
+
   // ── Hellaudit R2 regression (cross-turn injection + orphaned buffer) ──────────
 
   test("R2-HIGH-1: a steer admitted against a PRIOR turn is NOT injected into the current turn — expected_turn_mismatch fallback, no wm mutation", () => {
