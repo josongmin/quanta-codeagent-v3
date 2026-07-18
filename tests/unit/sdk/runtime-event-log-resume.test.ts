@@ -30,20 +30,11 @@ import { InMemorySessionEventLog, JsonlSessionEventLog, systemClock } from "@/ke
 import { decodeSessionEvent, type SessionEvent } from "@/protocol/session"
 import { createRuntime } from "@/sdk/runtime"
 import { createRuntimeSession } from "@/sdk/runtime/session"
+import { capabilitiesFor } from "../../support/session-fixtures"
 
 const ENV_KEY = "QUANTA_SESSION_EVENT_LOG_DIR"
 
-const CAPABILITIES = {
-  approvals: "none",
-  tools: false,
-  memory: false,
-  artifacts: false,
-  subagents: false,
-  automation: false,
-  shellSnapshot: false,
-  serverAutoContinues: false,
-  transport: "inproc",
-} as const
+const CAPABILITIES = capabilitiesFor()
 
 const makeHost = (sessionId: string): SessionHost => ({
   describe: () => ({

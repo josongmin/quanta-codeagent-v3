@@ -10,6 +10,7 @@ import {
   SESSION_PROTOCOL_VERSION,
   SessionProtocolValidationError,
 } from "@/protocol/session"
+import { makeSnapshotLite } from "../../support/session-fixtures"
 
 describe("@/protocol/session codec", () => {
   test("round-trips commands with envelope metadata", () => {
@@ -225,30 +226,13 @@ describe("@/protocol/session codec", () => {
     expect(() => decodeSessionEvent(raw)).toThrow(SessionProtocolValidationError)
   })
 
-  const validSnapshot = (): SessionSnapshotLite => ({
-    sessionId: "s1",
-    revision: 4,
-    seq: 2,
-    state: {
-      status: "idle",
-      draftInput: "",
-      permissionMode: "default",
-      messageCount: 0,
-    },
-    capabilities: {
-      approvals: "none",
-      tools: true,
-      memory: true,
-      artifacts: true,
-      subagents: false,
-      automation: false,
-      shellSnapshot: false,
-      serverAutoContinues: false,
-      transport: "inproc",
-    },
-    pendingApproval: null,
-    openArtifacts: [],
-  })
+  const validSnapshot = (): SessionSnapshotLite =>
+    makeSnapshotLite({
+      sessionId: "s1",
+      revision: 4,
+      seq: 2,
+      capabilities: { tools: true, memory: true, artifacts: true },
+    })
 
   test("round-trips snapshots with nullable pendingApproval", () => {
     const raw = encodeSessionSnapshot(validSnapshot())

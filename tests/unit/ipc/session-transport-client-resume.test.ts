@@ -27,6 +27,7 @@ import {
   type SessionTransportMessage,
 } from "@/ipc/session"
 import type { SessionEvent } from "@/protocol/session"
+import { makeSnapshotLite } from "../../support/session-fixtures"
 
 const makeEvent = (seq: number): SessionEvent => ({
   eventId: `event-${seq}`,
@@ -44,30 +45,12 @@ const makeEvent = (seq: number): SessionEvent => ({
 
 const SNAPSHOT_FRAME: SessionTransportMessage = {
   kind: "snapshot",
-  snapshot: {
+  snapshot: makeSnapshotLite({
     sessionId: "session-1",
     revision: 3,
     seq: 3,
-    state: {
-      status: "idle",
-      draftInput: "",
-      permissionMode: "default",
-      messageCount: 0,
-    },
-    capabilities: {
-      approvals: "operator",
-      tools: true,
-      memory: false,
-      artifacts: true,
-      subagents: false,
-      automation: false,
-      shellSnapshot: false,
-      serverAutoContinues: false,
-      transport: "stdio",
-    },
-    pendingApproval: null,
-    openArtifacts: [],
-  },
+    capabilities: { approvals: "operator", tools: true, artifacts: true, transport: "stdio" },
+  }),
 }
 
 /** Manual transport: frames are pushed by the test AFTER `connect()` resolved

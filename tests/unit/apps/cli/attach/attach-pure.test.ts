@@ -16,6 +16,7 @@ import {
 } from "@/apps/cli/attach"
 import type { SessionTransportMessage } from "@/ipc/session"
 import type { SessionEvent } from "@/protocol/session"
+import { makeSnapshotLite } from "../../../../support/session-fixtures"
 
 const HANDSHAKE_DISCOVERY_SESSION_ID = "ui-session"
 
@@ -64,25 +65,12 @@ describe("attach handshake (discovery → adopt canonical sessionId)", () => {
     // a resume cursor. Here there is no reconnect, so they must NOT.
     hs.onMessage({
       kind: "snapshot",
-      snapshot: {
+      snapshot: makeSnapshotLite({
         sessionId: "sess-9",
         revision: 1,
         seq: 3,
-        state: { status: "idle", draftInput: "", permissionMode: "default", messageCount: 0 },
-        capabilities: {
-          approvals: "none",
-          tools: false,
-          memory: false,
-          artifacts: false,
-          subagents: false,
-          automation: false,
-          shellSnapshot: false,
-          serverAutoContinues: false,
-          transport: "websocket",
-        },
-        pendingApproval: null,
-        openArtifacts: [],
-      },
+        capabilities: { transport: "websocket" },
+      }),
     })
     // A (hypothetical) second connect-reject — the re-handshake frame it emits
     // must still be a BARE connect (no resumeFromSeq), proving the dead cursor
@@ -133,30 +121,12 @@ describe("attach handshake (discovery → adopt canonical sessionId)", () => {
     })
     const snapshotMsg: SessionTransportMessage = {
       kind: "snapshot",
-      snapshot: {
+      snapshot: makeSnapshotLite({
         sessionId: "daemon-session-7",
         revision: 1,
         seq: 4,
-        state: {
-          status: "idle",
-          draftInput: "",
-          permissionMode: "default",
-          messageCount: 0,
-        },
-        capabilities: {
-          approvals: "none",
-          tools: false,
-          memory: false,
-          artifacts: false,
-          subagents: false,
-          automation: false,
-          shellSnapshot: false,
-          serverAutoContinues: false,
-          transport: "websocket",
-        },
-        pendingApproval: null,
-        openArtifacts: [],
-      },
+        capabilities: { transport: "websocket" },
+      }),
     }
     const reaction = hs.onMessage(snapshotMsg)
     expect(reaction).toBeUndefined()
@@ -169,25 +139,12 @@ describe("attach handshake (discovery → adopt canonical sessionId)", () => {
     hs.initialConnect()
     hs.onMessage({
       kind: "snapshot",
-      snapshot: {
+      snapshot: makeSnapshotLite({
         sessionId: "direct-session",
         revision: 1,
         seq: 0,
-        state: { status: "idle", draftInput: "", permissionMode: "default", messageCount: 0 },
-        capabilities: {
-          approvals: "none",
-          tools: false,
-          memory: false,
-          artifacts: false,
-          subagents: false,
-          automation: false,
-          shellSnapshot: false,
-          serverAutoContinues: false,
-          transport: "websocket",
-        },
-        pendingApproval: null,
-        openArtifacts: [],
-      },
+        capabilities: { transport: "websocket" },
+      }),
     })
     expect(hs.sessionId).toBe("direct-session")
     expect(hs.ready).toBe(true)

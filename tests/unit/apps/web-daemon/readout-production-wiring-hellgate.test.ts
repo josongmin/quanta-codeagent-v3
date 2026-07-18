@@ -19,6 +19,7 @@ import { join } from "node:path"
 import { resolveReadout, type WebReadoutSources } from "@/apps/web-daemon/readout"
 import { buildProductionRuntimeFactory } from "@/apps/web-daemon/runtime-factory"
 import type { SessionSnapshotLite } from "@/protocol/session"
+import { makeSnapshotLite } from "../../../support/session-fixtures"
 
 const tmp = mkdtempSync(join(tmpdir(), "quanta-readout-wiring-"))
 const skillsDir = join(tmp, "skills")
@@ -40,25 +41,12 @@ afterAll(() => {
   rmSync(tmp, { recursive: true, force: true })
 })
 
-const SNAP: SessionSnapshotLite = {
+const SNAP: SessionSnapshotLite = makeSnapshotLite({
   sessionId: "wire-1",
   revision: 1,
   seq: 1,
-  state: { status: "idle", draftInput: "", permissionMode: "default", messageCount: 0 },
-  capabilities: {
-    approvals: "none",
-    tools: true,
-    memory: false,
-    artifacts: false,
-    subagents: true,
-    automation: false,
-    shellSnapshot: false,
-    serverAutoContinues: false,
-    transport: "websocket",
-  },
-  pendingApproval: null,
-  openArtifacts: [],
-}
+  capabilities: { tools: true, subagents: true, transport: "websocket" },
+})
 
 describe("production runtime factory — readout sources are LIVE on the facade", () => {
   test("facade exposes readoutSources whose accessors serve real data", async () => {

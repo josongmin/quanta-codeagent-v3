@@ -39,18 +39,9 @@ import {
 import type { Message } from "@/llm"
 import type { SessionEvent } from "@/protocol/session"
 import { createRuntimeSession } from "@/sdk/runtime/session"
+import { capabilitiesFor } from "../../support/session-fixtures"
 
-const CAPABILITIES = {
-  approvals: "none" as const,
-  tools: false,
-  memory: false,
-  artifacts: false,
-  subagents: false,
-  automation: false,
-  shellSnapshot: false,
-  serverAutoContinues: false,
-  transport: "inproc" as const,
-}
+const CAPABILITIES = capabilitiesFor()
 
 const messagesOf = (text: string): readonly Message[] => [
   { role: "user", content: [{ type: "text", text }] },

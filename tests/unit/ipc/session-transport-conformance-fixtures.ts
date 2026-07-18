@@ -30,55 +30,24 @@ import { createRuntimeFromAgentConfigBase, type RuntimeSession } from "@/sdk/run
 import { toSessionHandle } from "@/sdk/runtime/handle-adapter"
 import { StdoutStream } from "@/stream"
 import { type Tool, type ToolEvent, ToolRegistry } from "@/tool"
+import { capabilitiesFor, makeSnapshotLite } from "../../support/session-fixtures"
 
 export type TransportKind = "stdio" | "websocket"
 
-const capabilitiesFor = (transport: TransportKind) => ({
-  approvals: "operator" as const,
-  tools: true,
-  memory: false,
-  artifacts: true,
-  subagents: false,
-  automation: false,
-  shellSnapshot: false,
-  serverAutoContinues: false,
-  transport,
-})
+/** The transport-conformance manifest — the historical shape of this suite
+ *  (operator approvals + tools + artifacts). SSOT-derived via the shared
+ *  fixture; only the transport varies per column. */
+const conformanceCapabilities = (transport: TransportKind) =>
+  capabilitiesFor({ approvals: "operator", tools: true, artifacts: true, transport })
 
 export const makeSnapshot = (
   transport: TransportKind,
   overrides: Partial<SessionSnapshotLite> = {},
-): SessionSnapshotLite => {
-  const base: SessionSnapshotLite = {
-    sessionId: "session-1",
-    revision: 1,
-    seq: 1,
-    state: {
-      status: "idle",
-      draftInput: "",
-      permissionMode: "default",
-      messageCount: 0,
-    },
-    capabilities: capabilitiesFor(transport),
-    pendingApproval: null,
-    openArtifacts: [],
-  }
-  return {
-    ...base,
+): SessionSnapshotLite =>
+  makeSnapshotLite({
     ...overrides,
-    state: {
-      ...base.state,
-      ...(overrides.state ?? {}),
-    },
-    capabilities: {
-      ...base.capabilities,
-      ...(overrides.capabilities ?? {}),
-    },
-    pendingApproval:
-      overrides.pendingApproval === undefined ? base.pendingApproval : overrides.pendingApproval,
-    openArtifacts: overrides.openArtifacts ?? base.openArtifacts,
-  }
-}
+    capabilities: { ...conformanceCapabilities(transport), ...(overrides.capabilities ?? {}) },
+  })
 
 export const makeStateUpdatedEvent = (
   overrides: Partial<Extract<SessionEvent, { type: "session.state.updated" }>> = {},

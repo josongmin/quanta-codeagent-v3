@@ -7,6 +7,7 @@ import {
   systemClock,
 } from "@/kernel/session"
 import { SessionRevisionConflictError } from "@/protocol/session"
+import { capabilitiesFor } from "../../support/session-fixtures"
 
 const makeOutcome = (reason: AgentOutcome["reason"]) =>
   ({
@@ -20,17 +21,7 @@ const makeOutcome = (reason: AgentOutcome["reason"]) =>
 
 describe("@/kernel/session", () => {
   test("session posture commands reconcile to the host-authoritative state on ignored invalid values", async () => {
-    const manifest = {
-      approvals: "none" as const,
-      tools: false,
-      memory: false,
-      artifacts: false,
-      subagents: false,
-      automation: false,
-      shellSnapshot: false,
-      serverAutoContinues: false,
-      transport: "inproc" as const,
-    }
+    const manifest = capabilitiesFor()
     let permissionMode = "default"
     let identityMode = "default"
     let toolProfile = "write"
@@ -124,17 +115,7 @@ describe("@/kernel/session", () => {
   })
 
   test("runs a turn and updates transcript state", async () => {
-    const manifest = {
-      approvals: "operator" as const,
-      tools: true,
-      memory: false,
-      artifacts: true,
-      subagents: false,
-      automation: false,
-      shellSnapshot: false,
-      serverAutoContinues: false,
-      transport: "inproc" as const,
-    }
+    const manifest = capabilitiesFor({ approvals: "operator", tools: true, artifacts: true })
     let state = createKernelSessionState({
       sessionId: "s1",
       permissionMode: "default",
@@ -215,17 +196,7 @@ describe("@/kernel/session", () => {
   })
 
   test("allows image-only turns", async () => {
-    const manifest = {
-      approvals: "none" as const,
-      tools: true,
-      memory: false,
-      artifacts: false,
-      subagents: false,
-      automation: false,
-      shellSnapshot: false,
-      serverAutoContinues: false,
-      transport: "inproc" as const,
-    }
+    const manifest = capabilitiesFor({ tools: true })
     let state = createKernelSessionState({
       sessionId: "image-only",
       permissionMode: "default",
@@ -288,17 +259,7 @@ describe("@/kernel/session", () => {
   })
 
   test("replaces transcript through the kernel-owned command path", async () => {
-    const manifest = {
-      approvals: "none" as const,
-      tools: false,
-      memory: false,
-      artifacts: false,
-      subagents: false,
-      automation: false,
-      shellSnapshot: false,
-      serverAutoContinues: false,
-      transport: "inproc" as const,
-    }
+    const manifest = capabilitiesFor()
     const state = createKernelSessionState({
       sessionId: "s1",
       permissionMode: "default",
@@ -337,17 +298,7 @@ describe("@/kernel/session", () => {
     const state = createKernelSessionState({
       sessionId: "s1",
       permissionMode: "default",
-      capabilityManifest: {
-        approvals: "none",
-        tools: false,
-        memory: false,
-        artifacts: false,
-        subagents: false,
-        automation: false,
-        shellSnapshot: false,
-        serverAutoContinues: false,
-        transport: "inproc",
-      },
+      capabilityManifest: capabilitiesFor(),
     })
     await expect(
       dispatchSessionCommand(

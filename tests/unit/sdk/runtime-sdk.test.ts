@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { AgentOutcome } from "@/agent"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import { createRuntime } from "@/sdk/runtime"
+import { capabilitiesFor } from "../../support/session-fixtures"
 
 const makeOutcome = (reason: AgentOutcome["reason"]) =>
   ({
@@ -20,17 +21,7 @@ describe("@/sdk/runtime", () => {
         describe: () => ({
           sessionId: "sdk-session",
           permissionMode: "default",
-          capabilityManifest: {
-            approvals: "none",
-            tools: false,
-            memory: false,
-            artifacts: false,
-            subagents: false,
-            automation: false,
-            shellSnapshot: false,
-            serverAutoContinues: false,
-            transport: "inproc",
-          },
+          capabilityManifest: capabilitiesFor(),
           identityMode: "default",
           toolProfile: "write",
         }),
@@ -76,17 +67,7 @@ describe("@/sdk/runtime", () => {
         describe: () => ({
           sessionId: "sdk-session",
           permissionMode: "default",
-          capabilityManifest: {
-            approvals: "none",
-            tools: false,
-            memory: false,
-            artifacts: false,
-            subagents: false,
-            automation: false,
-            shellSnapshot: false,
-            serverAutoContinues: false,
-            transport: "inproc",
-          },
+          capabilityManifest: capabilitiesFor(),
         }),
         runTurn: async () => ({ outcome: makeOutcome("completed"), messages: [] }),
         close: async () => undefined,
@@ -112,17 +93,7 @@ describe("@/sdk/runtime", () => {
         describe: () => ({
           sessionId: "sdk-read",
           permissionMode: "default",
-          capabilityManifest: {
-            approvals: "none",
-            tools: false,
-            memory: false,
-            artifacts: false,
-            subagents: false,
-            automation: false,
-            shellSnapshot: false,
-            serverAutoContinues: false,
-            transport: "inproc",
-          },
+          capabilityManifest: capabilitiesFor(),
         }),
         runTurn: async () => ({ outcome: makeOutcome("completed"), messages: [] }),
         close: async () => undefined,
@@ -147,17 +118,7 @@ describe("@/sdk/runtime", () => {
         describe: () => ({
           sessionId: "sdk-session",
           permissionMode: "default",
-          capabilityManifest: {
-            approvals: "none",
-            tools: false,
-            memory: false,
-            artifacts: false,
-            subagents: false,
-            automation: false,
-            shellSnapshot: false,
-            serverAutoContinues: false,
-            transport: "inproc",
-          },
+          capabilityManifest: capabilitiesFor(),
         }),
         runTurn: async () => {
           await hostTurnGate
@@ -209,17 +170,7 @@ describe("@/sdk/runtime", () => {
         describe: () => ({
           sessionId: "sdk-session",
           permissionMode: "default",
-          capabilityManifest: {
-            approvals: "none",
-            tools: false,
-            memory: false,
-            artifacts: false,
-            subagents: false,
-            automation: false,
-            shellSnapshot: false,
-            serverAutoContinues: false,
-            transport: "inproc",
-          },
+          capabilityManifest: capabilitiesFor(),
         }),
         runTurn: async () => ({ outcome: makeOutcome("completed"), messages: [] }),
         startSideConversation: async ({ question }) => {

@@ -28,18 +28,9 @@ import type {
   SessionDispatchOptions,
   SessionDispatchResult,
 } from "@/sdk/runtime"
+import { capabilitiesFor, makeSnapshotLite } from "../../../support/session-fixtures"
 
-const STUB_CAPS = {
-  approvals: "none" as const,
-  tools: false,
-  memory: false,
-  artifacts: false,
-  subagents: false,
-  automation: false,
-  shellSnapshot: false,
-  serverAutoContinues: false,
-  transport: "websocket" as const,
-}
+const STUB_CAPS = capabilitiesFor({ transport: "websocket" })
 
 interface StubBag {
   sessionsCreated: number
@@ -84,20 +75,12 @@ export const createStubRuntimeFactory = (): {
       bag.sessionsCreated += 1
       const sessionId = `stub-session-${bag.sessionsCreated}`
       const listeners = new Set<(event: SessionEvent) => void>()
-      let snapshot: SessionSnapshotLite = {
+      let snapshot: SessionSnapshotLite = makeSnapshotLite({
         sessionId,
         revision: 1,
         seq: 0,
-        state: {
-          status: "idle",
-          draftInput: "",
-          permissionMode: "default",
-          messageCount: 0,
-        },
         capabilities: STUB_CAPS,
-        pendingApproval: null,
-        openArtifacts: [],
-      }
+      })
       let draftImages: readonly ImageBlock[] = []
       let transportBridge: ReturnType<typeof createSessionTransportBridge> | undefined
       let transportDispatchQueue: Promise<void> = Promise.resolve()

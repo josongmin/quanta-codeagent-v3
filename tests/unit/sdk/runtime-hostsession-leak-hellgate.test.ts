@@ -31,6 +31,7 @@ import { join } from "node:path"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import { JsonlSessionEventLogLockError, type SessionHost } from "@/kernel/session"
 import { createRuntime } from "@/sdk/runtime"
+import { capabilitiesFor } from "../../support/session-fixtures"
 
 const tmpDirs: string[] = []
 const priorEnv = process.env.QUANTA_SESSION_EVENT_LOG_DIR
@@ -49,17 +50,7 @@ const makeSpyHost = (closeCalls: { count: number }): SessionHost =>
     describe: () => ({
       sessionId: SESSION_ID,
       permissionMode: "default",
-      capabilityManifest: {
-        approvals: "none",
-        tools: false,
-        memory: false,
-        artifacts: false,
-        subagents: false,
-        automation: false,
-        shellSnapshot: false,
-        serverAutoContinues: false,
-        transport: "inproc",
-      },
+      capabilityManifest: capabilitiesFor(),
       identityMode: "default",
       toolProfile: "write",
     }),

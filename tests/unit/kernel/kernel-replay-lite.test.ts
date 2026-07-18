@@ -1,41 +1,32 @@
 import { describe, expect, test } from "bun:test"
 import { replaySnapshotLite } from "@/kernel/session"
 import { SessionProtocolValidationError, type SessionSnapshotLite } from "@/protocol/session"
+import { makeSnapshotLite } from "../../support/session-fixtures"
 
-const makeSnapshot = (): SessionSnapshotLite => ({
-  sessionId: "s1",
-  revision: 4,
-  seq: 10,
-  state: {
-    status: "idle",
-    draftInput: "",
-    permissionMode: "default",
-    messageCount: 2,
-    lastUserText: "ping",
-    lastAssistantText: "pong",
-  },
-  capabilities: {
-    approvals: "none",
-    tools: false,
-    memory: false,
-    artifacts: true,
-    subagents: false,
-    automation: false,
-    shellSnapshot: false,
-    serverAutoContinues: false,
-    transport: "inproc",
-  },
-  pendingApproval: null,
-  openArtifacts: [
-    {
-      artifactId: "a1",
-      kind: "text",
-      mimeType: "text/plain",
-      locator: "artifact://a1",
-      createdAt: "2026-05-26T00:00:00.000Z",
+const makeSnapshot = (): SessionSnapshotLite =>
+  makeSnapshotLite({
+    sessionId: "s1",
+    revision: 4,
+    seq: 10,
+    state: {
+      status: "idle",
+      draftInput: "",
+      permissionMode: "default",
+      messageCount: 2,
+      lastUserText: "ping",
+      lastAssistantText: "pong",
     },
-  ],
-})
+    capabilities: { artifacts: true },
+    openArtifacts: [
+      {
+        artifactId: "a1",
+        kind: "text",
+        mimeType: "text/plain",
+        locator: "artifact://a1",
+        createdAt: "2026-05-26T00:00:00.000Z",
+      },
+    ],
+  })
 
 describe("kernel replay-lite", () => {
   test("clones snapshot and retains only post-snapshot tail events", () => {

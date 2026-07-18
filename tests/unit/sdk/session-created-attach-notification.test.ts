@@ -35,8 +35,8 @@ import type { SessionTransport, SessionTransportMessage } from "@/ipc/session"
 import type { KernelClock, KernelEventLogPort, SessionHost } from "@/kernel/session"
 import { createKernelSessionState } from "@/kernel/session"
 import type { SessionEvent } from "@/protocol/session"
-import { normalizeCapabilityManifest } from "@/protocol/session"
 import { createRuntimeSession } from "@/sdk/runtime/session"
+import { capabilitiesFor } from "../../support/session-fixtures"
 import {
   attachSessionTransport as engineAttachSessionTransport,
   type SessionEngineDeps,
@@ -100,7 +100,7 @@ const makeHost = (): SessionHost => ({
   describe: () => ({
     sessionId: PIN_SESSION_ID,
     permissionMode: "default",
-    capabilityManifest: normalizeCapabilityManifest({
+    capabilityManifest: capabilitiesFor({
       approvals: "operator",
       transport: "websocket",
       serverAutoContinues: true,

@@ -28,6 +28,7 @@ import {
 } from "@/ipc/session"
 import { SessionProtocolValidationError } from "@/protocol/session"
 import { createRuntime } from "@/sdk/runtime"
+import { capabilitiesFor } from "../../support/session-fixtures"
 import { makeCommand, makeSnapshot } from "./session-transport-conformance-fixtures"
 
 /** In-memory duplex transport pair (same shape as session-transport.test.ts):
@@ -99,17 +100,7 @@ describe("S5a / bridge dispatch-error → rejected promotion", () => {
         describe: () => ({
           sessionId: "dispatch-reject-session",
           permissionMode: "default",
-          capabilityManifest: {
-            approvals: "none",
-            tools: false,
-            memory: false,
-            artifacts: false,
-            subagents: false,
-            automation: false,
-            shellSnapshot: false,
-            serverAutoContinues: false,
-            transport: "inproc",
-          },
+          capabilityManifest: capabilitiesFor(),
         }),
         runTurn: async () => {
           throw new Error("host.runTurn must NOT be reached — the reducer rejects first")

@@ -24,6 +24,7 @@ import {
   tryDecodeSessionTransportMessage,
 } from "@/ipc/session"
 import type { SessionEvent } from "@/protocol/session"
+import { makeSnapshotLite } from "../../../../support/session-fixtures"
 
 /** Listener buckets the fake socket dispatches to. */
 type Listeners = {
@@ -102,25 +103,12 @@ const makeFakeSocket = (opts?: { readyState?: number }): FakeSocket => {
 /** A snapshot transport message that settles the handshake to READY for `sid`. */
 const snapshotMsg = (sid: string, seq = 1): SessionTransportMessage => ({
   kind: "snapshot",
-  snapshot: {
+  snapshot: makeSnapshotLite({
     sessionId: sid,
     revision: 1,
     seq,
-    state: { status: "idle", draftInput: "", permissionMode: "default", messageCount: 0 },
-    capabilities: {
-      approvals: "none",
-      tools: false,
-      memory: false,
-      artifacts: false,
-      subagents: false,
-      automation: false,
-      shellSnapshot: false,
-      serverAutoContinues: false,
-      transport: "websocket",
-    },
-    pendingApproval: null,
-    openArtifacts: [],
-  },
+    capabilities: { transport: "websocket" },
+  }),
 })
 
 const eventMsg = (event: SessionEvent): SessionTransportMessage => ({ kind: "event", event })

@@ -27,6 +27,7 @@ import {
   type SessionTransportMessage,
   tryDecodeSessionTransportMessage,
 } from "@/ipc/session"
+import { capabilitiesFor } from "../../../../support/session-fixtures"
 
 type Listeners = {
   message: Array<(event: { data: unknown }) => void>
@@ -81,17 +82,7 @@ const snapshotWithModel = (sid: string, modelSlug: string): SessionTransportMess
     revision: 1,
     seq: 1,
     state: { status: "idle", draftInput: "", permissionMode: "default", messageCount: 0, modelSlug },
-    capabilities: {
-      approvals: "none",
-      tools: false,
-      memory: false,
-      artifacts: false,
-      subagents: false,
-      automation: false,
-      shellSnapshot: false,
-      serverAutoContinues: false,
-      transport: "websocket",
-    },
+    capabilities: capabilitiesFor({ transport: "websocket" }),
     pendingApproval: null,
     openArtifacts: [],
   },

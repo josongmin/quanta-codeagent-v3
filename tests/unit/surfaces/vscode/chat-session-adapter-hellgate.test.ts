@@ -27,33 +27,12 @@ import {
   type SessionTransportMessage,
 } from "@/ipc/session"
 import type { SessionCommand, SessionEvent, SessionSnapshotLite } from "@/protocol/session"
+import { capabilitiesFor, makeSnapshotLite } from "../../../support/session-fixtures"
 
-const CAPABILITIES = {
-  approvals: "operator" as const,
-  tools: true,
-  memory: false,
-  artifacts: false,
-  subagents: false,
-  automation: false,
-  shellSnapshot: false,
-  serverAutoContinues: false,
-  transport: "stdio" as const,
-}
+const CAPABILITIES = capabilitiesFor({ approvals: "operator", tools: true, transport: "stdio" })
 
-const makeSnapshot = (sessionId: string): SessionSnapshotLite => ({
-  sessionId,
-  revision: 1,
-  seq: 1,
-  state: {
-    status: "idle",
-    draftInput: "",
-    permissionMode: "default",
-    messageCount: 0,
-  },
-  capabilities: CAPABILITIES,
-  pendingApproval: null,
-  openArtifacts: [],
-})
+const makeSnapshot = (sessionId: string): SessionSnapshotLite =>
+  makeSnapshotLite({ sessionId, capabilities: CAPABILITIES })
 
 /** A linked in-memory transport pair: whatever side A sends arrives at side B's
  *  handlers, and vice-versa — the real `SessionTransport` contract. */

@@ -23,6 +23,7 @@ import {
   tryDecodeSessionTransportMessage,
 } from "@/ipc/session"
 import type { SessionEvent } from "@/protocol/session"
+import { makeSnapshotLite } from "../../../../support/session-fixtures"
 
 const captureStderr = async (fn: () => Promise<unknown>): Promise<string> => {
   const orig = process.stderr.write.bind(process.stderr)
@@ -173,25 +174,15 @@ const snapshotMsg = (
   opts?: { readonly serverAutoContinues?: boolean },
 ): SessionTransportMessage => ({
   kind: "snapshot",
-  snapshot: {
+  snapshot: makeSnapshotLite({
     sessionId: sid,
     revision: 1,
     seq: 1,
-    state: { status: "idle", draftInput: "", permissionMode: "default", messageCount: 0 },
     capabilities: {
-      approvals: "none",
-      tools: false,
-      memory: false,
-      artifacts: false,
-      subagents: false,
-      automation: false,
-      shellSnapshot: false,
-      serverAutoContinues: opts?.serverAutoContinues ?? false,
       transport: "websocket",
+      serverAutoContinues: opts?.serverAutoContinues ?? false,
     },
-    pendingApproval: null,
-    openArtifacts: [],
-  },
+  }),
 })
 
 const approvalEvent = (approvalId: string): SessionTransportMessage => ({

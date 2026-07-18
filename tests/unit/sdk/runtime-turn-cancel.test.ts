@@ -10,18 +10,9 @@ import { describe, expect, test } from "bun:test"
 import type { AgentOutcome } from "@/agent"
 import { createSingleSessionRuntimeHost } from "@/host/runtime"
 import { createRuntime } from "@/sdk/runtime"
+import { capabilitiesFor } from "../../support/session-fixtures"
 
-const manifest = {
-  approvals: "none" as const,
-  tools: false,
-  memory: false,
-  artifacts: false,
-  subagents: false,
-  automation: false,
-  shellSnapshot: false,
-  serverAutoContinues: false,
-  transport: "inproc" as const,
-}
+const manifest = capabilitiesFor()
 
 describe("RuntimeSession turn.cancel verb", () => {
   test("cancel mid-flight aborts the signal the host turn observes (real kernel delegation)", async () => {
