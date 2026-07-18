@@ -275,4 +275,12 @@ export const KNOBS_C: readonly RuntimeConfigKnob[] = [
     group: "tools",
     describe: "`notebook_edit` Jupyter cell-edit tool gate (default-OFF).",
   },
+  {
+    envKey: "QUANTA_NODE_REPL",
+    kind: "bool",
+    default: false,
+    group: "tools",
+    describe:
+      "ADR-0249 `node_repl` persistent Node kernel tool gate — arbitrary Node code exec, always-confirm (strict opt-in, default-OFF).",
+  },
 ]

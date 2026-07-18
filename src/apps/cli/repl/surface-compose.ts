@@ -13,7 +13,7 @@ import {
 } from "@/agent/plan-queue"
 import { createShadowVerify } from "@/agent/shadow-verify"
 import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
-import type { Message, StreamInput } from "@/llm"
+import { createStickyPresetResolver, type Message, type StreamInput } from "@/llm"
 import type { RadarStore } from "@/radar"
 import { isApprovedDecision } from "@/runner/orchestrate"
 import type {
@@ -50,6 +50,7 @@ import {
   createConversationActionSurface,
 } from "./conversation-action-surface"
 import { type ComposerHandle, createComposerHandle } from "./ctx-adapters/composer-edit-adapter"
+import { buildPresetRoleModelResolver } from "./ctx-adapters/preset-role-resolver-adapter"
 import { createItemStore } from "./item-store"
 import { buildPerToolCheckpointWire } from "./per-tool-checkpoint-wire"
 import {
@@ -407,8 +408,38 @@ export const composeSurfaceWires = (
   // goal complete then stops the pursuit.
   const objectiveStore = createObjectiveStore()
 
+  // §9.6 `/presets` (opusplan-style sticky model preset) — mint ONE
+  // `StickyPresetResolver`. It is the SINGLE instance shared by (a) the
+  // `/presets` slash slot (`ctx.presets`, threaded via dispatch below), which
+  // `select`/`clear`s it, and (b) the loop's role→model resolution, wrapped by
+  // `buildPresetRoleModelResolver(presetResolver)` into
+  // `AgentConfig.roleModelResolver` — so a `/presets opusplan` actually changes
+  // which model a delegated role runs (consumed by `resolveChildLlm`).
+  // Default-OFF byte-identity: with NO preset selected the adapter's
+  // `resolve(role, default)` returns the caller's `default` VERBATIM, so the loop
+  // is byte-identical to the no-resolver path until a preset is picked.
+  //
+  // The compose→config plumbing that carries the wrapped resolver into
+  // `AgentConfig.roleModelResolver` crosses the concurrent-hot runtime-facade
+  // files (`@/sdk/runtime/context` compose key, `@/host/runtime` context-binding
+  // snapshot/base + assembler `maybeWireRoleModelResolver`) and is delivered as
+  // verbatim edits alongside this change (see the change notes). This surface
+  // owns only the SINGLE mint + the `ctx.presets` slot; the
+  // `roleModelResolver: buildPresetRoleModelResolver(presetResolver)` line below
+  // lands together with that runtime-facade compose key.
+  const presetResolver = createStickyPresetResolver()
+
   const runtimeFacadeCompose: RuntimeFacadeComposeOptions = {
     objective: objectiveStore,
+    // §9.6 `/presets` — wrap the SINGLE `presetResolver` (the SAME instance the
+    // `/presets` slash `select`/`clear`s via `ctx.presets`) into an
+    // `AgentConfig.roleModelResolver` and thread it DOWN (mirrors `objective`)
+    // so `resolveChildLlm` consults the selected preset for a delegated role's
+    // model. Default-OFF byte-identity: with NO preset selected the adapter's
+    // `resolve` returns the caller fallback VERBATIM (and the config still carries
+    // a resolver, so this is the intended live seam — the byte-identity is at the
+    // resolve-result level, not the presence level).
+    roleModelResolver: buildPresetRoleModelResolver(presetResolver),
     // ADR-0231 — thread the producer block ONLY when the store is wired. The
     // idle source is adapted from the CLI idle monitor: when the monitor reports
     // idle, surface the resolved threshold as the idle-ms reading so the pure
@@ -855,6 +886,13 @@ export const composeSurfaceWires = (
     ...(typeof setup.sessionId === "string" && setup.sessionId.length > 0
       ? { goal: { port: objectiveStore, threadId: setup.sessionId } }
       : {}),
+    // §9.6 `/presets` — the SAME `StickyPresetResolver` threaded into the loop's
+    // role→model resolution above. `/presets <name>` calls `.select` on THIS
+    // instance so the pick becomes sticky for the run (single instance, no
+    // split-brain). Always present in the REPL (mirrors `/goal`); default-OFF
+    // byte-identity is preserved by the resolver itself (no preset selected ⇒
+    // role resolution returns the caller fallback verbatim).
+    presets: presetResolver,
     // LIVE `/context` seam — the merged segmented view (prompt-assembly segments
     // + the S3 reasoning-token annotation). Reads the SAME `contextUsageHolder`
     // the loop's `onPromptAssembled` writes and the stream tee feeds reasoning

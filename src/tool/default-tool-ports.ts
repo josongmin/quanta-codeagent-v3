@@ -1,4 +1,5 @@
 import type { OsSandboxProfile } from "@/runtime"
+import type { NodeReplKernel } from "@/runtime/node-repl"
 import type { AutomationEnginePort } from "@/scheduler/automation-engine"
 import type { FileSystemPort } from "@/storage"
 import type { AppshotArtifactSink, AppshotPort } from "./appshot"
@@ -101,6 +102,16 @@ export interface DefaultToolPorts {
    *  variables). Host sets this iff `QUANTA_DEBUG_TOOLS` is on; absent ⇒ tool
    *  not registered (byte-identical). High-risk (executes user code). */
   debugTools?: boolean
+  /** ADR-0249 — when a stateful `NodeReplKernel` is wired, append `node_repl`
+   *  (evaluate code in a PERSISTENT `node -i` subprocess whose variable bindings
+   *  survive across calls). Absent ⇒ tool NOT registered (byte-identical menu).
+   *  The composition root mints ONE `createDefaultNodeReplKernel()` per session
+   *  and passes it here ONLY when `QUANTA_NODE_REPL` is on. DISTINCT from
+   *  `code_cell` (one-shot WASM sandbox, no persistent state). High-risk: runs
+   *  arbitrary Node code with full host access ⇒ always-confirm tier. Duck-typed
+   *  cross-slice port (`@/runtime/node-repl`, the SAME import direction this file
+   *  already uses for `@/runtime`'s `OsSandboxProfile`). */
+  nodeRepl?: NodeReplKernel
   /** Epic-2 — when set, append `run_tests` (detect toolchain + run suite +
    *  normalized pass/fail evidence). Host sets this iff `QUANTA_TEST_RUNNER` is
    *  on; absent ⇒ tool not registered (byte-identical). High-risk (runs test code). */

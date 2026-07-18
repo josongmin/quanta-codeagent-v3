@@ -1,5 +1,7 @@
 import { z } from "zod"
+import { runtimeConfig } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
+import { createDefaultTemplateExpander, type ExpandContext, type ExpandError } from "./playbook"
 import type { Skill, SkillEffort } from "./types"
 
 const schema = z.object({
@@ -49,6 +51,74 @@ export const interpolateSkillArgs = (body: string, args: string): string => {
     const idx = Number(d)
     return idx >= 1 && idx <= positionals.length ? (positionals[idx - 1] ?? "") : ""
   })
+}
+
+/**
+ * Parse the caller-supplied `args` string into a NAMED context for the
+ * Windsurf-style `{{ name }}` expander (ADR-0252). This is the ONLY source of
+ * substitution values — nothing is invented. Each whitespace-separated token
+ * shaped `key=value` becomes a context entry (`key` → the raw `value` string).
+ *
+ * Grammar (deliberately narrow, no heuristics):
+ *  - a token is a `key=value` pair iff it contains `=` AND the substring before
+ *    the FIRST `=` is a valid template identifier (`[A-Za-z_$][A-Za-z0-9_$]*`).
+ *  - the value is everything after the first `=` (so `x=a=b` binds `x` → `a=b`).
+ *  - tokens that are NOT `key=value` (bare positionals like `foo`) are IGNORED
+ *    here — they remain available to the `$1`/`$ARGUMENTS` positional pass, so
+ *    the two substitution surfaces never fight over the same token.
+ *
+ * Last-wins on a repeated key (mirrors the macro-registry `buildMacroRegistry`
+ * collision rule). Returns a plain `Record` typed as {@link ExpandContext};
+ * every value is a `string`, so the expander's number/boolean/object arms are
+ * never reached from this source (author templates get verbatim string
+ * substitution, which is the Windsurf CLI-arg contract).
+ */
+const IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$]*$/
+
+export const parseKeyValueArgs = (args: string): ExpandContext => {
+  const ctx: Record<string, string> = {}
+  for (const tok of args.trim().split(/\s+/)) {
+    if (tok === "") continue
+    const eq = tok.indexOf("=")
+    if (eq <= 0) continue
+    const key = tok.slice(0, eq)
+    if (!IDENT_RE.test(key)) continue
+    ctx[key] = tok.slice(eq + 1)
+  }
+  return ctx
+}
+
+/** Result of {@link expandSkillTemplateVars}. `ok:false` carries the expander's
+ *  typed short-circuit so the tool can surface a PRECISE authoring error to the
+ *  model (an unknown `{{ x }}` is NEVER guessed / silently dropped). */
+export type SkillTemplateResult =
+  | { readonly ok: true; readonly text: string }
+  | { readonly ok: false; readonly error: ExpandError }
+
+/**
+ * Run the ADR-0252 `{{ name }}` expander over a skill `body` using a context
+ * parsed from `args` (see {@link parseKeyValueArgs}). Pure: no IO, no throw.
+ * This is the genuine consumer of `createDefaultTemplateExpander` — the render
+ * path the ADR/ledger flagged as the follow-up wire. Runs ALONGSIDE (not in
+ * place of) the `$ARGUMENTS`/`$N` positional pass: named `key=value` vars vs
+ * positional slots are two different author surfaces (Windsurf vs CC slash).
+ */
+export const expandSkillTemplateVars = (body: string, args: string): SkillTemplateResult => {
+  const result = createDefaultTemplateExpander().expand(body, parseKeyValueArgs(args))
+  return result.ok ? { ok: true, text: result.text } : { ok: false, error: result.error }
+}
+
+/** Human-readable one-liner for a {@link ExpandError} — surfaced to the model
+ *  so an author can fix the template/args without the tool guessing a value. */
+const renderExpandError = (e: ExpandError): string => {
+  switch (e.kind) {
+    case "unknown-variable":
+      return `unknown template variable {{ ${e.name} }} at char ${e.position} — pass \`${e.name}=<value>\` in args (no value was guessed)`
+    case "max-iterations":
+      return `template expansion hit the iteration bound (${e.iterations})`
+    case "recursive":
+      return `template variable {{ ${e.name} }} is recursive`
+  }
 }
 
 /**
@@ -161,11 +231,34 @@ export const createSkillTool = (skills: Skill[]): Tool<Input> => {
         }
         return
       }
+      // ADR-0252 — Windsurf `{{ name }}` named-var substitution. Gated
+      // (`QUANTA_SKILL_TEMPLATE_VARS`, default-OFF) AND only when the caller
+      // passed args. OFF or no-args ⇒ this branch is skipped entirely, so a
+      // literal `{{ x }}` in a body emits verbatim exactly as today
+      // (byte-identical). Runs BEFORE the positional pass so `$N`-inserted text
+      // is never re-scanned for `{{}}` and vice-versa. An unknown variable
+      // SHORT-CIRCUITS to an `ok:false` result carrying the expander's typed
+      // error — the tool never guesses a value.
+      let templated = skill.body
+      if (input.args !== undefined && runtimeConfig().skillTemplateVars) {
+        const expanded = expandSkillTemplateVars(skill.body, input.args)
+        if (!expanded.ok) {
+          yield {
+            type: "result",
+            result: {
+              ok: false,
+              output: `Skill '${want}' template error: ${renderExpandError(expanded.error)}`,
+            },
+          }
+          return
+        }
+        templated = expanded.text
+      }
       // §22.2 — interpolate `$ARGUMENTS`/`$N` ONLY when the caller supplied
       // args. Absent ⇒ body verbatim (byte-identical to every pre-feature
       // invocation, incl. bodies containing a literal `$ARGUMENTS`).
       const body =
-        input.args !== undefined ? interpolateSkillArgs(skill.body, input.args) : skill.body
+        input.args !== undefined ? interpolateSkillArgs(templated, input.args) : templated
       yield {
         type: "result",
         result: { ok: true, output: `${scopingNote(skill)}\n\n${body}` },

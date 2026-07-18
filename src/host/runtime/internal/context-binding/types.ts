@@ -73,6 +73,14 @@ export type RuntimeBase = RuntimeAgentConfigBase & {
    *  Duck-typed `unknown` (no cycle into the agent slice). Absent ⇒ assembler
    *  mints its own. */
   objective?: unknown
+  /** §9.6 `/presets` — surface-owned role→model resolver threaded DOWN from the
+   *  CLI compose seam (mirrors `objective`). Carried on the base so
+   *  `buildAgentConfigFromBase` spreads it onto `AgentConfig.roleModelResolver`
+   *  and `resolveChildLlm` consults it. Already a field of `RuntimeAgentConfigBase`
+   *  (via `Omit<AgentConfig, …>`); redeclared here beside `objective` for the
+   *  compose-key parity + doc. Absent ⇒ `wireOptionalAgentPorts` defaults the
+   *  SSOT resolver (caller-fallback verbatim), byte-identical. */
+  roleModelResolver?: AgentConfig["roleModelResolver"]
 }
 
 export interface RuntimeConfirmSlot {
@@ -152,6 +160,9 @@ export interface RuntimeContextSnapshot {
   /** `/goal` (Codex parity) — surface objective store on the snapshot so the
    *  per-turn base carries it into `maybeWireObjective` (mirrors `browserNet`). */
   readonly objective?: unknown
+  /** §9.6 `/presets` — surface role→model resolver on the snapshot so the
+   *  compose PASS_THROUGH patch carries it onto the base (mirrors `objective`). */
+  readonly roleModelResolver?: AgentConfig["roleModelResolver"]
 }
 
 /** S1 (jul-04) — structural mirror of `@/tool/browser`'s `BrowserNetSink`, kept
@@ -203,6 +214,7 @@ export type RuntimeContextPatch = Partial<
     | "radar"
     | "browserNet"
     | "objective"
+    | "roleModelResolver"
   >
 >
 

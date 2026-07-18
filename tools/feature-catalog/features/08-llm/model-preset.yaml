@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "export-only preset registry + resolver — re-exported from src/llm/index.ts barrel but NO live consumer imports resolveModelPreset / createStickyPresetResolver outside its own hellgate test; no /presets slash, no host resolution. Importing changes no behaviour (Default-OFF)."
+    cli: "reachable from src/apps/cli/index.ts import graph — the `/presets` slash (presets-slash-sticky-model) is the FIRST live consumer: surface-compose.ts mints a StickyPresetResolver via createStickyPresetResolver and threads it into ctx.presets AND (wrapped) into AgentConfig.roleModelResolver. The registry/resolver primitives stay pure; Default-OFF byte-identity holds because an UNSELECTED resolver returns the caller fallback verbatim."
     web: "no web bridge consumer; pure in-memory resolver with no persistence and no surface affordance on any plane."
 purpose: |
   A model preset is a NAMED, curated bundle mapping logical roles/phases to
@@ -58,18 +58,7 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    Built + hellgate-tested but NOT yet composed at a call site. The registry +
-    resolver are re-exported from the src/llm/index.ts barrel, yet NO host loop
-    or CLI command resolves a preset — there is no /presets slash, no --preset
-    flag, no persistence. Importing changes no behaviour (Default-OFF).
-  promotion_path: |
-    L3: a composition root selects a preset by name (a `/presets` slash or a
-    `--preset opusplan` flag) and the per-turn model resolver consults
-    StickyPresetResolver.resolve(role, fallback) ahead of the verbatim fallback,
-    layered under any explicit role-model-override; optional persistence of the
-    selected preset across sessions.
+deliberate_hold: null
 notes: |
   Model ids are the current canonical slugs (claude-api skill model table).
   PresetError subclasses QuantaError so future rejection codes attach without a

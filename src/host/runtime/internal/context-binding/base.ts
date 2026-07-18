@@ -469,6 +469,11 @@ const buildOptionalSnapshotFields = (
   // `/goal` (Codex parity) — surface the objective store so the per-turn base
   // carries it into `maybeWireObjective` (mirrors `browserNet`).
   ...whenDefined("objective", base.objective),
+  // §9.6 `/presets` — surface the role→model resolver so the compose PASS_THROUGH
+  // patch round-trips it onto the base, whence `buildAgentConfigFromBase` spreads
+  // it onto `AgentConfig.roleModelResolver` (mirrors `objective`). Absent ⇒ omitted
+  // ⇒ optional-ports defaults the SSOT resolver (caller-fallback verbatim).
+  ...whenDefined("roleModelResolver", base.roleModelResolver),
 })
 
 export const buildSnapshot = (base: RuntimeBase): RuntimeContextSnapshot => ({

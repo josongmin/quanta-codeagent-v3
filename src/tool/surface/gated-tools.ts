@@ -587,6 +587,19 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     note: "W5 (DAP debugger) — run a program under a Debug Adapter Protocol adapter (e.g. debugpy for adapter:'python'), stop at the FIRST breakpoint, and report the call stack + local variables (and an optional evaluated expression). Self-contained one-shot: launch → stop → inspect → terminate (continue/step across calls is a future extension). HIGH RISK: launching the adapter EXECUTES the user's program (arbitrary code) ⇒ always-confirm tier (every call needs approval, like bash). NEVER throws — a spawn/protocol/timeout fault collapses to ok:false. The wire codec is byte-accurate (Content-Length framing, multibyte-safe) and the client correlates out-of-order responses by request_seq. Opt-in EVERYWHERE (QUANTA_DEBUG_TOOLS); absent flag ⇒ tool not registered (byte-identical menu).",
   },
   {
+    name: "node_repl",
+    origin: "@/tool/node-repl (via DefaultToolPorts.nodeRepl)",
+    gate: {
+      kind: "config-slot",
+      slot: "DefaultToolPorts.nodeRepl",
+      env: "QUANTA_NODE_REPL",
+    },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "exec",
+    adr: "0249",
+    note: "ADR-0249 (Codex node_repl absorption) — agent front door to the persistent Node REPL kernel: op:'exec' evaluates code in a live `node -i` subprocess whose variable bindings SURVIVE across calls (`let x=42` now, `x`→`42` later); op:'list'/'status'/'kill' manage kernels. DISTINCT from code_cell (one-shot QuickJS-WASM sandbox with NO persistent state and NO real Node runtime) — neither subsumes the other. HIGH RISK: runs arbitrary Node code with FULL host access (no sandbox) ⇒ always-confirm tier (every call needs approval, like bash/debug_inspect). NEVER throws — the kernel port is no-throw (Result<…,KernelError>); a spawn/eval/abort fault collapses to ok:false. Composition root mints ONE stateful NodeReplKernel per session (IO-free until first exec) ONLY when QUANTA_NODE_REPL is on; absent ⇒ tool not registered (byte-identical menu). Opt-in EVERYWHERE (never auto-seeds).",
+  },
+  {
     name: "notebook_edit",
     origin: "@/tool/notebook-edit (via DefaultToolPorts.notebookEdit)",
     gate: {

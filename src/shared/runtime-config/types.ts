@@ -162,6 +162,13 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  under a DAP adapter, stop at first breakpoint, report stack + variables) is
    *  appended — high-risk (executes the program), always-confirm tier. */
   readonly debugTools: boolean
+  /** ADR-0249 `node_repl` persistent-kernel tool gate (`QUANTA_NODE_REPL`).
+   *  Strict opt-in (`gateOn` vocab; #24). Default false ⇒ host wires NO
+   *  `DefaultToolPorts.nodeRepl`, tool not registered (byte-identical menu).
+   *  When true, `node_repl` (evaluate code in a persistent `node -i` subprocess
+   *  whose bindings survive across calls) is appended — high-risk (arbitrary
+   *  Node code, full host access), always-confirm tier. */
+  readonly nodeRepl: boolean
   /** Epic-2 `run_tests` structured test-runner gate (`QUANTA_TEST_RUNNER`).
    *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ host sets NO
    *  `DefaultToolPorts.testRunner`, tool not registered (byte-identical). When
@@ -365,6 +372,16 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  root wires a jailed writer (under the user/repo skills dir) and registers
    *  the tool so the model can scaffold + validate + install a new skill. */
   readonly skillCreator: boolean
+  /** ADR-0252 — Windsurf-style `{{ name }}` template-literal substitution in the
+   *  skill body (`QUANTA_SKILL_TEMPLATE_VARS`). Opt-in (`gateOn` vocab
+   *  `1`/`on`/`true`/`yes`; #24). Default false ⇒ the `Skill` tool body is NOT
+   *  scanned for `{{ name }}` (byte-identical — a literal `{{ x }}` in a body is
+   *  emitted verbatim exactly as today). When ON, a body's `{{ name }}` refs are
+   *  resolved against a context parsed from the caller's `key=value` `args`
+   *  tokens via `createDefaultTemplateExpander`; an unknown variable surfaces the
+   *  expander's typed short-circuit (no guess / silent-drop). Runs ALONGSIDE the
+   *  `$ARGUMENTS`/`$N` positional interpolation (ADR-0252 sibling contract). */
+  readonly skillTemplateVars: boolean
   /** C6 — structured deny-reason surfacing (`QUANTA_DENY_REASON`). Opt-in
    *  (the `gateOn` truthy vocab (#24)). Default false ⇒ the `ToolFailure.permission_denied` envelope
    *  omits `denyReason`, the model-facing deny `content` carries no

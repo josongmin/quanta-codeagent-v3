@@ -84,6 +84,21 @@ export type {
   RepoRulesReaderPort,
   RepoRulesView,
 } from "./port"
+// ADR-0252 — Windsurf-style `{{ name }}` template-literal expander (sibling to
+// the ADR-0203 `!macro` expander). Re-exported from the root barrel so a host
+// (the `Skill` tool render path) can reach it WITHOUT deep-importing the
+// sub-slice path. Additive: nothing in the parser / validator / dispatcher
+// constructs it; the `Skill` tool wires it under `QUANTA_SKILL_TEMPLATE_VARS`
+// (default-OFF ⇒ byte-identical, cf. HELL-TL-14 + the skill-template hellgate).
+export {
+  createDefaultTemplateExpander,
+  type ExpandContext,
+  type ExpandError,
+  type ExpandResult,
+  type ExpandValue,
+  type NestedContext,
+  type TemplateExpander,
+} from "./template-literal"
 export type {
   ForbiddenActionMatch,
   InlineTriggerConfig,

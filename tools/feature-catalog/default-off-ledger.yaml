@@ -1093,15 +1093,35 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: model-preset-sticky-resolver
-    gate_owner: [createStickyPresetResolver caller]
-    activation: unwired
-    effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
-    reachability: producer-only
+    # WIRED (jul-18, Wave N): the producer-only preset resolver now has a live
+    # consumer — surface-compose mints one createStickyPresetResolver() into
+    # ctx.presets, driving the `/presets` slash (list/select/clear). Default-OFF
+    # byte-identical (unselected resolver returns the caller fallback verbatim).
+    gate_owner: [createStickyPresetResolver mint (surface-compose)]
+    activation: resource/command
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
-    decision: hold
-    owner_seam: src/llm/model-preset.ts
-    rollback: export-only(surface 없음)
+    decision: measure-first
+    owner_seam: src/apps/cli/repl/surface-compose.ts
+    rollback: no preset selected ⇒ resolve returns caller fallback verbatim
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: presets-slash-sticky-model
+    # NEW (jul-18, Wave N): the `/presets` CLI slash — first live consumer of the
+    # model-preset system. Lists presets / applies a sticky role→model pick /
+    # typed error on unknown (no silent default). fc-registered, all slash
+    # drift-guards green.
+    gate_owner: [/presets slash command]
+    activation: resource/command
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/apps/cli/slash/presets-cmd.ts
+    rollback: no preset selected ⇒ /presets prints list only (off=byte-identical)
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: model-tag-auto-hook
@@ -1177,15 +1197,15 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: node-repl-persistent-kernel
-    gate_owner: [node-repl caller-import]
-    activation: unwired
-    effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
-    reachability: seam-only
+    gate_owner: [cfg.nodeRepl]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: na }
+    reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
-    risk: behavioral-cost
-    decision: hold
-    owner_seam: src/runtime/node-repl/index.ts
-    rollback: tool 등록 없음(현행)
+    risk: security
+    decision: measure-first
+    owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+    rollback: cfg.nodeRepl 미주입 (QUANTA_NODE_REPL=0)
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: notebook-edit-cell-tool
@@ -1878,7 +1898,29 @@ rows:
     risk: behavioral-cost
     decision: hold
     owner_seam: src/agent/streaming-cancellation/default.ts
-    rollback: consumer 없음(현행)
+    # jul-18 wire-attempt AUDIT (agent-loop investigation): held DELIBERATELY, not
+    # by neglect. The live abort path is a plain AbortSignal — composition root
+    # `new AbortController()` (bootstrap-session.ts:432) → `abort.signal` →
+    # `config.signal` (types.ts:170) → `llm.stream({signal})` (stream-consume.ts:371)
+    # + `streamingTurn({signal})` (stream-consume.ts:389). 33 bare `.abort()`
+    # producers across CLI/host/bench/headless/web feed it; NO downstream consumer
+    # reads a typed cancel cause off the loop's abort — cause is re-derived post-hoc
+    # from WHICH signal fired (`classifyTurnAbort` turn-gate.ts:34, `interruptedCategory`
+    # stop-category.ts:309). The primitive's 3 unique offerings are all currently
+    # unconsumed: (a) typed cause — no `cancel_rate{cause}` metric / recorder envelope
+    # wants it; (b) cleanup orchestration — teardown is owned by `ctx.disposeResources`
+    # (entry.ts:121, finally-guarded both paths); (c) partial salvage — the loop's
+    # own drop-oldest/conversation-cancel capture already handles partial turns.
+    # Wiring `toAbortSignal(controller.signal)` into `config.signal` today would
+    # DUPLICATE the abort-propagation mechanism while every producer still calls the
+    # bare `.abort()` (the cause channel would latch nothing) → VACUOUS wire. The
+    # live user-abort cause already flows through the sibling mid-turn-interruption
+    # slice (`MidTurnCancelCause`, default.ts:96-134), which IS wired
+    # (mid-turn-capture-wire.ts, QUANTA_MIDTURN_CAPTURE). Promotion is GATED on a
+    # real cause CONSUMER landing first (metrics counter or recorder outcome envelope)
+    # + retrofitting the 33 producers to `cancel(cause)`; until then a wire is
+    # dead-wire-risk, so this stays catalogued-not-hidden with its reason.
+    rollback: consumer 없음(현행) — wire=vacuous until a cause-consumer + producer retrofit land
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: structured-output-mode
@@ -2034,15 +2076,15 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: template-literal-windsurf
-    gate_owner: [templateExpander caller-import]
-    activation: unwired
+    gate_owner: [QUANTA_SKILL_TEMPLATE_VARS]
+    activation: env/config
     effective_default: { cli: off, web: na, bench: na, headless: off, daemon: na }
-    reachability: producer-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: behavioral-cost
-    decision: hold
-    owner_seam: src/skill/playbook/template-literal/default-expander.ts
-    rollback: built-not-wired(barrel 미노출)
+    decision: measure-first
+    owner_seam: src/skill/skill-tool.ts
+    rollback: QUANTA_SKILL_TEMPLATE_VARS!=1
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: three-way-restore

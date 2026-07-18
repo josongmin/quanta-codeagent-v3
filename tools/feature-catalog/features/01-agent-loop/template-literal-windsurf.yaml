@@ -3,22 +3,22 @@ title: Template-literal `{{ variable }}` expander — Windsurf workflow parity (
 section: 1
 subsystem: 플레이북 — 사용자 작성 task macro / 템플릿 치환 (ADR-0203 형제)
 order: 252
-maturity: L2
+maturity: L3
 status: new
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:windsurf, surface:core, tier:core, default-off]
 depends_on: []
 surface_integration:
-  cli: missing
+  cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-18"
   evidence:
-    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    cli: "wired into the Skill tool render path (src/skill/skill-tool.ts execute → expandSkillTemplateVars) under QUANTA_SKILL_TEMPLATE_VARS (default-OFF). When ON + caller passes key=value args, a skill body's `{{ name }}` resolves to the value; unknown var → typed short-circuit surfaced to the model (no guess). OFF ⇒ `{{ name }}` emitted verbatim (byte-identical)."
     web: "pure internal template-literal expander library (jinja2-style variable substitution), no UI affordance on any surface"
 purpose: |
   Windsurf workflow `.windsurf/workflows/<name>.md`의 jinja2-style `{{ name }}`
@@ -38,26 +38,14 @@ evidence:
     - src/skill/playbook/template-literal/types.ts
     - src/skill/playbook/template-literal/default-expander.ts
     - src/skill/playbook/template-literal/index.ts
+    - src/skill/playbook/index.ts
+    - src/skill/skill-tool.ts
   adrs: [252, 203]
   tests:
-    unit: [tests/unit/skill/playbook/template-literal-hellgate.test.ts]
+    unit:
+      - tests/unit/skill/playbook/template-literal-hellgate.test.ts
+      - tests/unit/skill/skill-template-vars-hellgate.test.ts
     integration: []
     contract: []
-knobs: []
-deliberate_hold:
-  reason: |
-    Seam-only (DOF-30 verified @c2f0dd1c2): the template-literal expander
-    (`src/skill/playbook/template-literal/default-expander.ts`) is not exposed
-    on any barrel and has zero production consumer — the live rule/skill loaders
-    do not construct a `TemplateExpander`, so a SKILL.md template literal is left
-    verbatim (byte-identical default-OFF). Unique primitive preserved: the
-    Windsurf-style `${...}` template-literal expansion contract for playbook /
-    SKILL.md bodies, a sibling to the ADR-0203 `!macro` surface (both usable in
-    one SKILL.md, host chooses composition order).
-  promotion_path: |
-    Promotion owner = the skill/playbook loader (`src/skill/playbook/*` +
-    `src/skill/registry`): expose the expander on the playbook barrel and thread
-    a `TemplateExpander` into the SKILL.md body assembly so a template literal
-    expands at load time, then promote to L3. Engine swap (nunjucks/handlebars)
-    is a one-line `TemplateExpander` port body change.
-notes: 'ADR-0203 `!macro`와 sibling — 같은 SKILL.md에 둘 다 사용 가능. 합성 순서는 host 자유 (slice가 강제 안 함). HELL-TL-14는 default-OFF (template expander 미주입 시 `!macro` surface byte-identical) 봉인. exactOptionalPropertyTypes: OMIT은 slice 내부 코딩 스타일 — 프로젝트 wide tsconfig는 그대로. nunjucks/handlebars swap은 TemplateExpander port body 한 줄 교체로 가능.'
+knobs: [QUANTA_SKILL_TEMPLATE_VARS]
+notes: 'WIRED (jul-18): the ADR-0252 expander was previously producer-only (unreachable — not even barrel-exported). Now re-exported from the playbook root barrel (`src/skill/playbook/index.ts`) and wired into the Skill tool render path (`src/skill/skill-tool.ts` `execute` → `expandSkillTemplateVars`) under `QUANTA_SKILL_TEMPLATE_VARS` (default-OFF). Context source = the caller-supplied `args` string parsed into named `key=value` bindings (`parseKeyValueArgs`) — NO invented/heuristic context. Runs ALONGSIDE (not in place of) the pre-existing `$ARGUMENTS`/`$N` positional interpolation (`interpolateSkillArgs`): two different author surfaces (Windsurf named vars vs CC-slash positionals), NOT duplicates — different grammar, lookup, and semantics. Unknown `{{ name }}` → the expander typed short-circuit surfaced as an `ok:false` tool result (no guess, no partial-body leak). OFF ⇒ a literal `{{ name }}` in a body emits verbatim (byte-identical). ADR-0203 `!macro`와 sibling — 같은 SKILL.md에 둘 다 사용 가능. HELL-TL-14는 pure-expander default-OFF 봉인; skill-template-vars-hellgate가 wire의 gate/OFF-identity/short-circuit 봉인. nunjucks/handlebars swap은 TemplateExpander port body 한 줄 교체로 가능.'

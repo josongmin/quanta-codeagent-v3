@@ -202,6 +202,8 @@ const parseCapabilitySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // W6 — strict opt-in. Default false ⇒ no notebook_edit tool (byte-identical).
     notebookEdit: gateOn(env, "QUANTA_NOTEBOOK_EDIT"),
     debugTools: gateOn(env, "QUANTA_DEBUG_TOOLS"),
+    // ADR-0249 — strict opt-in. Default false ⇒ no node_repl tool (byte-identical).
+    nodeRepl: gateOn(env, "QUANTA_NODE_REPL"),
     testRunner: gateOn(env, "QUANTA_TEST_RUNNER"),
     evidence: gateOn(env, "QUANTA_EVIDENCE"),
     // H15 — opt-in (`gateOn` vocab; #24). Default false ⇒ responses-wire byte-identical
@@ -294,6 +296,12 @@ const parseToolSurfaceSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> =>
     // jun-6 skill-creator — opt-in (`gateOn` vocab; #24). Default false ⇒ no writer
     // port, `skill_create` not registered (byte-identical default tool surface).
     skillCreator: gateOn(env, "QUANTA_SKILL_CREATOR"),
+    // ADR-0252 skill template-literal — opt-in (`gateOn` vocab; #24). Default false
+    // ⇒ the `Skill` body is never scanned for `{{ name }}` (a literal `{{ x }}`
+    // emits verbatim, byte-identical). ON ⇒ `createDefaultTemplateExpander` resolves
+    // `{{ name }}` against the caller's `key=value` args tokens; unknown var ⇒ typed
+    // short-circuit surfaced to the model (no guess).
+    skillTemplateVars: gateOn(env, "QUANTA_SKILL_TEMPLATE_VARS"),
     // C6 — opt-in (`gateOn` vocab; #24). Default false ⇒ no structured deny reason
     // attached / no content prefix / DecisionEvent unchanged (byte-identical).
     surfaceDenyReason: gateOn(env, "QUANTA_DENY_REASON"),

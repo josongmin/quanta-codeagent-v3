@@ -13,6 +13,7 @@ import { createCommunicateUpdateTool } from "./communicate-update"
 import { containerExecTool, containerWriteFileTool } from "./container-exec"
 import { coverageCheckTool } from "./coverage_check"
 import { makeDebugInspectTool } from "./debug/tool"
+import { makeNodeReplTool } from "./node-repl"
 import type { DefaultToolPorts } from "./default-tool-ports"
 import { diagnosticsTool, nullDiagnosticsProvider } from "./diagnostics"
 // ADR-0142: register document/structured-data read tools into the default
@@ -767,6 +768,9 @@ const CONDITIONAL_REGISTRATIONS: readonly ConditionalRegistration[] = [
     p.notebookEdit === true ? [makeNotebookEditTool(p.fs ?? defaultFileSystemPort) as Tool] : [],
   // W5 (DAP) — debug_inspect (high-risk: runs the program under a debug adapter).
   (p) => (p.debugTools === true ? [makeDebugInspectTool() as Tool] : []),
+  // ADR-0249 — node_repl (high-risk: arbitrary Node code in a persistent kernel).
+  // Registered ONLY when the host wires the stateful NodeReplKernel port.
+  (p) => (p.nodeRepl !== undefined ? [makeNodeReplTool(p.nodeRepl) as Tool] : []),
   // Epic-2 — run_tests structured test-runner (high-risk: runs project test code).
   (p) =>
     p.testRunner === true ? [makeRunTestsTool({ fs: p.fs ?? defaultFileSystemPort }) as Tool] : [],
