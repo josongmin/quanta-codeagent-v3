@@ -28,7 +28,7 @@ import {
   type BunWebSocketAdapter,
   createBunWebSocketAdapter,
 } from "../ws-adapter"
-import { replyToHeartbeat } from "./heartbeat"
+import { replyToHeartbeat } from "@/ipc/session"
 import { attachAgentStateSink, attachCanvasSink, attachObservabilitySink } from "./sinks"
 import type { WSData } from "./ws-data"
 

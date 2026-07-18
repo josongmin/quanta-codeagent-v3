@@ -26,6 +26,11 @@ export type {
   SessionTransportBridgeErrorArgs,
 } from "./bridge"
 export { createSessionTransportBridge, planSessionReplay } from "./bridge"
+export {
+  HEARTBEAT_INTERVAL_MS,
+  replyToHeartbeat,
+  replyToHeartbeatOnTransport,
+} from "./heartbeat"
 export type {
   CreateSessionTransportClientOpts,
   SessionTransportClient,

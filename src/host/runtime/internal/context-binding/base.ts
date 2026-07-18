@@ -74,7 +74,11 @@ export const buildCapabilityManifest = (base: RuntimeBase): CapabilityManifest =
       base.subagentBackground !== undefined,
     automation: base.automationEngine !== undefined,
     shellSnapshot: base.shellSnapshot !== undefined,
-    transport: "inproc",
+    // jul-16 GAP-3 — the transport stamp is composition-injected (presence-only
+    // seam, mirrors `serverAutoContinues` below). The connect stdio door stamps
+    // `"stdio"`; the web daemon `"websocket"`; absent ⇒ `"inproc"` (an
+    // in-process embedder), byte-identical to the pre-seam hardcode.
+    transport: base.sessionTransport ?? "inproc",
     // ADR-0540 W1-B — the `server-auto-continues` marker. Presence-only seam:
     // the composition root (web-daemon, gate ON) stamps `serverAutoContinues`
     // on the base; every other surface leaves it absent ⇒ false (the normalize
@@ -122,6 +126,9 @@ const buildTurnAssemblerDeps = (args: {
     // ADR-0540 W1-B — capability-manifest concern only (the `server-auto-
     // continues` marker); never a per-turn agent field (mirrors the A2 strip).
     serverAutoContinues: _serverAutoContinues,
+    // jul-16 GAP-3 — capability-manifest concern only (the transport stamp);
+    // never a per-turn agent field (mirrors the W1-B strip above).
+    sessionTransport: _sessionTransport,
     systemSource,
     messages: _baseMessages,
     signal: _baseSignal,
@@ -168,6 +175,8 @@ export const buildAgentConfigFromBase = (args: {
     artifactPreviewResolver: _artifactPreviewResolver,
     // ADR-0540 W1-B — manifest-only marker, stripped (see buildTurnAssemblerDeps).
     serverAutoContinues: _serverAutoContinues,
+    // jul-16 GAP-3 — manifest-only transport stamp, stripped (see buildTurnAssemblerDeps).
+    sessionTransport: _sessionTransport,
     systemSource,
     toolProfileState,
     identityModeState,
@@ -287,6 +296,11 @@ const buildBootstrapBaseShape = (
       args.includeSearchPipeline === true ? args.boot.tooling.searchPipeline : undefined,
     ),
     ...whenDefined("approvalProtocol", args.overlay?.approvalProtocol),
+    // jul-16 GAP-3 — carry the composition-declared wire transport onto the base
+    // so `buildCapabilityManifest` stamps `capabilities.transport` (presence-only
+    // seam, mirrors `serverAutoContinues`). Absent ⇒ omitted ⇒ `"inproc"`
+    // fallback (byte-identical to the pre-seam hardcode).
+    ...whenDefined("sessionTransport", args.overlay?.sessionTransport),
     ...whenDefined("planExitPort", args.overlay?.planExitPort),
     ...whenDefined("userInputPort", args.overlay?.userInputPort),
     ...whenDefined("backgroundConsentPort", args.overlay?.backgroundConsentPort),

@@ -50,13 +50,23 @@ const buildHeadlessRuntimeArgs = (
   // re-run). OFF ⇒ deny + no `approvalProtocol` ⇒ byte-identical to the pre-W1
   // deferred composition (the `driveSessionTurn` `resolveApproval` re-run path).
   const approval = buildHeadlessApprovalWiring(input.env ?? {})
+  // jul-16 GAP-3 (02 serve --stdio) — assemble the overlay from the approval
+  // wiring PLUS the composition-declared wire transport stamp. Both slots are
+  // presence-only: absent ⇒ the overlay key is omitted (byte-identical to the
+  // pre-seam composition, `capabilities.transport` falls back to `"inproc"`).
+  const overlay = {
+    ...(approval.approvalProtocol !== undefined
+      ? { approvalProtocol: approval.approvalProtocol }
+      : {}),
+    ...(input.sessionTransport !== undefined
+      ? { sessionTransport: input.sessionTransport }
+      : {}),
+  }
   return {
     boot,
     stream,
     onConfirm: approval.onConfirm,
-    ...(approval.approvalProtocol !== undefined
-      ? { overlay: { approvalProtocol: approval.approvalProtocol } }
-      : {}),
+    ...(Object.keys(overlay).length > 0 ? { overlay } : {}),
     execution: {
       history: boot.history,
       cwd: boot.cwd,

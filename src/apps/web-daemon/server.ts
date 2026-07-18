@@ -43,7 +43,10 @@ import { installSubagentSource, type SubagentSourceHandle } from "./subagent-sou
 import type { WebDaemonConfig, WebDaemonHandle } from "./types"
 
 export { parseFollowerApprovalTimeoutMs } from "./server/follower-approval"
-export { HEARTBEAT_INTERVAL_MS, replyToHeartbeat } from "./server/heartbeat"
+// jul-16 — heartbeat responder hoisted to `@/ipc/session` (every session.v1
+// server can pong now, not just this WS daemon). Re-exported here so existing
+// `@/apps/web-daemon/server` importers are unchanged.
+export { HEARTBEAT_INTERVAL_MS, replyToHeartbeat } from "@/ipc/session"
 export {
   _serveStaticSpaForTest,
   CONFIG_ALLOWED_KEYS,

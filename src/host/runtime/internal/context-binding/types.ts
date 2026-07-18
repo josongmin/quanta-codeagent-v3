@@ -303,6 +303,13 @@ export type RuntimeBootstrapOverlay = {
    *  byte-identical: no counter). The web daemon / assembler set `cfg.writeBudget`
    *  directly; the interactive CLI rides this overlay slot. */
   readonly writeBudget?: AgentConfig["writeBudget"]
+  /** jul-16 GAP-3 (02 serve --stdio) — the wire transport this surface's
+   *  composition root declares, stamped onto `capabilities.transport`. Set by
+   *  the connect stdio door (`"stdio"`); absent ⇒ the base omits the slot and
+   *  `buildCapabilityManifest` falls back to `"inproc"` (byte-identical to the
+   *  pre-seam hardcode). Presence-only seam, mirrors `serverAutoContinues` (the
+   *  web daemon stamps its own `"websocket"` on the base directly). */
+  readonly sessionTransport?: import("@/protocol/session").CapabilityManifest["transport"]
 }
 
 export interface RuntimeBootstrapHelpers {

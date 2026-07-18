@@ -62,6 +62,11 @@ export interface HeadlessRunInput {
   readonly transport?: SessionTransport
   /** Optional retained tail window for the attached transport bridge. */
   readonly transportReplayWindow?: number
+  /** jul-16 GAP-3 (02 serve --stdio) — the wire transport the SURFACE declares
+   *  for `capabilities.transport` (the connect stdio door passes `"stdio"`).
+   *  Threaded onto the runtime overlay → base → `buildCapabilityManifest`.
+   *  Absent ⇒ omitted ⇒ `"inproc"` fallback (byte-identical). */
+  readonly sessionTransport?: import("@/protocol/session").CapabilityManifest["transport"]
   /** Optional subagent config so the shared execution-plane helper can
    *  wire real delegation/background slots in the second-consumer surface. */
   readonly subagentConfig?: AgentConfig["subagent"]

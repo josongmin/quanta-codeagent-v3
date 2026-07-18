@@ -67,6 +67,15 @@ export interface RuntimeAgentConfigAugments {
    *  `QUANTA_INLINE_APPROVAL_RESOLVER`; absent ⇒ marker false (byte-identical
    *  on every other surface). */
   serverAutoContinues?: boolean
+  /** jul-16 GAP-3 (02 serve --stdio) — composition-root declaration of THIS
+   *  surface's wire transport, stamped onto `capabilities.transport`. Same
+   *  presence-only seam as {@link serverAutoContinues}: the comp root sets
+   *  `"stdio"` (connect stdio door) / `"websocket"` (web daemon); absent ⇒
+   *  `buildCapabilityManifest` falls back to the `"inproc"` default (an
+   *  in-process embedder), byte-identical to the pre-seam hardcode. Typed
+   *  `"inproc" | "stdio" | "websocket"` — the `CapabilityManifest.transport`
+   *  union. */
+  sessionTransport?: "inproc" | "stdio" | "websocket"
 }
 
 export type RuntimeAgentConfigBase = Omit<AgentConfig, "modePolicy" | "budgetMeter"> &

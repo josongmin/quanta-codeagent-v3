@@ -820,6 +820,15 @@ const buildAgentConfigBase = async ({
     // `CapabilityManifest` made it required — flow-identical, not byte-identical
     // on the wire (same precedent as every other required capability bit).
     ...(gateOn(env, WEB_INLINE_APPROVAL_GATE) ? { serverAutoContinues: true } : {}),
+    // jul-16 GAP-3 — the web daemon speaks session.v1 over WebSocket, so stamp
+    // the HONEST transport here (was the base's `"inproc"` default lie — every
+    // web session reported an in-process transport). Presence-only seam
+    // (mirrors `serverAutoContinues`); completes the 3-way "다름이 정답" with the
+    // stdio door (`"stdio"`) and an in-process embedder (`"inproc"`). No
+    // production consumer branches on the value today (verified by grep of the
+    // in-repo surfaces; the web bundle lives out-of-repo), so this is a
+    // truth-fix, not a behavior change.
+    sessionTransport: "websocket",
     ...observabilitySlots(observability),
   }
   return base

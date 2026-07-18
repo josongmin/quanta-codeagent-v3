@@ -6,6 +6,7 @@ import {
   type SessionSnapshotLite,
 } from "@/protocol/session"
 import { SessionDispatchFailedError, SessionDuplicateCommandError } from "./errors"
+import { replyToHeartbeatOnTransport } from "./heartbeat"
 import type {
   SessionDurableEventLogReader,
   SessionReplayPlan,
@@ -633,6 +634,16 @@ export const createSessionTransportBridge = (
             // cross-peer fan-out (`publishEvents`/`publishSnapshot`) rides the
             // send tail — that is where J-MED-1's ordering guarantee lives.
             return handleCommand(transport, message.command)
+          case "heartbeat":
+            // jul-16 heartbeat hoist — a client keepalive `ping` is answered
+            // with a typed `pong` (fire-and-forget) so EVERY session.v1 server
+            // reachable through this bridge (serve --stdio + any attach) keeps
+            // an idle client's liveness deadline reset. Consumed here (never
+            // forwarded), so the bridge's connect/command contract is unchanged.
+            // No handshake gate: a keepalive must work before/independent of a
+            // connect (mirrors the web-daemon WS pump, which pongs pre-bridge).
+            replyToHeartbeatOnTransport(transport, message)
+            return
           default:
             return
         }
