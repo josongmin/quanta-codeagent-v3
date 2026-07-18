@@ -45,7 +45,10 @@
  * marker-aware clients skip their re-issue.
  */
 
-import { SessionProtocolValidationError } from "@/protocol/session"
+import {
+  continuationCommandIdForApproval,
+  SessionProtocolValidationError,
+} from "@/protocol/session"
 import type { RuntimeSession } from "@/sdk/runtime"
 import { errMessage, gateOn, logger } from "@/shared"
 
@@ -70,29 +73,38 @@ export const setupApprovalContinuation = (
 ): ApprovalContinuationWiring => {
   if (!gateOn(env, WEB_INLINE_APPROVAL_GATE)) return { unsub: null }
   const fire = (approvalId: string, retriedAfterLeaseRace: boolean): void => {
-    // Daemon-minted continuation (the session library mints a fresh commandId
-    // server-side). Enqueued, never awaited here — see the module contract.
-    void session.turn.run(undefined, { enqueue: true }).catch((error: unknown) => {
-      const issue = error instanceof SessionProtocolValidationError ? error.issue : undefined
-      // Backstop (audit M-1): `enqueue` already chains behind the in-flight
-      // direct dispatch (`engine.ts` activeDispatch) — deterministic for the
-      // single-respond case. A lease-held here means MULTIPLE direct dispatches
-      // overlapped the tail (latest-wins window); one re-enqueue re-chains
-      // behind the then-current activity. Bounded to one retry: a second miss
-      // is surfaced loudly below instead of polling the lease.
-      if (issue === "single_writer_lease_held" && !retriedAfterLeaseRace) {
-        fire(approvalId, true)
-        return
-      }
-      // `empty_turn_input` = a (non-marker-aware) client's own re-issue won the
-      // tail first and already consumed the draft — the benign duplicate case.
-      const benign = issue === "empty_turn_input"
-      const log = benign ? logger.info.bind(logger) : logger.warn.bind(logger)
-      log("web-daemon: post-approval continuation turn.run settled without running", {
-        approvalId,
-        error: errMessage(error),
+    // Daemon-minted continuation. B-MED-7: mint the commandId DETERMINISTICALLY
+    // from the originating approvalId (`continuationCommandIdForApproval`) and
+    // stamp `causedByApprovalId` (additive). A marker-aware wire client
+    // PREDICTS this exact commandId from the `approval.resolved` event and
+    // adopts ONLY that continuation's `turn.started` — so a foreign peer's
+    // interleaved turn is never mis-adopted (multi-peer 승인 입양 정확화). A
+    // pre-B-MED-7 client ignores the stamp; the meta is otherwise inert.
+    // Enqueued, never awaited here — see the module contract.
+    const continuationCommandId = continuationCommandIdForApproval(approvalId)
+    void session.turn
+      .run({ commandId: continuationCommandId, causedByApprovalId: approvalId }, { enqueue: true })
+      .catch((error: unknown) => {
+        const issue = error instanceof SessionProtocolValidationError ? error.issue : undefined
+        // Backstop (audit M-1): `enqueue` already chains behind the in-flight
+        // direct dispatch (`engine.ts` activeDispatch) — deterministic for the
+        // single-respond case. A lease-held here means MULTIPLE direct dispatches
+        // overlapped the tail (latest-wins window); one re-enqueue re-chains
+        // behind the then-current activity. Bounded to one retry: a second miss
+        // is surfaced loudly below instead of polling the lease.
+        if (issue === "single_writer_lease_held" && !retriedAfterLeaseRace) {
+          fire(approvalId, true)
+          return
+        }
+        // `empty_turn_input` = a (non-marker-aware) client's own re-issue won the
+        // tail first and already consumed the draft — the benign duplicate case.
+        const benign = issue === "empty_turn_input"
+        const log = benign ? logger.info.bind(logger) : logger.warn.bind(logger)
+        log("web-daemon: post-approval continuation turn.run settled without running", {
+          approvalId,
+          error: errMessage(error),
+        })
       })
-    })
   }
   const unsub = session.subscribe((event) => {
     if (event.type !== "approval.resolved" || event.decision !== "approve") return

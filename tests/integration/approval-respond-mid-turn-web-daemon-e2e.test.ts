@@ -46,6 +46,7 @@ import type { SessionTransport, SessionTransportMessage } from "@/ipc/session"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext, ToolAction } from "@/permission"
 import type { PendingApprovalView, SessionCommand, SessionEvent } from "@/protocol/session"
+import { continuationCommandIdForApproval } from "@/protocol/session"
 import { driveSessionTurn } from "@/runner/orchestrate"
 import { createRuntimeFromAgentConfigBase, type RuntimeSession } from "@/sdk/runtime"
 import { StdoutStream } from "@/stream"
@@ -572,6 +573,14 @@ describe("ADR-0540 W1-B: daemon-owned continuation (web leak sealed server-side)
     const continuationCause = started[1]?.causedByCommandId
     expect(continuationCause).toBeDefined()
     expect(sentIds).not.toContain(continuationCause)
+
+    // B-MED-7 — the daemon minted the continuation's commandId DETERMINISTICALLY
+    // from the originating approvalId (`continuationCommandIdForApproval`), so a
+    // marker-aware wire client can PREDICT it from the `approval.resolved` event
+    // alone and adopt EXACTLY this turn (never a foreign peer's interleaved
+    // turn.started — the multi-peer 승인 입양 정확화 fix). This is the load-bearing
+    // daemon wire the correlator's precise-adoption arm keys on.
+    expect(continuationCause).toBe(continuationCommandIdForApproval(approvalId))
 
     // The resolution reached the wire exactly once.
     expect(harness.tap.eventsOfType("approval.resolved").length).toBe(1)

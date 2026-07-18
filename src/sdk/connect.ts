@@ -274,20 +274,23 @@ export const connect = async (opts: ConnectOptions): Promise<SessionHandle> => {
     sessionId: handover.sessionId,
     resumeFromSeq: handover.lastSeq,
   })
-  const handle = createSessionHandle(client, {
-    ...(handover.snapshot !== undefined ? { initialSnapshot: handover.snapshot } : {}),
-    replayEvents: handover.events,
-    ...(resumeOutcome !== undefined ? { resumeOutcome } : {}),
-  })
-
   // ADR-0540 W1-B marker, LATEST-snapshot-wins (same semantics as attach).
   // An events-only resume carries no snapshot ⇒ defensive false until the
-  // next snapshot frame updates it (same read a legacy daemon gets).
+  // next snapshot frame updates it (same read a legacy daemon gets). Tracked
+  // BEFORE the handle so B-MED-7 can thread it into the turn-end correlator:
+  // a marker-aware server ⇒ EXACT-commandId adoption of the daemon's stamped
+  // continuation (no foreign-peer turn.started guess).
   let serverAutoContinues = handover.snapshot?.capabilities.serverAutoContinues === true
   client.onMessage((message) => {
     if (message.kind === "snapshot") {
       serverAutoContinues = message.snapshot.capabilities.serverAutoContinues === true
     }
+  })
+  const handle = createSessionHandle(client, {
+    ...(handover.snapshot !== undefined ? { initialSnapshot: handover.snapshot } : {}),
+    replayEvents: handover.events,
+    ...(resumeOutcome !== undefined ? { resumeOutcome } : {}),
+    serverAutoContinues: () => serverAutoContinues,
   })
 
   if (opts.onConnectionState !== undefined) {

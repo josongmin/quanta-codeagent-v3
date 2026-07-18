@@ -13,7 +13,28 @@ export interface InputAppendCommand extends SessionCommandEnvelope<"input.append
   readonly images?: readonly ImageBlock[]
 }
 
-export interface TurnRunCommand extends SessionCommandEnvelope<"turn.run"> {}
+export interface TurnRunCommand extends SessionCommandEnvelope<"turn.run"> {
+  /**
+   * B-MED-7 (multi-peer 승인 입양 정확화) — ADDITIVE, optional. When a
+   * `turn.run` is the daemon-owned POST-APPROVAL CONTINUATION (ADR-0540 W1-B,
+   * `serverAutoContinues`), the daemon stamps the ORIGINATING `approvalId` here
+   * so a marker-aware wire client can adopt EXACTLY that continuation's
+   * `turn.started` — instead of guessing "the next unclaimed turn.started",
+   * which in a 3-peer interleave could adopt a FOREIGN peer's turn.
+   *
+   * The daemon ALSO mints this continuation's `commandId` deterministically as
+   * {@link continuationCommandIdForApproval}`(approvalId)` so the client can
+   * PREDICT it from the `approval.resolved` event alone (the client never sees
+   * the daemon's outbound command; the kernel echoes only `commandId` onto the
+   * `turn.started`). This field is thus provenance/legibility + codec
+   * passthrough; the correlator's match keys on the derived `commandId`.
+   *
+   * ABSENT ⇒ a legacy (stamp-less) auto-continue server ⇒ the client keeps the
+   * historical "next unclaimed turn.started" adoption (byte-identical). A
+   * pre-B-MED-7 client ignores this field entirely.
+   */
+  readonly causedByApprovalId?: string
+}
 
 export interface TurnCancelCommand extends SessionCommandEnvelope<"turn.cancel"> {}
 

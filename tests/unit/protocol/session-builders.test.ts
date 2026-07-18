@@ -14,6 +14,7 @@ import {
   buildTurnCancel,
   buildTurnRun,
   type CommandBuildDeps,
+  continuationCommandIdForApproval,
   isSessionCommandType,
 } from "@/protocol/session"
 
@@ -33,6 +34,31 @@ describe("protocol session builders (hoisted SSOT)", () => {
     expect(command.commandId).toMatch(UUID_RE)
     expect(command.issuedAt).toBe("2026-07-16T12:00:00.000Z")
     expect("expectedRevision" in command).toBe(false)
+  })
+
+  test("B-MED-7: continuationCommandIdForApproval is a DETERMINISTIC, approvalId-derived id (SSOT prediction)", () => {
+    expect(continuationCommandIdForApproval("ap-1")).toBe("approval-continuation:ap-1")
+    // Deterministic (same input ⇒ same id) and injective per approvalId.
+    expect(continuationCommandIdForApproval("ap-1")).toBe(continuationCommandIdForApproval("ap-1"))
+    expect(continuationCommandIdForApproval("ap-2")).not.toBe(
+      continuationCommandIdForApproval("ap-1"),
+    )
+  })
+
+  test("B-MED-7: buildTurnRun forwards causedByApprovalId when present; omits it otherwise (byte-identical)", () => {
+    const stamped = buildTurnRun(fixedDeps, {
+      commandId: continuationCommandIdForApproval("ap-7"),
+      causedByApprovalId: "ap-7",
+    })
+    expect(stamped).toEqual({
+      sessionId: "builder-session",
+      type: "turn.run",
+      commandId: "approval-continuation:ap-7",
+      issuedAt: "2026-07-16T12:00:00.000Z",
+      causedByApprovalId: "ap-7",
+    })
+    const bare = buildTurnRun(fixedDeps, { commandId: "r-bare" })
+    expect("causedByApprovalId" in bare).toBe(false)
   })
 
   test("buildTurnCancel honors explicit meta overrides (id / issuedAt / expectedRevision)", () => {

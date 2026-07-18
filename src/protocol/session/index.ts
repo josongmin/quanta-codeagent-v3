@@ -9,6 +9,7 @@ export {
   buildTurnCancel,
   buildTurnRun,
   commandMeta,
+  continuationCommandIdForApproval,
 } from "./builders"
 export type { CapabilityExpectation, CapabilityManifest } from "./capabilities"
 export { normalizeCapabilityManifest } from "./capabilities"

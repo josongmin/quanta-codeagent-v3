@@ -42,6 +42,7 @@ import {
   buildTurnRun,
   type CommandBuildDeps,
   type CommandReceipt,
+  continuationCommandIdForApproval,
   SessionProtocolError,
 } from "@/protocol/session"
 import type {
@@ -161,6 +162,15 @@ interface TurnChain {
    *  daemon-minted (`serverAutoContinues`) or issued by another peer's flow.
    *  An EXPLICIT succession report (`succeed`) clears it first (report wins). */
   awaitingAdoption: boolean
+  /** B-MED-7 — when this chain's approval was approved AND the server declares
+   *  `serverAutoContinues` (marker-aware daemon that STAMPS its continuation),
+   *  the EXACT `turn.started.causedByCommandId` this chain will adopt: the
+   *  daemon mints it deterministically as
+   *  `continuationCommandIdForApproval(approvalId)`. A precise match adopts;
+   *  under a marker-aware server NOTHING else is adopted (no "next unclaimed"
+   *  guess), so a foreign peer's interleaved turn.started can never be stolen.
+   *  `undefined` ⇒ legacy stamp-less server ⇒ the historical guess arm. */
+  expectedContinuationId: string | undefined
   settlement: ChainSettlement | undefined
   readonly waiters: Array<{
     readonly resolve: (event: SessionTurnEndEvent) => void
@@ -198,6 +208,7 @@ const settleChain = (chain: TurnChain, settlement: ChainSettlement): void => {
   if (chain.settlement !== undefined) return
   chain.settlement = settlement
   chain.awaitingAdoption = false
+  chain.expectedContinuationId = undefined
   const waiters = chain.waiters.splice(0)
   for (const waiter of waiters) {
     if (settlement.kind === "end") waiter.resolve(settlement.event)
@@ -229,12 +240,21 @@ interface CorrelatorState {
    *  status value (a `running` echo between `approval.requested` and the
    *  `awaiting_approval` echo must not void anything). */
   lastObservedStatus: string | undefined
+  /** B-MED-7 — LATEST-known ADR-0540 W1-B `serverAutoContinues` marker (read at
+   *  adoption time, not captured at construction — a mid-session snapshot may
+   *  flip it). TRUE ⇒ the daemon owns + STAMPS its post-approval continuation,
+   *  so adoption is EXACT-commandId-only (predicted via
+   *  `continuationCommandIdForApproval`); a foreign peer's interleaved
+   *  turn.started is never guessed into my chain. FALSE/absent ⇒ legacy
+   *  stamp-less server ⇒ the historical "next unclaimed turn.started" guess. */
+  readonly serverAutoContinues: () => boolean
 }
 
 const adoptInto = (state: CorrelatorState, chain: TurnChain, commandId: string): void => {
   chain.ids.add(commandId)
   state.byCommandId.set(commandId, chain)
   chain.awaitingAdoption = false
+  chain.expectedContinuationId = undefined
 }
 
 const handleTurnStarted = (
@@ -249,13 +269,39 @@ const handleTurnStarted = (
     own.awaitingAdoption = false
     return
   }
-  // §3.2 marker-ON arm: exactly the chain whose approval was just approved
-  // may adopt the next unclaimed turn.started as its continuation. A foreign
-  // turn can only be adopted if it starts INSIDE the approve→continuation
-  // window — in which case it also consumed this session's pending draft,
-  // i.e. it literally ran this chain's prompt (single-draft session).
+  // B-MED-7 — PRECISE arm (marker-aware server): a stamped daemon continuation
+  // arrives with the EXACT commandId this chain predicted from its approvalId
+  // (`continuationCommandIdForApproval`). Adopt only on that exact match —
+  // never on a foreign peer's interleaved turn.started.
   for (const chain of state.byCommandId.values()) {
-    if (chain.awaitingAdoption && chain.settlement === undefined) {
+    if (
+      chain.awaitingAdoption &&
+      chain.settlement === undefined &&
+      chain.expectedContinuationId === causedBy
+    ) {
+      adoptInto(state, chain, causedBy)
+      return
+    }
+  }
+  // Under a marker-aware server EVERY armed chain carries an
+  // `expectedContinuationId`; a non-matching turn.started is therefore a
+  // FOREIGN peer's turn (or a not-yet-armed one) and must NOT be adopted —
+  // this is exactly the B-MED-7 mis-adoption the precise arm closes. The
+  // legacy guess below is reachable only when NO armed chain has a prediction
+  // (a stamp-less server), so it can never steal a foreign turn under W1-B.
+  if (state.serverAutoContinues()) return
+  // §3.2 LEGACY arm (stamp-less auto-continue server): exactly the chain whose
+  // approval was just approved may adopt the next unclaimed turn.started as its
+  // continuation. A foreign turn can only be adopted if it starts INSIDE the
+  // approve→continuation window — in which case it also consumed this session's
+  // pending draft, i.e. it literally ran this chain's prompt (single-draft
+  // session). Retained for no-regression against a pre-B-MED-7 daemon.
+  for (const chain of state.byCommandId.values()) {
+    if (
+      chain.awaitingAdoption &&
+      chain.settlement === undefined &&
+      chain.expectedContinuationId === undefined
+    ) {
       adoptInto(state, chain, causedBy)
       return
     }
@@ -286,6 +332,13 @@ const handleApprovalResolved = (
     return
   }
   chain.awaitingAdoption = true
+  // B-MED-7 — under a marker-aware server the daemon mints its continuation
+  // commandId deterministically from THIS approvalId; predict it so the
+  // adoption arm matches EXACTLY (no foreign-turn guess). A stamp-less legacy
+  // server leaves this undefined ⇒ the historical guess arm.
+  chain.expectedContinuationId = state.serverAutoContinues()
+    ? continuationCommandIdForApproval(event.approvalId)
+    : undefined
 }
 
 const handleApprovalRequested = (
@@ -372,6 +425,7 @@ const beginChain = (state: CorrelatorState, commandId: string): void => {
       })
     } else {
       prior.awaitingAdoption = false
+      prior.expectedContinuationId = undefined
     }
   }
   const reused = state.byCommandId.get(commandId)
@@ -395,6 +449,7 @@ const beginChain = (state: CorrelatorState, commandId: string): void => {
     approvalIds: new Set(),
     unresolvedApprovalIds: new Set(),
     awaitingAdoption: false,
+    expectedContinuationId: undefined,
     settlement: undefined,
     waiters: [],
   }
@@ -402,12 +457,26 @@ const beginChain = (state: CorrelatorState, commandId: string): void => {
   state.current = chain
 }
 
-export const createTurnEndCorrelator = (): TurnEndCorrelator => {
+/** B-MED-7 — the correlator learns whether the connected server STAMPS its
+ *  post-approval continuation (ADR-0540 W1-B `serverAutoContinues`). Supplied
+ *  as a LATEST-known reader (a mid-session snapshot may flip the marker); the
+ *  wire handle threads its live capability read here. Absent ⇒ legacy
+ *  stamp-less behavior (byte-identical guess arm). */
+export interface CreateTurnEndCorrelatorOpts {
+  /** `undefined` accepted explicitly so callers thread an optional reader in
+   *  ONE line (no per-call-site ternary); absent/undefined ⇒ legacy `false`. */
+  readonly serverAutoContinues?: (() => boolean) | undefined
+}
+
+export const createTurnEndCorrelator = (
+  opts: CreateTurnEndCorrelatorOpts = {},
+): TurnEndCorrelator => {
   const state: CorrelatorState = {
     byCommandId: new Map(),
     byApprovalId: new Map(),
     current: undefined,
     lastObservedStatus: undefined,
+    serverAutoContinues: opts.serverAutoContinues ?? (() => false),
   }
 
   return {
@@ -544,6 +613,12 @@ export interface CreateSessionHandleOpts {
    *  server reset the view with a full snapshot; loud, never silent). Absent
    *  ⇒ the payload is byte-identical to the pre-05 handle. */
   readonly resumeOutcome?: SessionTransportConnectionResume
+  /** B-MED-7 — LATEST-known ADR-0540 W1-B `serverAutoContinues` capability
+   *  read (a mid-session snapshot may flip it). When TRUE the daemon owns +
+   *  STAMPS its post-approval continuation, so the turn-end correlator adopts
+   *  the continuation by its PREDICTED commandId only (no foreign-turn guess).
+   *  Absent ⇒ legacy stamp-less behavior (byte-identical). */
+  readonly serverAutoContinues?: () => boolean
   /** Injected wall clock for snapshot freshness stamps (testability). */
   readonly now?: () => number
   /** Fresh unique command id — defaults to `crypto.randomUUID`. */
@@ -665,7 +740,7 @@ export const createSessionHandle = (
     sessionId: client.sessionId,
     clock: opts.clock ?? { now: () => new Date() },
   }
-  const correlator = createTurnEndCorrelator()
+  const correlator = createTurnEndCorrelator({ serverAutoContinues: opts.serverAutoContinues })
   const eventListeners = new Set<(event: SessionEvent) => void>()
   const rejectionListeners = new Set<(rejection: SessionTransportClientRejection) => void>()
 

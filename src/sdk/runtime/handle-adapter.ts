@@ -120,6 +120,11 @@ export interface ToSessionHandleOpts {
   readonly now?: () => number
   /** Fresh unique command id — defaults to `crypto.randomUUID`. */
   readonly newCommandId?: () => string
+  /** B-MED-7 — LATEST-known ADR-0540 W1-B `serverAutoContinues` read. TRUE ⇒
+   *  the daemon owns + STAMPS its post-approval continuation, so the correlator
+   *  adopts by the PREDICTED commandId only (no foreign-turn guess). Absent ⇒
+   *  legacy stamp-less behavior (byte-identical). */
+  readonly serverAutoContinues?: () => boolean
 }
 
 /** The in-process verb table — hoisted from `toSessionHandle` (god-FN
@@ -194,7 +199,7 @@ export const toSessionHandle = (
 ): SessionHandle => {
   const now = opts.now ?? (() => Date.now())
   const newCommandId = opts.newCommandId ?? (() => crypto.randomUUID())
-  const correlator = createTurnEndCorrelator()
+  const correlator = createTurnEndCorrelator({ serverAutoContinues: opts.serverAutoContinues })
   const rejectionListeners = new Set<(rejection: SessionTransportClientRejection) => void>()
   const stateListeners = new Set<(state: SessionTransportConnectionState) => void>()
 

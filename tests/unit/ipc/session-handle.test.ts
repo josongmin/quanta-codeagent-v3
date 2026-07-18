@@ -38,7 +38,10 @@ import {
   SessionTurnCorrelationLostError,
 } from "@/ipc/session"
 import type { SessionEvent } from "@/protocol/session"
-import { SessionProtocolValidationError } from "@/protocol/session"
+import {
+  continuationCommandIdForApproval,
+  SessionProtocolValidationError,
+} from "@/protocol/session"
 import { makeSnapshot, makeStateUpdatedEvent } from "./session-transport-conformance-fixtures"
 
 /** Fully-controlled wire: captures outbound frames, delivers inbound frames,
@@ -81,7 +84,7 @@ const makeWire = () => {
   return { transport, sent, deliver, die }
 }
 
-const makeHandle = (opts?: { resumeFromSeq?: number }) => {
+const makeHandle = (opts?: { resumeFromSeq?: number; serverAutoContinues?: () => boolean }) => {
   const wire = makeWire()
   const client = createSessionTransportClient({
     transport: wire.transport,
@@ -91,6 +94,11 @@ const makeHandle = (opts?: { resumeFromSeq?: number }) => {
   const handle = createSessionHandle(client, {
     initialSnapshot: makeSnapshot("websocket"),
     now: () => 1_000,
+    // B-MED-7 — thread the marker-aware read so adoption is EXACT-commandId
+    // (default undefined ⇒ legacy guess arm, byte-identical to pre-B-MED-7).
+    ...(opts?.serverAutoContinues !== undefined
+      ? { serverAutoContinues: opts.serverAutoContinues }
+      : {}),
   })
   return { ...wire, client, handle }
 }
@@ -388,6 +396,112 @@ describe("SessionHandle — awaitTurnEnd correlation (§3.2)", () => {
     deliver({ kind: "event", event: event({ causedByCommandId: "run-9", seq: 13 }) })
     const end = await wait
     expect(end.causedByCommandId).toBe("run-9")
+  })
+})
+
+/**
+ * B-MED-7 — multi-peer 승인 입양 정확화.
+ *
+ * marker-ON (`serverAutoContinues`) precise adoption: the daemon mints its
+ * post-approval continuation with a commandId DETERMINISTICALLY derived from
+ * the originating approvalId (`continuationCommandIdForApproval`). The correlator
+ * predicts that exact id and adopts ONLY that continuation's `turn.started` — so
+ * a FOREIGN peer's interleaved `turn.started` (unrelated random commandId) can
+ * never be stolen into my chain, even while my adoption window is open.
+ *
+ * The legacy (stamp-less) server keeps the historical "next unclaimed
+ * turn.started" guess (no marker threaded) — proven byte-identical below.
+ */
+describe("SessionHandle — B-MED-7 multi-peer precise adoption (§3.2)", () => {
+  test("marker-ON: my approval's continuation is adopted by its PREDICTED (approvalId-derived) commandId", async () => {
+    const { handle, deliver } = makeHandle({ serverAutoContinues: () => true })
+    await handle.turn.run({ commandId: "run-1" })
+    const wait = handle.awaitTurnEnd()
+
+    deliver(approvalRequested({ approvalId: "ap-1", causedByCommandId: "run-1", seq: 10 }))
+    deliver(approvalResolved({ approvalId: "ap-1", decision: "approve", seq: 11 }))
+    // Daemon stamps its continuation with the DERIVED commandId (predictable):
+    const contId = continuationCommandIdForApproval("ap-1")
+    deliver(turnStarted({ causedByCommandId: contId, seq: 12 }))
+    deliver({ kind: "event", event: event({ causedByCommandId: contId, seq: 13 }) })
+    const end = await wait
+    expect(end.causedByCommandId).toBe(contId)
+  })
+
+  test("marker-ON 3-PEER: a FOREIGN peer's interleaved turn.started is NOT adopted; only MY predicted continuation is (the B-MED-7 fix)", async () => {
+    // Peer A (this handle) approves ap-A while peers B/C share the session's
+    // single draft. Peer C's OWN explicit turn.started (random commandId) races
+    // into A's open adoption window. Pre-fix, A's guess arm stole C's turn
+    // (draft-blended terminal). Post-fix, A adopts ONLY its derived id.
+    const { handle, deliver } = makeHandle({ serverAutoContinues: () => true })
+    await handle.turn.run({ commandId: "run-A" })
+    const wait = handle.awaitTurnEnd()
+
+    deliver(approvalRequested({ approvalId: "ap-A", causedByCommandId: "run-A", seq: 10 }))
+    deliver(approvalResolved({ approvalId: "ap-A", decision: "approve", seq: 11 }))
+    // FOREIGN peer C's turn starts INSIDE A's window — MUST NOT be adopted.
+    deliver(turnStarted({ causedByCommandId: "peerC-run", seq: 12 }))
+    deliver({ kind: "event", event: event({ causedByCommandId: "peerC-run", seq: 13 }) })
+    // A must still be pending — it never adopted C's foreign turn.
+    expect((await probe(wait)).state).toBe("pending")
+
+    // A's OWN daemon continuation (derived id) arrives and IS adopted.
+    const contId = continuationCommandIdForApproval("ap-A")
+    deliver(turnStarted({ causedByCommandId: contId, seq: 14 }))
+    deliver({ kind: "event", event: event({ causedByCommandId: contId, seq: 15 }) })
+    const end = await wait
+    expect(end.causedByCommandId).toBe(contId)
+  })
+
+  test("marker-ON: a NON-matching turn.started never settles the chain (no guess fallback under a marker-aware server)", async () => {
+    const { handle, deliver } = makeHandle({ serverAutoContinues: () => true })
+    await handle.turn.run({ commandId: "run-1" })
+    const wait = handle.awaitTurnEnd()
+    deliver(approvalRequested({ approvalId: "ap-1", causedByCommandId: "run-1", seq: 10 }))
+    deliver(approvalResolved({ approvalId: "ap-1", decision: "approve", seq: 11 }))
+    // A daemon-77-style random id (the LEGACY shape) must NOT be adopted when
+    // the server is marker-aware — the correlator waits for the derived id.
+    deliver(turnStarted({ causedByCommandId: "daemon-77", seq: 12 }))
+    deliver({ kind: "event", event: event({ causedByCommandId: "daemon-77", seq: 13 }) })
+    expect((await probe(wait)).state).toBe("pending")
+    // The real (derived) continuation settles it.
+    const contId = continuationCommandIdForApproval("ap-1")
+    deliver(turnStarted({ causedByCommandId: contId, seq: 14 }))
+    deliver({ kind: "event", event: event({ causedByCommandId: contId, seq: 15 }) })
+    expect((await wait).causedByCommandId).toBe(contId)
+  })
+
+  test("LEGACY (no marker threaded): the historical next-unclaimed guess still adopts a stamp-less daemon turn — no regression", async () => {
+    // Byte-identical to the pre-B-MED-7 "ADOPTION succession" contract: no
+    // serverAutoContinues reader ⇒ the guess arm claims the next unclaimed turn.
+    const { handle, deliver } = makeHandle()
+    await handle.turn.run({ commandId: "run-1" })
+    const wait = handle.awaitTurnEnd()
+    deliver(approvalRequested({ approvalId: "ap-1", causedByCommandId: "run-1", seq: 10 }))
+    deliver(approvalResolved({ approvalId: "ap-1", decision: "approve", seq: 11 }))
+    deliver(turnStarted({ causedByCommandId: "daemon-77", seq: 12 }))
+    deliver({ kind: "event", event: event({ causedByCommandId: "daemon-77", seq: 13 }) })
+    const end = await wait
+    expect(end.causedByCommandId).toBe("daemon-77")
+  })
+
+  test("marker read is LATEST-known: a mid-session flip to marker-ON gates the very next approval's adoption", async () => {
+    let marker = false
+    const { handle, deliver } = makeHandle({ serverAutoContinues: () => marker })
+    await handle.turn.run({ commandId: "run-1" })
+    const wait = handle.awaitTurnEnd()
+    // Marker flips ON before this approval resolves (a fresh snapshot updated it).
+    marker = true
+    deliver(approvalRequested({ approvalId: "ap-1", causedByCommandId: "run-1", seq: 10 }))
+    deliver(approvalResolved({ approvalId: "ap-1", decision: "approve", seq: 11 }))
+    // A foreign random turn must NOT be adopted now (precise arm armed).
+    deliver(turnStarted({ causedByCommandId: "foreign", seq: 12 }))
+    deliver({ kind: "event", event: event({ causedByCommandId: "foreign", seq: 13 }) })
+    expect((await probe(wait)).state).toBe("pending")
+    const contId = continuationCommandIdForApproval("ap-1")
+    deliver(turnStarted({ causedByCommandId: contId, seq: 14 }))
+    deliver({ kind: "event", event: event({ causedByCommandId: contId, seq: 15 }) })
+    expect((await wait).causedByCommandId).toBe(contId)
   })
 })
 

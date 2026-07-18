@@ -66,6 +66,18 @@ export const buildInputAppend = (
   ...(meta?.images !== undefined && meta.images.length > 0 ? { images: meta.images } : {}),
 })
 
+/**
+ * B-MED-7 — SSOT derivation of the daemon-owned post-approval CONTINUATION's
+ * `commandId` from the originating `approvalId`. DETERMINISTIC so a marker-aware
+ * wire client can PREDICT the continuation's `commandId` from the
+ * `approval.resolved` event alone (it never observes the daemon's outbound
+ * command; the kernel echoes only `commandId` onto the `turn.started`). Both
+ * the daemon (which mints the id) and the correlator (which arms the expected
+ * id) call THIS one function, so the prediction can never drift.
+ */
+export const continuationCommandIdForApproval = (approvalId: string): string =>
+  `approval-continuation:${approvalId}`
+
 export const buildTurnRun = (
   deps: CommandBuildDeps,
   meta: Partial<Omit<TurnRunCommand, "sessionId" | "type">> | undefined,
@@ -73,6 +85,11 @@ export const buildTurnRun = (
   sessionId: deps.sessionId,
   type: "turn.run",
   ...commandMeta(deps, meta),
+  // B-MED-7 — forward the daemon continuation's originating approvalId
+  // (additive; a bare turn.run omits it ⇒ byte-identical).
+  ...(meta?.causedByApprovalId !== undefined
+    ? { causedByApprovalId: meta.causedByApprovalId }
+    : {}),
 })
 
 /** S1 — `turn.cancel` builder. The command has existed in the protocol's
