@@ -1,11 +1,14 @@
 export type {
   AttachHandshake,
+  AttachHandshakeOpts,
   BuildApprovalRespondArgs,
   RunSessionHandshakeResult,
+  RunSessionResumeHandshakeResult,
   SessionApprovalAnswer,
   SessionApprovalFlow,
   SessionApprovalFlowDeps,
   SessionHandshakeHandoff,
+  SessionResumeHandshakeHandoff,
 } from "./attach-flow"
 export {
   buildApprovalRespondCommand,
@@ -14,6 +17,7 @@ export {
   createSessionApprovalFlow,
   HANDSHAKE_DISCOVERY_SESSION_ID,
   runSessionHandshake,
+  runSessionResumeHandshake,
 } from "./attach-flow"
 export type {
   ConnectedSessionTransport,
@@ -89,6 +93,7 @@ export type {
   SessionTransportRejectedMessage,
   SessionTransportRejectReason,
   SessionTransportRejectTarget,
+  SessionTransportResumedMessage,
 } from "./types"
 export {
   type CreateSessionWebSocketClientOpts,

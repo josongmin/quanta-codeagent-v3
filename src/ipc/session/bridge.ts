@@ -314,7 +314,20 @@ export const createSessionTransportBridge = (
           },
         })
 
-  const sendReplay = async (peer: SessionTransport, resumeFromSeq?: number): Promise<void> => {
+  /** Serve a replay plan and report HOW the peer's view was restored — the
+   *  raw material of the ticket-05 `resumed` served-marker:
+   *   - `mode`             — `"snapshot"` when a snapshot frame carried/reset
+   *                          the state, `"replay"` for an events-only answer
+   *                          (which includes the EMPTY caught-up answer);
+   *   - `servedThroughSeq` — the seq the peer is current through once the
+   *                          served frames are applied (the resume cursor
+   *                          itself when the replay was empty — the trailing
+   *                          `?? snapshot.seq` arm covers the no-cursor plan,
+   *                          whose snapshot branch already answered). */
+  const sendReplay = async (
+    peer: SessionTransport,
+    resumeFromSeq?: number,
+  ): Promise<{ mode: "replay" | "snapshot"; servedThroughSeq: number }> => {
     const plan = planSessionReplay({
       snapshot,
       tail,
@@ -327,6 +340,11 @@ export const createSessionTransportBridge = (
     }
     messages.push(...toEventMessages(plan.tail))
     await sendMessages(peer, messages)
+    return {
+      mode: plan.snapshot !== undefined ? "snapshot" : "replay",
+      servedThroughSeq:
+        plan.tail.at(-1)?.seq ?? plan.snapshot?.seq ?? resumeFromSeq ?? snapshot.seq,
+    }
   }
 
   const rejectCommand = async (
@@ -417,7 +435,25 @@ export const createSessionTransportBridge = (
       await rejectConnect(peer, new SessionProtocolValidationError("session_id_mismatch"))
       return
     }
-    await sendReplay(peer, message.resumeFromSeq)
+    const served = await sendReplay(peer, message.resumeFromSeq)
+    // Ticket 05 — the `resumed` served-marker, EXACTLY ONCE per requesting
+    // connect, strictly AFTER the whole replay answer (snapshot fallback,
+    // incremental events, or an EMPTY caught-up replay — the zero-frame case
+    // that made an ack-less resume handshake a structural forever-hang).
+    // OPT-IN by the connect frame's `resumeAck`: every non-requesting flow
+    // (attach CLI, raw-client resume, web frontends) keeps a byte-identical
+    // wire; an already-shipped client that somehow received it would drop the
+    // unknown kind silently (additive discipline, heartbeat precedent).
+    if (message.resumeAck === true) {
+      await sendMessages(peer, [
+        {
+          kind: "resumed",
+          sessionId: snapshot.sessionId,
+          servedThroughSeq: served.servedThroughSeq,
+          mode: served.mode,
+        },
+      ])
+    }
   }
 
   const handleCommand = async (peer: SessionTransport, command: SessionCommand): Promise<void> => {

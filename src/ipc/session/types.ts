@@ -17,6 +17,17 @@ export interface SessionTransportConnectMessage {
   readonly kind: "connect"
   readonly sessionId: string
   readonly resumeFromSeq?: number
+  /**
+   * Ticket 05 (door-level resume) — request the {@link
+   * SessionTransportResumedMessage `resumed`} served-marker in the answer.
+   * ADDITIVE OPT-IN: an already-shipped bridge ignores the unknown field (its
+   * connect decoder drops unrecognized keys), and a bridge only emits the
+   * marker when this field is `true` — so every existing flow (attach CLI,
+   * raw-client resume, web frontends) keeps a byte-identical wire. Only the
+   * SDK door's resume handshake sets it (it is the only consumer whose
+   * readiness needs the ack — see the `resumed` docblock).
+   */
+  readonly resumeAck?: true
   readonly surfaceSubscription?: SurfaceSubscription
 }
 
@@ -51,6 +62,37 @@ export interface SessionTransportHeartbeatMessage {
   readonly phase: "ping" | "pong"
 }
 
+/**
+ * Replay served-marker. ADDITIVE 7th transport kind (same discipline as the
+ * heartbeat 6th — the original kinds are untouched in meaning; an
+ * already-shipped peer's closed-kind decoder drops this frame silently via
+ * `tryDecodeSessionTransportMessage`, so it is wire-compatible additive).
+ *
+ * WHY (jul-16 adversarial audit, ticket 05): session.v1 was ACK-LESS — the
+ * bridge answers a servable resume cursor with an events-only replay, which is
+ * ZERO frames when the cursor is already at tip. A handshake that may only
+ * settle on a snapshot frame therefore had no way to tell a caught-up resume
+ * apart from a dead server: `connect({resumeFromSeq})` was a structural
+ * forever-hang and had to be descoped. This frame closes the gap: the bridge
+ * emits it EXACTLY ONCE per `resumeAck`-requesting connect, strictly AFTER the
+ * whole replay answer (incremental events, snapshot fallback, or an EMPTY
+ * replay), so "caught up" is now a deterministic wire fact.
+ *
+ *  - `servedThroughSeq` — the seq the peer's view is current through once the
+ *    preceding replay is applied (== the resume cursor itself when the replay
+ *    was empty);
+ *  - `mode` — how the view was restored: `"replay"` = incremental events only
+ *    (memory tail or durable-log rescue), `"snapshot"` = a snapshot frame
+ *    carried/reset the state (the resume was demoted, or the connect was a
+ *    plain full restore).
+ */
+export interface SessionTransportResumedMessage {
+  readonly kind: "resumed"
+  readonly sessionId: string
+  readonly servedThroughSeq: number
+  readonly mode: "replay" | "snapshot"
+}
+
 export type SessionTransportMessage =
   | SessionTransportConnectMessage
   | { readonly kind: "command"; readonly command: SessionCommand }
@@ -58,6 +100,7 @@ export type SessionTransportMessage =
   | SessionTransportRejectedMessage
   | { readonly kind: "snapshot"; readonly snapshot: SessionSnapshotLite }
   | SessionTransportHeartbeatMessage
+  | SessionTransportResumedMessage
 
 export type SessionTransportHandler = (message: SessionTransportMessage) => void | Promise<void>
 

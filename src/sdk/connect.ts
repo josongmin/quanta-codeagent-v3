@@ -29,17 +29,23 @@
  *
  * Deliberately NOT provided (honest v1, ticket 01 §1): in-process transports
  * (external in-process = `createAnalysisAgent`; `toSessionHandle` is an
- * internal conformance oracle, MASTER §3.3) · automatic reconnect · RESUME of
- * ANY kind. The resume descope is STRUCTURAL, not deferred polish (jul-16
- * audit KILL): the handshake's `ready` can only settle on a snapshot frame,
- * but the bridge answers a servable resume cursor with events-only — ZERO
- * frames when the cursor is already at tip (`planSessionReplay`), which is
- * exactly the reconnect-right-after-a-drop base case — and session.v1 has no
- * ack frame that could signal "caught up". A `resumeFromSeq` option here is
- * therefore a guaranteed forever-pending `connect()`. Door-level resume is
- * ticket 05's, riding the raw client's `connect({resumeFromSeq})` resume
- * watcher (arm→send + resume-outcome surfacing, already on main). `lastSeq()`
- * stays — it is pure observation (the cursor a future resume would feed).
+ * internal conformance oracle, MASTER §3.3) · automatic reconnect.
+ *
+ * RESUME (ticket 05 — the jul-16 descope, now properly closed): a
+ * `resumeFromSeq`-carrying connect() rides `runSessionResumeHandshake`, whose
+ * connect frames carry the cursor + the `resumeAck` served-marker request.
+ * The original KILL was structural — the handshake could only settle on a
+ * snapshot frame while the bridge answers a servable cursor with events-only
+ * (ZERO frames at cursor==tip), and ack-less session.v1 had no way to say
+ * "caught up" — so the option was a guaranteed forever-pending connect().
+ * The additive `resumed` frame IS that ack: the bridge emits it once per
+ * requesting connect, strictly after the whole replay answer (empty replay
+ * included), so `ready` now settles deterministically on snapshot OR resumed.
+ * The outcome is surfaced on the connected payload (`resume: "replayed" |
+ * "snapshot_fallback"` — same semantics as the raw client's resume watcher,
+ * which stays untouched); replayed disconnect-window events are re-delivered
+ * through the handle's M-2 replay buffer (loss == 0). `lastSeq()` is the
+ * cursor a subsequent resume feeds.
  */
 
 import {
@@ -48,6 +54,7 @@ import {
   createSessionStdioSpawnTransport,
   createSessionTransportClient,
   runSessionHandshake,
+  runSessionResumeHandshake,
   type SessionApprovalAnswer,
   type SessionHandle,
   SessionHandleClosedError,
@@ -189,12 +196,24 @@ export interface ConnectOptions {
    *  `permission.set("bypass"|"acceptEdits")` instead). */
   readonly onApproval?: (approval: PendingApprovalView) => Promise<ApprovalDecisionResult>
   /** Connection liveness (S4): called with `connected` once the handshake
-   *  settled, then `closed` (with the transport's reason) at most once. */
+   *  settled — carrying `resume: "replayed" | "snapshot_fallback"` when this
+   *  connect resumed (ticket 05; silent demotion is banned) — then `closed`
+   *  (with the transport's reason) at most once. */
   readonly onConnectionState?: (state: SessionTransportConnectionState) => void
-  // NO `resumeFromSeq` — deliberately (jul-16 audit KILL). See the module
-  // docblock: an ack-less protocol cannot handshake a caught-up resume, so the
-  // option was a structural forever-hang. Reconnect = a fresh connect() (the
-  // snapshot re-seeds state); resume proper is ticket 05.
+  /**
+   * Ticket 05 — resume this view from a prior connection's `lastSeq()` cursor.
+   * The handshake carries the cursor + the `resumeAck` served-marker request;
+   * the server answers with an incremental event replay of the disconnect
+   * window when it can serve it (memory tail, or the on-disk event log across
+   * a daemon restart — ADR-0540 W4-b) and an honest full-snapshot reset when
+   * it cannot. The outcome is surfaced on the connected payload (`resume`)
+   * and replayed events reach `subscribe()` via the handshake replay buffer.
+   * ⚠ Against a daemon shipped BEFORE the `resumed` marker the caught-up
+   * (zero-frame) resume cannot be acknowledged — treat an unexplained resume
+   * hang against an old daemon as version skew (same posture as §6's
+   * bad_version note) and reconnect fresh.
+   */
+  readonly resumeFromSeq?: number
 }
 
 /** Map the SSOT decision onto the hoisted flow's rich answer shape. Garbage
@@ -221,7 +240,15 @@ export const connect = async (opts: ConnectOptions): Promise<SessionHandle> => {
     })
   })
 
-  const handshake = runSessionHandshake({ transport })
+  // Ticket 05: a resume cursor routes through the RESUME handshake (cursor +
+  // `resumeAck` on the connect frames; ready settles on snapshot OR the
+  // `resumed` served-marker). Without one, the historical full handshake —
+  // byte-identical wire.
+  const resumeFromSeq = opts.resumeFromSeq
+  const handshake =
+    resumeFromSeq === undefined
+      ? runSessionHandshake({ transport })
+      : runSessionResumeHandshake({ transport, resumeFromSeq })
   try {
     await Promise.race([handshake.ready, closeWatch])
   } catch (error) {
@@ -234,21 +261,29 @@ export const connect = async (opts: ConnectOptions): Promise<SessionHandle> => {
   // detaches, the raw client subscribes with the canonical id + the observed
   // cursor, and the handle seeds its snapshot cache + re-delivers the
   // handshake-window tail (M-2 — on a stdio door those frames arrived in the
-  // SAME chunk as the snapshot and would otherwise be silently lost). No
-  // frame can fall in between (single-threaded; no await inside the block).
+  // SAME chunk as the snapshot and would otherwise be silently lost; on a
+  // resume they ARE the replayed disconnect window). No frame can fall in
+  // between (single-threaded; no await inside the block). On an events-only
+  // resume there is NO snapshot: the cache stays honestly empty until the
+  // next live snapshot frame, and the resume outcome rides the connected
+  // payload instead.
   const handover = handshake.handoff()
+  const resumeOutcome = "resume" in handover ? handover.resume : undefined
   const client = createSessionTransportClient({
     transport,
     sessionId: handover.sessionId,
     resumeFromSeq: handover.lastSeq,
   })
   const handle = createSessionHandle(client, {
-    initialSnapshot: handover.snapshot,
+    ...(handover.snapshot !== undefined ? { initialSnapshot: handover.snapshot } : {}),
     replayEvents: handover.events,
+    ...(resumeOutcome !== undefined ? { resumeOutcome } : {}),
   })
 
   // ADR-0540 W1-B marker, LATEST-snapshot-wins (same semantics as attach).
-  let serverAutoContinues = handover.snapshot.capabilities.serverAutoContinues === true
+  // An events-only resume carries no snapshot ⇒ defensive false until the
+  // next snapshot frame updates it (same read a legacy daemon gets).
+  let serverAutoContinues = handover.snapshot?.capabilities.serverAutoContinues === true
   client.onMessage((message) => {
     if (message.kind === "snapshot") {
       serverAutoContinues = message.snapshot.capabilities.serverAutoContinues === true
@@ -307,7 +342,9 @@ export const connect = async (opts: ConnectOptions): Promise<SessionHandle> => {
     // M-3 (jul-16 audit): an approval that parked BEFORE this connection has
     // no future `approval.requested` event — the snapshot is its only carrier.
     // Seed it once so `onApproval` can answer it instead of it parking forever.
-    if (handover.snapshot.pendingApproval !== null) {
+    // (An events-only resume has no snapshot; a parked approval reaches the
+    // flow through the replayed `approval.requested` event instead.)
+    if (handover.snapshot !== undefined && handover.snapshot.pendingApproval !== null) {
       dispatchApproval(handover.snapshot.pendingApproval)
     }
   }

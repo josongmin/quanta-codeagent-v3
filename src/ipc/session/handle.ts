@@ -47,6 +47,7 @@ import {
 import type {
   SessionTransportClient,
   SessionTransportClientRejection,
+  SessionTransportConnectionResume,
   SessionTransportConnectionState,
 } from "./client"
 import { typedErrorFromRejectedMessage } from "./errors"
@@ -535,6 +536,14 @@ export interface CreateSessionHandleOpts {
    *  to every subscriber that attaches before the first LIVE event frame —
    *  exactly what a ws door (per-frame macrotasks) would have delivered live. */
   readonly replayEvents?: readonly SessionEvent[]
+  /** Ticket 05 — how the connection this handle wraps was RESUMED (the door's
+   *  handshake-derived outcome). When present, the synthetic `connected`
+   *  state a subscriber receives on `onConnectionState` carries it as the
+   *  `resume` payload — same semantics as the raw client's resume watcher
+   *  (`"replayed"` = incremental event replay, `"snapshot_fallback"` = the
+   *  server reset the view with a full snapshot; loud, never silent). Absent
+   *  ⇒ the payload is byte-identical to the pre-05 handle. */
+  readonly resumeOutcome?: SessionTransportConnectionResume
   /** Injected wall clock for snapshot freshness stamps (testability). */
   readonly now?: () => number
   /** Fresh unique command id — defaults to `crypto.randomUUID`. */
@@ -753,7 +762,13 @@ export const createSessionHandle = (
       })
       if (!deliveredTerminal && !closed) {
         try {
-          handler({ status: "connected" })
+          // Ticket 05: a resumed connection's synthetic `connected` carries the
+          // honest resume outcome (loss-less replay vs snapshot fallback).
+          handler(
+            opts.resumeOutcome === undefined
+              ? { status: "connected" }
+              : { status: "connected", resume: opts.resumeOutcome },
+          )
         } catch {
           // Same swallow rule as the raw client's fan-out.
         }

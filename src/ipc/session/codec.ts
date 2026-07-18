@@ -49,6 +49,7 @@ const decodeKind = (raw: string): SessionTransportMessage["kind"] => {
     case "rejected":
     case "snapshot":
     case "heartbeat":
+    case "resumed":
       return envelope.kind
     default:
       throw new SessionProtocolValidationError("bad_transport_kind")
@@ -94,6 +95,12 @@ const decodeConnectMessage = (raw: string): SessionTransportMessage => {
     envelope.resumeFromSeq,
     "bad_transport_resume_from_seq",
   )
+  // Ticket 05 — the served-marker opt-in: absent or literal `true` only (our
+  // encoder never writes anything else; a foreign `false`/garbage is refused).
+  if (envelope.resumeAck !== undefined && envelope.resumeAck !== true) {
+    throw new SessionProtocolValidationError("bad_transport_resume_ack")
+  }
+  const resumeAck = envelope.resumeAck
   const surfaceSubscription =
     envelope.surfaceSubscription === undefined
       ? undefined
@@ -106,8 +113,31 @@ const decodeConnectMessage = (raw: string): SessionTransportMessage => {
     kind: "connect",
     sessionId: decodeConnectSessionId(envelope.sessionId),
     ...(resumeFromSeq !== undefined ? { resumeFromSeq } : {}),
+    ...(resumeAck === true ? { resumeAck: true as const } : {}),
     ...(surfaceSubscription !== undefined ? { surfaceSubscription } : {}),
   }
+}
+
+/** Ticket 05 — the `resumed` served-marker (see the type docblock in
+ *  `types.ts`). Same control-envelope discipline as every sibling: version
+ *  gate first, then a strict field-by-field decode — an already-shipped peer
+ *  never reaches this decoder (its closed-kind gate drops the frame). */
+const decodeResumedMessage = (raw: string): SessionTransportMessage => {
+  const envelope = expectObject(JSON.parse(raw) as unknown)
+  requireProtocolVersion(envelope)
+  const sessionId = decodeString(envelope.sessionId, "bad_transport_session_id")
+  const servedThroughSeq = decodeOptionalNumber(
+    envelope.servedThroughSeq,
+    "bad_transport_served_through_seq",
+  )
+  if (servedThroughSeq === undefined) {
+    throw new SessionProtocolValidationError("bad_transport_served_through_seq")
+  }
+  const mode = envelope.mode
+  if (mode !== "replay" && mode !== "snapshot") {
+    throw new SessionProtocolValidationError("bad_transport_resume_mode")
+  }
+  return { kind: "resumed", sessionId, servedThroughSeq, mode }
 }
 
 const decodeRejectedMessage = (
@@ -177,6 +207,7 @@ export const encodeSessionTransportMessage = (message: SessionTransportMessage):
         kind: "connect",
         sessionId: message.sessionId,
         ...(message.resumeFromSeq !== undefined ? { resumeFromSeq: message.resumeFromSeq } : {}),
+        ...(message.resumeAck === true ? { resumeAck: true } : {}),
         ...(message.surfaceSubscription !== undefined
           ? { surfaceSubscription: message.surfaceSubscription }
           : {}),
@@ -202,6 +233,13 @@ export const encodeSessionTransportMessage = (message: SessionTransportMessage):
       return encodeSessionSnapshot(message.snapshot)
     case "heartbeat":
       return encodeControlEnvelope({ kind: "heartbeat", phase: message.phase })
+    case "resumed":
+      return encodeControlEnvelope({
+        kind: "resumed",
+        sessionId: message.sessionId,
+        servedThroughSeq: message.servedThroughSeq,
+        mode: message.mode,
+      })
   }
 }
 
@@ -219,6 +257,8 @@ export const decodeSessionTransportMessage = (raw: string): SessionTransportMess
       return { kind: "snapshot", snapshot: decodeSessionSnapshot(raw) }
     case "heartbeat":
       return decodeHeartbeatMessage(raw)
+    case "resumed":
+      return decodeResumedMessage(raw)
   }
 }
 

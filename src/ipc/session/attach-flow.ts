@@ -43,6 +43,7 @@ import {
   type CommandBuildDeps,
   type SessionSnapshotLite,
 } from "@/protocol/session"
+import type { SessionTransportConnectionResume } from "./client"
 import { typedErrorFromRejectedMessage } from "./errors"
 import type { SessionTransport, SessionTransportMessage } from "./types"
 
@@ -51,11 +52,28 @@ import type { SessionTransport, SessionTransportMessage } from "./types"
  *  non-empty placeholder that can never equal a real (uuid-shaped) id. */
 export const HANDSHAKE_DISCOVERY_SESSION_ID = "ui-session"
 
+/** Ticket 05 — door-level resume knob for {@link createAttachHandshake}. */
+export interface AttachHandshakeOpts {
+  /** Carry this resume cursor (plus the `resumeAck` served-marker request) on
+   *  EVERY connect frame this driver mints — the initial discovery frame and
+   *  the id-adoption re-handshake alike. Absent ⇒ the historical bare frames
+   *  (byte-identical wire; the attach CLI stays resume-free by design). */
+  readonly resumeFromSeq?: number
+}
+
 export interface AttachHandshake {
   /** Canonical, server-minted session id once learned; `undefined` until then. */
   readonly sessionId: string | undefined
-  /** True once a snapshot has settled the handshake (commands may now flow). */
+  /** True once a snapshot OR (ticket 05) a `resumed` served-marker has settled
+   *  the handshake (commands may now flow). */
   readonly ready: boolean
+  /** Ticket 05 — how a RESUME handshake was served, derived from the
+   *  `resumed` marker's authoritative `mode` (set exactly once, when the
+   *  marker settles the handshake): `"replayed"` = events-only restore (empty
+   *  caught-up replay included), `"snapshot_fallback"` = a snapshot frame
+   *  carried/reset the state. `undefined` until settled, and always
+   *  `undefined` on a non-resume handshake. */
+  readonly resumeOutcome: SessionTransportConnectionResume | undefined
   /** ADR-0540 W1-B — the daemon's capability manifest, retained from the
    *  handshake snapshot (`undefined` until one arrives). The attach client
    *  gates its post-approval `turn.run` re-issue on
@@ -76,30 +94,46 @@ export interface AttachHandshake {
   onMessage(message: SessionTransportMessage): SessionTransportMessage | undefined
 }
 
-const connectFrame = (sessionId: string): SessionTransportMessage => ({
-  kind: "connect",
-  sessionId,
-})
-
-export const createAttachHandshake = (): AttachHandshake => {
+export const createAttachHandshake = (opts: AttachHandshakeOpts = {}): AttachHandshake => {
   let sessionId: string | undefined
   let ready = false
   let capabilities: CapabilityManifest | undefined
   let modelSlug: string | undefined
+  let resumeOutcome: SessionTransportConnectionResume | undefined
 
-  // NOTE (v1 scope): this driver has NO reconnect/resume path. A joining client
-  // performs the discovery→adopt dance ONCE; a daemon-initiated close exits the
-  // CLI cleanly (see attach-client.ts close/error listeners) rather than
-  // silently re-dialing. The frontend's resume-cursor (`resumeFromSeq`) is
-  // therefore deliberately omitted — both the initial AND the re-handshake
-  // (id-adoption) connect frames are bare. `runSessionHandshake` below is
-  // equally resume-free BY STRUCTURE (jul-16 audit KILL): its `ready` settles
-  // only on a SNAPSHOT frame, while the bridge answers a servable resume
-  // cursor with events-only — zero frames when the cursor is already at tip
-  // (`planSessionReplay`) — so a resume-carrying handshake would pend forever.
-  // session.v1 has no ack frame that could signal "caught up"; door-level
-  // resume is ticket 05's, riding the raw client's `connect({resumeFromSeq})`
-  // resume watcher instead of this handshake.
+  // Every connect frame this driver mints carries the SAME resume posture:
+  // bare (historical, byte-identical) without opts, cursor + `resumeAck`
+  // served-marker request with them (ticket 05 — the id-adoption re-handshake
+  // is the frame the bridge actually answers, so BOTH frames must carry it).
+  const connectFrame = (sid: string): SessionTransportMessage => ({
+    kind: "connect",
+    sessionId: sid,
+    ...(opts.resumeFromSeq !== undefined
+      ? { resumeFromSeq: opts.resumeFromSeq, resumeAck: true as const }
+      : {}),
+  })
+
+  // NOTE (attach scope): the CLI attach client keeps NO reconnect/resume path.
+  // A joining client performs the discovery→adopt dance ONCE; a daemon-
+  // initiated close exits the CLI cleanly (see attach-client.ts close/error
+  // listeners) rather than silently re-dialing — it constructs this driver
+  // WITHOUT opts, so its wire is byte-identical to the pre-05 handshake.
+  //
+  // Ticket 05 lifted the old structural KILL for the SDK door: `ready` used to
+  // settle only on a SNAPSHOT frame while the bridge answers a servable resume
+  // cursor with events-only (ZERO frames at cursor==tip), so a resume-carrying
+  // handshake pended forever. The `resumed` served-marker (requested via the
+  // connect frame's `resumeAck`, emitted by the bridge strictly AFTER the
+  // whole replay answer — fallback snapshot, incremental events, or nothing)
+  // is the missing ack. A RESUME handshake settles on the MARKER ONLY (a
+  // fallback snapshot no longer settles it early): that makes the settle
+  // point deterministic — every replay frame precedes the marker on an
+  // ordered transport, so the runner's handover buffer provably holds the
+  // WHOLE served window — and makes the outcome authoritative (`mode` from
+  // the marker, never inferred from a possibly-stray first frame). The cost
+  // is honest: a resume against a daemon shipped WITHOUT the marker cannot
+  // settle — the same version-skew posture as every other capability gap.
+  const resuming = opts.resumeFromSeq !== undefined
 
   return {
     get sessionId() {
@@ -113,6 +147,9 @@ export const createAttachHandshake = (): AttachHandshake => {
     },
     get modelSlug() {
       return modelSlug
+    },
+    get resumeOutcome() {
+      return resumeOutcome
     },
     initialConnect() {
       return connectFrame(sessionId ?? HANDSHAKE_DISCOVERY_SESSION_ID)
@@ -130,8 +167,8 @@ export const createAttachHandshake = (): AttachHandshake => {
             sessionId !== message.sessionId
           ) {
             sessionId = message.sessionId
-            // Re-handshake to the canonical id — bare (no resume cursor; the
-            // discovery bootstrap never resumes and there is no reconnect path).
+            // Re-handshake to the canonical id (same resume posture as the
+            // discovery frame — the bridge answers THIS one with the replay).
             return connectFrame(sessionId)
           }
           return undefined
@@ -149,6 +186,29 @@ export const createAttachHandshake = (): AttachHandshake => {
           // client can render the connection pill from the snapshot; the engine
           // no longer fans `session.created` to the transport bridge.
           modelSlug = message.snapshot.state.modelSlug
+          // Ticket 05 — a RESUME handshake does NOT settle on a snapshot (a
+          // fallback answer is snapshot → tail → marker; settling here would
+          // hand over before the served window finished). The marker below is
+          // the only settle arm; this frame is retained as state.
+          if (!resuming) ready = true
+          return undefined
+        }
+        case "resumed": {
+          // Ticket 05 — the served-marker: the bridge finished serving THIS
+          // connect's replay (possibly zero frames). Only a REQUESTING
+          // handshake may settle on it (a non-resume driver never asked — an
+          // unsolicited marker is ignored like any other unknown-to-this-flow
+          // frame). Adopt the canonical id if the reject leg was skipped and
+          // take the AUTHORITATIVE outcome from the reported mode — the arm
+          // that makes the caught-up (zero-frame) resume terminate instead of
+          // hanging.
+          if (!resuming) return undefined
+          if (sessionId === undefined) {
+            sessionId = message.sessionId
+          }
+          if (resumeOutcome === undefined) {
+            resumeOutcome = message.mode === "replay" ? "replayed" : "snapshot_fallback"
+          }
           ready = true
           return undefined
         }
@@ -393,23 +453,50 @@ export interface RunSessionHandshakeResult {
   abort(): void
 }
 
+/** Ticket 05 — what a RESUME handshake hands over. Unlike the full-connect
+ *  {@link SessionHandshakeHandoff}, `snapshot` is OPTIONAL: an events-only
+ *  (or empty caught-up) replay carries NO snapshot frame — state continuity
+ *  is the point — and only the fallback demotion produces one. */
+export interface SessionResumeHandshakeHandoff {
+  readonly sessionId: string
+  /** Present ONLY when the bridge demoted the resume to a snapshot reset. */
+  readonly snapshot?: SessionSnapshotLite
+  /** Highest seq observed across replayed events, any fallback snapshot AND
+   *  the `resumed` marker's `servedThroughSeq` — on an EMPTY caught-up replay
+   *  the marker is the only carrier, seeding the cursor at the resume point. */
+  readonly lastSeq: number
+  /** The replayed disconnect-window events (M-2 re-delivery contract — the
+   *  caller must feed them to `CreateSessionHandleOpts.replayEvents` or the
+   *  gap the resume exists to deliver is silently lost). */
+  readonly events: readonly SessionEvent[]
+  /** How the view was restored — the R2-F5 surfacing channel's payload. */
+  readonly resume: SessionTransportConnectionResume
+}
+
+export interface RunSessionResumeHandshakeResult {
+  readonly ready: Promise<void>
+  handoff(): SessionResumeHandshakeHandoff
+  abort(): void
+}
+
 /**
- * NO RESUME CURSOR by design (jul-16 audit KILL — honest descope): this
- * runner's `ready` can only settle on a SNAPSHOT frame, but the bridge
- * answers a servable `resumeFromSeq` with an EVENTS-ONLY replay — zero frames
- * when the cursor is already at tip (`planSessionReplay`), which is exactly
- * the "reconnect right after a drop" base case. session.v1 carries no ack
- * frame that could tell a caught-up resume apart from a dead server, so a
- * resume-carrying handshake is a STRUCTURAL forever-hang, not a feature gap.
- * Door-level resume is ticket 05's, riding the raw client's
- * `connect({resumeFromSeq})` resume watcher (arm→send + resume-outcome
- * surfacing) — not this handshake.
+ * Shared runner core. In RESUME mode (`resumeFromSeq` present) the driver's
+ * connect frames carry the cursor + the `resumeAck` served-marker request, and
+ * `ready` settles on a SNAPSHOT **or** a `resumed` frame — the marker is what
+ * turned the jul-16 audit's structural forever-hang (events-only replay, ZERO
+ * frames at cursor==tip, no ack in the protocol) into a deterministic settle.
+ * Without a cursor the behavior is the historical snapshot-only handshake,
+ * byte-identical on the wire.
  */
-export const runSessionHandshake = (args: {
+const runSessionHandshakeCore = (args: {
   readonly transport: SessionTransport
-}): RunSessionHandshakeResult => {
-  const handshake = createAttachHandshake()
-  let lastSeq = 0
+  readonly resumeFromSeq?: number
+}) => {
+  const resumeFromSeq = args.resumeFromSeq
+  const handshake = createAttachHandshake(
+    resumeFromSeq !== undefined ? { resumeFromSeq } : {},
+  )
+  let lastSeq = resumeFromSeq ?? 0
   let snapshot: SessionSnapshotLite | undefined
   let settled = false
   const tailEvents: SessionEvent[] = []
@@ -429,14 +516,20 @@ export const runSessionHandshake = (args: {
 
   // Track the cursor across EVERYTHING observed while we own the listener —
   // the atomic-handover guarantee is exactly this accumulation. Post-snapshot
-  // events are ALSO buffered for the caller (M-2 — see the handoff docblock).
+  // events are ALSO buffered for the caller (M-2 — see the handoff docblock);
+  // in RESUME mode every event is buffered (an events-only replay has NO
+  // snapshot to key on, and those events ARE the disconnect window the resume
+  // exists to deliver), and the `resumed` marker's `servedThroughSeq` feeds
+  // the cursor (the ONLY carrier on an empty caught-up replay).
   const trackCursor = (message: SessionTransportMessage): void => {
     if (message.kind === "snapshot") {
       snapshot = message.snapshot
       lastSeq = Math.max(lastSeq, message.snapshot.seq)
     } else if (message.kind === "event") {
       lastSeq = Math.max(lastSeq, message.event.seq)
-      if (snapshot !== undefined) tailEvents.push(message.event)
+      if (snapshot !== undefined || resumeFromSeq !== undefined) tailEvents.push(message.event)
+    } else if (message.kind === "resumed") {
+      lastSeq = Math.max(lastSeq, message.servedThroughSeq)
     }
   }
 
@@ -479,13 +572,82 @@ export const runSessionHandshake = (args: {
     handoff() {
       unsubscribe()
       const sid = handshake.sessionId
-      if (sid === undefined || snapshot === undefined) {
+      if (sid === undefined) {
         throw new Error("runSessionHandshake.handoff() called before the handshake settled")
       }
-      return { sessionId: sid, snapshot, lastSeq, events: [...tailEvents] }
+      return {
+        sessionId: sid,
+        snapshot,
+        lastSeq,
+        events: [...tailEvents],
+        resumeOutcome: handshake.resumeOutcome,
+      }
     },
     abort() {
       unsubscribe()
     },
+  }
+}
+
+/**
+ * Full-connect handshake runner (the historical, resume-free entrypoint —
+ * byte-identical wire). `ready` settles on the snapshot; the handoff's
+ * `snapshot` is guaranteed present.
+ */
+export const runSessionHandshake = (args: {
+  readonly transport: SessionTransport
+}): RunSessionHandshakeResult => {
+  const core = runSessionHandshakeCore({ transport: args.transport })
+  return {
+    ready: core.ready,
+    handoff(): SessionHandshakeHandoff {
+      const handover = core.handoff()
+      if (handover.snapshot === undefined) {
+        // Unreachable on the snapshot-settled path — kept as a loud invariant.
+        throw new Error("runSessionHandshake.handoff() called before the handshake settled")
+      }
+      return {
+        sessionId: handover.sessionId,
+        snapshot: handover.snapshot,
+        lastSeq: handover.lastSeq,
+        events: handover.events,
+      }
+    },
+    abort: core.abort,
+  }
+}
+
+/**
+ * Ticket 05 — RESUME handshake runner: the door-level
+ * `connect({resumeFromSeq})` path. Rides the same driver with the cursor +
+ * `resumeAck` on the connect frames; `ready` settles on a snapshot OR the
+ * `resumed` served-marker (the empty caught-up replay settles DETERMINISTICALLY
+ * — the case the jul-16 audit killed as a structural hang). The handoff
+ * additionally reports the honest resume outcome (`"replayed"` /
+ * `"snapshot_fallback"` — silent demotion is banned by ticket 05 acceptance).
+ */
+export const runSessionResumeHandshake = (args: {
+  readonly transport: SessionTransport
+  readonly resumeFromSeq: number
+}): RunSessionResumeHandshakeResult => {
+  const core = runSessionHandshakeCore(args)
+  return {
+    ready: core.ready,
+    handoff(): SessionResumeHandshakeHandoff {
+      const handover = core.handoff()
+      if (handover.resumeOutcome === undefined) {
+        // Unreachable once settled: BOTH settle arms (snapshot / resumed) mint
+        // an outcome on a resume handshake — kept as a loud invariant.
+        throw new Error("runSessionResumeHandshake.handoff() called before the handshake settled")
+      }
+      return {
+        sessionId: handover.sessionId,
+        ...(handover.snapshot !== undefined ? { snapshot: handover.snapshot } : {}),
+        lastSeq: handover.lastSeq,
+        events: handover.events,
+        resume: handover.resumeOutcome,
+      }
+    },
+    abort: core.abort,
   }
 }
