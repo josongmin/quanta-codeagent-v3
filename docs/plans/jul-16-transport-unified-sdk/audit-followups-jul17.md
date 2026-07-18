@@ -7,7 +7,7 @@
 
 | # | 심각도 | 내용 | 최소 하드닝 | 처리 시점 |
 |---|---|---|---|---|
-| B-MED-7 | MED | marker-ON(`serverAutoContinues`) 모드에서 awaitTurnEnd 입양 arm이 "다음 미청구 turn.started"를 입양 — 3-peer + interleaved `input.append`가 공유 draft 오염 시 draft-blended terminal 배달(**hang 아님·type-lie 아님**, 의미상 틀린 terminal). single-peer/CLI 무해. | daemon이 auto-continuation turn.run에 originating **approvalId 스탬프** → 입양이 guess 대신 match. (wire 메타 additive) | **multi-peer 서피스 티켓** (ticket-01 sign-off 불요 — W1-B 데몬측과 함께) |
+| ~~B-MED-7~~ ✅ DONE(27e191b5a) | MED | marker-ON(`serverAutoContinues`) 모드에서 awaitTurnEnd 입양 arm이 "다음 미청구 turn.started"를 입양 — 3-peer + interleaved `input.append`가 공유 draft 오염 시 draft-blended terminal 배달(**hang 아님·type-lie 아님**, 의미상 틀린 terminal). single-peer/CLI 무해. | daemon이 auto-continuation turn.run에 originating **approvalId 스탬프** → 입양이 guess 대신 match. (wire 메타 additive) | **multi-peer 서피스 티켓** (ticket-01 sign-off 불요 — W1-B 데몬측과 함께) |
 
 ## 어딧C — W4-b+05 durable (HEAD daa3214ac)
 crash/torn·lock·seq·replay·누출·게이트·v1정직성 7축 실행 repro **전부 검증됨 = SOTA급**. torn-write prefix가 valid JSON일 확률 0(실측), 8-프로세스 하드링크 race 정확히 1획득, pigeonhole 공격 snapshot fallback 강등, replay가 sendMessages chokepoint 우회 0.
