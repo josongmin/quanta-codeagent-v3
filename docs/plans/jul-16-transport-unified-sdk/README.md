@@ -14,7 +14,7 @@
 | [01](01-connect-session-handle.md) | `connect()`(ws/stdio) + verb 표면 + hoist + liveness/버전스큐 + conformance | L | ✅ **LANDED** c89bc49c1 (적대어딧 2R — hang 3종 사멸, resumeFromSeq는 05로 descope) | — |
 | [02](02-serve-stdio-entrypoint.md) | `quanta serve --stdio` + heartbeat hoist + transport 스탬프 seam | M | 🔄 구현 중 (RED e2e 선행) | 01✅ |
 | [03](03-protocol-copy-drift-guard.md) | field-shape 라쳇(A) → 번들 소비(B) → 클라 수렴 평가(C) | XS+M+XS | ✅ **전량 완료** — A 896b0ae86(+764b70215) / B 9080a8853(생성물 번들) / [C](03c-ws-client-convergence.md) hold 판정 | — |
-| [04](04-wire-fidelity-negotiation.md) | fidelity opt-in full payload | L | 미니RFC ✅ [04-mini-rfc.md](04-mini-rfc.md)(전제 정정 3건) — 착수 가능 | 01✅, 03-A✅ |
+| [04](04-wire-fidelity-negotiation.md) | fidelity opt-in full payload | L | ✅ **LANDED** bbd289d40 (S1-S5, 적대어딧 통과) | 01✅, 03-A✅ |
 | [05](05-durable-resume-composition.md) | durable resume | S+M | 코어 ✅ a38ee957f(W4-b 527f78811 위) / door-resume(`resumed` 프레임) 🔄 구현 중 | 01✅ |
 
 ## 인접 워크스트림 경계 (중복 금지 지도)

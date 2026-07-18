@@ -1,7 +1,7 @@
 # Ticket 04 — wire fidelity opt-in (full payload)
 
 - **Date:** 2026-07-16
-- **Status:** DRAFT v3 — **미니RFC 완료(07-17): [04-mini-rfc.md](04-mini-rfc.md)가 구현 SSOT.** 착수 가능(조건부 — J의 `resumed` 프레임과 codec kind 병합 조율 후 rebase 재검증).
+- **Status:** ✅ LANDED bbd289d40 (S1-S5, 적대어딧 1R 통과·MED 1 수정) — 이하 v3 설계 — **미니RFC 완료(07-17): [04-mini-rfc.md](04-mini-rfc.md)가 구현 SSOT.** 착수 가능(조건부 — J의 `resumed` 프레임과 codec kind 병합 조율 후 rebase 재검증).
 - **⚡RFC가 이 티켓의 전제를 정정한 3건** (충돌 시 RFC 우선):
   1. §1-1 "full은 4레이어 관통" → **AgentEvent 층 변경 0**: full payload는 이미 host-bridge 입구에 도달(tool_result.preview=redaction-적용 전 전문, tool_call.input 원본) — "full"의 정직한 정의는 model-parity.
   2. 캐스케이드 공포(W1-B 46파일) → **구조적 회피**: 03-A hellgate가 optional additive(`argsFull?`)를 이미 선인가 — required 필드였던 W1-B와 달리 copy/리터럴 강제 sync 0.
