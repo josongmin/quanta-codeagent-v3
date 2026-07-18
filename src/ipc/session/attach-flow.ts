@@ -61,6 +61,12 @@ export interface AttachHandshake {
    *  gates its post-approval `turn.run` re-issue on
    *  `capabilities.serverAutoContinues` (marker true ⇒ the DAEMON re-issues). */
   readonly capabilities: CapabilityManifest | undefined
+  /** AUDIT-γ H2 — the attached session's model slug, retained from the handshake
+   *  snapshot (`snapshot.state.modelSlug`; `undefined` until a snapshot arrives
+   *  or when the state carries none). The attach client renders the
+   *  `[session · <model>]` pill from THIS once the handshake settles, because
+   *  the engine no longer fans `session.created` to the transport bridge. */
+  readonly modelSlug: string | undefined
   /** Build the FIRST connect frame (discovery sentinel). */
   initialConnect(): SessionTransportMessage
   /**
@@ -79,6 +85,7 @@ export const createAttachHandshake = (): AttachHandshake => {
   let sessionId: string | undefined
   let ready = false
   let capabilities: CapabilityManifest | undefined
+  let modelSlug: string | undefined
 
   // NOTE (v1 scope): this driver has NO reconnect/resume path. A joining client
   // performs the discovery→adopt dance ONCE; a daemon-initiated close exits the
@@ -103,6 +110,9 @@ export const createAttachHandshake = (): AttachHandshake => {
     },
     get capabilities() {
       return capabilities
+    },
+    get modelSlug() {
+      return modelSlug
     },
     initialConnect() {
       return connectFrame(sessionId ?? HANDSHAKE_DISCOVERY_SESSION_ID)
@@ -135,6 +145,10 @@ export const createAttachHandshake = (): AttachHandshake => {
           // ADR-0540 W1-B — retain the manifest (latest snapshot wins) so the
           // client can gate its post-approval re-issue on `serverAutoContinues`.
           capabilities = message.snapshot.capabilities
+          // AUDIT-γ H2 — retain the model slug (latest snapshot wins) so the
+          // client can render the connection pill from the snapshot; the engine
+          // no longer fans `session.created` to the transport bridge.
+          modelSlug = message.snapshot.state.modelSlug
           ready = true
           return undefined
         }

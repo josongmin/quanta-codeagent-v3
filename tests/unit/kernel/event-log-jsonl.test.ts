@@ -23,7 +23,7 @@
 
 import { afterEach, describe, expect, test } from "bun:test"
 import { spawnSync } from "node:child_process"
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -290,5 +290,31 @@ describe("JsonlSessionEventLog substrate", () => {
     const reopened = openLog(dir)
     expect(reopened.list()).toEqual([deltaEvent(1, "only")])
     reopened.close()
+  })
+
+  // AUDIT-γ H1 (security). The JSONL file is the FULL session transcript —
+  // prompts, tool I/O, secrets. On a multi-user host with the default umask 022
+  // an unspecified-mode create is 0o644 (world-readable). Every artifact this
+  // writer creates (the dir it makes, the .jsonl fd, the .lock sidecar) must be
+  // owner-only. The assertion inspects the mode bits DIRECTLY (`& 0o077 === 0`)
+  // rather than relying on umask, so removing the explicit modes in the source
+  // goes red regardless of the runner's umask (red-on-injection is not
+  // umask-dependent).
+  test("(H1) created dir, log file, and lock are owner-only (no group/other perms)", () => {
+    // A fresh SUBDIR under the temp root, so mkdirSync actually creates it here.
+    const dir = join(freshDir(), "logs-owner-only")
+    const log = openLog(dir, "sec1")
+    log.append(deltaEvent(1, "secret-transcript"))
+
+    const noGroupOther = (path: string): number => statSync(path).mode & 0o077
+    // Directory the writer created recursively.
+    expect(noGroupOther(dir)).toBe(0)
+    // The transcript file itself.
+    expect(noGroupOther(logFile(dir, "sec1"))).toBe(0)
+    // The single-writer lock sidecar (inherits the temp file's mode via link(2));
+    // inspected while the log is OPEN, because close() removes it.
+    expect(noGroupOther(`${logFile(dir, "sec1")}.lock`)).toBe(0)
+
+    log.close()
   })
 })

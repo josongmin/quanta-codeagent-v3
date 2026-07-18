@@ -137,7 +137,7 @@ const isPidAlive = (pid: number): boolean => {
  *  ⇒ fail closed, never a race artifact of this writer). */
 const tryCreateLock = (lockPath: string): boolean => {
   const tempPath = `${lockPath}.${process.pid}.tmp`
-  writeFileSync(tempPath, String(process.pid))
+  writeFileSync(tempPath, String(process.pid), { mode: 0o600 })
   try {
     linkSync(tempPath, lockPath)
     return true
@@ -253,7 +253,7 @@ export class JsonlSessionEventLog implements KernelEventLogPort, DurableSessionE
       )
     }
     const warn = options.warn ?? defaultWarn
-    mkdirSync(options.dir, { recursive: true })
+    mkdirSync(options.dir, { recursive: true, mode: 0o700 })
     this.#filePath = join(options.dir, `${options.sessionId}.jsonl`)
     this.#lockPath = `${this.#filePath}.lock`
     acquireSingleWriterLock(this.#lockPath, warn)
@@ -261,7 +261,7 @@ export class JsonlSessionEventLog implements KernelEventLogPort, DurableSessionE
       const loaded = loadAndRecover(this.#filePath, warn)
       this.#events = loaded.events
       this.#tip = loaded.tip
-      this.#fd = openSync(this.#filePath, "a")
+      this.#fd = openSync(this.#filePath, "a", 0o600)
       if (loaded.repairNewline) {
         warn(`unterminated final line in ${this.#filePath} — newline repaired (event kept)`)
         writeSync(this.#fd, "\n")

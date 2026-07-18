@@ -45,7 +45,7 @@ import {
   createAttachHandshake,
   HANDSHAKE_DISCOVERY_SESSION_ID,
 } from "./handshake"
-import { renderSessionEvent } from "./render"
+import { renderAttachModelPill, renderSessionEvent } from "./render"
 
 /** UUX-1-19 — the prompter's RICH decision. MOVED (S3, jul-16 SDK ticket 01)
  *  to the hoisted attach flow (`@/ipc/session/attach-flow`) as
@@ -216,10 +216,19 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
   }
 
   const onMessage = (message: SessionTransportMessage): void => {
+    const wasReady = handshake.ready
     const reaction = handshake.onMessage(message)
     if (reaction !== undefined) {
       // Re-handshake with the adopted canonical id.
       void transport.send(reaction).catch(() => undefined)
+    }
+    // AUDIT-γ H2 — the `[session · <model>]` pill on the FIRST settle. The engine
+    // no longer fans `session.created` to the transport bridge, so a wire attach
+    // never sees that event; the model comes from the handshake SNAPSHOT
+    // (`snapshot.state.modelSlug`) instead. Render exactly once, on the
+    // not-ready → ready edge.
+    if (!wasReady && handshake.ready) {
+      opts.write(renderAttachModelPill(handshake.modelSlug))
     }
     if (message.kind === "event") handleEvent(message.event)
   }
