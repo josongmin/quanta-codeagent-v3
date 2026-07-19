@@ -146,6 +146,20 @@ interface ResumeOutcomeWatch {
  *  `onRejected`/`onMessage`) so a later unrelated frame cannot mint a stale
  *  verdict; heartbeats pass through untouched. One watch slot — the latest
  *  connect wins it. */
+/** Fan a value out to a set of handlers, swallowing per-handler errors AND
+ *  floating async rejections so one bad subscriber never poisons the others.
+ *  Shared by the state-handler and message-handler dispatch (god-fn split). */
+const fanOut = <T>(handlers: Iterable<(value: T) => unknown>, value: T): void => {
+  for (const handler of [...handlers]) {
+    try {
+      const result = handler(value)
+      if (result instanceof Promise) void result.catch(() => undefined)
+    } catch {
+      // Swallow per-handler errors to avoid poisoning sibling subscribers.
+    }
+  }
+}
+
 const createResumeOutcomeWatcher = (
   emitOutcome: (resume: SessionTransportConnectionResume) => void,
 ) => {
@@ -246,13 +260,7 @@ export const createSessionTransportClient = (
   let terminalState: SessionTransportConnectionClosed | undefined
 
   const emitState = (state: SessionTransportConnectionState): void => {
-    for (const handler of [...stateHandlers]) {
-      try {
-        handler(state)
-      } catch {
-        // Swallow per-handler errors to avoid poisoning sibling subscribers.
-      }
-    }
+    fanOut(stateHandlers, state)
   }
 
   // Terminal once-latch: `closed` is delivered at most once, whichever exit
@@ -289,16 +297,7 @@ export const createSessionTransportClient = (
         // A throwing rejection observer must not poison message fan-out.
       }
     }
-    for (const handler of [...handlers]) {
-      try {
-        const result = handler(message)
-        if (result instanceof Promise) {
-          void result.catch(() => undefined)
-        }
-      } catch {
-        // Swallow per-handler errors to avoid poisoning sibling subscribers.
-      }
-    }
+    fanOut(handlers, message)
   })
 
   // S4: transports that expose the liveness channel drive the terminal state
