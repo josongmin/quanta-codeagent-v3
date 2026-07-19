@@ -11,8 +11,8 @@
  *   - agent           : background:true + task_id banner ⇒ start kind:"subagent"
  *   - task_output     : terminal status line     ⇒ settle completed|failed|stopped
  *   - task_stop       : ok success               ⇒ settle stopped
- *   - get_mcp_task    : terminal payload prefix  ⇒ settle completed|failed|stopped
- *   - cancel_mcp_task : ok success               ⇒ settle stopped
+ *   - get_mcp_task    : authoritative task observation ⇒ create/touch/settle MCP task
+ *   - cancel_mcp_task : verified cancellation     ⇒ create/settle MCP task
  *
  * Each leaf is DEFENSIVE: it validates every read against shape + type and
  * returns null on any mismatch. NO-THROW is enforced by a wrapper in
@@ -85,21 +85,51 @@ const extractTaskStatus = (output: string): string | null => {
   return m?.[1] ?? null
 }
 
-/** Pull the leading word from a `get_mcp_task` payload. The tool returns
- *  either `not-ready: ...`, `<id> [<state>]\ncompleted: ...`,
- *  `<id> [<state>]\nfailed: ...`, or `<id> [<state>]\ncancelled` (verbatim
- *  in `src/tool/mcp_tasks/get_task.ts`). We branch on the SECOND-line
- *  prefix, which is the unambiguous terminal-state signal. */
-const extractMcpGetState = (output: string): "completed" | "failed" | "cancelled" | null => {
-  if (/^not-ready:/m.test(output)) return null
-  if (/^completed:/m.test(output)) return "completed"
-  if (/^failed:/m.test(output)) return "failed"
-  // The `cancelled` arm is a bare line ("cancelled") — anchor on a full-line
-  // match to avoid colliding with `cancel_mcp_task`'s `cancelled: <id>` shape
-  // (which the cancel matcher owns).
-  if (/^cancelled$/m.test(output)) return "cancelled"
+/** Parse the state bracket written by `get_mcp_task` for the exact input id.
+ *
+ * We intentionally require the id echoed in output to match the tool input:
+ * a redacted/error string that merely contains a task-looking token must not
+ * create or settle a ledger entry for a different task. */
+const mcpHeaderState = (
+  output: string,
+  prefix: string,
+): "pending" | "in_progress" | "completed" | "failed" | "cancelled" | null => {
+  if (!output.startsWith(prefix)) return null
+  const end = output.indexOf("]", prefix.length)
+  if (end < 0) return null
+  if (output.length > end + 1 && output[end + 1] !== "\n") return null
+  const state = output.slice(prefix.length, end)
+  if (
+    state === "pending" ||
+    state === "in_progress" ||
+    state === "completed" ||
+    state === "failed" ||
+    state === "cancelled"
+  ) {
+    return state
+  }
   return null
 }
+
+const mcpTaskTitle = (taskId: string): string => `MCP task ${taskId}`
+
+const mcpObservation = (
+  taskId: string,
+  owner: string,
+  status: Extract<LedgerAction, { kind: "observe_mcp_task" }>["status"],
+  opts: { waitingOn?: "tool"; error?: string } = {},
+): LedgerAction => ({
+  kind: "observe_mcp_task",
+  id: taskId,
+  owner,
+  title: mcpTaskTitle(taskId),
+  ...(status === "running" || status === "waiting"
+    ? { resumeAction: `get_mcp_task ${taskId}` }
+    : {}),
+  status,
+  ...(opts.waitingOn !== undefined ? { waitingOn: opts.waitingOn } : {}),
+  ...(opts.error !== undefined ? { error: opts.error } : {}),
+})
 
 // ─── Per-tool matchers ──────────────────────────────────────────────────────
 
@@ -229,30 +259,62 @@ const matchTaskStop = (event: ObservedToolEvent): LedgerAction | null => {
   return { kind: "settle", id: taskId, status: "stopped" }
 }
 
-/** `get_mcp_task` — terminal payload prefix ⇒ settle. */
-const matchGetMcpTask = (event: ObservedToolEvent): LedgerAction | null => {
+/** `get_mcp_task` — observe a real task lifecycle state.
+ *
+ * There is no task-launch banner in the MCP tool surface. A successful poll
+ * is therefore the first and only evidence that an id refers to a real MCP
+ * task. `pending` maps to ledger `waiting` on the remote tool; `in_progress`
+ * maps to `running`; terminal result payloads map to terminal ledger states.
+ * Unknown, malformed, and contradictory observations are ignored. */
+const matchGetMcpTask = (
+  event: ObservedToolEvent,
+  opts: DefaultLedgerMatcherOptions,
+): LedgerAction | null => {
   if (event.name !== "get_mcp_task") return null
+  if (!event.ok) return null
   if (typeof event.output !== "string") return null
   const taskId = isObject(event.input) ? pickString(event.input, "taskId") : null
   if (taskId === null) return null
-  const state = extractMcpGetState(event.output)
-  if (state === null) return null
-  if (state === "completed") return { kind: "settle", id: taskId, status: "completed" }
-  if (state === "failed") return { kind: "settle", id: taskId, status: "failed" }
-  // cancelled ⇒ stopped (RunStatus has no `cancelled` arm; the wave-1 model
-  // maps user/host cancellation to `stopped`).
-  return { kind: "settle", id: taskId, status: "stopped" }
+  const owner = (opts.owner ?? (() => DEFAULT_OWNER))()
+
+  const notReadyState = mcpHeaderState(event.output, `not-ready: ${taskId} [`)
+  if (notReadyState === "pending") {
+    return mcpObservation(taskId, owner, "waiting", { waitingOn: "tool" })
+  }
+  if (notReadyState === "in_progress") return mcpObservation(taskId, owner, "running")
+  if (notReadyState !== null) return null
+
+  const headerPrefix = `${taskId} [`
+  const headerState = mcpHeaderState(event.output, headerPrefix)
+  if (headerState === null) return null
+  const close = event.output.indexOf("]", headerPrefix.length)
+  const payload = event.output.slice(close + 1)
+  // `getResult` runs after `getInfo`, so it is authoritative when a task
+  // transitions between the two calls. The header remains validated as a
+  // real task-state observation, but the terminal payload wins on that race.
+  if (payload.startsWith("\ncompleted:")) return mcpObservation(taskId, owner, "completed")
+  if (payload.startsWith("\nfailed:")) {
+    const error = payload.slice("\nfailed:".length).split("\n")[0]?.trim()
+    return mcpObservation(taskId, owner, "failed", error ? { error } : {})
+  }
+  if (payload.startsWith("\ncancelled")) return mcpObservation(taskId, owner, "stopped")
+  return null
 }
 
-/** `cancel_mcp_task` — ok success ⇒ settle stopped. */
-const matchCancelMcpTask = (event: ObservedToolEvent): LedgerAction | null => {
+/** `cancel_mcp_task` — only its exact successful output proves cancellation.
+ * The observation can safely create a terminal entry even when this is the
+ * first task event the ledger saw. */
+const matchCancelMcpTask = (
+  event: ObservedToolEvent,
+  opts: DefaultLedgerMatcherOptions,
+): LedgerAction | null => {
   if (event.name !== "cancel_mcp_task") return null
   if (!event.ok) return null
   if (typeof event.output !== "string") return null
-  if (!event.output.startsWith("cancelled: ")) return null
   const taskId = isObject(event.input) ? pickString(event.input, "taskId") : null
   if (taskId === null) return null
-  return { kind: "settle", id: taskId, status: "stopped" }
+  if (event.output !== `cancelled: ${taskId}`) return null
+  return mcpObservation(taskId, (opts.owner ?? (() => DEFAULT_OWNER))(), "stopped")
 }
 
 // ─── Composer ──────────────────────────────────────────────────────────────

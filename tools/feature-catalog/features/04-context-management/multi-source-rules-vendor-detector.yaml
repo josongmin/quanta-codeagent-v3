@@ -6,9 +6,9 @@ order: 20
 maturity: L3
 status: stable
 ui_surfaces: [cli]
-monitoring: n-a
+monitoring: integrated
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:cursor, absorbed:cline, absorbed:roo, absorbed:aider, absorbed:windsurf, surface:core, default-off]
 depends_on: [loadreporules-cwd]
@@ -16,10 +16,10 @@ surface_integration:
   cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-19"
   evidence:
-    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "pure rule-ingestion port feeding prompt assembly, default-OFF, no UI affordance"
+    cli: "QUANTA_VENDOR_RULES enables loadGlobRulesWithVendors in the trusted mode-preset system path; interactive, headless, and IDE builders consume cfg.globRules."
+    web: "no web mode-preset consumer."
 purpose: |
   6-vendor 자동 감지: .cursor/rules/*.mdc + .clinerules(file|dir) +
   .roo/rules-{mode}/*.md + .aider.conf.yml + CONVENTIONS.md + .windsurfrules +
@@ -28,7 +28,9 @@ purpose: |
   encoded collision resolution (quanta > foreign vendors). symlink (file+dir)
   reject + 2x body-cap size-skip + maxFiles=256. slice fence: @/rules→@/shared만,
   frontmatter parser 인라인 (gray-matter 미도입 — install blocked + slice fence).
-  Default-OFF: detectAll 미호출 시 byte-identical.
+  `QUANTA_VENDOR_RULES`가 설정되지 않으면 detector를 호출하지 않고 cfg.globRules
+  를 주입하지 않아 기존 prompt assembly와 byte-identical이다. batch/ci-bot/daemon은
+  `modeLoadsRepoRules` trust gate 때문에 vendor rules를 로드하지 않는다.
 evidence:
   code:
     - src/rules/vendor-detector/port.ts
@@ -37,6 +39,10 @@ evidence:
     - src/rules/vendor-detector/default-detector.ts
     - src/rules/vendor-detector/index.ts
     - src/rules/index.ts
+    - src/apps/agent/mode-presets/system.ts
+    - src/apps/agent/mode-presets/interactive.ts
+    - src/apps/agent/mode-presets/headless.ts
+    - src/apps/agent/mode-presets/ide.ts
   adrs: [205]
   tests:
     unit:
@@ -46,19 +52,9 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    Wiring으로 @/agent/glob-rules.ts 합류는 별 슬라이스 — detector만 신설하고
-    loadGlobRules 합성은 후속. Default-OFF로 byte-identical 유지.
-    DOF-40 재확인 @b92b3798f: composer(loadGlobRulesWithVendors)는 존재하나
-    production call-site 0 — live 경로 rule-indicator.ts:260은 legacy
-    loadGlobRules(cwd) 호출. 즉 detectAll은 여전히 seam-only.
-  promotion_path: |
-    @/agent/glob-rules.ts:loadGlobRulesWithVendors 가 이미 detectAll 을
-    호출·GlobRule[] 로 어댑팅. 승격 = src/apps/cli/rule-indicator.ts (미소유,
-    별 leaf) 의 loadGlobRules(cwd) → loadGlobRulesWithVendors(cwd, {
-    vendorDetectorEnabled:true, onUnconsumed:<진단싱크> }) 교체.
-    promotion owner: @songmin.
+config_refs:
+  env: [QUANTA_VENDOR_RULES]
+deliberate_hold: null
 notes: |
   fast-glob 미사용 — PathKind 3종(file/dir/mode-dir) 닫힌 enum이면 충분.
   새 vendor 추가는 vendor-table.ts 한 줄 + (필요 시) ParserKind 확장.
@@ -70,10 +66,7 @@ notes: |
   이 하드닝은 consumer 측 swallow 를 닫음. 커버: vendor-glob-unconsumed-
   failclosed-hellgate.test.ts (red-on-injection 검증됨).
 
-  DOF-40 END-TO-END usability proof (여전히 seam-only — production caller
-  = rule-indicator.ts:260 미소유): REAL createDefaultVendorDetector 가 real
-  .windsurfrules fixture 를 walk → loadGlobRulesWithVendors → selectGlobRules
-  → renderGlobRulesBlock 가 방출한 PROMPT STRING 안에 vendor body 도달을
-  실증 (detector 가 실제로 rule 을 prompt 까지 밀어넣음). chmod-000
-  .clinerules 파일로 real parse_error → onUnconsumed 실증. 커버:
-  stage1-phase2-consume-and-vendor-glob-e2e-hellgate.test.ts.
+  Production consumer (2026-07-19): mode-presets/system.ts resolves vendor
+  glob rules under QUANTA_VENDOR_RULES and trusted interactive/headless/IDE
+  builders pass cfg.globRules into prompt construction. The older
+  rule-indicator legacy call does not determine this production path.

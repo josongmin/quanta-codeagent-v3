@@ -104,8 +104,9 @@ export const buildMutableSurfaceWires = (
       ...new Set([setup.model, ...core.retryCandidates.map((candidate) => candidate.id)]),
     ],
   })
-  if (modelWire.modelAdapter !== undefined) {
-    setup.liveModelSource.source = () => modelWire.modelAdapter?.current() ?? setup.model
+  const modelAdapter = modelWire.modelAdapter
+  if (modelAdapter !== undefined) {
+    setup.liveModelSource.source = () => modelAdapter.current()
   }
 
   return {

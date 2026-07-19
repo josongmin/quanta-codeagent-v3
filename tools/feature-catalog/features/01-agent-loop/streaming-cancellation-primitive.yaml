@@ -1,5 +1,5 @@
 id: streaming-cancellation-primitive
-title: Streaming-cancellation controller — typed cancel-cause + AbortSignal round-trip (ADR-0183, built-not-wired)
+title: Streaming-cancellation controller — typed cancel-cause + AbortSignal round-trip (ADR-0183)
 section: 1
 subsystem: Loop 스트리밍 취소 — typed cancel controller (Default-OFF seam)
 order: 455
@@ -8,7 +8,7 @@ status: new
 ui_surfaces: [none]
 monitoring: none
 modes: [n-a]
-configurable: planned
+configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core, default-off]
 depends_on: []
@@ -18,23 +18,26 @@ surface_integration:
   method: audited
   verified: "2026-06-15"
   evidence:
-    cli: "built-not-wired — no production consumer; only doc-comment references (mid-turn-interruption/types.ts, branch-search/verify.ts). The live user-abort path goes through mid-turn-interruption's local MidTurnCancelCause, NOT this slice."
+    cli: "Host-injected CancellationController is consumed by the real sampling loop. Standard CLI does not construct one, so typed causes remain an explicit host integration."
     web: "no surface affordance; pure in-process cancel primitive."
-purpose: 'ADR-0183 streaming-cancellation primitive: a typed CancelController carrying a closed cancel-cause union (budget-breach | verify-guard | user-abort) that round-trips to a standard AbortSignal (toAbortSignal()) + orchestrates cleanup. Built + hellgate-tested but DELIBERATELY UNWIRED — callers opt in by threading toAbortSignal() into existing StreamInput.signal; without that wire, behaviour is byte-identical. Catalogued (not hidden) so the orphan is visible with its reason.'
+purpose: 'ADR-0183 streaming-cancellation primitive: a typed CancelController carrying a closed cancel-cause union (budget-breach | verify-guard | user-abort) that round-trips to a standard AbortSignal + orchestrates cleanup. The real sampling loop consumes optional `AgentConfig.streamCancellation`: it projects typed/session abort into the provider signal, wraps the provider stream through `cancellableStream`, and awaits cleanup with salvaged partial output before the next loop action. Absent slot is byte-identical; standard CLI/web still do not mint a controller, so typed causes remain an explicit host opt-in.'
 evidence:
   code:
     - src/agent/streaming-cancellation/default.ts
     - src/agent/streaming-cancellation/llm-stream-cancel.ts
     - src/agent/streaming-cancellation/types.ts
     - src/agent/streaming-cancellation/index.ts
+    - src/agent/loop/stream-cancellation-wire.ts
+    - src/agent/loop/stream-consume.ts
   adrs: [183]
   tests:
     unit:
       - tests/unit/streaming-cancellation-hellgate.test.ts
+      - src/agent/loop/__tests__/stream-cancellation-live-wire.test.ts
     integration: []
     contract: []
 knobs: []
 deliberate_hold:
-  reason: 'Built-but-unwired pure-infra primitive: no gate knob, no production consumer (only doc-comment refs), single slice-local unit hellgate. ADR-0183 envisioned callers (budget-breach/verify-guard/user-abort) but the live user-abort path uses mid-turn-interruption''s local cause-union instead, so this sibling is parked.'
-  promotion_path: 'Thread CancelController.toAbortSignal() into the loop StreamInput.signal at the budget-breach / verify-guard / user-abort sites; then promote to L3/L4.'
-notes: 'Registered as an L2 deliberate-hold for VISIBILITY (catalog philosophy: orphans catalogued-not-hidden with a reason), not because it is live. The dir/test "ADR-0177" labels are stale (0177 was renumbered); the real ADR is 0183.'
+  reason: 'The loop consumer is live, but ordinary CLI/web sessions do not construct a controller or attach typed-cause producers. Enabling it broadly without a cause-owner would be a no-op wrapper; retain host injection until cancellation metrics/recorder ownership and producer migration are designed.'
+  promotion_path: 'Add one host-owned controller factory and migrate a concrete budget/verify/user-abort producer to cancel(cause), with a cause receipt and no duplicate local interruption path.'
+notes: 'The dir/test "ADR-0177" labels are stale (0177 was renumbered); the real ADR is 0183.'

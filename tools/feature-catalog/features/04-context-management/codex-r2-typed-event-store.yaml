@@ -8,10 +8,12 @@ status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
-configurable: n-a
+configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "default-off"]
 depends_on: []
+config_refs:
+  env: [QUANTA_TYPED_EVENT_REPLAY]
 surface_integration:
   cli: full
   web: na
@@ -28,13 +30,19 @@ purpose: |
   compaction_event; ADR-0335 extended to 8 variants (plugin_activation,
   app_activation) verified against Codex Desktop bundle ground truth.
   `since(at)` semantics is INCLUSIVE on the lower bound. wm is never
-  mutated by this slice — additive side-channel.
+  mutated by this slice — additive side-channel. `QUANTA_TYPED_EVENT_REPLAY`
+  opt-in installs a bounded append-index reader and replays only stored
+  `compaction_event`s into the next turn's context envelope; context and
+  mention variants retain their direct owners so replay cannot duplicate them.
 evidence:
   code:
     - src/memory/typed-event/types.ts
     - src/memory/typed-event/port.ts
     - src/memory/typed-event/in-memory-store.ts
     - src/memory/typed-event/index.ts
+    - src/agent/context-change/store-reader.ts
+    - src/agent/codex-r2-wire-install/install.ts
+    - src/host/runtime/agent-config-assembler.ts
   adrs:
     - docs/decisions/0320-typed-history-event-store.md
     - docs/decisions/0335-typed-event-closed-set-bulk-extension.md
@@ -42,25 +50,10 @@ evidence:
     unit:
       - src/memory/typed-event/__tests__/in-memory-store.hellgate.test.ts
       - src/memory/typed-event/__tests__/port-contract.test.ts
+      - src/agent/context-change/__tests__/store-reader.hellgate.test.ts
+      - src/agent/codex-r2-wire-install/__tests__/install.hellgate.test.ts
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    Producer-only (DOF-30 verified @c2f0dd1c2): the `AgentConfig.typedEventStore`
-    config SLOT has no reader. The concrete store IS live — the main assembler
-    (`src/host/runtime/agent-config-assembler.ts:832`) builds
-    `createInMemoryTypedHistoryEventStore()` and threads it as the POSITIONAL
-    `store` dep into `installCodexR2Wires`, where the context-change +
-    compaction-emit + mention producers append to it — but that path does NOT go
-    through the `cfg.typedEventStore` slot the ledger row names. So the SLOT
-    itself is byte-identical default-OFF. Unique primitive preserved: the
-    closed-union typed history-event store (ADR-0320 records every variant;
-    widening requires a new ADR) as a first-class injectable AgentConfig slot.
-  promotion_path: |
-    Promotion owner = `installCodexR2Wires` (`src/agent/codex-r2-wire-install/`)
-    + `agent-config-assembler.ts`: promote the positional `store` dep to read
-    `cfg.typedEventStore` (caller-override-precedence) so a host can inject a
-    durable/on-disk typed-event store instead of the in-memory default, then
-    promote to L3.
+deliberate_hold: null
 notes: 'Closed-set extension log in ADR-0320 body records every variant addition; widening the union requires a new ADR.'

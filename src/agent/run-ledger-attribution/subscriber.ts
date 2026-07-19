@@ -30,32 +30,95 @@ const isObservedEvent = (e: unknown): e is ObservedToolEvent => {
   return typeof rec.name === "string" && typeof rec.ok === "boolean"
 }
 
+const isTerminalMcpObservation = (
+  status: Extract<LedgerAction, { kind: "observe_mcp_task" }>["status"],
+): status is "completed" | "failed" | "stopped" =>
+  status === "completed" || status === "failed" || status === "stopped"
+
+/** Register the observed MCP task only after a real tool result confirms its
+ * id. A cross-kind id collision is ignored rather than overwriting unrelated
+ * work. */
+const applyMcpTaskObservation = (
+  ledger: RunLedgerHookSubscriberDeps["ledger"],
+  action: Extract<LedgerAction, { kind: "observe_mcp_task" }>,
+): void => {
+  const existing = ledger.get(action.id)
+  if (existing !== null && existing.kind !== "mcp_task") return
+  if (existing === null) {
+    ledger.start({
+      id: action.id,
+      kind: "mcp_task",
+      owner: action.owner,
+      title: action.title,
+      ...(action.resumeAction !== undefined ? { resumeAction: action.resumeAction } : {}),
+    })
+  }
+  if (isTerminalMcpObservation(action.status)) {
+    ledger.settle(
+      action.id,
+      action.status,
+      action.error !== undefined ? { error: action.error } : undefined,
+    )
+    return
+  }
+  ledger.touch(action.id, {
+    status: action.status,
+    ...(action.waitingOn !== undefined ? { waitingOn: action.waitingOn } : {}),
+  })
+}
+
+const applyStart = (
+  ledger: RunLedgerHookSubscriberDeps["ledger"],
+  action: Extract<LedgerAction, { kind: "start" }>,
+): void => {
+  ledger.start({
+    id: action.id,
+    kind: action.runKind,
+    owner: action.owner,
+    title: action.title,
+    ...(action.resumeAction !== undefined ? { resumeAction: action.resumeAction } : {}),
+  })
+}
+
+const applyTouch = (
+  ledger: RunLedgerHookSubscriberDeps["ledger"],
+  action: Extract<LedgerAction, { kind: "touch" }>,
+): void => {
+  const patch: Parameters<typeof ledger.touch>[1] = {}
+  if (action.status !== undefined) patch.status = action.status
+  if (action.waitingOn !== undefined) patch.waitingOn = action.waitingOn
+  ledger.touch(action.id, patch)
+}
+
+const applySettle = (
+  ledger: RunLedgerHookSubscriberDeps["ledger"],
+  action: Extract<LedgerAction, { kind: "settle" }>,
+): void => {
+  ledger.settle(
+    action.id,
+    action.status,
+    action.error !== undefined ? { error: action.error } : undefined,
+  )
+}
+
 /** Apply a single `LedgerAction` to the ledger. NO-THROW: a misbehaving
- *  ledger adapter (e.g. a stub in tests, a future remote-IPC store) MUST
- *  NOT bring down the hook bus. */
+ * ledger adapter (e.g. a stub in tests, a future remote-IPC store) MUST NOT
+ * bring down the hook bus. */
 const applyAction = (ledger: RunLedgerHookSubscriberDeps["ledger"], action: LedgerAction): void => {
   try {
-    if (action.kind === "start") {
-      ledger.start({
-        id: action.id,
-        kind: action.runKind,
-        owner: action.owner,
-        title: action.title,
-        ...(action.resumeAction !== undefined ? { resumeAction: action.resumeAction } : {}),
-      })
-      return
+    switch (action.kind) {
+      case "observe_mcp_task":
+        applyMcpTaskObservation(ledger, action)
+        return
+      case "start":
+        applyStart(ledger, action)
+        return
+      case "touch":
+        applyTouch(ledger, action)
+        return
+      case "settle":
+        applySettle(ledger, action)
     }
-    if (action.kind === "touch") {
-      const patch: Parameters<typeof ledger.touch>[1] = {}
-      if (action.status !== undefined) patch.status = action.status
-      if (action.waitingOn !== undefined) patch.waitingOn = action.waitingOn
-      ledger.touch(action.id, patch)
-      return
-    }
-    // settle
-    const opts: Parameters<typeof ledger.settle>[2] =
-      action.error !== undefined ? { error: action.error } : undefined
-    ledger.settle(action.id, action.status, opts)
   } catch {
     // Swallow — see file-level NO-THROW invariant.
   }

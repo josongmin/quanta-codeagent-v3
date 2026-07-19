@@ -179,14 +179,14 @@ const stubPolicy = (
 /* ====================================================================== */
 
 describe("A. defaultResumePolicy", () => {
-  test("HG-01: idempotent='true' → resume (wins over staleness checks)", () => {
+  test("HG-01: legacy idempotent metadata cannot self-authorize restart replay", () => {
     const policy = defaultResumePolicy({ now: () => 1_000_000 })
     const h = mkHandle({ id: "bg-1", spec: { task: "t", metadata: { idempotent: "true" } } })
     const d = policy.decide(h)
-    expect(d.action).toBe("resume")
+    expect(d.action).toBe("skip")
   })
 
-  test("HG-02: age > default 24h, no idempotent → mark-failed", () => {
+  test("HG-02: age > default 24h → mark-failed", () => {
     const tNow = 100_000_000
     const policy = defaultResumePolicy({ now: () => tNow })
     const h = mkHandle({ id: "bg-2", startedAt: tNow - 25 * 60 * 60 * 1000 })
@@ -220,14 +220,14 @@ describe("A. defaultResumePolicy", () => {
     expect(d.action).toBe("skip")
   })
 
-  test("HG-05: fresh handle, low turns, no idempotent marker → skip (user inspects)", () => {
+  test("HG-05: fresh handle, low turns → skip (user inspects)", () => {
     const policy = defaultResumePolicy({ now: () => 1_000_000 })
     const h = mkHandle({ id: "bg-5", startedAt: 999_500, turns: 1 })
     const d = policy.decide(h)
     expect(d.action).toBe("skip")
   })
 
-  test("HG-06: idempotent='true' AND very old → resume (idempotent wins over age)", () => {
+  test("HG-06: legacy idempotent metadata cannot bypass stale rejection", () => {
     const tNow = 100_000_000
     const policy = defaultResumePolicy({ now: () => tNow })
     const h = mkHandle({
@@ -236,7 +236,7 @@ describe("A. defaultResumePolicy", () => {
       spec: { task: "t", metadata: { idempotent: "true" } },
     })
     const d = policy.decide(h)
-    expect(d.action).toBe("resume")
+    expect(d.action).toBe("mark-failed")
   })
 
   test("HG-07: opts.maxAgeMs override (1h) → 2h-old → mark-failed", () => {

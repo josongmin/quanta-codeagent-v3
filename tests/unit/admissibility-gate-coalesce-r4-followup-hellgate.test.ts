@@ -36,6 +36,9 @@ import {
   type AdmissibilityWaveAOptions,
   runAdmissibilityGate,
 } from "@/agent/admissibility-gate"
+import { createApprovalStateMachine } from "@/agent/approval-state-machine"
+import { createObjectiveStore } from "@/agent/objective"
+import { createRunLedger } from "@/agent/run-ledger"
 import type { ToolUseBlock } from "@/llm"
 import type {
   ApprovalDecision,
@@ -402,5 +405,42 @@ describe("ROUND-4 admissibility — concurrent reviewer coalescing per actionKey
     expect(retry.prompts()).toBe(1)
     retry.release()
     expect(await r).toBeNull()
+  })
+
+  test("pending reviewer is visible in the live approval, objective, and ledger projections", async () => {
+    const objective = createObjectiveStore()
+    const ledger = createRunLedger()
+    const approvalStateMachine = createApprovalStateMachine({ objective, ledger })
+    objective.set("sess-1", { goal: "complete safely" })
+    const reviewer = mkDeferredReviewer("user_approved")
+    const input = { command: "git status" }
+    const wave = { ...waveOf(reviewer, undefined), approvalStateMachine }
+    const p = runAdmissibilityGate(
+      call(input, "approval-live"),
+      cfg({ approvalStateMachine }),
+      { mode: "bypass" },
+      actionOf(input),
+      undefined,
+      wave,
+    )
+
+    await settle()
+
+    // ★ CONTRACT: request precedes the unresolved reviewer promise.
+    const pending = approvalStateMachine.pending()
+    expect(pending).toHaveLength(1)
+    const approval = pending[0]
+    expect(approval?.status).toBe("pending")
+    expect(objective.get("sess-1")?.blockers).toHaveLength(1)
+    expect(ledger.waiting()).toHaveLength(1)
+    expect(ledger.get(approval?.id ?? "")?.status).toBe("waiting")
+
+    reviewer.release()
+    expect(await p).toBeNull()
+
+    // ★ CONTRACT: terminal approval settles the same record and clears both projections.
+    expect(approvalStateMachine.get(approval?.id ?? "")?.status).toBe("approved")
+    expect(objective.get("sess-1")?.blockers).toHaveLength(0)
+    expect(ledger.get(approval?.id ?? "")?.status).toBe("completed")
   })
 })

@@ -5,8 +5,8 @@
  * Verifies:
  *   A. Gate OFF (default): interrupted handle stays interrupted in store
  *      (normalizeBgStatus never writes back to store — store is ground truth).
- *   B. Gate ON: resumeInterruptedHandles is called, interrupted handle is
- *      written back to store as "resumed" before the function returns.
+ *   B. Gate ON: the live recovery sweep evaluates persisted handles but never
+ *      treats LLM-controlled metadata as replay authorization.
  *   C. Byte-identical: when subagentConfig is absent, function still returns
  *      without touching the store regardless of gate value.
  */
@@ -15,11 +15,11 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { AgentConfig } from "@/agent/types"
 import {
   defaultJsonlSchedulerStore,
   type PersistedHandle,
 } from "@/agent/subagent-persistence-store"
+import type { AgentConfig } from "@/agent/types"
 import {
   buildSharedExecutionPlaneRuntimeAugments,
   type SharedExecutionPlaneRuntimeArgs,
@@ -28,10 +28,8 @@ import { ToolRegistry } from "@/tool"
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
-/** Build an interrupted handle.  `spec.metadata.idempotent` is set to "true"
- *  so `defaultResumePolicy` returns "resume" instead of "skip" (the default
- *  conservative policy skips handles without the opt-in marker — separate
- *  concern, covered by subagent-resume-hellgate.test.ts). */
+/** Build an interrupted handle carrying the legacy metadata marker. The live
+ *  policy must treat it as untrusted and leave a fresh handle for inspection. */
 const mkHandle = (id: string, over: Partial<PersistedHandle> = {}): PersistedHandle => ({
   id,
   spec: { task: `task-${id}`, metadata: { idempotent: "true" } },
@@ -47,10 +45,9 @@ const mkHandle = (id: string, over: Partial<PersistedHandle> = {}): PersistedHan
  *  from this config will never be invoked synchronously within the test window
  *  (any async background fork may fail, which is OK — the test only observes
  *  the store state, not the forked task result). */
-// biome-ignore lint/suspicious/noExplicitAny: inert port stubs
 const fakeParentConfig = (): AgentConfig =>
   ({
-    llm: { stream: async function* () {} } as any,
+    llm: { stream: async function* () {} } as unknown as AgentConfig["llm"],
     registry: new ToolRegistry([]),
     stream: { emit: () => {} },
     permission: { mode: "default" },
@@ -115,12 +112,11 @@ describe("A. Gate OFF — store is untouched", () => {
 
 // ─── B. Gate ON ─────────────────────────────────────────────────────────────
 
-describe("B. Gate ON — interrupted handle becomes resumed", () => {
-  test("B1: QUANTA_SUBAGENT_RESUME=1 causes interrupted handle to be marked resumed", async () => {
+describe("B. Gate ON — recovery sweep is fail-closed", () => {
+  test("B1: QUANTA_SUBAGENT_RESUME=1 does not re-fork from legacy metadata", async () => {
     const store = defaultJsonlSchedulerStore({ baseDir })
-    // INV-09 LIVE: the plane wires a lineageGuard from the scheduler's
-    // resume-fork depth (= parentDepth+1 = 0+1 = 1 for a root parent). A handle
-    // persisted at the MATCHING depth resumes normally.
+    // Matching lineage proves only depth authority; it is not a side-effect
+    // replay authorization.
     const handle = mkHandle("bg-test-b001", { depth: 1 })
     await store.save(handle)
 
@@ -138,11 +134,10 @@ describe("B. Gate ON — interrupted handle becomes resumed", () => {
 
     const after = await store.load("bg-test-b001")
     expect(after).not.toBeNull()
-    // The orchestrator marks the original handle "resumed" and forks a new one.
-    expect(after?.status).toBe("resumed")
+    expect(after?.status).toBe("interrupted")
   })
 
-  test("B2: the resumed handle outputSummary references the new handle id", async () => {
+  test("B2: the original interrupted record stays inspectable rather than claiming a replay", async () => {
     const store = defaultJsonlSchedulerStore({ baseDir })
     const handle = mkHandle("bg-test-b002", { depth: 1 })
     await store.save(handle)
@@ -160,7 +155,7 @@ describe("B. Gate ON — interrupted handle becomes resumed", () => {
     await buildSharedExecutionPlaneRuntimeAugments(args)
 
     const after = await store.load("bg-test-b002")
-    expect(after?.outputSummary).toMatch(/^resumed as bg-/)
+    expect(after?.outputSummary).toBe("(interrupted)")
   })
 })
 

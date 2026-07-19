@@ -1,12 +1,19 @@
 import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { extname, join } from "node:path"
+import ts from "typescript"
 
 const readSource = (path: string): string =>
   readFileSync(join(import.meta.dir, "../../../", path), "utf8")
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 const APPS_ROOT = join(REPO_ROOT, "src/apps")
+const FORBIDDEN_IMPORTS = [
+  "@/host/runtime/session-host",
+  "@/runner/side-conversation-port",
+  "@/sdk/runtime/compat",
+  "@/runner/assemble/config",
+] as const
 const walkTs = (dir: string): string[] => {
   const out: string[] = []
   for (const entry of readdirSync(dir)) {
@@ -18,25 +25,54 @@ const walkTs = (dir: string): string[] => {
   return out
 }
 
+const importedModules = (file: string, source: string): readonly string[] => {
+  const program = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  )
+  const modules: string[] = []
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      modules.push(node.moduleSpecifier.text)
+    }
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length === 1 &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
+      modules.push(node.arguments[0].text)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(program)
+  return modules
+}
+
 describe("CLI runtime SDK cutover source gates", () => {
   test("app surfaces no longer import raw compat owners or runner side ports directly", () => {
     const offenders: Array<{ path: string; needle: string }> = []
-    for (const file of walkTs(APPS_ROOT)) {
+    const files = walkTs(APPS_ROOT)
+    expect(files.length).toBeGreaterThan(100)
+    for (const file of files) {
       const src = readFileSync(file, "utf8")
-      if (src.includes('from "@/host/runtime/session-host"')) {
-        offenders.push({ path: file, needle: "@/host/runtime/session-host" })
-      }
-      if (src.includes('from "@/runner/side-conversation-port"')) {
-        offenders.push({ path: file, needle: "@/runner/side-conversation-port" })
-      }
-      if (src.includes('from "@/sdk/runtime/compat"')) {
-        offenders.push({ path: file, needle: "@/sdk/runtime/compat" })
-      }
-      if (src.includes('from "@/runner/assemble/config"')) {
-        offenders.push({ path: file, needle: "@/runner/assemble/config" })
+      for (const needle of importedModules(file, src)) {
+        if (FORBIDDEN_IMPORTS.includes(needle as (typeof FORBIDDEN_IMPORTS)[number])) {
+          offenders.push({ path: file, needle })
+        }
       }
     }
     expect(offenders).toEqual([])
+  })
+
+  test("import scanner rejects static and dynamic forbidden-import injections", () => {
+    for (const forbidden of FORBIDDEN_IMPORTS) {
+      expect(importedModules("injected.ts", `import x from "${forbidden}"`)).toEqual([forbidden])
+      expect(importedModules("injected.ts", `await import("${forbidden}")`)).toEqual([forbidden])
+    }
   })
 
   test("session-loop consumes sdk runtime, not runner interactive primitives", () => {

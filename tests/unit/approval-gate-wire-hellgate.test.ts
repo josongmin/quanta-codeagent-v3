@@ -125,6 +125,13 @@ describe("approval-gate-wire (ADR-0407)", () => {
     expect(objective.get("thread-1")?.blockers).toHaveLength(1)
     expect(ledger.get(kernelApprovalId)?.status).toBe("waiting")
 
+    // The provisional local id is never left active after the kernel takes
+    // ownership. The host sees exactly one live pending approval/ledger entry.
+    expect(sm.pending()).toHaveLength(1)
+    expect(sm.pending()[0]?.id).toBe(kernelApprovalId)
+    expect(ledger.waiting()).toHaveLength(1)
+    expect(ledger.waiting()[0]?.id).toBe(kernelApprovalId)
+
     sm.settle(kernelApprovalId, "approve")
     expect(sm.get(kernelApprovalId)?.status).toBe("approved")
     expect(objective.get("thread-1")?.blockers).toHaveLength(0)

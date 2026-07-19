@@ -848,6 +848,10 @@ const wireSessionResourcesAndCodexR2 = (cfg: AgentConfig, env: AssemblerEnv): vo
     ...(cfg.sessionId !== undefined ? { sessionId: cfg.sessionId } : {}),
     systemPromptCache: wrappedCache,
     store: sessionResources?.store ?? createInMemoryTypedHistoryEventStore(),
+    // Typed event history remains append-only by default. This opt-in promotes
+    // only stored compaction events into the next turn's context envelope;
+    // context and mention variants already have direct injection owners.
+    replayStoredEvents: gateOn(env, "QUANTA_TYPED_EVENT_REPLAY"),
     // ADR-0418 — @file mention resolver (helper keeps this closure under the
     // cognitive-complexity cap). Default-ON; QUANTA_MENTION_FILE=off opts out.
     ...mentionResolverDep(cfg.cwd, env),

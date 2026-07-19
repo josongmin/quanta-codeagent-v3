@@ -31,6 +31,7 @@ import {
   readStickyModelForMode,
   resolveSkillTurnOverride,
 } from "./skill-gate"
+import { createStreamCancellationWire } from "./stream-cancellation-wire"
 import type { StreamConsumeResult } from "./types"
 
 /**
@@ -339,6 +340,10 @@ const runSamplingScope = (args: {
   const { config, recorder } = session
   const { collector, taskSpend } = state
   const { messages, system } = ctx
+  const cancellationWire = createStreamCancellationWire({
+    sessionSignal: config.signal,
+    controller: config.streamCancellation,
+  })
   return withActiveSpanScope(false, samplingSpan, () => {
     // D2: emit `llm_request` from INSIDE the sampling scope so its OBSERVE
     // event samples the SAME active trace ref the paired `usage` events (fired
@@ -356,24 +361,25 @@ const runSamplingScope = (args: {
         ...(config.sessionId !== undefined ? { promptCacheKey: config.sessionId } : {}),
       }),
     )
+    const providerEvents = turnLlm.llm.stream({
+      messages,
+      system,
+      tools: visibleSpecs,
+      ...(turnLlm.thinking !== undefined ? { thinking: turnLlm.thinking } : {}),
+      ...(toolChoice.kind !== "auto" ? { toolChoice } : {}),
+      ...(config.sessionId !== undefined && config.sessionId.length > 0
+        ? { promptCacheKey: config.sessionId }
+        : {}),
+      signal: cancellationWire?.signal ?? config.signal,
+      turnTimingCapture: args.turnTimingCapture,
+      ...(args.onResponseHeaders !== undefined
+        ? { onResponseHeaders: args.onResponseHeaders }
+        : {}),
+    })
     return streamingTurn({
       events: teeUsage(
         config,
-        turnLlm.llm.stream({
-          messages,
-          system,
-          tools: visibleSpecs,
-          ...(turnLlm.thinking !== undefined ? { thinking: turnLlm.thinking } : {}),
-          ...(toolChoice.kind !== "auto" ? { toolChoice } : {}),
-          ...(config.sessionId !== undefined && config.sessionId.length > 0
-            ? { promptCacheKey: config.sessionId }
-            : {}),
-          signal: config.signal,
-          turnTimingCapture: args.turnTimingCapture,
-          ...(args.onResponseHeaders !== undefined
-            ? { onResponseHeaders: args.onResponseHeaders }
-            : {}),
-        }),
+        cancellationWire?.wrap(providerEvents) ?? providerEvents,
         recorder,
         collector,
         taskSpend,
@@ -386,7 +392,7 @@ const runSamplingScope = (args: {
       isEarlyDispatchSafe: (name) => config.registry.isEarlyDispatchSafe(name),
       onToolInput: buildToolInputSeam(config.registry),
       ...args.callbacks,
-      signal: config.signal,
+      signal: cancellationWire?.signal ?? config.signal,
     })
   })
 }

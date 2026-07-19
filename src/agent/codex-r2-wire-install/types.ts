@@ -43,6 +43,12 @@ export interface CodexR2WireDeps {
    *  `cfg.compactionEventEmit` (proactive compaction events append here). */
   readonly store?: TypedHistoryEventStore
 
+  /** Opt-in replay of stored compaction events into the normal per-turn
+   * context-events slot. Other stored variants retain their direct owning
+   * injection paths and are consumed without replay to avoid duplicates.
+   * Absent or false is byte-identical to the prior append-only side channel. */
+  readonly replayStoredEvents?: boolean
+
   /** Mention resolver port (ADR-0325). When set, fills `cfg.mentionInjector`
    *  via an inline closure that calls `parseMentions` → `buildInjectionFragments`
    *  → `buildMentionInjectionMessages`. If `store` is ALSO set the closure

@@ -13,25 +13,25 @@ type SlashCtxInput = Parameters<typeof buildReplSlashCtx>[0]
 const sharedOptionalSlots = (
   core: SurfaceCoreState,
   mutable: MutableSurfaceWires,
-): Partial<SlashCtxInput> => ({
-  ...(mutable.projectsKbSlot === undefined ? {} : { projectsKb: mutable.projectsKbSlot }),
-  ...(mutable.mcpResourcesSlot === undefined ? {} : { mcpResources: mutable.mcpResourcesSlot }),
-  ...(core.browserNetHolder === undefined
-    ? {}
-    : { browserNet: () => core.browserNetHolder?.get() }),
-  ...(mutable.itemStreamSink === undefined ? {} : { itemStreamSink: mutable.itemStreamSink }),
-  ...(mutable.itemStore === undefined
-    ? {}
-    : { activityItems: () => mutable.itemStore?.snapshot() ?? [] }),
-  ...(core.radarStore === undefined ? {} : { radar: core.radarStore }),
-  ...(core.perToolCkpt === undefined
-    ? {}
-    : {
-        perToolRegistry: core.perToolCkpt.registry,
-        perToolRestorePort: core.perToolCkpt.restore,
-        perToolReplaceMessages: mutable.liveHistorySwap,
-      }),
-})
+): Partial<SlashCtxInput> => {
+  const browserNetHolder = core.browserNetHolder
+  const itemStore = mutable.itemStore
+  return {
+    ...(mutable.projectsKbSlot === undefined ? {} : { projectsKb: mutable.projectsKbSlot }),
+    ...(mutable.mcpResourcesSlot === undefined ? {} : { mcpResources: mutable.mcpResourcesSlot }),
+    ...(browserNetHolder === undefined ? {} : { browserNet: () => browserNetHolder.get() }),
+    ...(mutable.itemStreamSink === undefined ? {} : { itemStreamSink: mutable.itemStreamSink }),
+    ...(itemStore === undefined ? {} : { activityItems: () => itemStore.snapshot() }),
+    ...(core.radarStore === undefined ? {} : { radar: core.radarStore }),
+    ...(core.perToolCkpt === undefined
+      ? {}
+      : {
+          perToolRegistry: core.perToolCkpt.registry,
+          perToolRestorePort: core.perToolCkpt.restore,
+          perToolReplaceMessages: mutable.liveHistorySwap,
+        }),
+  }
+}
 
 const runtimeOptionalSlots = (
   setup: SessionSetupResult,

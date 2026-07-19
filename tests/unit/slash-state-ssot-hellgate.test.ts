@@ -6,13 +6,26 @@ const REPO_ROOT = join(import.meta.dir, "..", "..")
 
 const read = (path: string): string => readFileSync(join(REPO_ROOT, path), "utf8")
 
+const stateProjectionCount = (source: string): number =>
+  [
+    /toolProfileState\s*===\s*undefined\s*\?\s*\{\}\s*:\s*\{\s*toolProfileState\s*\}/,
+    /identityModeState\s*===\s*undefined[\s\S]*?identityModeState\s*,\s*onIdentityModeChange\s*:\s*setup\.refreshSystemPrompt/,
+    /focusChain\s*===\s*undefined\s*\?\s*\{\}\s*:\s*\{\s*focusChain\s*\}/,
+  ].filter((projection) => projection.test(source)).length
+
 describe("slash state SSOT hellgate", () => {
   test("slash-context composer projects slash state from the runtime bridge only", () => {
     const src = read("src/apps/cli/repl/surface-compose/slash-context-compose.ts")
     expect(src).toContain("const toolProfileState = setup.runtimeContext.toolProfileState()")
     expect(src).toContain("const identityModeState = setup.runtimeContext.identityModeState()")
-    expect(src).toContain("onIdentityModeChange: setup.refreshSystemPrompt")
     expect(src).toContain("const focusChain = setup.runtimeContext.focusChain()")
+    expect(stateProjectionCount(src)).toBe(3)
+
+    const missingProjection = src.replace("{ toolProfileState }", "{}")
+    expect(stateProjectionCount(missingProjection)).toBe(2)
+
+    const composer = read("src/apps/cli/repl/surface-compose/composer.ts")
+    expect(composer).toMatch(/buildSurfaceSlashContext\s*\(/)
   })
 
   test("slash adapters prefer authoritative session-owned state", () => {

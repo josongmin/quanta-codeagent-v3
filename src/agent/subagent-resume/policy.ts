@@ -9,13 +9,12 @@
  * `PersistedHandle` type). NO `@/agent/loop`, `@/agent/dispatch`, `@/llm`,
  * `@/permission`, `@/tool`.
  *
- * Idempotency-gating rationale: AUTO-RESUMING any interrupted work is
- * dangerous — the original interruption may have been caused by the work
- * itself (looping tool, OOM, deliberate kill). The conservative default
- * therefore requires the spec author to explicitly DECLARE the work safe to
- * replay via `spec.metadata.idempotent === "true"`. Without that opt-in,
- * defaultResumePolicy returns "skip" so the user inspects + decides
- * manually. See ADR-0159 §"Alternatives rejected → Auto-resume all".
+ * Restart rationale: AUTO-RESUMING any interrupted work is dangerous — the
+ * original interruption may have been caused by the work itself (looping
+ * tool, OOM, deliberate kill). Tool input is LLM-controlled and cannot
+ * self-authorize a replay, so the default policy never treats metadata as an
+ * idempotency proof. It preserves stale/loop failure handling, then leaves
+ * otherwise-safe handles for an explicit user or trusted-host decision.
  */
 
 import type { PersistedHandle } from "@/agent/subagent-persistence-store"
@@ -52,13 +51,10 @@ const DEFAULT_MAX_AGE_MS = 24 * 60 * 60 * 1000 // 24h
 const DEFAULT_STALE_TURNS_RATIO = 0.8
 
 /** Default conservative policy:
- *   - `spec.metadata.idempotent === "true"` → `"resume"` (caller opted in).
- *     This wins over staleness/age — once the spec author declares the work
- *     idempotent, replaying is safe by definition.
  *   - `now - startedAt > maxAgeMs` → `"mark-failed"` (likely stale).
  *   - `spec.maxTurns` set AND `turns / maxTurns >= staleTurnsRatio` →
  *     `"mark-failed"` (likely looped — interruption probably saved us).
- *   - Else → `"skip"` (user inspects + decides via separate API).
+ *   - Else → `"skip"` (user or trusted host decides via a separate API).
  *
  *  The 4 arms cover the meaningful decision surface without forcing every
  *  caller to write the same boilerplate. */
@@ -68,12 +64,8 @@ export const defaultResumePolicy = (opts: DefaultResumePolicyOpts = {}): ResumeP
   const now = opts.now ?? Date.now
   return {
     decide(handle): ResumeDecision {
-      // 1) Idempotent opt-in wins over staleness checks — caller knows best.
-      const idempotent = handle.spec.metadata?.idempotent === "true"
-      if (idempotent) {
-        return { action: "resume", reason: "spec.metadata.idempotent === 'true'" }
-      }
-      // 2) Staleness by age.
+      // 1) Staleness by age. `spec.metadata` is untrusted tool input and is
+      // deliberately NOT a replay authorization boundary.
       const age = now() - handle.startedAt
       if (age > maxAgeMs) {
         return {
@@ -81,7 +73,7 @@ export const defaultResumePolicy = (opts: DefaultResumePolicyOpts = {}): ResumeP
           reason: `interrupted handle is stale (age ${age}ms > maxAgeMs ${maxAgeMs}ms)`,
         }
       }
-      // 3) Staleness by turn budget — only if spec.maxTurns is set.
+      // 2) Staleness by turn budget — only if spec.maxTurns is set.
       const maxTurns = handle.spec.maxTurns
       if (maxTurns !== undefined && maxTurns > 0) {
         const ratio = handle.turns / maxTurns
@@ -92,10 +84,10 @@ export const defaultResumePolicy = (opts: DefaultResumePolicyOpts = {}): ResumeP
           }
         }
       }
-      // 4) Default — leave for user inspection.
+      // 3) Default — leave for user/trusted-host inspection.
       return {
         action: "skip",
-        reason: "no idempotent marker; under staleness thresholds — user must decide",
+        reason: "no trusted replay authorization; under staleness thresholds — user must decide",
       }
     },
   }

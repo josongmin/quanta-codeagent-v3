@@ -103,7 +103,8 @@ describe("HELLGATE WS-A — grep-gate: raw approve comparison banned at consumer
     "src/apps/cli/repl/session-loop.ts",
     "src/apps/cli/repl/session-setup.ts",
   ]
-  const BANNED = /[^.\w]decision === "approve"/
+  const findRawApprovalComparisons = (source: string): readonly string[] =>
+    source.match(/(^|[^.\w])decision\s*===\s*"approve"/gm) ?? []
 
   test("precompact owner calls the authoritative approval projection", () => {
     const src = readFileSync(join(ROOT, "src/apps/cli/repl/surface-compose/core-state.ts"), "utf8")
@@ -111,15 +112,17 @@ describe("HELLGATE WS-A — grep-gate: raw approve comparison banned at consumer
   })
 
   test("raw-comparison detector rejects an injected regression", () => {
-    expect(BANNED.test('if (decision === "approve") return "approve"')).toBe(true)
+    expect(
+      findRawApprovalComparisons('if (\n  decision\n  === "approve"\n) return "approve"'),
+    ).toHaveLength(1)
   })
 
   for (const rel of SCANNED) {
     test(`${rel} has no raw 'decision === "approve"' comparison`, () => {
       const src = readFileSync(join(ROOT, rel), "utf8")
-      const hit = src.split("\n").findIndex((l) => BANNED.test(l))
+      const hit = findRawApprovalComparisons(src)
       expect(
-        hit === -1 ? "" : `${rel}:${hit + 1} — use normalizeApprovalDecision/isApprovedDecision`,
+        hit.length === 0 ? "" : `${rel} — use normalizeApprovalDecision/isApprovedDecision`,
       ).toBe("")
     })
   }

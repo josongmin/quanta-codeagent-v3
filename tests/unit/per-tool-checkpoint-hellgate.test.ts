@@ -55,7 +55,7 @@ const makeFakeOdb = (over: Partial<ShadowOdb>): ShadowOdb => {
     listSnapshots: over.listSnapshots ?? (ni("listSnapshots") as ShadowOdb["listSnapshots"]),
     rewindToRef: over.rewindToRef ?? (ni("rewindToRef") as ShadowOdb["rewindToRef"]),
     restorePartialFromRef: ni("restorePartialFromRef") as ShadowOdb["restorePartialFromRef"],
-    diffSinceRef: ni("diffSinceRef") as ShadowOdb["diffSinceRef"],
+    diffSinceRef: over.diffSinceRef ?? (ni("diffSinceRef") as ShadowOdb["diffSinceRef"]),
     cleanup: over.cleanup ?? (ni("cleanup") as ShadowOdb["cleanup"]),
   }
 }
@@ -349,6 +349,52 @@ describe("ThreeWayRestorePort orthogonality (HELL-D11..D15)", () => {
     expect(out.messagesBefore).toBeUndefined()
   })
 
+  test("HELL-D11b: restoreFiles targets the selected tag SHA, never the newer last anchor", async () => {
+    const policy = defaultGranularCheckpointPolicy({
+      base: buildBasePolicy("per-mutating"),
+      granularity: "tool",
+    })
+    const tag = policy.computeTag({
+      workspace: "/ws",
+      turnId: "turn-1",
+      toolName: "edit_file",
+      callIndex: 0,
+    }) as string
+    policy.recordAnchorSha(tag, "selected-sha", {
+      workspace: "/ws",
+      turnId: "turn-1",
+      toolName: "edit_file",
+      callIndex: 0,
+    })
+    const restore = defaultThreeWayRestore({
+      registry: policy.registry,
+      workspace: "/ws",
+      shadowOdb: makeFakeOdb({
+        listSnapshots: async () => [
+          { ref: "refs/quanta/snapshots/last-registered", sha: "newer-sha", timestampSec: 2 },
+          { ref: "refs/quanta/snapshots/older", sha: "selected-sha", timestampSec: 1 },
+        ],
+        diffSinceRef: async (_workspace, ordinal) => {
+          expect(ordinal).toBe(2)
+          return {
+            snap: { ref: "refs/quanta/snapshots/older", sha: "selected-sha", timestampSec: 1 },
+            diff: "",
+          }
+        },
+        rewindToLast: async () => {
+          throw new Error("must not restore the latest anchor")
+        },
+        rewindToRef: async (_workspace, ordinal, opts) => {
+          expect(ordinal).toBe(2)
+          expect(opts?.expectSha).toBe("selected-sha")
+          return { ref: "refs/quanta/snapshots/older", sha: "selected-sha", timestampSec: 1 }
+        },
+      }),
+    })
+
+    expect((await restore.restoreFiles(tag)).ok).toBe(true)
+  })
+
   test("HELL-D12: restoreTask touches conversation only — shadow ODB NEVER consulted", async () => {
     // Use a setup with NO shadowOdb to prove the task leg does not need it.
     const policy = defaultGranularCheckpointPolicy({
@@ -500,8 +546,18 @@ describe("ThreeWayRestorePort typed failures (HELL-E16..E18)", () => {
       base: buildBasePolicy("per-mutating"),
       granularity: "tool",
     })
-    const tag = policy.computeTag({ workspace: "/ws", turnId: "t1", toolName: "x", callIndex: 0 }) as string
-    policy.recordAnchorSha(tag, "absent-sha", { workspace: "/ws", turnId: "t1", toolName: "x", callIndex: 0 })
+    const tag = policy.computeTag({
+      workspace: "/ws",
+      turnId: "t1",
+      toolName: "x",
+      callIndex: 0,
+    }) as string
+    policy.recordAnchorSha(tag, "absent-sha", {
+      workspace: "/ws",
+      turnId: "t1",
+      toolName: "x",
+      callIndex: 0,
+    })
     let rewindCalls = 0
     const restore = defaultThreeWayRestore({
       registry: policy.registry,

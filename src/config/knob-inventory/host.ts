@@ -17,7 +17,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "Ctrl+B detach + `/background` turn portal (ticket-18; opt-in).",
-    readSite: "apps/cli/repl/surface-compose.ts",
+    readSite: "apps/cli/repl/background-turn-portal.ts",
   },
   {
     envKey: "QUANTA_SPINNER_STALL",

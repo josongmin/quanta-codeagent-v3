@@ -228,15 +228,25 @@ describe("UUX-1-23 — /side not-wired posture (no throw)", () => {
     expect(out()).toContain("not wired")
   })
 
-  test("mutable side-chat wire no longer hard-throws for the unwired side chat", async () => {
+  test("mutable side-chat wire returns the typed marker from the live late-bound closure", async () => {
     const src = await readFile(
       join(import.meta.dir, "../../../src/apps/cli/repl/surface-compose/mutable-wires.ts"),
       "utf8",
     )
-    expect(src).not.toContain('throw new Error("side chat not wired')
-    // The closure RETURNS the typed marker (a comment mentioning the marker
-    // would not satisfy this pin).
-    expect(src).toMatch(/^[^/]*return "not-wired"/m)
+    const liveUnwiredBranch =
+      /const startSideConversation\s*=\s*async\s*\([\s\S]*?if\s*\(\s*sideConversationStart\s*===\s*undefined\s*\)\s*return\s*"not-wired"/
+    expect(liveUnwiredBranch.test(src)).toBe(true)
+    const removedBranch = src.replace(
+      'if (sideConversationStart === undefined) return "not-wired"',
+      'if (sideConversationStart === undefined) return "wrong-marker"',
+    )
+    expect(liveUnwiredBranch.test(removedBranch)).toBe(false)
+
+    const slashContext = await readFile(
+      join(import.meta.dir, "../../../src/apps/cli/repl/surface-compose/slash-context-compose.ts"),
+      "utf8",
+    )
+    expect(slashContext).toMatch(/startSideConversation\s*:\s*mutable\.startSideConversation/)
   })
 })
 

@@ -16,17 +16,19 @@ surface_integration:
   cli: full
   web: full
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-19"
   evidence:
-    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "in the web-daemon the subscriber IS wired to post_tool_use (runtime-factory.ts:152), populating runLedger which the observability-emitter projects into the web-only RunColumn (Running/Waiting/Completed)"
+    cli: "The observability composition wire subscribes createRunLedgerHookSubscriber to the live post_tool_use bus; MCP task polling now produces real waiting/running/terminal ledger records."
+    web: "the web runtime factory supplies the same live hook-bus subscriber and projects the populated ledger into RunColumn."
 purpose: |
   Wave-2 wiring for the wave-1 Run Ledger (ADR-0395). `@/agent/run-ledger` is
   a pure store; this slice plugs INTO the in-process `HookBus`
   (`src/agent/hooks.ts`) `post_tool_use` event and translates observed tool
-  outputs (bash background/await/kill banner, agent background launch
-  banner, task_output/task_stop, get_mcp_task / cancel_mcp_task) into
-  `start` / `touch` / `settle` ledger actions.
+  outputs (bash background/await/kill banner, agent background launch banner,
+  task_output/task_stop, get_mcp_task / cancel_mcp_task) into ledger actions.
+  The MCP surface has no launch event: only an exact successful task poll may
+  create a record, then pending/in-progress/terminal observations map to
+  waiting/running/settled without inventing a task from an arbitrary id.
 
   Closed contracts:
     - `LedgerAction` — three arms (start / touch / settle) mirroring
@@ -49,42 +51,36 @@ purpose: |
   banner contract — a tool author who changes a banner is caught by this
   slice's hellgate.
 
-  Default-OFF: importing the barrel touches no process state. Composition
-  wiring (subscribe the handler to a `HookBus`) is a follow-up slice.
+  Importing the barrel touches no process state. Runtime composition subscribes
+  the handler to the HookBus; ledger visibility remains default-off where that
+  runtime surface does not construct an observability wire.
 evidence:
   code:
     - src/agent/run-ledger-attribution/types.ts
     - src/agent/run-ledger-attribution/matchers.ts
     - src/agent/run-ledger-attribution/subscriber.ts
     - src/agent/run-ledger-attribution/index.ts
+    - src/agent/observability-wire/wire.ts
+    - src/host/runtime/agent-arg-builder/observability-wire.ts
   adrs:
     - docs/decisions/0401-run-ledger-attribution.md
     - 395
   tests:
     unit:
       - tests/unit/run-ledger-attribution-hellgate.test.ts
+      - tests/unit/observability-wire-approval-gap-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
 config_refs:
   env: []
-deliberate_hold:
-  reason: |
-    Composition-root subscription (`hookBus.on("post_tool_use", subscriber)`)
-    is intentionally NOT shipped in this slice. The wave-2 contract is:
-    matcher + subscriber + ADR + tests, default-OFF. Wiring is a follow-up
-    one-line addition in `src/apps/agent/index.ts` (or per-surface root).
-  promotion_path: |
-    Follow-up slice adds the wiring + an env toggle
-    (e.g. `QUANTA_RUN_LEDGER` on|off) + a surface that reads
-    `ledger.running()` / `ledger.waiting()` for status rendering.
+deliberate_hold: null
 notes: |
   Banner-contract observability — the matcher pins the LITERAL output text
   each producing tool emits. The hellgate covers every banner verbatim so a
   tool author who renames `[bash background]` (e.g. to `[bash bg]`) sees a
   CI fail HERE, not a silent regression in a far-away UI weeks later.
 
-  ROI: enables wave-1 ledger's UX promise (single surface for Running /
-  Waiting / Completed across shell / subagent / mcp_task) without coupling
-  any of the three producing slices to the ledger. ~600 LOC + 43 hellgate
-  cases; zero changes to bash/subagent/mcp.
+  MCP task state is parsed from the exact tool output and echoed task id. This
+  prevents a terminal poll from silently settling a nonexistent ledger row or
+  overwriting an unrelated shell/subagent record with the same id.

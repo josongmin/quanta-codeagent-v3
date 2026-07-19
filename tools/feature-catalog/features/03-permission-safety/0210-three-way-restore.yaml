@@ -29,8 +29,11 @@ purpose: |
   `shadow-rewind-failed` / ...). 직교성 hellgate D14/D15 로 봉인 —
   `restoreFiles` 가 conversation store size 변경 금지 + 역방향 동일.
   Slash command `/rewind-tool` 등록 + default-OFF (조립 layer 가 wiring
-  opt-in). ADR-0118 (rewindToLast files) + ADR-0124 (ConversationCheckpoint
-  Store) 두 면을 ADR-0209 tag registry 로 합성하는 wiring slice.
+  opt-in). Files leg resolves the selected registry SHA to ShadowOdb's
+  ordinal snapshot API and calls `rewindToRef(..., {expectSha})`; a moved or
+  missing snapshot is a typed refusal, never a fallback to the latest anchor.
+  ADR-0118 (shadow files) + ADR-0124 (ConversationCheckpoint Store) 두 면을
+  ADR-0209 tag registry 로 합성하는 wiring slice.
 evidence:
   code:
     - src/agent/per-tool-checkpoint/three-way-restore.ts
@@ -51,3 +54,5 @@ notes: |
   task leg 호출 안 함 (atomic-ish: partial restore 방지). 모든 leg 는
   Promise<RestoreOutcome> — NO-THROW. tag registry miss 는 typed
   `tag-not-found` (회복 가능).
+  Tag-selected file restore is SHA-pinned: a later checkpoint cannot retarget
+  `/rewind-tool <older-tag>` to `last-registered`.

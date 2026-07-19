@@ -39,6 +39,28 @@ const inputTurn2 = (): StreamInput => ({
 })
 
 describe("OpenAIResponsesAdapter continuation", () => {
+  test("forwards response.in_progress heartbeat metadata through the live adapter", async () => {
+    const adapter = new OpenAIResponsesAdapter({
+      apiKey: "k",
+      model: "gpt-5",
+      fetchImpl: async () =>
+        sseResponse([
+          'data: {"type":"response.in_progress","message":"thinking","progress":0.42,"response":{"created_at":1700000000}}\n\n',
+          'data: {"type":"response.completed","response":{"id":"resp_1","model":"gpt-5","usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
+          "data: [DONE]\n\n",
+        ]),
+    })
+
+    const events = await collect(adapter.stream(inputTurn1()))
+
+    expect(events.find((event) => event.type === "response_in_progress")).toEqual({
+      type: "response_in_progress",
+      message: "thinking",
+      progress: 0.42,
+      createdAt: 1_700_000_000_000,
+    })
+  })
+
   test("second strict-extension turn uses previous_response_id with delta-only input", async () => {
     const bodies: Record<string, unknown>[] = []
     let call = 0

@@ -1,44 +1,51 @@
 id: subagent-resume-replay
-title: Subagent resume/replay — idempotent re-drive of interrupted child handles (built-not-wired)
+title: Subagent restart recovery — persisted-handle sweep (replay held)
 section: 1
-subsystem: 서브에이전트 복원 — interrupted handle 재개 + tool-history replay (Default-OFF seam)
+subsystem: Subagent crash recovery
 order: 456
-maturity: L2
+maturity: L3
 status: new
-ui_surfaces: [none]
-monitoring: none
-modes: [n-a]
-configurable: planned
+ui_surfaces: [cli]
+monitoring: integrated
+modes: [interactive, headless, batch, daemon, ide]
+configurable: integrated
 owners: ["@songmin"]
 labels: [surface:core, default-off]
-depends_on: []
+depends_on: [subagent-persistence-store]
 surface_integration:
-  cli: missing
+  cli: full
   web: na
   method: audited
-  verified: "2026-06-15"
+  verified: "2026-07-19"
   evidence:
-    cli: "built-not-wired — no consumer of resumeInterruptedHandles across src/ (not via path nor the @/agent barrel). Opt-in seam: a surface/host wires the resumer over the subagent run-ledger."
-    web: "no surface affordance; pure in-process resume/replay primitive."
-purpose: 'Subagent crash-resume + tool-replay primitive. resumeInterruptedHandles re-drives child-agent handles that were interrupted (hard crash / restart) using a recorded tool-history: idempotency (a tool call already recorded as completed is NOT re-executed — replay returns the stored result), policy (which handles are resumable), and tool-replay (feed the stored tool outcomes back so the child continues from where it died rather than re-running side-effecting tools). Built + hellgate-tested (resume + replay) but DELIBERATELY UNWIRED — no host constructs the resumer yet; absent wiring is byte-identical. Catalogued (not hidden) so the orphan is visible with its reason.'
+    cli: "The shared execution plane calls resumeInterruptedHandles under QUANTA_SUBAGENT_RESUME. The default policy fail-closes: public tool metadata cannot authorize a re-fork."
+    web: "no web recovery surface."
+purpose: |
+  On restart, the host can load persisted interrupted subagent handles through
+  the shared execution plane under QUANTA_SUBAGENT_RESUME. The live default
+  policy marks stale/looped handles failed and leaves fresh handles inspectable;
+  it does not trust LLM-controlled metadata.idempotent to re-fork work. The
+  helper-only conversation and tool-history replay modules remain unwired, so
+  no transcript/tool replay claim is made for the product path.
 evidence:
   code:
+    - src/runner/session-execution-plane.ts
+    - src/host/runtime/internal/context-binding/base.ts
     - src/agent/subagent-resume/resumer.ts
-    - src/agent/subagent-resume/idempotency.ts
     - src/agent/subagent-resume/policy.ts
-    - src/agent/subagent-resume/replay.ts
-    - src/agent/subagent-resume/tool-history.ts
-    - src/agent/subagent-resume/tool-replay.ts
-    - src/agent/subagent-resume/index.ts
+    - src/tool/subagent-bg/fork.ts
   adrs: []
   tests:
     unit:
+      - tests/unit/runner/subagent-resume-wire.test.ts
       - tests/unit/subagent-resume-hellgate.test.ts
-      - tests/unit/subagent-resume-replay-hellgate.test.ts
+      - tests/unit/subagent-background-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
+config_refs:
+  env: [QUANTA_SUBAGENT_RESUME]
 deliberate_hold:
-  reason: 'Built-but-unwired: no consumer of resumeInterruptedHandles in src/ (neither by path nor barrel), no gate knob. The idempotent re-drive + tool-replay core is fully hellgate-tested but no host call site constructs the resumer over a subagent run-ledger.'
-  promotion_path: 'Wire the resumer into the subagent run-ledger / restart bootstrap (detect interrupted child handles → resumeInterruptedHandles with the recorded tool-history); then promote to L3/L4.'
-notes: 'Sibling of session crash-resume (session-resilience §13.2) but for CHILD-AGENT handles: the durability axis is the recorded tool-history, and the crux is idempotency (no double side-effect on replay).'
+  reason: "Conversation replay and tool-history replay have no production writer/consumer. A trusted durable replay authorization plus an explicit confirmation surface is required before automatic re-fork can be enabled."
+  promotion_path: "Add a host-issued durable replay-eligibility record, replay/history producer and consumer, then prove a restart cannot repeat a side effect before permitting automatic re-fork."
+notes: "Legacy persisted metadata.idempotent is deliberately ignored by the default policy, and new public subagent_fork input rejects that reserved key."
