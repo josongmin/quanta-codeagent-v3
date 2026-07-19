@@ -31,7 +31,6 @@
     "src/apps/cli/raw-line-reader.ts::readLine",
     "src/apps/cli/repl/session-loop.ts::runSessionLoop",
     "src/apps/cli/repl/session-setup.ts::setupSession",
-    "src/apps/cli/repl/surface-compose.ts::composeSurfaceWires",
     "src/apps/eval/grounding/compare.ts::buildGroundingComparison",
     "src/apps/eval/grounding/compare.ts::evaluateGroundingRegression",
     "src/apps/eval/grounding/normalization/heuristic.ts::normalizeGroundingDecisionHeuristically",

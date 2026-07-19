@@ -1,11 +1,9 @@
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { defaultPlanQueueStore, type SendNowInjection } from "@/agent/plan-queue"
 import type { Message } from "@/llm"
-import type {
-  RuntimeSideConversationArgs,
-  RuntimeSideConversationResult,
-} from "@/sdk/runtime"
+import type { RuntimeSideConversationArgs, RuntimeSideConversationResult } from "@/sdk/runtime"
 import { errMessage, gateOn, type ItemStreamSink, itemStreamEnabled, logger } from "@/shared"
+import type { SideStartUnwired } from "../../side-cmd"
 import type { AutomationSlashState } from "../../slash/cron-cmd"
 import type { McpResourceDirRecord } from "../../slash/mcp-resources-cmd"
 import { createTextInbox } from "../../text-inbox"
@@ -59,7 +57,7 @@ export const buildMutableSurfaceWires = (
   }
   const startSideConversation = async (
     args: RuntimeSideConversationArgs,
-  ): Promise<RuntimeSideConversationResult> => {
+  ): Promise<RuntimeSideConversationResult | SideStartUnwired> => {
     if (sideConversationStart === undefined) return "not-wired"
     return await sideConversationStart(args)
   }
@@ -118,7 +116,9 @@ export const buildMutableSurfaceWires = (
     liveHistorySwap,
     setReplaceMessages,
     sessionSwitchWire:
-      state.rewindState === undefined ? undefined : createSessionSwitchWire(state.rewindState.sessionId),
+      state.rewindState === undefined
+        ? undefined
+        : createSessionSwitchWire(state.rewindState.sessionId),
     setSideConversationStart,
     startSideConversation,
     isSideConversationWired: () => sideConversationStart !== undefined,

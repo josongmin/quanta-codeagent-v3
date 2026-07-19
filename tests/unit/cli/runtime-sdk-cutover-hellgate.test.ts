@@ -67,7 +67,7 @@ describe("CLI runtime SDK cutover source gates", () => {
   test("cli setup and side-conversation seams avoid old runner barrels in the main path", () => {
     const runtimeContext = readSource("src/apps/cli/repl/runtime-context-compose.ts")
     const sdkContext = readSource("src/sdk/runtime/context.ts")
-    const surface = readSource("src/apps/cli/repl/surface-compose.ts")
+    const mutableSurface = readSource("src/apps/cli/repl/surface-compose/mutable-wires.ts")
     const sessionLoop = readSource("src/apps/cli/repl/session-loop.ts")
     const setup = readSource("src/apps/cli/repl/session-setup.ts")
     const internal = readSource("src/apps/cli/internal.ts")
@@ -80,10 +80,11 @@ describe("CLI runtime SDK cutover source gates", () => {
     expect(runtimeContext).not.toContain("RuntimeSessionDeps")
     expect(runtimeContext).not.toContain(".withAdmissibility(")
 
-    expect(surface).not.toContain("import { assembleConfig")
-    expect(surface).toContain("startSideConversation: async (args) => {")
-    expect(surface).not.toContain(".wrapRegistry(")
-    expect(surface).not.toContain(".setGranularRegistry(")
+    expect(mutableSurface).not.toContain("import { assembleConfig")
+    expect(mutableSurface).toContain("const startSideConversation = async")
+    expect(mutableSurface).toContain('return "not-wired"')
+    expect(mutableSurface).not.toContain(".wrapRegistry(")
+    expect(mutableSurface).not.toContain(".setGranularRegistry(")
 
     expect(sdkContext).not.toContain("RuntimeSessionDeps")
     expect(sdkContext).not.toContain("CreateRuntimeFacadeFromSessionDepsArgs")

@@ -228,9 +228,9 @@ describe("UUX-1-23 — /side not-wired posture (no throw)", () => {
     expect(out()).toContain("not wired")
   })
 
-  test("surface-compose no longer hard-throws for the unwired side chat", async () => {
+  test("mutable side-chat wire no longer hard-throws for the unwired side chat", async () => {
     const src = await readFile(
-      join(import.meta.dir, "../../../src/apps/cli/repl/surface-compose.ts"),
+      join(import.meta.dir, "../../../src/apps/cli/repl/surface-compose/mutable-wires.ts"),
       "utf8",
     )
     expect(src).not.toContain('throw new Error("side chat not wired')

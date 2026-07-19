@@ -24,8 +24,7 @@
  *
  * The tag identifies an anchor in the granular registry (built by
  * `GranularCheckpointPolicy`). For the files leg we use the resolved SHA
- * (or, when the registry is absent / SHA is empty, fall back to the
- * `SHADOW_LAST_REF` semantics via `rewindToLast`). For the task leg we
+ * through the ordinal-addressed ShadowOdb API). For the task leg we
  * use the tag VERBATIM as the `ConversationCheckpointStore` id — caller
  * is responsible for `record`-ing the conversation snapshot under the
  * SAME tag at anchor time. This decoupling means a caller may wire
@@ -102,23 +101,10 @@ const resolveTag = (
 /* legs                                                                */
 /* ------------------------------------------------------------------ */
 
-/** FILES leg. Compute the diff against the current worktree BEFORE the
- *  rewind (so we know `filesChanged`) then invoke `ShadowOdb.rewindToLast`.
- *
- *  Today we use `rewindToLast` (which targets `SHADOW_LAST_REF`) rather
- *  than restoring to the registry's specific SHA. This is intentional:
- *  the `ShadowOdb` port does not expose a per-SHA `restore` method, and
- *  building one would mutate the closed port (the user instructions
- *  forbid touching `src/storage/shadow-odb/*`).
- *
- *  Trade-off: per-tool granularity gives PRECISE TAGS but the files-leg
- *  rewind is still anchored to whatever SHA `SHADOW_LAST_REF` points at.
- *  In practice the auto-checkpoint policy advances `SHADOW_LAST_REF`
- *  before EVERY destructive tool call (tool-grain), so the SHA recorded
- *  in the registry at the tag is the SAME SHA `SHADOW_LAST_REF` would
- *  point at after the immediately preceding anchor. This is documented
- *  explicitly in the ADR-0205 trade-offs section.
- */
+/** FILES leg. Resolve the tag SHA to the current ordinal snapshot list, then
+ * restore through ShadowOdb's ordinal API with `expectSha`. The second guard
+ * closes the list→restore race: a concurrent anchor can shift the ordinal,
+ * but can never retarget this destructive operation silently. */
 const doFilesLeg = async (
   ports: ThreeWayRestorePorts,
   tag: CheckpointTag,
@@ -136,15 +122,33 @@ const doFilesLeg = async (
     )
   }
 
-  // Compute the list of changed files BEFORE the rewind so the outcome
-  // can describe what will change. Best-effort: a diff failure does NOT
-  // block the rewind (we surface an empty list).
+  let ordinal: number
+  try {
+    const snapshots = await ports.shadowOdb.listSnapshots(ports.workspace)
+    const index = snapshots.findIndex((snapshot) => snapshot.sha === resolved.sha)
+    if (index === -1) {
+      return failOutcome(
+        tag,
+        "shadow-rewind-failed",
+        `shadow snapshot for tag ${tag} (${resolved.sha.slice(0, 12)}) is unavailable`,
+      )
+    }
+    ordinal = index + 1
+  } catch (e) {
+    const code = extractShadowCode(e)
+    return failOutcome(tag, "shadow-rewind-failed", `shadow snapshot lookup failed: ${code}`, code)
+  }
+
+  // Compute the list of changed files against the SELECTED snapshot before
+  // the rewind. Best-effort: a diff failure does NOT block the restore (we
+  // surface an empty list), but a moved ordinal is never used as evidence.
   let filesChanged: ReadonlyArray<string> = []
   try {
-    const diff = await ports.shadowOdb.diffSinceLast(ports.workspace)
-    filesChanged = parseChangedPaths(diff)
+    const diff = await ports.shadowOdb.diffSinceRef(ports.workspace, ordinal)
+    if (diff.snap.sha === resolved.sha) filesChanged = parseChangedPaths(diff.diff)
   } catch {
-    // swallow — the rewind will still attempt; filesChanged stays empty.
+    // Swallow only the non-mutating preview failure. The restore itself is
+    // still SHA-pinned below and will fail closed if the target moved.
   }
 
   try {
@@ -153,7 +157,10 @@ const doFilesLeg = async (
       untracked: "preserve",
       ...(opts?.allowDirtyMerge === true ? { allowDirtyMerge: true } : {}),
     }
-    await ports.shadowOdb.rewindToLast(ports.workspace, rewindOpts)
+    await ports.shadowOdb.rewindToRef(ports.workspace, ordinal, {
+      ...rewindOpts,
+      expectSha: resolved.sha,
+    })
   } catch (e) {
     const code = extractShadowCode(e)
     return failOutcome(tag, "shadow-rewind-failed", `shadow-odb rewind failed: ${code}`, code)

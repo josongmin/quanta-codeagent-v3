@@ -7,12 +7,12 @@ const REPO_ROOT = join(import.meta.dir, "..", "..")
 const read = (path: string): string => readFileSync(join(REPO_ROOT, path), "utf8")
 
 describe("slash state SSOT hellgate", () => {
-  test("surface-compose projects slash state from the runtime bridge only", () => {
-    const src = read("src/apps/cli/repl/surface-compose.ts")
-    expect(src).toContain("toolProfileState: setup.runtimeContext.toolProfileState()")
-    expect(src).toContain("identityModeState: setup.runtimeContext.identityModeState()")
+  test("slash-context composer projects slash state from the runtime bridge only", () => {
+    const src = read("src/apps/cli/repl/surface-compose/slash-context-compose.ts")
+    expect(src).toContain("const toolProfileState = setup.runtimeContext.toolProfileState()")
+    expect(src).toContain("const identityModeState = setup.runtimeContext.identityModeState()")
     expect(src).toContain("onIdentityModeChange: setup.refreshSystemPrompt")
-    expect(src).toContain("focusChain: setup.runtimeContext.focusChain()")
+    expect(src).toContain("const focusChain = setup.runtimeContext.focusChain()")
   })
 
   test("slash adapters prefer authoritative session-owned state", () => {

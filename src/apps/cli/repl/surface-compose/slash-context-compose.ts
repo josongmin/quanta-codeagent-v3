@@ -1,6 +1,6 @@
 import { EFFORT_LEVELS, effortToTokenBudget } from "@/agent"
-import { overlayRewindState } from "../session-switch-wire"
 import type { SessionSetupResult } from "../session-setup"
+import { overlayRewindState } from "../session-switch-wire"
 import { buildSkillsCallback } from "../skills-surface"
 import { buildReplSlashCtx } from "../slash-surface"
 import type { SurfaceCoreState } from "./core-state"
@@ -11,8 +11,6 @@ import { buildReplaySlashState } from "./wire-builders"
 type SlashCtxInput = Parameters<typeof buildReplSlashCtx>[0]
 
 const sharedOptionalSlots = (
-  setup: SessionSetupResult,
-  state: SurfaceState,
   core: SurfaceCoreState,
   mutable: MutableSurfaceWires,
 ): Partial<SlashCtxInput> => ({
@@ -33,14 +31,6 @@ const sharedOptionalSlots = (
         perToolRestorePort: core.perToolCkpt.restore,
         perToolReplaceMessages: mutable.liveHistorySwap,
       }),
-  rewindState:
-    state.rewindState === undefined || mutable.sessionSwitchWire === undefined
-      ? undefined
-      : overlayRewindState(
-          state.rewindState,
-          mutable.liveHistorySwap,
-          mutable.sessionSwitchWire,
-        ),
 })
 
 const runtimeOptionalSlots = (
@@ -62,10 +52,7 @@ const runtimeOptionalSlots = (
       : {
           stickyModelStore: stickyModelStore.store,
           stickyModelCandidateIds: [
-            ...new Set([
-              setup.model,
-              ...core.retryCandidates.map((candidate) => candidate.id),
-            ]),
+            ...new Set([setup.model, ...core.retryCandidates.map((candidate) => candidate.id)]),
           ],
         }),
   }
@@ -81,8 +68,12 @@ export const buildSurfaceSlashContext = (
   buildReplSlashCtx({
     skillsCb: buildSkillsCallback(setup.skillsConfig, setup.pills),
     idleMonitor: setup.idleMonitor,
-    ...sharedOptionalSlots(setup, state, core, mutable),
+    ...sharedOptionalSlots(core, mutable),
     imageQueue: state.imageQueue,
+    rewindState:
+      state.rewindState === undefined || mutable.sessionSwitchWire === undefined
+        ? undefined
+        : overlayRewindState(state.rewindState, mutable.liveHistorySwap, mutable.sessionSwitchWire),
     mcpSurface: setup.mcpSurface,
     costPanel: setup.costPanel,
     planStore: setup.planStore,

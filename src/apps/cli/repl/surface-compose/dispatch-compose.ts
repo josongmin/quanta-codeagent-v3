@@ -3,8 +3,8 @@ import type { MemorySlashState } from "../../memory-cmd"
 import type { PermissionInspectSlashState } from "../../permission-explain"
 import type { ConvCheckpointSlashState } from "../../rewind-conv-cmd"
 import type { SessionSetupResult } from "../session-setup"
-import { buildSurfaceDispatch, buildVoiceLiveSlot } from "./dispatch"
 import type { SurfaceCoreState } from "./core-state"
+import { buildSurfaceDispatch, buildVoiceLiveSlot } from "./dispatch"
 import type { MutableSurfaceWires } from "./mutable-wires"
 import type { SurfaceState } from "./turn-sinks"
 import { renderRetryEvent } from "./wire-builders"
@@ -78,9 +78,7 @@ export const buildSurfaceDispatchWire = (
     ...(voiceLive === undefined ? {} : { voiceLive }),
     ...(memory === undefined ? {} : { memory }),
     ...(dream === undefined ? {} : { dream }),
-    ...(core.backgroundPortal === undefined
-      ? {}
-      : { background: core.backgroundPortal.view() }),
+    ...(core.backgroundPortal === undefined ? {} : { background: core.backgroundPortal.view() }),
     planQueue: mutable.planQueueStore,
     workingState: core.workingStateView,
     skillScope: core.skillScopeView,
