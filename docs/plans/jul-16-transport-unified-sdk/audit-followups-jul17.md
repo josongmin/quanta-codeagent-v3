@@ -32,3 +32,14 @@ crash/torn·lock·seq·replay·누출·게이트·v1정직성 7축 실행 repro 
 | # | 심각도 | 내용 | 처리 |
 |---|---|---|---|
 | ~~02-approval~~ ✅ DONE(5b4110f18) | MED | serve --stdio가 approval을 WIRE 클라(connect onApproval)에게 위임하려면 kernel `awaiting_approval`+`approval.requested` wire 이벤트→`approval.respond` 재개 경로 필요. headless approval은 W1-A inline auto / OFF deny 두 모드뿐 — "wire-defer"(onConfirm이 deny 대신 wire respond 대기) 3번째 모드 미구현. CLI attach가 daemon 세션서 쓰는 flow와 동형. e2e approval round-trip visible-skip. | serve wire-approval 위임 배선(kernel approval 경로) 별도 작업. 가설: session-bridge에서 transport 모드일 때 onConfirm을 wire-defer resolver로 |
+
+## jul-19 3바퀴 어딧 (β/γ API rate-limit 즉사 → 직접 검증)
+α(정확성)·β(통합)·γ(보안) 병렬 3바퀴가 서버 rate-limit으로 2회 즉사 → 직접 실행검증+코드리딩으로 대체. **최근 미검종합 랜딩(04·B-MED-7·02approval·J-MED-1) 견고**.
+
+**검증 통과**: 04 strip 4경로(sendReplay→sendMessages 단일 chokepoint, durable 포함)·codec 8종 exhaustive·B-MED-7 exact-match(approvalId 내용 무관)·04 크기캡 4MiB 정확·correlator 전 arm 공존(70pass)·closePeer 누수0(peers.delete GC)·02 deny(web-daemon e2e 커버, wire-defer 동일 kernel 경로).
+
+| # | 심각도 | 내용 | 처리 |
+|---|---|---|---|
+| ~~γ-sqlite~~ ✅ DONE(b177f24af) | MED-보안 | threads.db가 `new Database` mode 미지정→0o644 world-readable. 04 full 전문(비밀) 저장 시 노출. H1(JsonlSessionEventLog 0o600) sqlite 대응 누락 | mkdir 0o700+chmodSync 0o600+회귀테스트 |
+| β-gate-combo | LOW | serve --stdio(wireDefer)+QUANTA_INLINE_APPROVAL_RESOLVER 동시 ON시 inline auto-approve 우선(wire onApproval 무시) — approval-wiring:79 주석엔 "inline WINS" 명시(의도), serve USAGE엔 미기재 | serve USAGE/0543에 조합 우선순위 1줄(코드 무변, 의도된 동작) |
+| 02-deny-e2e | LOW | serve --stdio approval **deny/다중** 직접 spawn e2e 부재(approve만). 기능=kernel deny 경로(web-daemon e2e 검증)라 무결, serve 서피스 직접 커버만 갭 | 중복 커버라 ROI 낮음, 여력시 |
