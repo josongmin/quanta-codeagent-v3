@@ -17,6 +17,7 @@ import {
 } from "@/ipc/session"
 import type { ImageBlock } from "@/llm"
 import {
+  type PendingApprovalView,
   type SessionCommand,
   type SessionEvent,
   SessionProtocolValidationError,
@@ -42,6 +43,13 @@ interface StubBag {
   lastAttachReplayWindow: number | undefined
 }
 
+interface StubRuntimeFactoryOptions {
+  /** When a turn's exact draft matches this text, park it on a real pending
+   *  approval instead of completing. The subsequent exact `approval.respond`
+   *  command clears the pending state and emits `approval.resolved`. */
+  readonly approvalOnPrompt?: string
+}
+
 const sleep = async (ms: number): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -56,7 +64,9 @@ const emitEvent = (
   for (const listener of [...listeners]) listener(event)
 }
 
-export const createStubRuntimeFactory = (): {
+export const createStubRuntimeFactory = (
+  options: StubRuntimeFactoryOptions = {},
+): {
   factory: () => Promise<RuntimeFacade>
   bag: StubBag
   emit: (event: SessionEvent) => void
@@ -128,6 +138,59 @@ export const createStubRuntimeFactory = (): {
               throw new SessionProtocolValidationError("empty_turn_input")
             }
             const prompt = snapshot.state.draftInput
+            if (options.approvalOnPrompt === prompt) {
+              const approval: PendingApprovalView = {
+                approvalId: `stub-approval-${crypto.randomUUID()}`,
+                reason: `operator approval required for: ${prompt}`,
+                requestedAt: new Date().toISOString(),
+              }
+              snapshot = {
+                ...snapshot,
+                revision: snapshot.revision + 1,
+                seq: snapshot.seq + 3,
+                state: {
+                  ...snapshot.state,
+                  status: "awaiting_approval",
+                  messageCount: snapshot.state.messageCount + 1,
+                  lastUserText: prompt,
+                },
+                pendingApproval: approval,
+              }
+              const started: Extract<SessionEvent, { type: "turn.started" }> = {
+                eventId: crypto.randomUUID(),
+                seq: snapshot.seq - 2,
+                revision: snapshot.revision,
+                emittedAt: new Date().toISOString(),
+                causedByCommandId: command.commandId,
+                type: "turn.started",
+                prompt,
+              }
+              const requested: Extract<SessionEvent, { type: "approval.requested" }> = {
+                eventId: crypto.randomUUID(),
+                seq: snapshot.seq - 1,
+                revision: snapshot.revision,
+                emittedAt: new Date().toISOString(),
+                causedByCommandId: command.commandId,
+                type: "approval.requested",
+                approval,
+              }
+              const updated: Extract<SessionEvent, { type: "session.state.updated" }> = {
+                eventId: crypto.randomUUID(),
+                seq: snapshot.seq,
+                revision: snapshot.revision,
+                emittedAt: new Date().toISOString(),
+                causedByCommandId: command.commandId,
+                type: "session.state.updated",
+                state: snapshot.state,
+              }
+              await publish([started, requested, updated])
+              return {
+                revision: snapshot.revision,
+                seq: snapshot.seq,
+                events: [started, requested, updated],
+                approvalRequest: approval,
+              }
+            }
             const assistantText = `stub: ${prompt}`
             const deltaParts = ["stub: ", prompt]
             snapshot = {
@@ -224,6 +287,51 @@ export const createStubRuntimeFactory = (): {
               revision: snapshot.revision,
               seq: snapshot.seq,
               events: [started, updated, completed, completedState],
+            }
+          }
+          case "approval.respond": {
+            const pending = snapshot.pendingApproval
+            // Unknown/stale responses are intentionally absorbed by this
+            // shared-session fixture: no event, no state mutation, wire stays
+            // live. The authenticated-flow edge test pins that behavior.
+            if (pending === null || pending.approvalId !== command.approvalId) {
+              return { revision: snapshot.revision, seq: snapshot.seq, events: [] }
+            }
+            snapshot = {
+              ...snapshot,
+              revision: snapshot.revision + 1,
+              seq: snapshot.seq + 2,
+              state: {
+                ...snapshot.state,
+                status: "idle",
+                draftInput: "",
+              },
+              pendingApproval: null,
+            }
+            const resolved: Extract<SessionEvent, { type: "approval.resolved" }> = {
+              eventId: crypto.randomUUID(),
+              seq: snapshot.seq - 1,
+              revision: snapshot.revision,
+              emittedAt: new Date().toISOString(),
+              causedByCommandId: command.commandId,
+              type: "approval.resolved",
+              approvalId: command.approvalId,
+              decision: command.decision,
+            }
+            const updated: Extract<SessionEvent, { type: "session.state.updated" }> = {
+              eventId: crypto.randomUUID(),
+              seq: snapshot.seq,
+              revision: snapshot.revision,
+              emittedAt: new Date().toISOString(),
+              causedByCommandId: command.commandId,
+              type: "session.state.updated",
+              state: snapshot.state,
+            }
+            await publish([resolved, updated])
+            return {
+              revision: snapshot.revision,
+              seq: snapshot.seq,
+              events: [resolved, updated],
             }
           }
           default:
@@ -331,7 +439,19 @@ export const createStubRuntimeFactory = (): {
           set: async () => ({ revision: snapshot.revision, seq: snapshot.seq, events: [] }),
         },
         approval: {
-          respond: async () => ({ revision: snapshot.revision, seq: snapshot.seq, events: [] }),
+          respond: async (approvalId, decision, meta, options) =>
+            await dispatch(
+              {
+                ...meta,
+                sessionId,
+                type: "approval.respond",
+                approvalId,
+                decision,
+                commandId: meta?.commandId ?? crypto.randomUUID(),
+                issuedAt: meta?.issuedAt ?? new Date().toISOString(),
+              },
+              options,
+            ),
         },
         transcript: {
           replace: async () => ({ revision: snapshot.revision, seq: snapshot.seq, events: [] }),

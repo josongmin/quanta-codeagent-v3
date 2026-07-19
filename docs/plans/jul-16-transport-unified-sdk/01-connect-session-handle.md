@@ -1,7 +1,7 @@
 # Ticket 01 — `connect({transport})` + SessionHandle (공개문 개방)
 
 - **Date:** 2026-07-16
-- **Status:** DRAFT v2 (적대어딧 R1 반영) — 구현 미착수. **S0 스파이크가 선행 게이트.**
+- **Status:** ✅ LANDED c89bc49c1 (S1–S7 + 적대어딧 hang 3종 수선). 이하 내용은 구현 설계 기록.
 - **기능:** 공개 `connect()`(ws/stdio) + generic verb 표면(`SessionVerbSurface<R>`) + builder/handshake/approval-flow SSOT hoist + 연결상태·버전스큐·rejected 비동기 채널 + conformance 확장(정규화 계약 명문화) + DX 문서.
 - **왜:** 외부가 wire를 탈 공개 경로 0. 클라 liveness(연결사망 통지)와 버전 스큐 진단도 0 — 지금 공개하면 소비자의 "첫 1시간"이 전부 미정의 행(hang)으로 끝난다. builder 2벌·approval 결정 타입 3벌은 드리프트 씨앗.
 - **ROI:** 외부 프론트·봇·사이드카가 한 API. 부수로 선존 침묵 버그 2종(dispatch 에러 무통지·버전 불일치 무언 드롭) 수선.

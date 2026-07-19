@@ -87,6 +87,17 @@ describe("headless approval wiring — gate-controlled shape", () => {
     ).toBeUndefined()
     expect(buildHeadlessApprovalWiring(ON).approvalProtocol).toBeDefined()
   })
+
+  test("wire delivery ⇒ interactive:false + mutable slot, even when the ambient inline gate is ON", async () => {
+    const wireOnly = buildHeadlessApprovalWiring(OFF, { wireDefer: true })
+    const conflict = buildHeadlessApprovalWiring(ON, { wireDefer: true })
+
+    expect(wireOnly.approvalProtocol?.interactive).toBe(false)
+    expect(conflict.approvalProtocol?.interactive).toBe(false)
+    expect(typeof conflict.approvalProtocol?.confirmSlot.current).toBe("function")
+    // Before the runtime swaps the slot, the wire posture is fail-closed.
+    expect(await conflict.onConfirm(action("edit"))).toBe(false)
+  })
 })
 
 describe("headless approval wiring — behavioral through the REAL runtime controller", () => {
@@ -124,5 +135,13 @@ describe("headless approval wiring — behavioral through the REAL runtime contr
         async () => await offCtrl.onConfirm(action("bash", { command: "ls" })),
       ),
     ).rejects.toThrow(/runtime approval required/)
+  })
+
+  test("wire delivery wins over inline gate and mints a deferred pending approval", async () => {
+    const ctrl = controllerFor(buildHeadlessApprovalWiring(ON, { wireDefer: true }))
+    await expect(
+      ctrl.runWithProtocol(async () => await ctrl.onConfirm(action("bash", { command: "ls" }))),
+    ).rejects.toThrow(/runtime approval required/)
+    expect(ctrl.__pendingSize()).toBe(1)
   })
 })

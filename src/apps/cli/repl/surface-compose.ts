@@ -5,12 +5,8 @@ import {
 } from "@/agent/conversation-checkpoint"
 import { type InboundMode, parseInboundMode } from "@/agent/inbound-mode"
 import { createInterruptedTurnBuffer } from "@/agent/interrupted-turn"
-import { createObjectiveStore, type ObjectivePort } from "@/agent/objective"
-import {
-  defaultPlanQueueStore,
-  type PlanQueueStore,
-  type SendNowInjection,
-} from "@/agent/plan-queue"
+import { createObjectiveStore } from "@/agent/objective"
+import { defaultPlanQueueStore, type SendNowInjection } from "@/agent/plan-queue"
 import { createShadowVerify } from "@/agent/shadow-verify"
 import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
 import { createStickyPresetResolver, type Message, type StreamInput } from "@/llm"
@@ -34,40 +30,25 @@ import {
 } from "../mode-cycle"
 import type { PermissionInspectSlashState } from "../permission-explain"
 import type { ConvCheckpointSlashState } from "../rewind-conv-cmd"
-import type { SessionIoState } from "../session-cmd"
 import { createBrowserNetHolder } from "../slash/browser-net-cmd"
 import type { SlashContext } from "../slash-commands"
-import { createTextInbox, type TextInbox } from "../text-inbox"
-import {
-  type BackgroundTurnPortal,
-  BG_TURN_ENV_GATE,
-  createBackgroundTurnPortal,
-} from "./background-turn-portal"
-import type { ContextUsageHolder } from "./context-usage-snapshot"
-import { type ConvCheckpointWire, startConvCheckpointWire } from "./conv-checkpoint-wire"
-import {
-  type ConversationActionSurface,
-  createConversationActionSurface,
-} from "./conversation-action-surface"
-import { type ComposerHandle, createComposerHandle } from "./ctx-adapters/composer-edit-adapter"
+import { createTextInbox } from "../text-inbox"
+import { BG_TURN_ENV_GATE, createBackgroundTurnPortal } from "./background-turn-portal"
+import { startConvCheckpointWire } from "./conv-checkpoint-wire"
+import { createConversationActionSurface } from "./conversation-action-surface"
+import { createComposerHandle } from "./ctx-adapters/composer-edit-adapter"
 import { buildPresetRoleModelResolver } from "./ctx-adapters/preset-role-resolver-adapter"
 import { createItemStore } from "./item-store"
 import { buildPerToolCheckpointWire } from "./per-tool-checkpoint-wire"
-import {
-  createPlaybookTriggerSurfaceSeam,
-  type PlaybookTriggerSurfaceSeam,
-} from "./playbook-trigger-surface-seam"
+import { createPlaybookTriggerSurfaceSeam } from "./playbook-trigger-surface-seam"
 import type { SessionSetupResult } from "./session-setup"
-import {
-  createSessionSwitchWire,
-  overlayRewindState,
-  type SessionSwitchWire,
-} from "./session-switch-wire"
+import { createSessionSwitchWire, overlayRewindState } from "./session-switch-wire"
 import { buildSkillsCallback } from "./skills-surface"
-import { buildReplSlashCtx, type ReplSlashCtx } from "./slash-surface"
+import { buildReplSlashCtx } from "./slash-surface"
 import { buildSurfaceDispatch, buildVoiceLiveSlot } from "./surface-compose/dispatch"
 import { buildKbSlashSlot, isEnvTruthy } from "./surface-compose/kb-slot"
 import type { SurfaceState } from "./surface-compose/turn-sinks"
+import type { ReplSurfaceWires } from "./surface-compose/types"
 import {
   buildDefaultSessionIo,
   buildModelAdapterWire,
@@ -89,132 +70,9 @@ import {
 // imports below the import block to avoid a duplicate-binding conflict.
 export { buildPromptUx, type PromptUxOpts } from "./surface-compose/prompt-ux"
 export { composeTurnSinks, createSurfaceState } from "./surface-compose/turn-sinks"
+export type { ReplSurfaceWires } from "./surface-compose/types"
 export type { SurfaceState }
 export { buildModelAdapterWire, buildRetryCandidates, extractApplyPatchPaths }
-
-/** ADR-0310 — bundle of REPL-side wires constructed once per session. The
- *  surface (`runRepl`) keeps the references alive so the loop can:
- *    - record turn snapshots into `convWire` (ADR-0292 turn-end auto-record),
- *    - attach the playbook-trigger handle into `playbookSeam` once the
- *      `ExternalPromptQueue` is born inside the loop (ADR-0293),
- *    - drain `textInbox` from the next-turn `PromptSource.next()` (ADR-0291),
- *    - mutate the surface's `composer` pending-text buffer from `/edit-message`
- *      (ADR-0291),
- *    - replace the live `history` binding from `/rewind-conv` (ADR-0292).
- *
- *  Default-OFF: knobs absent ⇒ every wire is built but the slots that gate the
- *  slash visibility (convCheckpoint, playbookSeam, the 8 ADR-0291 slots) are
- *  presence-spread so the projection is byte-identical to legacy when the
- *  operator did NOT opt in. */
-export interface ReplSurfaceWires {
-  readonly slashCtx: ReplSlashCtx
-  /** ADR-0292 — surface-supplied state for `/rewind-conv`. Present iff the
-   *  conv-checkpoint wire was constructed. */
-  readonly convCheckpointSlot: ConvCheckpointSlashState | undefined
-  /** ADR-0294 — surface-supplied session-io adapter for `/session`. Always
-   *  wired in the REPL surface. */
-  readonly sessionIo: SessionIoState
-  /** Pre-composed dispatch closure that routes a slash command into the
-   *  full augmented SlashContext (legacy + ADR-0291 + ADR-0292 + ADR-0294
-   *  slots). Wires that aren't yet wired to runSlashCommand land here. */
-  readonly dispatchSlash: (input: string) => Promise<boolean>
-  /** ADR-0292 — turn-end auto-record wire. `null` ⇒ env knob is OFF; the
-   *  loop's recordTurn hook is a no-op. */
-  readonly convCheckpointWire: ConvCheckpointWire | null
-  /** ADR-0292 — the shared store backing BOTH `convCheckpointWire` AND the
-   *  `/fork-checkpoint` adapter (ADR-0291). One store per session. */
-  readonly convStore: ConversationCheckpointStore
-  /** ADR-0293 — seam the loop attaches the playbook-trigger handle to once
-   *  it has the `ExternalPromptQueue` in hand. */
-  readonly playbookSeam: PlaybookTriggerSurfaceSeam
-  /** ADR-0291 — surface-owned mutable composer text holder. */
-  readonly composerHandle: ComposerHandle
-  /** ADR-0291 — surface-owned text inbox singleton. */
-  readonly textInbox: TextInbox
-  /** Constructor-time runtime composition inputs the loop threads into
-   *  `runtimeContext.createRuntimeFacade(...)` so the public SDK surface stays
-   *  immutable after bootstrap. */
-  readonly runtimeFacadeCompose: RuntimeFacadeComposeOptions
-  /** ADR-0292 — surface-side hook the loop uses to swap its live history
-   *  binding when `/rewind-conv <tag>` restores a snapshot. Wired by the
-   *  loop via a setter so the closure captures the loop-internal `let`
-   *  history reference rather than the snapshot at compose time. */
-  readonly setReplaceMessages: (fn: (msgs: ReadonlyArray<Message>) => Promise<void>) => void
-  /** UUX-4-07 — install the loop's `/fork` switch closure (mirrors
-   *  `setReplaceMessages`). Absent when the surface has no id-mode rewind
-   *  state (one-shot / legacy) ⇒ `/fork` keeps mint-and-stay behavior. */
-  readonly setSwitchSession?: SessionSwitchWire["setSwitchSession"]
-  /** Runtime-owned `/side` starter slot. Installed by the loop once the live
-   *  runtime session exists; until then `/side` keeps its historical
-   *  "not wired" surface behavior. */
-  readonly setSideConversationStart: (
-    fn: ((args: RuntimeSideConversationArgs) => Promise<RuntimeSideConversationResult>) | undefined,
-  ) => void
-  /** `/queue` plan-queue store (surface-owned). Producers (playbook/voice/
-   *  mid-turn capture) enqueue into THIS instance; the slash inspects/mutates
-   *  it. Exposed so the loop can also enqueue/drain against the same store. */
-  readonly planQueueStore: PlanQueueStore
-  /** `/goal` (Codex "Pursuing goal" parity) — the surface-owned per-thread
-   *  objective store. The SAME instance backs the `/goal` slash slot (set/show)
-   *  and is threaded to the loop, which arms the idle goal-continuation ticker
-   *  over it when `QUANTA_GOAL_ENFORCE` is set. Always present; pursuit is gated,
-   *  not the store. */
-  readonly objectiveStore: ObjectivePort
-  /** Install the `/queue` `sendNow` injection target once the loop owns its
-   *  `ExternalPromptQueue`. Until installed, `sendNow` returns the TRANSIENT
-   *  typed `send-not-ready` and KEEPS the entry (fail-closed timing window —
-   *  the send is never a silent drop; the operator retries once the loop is
-   *  up). After install, a terminal sink rejection maps to `send-not-possible`
-   *  and removes the entry — see `PlanQueueStore.sendNow`. */
-  readonly setPlanQueueSendNow: (
-    fn: ((inj: SendNowInjection) => { ok: true } | { ok: false; reason: string }) | undefined,
-  ) => void
-  /** B2 (jul-04 CLI-surfacing) — install the `/cron` (+ `/schedule`/`/inbox`)
-   *  automation slash slot once the loop mints the automation engine (the engine
-   *  is born INSIDE `runSessionLoop`, after this bundle is built). The loop builds
-   *  the thin `createCronSlashAdapter` over the live engine port and calls this
-   *  setter; the dispatch closure reads the slot LIVE. Until installed ⇒ `/cron`
-   *  prints "not wired" (default-OFF byte-identical). */
-  readonly setAutomationSlash: (
-    fn: import("../slash/cron-cmd").AutomationSlashState | undefined,
-  ) => void
-  /** §steer — the conversation-action surface (weave/interrupt sinks +
-   *  activeTurnRef), present only when `QUANTA_CONVERSATION_ACTIONS=1`. Threaded
-   *  to the session loop's in-turn reader for weave/interrupt routing. */
-  readonly conversationActions?: ConversationActionSurface
-  /** §steer — the session-mutable inbound delivery mode (queue|weave|interrupt),
-   *  seeded from `QUANTA_INBOUND_MODE`. The session loop reads `.current` per
-   *  mid-turn line; the `/inbound` slash mutates it. */
-  readonly inboundMode: { current: InboundMode }
-  /** #13 — the shared mode-cycle store (present iff `QUANTA_MODE_CYCLE` is on).
-   *  Threaded into `buildPromptUx` so the shift+tab pill/hook reuses the SAME
-   *  instance the `/mode` slash mutates + the session loop's per-turn
-   *  `permissionModeState` projection reads. Absent ⇒ no mode-cycle (byte-
-   *  identical). */
-  readonly modeCycleStore?: ModeCycleStore
-  /** Track D (runtime → REPL context wire) — the per-turn prompt-assembly sink
-   *  the composition root wires into `AgentConfig.onPromptAssembled`. Each call
-   *  retains the latest snapshot the `/context` slash renders via the
-   *  `contextUsage` slot already wired into `slashCtx`. NOT wired here (the REPL
-   *  surface does not own the AgentConfig — the runtime facade does); the
-   *  integration layer hands this to config. Absent from config ⇒ the loop
-   *  performs no capture (default-OFF byte-identical) and `/context` shows its
-   *  fallback. */
-  readonly promptAssembledSink: ContextUsageHolder["sink"]
-  /** RFC-09 (B) / ADR-0445 — getter over the SAME retained per-turn usage
-   *  snapshot the `/context` slash renders. The host binds the pre-compaction
-   *  warning to this so NO second token heuristic is introduced. Returns
-   *  `undefined` before the first turn. */
-  readonly contextUsageView: ContextUsageHolder["view"]
-  /** Ticket 18 (V1) — the background-turn portal (present iff `QUANTA_BG_TURN`).
-   *  Threaded into the session loop's `backgroundPortal` dep so Ctrl+B can detach
-   *  the running INTERACTIVE turn into it; the READ-ONLY `.view()` is wired into
-   *  the `/background` slot above. Absent ⇒ Ctrl+B + `/background` are unwired
-   *  (default-OFF byte-identical). */
-  readonly backgroundPortal?: BackgroundTurnPortal
-  /** Clears the bounded `/rewind-tool` anchor registry when this session closes. */
-  readonly disposePerToolRecord?: () => void
-}
 
 /** Build a fresh per-session wire bundle. Pure — no I/O, no env reads beyond
  *  the explicit `envSource` parameter; all upstream-port presence is gated

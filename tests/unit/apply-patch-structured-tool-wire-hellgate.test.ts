@@ -24,10 +24,10 @@
 // ADR-0280 automationEngine conditional-append pattern at src/tool/index.ts.
 
 import { describe, expect, test } from "bun:test"
-import type { PatchFileSystemPort } from "@/patch"
 import type { Tool, ToolContext, ToolResult } from "@/tool"
 import { buildDefaultTools } from "@/tool"
 import { makeApplyPatchStructuredTool } from "@/tool/apply-patch-structured-tool"
+import type { GuardedPatchFileSystemPort } from "@/tool/patch-mutation-safety"
 
 const TOOL_NAME = "apply_patch_structured"
 
@@ -40,7 +40,7 @@ const isStructuredPatchOn = (env: NodeJS.ProcessEnv): boolean =>
  *  is on. `built` records whether the factory was invoked (zero-alloc proof). */
 const buildToolsWithGate = (
   env: NodeJS.ProcessEnv,
-  fs?: PatchFileSystemPort,
+  fs?: GuardedPatchFileSystemPort,
 ): { tools: Tool[]; built: boolean } => {
   const base = buildDefaultTools()
   if (!isStructuredPatchOn(env)) return { tools: base, built: false }
@@ -61,7 +61,7 @@ const run = async (tool: Tool, input: unknown, c: ToolContext): Promise<ToolResu
 // --- In-memory PatchFileSystemPort so tests need no disk/jail. -----------------
 const memFs = (
   seed: Record<string, string> = {},
-): PatchFileSystemPort & {
+): GuardedPatchFileSystemPort & {
   files: Map<string, string>
 } => {
   const files = new Map<string, string>(Object.entries(seed))
@@ -86,6 +86,11 @@ const memFs = (
     },
     async exists(p) {
       return files.has(p)
+    },
+    async statTarget(p) {
+      return files.has(p)
+        ? { exists: true, resolvedPath: `/jail/${p}`, mtimeMs: 0 }
+        : { exists: false }
     },
   }
 }
@@ -119,6 +124,7 @@ describe("apply_patch_structured wire — gate", () => {
     expect(tool.isReadOnly()).toBe(false)
     expect(tool.isConcurrencySafe({ patch: "" } as never)).toBe(false)
     expect(tool.hitlTier?.({} as never)).toBe("pre-approval-ok")
+    expect(tool.interruptBehavior?.({} as never)).toBe("block")
     expect(typeof tool.execute).toBe("function")
     // appended AFTER the byte-identical base set
     expect(tools[tools.length - 1]?.name).toBe(TOOL_NAME)
@@ -173,7 +179,7 @@ describe("apply_patch_structured — adapter behavior (no-throw boundary)", () =
   })
 
   test("throwing port ⇒ captured as per-file failure, NO throw escapes execute", async () => {
-    const exploding: PatchFileSystemPort = {
+    const exploding: GuardedPatchFileSystemPort = {
       async readFile() {
         throw new Error("port boom: readFile")
       },
@@ -188,6 +194,9 @@ describe("apply_patch_structured — adapter behavior (no-throw boundary)", () =
       },
       async exists() {
         throw new Error("port boom: exists")
+      },
+      async statTarget() {
+        throw new Error("port boom: statTarget")
       },
     }
     const tool = makeApplyPatchStructuredTool(exploding)
@@ -211,6 +220,30 @@ describe("apply_patch_structured — adapter behavior (no-throw boundary)", () =
     // structured absent ⇒ falls back to output verbatim
     const fallback: ToolResult = { ok: false, output: "raw-fallback-text" }
     expect(tool.toModelOutput(fallback)).toBe("raw-fallback-text")
+  })
+
+  test("mutating window enters and exits the injected critical section exactly once", async () => {
+    const tool = makeApplyPatchStructuredTool(memFs())
+    let entered = 0
+    let exited = 0
+    const context: ToolContext = {
+      cwd: "/jail",
+      signal: new AbortController().signal,
+      criticalSection: {
+        begin: () => {
+          entered += 1
+          return {
+            end: () => {
+              exited += 1
+            },
+          }
+        },
+      },
+    }
+    const res = await run(tool, { patch: wrapPatch("*** Add File: new.txt", "+content") }, context)
+    expect(res.ok).toBe(true)
+    expect(entered).toBe(1)
+    expect(exited).toBe(1)
   })
 
   test("default-port path (no fs arg) constructs an FsJailFileSystemPort from ctx.cwd", () => {

@@ -37,8 +37,8 @@ const editAction = (input: Record<string, unknown>): ToolAction => ({
   input,
   isReadOnly: false,
 })
-const patchAction = (patch: string): ToolAction => ({
-  tool: "apply_patch",
+const patchAction = (patch: string, tool = "apply_patch"): ToolAction => ({
+  tool,
   input: { patch },
   isReadOnly: false,
 })
@@ -176,6 +176,17 @@ describe("#19 preflight — apply_patch applicability", () => {
     expect(w).toBeDefined()
     expect(w).toContain("apply_patch")
   })
+
+  test("structured sibling warns without mutating when one op cannot apply", async () => {
+    const files: Record<string, string> = { "/repo/x.ts": "alpha\nDELTA\ngamma\n" }
+    const w = await preflightApplyWarning(patchAction(cleanPatch, "apply_patch_structured"), {
+      cwd,
+      readFile: reader(files),
+    })
+    expect(w).toContain("apply_patch_structured")
+    expect(w?.toLowerCase()).toContain("one or more files may fail")
+    expect(files["/repo/x.ts"]).toBe("alpha\nDELTA\ngamma\n")
+  })
 })
 
 describe("#19 preflight gate", () => {
@@ -252,6 +263,19 @@ describe("#19 preflight WIRING — buildCliOnConfirm surfaces the warning", () =
     const onConfirm = __testing.buildCliOnConfirm(deps)
     const out = await captureStderr(() => onConfirm(staleEdit))
     expect(out).not.toContain("pre-flight")
+  })
+
+  test("structured approval renders both its V4A diff and partial-apply warning", async () => {
+    process.env.QUANTA_PREFLIGHT_CHECK = "1"
+    process.env.QUANTA_DIFF_PREVIEW = "1"
+    const onConfirm = __testing.buildCliOnConfirm(deps)
+    const structured = patchAction(
+      "*** Begin Patch\n*** Update File: missing.ts\n@@\n-old\n+new\n*** End Patch",
+      "apply_patch_structured",
+    )
+    const out = await captureStderr(() => onConfirm(structured))
+    expect(out).toContain("apply_patch_structured (V4A)")
+    expect(out).toContain("one or more files may fail")
   })
 
   // #20 — the CLI confirm offers the [p] "always allow `<program> …`" verb only

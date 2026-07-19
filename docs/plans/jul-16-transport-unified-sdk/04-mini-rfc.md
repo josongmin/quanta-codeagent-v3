@@ -1,7 +1,7 @@
 # Ticket 04 미니 RFC — wire fidelity opt-in 착수 전 판정
 
 - **Date:** 2026-07-18
-- **Status:** RFC v1 — [04-wire-fidelity-negotiation.md](04-wire-fidelity-negotiation.md)(DRAFT v2)가 요구한 "착수 전 자체 미니 RFC". 구현 미착수, 이 문서는 판정만.
+- **Status:** HISTORICAL RFC — 구현은 bbd289d40으로 LANDED. 이 문서는 착수 전 판정 근거만 보존한다.
 - **실측 기준:** HEAD `ccb8480b7`(01 LANDED · 03-A LANDED · W4-b JsonlSessionEventLog LANDED · 05 코어 durable replay LANDED). 아래 file:line은 전부 이 트리에서 재확인한 것.
 - **관계:** 티켓 문서(DRAFT v2)의 설계 골격은 유지. 이 RFC는 5개 판정을 코드 팩트로 확정하고, v2 이후 랜딩된 신규 지형(JsonlSessionEventLog·connect()/SessionHandle·serverAutoContinues·peer-로컬 프레임 전례)을 blast radius/협상 설계에 반영한다. 티켓 v2와 충돌 시 이 문서가 우선(착수 시 티켓에 역반영).
 

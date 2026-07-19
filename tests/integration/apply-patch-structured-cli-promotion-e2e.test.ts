@@ -16,9 +16,19 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { gitWriteProtectReason } from "@/permission"
 import {
   buildDefaultTools,
   seedEnvVarsForSurface,
@@ -26,6 +36,7 @@ import {
   type ToolContext,
   type ToolResult,
 } from "@/tool"
+import { guardWrite, ReadFileState } from "@/tool/stale-read-guard"
 
 const roots: string[] = []
 
@@ -47,8 +58,13 @@ const structuredTool = (): Tool => {
   return tool
 }
 
-const run = async (tool: Tool, patch: string, cwd: string): Promise<ToolResult> => {
-  const ctx: ToolContext = { cwd, signal: new AbortController().signal }
+const run = async (
+  tool: Tool,
+  patch: string,
+  cwd: string,
+  context: Omit<Partial<ToolContext>, "cwd" | "signal"> = {},
+): Promise<ToolResult> => {
+  const ctx: ToolContext = { cwd, signal: new AbortController().signal, ...context }
   let result: ToolResult | undefined
   for await (const event of tool.execute({ patch } as never, ctx)) {
     if (event.type === "result") result = event.result
@@ -120,5 +136,89 @@ describe("apply_patch_structured — explicit CLI promotion", () => {
     expect(readFileSync(join(outside, "secret.txt"), "utf8")).toBe("TOP-SECRET\n")
     expect(existsSync(join(root, "safe.txt"))).toBe(true)
     expect(readFileSync(join(root, "safe.txt"), "utf8")).toBe("inside")
+  })
+
+  test("wired git-write guard hard-denies protected paths before any sibling mutation", async () => {
+    const root = workspace("git-guard")
+
+    const result = await run(
+      structuredTool(),
+      v4a(
+        "*** Add File: safe.txt",
+        "+must-not-land",
+        "*** Add File: .git/hooks/pre-commit",
+        "+#!/bin/sh",
+      ),
+      root,
+      { gitWriteGuard: gitWriteProtectReason },
+    )
+
+    expect(result.ok).toBe(false)
+    expect(result.failure).toEqual({
+      mode: "permission_denied",
+      path: ".git/hooks/pre-commit",
+    })
+    expect(existsSync(join(root, "safe.txt"))).toBe(false)
+    expect(existsSync(join(root, ".git/hooks/pre-commit"))).toBe(false)
+  })
+
+  test("wired stale-read guard rejects an externally drifted target with zero mutation", async () => {
+    const root = workspace("stale-guard")
+    const target = join(root, "a.txt")
+    writeFileSync(target, "model-read-v1\n")
+    const readMtime = statSync(target).mtimeMs
+    const state = new ReadFileState()
+    state.record(target, readMtime)
+
+    writeFileSync(target, "external-v2\n")
+    const advanced = new Date(readMtime + 5_000)
+    utimesSync(target, advanced, advanced)
+    expect(guardWrite(state, target, statSync(target).mtimeMs).ok).toBe(false)
+
+    const result = await run(
+      structuredTool(),
+      v4a("*** Update File: a.txt", "@@", "-external-v2", "+agent-v3"),
+      root,
+      { readFileState: state, editFreshHash: true },
+    )
+
+    expect(result.ok).toBe(false)
+    expect(result.failure).toEqual({ mode: "rejected", reason: "stale_read" })
+    expect(readFileSync(target, "utf8")).toBe("external-v2\n")
+  })
+
+  test("partial success refreshes stale-read baselines for every successful sibling", async () => {
+    const root = workspace("baseline")
+    const updated = join(root, "updated.txt")
+    writeFileSync(updated, "before\n")
+    writeFileSync(join(root, "drifted.txt"), "actual\n")
+    const state = new ReadFileState()
+    state.record(updated, statSync(updated).mtimeMs)
+
+    const result = await run(
+      structuredTool(),
+      v4a(
+        "*** Update File: updated.txt",
+        "@@",
+        "-before",
+        "+after",
+        "*** Update File: drifted.txt",
+        "@@",
+        "-missing-anchor",
+        "+replacement",
+        "*** Add File: created.txt",
+        "+created",
+      ),
+      root,
+      { readFileState: state, editFreshHash: true },
+    )
+
+    const created = join(root, "created.txt")
+    expect(result.ok).toBe(false)
+    expect(readFileSync(updated, "utf8")).toBe("after\n")
+    expect(readFileSync(created, "utf8")).toBe("created")
+    expect(guardWrite(state, updated, statSync(updated).mtimeMs).ok).toBe(true)
+    expect(state.has(created)).toBe(true)
+    expect(guardWrite(state, created, statSync(created).mtimeMs).ok).toBe(true)
   })
 })

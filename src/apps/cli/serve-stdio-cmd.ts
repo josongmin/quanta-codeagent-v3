@@ -138,24 +138,24 @@ const defaultIo = (): ServeStdioCmdIo => {
   // bridge subscribes (see serveOverStdio).
   const buffering = createEarlyBufferingStdinReader()
   return {
-  writer: process.stdout,
-  reader: buffering.reader,
-  flushInbound: () => buffering.flush(),
-  err: (s) => {
-    process.stderr.write(s)
-  },
-  onShutdown: (handler) => {
-    // stdin EOF: the parent closed our input pipe (the app-server shutdown
-    // signal). `end` fires on clean EOF; `close` is the belt-and-braces reap.
-    process.stdin.on("end", handler)
-    process.stdin.on("close", handler)
-    // Ensure the stream is flowing so `end` actually fires (a paused stdin never
-    // emits EOF). The transport's own `data` listener also resumes it, but a
-    // gate-idle server with no frames yet must still hear the parent's hangup.
-    process.stdin.resume()
-    process.on("SIGTERM", handler)
-    process.on("SIGINT", handler)
-  },
+    writer: process.stdout,
+    reader: buffering.reader,
+    flushInbound: () => buffering.flush(),
+    err: (s) => {
+      process.stderr.write(s)
+    },
+    onShutdown: (handler) => {
+      // stdin EOF: the parent closed our input pipe (the app-server shutdown
+      // signal). `end` fires on clean EOF; `close` is the belt-and-braces reap.
+      process.stdin.on("end", handler)
+      process.stdin.on("close", handler)
+      // Ensure the stream is flowing so `end` actually fires (a paused stdin never
+      // emits EOF). The transport's own `data` listener also resumes it, but a
+      // gate-idle server with no frames yet must still hear the parent's hangup.
+      process.stdin.resume()
+      process.on("SIGTERM", handler)
+      process.on("SIGINT", handler)
+    },
   }
 }
 
@@ -184,6 +184,11 @@ OPTIONS
   --permission-mode <mode>   default | acceptEdits | bypass | auto.
                              Unattended callers want bypass/acceptEdits; an
                              onApproval client wants default (HITL).
+
+APPROVALS
+  This surface always delegates approval prompts to the wire client. Its
+  explicit wire-delivery contract takes precedence over an inherited
+  QUANTA_INLINE_APPROVAL_RESOLVER=1, so onApproval cannot be silently bypassed.
 
 CHANNELS
   • stdout is PURE session.v1 (never written to directly).
@@ -429,9 +434,9 @@ const serveOverStdio = async (io: ServeStdioCmdIo, args: ServeStdioArgs): Promis
         // 02 approval wire-delegation — this surface has NO inline operator; a
         // mid-turn ask is DEFERRED onto the wire (kernel `awaiting_approval` +
         // `approval.requested`) for the `connect({onApproval})` client to resolve
-        // via `approval.respond` + a re-issued `turn.run`. Unless the caller set
-        // the inline auto-approve gate (which then wins), a gated tool parks here
-        // rather than being silently denied at the base `onConfirm`.
+        // via `approval.respond` + a re-issued `turn.run`. This explicit surface
+        // contract wins over an inherited inline auto-approve gate: a gated tool
+        // always parks here rather than bypassing the wire operator.
         approvalDelivery: "wire",
         cwd: args.cwd,
         env: sessionEnv,

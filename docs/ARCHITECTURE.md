@@ -129,6 +129,7 @@ Note: `LLMPort.StreamEvent` is **leaky-by-design** — `ThinkingBlock.signature`
 |---|---|---|---|
 | `FileSystemPort` | `src/storage/service.ts` | `defaultFileSystemPort` | PROD ×1 (jail boundary) |
 | `PatchFileSystemPort` | `src/patch/types.ts` | `FsJailFileSystemPort` (in `@/tool/apply-patch`) | PROD ×1 — **distinct shape from `@/storage`'s port**, renamed to avoid name collision |
+| `GuardedPatchFileSystemPort` | `src/tool/patch-mutation-safety.ts` | `FsJailFileSystemPort` | Tool-boundary extension adding jailed stat for shared Git/stale preflight and post-commit baseline refresh |
 
 ### `@/permission`
 | Port | Definition | Status |

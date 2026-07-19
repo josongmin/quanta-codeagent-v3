@@ -5,8 +5,9 @@
 existing throwing applier. Explicitly gated; CLI default-ON, other surfaces
 opt-in.
 **Scope:** `src/patch/structured-types.ts`, `src/patch/structured.ts`,
-`src/patch/message-for-model.ts`, `src/tool/apply-patch-structured-tool.ts`, the
-tool-surface manifest, and the unit/integration promotion rails.
+`src/patch/message-for-model.ts`, `src/tool/apply-patch-structured-tool.ts`,
+`src/tool/patch-mutation-safety.ts`, the tool-surface manifest, CLI approval
+preview/preflight, and the unit/integration promotion rails.
 **Surface posture:** the canonical `applyPatch` (`./applier`) remains
 byte-identical and all-or-nothing. The CLI explicitly seeds
 `QUANTA_ENABLE_STRUCTURED_PATCH=1`; `=0` restores the legacy tool menu. Web,
@@ -98,6 +99,12 @@ environment default:
   per-file failure and `messageForModel` output;
 - the tool uses the same `FsJailFileSystemPort`, permission classification,
   serialization, ownership fence, and one-call write budget as `apply_patch`;
+- the shared tool-layer mutation-safety owner hard-denies protected Git/editor
+  targets and stale update/delete targets before the first mutation;
+- successful files refresh the stale-read baseline even when a sibling fails,
+  so a targeted follow-up edit does not self-invalidate;
+- CLI approval renders the V4A body and a structured-specific applicability
+  warning before the operator accepts a partial-capable mutation;
 - the existing `apply_patch` tool remains available for callers requiring
   whole-patch atomicity;
 - `QUANTA_ENABLE_STRUCTURED_PATCH=0` is the immediate rollback and restores the
@@ -165,4 +172,7 @@ legacy-path byte-identity anchor proving `applyPatch` still throws wholesale.
 
 `tests/integration/apply-patch-structured-cli-promotion-e2e.test.ts` is the
 promotion receipt rail: real registry, real filesystem partial success, failed
-target byte preservation, and real jail symlink-escape isolation.
+target byte preservation, real jail symlink-escape isolation, wired Git/stale
+hard-deny with zero mutation, and partial-success baseline refresh. The CLI
+rails additionally prove the structured diff/preflight approval context and
+real subprocess seed plus explicit-`0` inheritance/rollback.

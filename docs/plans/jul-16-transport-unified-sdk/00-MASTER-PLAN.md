@@ -1,7 +1,7 @@
 # MASTER PLAN — Transport-Unified SDK Door (session.v1을 외부 소비 가능한 단일 문으로)
 
 - **Date:** 2026-07-16
-- **Status:** DRAFT v2 — 적대어딧 R1 반영(KILL 3·HIGH 10 수정). 구현 미착수.
+- **Status:** ✅ IMPLEMENTED (01–05 LANDED, 2026-07-19). 이 문서는 설계 baseline이며 live 상태는 [README.md](README.md)가 소유한다.
 - **Goal:** 내부에 이미 존재하는 3층(RuntimeSession / session.v1 / SessionTransport)을 하나의 공개 seam(`connect({transport})`)으로 승격하고, transport 간 parity를 서사가 아닌 **타입+conformance 팩트**로 강제한다.
 - **Design SSOT:** 이 문서. 티켓(01–05)과 충돌 시 이 문서 우선.
 - **Effort legend:** XS(<반나절) · S(1일) · M(2–3일) · L(1주+)
@@ -196,5 +196,5 @@ in-process 구현 = `toSessionHandle(runtimeSession)` 어댑터(자기가 만든
 - [x] dispatch-에러·버전 불일치가 wire 클라에 typed로 표면화 — lenient 디코더 탑재분부터, 기출하 구 피어는 침묵 유지 (01 LANDED — 선존 침묵 2종 수선)
 - [ ] `quanta serve --stdio` OFF 시 byte-identical + ON 시 attach 동일 시나리오 (02 — 진행 중)
 - [x] field-shape 드리프트 주입 red / 기존 hellgate 계약 무약화 (03-A LANDED 896b0ae86) — 번들 소비(03-B 9080a8853)로 드리프트 구조적 불가화까지 완료
-- [ ] fidelity 미협상 클라 byte-identical (wire·in-proc 구독자·아카이브 전부) (04 — 미니RFC 완료, 본구현 대기)
-- [~] 재시작 후 durable resume 이벤트 replay 복원 — 코어 LANDED(a38ee957f CROWN e2e); door-level `connect({resume})`는 05door 진행 중
+- [x] fidelity 미협상 클라 byte-identical (wire·in-proc 구독자·아카이브 전부) — 04 LANDED bbd289d40, full opt-in 협상 + strip/leak rails
+- [x] 재시작 후 durable resume 이벤트 replay 복원 — W4-b 527f78811 + 코어 a38ee957f + door-level `resumed` frame/connect resume 1f578f28f

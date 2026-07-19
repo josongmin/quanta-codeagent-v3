@@ -85,7 +85,9 @@ export const preflightApplyWarning = async (
       case "edit":
         return await preflightEdit(action.input, resolve, reader)
       case "apply_patch":
-        return await preflightApplyPatch(action.input, resolve, reader)
+        return await preflightApplyPatch(action.input, resolve, reader, "apply_patch")
+      case "apply_patch_structured":
+        return await preflightApplyPatch(action.input, resolve, reader, "apply_patch_structured")
       default:
         return undefined
     }
@@ -226,6 +228,7 @@ const preflightApplyPatch = async (
   input: unknown,
   resolve: (p: string) => string,
   reader: (p: string) => Promise<string>,
+  toolName: "apply_patch" | "apply_patch_structured",
 ): Promise<string | undefined> => {
   const i = asRecord(input)
   if (i === undefined) return undefined
@@ -246,7 +249,11 @@ const preflightApplyPatch = async (
       e instanceof PatchApplyError ||
       e instanceof PatchAnchorNotFoundError
     ) {
-      return `${WARN} apply_patch — will not cleanly apply: ${errMessage(e)}`
+      const verdict =
+        toolName === "apply_patch_structured"
+          ? "one or more files may fail while clean siblings can still apply"
+          : "will not cleanly apply"
+      return `${WARN} ${toolName} — ${verdict}: ${errMessage(e)}`
     }
     // WS-G (UUX-6-16) — an unexpected internal error is a preview bug, not an
     // apply verdict; the verdict stays silent but the degrade is latched once.

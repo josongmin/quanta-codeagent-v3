@@ -76,8 +76,14 @@ export const buildHeadlessApprovalWiring = (
   env: Record<string, string | undefined>,
   opts?: { readonly wireDefer?: boolean },
 ): HeadlessApprovalWiring => {
-  // The inline auto-approve gate WINS when set (an explicit opt-in): a live-op
-  // analogue that resolves the ask in-turn with no wire round-trip.
+  // An explicit surface delivery contract WINS over the ambient inline gate.
+  // `serve --stdio` has a real wire operator (`connect({onApproval})`), so an
+  // inherited QUANTA_INLINE_APPROVAL_RESOLVER must never silently bypass that
+  // operator and auto-approve. Unattended serve callers already have the
+  // explicit permission modes (`bypass` / `acceptEdits`) for that posture.
+  if (opts?.wireDefer === true) return wireDeferWiring()
+  // No external operator: the inline auto-approve gate is an explicit opt-in
+  // for ordinary headless execution and resolves the ask in-turn.
   if (gateOn(env, HEADLESS_INLINE_APPROVAL_GATE)) {
     // Auto-policy surface: headless has no operator, so a mid-turn ask auto-approves
     // INLINE (same turn) — the inline analogue of the deferred `resolveApproval`.
@@ -87,9 +93,6 @@ export const buildHeadlessApprovalWiring = (
       await confirmSlot.current(action)
     return { onConfirm, approvalProtocol: { confirmSlot, interactive: true } }
   }
-  // WIRE-DEFER (opt-in by the serve --stdio composition): a mid-turn ask parks
-  // the turn on the wire for the `connect({onApproval})` client to resolve.
-  if (opts?.wireDefer === true) return wireDeferWiring()
   // Default OFF — deferred deny (byte-identical to the pre-jul-18 composition).
   return deferredWiring()
 }

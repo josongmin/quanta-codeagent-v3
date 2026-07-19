@@ -1,5 +1,7 @@
 # 통합 로드맵 — transport-unified-sdk × ADR-0540 (2026-07-16 확정)
 
+> **HISTORICAL / COMPLETED (2026-07-19):** wave 실행계획은 완료됐다. 현재 상태는 [README.md](README.md), 잔여/처리 이력은 [audit-followups-jul17.md](audit-followups-jul17.md)가 소유한다. 아래의 과거 “미착수” 스냅샷은 당시 순서 결정 근거로만 읽는다.
+
 ## 구현 대조 원장 (HEAD c2c0e77ad 전수 검증)
 
 **이미 있음 → 재사용 (짓지 말 것)**

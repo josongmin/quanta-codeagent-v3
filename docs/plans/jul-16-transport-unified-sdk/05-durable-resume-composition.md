@@ -1,7 +1,7 @@
 # Ticket 05 — `connect({resume})` durable resume 합류 (ADR-0540 W2 소비자)
 
 - **Date:** 2026-07-16
-- **Status:** DRAFT v2 — **BLOCKED on ADR-0540 Wave 2** (온디스크 KernelEventLogPort)
+- **Status:** ✅ LANDED — W4-b 527f78811 + core a38ee957f + door-resume 1f578f28f
 - **기능:** `connect({ resume: { sessionId, afterSeq } })`가 서버 프로세스 재시작을 넘어 동작 — 스냅샷 폴백이 아니라 온디스크 이벤트로그 replay로 복원. WS 재접속·stdio 재기동 동일 시맨틱.
 - **왜:** 현행 replay는 bridge 메모리 tail(128) 한정 — 재시작이면 무조건 full-snapshot 폴백([bridge.ts:78-80](../../../src/ipc/session/bridge.ts)), 긴 단절이면 유실. substrate는 ADR-0540 W2 소유 — 이 티켓은 **SDK-가시 시맨틱만**.
 - **ROI:** Codex/Claude 부재 기능(jul-16 어딧 확증) = 이 계획의 차별화 capability.

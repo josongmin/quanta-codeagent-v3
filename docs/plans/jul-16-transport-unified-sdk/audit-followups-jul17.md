@@ -25,7 +25,7 @@ crash/torn·lock·seq·replay·누출·게이트·v1정직성 7축 실행 repro 
 ## J(05 door) 어딧 follow-up (1f578f28f, 선존·05 무관)
 | # | 심각도 | 내용 | 처리 |
 |---|---|---|---|
-| J-MED-1 | MED(PRE-EXISTING) | bridge.ts:523-539이 peer.connected를 async handleConnect 전 동기 설정 → concurrent publishEvents가 handshake replay 창 중간에 live 이벤트 interleave(seq 순서 뒤바뀜). **pre-05 plain connect에도 동일** — resume이 재접속-후-drop 빈도를 높여 hit rate만 상승. resumed 마커는 여전히 strictly last, servedThroughSeq 정직. | fan-out gating 별도 티켓(live fan-out을 connect replay 완료까지 게이트 or per-peer send queue) |
+| ~~J-MED-1~~ ✅ DONE(29f8359eb) | MED(PRE-EXISTING) | bridge.ts handshake replay 창에 live 이벤트가 interleave해 seq가 뒤바뀔 수 있었음 | per-peer send tail + async interleave hellgate로 순서 봉인 |
 | J-LOW-1 | LOW | events-only resume이 다음 live snapshot까지 serverAutoContinues=false 시작(connect.ts:286). false→클라 재발행이라 safe-by-default, M-3 pending-approval seed도 대응 skip. consistent. | 무조치(문서화됨) |
 
 ## 02 serve --stdio follow-up (a83e28cd4, 7/8 green)
@@ -41,5 +41,5 @@ crash/torn·lock·seq·replay·누출·게이트·v1정직성 7축 실행 repro 
 | # | 심각도 | 내용 | 처리 |
 |---|---|---|---|
 | ~~γ-sqlite~~ ✅ DONE(b177f24af) | MED-보안 | threads.db가 `new Database` mode 미지정→0o644 world-readable. 04 full 전문(비밀) 저장 시 노출. H1(JsonlSessionEventLog 0o600) sqlite 대응 누락 | mkdir 0o700+chmodSync 0o600+회귀테스트 |
-| β-gate-combo | LOW | serve --stdio(wireDefer)+QUANTA_INLINE_APPROVAL_RESOLVER 동시 ON시 inline auto-approve 우선(wire onApproval 무시) — approval-wiring:79 주석엔 "inline WINS" 명시(의도), serve USAGE엔 미기재 | serve USAGE/0543에 조합 우선순위 1줄(코드 무변, 의도된 동작) |
+| ~~β-gate-combo~~ ✅ DONE(2026-07-19 closeout) | MED-설정안전 | serve --stdio(wireDefer)+QUANTA_INLINE_APPROVAL_RESOLVER 동시 ON시 inherited env가 wire onApproval을 조용히 우회할 수 있었음 | explicit wire delivery가 우선하도록 fail-closed 변경 + runtime-controller unit/usage/0543 봉인 |
 | 02-deny-e2e | LOW | serve --stdio approval **deny/다중** 직접 spawn e2e 부재(approve만). 기능=kernel deny 경로(web-daemon e2e 검증)라 무결, serve 서피스 직접 커버만 갭 | 중복 커버라 ROI 낮음, 여력시 |

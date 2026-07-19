@@ -43,20 +43,13 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test"
-import { startWebDaemon } from "@/apps/web-daemon/server"
-import type {
-  AgentStatePorts,
-  CanvasPorts,
-  ObservabilityPorts,
-} from "@/apps/web-daemon/server"
-import type { WebDaemonHandle } from "@/apps/web-daemon/types"
-import { createRunLedger } from "@/agent/run-ledger"
 import type { ContextUsageBreakdown } from "@/agent/context/usage-breakdown"
-import {
-  encodeSessionTransportMessage,
-  tryDecodeSessionTransportMessage,
-} from "@/ipc/session"
+import { createRunLedger } from "@/agent/run-ledger"
+import type { AgentStatePorts, CanvasPorts, ObservabilityPorts } from "@/apps/web-daemon/server"
+import { startWebDaemon } from "@/apps/web-daemon/server"
+import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import type { SessionTransportMessage } from "@/ipc/session"
+import { encodeSessionTransportMessage, tryDecodeSessionTransportMessage } from "@/ipc/session"
 import { decodeCanvasFrame } from "@/protocol/canvas"
 import { decodeObservabilityFrame } from "@/protocol/observability"
 import { supported } from "@/protocol/session"
@@ -224,10 +217,7 @@ const drainTurn = async (ws: WebSocket): Promise<SessionTransportMessage> => {
       },
     }),
   )
-  return await waitForMessage(
-    ws,
-    (m) => m.kind === "event" && m.event.type === "turn.completed",
-  )
+  return await waitForMessage(ws, (m) => m.kind === "event" && m.event.type === "turn.completed")
 }
 
 describe("DOF-10 authenticated operator flow — ONE revision, real daemon + DOF-05 gate", () => {
@@ -239,10 +229,13 @@ describe("DOF-10 authenticated operator flow — ONE revision, real daemon + DOF
     ledger.start({ id: "run-1", kind: "shell", owner: "op", title: "ls -la" })
     const observabilityPorts: ObservabilityPorts = { runLedger: ledger, timer }
     const usage = makeUsageSource(REAL_USAGE)
+    const approvalPrompt = "request operator approval"
+    const { factory } = createStubRuntimeFactory({ approvalOnPrompt: approvalPrompt })
 
     const { port } = await bootAuthed({
       observabilityPorts,
       canvasPorts: usage.ports,
+      factory,
     })
 
     // ---- AUTH: connect WITH the token (DOF-05 gate must ALLOW) ----
@@ -291,17 +284,52 @@ describe("DOF-10 authenticated operator flow — ONE revision, real daemon + DOF
       .some((m) => m?.kind === "event" && m.event.type === "turn.output.delta")
     expect(sawDelta).toBe(true)
 
-    // ---- APPROVAL VERB: approval.respond command over the SAME wire ----
-    // The verb rides the bridge → runtime dispatch, which publishes a real
-    // `approval.resolved` SessionEvent back over the wire. We assert on the
-    // decoded event (command in → resolved event out) — the verb crossed the
-    // real transport, not a method spy.
+    // ---- APPROVAL VERB: mint a REAL pending approval, then resolve it over
+    //      the SAME wire. An arbitrary/unminted id is intentionally absorbed
+    //      (pinned by the stale-id edge below), so this positive rail first
+    //      drives input.append → turn.run → approval.requested and answers the
+    //      exact id the runtime published.
+    const requestedPromise = waitForMessage(
+      ws,
+      (m) => m.kind === "event" && m.event.type === "approval.requested",
+    )
+    const approvalIssuedAt = new Date().toISOString()
+    ws.send(
+      encodeSessionTransportMessage({
+        kind: "command",
+        command: {
+          sessionId: "stub-session-1",
+          commandId: "approval-append",
+          issuedAt: approvalIssuedAt,
+          type: "input.append",
+          text: approvalPrompt,
+        },
+      }),
+    )
+    ws.send(
+      encodeSessionTransportMessage({
+        kind: "command",
+        command: {
+          sessionId: "stub-session-1",
+          commandId: "approval-run",
+          issuedAt: approvalIssuedAt,
+          type: "turn.run",
+        },
+      }),
+    )
+    const requested = await requestedPromise
+    if (requested.kind !== "event" || requested.event.type !== "approval.requested") {
+      throw new Error("narrow")
+    }
+    const approvalId = requested.event.approval.approvalId
+    expect(approvalId).toStartWith("stub-approval-")
+
     const resolvedPromise = waitForMessage(
       ws,
       (m) =>
         m.kind === "event" &&
         m.event.type === "approval.resolved" &&
-        m.event.approvalId === "appr-1",
+        m.event.approvalId === approvalId,
     )
     ws.send(
       encodeSessionTransportMessage({
@@ -311,7 +339,7 @@ describe("DOF-10 authenticated operator flow — ONE revision, real daemon + DOF
           commandId: "approve-1",
           issuedAt: new Date().toISOString(),
           type: "approval.respond",
-          approvalId: "appr-1",
+          approvalId,
           decision: "approve",
         },
       }),
@@ -339,7 +367,9 @@ describe("DOF-10 authenticated operator flow — ONE revision, real daemon + DOF
     // And the WS constructor with a wrong token never reaches OPEN.
     const ws = new WebSocket(authedUrl(port, "wrong-token"))
     const opened = await Promise.race([
-      waitForOpen(ws).then(() => "open" as const).catch(() => "error" as const),
+      waitForOpen(ws)
+        .then(() => "open" as const)
+        .catch(() => "error" as const),
       wait(500).then(() => "timeout" as const),
     ])
     expect(opened).not.toBe("open")
@@ -358,7 +388,9 @@ describe("DOF-10 authenticated operator flow — ONE revision, real daemon + DOF
 
     const good = new WebSocket(authedUrl(port, SECRET))
     const goodResult = await Promise.race([
-      waitForOpen(good).then(() => "open" as const).catch(() => "error" as const),
+      waitForOpen(good)
+        .then(() => "open" as const)
+        .catch(() => "error" as const),
       wait(800).then(() => "timeout" as const),
     ])
     expect(goodResult).toBe("open")
@@ -433,9 +465,9 @@ describe("DOF-10 authenticated operator flow — ONE revision, real daemon + DOF
     // stale id, and the socket is still OPEN.
     const decodedRaw = raw.map((r) => tryDecodeSessionTransportMessage(r))
     expect(decodedRaw.some((m) => m?.kind === "rejected")).toBe(false)
-    expect(
-      decodedRaw.some((m) => m?.kind === "event" && m.event.type === "session.closed"),
-    ).toBe(false)
+    expect(decodedRaw.some((m) => m?.kind === "event" && m.event.type === "session.closed")).toBe(
+      false,
+    )
     expect(ws.readyState).toBe(WebSocket.OPEN)
 
     // A real turn AFTER the stale respond must still complete — the wire is live.
@@ -454,7 +486,9 @@ describe("DOF-10 authenticated operator flow — ONE revision, real daemon + DOF
     const authed = new WebSocket(authedUrl(port))
     expect(
       await Promise.race([
-        waitForOpen(authed).then(() => "open" as const).catch(() => "error" as const),
+        waitForOpen(authed)
+          .then(() => "open" as const)
+          .catch(() => "error" as const),
         wait(800).then(() => "timeout" as const),
       ]),
     ).toBe("open")
@@ -470,7 +504,9 @@ describe("DOF-10 authenticated operator flow — ONE revision, real daemon + DOF
     const wsNoToken = new WebSocket(`ws://127.0.0.1:${port}/`)
     expect(
       await Promise.race([
-        waitForOpen(wsNoToken).then(() => "open" as const).catch(() => "error" as const),
+        waitForOpen(wsNoToken)
+          .then(() => "open" as const)
+          .catch(() => "error" as const),
         wait(500).then(() => "timeout" as const),
       ]),
     ).not.toBe("open")

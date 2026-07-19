@@ -45,6 +45,9 @@ purpose: |
   STATUS: COMPLETE (8/8 e2e green — approval WIRE-delegation landed 5b4110f18 via the 3rd 'wire-defer' headless mode: gate OFF exit64/empty-stdout,
   core connect→append→turn.run→awaitTurnEnd + transport==="stdio", stdin-EOF /
   SIGTERM exit0, stdout-purity + polluter control). All 8 scenarios green including approval round-trip (connect onApproval → wire approval.requested → respond → re-run).
+  Approval precedence is fail-closed: this surface's explicit wire delivery
+  wins over an inherited QUANTA_INLINE_APPROVAL_RESOLVER=1, so a parent process
+  cannot silently replace connect({onApproval}) with inline auto-approval.
 evidence:
   code:
     - src/apps/cli/serve-stdio-cmd.ts
