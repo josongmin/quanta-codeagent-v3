@@ -104,7 +104,9 @@ const postCompactOwnerContracts = (): readonly PostCompactOwnerContract[] => [
 ]
 
 const missingPostCompactRequirements = (contract: PostCompactOwnerContract): string[] =>
-  contract.required.filter(([pattern]) => !pattern.test(contract.source)).map(([, reason]) => reason)
+  contract.required
+    .filter(([pattern]) => !pattern.test(contract.source))
+    .map(([, reason]) => reason)
 
 describe("audit ratchet — G1 post_compact live owner contracts (F1-class)", () => {
   test("each owner preserves its live post_compact call structure", () => {
@@ -197,9 +199,9 @@ const collectMatcherBannersFrom = (src: string): string[] => {
   const out = new Set<string>()
   // startsWith("...") and .test("...") (single arg, double-quoted literal).
   const re = /(?:startsWith|test)\s*\(\s*"((?:[^"\\]|\\.)+)"/g
-  let m: RegExpExecArray | null = null
-  // eslint-disable-next-line no-cond-assign
-  while ((m = re.exec(src)) !== null) {
+  for (;;) {
+    const m = re.exec(src)
+    if (m === null) break
     const lit = m[1]
     if (typeof lit === "string" && lit.length > 0) out.add(lit)
   }
@@ -210,36 +212,48 @@ const producerAnchor = (banner: string): string =>
   banner.startsWith("\\n") ? banner.slice("\\n".length) : banner
 
 const missingMatcherBanners = (matcherSrc: string, toolSrc: string): string[] =>
-  collectMatcherBannersFrom(matcherSrc).filter((banner) => !toolSrc.includes(producerAnchor(banner)))
+  collectMatcherBannersFrom(matcherSrc).filter(
+    (banner) => !toolSrc.includes(producerAnchor(banner)),
+  )
+
+const readDirSafe = (dir: string): Dirent<string>[] => {
+  try {
+    return readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+}
+
+const readToolSource = (path: string, entry: Dirent<string>): string | undefined => {
+  if (!entry.isFile() || !entry.name.endsWith(".ts")) return undefined
+  if (entry.name.endsWith(".test.ts") || entry.name.endsWith(".hellgate.test.ts")) return undefined
+  try {
+    return readUtf8(path)
+  } catch {
+    return undefined
+  }
+}
+
+const skipToolDirectory = (name: string): boolean =>
+  name === "__tests__" || name === "node_modules" || name.startsWith(".")
 
 const collectAllToolSources = (): string => {
   const buf: string[] = []
-  const walk = (dir: string): void => {
-    let entries: Dirent<string>[]
-    try {
-      entries = readdirSync(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const e of entries) {
-      const full = join(dir, e.name)
-      if (e.isDirectory()) {
-        // skip test dirs + node_modules-style sub-trees if any
-        if (e.name === "__tests__" || e.name === "node_modules" || e.name.startsWith(".")) continue
-        walk(full)
+  const pending = [...TOOL_DIRS]
+  while (pending.length > 0) {
+    const dir = pending.pop()
+    if (dir === undefined) break
+    for (const entry of readDirSafe(dir)) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (skipToolDirectory(entry.name)) continue
+        pending.push(full)
         continue
       }
-      if (!e.isFile()) continue
-      if (!e.name.endsWith(".ts")) continue
-      if (e.name.endsWith(".test.ts") || e.name.endsWith(".hellgate.test.ts")) continue
-      try {
-        buf.push(readUtf8(full))
-      } catch {
-        // unreadable file — skip
-      }
+      const source = readToolSource(full, entry)
+      if (source !== undefined) buf.push(source)
     }
   }
-  for (const d of TOOL_DIRS) walk(d)
   return buf.join("\n")
 }
 
