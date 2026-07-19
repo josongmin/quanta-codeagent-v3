@@ -26,6 +26,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { CLI_FEATURE_GATES } from "@/apps/cli/cli-feature-gates"
+import { CLI_SEEDED_GATES } from "@/apps/cli/cli-seeded-gates"
 import { renderHelp } from "@/apps/cli/help-render"
 import { BUILTINS } from "@/apps/cli/slash-commands"
 import { seedEnvVarsForSurface } from "@/tool"
@@ -57,6 +58,11 @@ describe("CLI_FEATURE_GATES ⟷ /help env-table parity", () => {
     })
   }
 
+  test("the canonical startup seed union is duplicate-free", () => {
+    const names = CLI_SEEDED_GATES.map(({ gate }) => gate)
+    expect(new Set(names).size).toBe(names.length)
+  })
+
   test("gate list is non-empty and duplicate-free", () => {
     expect(CLI_FEATURE_GATES.length).toBeGreaterThan(0)
     const names = CLI_FEATURE_GATES.map((g) => g.gate)
@@ -74,10 +80,11 @@ describe("CLI_FEATURE_GATES ⟷ /help env-table parity", () => {
   })
 })
 
-describe("seed loop consumes the data module (no parallel list)", () => {
-  test("index.ts imports cli-feature-gates and has no inline gate array", () => {
+describe("seed loop consumes the canonical union (no parallel list)", () => {
+  test("index.ts imports cli-seeded-gates and has no inline gate array", () => {
     const src = readFileSync("src/apps/cli/index.ts", "utf8")
-    expect(src).toContain("./cli-feature-gates")
+    expect(src).toContain("./cli-seeded-gates")
+    expect(src).toContain("CLI_SEEDED_GATE_NAMES")
     // The old inline literal must be gone — otherwise two lists drift.
     expect(/const CLI_FEATURE_GATES\s*=\s*\[/.test(src)).toBe(false)
   })

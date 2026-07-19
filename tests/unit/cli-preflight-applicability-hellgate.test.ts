@@ -94,6 +94,20 @@ describe("#19 preflight — edit applicability", () => {
     expect(w?.toLowerCase()).toContain("not found")
   })
 
+  test("unreadable target is an explicit safety warning, never a clean preview", async () => {
+    const error = Object.assign(new Error("permission denied"), { code: "EACCES" })
+    const w = await preflightApplyWarning(
+      editAction({ path: "x.ts", old_string: "beta", new_string: "BETA" }),
+      {
+        cwd,
+        readFile: async () => {
+          throw error
+        },
+      },
+    )
+    expect(w).toContain("cannot safely inspect")
+  })
+
   test("invalid line_ranges ⇒ surfaced before matching", async () => {
     const w = await preflightApplyWarning(
       editAction({
@@ -166,6 +180,17 @@ describe("#19 preflight — apply_patch applicability", () => {
     expect(w).toContain("apply_patch")
   })
 
+  test("patch preflight surfaces an unreadable target instead of treating it as absent", async () => {
+    const error = Object.assign(new Error("permission denied"), { code: "EACCES" })
+    const w = await preflightApplyWarning(patchAction(cleanPatch), {
+      cwd,
+      readFile: async () => {
+        throw error
+      },
+    })
+    expect(w).toContain("cannot safely inspect")
+  })
+
   test("REAL-EFFECT: the preview never mutates — fresh re-read is byte-identical", async () => {
     // A mutable map; the write-suppressed port must not touch it. Fresh-readback
     // after the preview proves zero mutation.
@@ -197,7 +222,8 @@ describe("#19 preflight — apply_patch applicability", () => {
 
   test("patch preflight rejects an outside target before any reader call", async () => {
     let reads = 0
-    const patch = "*** Begin Patch\n*** Update File: /outside/secret.txt\n@@\n-secret\n+redacted\n*** End Patch\n"
+    const patch =
+      "*** Begin Patch\n*** Update File: /outside/secret.txt\n@@\n-secret\n+redacted\n*** End Patch\n"
     const warning = await preflightApplyWarning(patchAction(patch, "apply_patch_structured"), {
       cwd,
       readFile: async () => {

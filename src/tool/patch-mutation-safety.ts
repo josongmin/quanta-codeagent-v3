@@ -61,12 +61,27 @@ export const guardStalePatchTargets = async (
   patch: Patch,
   port: GuardedPatchFileSystemPort,
   ctx: Pick<EditToolContext, "readFileState"> | undefined,
+  toolName: "apply_patch" | "apply_patch_structured",
 ): Promise<ToolEvent | null> => {
   const state = ctx?.readFileState
   if (state === undefined) return null
   for (const op of patch.ops) {
     if (op.kind !== "update" && op.kind !== "delete") continue
-    const stat = await port.statTarget(op.path)
+    let stat: Awaited<ReturnType<GuardedPatchFileSystemPort["statTarget"]>>
+    try {
+      stat = await port.statTarget(op.path)
+    } catch {
+      // A failed stat is not evidence that the target is absent. Deny before
+      // mutation and preserve the model-facing no-throw ToolResult boundary.
+      return {
+        type: "result",
+        result: {
+          ok: false,
+          output: `${toolName}: cannot safely verify freshness of ${op.path}; re-read the target and retry`,
+          failure: { mode: "rejected", reason: "stale_read_check_failed" },
+        },
+      }
+    }
     if (!stat.exists) continue
     const guard = guardWrite(state, stat.resolvedPath, stat.mtimeMs)
     if (!guard.ok) {

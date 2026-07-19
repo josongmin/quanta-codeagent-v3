@@ -138,6 +138,33 @@ describe("apply_patch_structured — explicit CLI promotion", () => {
     expect(readFileSync(join(root, "safe.txt"), "utf8")).toBe("inside")
   })
 
+  test("stale preflight turns a real jail escape into a no-throw zero-write rejection", async () => {
+    const root = workspace("stale-jail")
+    const outside = workspace("stale-jail-outside")
+    writeFileSync(join(outside, "secret.txt"), "TOP-SECRET\n")
+    symlinkSync(outside, join(root, "escape"))
+
+    const result = await run(
+      structuredTool(),
+      v4a(
+        "*** Add File: safe.txt",
+        "+must-not-land",
+        "*** Update File: escape/secret.txt",
+        "@@",
+        "-TOP-SECRET",
+        "+EXFILTRATED",
+      ),
+      root,
+      { readFileState: new ReadFileState(), editFreshHash: true },
+    )
+
+    expect(result.ok).toBe(false)
+    expect(result.failure).toEqual({ mode: "rejected", reason: "stale_read_check_failed" })
+    expect(result.output).toContain("cannot safely verify freshness")
+    expect(existsSync(join(root, "safe.txt"))).toBe(false)
+    expect(readFileSync(join(outside, "secret.txt"), "utf8")).toBe("TOP-SECRET\n")
+  })
+
   test("wired git-write guard hard-denies protected paths before any sibling mutation", async () => {
     const root = workspace("git-guard")
 

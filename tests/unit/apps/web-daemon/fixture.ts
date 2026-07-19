@@ -50,6 +50,10 @@ interface StubRuntimeFactoryOptions {
   readonly approvalOnPrompt?: string
 }
 
+type InputAppendCommand = Extract<SessionCommand, { type: "input.append" }>
+type TurnRunCommand = Extract<SessionCommand, { type: "turn.run" }>
+type ApprovalRespondCommand = Extract<SessionCommand, { type: "approval.respond" }>
+
 const sleep = async (ms: number): Promise<void> => {
   await new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -102,238 +106,259 @@ export const createStubRuntimeFactory = (
         transportBridge?.updateSnapshot(snapshot)
       }
 
+      const handleInputAppend = async (
+        command: InputAppendCommand,
+      ): Promise<SessionDispatchResult> => {
+        // Delay append a little so a server that dispatches commands
+        // concurrently will race `turn.run` against the stale draft.
+        await sleep(20)
+        snapshot = {
+          ...snapshot,
+          revision: snapshot.revision + 1,
+          seq: snapshot.seq + 1,
+          state: {
+            ...snapshot.state,
+            draftInput: appendDraft(snapshot.state.draftInput, command.text),
+          },
+        }
+        draftImages = [...draftImages, ...(command.images ?? [])]
+        const event: Extract<SessionEvent, { type: "session.state.updated" }> = {
+          eventId: crypto.randomUUID(),
+          seq: snapshot.seq,
+          revision: snapshot.revision,
+          emittedAt: new Date().toISOString(),
+          causedByCommandId: command.commandId,
+          type: "session.state.updated",
+          state: snapshot.state,
+        }
+        await publish([event])
+        return { revision: snapshot.revision, seq: snapshot.seq, events: [event] }
+      }
+
+      const handleApprovalTurn = async (
+        command: TurnRunCommand,
+        prompt: string,
+      ): Promise<SessionDispatchResult> => {
+        const approval: PendingApprovalView = {
+          approvalId: `stub-approval-${crypto.randomUUID()}`,
+          reason: `operator approval required for: ${prompt}`,
+          requestedAt: new Date().toISOString(),
+        }
+        snapshot = {
+          ...snapshot,
+          revision: snapshot.revision + 1,
+          seq: snapshot.seq + 3,
+          state: {
+            ...snapshot.state,
+            status: "awaiting_approval",
+            messageCount: snapshot.state.messageCount + 1,
+            lastUserText: prompt,
+          },
+          pendingApproval: approval,
+        }
+        const started: Extract<SessionEvent, { type: "turn.started" }> = {
+          eventId: crypto.randomUUID(),
+          seq: snapshot.seq - 2,
+          revision: snapshot.revision,
+          emittedAt: new Date().toISOString(),
+          causedByCommandId: command.commandId,
+          type: "turn.started",
+          prompt,
+        }
+        const requested: Extract<SessionEvent, { type: "approval.requested" }> = {
+          eventId: crypto.randomUUID(),
+          seq: snapshot.seq - 1,
+          revision: snapshot.revision,
+          emittedAt: new Date().toISOString(),
+          causedByCommandId: command.commandId,
+          type: "approval.requested",
+          approval,
+        }
+        const updated: Extract<SessionEvent, { type: "session.state.updated" }> = {
+          eventId: crypto.randomUUID(),
+          seq: snapshot.seq,
+          revision: snapshot.revision,
+          emittedAt: new Date().toISOString(),
+          causedByCommandId: command.commandId,
+          type: "session.state.updated",
+          state: snapshot.state,
+        }
+        await publish([started, requested, updated])
+        return {
+          revision: snapshot.revision,
+          seq: snapshot.seq,
+          events: [started, requested, updated],
+          approvalRequest: approval,
+        }
+      }
+
+      const handleCompletedTurn = async (
+        command: TurnRunCommand,
+        prompt: string,
+      ): Promise<SessionDispatchResult> => {
+        const assistantText = `stub: ${prompt}`
+        snapshot = {
+          ...snapshot,
+          revision: snapshot.revision + 1,
+          seq: snapshot.seq + 2,
+          state: {
+            ...snapshot.state,
+            status: "running",
+            messageCount: snapshot.state.messageCount + 1,
+            lastUserText: prompt,
+          },
+        }
+        const started: Extract<SessionEvent, { type: "turn.started" }> = {
+          eventId: crypto.randomUUID(),
+          seq: snapshot.seq - 1,
+          revision: snapshot.revision,
+          emittedAt: new Date().toISOString(),
+          causedByCommandId: command.commandId,
+          type: "turn.started",
+          prompt: snapshot.state.draftInput,
+          ...(draftImages.length > 0 ? { images: draftImages } : {}),
+        }
+        const updated: Extract<SessionEvent, { type: "session.state.updated" }> = {
+          eventId: crypto.randomUUID(),
+          seq: snapshot.seq,
+          revision: snapshot.revision,
+          emittedAt: new Date().toISOString(),
+          causedByCommandId: command.commandId,
+          type: "session.state.updated",
+          state: snapshot.state,
+        }
+        await publish([started, updated])
+        for (const delta of ["stub: ", prompt]) {
+          snapshot = {
+            ...snapshot,
+            revision: snapshot.revision + 1,
+            seq: snapshot.seq + 1,
+            state: {
+              ...snapshot.state,
+              streamingAssistantText: `${snapshot.state.streamingAssistantText ?? ""}${delta}`,
+            },
+          }
+          const deltaEvent: Extract<SessionEvent, { type: "turn.output.delta" }> = {
+            eventId: crypto.randomUUID(),
+            seq: snapshot.seq,
+            revision: snapshot.revision,
+            emittedAt: new Date().toISOString(),
+            causedByCommandId: command.commandId,
+            type: "turn.output.delta",
+            delta,
+          }
+          await publish([deltaEvent])
+        }
+        const { streamingAssistantText: _streamingAssistantText, ...runningState } = snapshot.state
+        snapshot = {
+          ...snapshot,
+          revision: snapshot.revision + 1,
+          seq: snapshot.seq + 2,
+          state: {
+            ...runningState,
+            status: "idle",
+            draftInput: "",
+            messageCount: snapshot.state.messageCount + 1,
+            lastAssistantText: assistantText,
+            lastOutcomeReason: "completed",
+          },
+        }
+        draftImages = []
+        const completed: Extract<SessionEvent, { type: "turn.completed" }> = {
+          eventId: crypto.randomUUID(),
+          seq: snapshot.seq - 1,
+          revision: snapshot.revision,
+          emittedAt: new Date().toISOString(),
+          causedByCommandId: command.commandId,
+          type: "turn.completed",
+          outcomeReason: "completed",
+          assistantText,
+        }
+        const completedState: Extract<SessionEvent, { type: "session.state.updated" }> = {
+          eventId: crypto.randomUUID(),
+          seq: snapshot.seq,
+          revision: snapshot.revision,
+          emittedAt: new Date().toISOString(),
+          causedByCommandId: command.commandId,
+          type: "session.state.updated",
+          state: snapshot.state,
+        }
+        await publish([completed, completedState])
+        return {
+          revision: snapshot.revision,
+          seq: snapshot.seq,
+          events: [started, updated, completed, completedState],
+        }
+      }
+
+      const handleTurnRun = async (command: TurnRunCommand): Promise<SessionDispatchResult> => {
+        if (snapshot.state.draftInput.trim().length === 0 && draftImages.length === 0) {
+          throw new SessionProtocolValidationError("empty_turn_input")
+        }
+        const prompt = snapshot.state.draftInput
+        return options.approvalOnPrompt === prompt
+          ? await handleApprovalTurn(command, prompt)
+          : await handleCompletedTurn(command, prompt)
+      }
+
+      const handleApprovalRespond = async (
+        command: ApprovalRespondCommand,
+      ): Promise<SessionDispatchResult> => {
+        const pending = snapshot.pendingApproval
+        // Unknown/stale responses are intentionally absorbed by this
+        // shared-session fixture: no event, no state mutation, wire stays live.
+        if (pending === null || pending.approvalId !== command.approvalId) {
+          return { revision: snapshot.revision, seq: snapshot.seq, events: [] }
+        }
+        snapshot = {
+          ...snapshot,
+          revision: snapshot.revision + 1,
+          seq: snapshot.seq + 2,
+          state: {
+            ...snapshot.state,
+            status: "idle",
+            draftInput: "",
+          },
+          pendingApproval: null,
+        }
+        const resolved: Extract<SessionEvent, { type: "approval.resolved" }> = {
+          eventId: crypto.randomUUID(),
+          seq: snapshot.seq - 1,
+          revision: snapshot.revision,
+          emittedAt: new Date().toISOString(),
+          causedByCommandId: command.commandId,
+          type: "approval.resolved",
+          approvalId: command.approvalId,
+          decision: command.decision,
+        }
+        const updated: Extract<SessionEvent, { type: "session.state.updated" }> = {
+          eventId: crypto.randomUUID(),
+          seq: snapshot.seq,
+          revision: snapshot.revision,
+          emittedAt: new Date().toISOString(),
+          causedByCommandId: command.commandId,
+          type: "session.state.updated",
+          state: snapshot.state,
+        }
+        await publish([resolved, updated])
+        return {
+          revision: snapshot.revision,
+          seq: snapshot.seq,
+          events: [resolved, updated],
+        }
+      }
+
       const dispatch = async (
         command: SessionCommand,
         _options?: SessionDispatchOptions,
       ): Promise<SessionDispatchResult> => {
         switch (command.type) {
-          case "input.append": {
-            // Delay append a little so a server that dispatches commands
-            // concurrently will race `turn.run` against the stale draft.
-            await sleep(20)
-            snapshot = {
-              ...snapshot,
-              revision: snapshot.revision + 1,
-              seq: snapshot.seq + 1,
-              state: {
-                ...snapshot.state,
-                draftInput: appendDraft(snapshot.state.draftInput, command.text),
-              },
-            }
-            draftImages = [...draftImages, ...(command.images ?? [])]
-            const event: Extract<SessionEvent, { type: "session.state.updated" }> = {
-              eventId: crypto.randomUUID(),
-              seq: snapshot.seq,
-              revision: snapshot.revision,
-              emittedAt: new Date().toISOString(),
-              causedByCommandId: command.commandId,
-              type: "session.state.updated",
-              state: snapshot.state,
-            }
-            await publish([event])
-            return { revision: snapshot.revision, seq: snapshot.seq, events: [event] }
-          }
-          case "turn.run": {
-            if (snapshot.state.draftInput.trim().length === 0 && draftImages.length === 0) {
-              throw new SessionProtocolValidationError("empty_turn_input")
-            }
-            const prompt = snapshot.state.draftInput
-            if (options.approvalOnPrompt === prompt) {
-              const approval: PendingApprovalView = {
-                approvalId: `stub-approval-${crypto.randomUUID()}`,
-                reason: `operator approval required for: ${prompt}`,
-                requestedAt: new Date().toISOString(),
-              }
-              snapshot = {
-                ...snapshot,
-                revision: snapshot.revision + 1,
-                seq: snapshot.seq + 3,
-                state: {
-                  ...snapshot.state,
-                  status: "awaiting_approval",
-                  messageCount: snapshot.state.messageCount + 1,
-                  lastUserText: prompt,
-                },
-                pendingApproval: approval,
-              }
-              const started: Extract<SessionEvent, { type: "turn.started" }> = {
-                eventId: crypto.randomUUID(),
-                seq: snapshot.seq - 2,
-                revision: snapshot.revision,
-                emittedAt: new Date().toISOString(),
-                causedByCommandId: command.commandId,
-                type: "turn.started",
-                prompt,
-              }
-              const requested: Extract<SessionEvent, { type: "approval.requested" }> = {
-                eventId: crypto.randomUUID(),
-                seq: snapshot.seq - 1,
-                revision: snapshot.revision,
-                emittedAt: new Date().toISOString(),
-                causedByCommandId: command.commandId,
-                type: "approval.requested",
-                approval,
-              }
-              const updated: Extract<SessionEvent, { type: "session.state.updated" }> = {
-                eventId: crypto.randomUUID(),
-                seq: snapshot.seq,
-                revision: snapshot.revision,
-                emittedAt: new Date().toISOString(),
-                causedByCommandId: command.commandId,
-                type: "session.state.updated",
-                state: snapshot.state,
-              }
-              await publish([started, requested, updated])
-              return {
-                revision: snapshot.revision,
-                seq: snapshot.seq,
-                events: [started, requested, updated],
-                approvalRequest: approval,
-              }
-            }
-            const assistantText = `stub: ${prompt}`
-            const deltaParts = ["stub: ", prompt]
-            snapshot = {
-              ...snapshot,
-              revision: snapshot.revision + 1,
-              seq: snapshot.seq + 2,
-              state: {
-                ...snapshot.state,
-                status: "running",
-                messageCount: snapshot.state.messageCount + 1,
-                lastUserText: prompt,
-              },
-            }
-            const started: Extract<SessionEvent, { type: "turn.started" }> = {
-              eventId: crypto.randomUUID(),
-              seq: snapshot.seq - 1,
-              revision: snapshot.revision,
-              emittedAt: new Date().toISOString(),
-              causedByCommandId: command.commandId,
-              type: "turn.started",
-              prompt: snapshot.state.draftInput,
-              ...(draftImages.length > 0 ? { images: draftImages } : {}),
-            }
-            const updated: Extract<SessionEvent, { type: "session.state.updated" }> = {
-              eventId: crypto.randomUUID(),
-              seq: snapshot.seq,
-              revision: snapshot.revision,
-              emittedAt: new Date().toISOString(),
-              causedByCommandId: command.commandId,
-              type: "session.state.updated",
-              state: snapshot.state,
-            }
-            await publish([started, updated])
-            for (const delta of deltaParts) {
-              snapshot = {
-                ...snapshot,
-                revision: snapshot.revision + 1,
-                seq: snapshot.seq + 1,
-                state: {
-                  ...snapshot.state,
-                  streamingAssistantText: `${snapshot.state.streamingAssistantText ?? ""}${delta}`,
-                },
-              }
-              const deltaEvent: Extract<SessionEvent, { type: "turn.output.delta" }> = {
-                eventId: crypto.randomUUID(),
-                seq: snapshot.seq,
-                revision: snapshot.revision,
-                emittedAt: new Date().toISOString(),
-                causedByCommandId: command.commandId,
-                type: "turn.output.delta",
-                delta,
-              }
-              await publish([deltaEvent])
-            }
-            snapshot = {
-              ...snapshot,
-              revision: snapshot.revision + 1,
-              seq: snapshot.seq + 2,
-              state: (() => {
-                const { streamingAssistantText: _streamingAssistantText, ...runningState } =
-                  snapshot.state
-                return {
-                  ...runningState,
-                  status: "idle" as const,
-                  draftInput: "",
-                  messageCount: snapshot.state.messageCount + 1,
-                  lastAssistantText: assistantText,
-                  lastOutcomeReason: "completed",
-                }
-              })(),
-            }
-            draftImages = []
-            const completed: Extract<SessionEvent, { type: "turn.completed" }> = {
-              eventId: crypto.randomUUID(),
-              seq: snapshot.seq - 1,
-              revision: snapshot.revision,
-              emittedAt: new Date().toISOString(),
-              causedByCommandId: command.commandId,
-              type: "turn.completed",
-              outcomeReason: "completed",
-              assistantText,
-            }
-            const completedState: Extract<SessionEvent, { type: "session.state.updated" }> = {
-              eventId: crypto.randomUUID(),
-              seq: snapshot.seq,
-              revision: snapshot.revision,
-              emittedAt: new Date().toISOString(),
-              causedByCommandId: command.commandId,
-              type: "session.state.updated",
-              state: snapshot.state,
-            }
-            await publish([completed, completedState])
-            return {
-              revision: snapshot.revision,
-              seq: snapshot.seq,
-              events: [started, updated, completed, completedState],
-            }
-          }
-          case "approval.respond": {
-            const pending = snapshot.pendingApproval
-            // Unknown/stale responses are intentionally absorbed by this
-            // shared-session fixture: no event, no state mutation, wire stays
-            // live. The authenticated-flow edge test pins that behavior.
-            if (pending === null || pending.approvalId !== command.approvalId) {
-              return { revision: snapshot.revision, seq: snapshot.seq, events: [] }
-            }
-            snapshot = {
-              ...snapshot,
-              revision: snapshot.revision + 1,
-              seq: snapshot.seq + 2,
-              state: {
-                ...snapshot.state,
-                status: "idle",
-                draftInput: "",
-              },
-              pendingApproval: null,
-            }
-            const resolved: Extract<SessionEvent, { type: "approval.resolved" }> = {
-              eventId: crypto.randomUUID(),
-              seq: snapshot.seq - 1,
-              revision: snapshot.revision,
-              emittedAt: new Date().toISOString(),
-              causedByCommandId: command.commandId,
-              type: "approval.resolved",
-              approvalId: command.approvalId,
-              decision: command.decision,
-            }
-            const updated: Extract<SessionEvent, { type: "session.state.updated" }> = {
-              eventId: crypto.randomUUID(),
-              seq: snapshot.seq,
-              revision: snapshot.revision,
-              emittedAt: new Date().toISOString(),
-              causedByCommandId: command.commandId,
-              type: "session.state.updated",
-              state: snapshot.state,
-            }
-            await publish([resolved, updated])
-            return {
-              revision: snapshot.revision,
-              seq: snapshot.seq,
-              events: [resolved, updated],
-            }
-          }
+          case "input.append":
+            return await handleInputAppend(command)
+          case "turn.run":
+            return await handleTurnRun(command)
+          case "approval.respond":
+            return await handleApprovalRespond(command)
           default:
             return { revision: snapshot.revision, seq: snapshot.seq, events: [] }
         }

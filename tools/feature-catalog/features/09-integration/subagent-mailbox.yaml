@@ -60,10 +60,11 @@ purpose: |
 
   Slice fence: `src/agent/subagent-mailbox/` is a pure leaf (store depends only
   on `node:crypto`; types reference nothing outside the slice).
-  `src/tool/subagent-mailbox/` imports `@/agent/subagent-mailbox` types only,
+  `src/tool/subagent-mailbox/` declares its own narrow consumer port and accepts
+  the host mailbox structurally at the Tier-1 composition seam; it imports only
   `../types` (Tool / ToolContext / ToolEvent / ToolResult), `@/shared`
-  (errMessage), and `zod`. NEVER `@/agent` core. The sealed `src/subagent/*`
-  slice is UNMODIFIED — the mailbox is a NEW sibling.
+  (errMessage), and `zod`. NEVER `@/agent`. The sealed `src/subagent/*` slice
+  is UNMODIFIED — the mailbox is a NEW sibling.
 evidence:
   code:
     - src/agent/subagent-mailbox/types.ts

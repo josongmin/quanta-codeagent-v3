@@ -43,7 +43,7 @@
 
 import { byteCompare } from "@/shared/byte-compare"
 import { bold, cyan, dim, renderBox } from "@/ui/ui-helpers"
-import { CLI_FEATURE_GATES } from "./cli-feature-gates"
+import { CLI_SEEDED_GATES } from "./cli-seeded-gates"
 import { KEYBIND_TRUTH, type KeybindTruth } from "./keybind-truth"
 import type { UnifiedKnob } from "./knob-catalog-wire"
 import type { SlashCommand, SlashContext } from "./slash-commands"
@@ -235,7 +235,7 @@ export const ENV_TABLE: readonly EnvRow[] = [
 ] as const
 
 /** WS-E jul-10 (UUX-1-09/6-26) — derived env rows for the CLI-seeded
- *  default-ON feature gates (`cli-feature-gates.ts`). Gates that already have
+ *  default-ON feature and tool gates (`cli-seeded-gates.ts`). Gates that already have
  *  a curated `ENV_TABLE` row (they are ALSO RuntimeConfig fields, e.g.
  *  QUANTA_UNTRUSTED_ENVELOPE) are skipped so every gate renders exactly once
  *  — pinned by `help-env-seeded-gates-parity.hellgate`. `defaultLabel` is
@@ -243,7 +243,7 @@ export const ENV_TABLE: readonly EnvRow[] = [
  *  var is unset (an explicit `=0` still wins). */
 export const seededGateEnvRows = (): readonly EnvRow[] => {
   const curated = new Set(ENV_TABLE.map((r) => r.key))
-  return CLI_FEATURE_GATES.filter((g) => !curated.has(g.gate)).map((g) => ({
+  return CLI_SEEDED_GATES.filter((g) => !curated.has(g.gate)).map((g) => ({
     key: g.gate,
     defaultLabel: "on (CLI)",
     describe: g.describe,

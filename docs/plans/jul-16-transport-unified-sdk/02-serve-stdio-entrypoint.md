@@ -1,7 +1,7 @@
 # Ticket 02 — `quanta serve --stdio` (session.v1 stdio 서버 진입점)
 
 - **Date:** 2026-07-16
-- **Status:** ✅ LANDED a83e28cd4 + approval wire-defer 5b4110f18 (8/8 real-spawn e2e)
+- **Status:** ✅ LANDED a83e28cd4 + approval wire-defer 5b4110f18 (10/10 real-spawn e2e)
 - **기능:** session.v1을 말하는 stdio 서버 제품 진입점 (Codex app-server 패턴). 부수: heartbeat 응답기 daemon→ipc hoist, capabilities transport 스탬프 seam 관통.
 - **왜:** stdio transport 스택이 구현돼 있는데 제품 문 0 (`createSessionStdioServer` 소비자 = conformance 픽스처뿐; headless는 transport 주입받는 라이브러리).
 - **ROI:** 네트워크 포트 없이 IDE·사이드카 통합. 01 `transports.stdio`의 실제 대상. 부수로 선존 이슈 1종(capabilities.transport 전 세션 "inproc" 하드코드 거짓말) 수선.

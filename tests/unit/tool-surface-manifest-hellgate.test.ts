@@ -351,7 +351,6 @@ describe("tool-surface manifest — manifest→CATALOG completeness gate (root-c
       "QUANTA_CONTAINER_EXEC",
       "terminal container_exec gate — declared in the knob-inventory SSOT; a dedicated terminal-surface feature yaml is a backlog item",
     ],
-    ["QUANTA_COVERAGE_TOOL", "coverage_check tool gate — pre-existing, no feature yaml yet"],
     ["QUANTA_DEBUG_TOOLS", "debug tool group gate — pre-existing, no feature yaml yet"],
     [
       "QUANTA_SHADOW",
@@ -359,7 +358,6 @@ describe("tool-surface manifest — manifest→CATALOG completeness gate (root-c
     ],
     ["QUANTA_SUBAGENT_6TOOLS", "subagent 6-tool router gate — pre-existing, no feature yaml yet"],
     ["QUANTA_SUBAGENT_BG", "subagent background-run gate — pre-existing, no feature yaml yet"],
-    ["QUANTA_SUBAGENT_MAILBOX", "subagent mailbox gate — pre-existing, no feature yaml yet"],
     [
       "QUANTA_TB_WRITE_TOOL",
       "terminal container_write_file gate (B2 TB lever) — pre-existing, no feature yaml yet",

@@ -28,8 +28,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { CLI_FEATURE_GATE_NAMES } from "@/apps/cli/cli-feature-gates"
-import { seedEnvVarsForSurface } from "@/tool"
+import { CLI_SEEDED_GATE_NAMES } from "@/apps/cli/cli-seeded-gates"
 
 const CHILD = new URL("./fixtures/seed-loop-child.ts", import.meta.url).pathname
 
@@ -154,11 +153,9 @@ describe("DOF-20 seed loop — real subprocess/inheritance proof", () => {
   )
 
   test("harness targets the SAME union index.ts seeds (drift-linked, not a copy)", () => {
-    // The fixture imports CLI_FEATURE_GATE_NAMES + seedEnvVarsForSurface("cli")
-    // — the exact two index.ts:48 sources. Pin here that every PROBE gate is a
-    // member of that live union, so if a gate is renamed/removed the probe (and
-    // thus this proof) is forced to track it rather than testing a stale name.
-    const union = new Set([...CLI_FEATURE_GATE_NAMES, ...seedEnvVarsForSurface("cli")])
+    // The fixture imports CLI_SEEDED_GATE_NAMES — the exact index.ts seed
+    // projection. Every probe must remain a member of that live union.
+    const union = new Set(CLI_SEEDED_GATE_NAMES)
     for (const g of PROBE) {
       expect(union.has(g), `${g} must be a live member of the seed union`).toBe(true)
     }

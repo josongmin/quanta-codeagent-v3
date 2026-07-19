@@ -35,32 +35,63 @@
  *  `{ ok: false, output: "send failed: ..." }` / `"read failed: ..."` instead of
  *  bubbling past the loop.
  *
- *  SLICE FENCE: imports `@/agent/subagent-mailbox` (the closed ADR-0416
- *  substrate) for typed `MailboxPort` + `MailboxMessage`, `../types` (Tool /
- *  ToolContext / ToolEvent / ToolResult), `@/shared` (errMessage), and `zod`.
- *  NEVER `@/agent` core (loop / dispatch / prompt / features / types). */
+ *  SLICE FENCE: declares the narrow mailbox port it consumes locally, then
+ *  accepts the host mailbox structurally at the Tier-1 composition seam. This
+ *  keeps the tool a library leaf: it imports `../types` (Tool / ToolContext /
+ *  ToolEvent / ToolResult), `@/shared` (errMessage), and `zod`, never `@/agent`.
+ *  The host-owned mailbox can add storage-only operations without widening this
+ *  tool's authority or creating a reverse runtime dependency. */
 
 import { z } from "zod"
-import {
-  type MailboxMessage,
-  type MailboxMessageKind,
-  type MailboxPort,
-  ROOT_MAILBOX_AGENT_ID,
-} from "@/agent/subagent-mailbox"
 import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+
+/** The mailbox protocol this LLM-facing surface actually consumes. It is
+ * deliberately narrower than the host-owned store: send/read/peek/pending are
+ * enough to expose the tools, while snapshot/admin methods remain unavailable
+ * to this slice. Structural typing keeps the host adapter checkable without an
+ * upward `@/agent` import. */
+export type SubagentMailboxMessageKind = "request" | "response" | "broadcast"
+
+export interface SubagentMailboxMessage {
+  readonly id: string
+  readonly from: string
+  readonly to: string
+  readonly kind: SubagentMailboxMessageKind
+  readonly body: string
+  readonly correlationId?: string
+  readonly sentAt: number
+  /** Present only when the host team-scoped adapter denied delivery. */
+  readonly denied?: "cross-team"
+}
+
+export interface SubagentMailboxToolPort {
+  send(init: {
+    from: string
+    to: string
+    kind: SubagentMailboxMessageKind
+    body: string
+    correlationId?: string
+  }): SubagentMailboxMessage
+  read(agentId: string, opts?: { limit?: number }): readonly SubagentMailboxMessage[]
+  peek(agentId: string, opts?: { limit?: number }): readonly SubagentMailboxMessage[]
+  pendingFor(agentId: string): number
+}
+
+/** Stable root mailbox address. This is protocol data, not a host dependency. */
+const ROOT_MAILBOX_AGENT_ID = "root"
 
 const KIND_ENUM = [
   "request",
   "response",
   "broadcast",
-] as const satisfies readonly MailboxMessageKind[]
+] as const satisfies readonly SubagentMailboxMessageKind[]
 // Two-way drift guard: `satisfies` proves array⊆union; this Assert proves the
-// REVERSE. Add a kind to MailboxMessageKind but forget the zod enum → the
+// REVERSE. Add a kind to SubagentMailboxMessageKind but forget the zod enum → the
 // subagent can never send that kind. Build error instead of silent gap.
 type _AssertKind<T extends true> = T
 export type _MailboxKindDriftGuard = _AssertKind<
-  MailboxMessageKind extends (typeof KIND_ENUM)[number] ? true : false
+  SubagentMailboxMessageKind extends (typeof KIND_ENUM)[number] ? true : false
 >
 
 // Input caps (R2 audit-H — DoS via 16MB `to`/100MB `correlation_id` → 1024-cell
@@ -123,7 +154,7 @@ const resolveTarget = (to: string, ctx: ToolContext): string => {
 }
 
 /** Render a sent message to concise model-facing confirmation text. */
-const renderSent = (m: MailboxMessage): string => {
+const renderSent = (m: SubagentMailboxMessage): string => {
   const lines: string[] = []
   lines.push(`sent message ${m.id}`)
   lines.push(`from: ${m.from}`)
@@ -136,7 +167,9 @@ const renderSent = (m: MailboxMessage): string => {
 
 const errResult = (msg: string): ToolResult => ({ ok: false, output: msg })
 
-const buildSubagentSendMessage = (port: MailboxPort): Tool<SubagentSendMessageInput> => ({
+const buildSubagentSendMessage = (
+  port: SubagentMailboxToolPort,
+): Tool<SubagentSendMessageInput> => ({
   name: "subagent_send_message",
   description:
     "Send a message to another agent in this run WITHOUT tearing it down. " +
@@ -165,7 +198,7 @@ const buildSubagentSendMessage = (port: MailboxPort): Tool<SubagentSendMessageIn
       const init: {
         from: string
         to: string
-        kind: MailboxMessageKind
+        kind: SubagentMailboxMessageKind
         body: string
         correlationId?: string
       } = { from, to, kind: parsed.data.kind, body: parsed.data.body }
@@ -232,7 +265,7 @@ const escapeBodyForLine = (body: string): string => body.replace(/\r\n|\r|\n/g, 
 /** Render one inbox message to a concise model-facing line:
  *  `from→to [kind] body (id, correlationId?)`. One line per message — the body
  *  is newline-escaped so it cannot inject a forged second line. */
-const renderMessage = (m: MailboxMessage): string => {
+const renderMessage = (m: SubagentMailboxMessage): string => {
   const tail = m.correlationId !== undefined ? `(${m.id}, ${m.correlationId})` : `(${m.id})`
   return `${m.from}→${m.to} [${m.kind}] ${escapeBodyForLine(m.body)} ${tail}`
 }
@@ -240,12 +273,14 @@ const renderMessage = (m: MailboxMessage): string => {
 /** Render the full inbox view: messages oldest-first (the port already returns
  *  them sorted by `sentAt`) plus a trailing `pending: <n>` line. Empty inbox ⇒
  *  the literal `"(no messages)"` followed by the pending line. */
-const renderInbox = (messages: readonly MailboxMessage[], pending: number): string => {
+const renderInbox = (messages: readonly SubagentMailboxMessage[], pending: number): string => {
   const body = messages.length === 0 ? "(no messages)" : messages.map(renderMessage).join("\n")
   return `${body}\npending: ${pending}`
 }
 
-const buildSubagentReadMessages = (port: MailboxPort): Tool<SubagentReadMessagesInput> => ({
+const buildSubagentReadMessages = (
+  port: SubagentMailboxToolPort,
+): Tool<SubagentReadMessagesInput> => ({
   name: "subagent_read_messages",
   description:
     "Poll your own inbox for messages other agents sent you (or broadcast). " +
@@ -279,11 +314,11 @@ const buildSubagentReadMessages = (port: MailboxPort): Tool<SubagentReadMessages
   },
 })
 
-/** Build the subagent-mailbox tools wired to a single `MailboxPort`. Returned as
+/** Build the subagent-mailbox tools wired to a single narrow port. Returned as
  *  a stable array so the tier-1 composer can spread it uniformly (mirrors
  *  `objectiveTools` / `subagentBgTools` shape). Both the SEND (ADR-0416) and READ
  *  (ADR-0419) tools share the SAME port instance and the SAME id-derivation. */
-export const subagentMailboxTools = (port: MailboxPort): Tool[] => [
+export const subagentMailboxTools = (port: SubagentMailboxToolPort): Tool[] => [
   buildSubagentSendMessage(port) as Tool,
   buildSubagentReadMessages(port) as Tool,
 ]

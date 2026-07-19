@@ -12,6 +12,8 @@ configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core"]
 depends_on: [objective-first-class]
+config_refs:
+  env: [QUANTA_OBJECTIVE_TOOLS]
 surface_integration:
   cli: full
   web: full
