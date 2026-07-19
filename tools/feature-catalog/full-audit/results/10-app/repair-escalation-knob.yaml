@@ -1,0 +1,56 @@
+version: 1
+feature_id: repair-escalation-knob
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/runner/batch/eval/driver/localize-prep.ts:repairEscalationFollowupOwners
+entrypoints: [src/apps/bench/index.ts]
+activation: [QUANTA_BENCH_REPAIR_ESCALATION=1, "closure-capability preset repair-escalation=1"]
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/config/knob-schema/schemas/bench-a.ts:repairEscalationSchema
+  - src/agent/repair-escalation.ts:decideEscalation
+consumer:
+  - src/runner/batch/eval/driver/localize-prep.ts
+  - src/runner/batch/eval/driver/result-assembly.ts
+reachable: yes
+surface_findings:
+  - "Bench: ON widens follow-up owners only when a primary rail remains red and owner evidence corroborates widening."
+  - "OFF skips escalation and preserves the existing owner set."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset env leaves posture.repairEscalation false.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts tests/unit/repair-escalation.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: ON reaches posture and red-rail plus corroborated-owner escalation semantics pass.
+failure_posture: fail-closed
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Feature is reachable through localize preparation and result assembly.
+  - kind: test
+    command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts tests/unit/repair-escalation.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Default-OFF projection and 9 escalation taxonomy cases pass.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

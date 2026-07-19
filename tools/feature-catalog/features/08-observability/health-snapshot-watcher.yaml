@@ -3,7 +3,7 @@ title: Health snapshot watcher — periodic re-emit + SIGHUP hot-reload (3-chann
 section: 8
 subsystem: 관측성 — operator-facing file refresh layering
 order: 99
-maturity: L3
+maturity: L2
 status: stable
 ui_surfaces: [cli]
 monitoring: integrated
@@ -51,7 +51,16 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    The watcher is an isolated, tested primitive. No production composition
+    root calls startHealthSnapshotWatcher(), owns its shutdown handle, or
+    exposes its manual refresh seam. Keeping it at L3 would overclaim a live
+    long-running health refresh path.
+  promotion_path: |
+    Wire one daemon or observability composition root, prove interval and
+    SIGHUP refresh against the real health file, and close the handle during
+    shutdown before restoring L3.
 notes: |
   Default-OFF — composition root (withFullObservability) does NOT attach the
   watcher automatically; callers must invoke startHealthSnapshotWatcher()

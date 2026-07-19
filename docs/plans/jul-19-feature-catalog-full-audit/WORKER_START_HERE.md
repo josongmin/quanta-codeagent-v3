@@ -26,6 +26,8 @@ coordinator-owned.
 ## Stop conditions
 
 - No consumer: stop and classify `seam-only` or `not-activatable`.
+- Intentional docs/eval/CI-governance artifact: classify `non-runtime`; do not
+  invent a production consumer to obtain `pass`.
 - Evidence path is unrelated: classify `stale-claim`; do not launder it with a
   nearby passing test.
 - External prerequisite unavailable: classify `conditional` with an exact

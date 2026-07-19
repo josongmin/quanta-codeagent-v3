@@ -1,0 +1,48 @@
+version: 1
+feature_id: otlp-helper
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/observability/metrics/otlp-helper.ts:otlpHttpMetricSink
+entrypoints: []
+activation: ["factory call plus optional OTel dependency installation"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/observability/metrics/otlp-helper.ts:otlpHttpMetricSink
+  - src/observability/metrics/otlp-helper.ts:prometheusMetricSink
+consumer: []
+reachable: no
+surface_findings:
+  - "Only tests invoke the factories; no production observability root selects an exporter or owns shutdown."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-metrics-otlp-helper-hellgate.test.ts tests/unit/otel-resource-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Injected loaders prove OTLP and Prometheus construction, resource attrs, configuration, and shutdown.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: seam-only
+blocker: No production composition root invokes the factory, pins optional exporter dependencies, or owns graceful shutdown.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg otlp-helper src tests
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production factory call exists.
+  - kind: test
+    command: bun test tests/unit/observability-metrics-otlp-helper-hellgate.test.ts tests/unit/otel-resource-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 20 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

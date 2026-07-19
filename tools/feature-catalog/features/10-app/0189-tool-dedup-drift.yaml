@@ -3,7 +3,7 @@ title: Per-tool TTL drift detector — config-vs-preset divergence as typed sign
 section: 10
 subsystem: Tool-dedup config drift detection
 order: 92
-maturity: L3
+maturity: L2
 status: stable
 ui_surfaces: [cli]
 monitoring: integrated
@@ -41,11 +41,20 @@ evidence:
   tests:
     unit:
       - tests/unit/observability-tool-dedup-drift-hellgate.test.ts
-      - tests/unit/observability-tool-dedup-drift-hellgate.test.ts
+      - tests/unit/observability-metrics-instrument-tool-dedup-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    Drift classification is only reached when a caller constructs the optional
+    ToolCallCache with checkRecommendedDrift enabled. No production tool
+    composition root constructs that cache or installs instrumentToolWithDedup,
+    so current evidence proves the primitive rather than a live detector.
+  promotion_path: |
+    Wire the cache and wrapper at the authoritative tool composition root,
+    enable drift checking through an explicit policy, and prove operator-log
+    plus metric emission on a synthetic configuration mismatch.
 notes: |
   Sibling dual-audience pattern to ADR-0169 (skipped-warning operator
   log) + ADR-0175 (wired-gauge machine counter). All options default-OFF.

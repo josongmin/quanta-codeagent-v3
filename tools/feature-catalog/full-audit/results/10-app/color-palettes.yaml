@@ -1,0 +1,47 @@
+version: 1
+feature_id: color-palettes
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/apps/cli/color-palettes.ts:getColorPalette
+entrypoints: []
+activation: ["renderer call to getColorPalette; no current render call site"]
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer: [src/apps/cli/color-palettes.ts:getColorPalette]
+consumer: []
+reachable: no
+surface_findings:
+  - "The /color command accepts and persists daltonized theme names, but no renderer consumes the palette hex roles."
+  - "Only unit and drift tests import getColorPalette."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/color-palettes.test.ts src/apps/cli/__tests__/theme-daltonized-drift.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Palette totality, safety, role integrity, grayscale, and enum binding pass in isolation.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No host status, box, or text renderer maps the selected theme through getColorPalette.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg color-palettes src tests
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production palette resolver consumer exists.
+  - kind: test
+    command: bun test src/apps/cli/__tests__/color-palettes.test.ts src/apps/cli/__tests__/theme-daltonized-drift.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 13 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

@@ -26,16 +26,27 @@ seed owners introduced before this snapshot.
 - `bun fc lint`: green; orphan Accepted ADR count reduced from 4 to 0.
 - `bun fc diff`: green at the authority snapshot before this campaign's YAML edits.
 - `default-off-ledger-checker`: `eligible=176 runtime_cli_seeds=30 unknown_surfaces=0 unknown_values=0`.
-- Reachability baseline: removed stale `bug-fix-proposal-queue` grandfather;
-  `pr-output-sink-redaction` remains because symbol-level dead-API proof still
-  reproduces.
+- Reachability baseline: the grandfather list is now empty. Package-script and
+  `import.meta.main` roots are discovered as executable entrypoints, while 12
+  genuinely isolated L3 claims were downgraded to L2.
 - Full-audit snapshot and queue are generated under
   `tools/feature-catalog/full-audit/`.
+
+## P0 closeout
+
+- Closed: 28/28; pending P0: 0.
+- Verdicts: 12 `pass`, 12 `seam-only`, 3 `non-runtime`, 1 `proof-gap`.
+- Independent review: 28 pending; no record is approved by its auditor.
+- Current module and symbol reachability: 0 L3+ offenders and 0 grandfathered.
+- Open proof gap: retrieval real-API eval produced 4 pass, 25 credential skips,
+  and 1 Ollama latency timeout; it remains held without retry laundering.
 
 ## Verdicts
 
 `pass`, `conditional`, `seam-only`, `not-activatable`, `proof-gap`,
-`stale-claim`, `duplicate`, or `removed`.
+`stale-claim`, `non-runtime`, `duplicate`, or `removed`. `non-runtime` is for
+intentional ADR, eval, or CI-governance artifacts and never asserts production
+reachability.
 
 A verdict is not complete without the owner seam, entrypoint, activation,
 producer, consumer, surface findings, failure posture, and revision-bound

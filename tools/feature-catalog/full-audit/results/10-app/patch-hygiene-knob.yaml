@@ -1,0 +1,56 @@
+version: 1
+feature_id: patch-hygiene-knob
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/runner/batch/eval/driver/result-assembly.ts:attachClosureOutputs
+entrypoints: [src/apps/bench/index.ts]
+activation: [QUANTA_BENCH_PATCH_HYGIENE=1, "patch-hygiene posture module"]
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/config/knob-schema/schemas/bench-a.ts:patchHygieneSchema
+  - src/runner/batch/eval/closure-diagnostics-io.ts:buildPatchHygiene
+consumer:
+  - src/runner/batch/eval/driver/result-assembly.ts
+  - src/apps/bench/run-main.ts
+reachable: yes
+surface_findings:
+  - "Bench: ON emits patch-hygiene result fields and deny telemetry into the instance result."
+  - "Owner-outside remains telemetry; only bounded stray-file classes deny."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset env leaves posture.patchHygiene false.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts tests/unit/patch-hygiene.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: ON reaches posture and stray-file, allowlist, owner, and empty-diff semantics pass.
+failure_posture: fail-closed
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Feature is reachable through result assembly and bench report composition.
+  - kind: test
+    command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts tests/unit/patch-hygiene.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Default-OFF projection and 9 hygiene semantics cases pass.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

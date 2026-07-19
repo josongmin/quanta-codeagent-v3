@@ -1,0 +1,47 @@
+version: 1
+feature_id: darwin-vz-native-scaffold
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/mcp/skybridge/applevz-native.ts:nativeAppleVzSandbox
+entrypoints: []
+activation: ["caller constructs nativeAppleVzSandbox and injects it into skybridge registry config"]
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: off
+producer: [src/mcp/skybridge/applevz-native.ts:nativeAppleVzSandbox]
+consumer: []
+reachable: no
+surface_findings:
+  - "Registry supports an injected nativeAppleVzSandbox but no production root constructs or injects it."
+  - "The optional N-API package loader and real VZVirtualMachine bring-up remain absent; tests use fake bindings."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp-skybridge-applevz-native-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 20 fake-binding availability, mapping, spawn, error, and injected-registry cases pass.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: seam-only
+blocker: No signed native package, real VM/image/vsock flow, or production composition-root injection exists.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg nativeAppleVzSandbox src/mcp/skybridge src/apps
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Registry owns only an optional injected slot; no production constructor call exists.
+  - kind: test
+    command: bun test tests/unit/mcp-skybridge-applevz-native-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 20 pass, 0 fail against fake bindings.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

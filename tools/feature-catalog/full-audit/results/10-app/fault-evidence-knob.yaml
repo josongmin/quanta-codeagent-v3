@@ -1,0 +1,56 @@
+version: 1
+feature_id: fault-evidence-knob
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/runner/batch/eval/closure-session.ts:buildClosureSession
+entrypoints: [src/apps/bench/index.ts]
+activation: [QUANTA_BENCH_FAULT_EVIDENCE=1, "closure-capability preset fault-evidence=1"]
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/config/knob-schema/schemas/bench-a.ts:faultEvidenceSchema
+  - src/runner/batch/eval/closure-session.ts:buildClosureSession
+consumer:
+  - src/runner/batch/eval/driver/attempt-context.ts
+  - src/runner/batch/eval/driver/result-assembly.ts
+reachable: yes
+surface_findings:
+  - "Bench: ON builds bounded owner evidence and injects or emits it through the attempt/result path."
+  - "Web and interactive CLI: not applicable."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset env leaves posture.faultEvidence false and does not perturb sibling knobs.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts tests/unit/bench-fault-evidence-wiring.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: ON reaches posture; bounded ranked evidence renders without raw source bodies.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Feature is reachable after evidence follows schema, posture, closure session, and result assembly.
+  - kind: test
+    command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts tests/unit/bench-fault-evidence-wiring.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Default-OFF projection and bounded ON behavior pass.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

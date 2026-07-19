@@ -13,12 +13,12 @@ owners: ["@songmin"]
 labels: ["surface:cli", "integration:github"]
 depends_on: [pii-redaction-scanner, secret-detection-scanner, github-actions-trigger-adapter]
 surface_integration:
-  cli: missing
+  cli: partial
   web: missing
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    cli: "the standalone from-pr-cmd-runner constructs the mandatory-redaction sink; it is installable from the Actions workflow template but is not registered in the interactive CLI dispatcher"
     web: "backend PR-comment sink with redaction marker; no browser affordance"
 purpose: |
   Closed-port sink for every outgoing PR comment / review / issue reply
@@ -46,6 +46,7 @@ evidence:
   code:
     - src/integrations/github/pr-output-sink.ts
     - src/integrations/github/pr-context-loader.ts
+    - src/apps/cli/from-pr-cmd.ts
   adrs: [313]
   tests:
     unit:

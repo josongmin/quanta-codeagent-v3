@@ -26,6 +26,9 @@ purpose: 'Default-OFF: append adversarial-coverage block to repro generation so 
 evidence:
   code:
     - src/runner/knobs/knobs/adversarial-repro.ts
+    - src/config/knob-schema/schemas/bench-b.ts
+    - src/runner/batch/eval/knobs-bench.ts
+    - src/runner/batch/eval/driver/repro-test-prep.ts
   adrs: [433]
   tests:
     unit:

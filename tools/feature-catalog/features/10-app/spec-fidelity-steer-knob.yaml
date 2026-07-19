@@ -26,6 +26,9 @@ purpose: 'Default-OFF: when issue declares concrete expected output, append mini
 evidence:
   code:
     - src/runner/knobs/knobs/spec-fidelity-steer.ts
+    - src/config/knob-schema/schemas/bench-a.ts
+    - src/runner/batch/eval/knobs-bench.ts
+    - src/runner/batch/eval/driver/config-build.ts
   adrs: [533]
   tests:
     unit:

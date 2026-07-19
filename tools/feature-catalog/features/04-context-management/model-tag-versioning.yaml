@@ -3,7 +3,7 @@ title: ModelTag versioning + invalidator + canonical codec (ADR-0266)
 section: 4
 subsystem: retrieval — embedding model identity / cache-store invalidation
 order: 266
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [cli]
 monitoring: integrated

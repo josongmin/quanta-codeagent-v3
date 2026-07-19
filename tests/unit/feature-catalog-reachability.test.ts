@@ -53,6 +53,16 @@ const l4plus = (s: string): boolean => {
 describe("fc reachability — import-graph ground truth", () => {
   test("REACH-01: entrypoint + core modules are reached", () => {
     expect(r.reached.has("src/apps/cli/index.ts")).toBe(true)
+    // `bun run bench` targets cli.ts directly; package-script roots must seed
+    // reachability instead of being misclassified because their filename is
+    // not index.ts.
+    expect(r.reached.has("src/apps/bench/cli.ts")).toBe(true)
+    expect(r.reached.has("src/apps/bench/commands/analyze.ts")).toBe(true)
+    expect(r.reached.has("src/apps/bench/commands/grade.ts")).toBe(true)
+    // Standalone installable runners are production roots even when they are
+    // not registered in the interactive CLI or package scripts.
+    expect(r.reached.has("src/apps/cli/from-pr-cmd-runner.ts")).toBe(true)
+    expect(r.reached.has("src/apps/cli/from-pr-cmd.ts")).toBe(true)
     expect(r.reached.has("src/agent/loop.ts")).toBe(true)
     expect(r.reached.has("src/apps/cli/repl/surface-compose.ts")).toBe(true)
   })

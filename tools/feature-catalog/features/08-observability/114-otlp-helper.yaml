@@ -3,7 +3,7 @@ title: OTLP HTTP + Prometheus exporter helpers
 section: 8
 subsystem: metrics export (ADR-0144)
 order: 114
-maturity: L3
+maturity: L2
 status: stable
 ui_surfaces: [api]
 monitoring: integrated
@@ -37,7 +37,16 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    The exporter factories and typed missing-dependency behavior are tested,
+    but no production composition root invokes either helper or owns the
+    returned shutdown handle. This is an optional adapter seam, not an active
+    exporter path.
+  promotion_path: |
+    Add an explicit observability composition-root selection, install and pin
+    the chosen exporter dependencies, prove one emitted metric reaches the
+    configured backend, and verify graceful shutdown before restoring L3.
 notes: |
   Zero runtime npm deps until caller invokes the helper. Test seam `__loader`
   injects fake module surface for off-network unit tests.

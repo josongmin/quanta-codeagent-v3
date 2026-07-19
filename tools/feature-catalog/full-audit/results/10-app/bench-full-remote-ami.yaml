@@ -1,0 +1,51 @@
+version: 1
+feature_id: bench-full-remote-ami
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/apps/bench/commands/grade.ts:cmdGrade
+entrypoints: [src/apps/bench/cli.ts]
+activation: ["quanta-bench grade --mode full", "quanta-bench remote"]
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/apps/bench/commands/grade.ts:cmdGrade
+  - src/apps/bench/remote/full.ts:runFullRemote
+consumer:
+  - src/apps/bench/cli.ts
+  - src/apps/bench/commands/grade.ts
+reachable: yes
+surface_findings:
+  - "The package bench script directly executes bench/cli.ts, which dispatches grade/remote to the full-remote owner."
+  - "The prior unreachable verdict was a catalog analyzer false positive caused by index.ts-only entrypoint discovery."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/bench-full-remote-hellgate.test.ts tests/unit/bench-pool-hellgate.test.ts tests/integration/bench-box-ls-status.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Hermetic remote orchestration proves auth minimization, launch hardening, artifacts, cleanup, relaunch, pooling, status, and failure paths.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: bun test tests/unit/feature-catalog-reachability.test.ts && bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Package-script entrypoint reaches bench commands and remote implementation.
+  - kind: test
+    command: bun test tests/unit/bench-pool-hellgate.test.ts tests/unit/bench-full-remote-hellgate.test.ts tests/unit/bench-full-remote-relaunch-hellgate.test.ts tests/unit/bench-full-remote-stream-hellgate.test.ts tests/unit/full-remote-bench-env-forward.test.ts tests/unit/bench-remote-backend.test.ts tests/unit/bench-concurrency-hellgate.test.ts tests/integration/bench-box-ls-status.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Full-remote owner rails passed in the 384-case grouped run.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

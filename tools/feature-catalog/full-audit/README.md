@@ -29,6 +29,8 @@ a `closed` file must satisfy the strict schema in `schema.ts`.
 - A default-OFF `pass` also needs a separate passing OFF identity proof.
 - `conditional` needs a concrete blocker or prerequisite.
 - `seam-only` and `not-activatable` cannot claim production reachability.
+- `non-runtime` is reserved for documentation, eval, or governance artifacts
+  whose catalog claim is intentionally not a production execution surface.
 - Every closed verdict carries source/test/runtime receipts tied to a revision.
 
 The catalog YAML remains the feature-claim SSOT. This directory records whether

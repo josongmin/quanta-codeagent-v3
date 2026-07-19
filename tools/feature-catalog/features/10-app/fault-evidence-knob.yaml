@@ -26,6 +26,10 @@ purpose: 'Default-OFF NOOP-apply registry knob: emit bounded typed FaultEvidence
 evidence:
   code:
     - src/runner/knobs/knobs/fault-evidence.ts
+    - src/config/knob-schema/schemas/bench-a.ts
+    - src/runner/batch/eval/knobs-bench.ts
+    - src/runner/batch/eval/closure-session.ts
+    - src/runner/batch/eval/driver/result-assembly.ts
   adrs: [533]
   tests:
     unit:

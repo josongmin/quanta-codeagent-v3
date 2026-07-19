@@ -1,0 +1,49 @@
+version: 1
+feature_id: real-api-smoke-eval
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: tests/eval/retrieval
+entrypoints: ["bun test tests/eval/retrieval"]
+activation: ["manual eval command plus vendor credentials or reachable local Ollama"]
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer: [tests/eval/retrieval/_helpers.ts]
+consumer:
+  - tests/eval/retrieval/openai-embedder.eval.test.ts
+  - tests/eval/retrieval/ollama-embedder.eval.test.ts
+reachable: conditional
+surface_findings:
+  - "The eval battery is manual-only and absent from the test:eval/package CI surface."
+  - "Current run: 25 credential-gated cases skipped; local Ollama ran 5 cases with 4 pass and 1 timeout."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: external
+  command: bun test tests/eval/retrieval
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: HELL-OLL-01 exceeded the 5s test timeout; 4 Ollama cases passed and 25 vendor cases skipped without keys.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: proof-gap
+blocker: No credentialed multi-vendor receipt exists, no nightly runner owns the battery, and the available Ollama rail is currently RED on latency.
+disposition: hold
+receipts:
+  - kind: external
+    command: bun test tests/eval/retrieval
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: 4 pass, 25 skip, 1 fail; Ollama dimension/capability case timed out after 5000ms.
+  - kind: source
+    command: bun fc validate --strict
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All six eval files and ADR references resolve.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

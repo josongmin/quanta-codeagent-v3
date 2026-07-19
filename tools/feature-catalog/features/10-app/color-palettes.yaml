@@ -3,7 +3,7 @@ title: Colorblind-safe color palettes (Okabe-Ito CUD SSOT)
 section: 10
 subsystem: Surface-agnostic UI helpers (theming data SSOT)
 order: 97
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [cli]
 monitoring: n-a

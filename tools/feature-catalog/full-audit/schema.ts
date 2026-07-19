@@ -74,6 +74,7 @@ const ClosedAuditRecordSchema = AuditRecordBaseSchema.extend({
     "not-activatable",
     "proof-gap",
     "stale-claim",
+    "non-runtime",
     "duplicate",
     "removed",
   ]),
@@ -117,7 +118,10 @@ const refineVerdict = (record: ClosedAuditRecord, ctx: z.RefinementCtx): void =>
   if (record.verdict === "conditional" && record.blocker === null) {
     ctx.addIssue({ code: "custom", message: "CONDITIONAL requires blocker", path: ["blocker"] })
   }
-  if (["seam-only", "not-activatable"].includes(record.verdict) && record.reachable === "yes") {
+  if (
+    ["seam-only", "not-activatable", "non-runtime"].includes(record.verdict) &&
+    record.reachable === "yes"
+  ) {
     ctx.addIssue({
       code: "custom",
       message: `${record.verdict} cannot claim reachable=yes`,

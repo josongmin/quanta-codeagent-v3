@@ -26,6 +26,10 @@ purpose: 'Default-OFF NOOP-apply registry knob: emit PatchHygieneReport (stray-f
 evidence:
   code:
     - src/runner/knobs/knobs/patch-hygiene.ts
+    - src/config/knob-schema/schemas/bench-a.ts
+    - src/runner/batch/eval/knobs-bench.ts
+    - src/runner/batch/eval/closure-diagnostics-io.ts
+    - src/runner/batch/eval/driver/result-assembly.ts
   adrs: [17]
   tests:
     unit:

@@ -1,0 +1,51 @@
+version: 1
+feature_id: tool-dedup-drift
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/observability/metrics/instrument-tool-dedup.ts:defaultToolCallCache
+entrypoints: []
+activation: ["construct cache with checkRecommendedDrift=true; no production caller"]
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/observability/metrics/instrument-tool-dedup.ts:defaultToolCallCache]
+consumer: []
+reachable: no
+surface_findings:
+  - "The optional cache and wrapper are test-only consumers; buildDefaultTools does not install them."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability-tool-dedup-drift-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Omitted or false drift gate emits no rows, warning, or metric.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-tool-dedup-drift-hellgate.test.ts tests/unit/observability-metrics-instrument-tool-dedup-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Drift taxonomy, warn and metric split, error isolation, TTL behavior, and wrapper behavior pass.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: seam-only
+blocker: No production tool composition root constructs the cache or enables the drift detector.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg instrument-tool-dedup src tests
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production composition consumer exists.
+  - kind: test
+    command: bun test tests/unit/observability-tool-dedup-drift-hellgate.test.ts tests/unit/observability-metrics-instrument-tool-dedup-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 54 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

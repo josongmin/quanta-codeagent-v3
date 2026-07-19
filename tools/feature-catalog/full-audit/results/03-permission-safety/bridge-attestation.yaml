@@ -1,0 +1,52 @@
+version: 1
+feature_id: bridge-attestation
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/security/bridge-attest/default-attestor.ts:createDefaultAttestor
+entrypoints: []
+activation: ["constructor call only; no production bridge or permission composition root calls it"]
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/security/bridge-attest/default-attestor.ts:createDefaultAttestor]
+consumer: []
+reachable: no
+surface_findings:
+  - "All production references are slice-local; only the hellgate imports the public barrel."
+  - "The default test-secret fallback is not acceptable as an implicit production activation path."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/security/bridge-attest-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Barrel import alone has no side effects.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/security/bridge-attest-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 15 isolated preflight, token, tamper, revoke, expiry, and event cases pass.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: seam-only
+blocker: No remote bridge, MCP tool, Tauri wrapper, or org-policy proxy constructs the attestor or subscribes to its events.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg bridge-attest src tests
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production references are confined to the owner slice.
+  - kind: test
+    command: bun test tests/unit/security/bridge-attest-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 15 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

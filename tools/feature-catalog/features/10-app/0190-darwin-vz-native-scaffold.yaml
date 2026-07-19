@@ -3,7 +3,7 @@ title: Darwin VZ native scaffold — napi-rs binding to Virtualization.framework
 section: 10
 subsystem: Darwin microVM native helper (Skybridge Phase 3.3)
 order: 93
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [api]
 monitoring: planned

@@ -1,0 +1,56 @@
+version: 1
+feature_id: verification-plan-knob
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/runner/batch/eval/closure-session.ts:buildClosureSession
+entrypoints: [src/apps/bench/index.ts]
+activation: [QUANTA_BENCH_VERIFICATION_PLAN=1, "closure-capability preset verification-plan=1"]
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/config/knob-schema/schemas/bench-a.ts:verificationPlanSchema
+  - src/agent/verification-plan/build.ts:buildVerificationPlan
+consumer:
+  - src/runner/batch/eval/driver/attempt-context.ts
+  - src/runner/batch/eval/driver/result-assembly.ts
+reachable: yes
+surface_findings:
+  - "Bench: ON selects typed primary, required, and optional verification steps from public evidence."
+  - "Absent evidence degrades to primaryRail=null instead of inventing authority."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset env leaves posture.verificationPlan false.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts tests/unit/verification-plan.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: ON reaches posture and plan construction preserves red-on-injection and typed predicates.
+failure_posture: fail-closed
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Feature is reachable through closure-session production composition.
+  - kind: test
+    command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts tests/unit/verification-plan.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Default-OFF projection and 17 plan semantics cases pass.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

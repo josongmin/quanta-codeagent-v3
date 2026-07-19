@@ -26,6 +26,10 @@ purpose: 'Default-OFF per-instance retry cap (integer N in [1,5]; N unset => sin
 evidence:
   code:
     - src/runner/knobs/knobs/retry-transient.ts
+    - src/config/knob-schema/schemas/bench-loop.ts
+    - src/runner/batch/eval/knobs-bench.ts
+    - src/apps/bench/eval/driver.ts
+    - src/runner/batch/eval/retry-policy.ts
   adrs: []
   tests:
     unit: [tests/unit/kernel/derive-parity.test.ts]

@@ -1,0 +1,37 @@
+version: 1
+feature_id: negative-invariants-doc-ssot
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: docs/decisions/0044-negative-invariants.md
+entrypoints: []
+activation: ["architecture and security review convention"]
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer: [docs/decisions/0044-negative-invariants.md]
+consumer: []
+reachable: no
+surface_findings:
+  - "The catalog claim is explicitly a negative-space ADR SSOT, not executable product behavior."
+  - "Runtime companions for individual invariants are cataloged separately and are not laundered into this verdict."
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: na
+security_posture: conditional
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: bun fc validate --strict
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: ADR-0044 resolves and the doc-only feature has no missing evidence.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

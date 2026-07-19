@@ -5,7 +5,9 @@
  * self-declared `fc judge` axes + grep heuristics could not give. Builds the
  * real import/re-export graph over `src/**\/*.ts` (resolving `@/` + relative
  * specifiers to actual files), then BFS from the production ENTRYPOINTS
- * (`src/apps/<surface>/index.ts`). A feature whose `evidence.code` files are
+ * (`src/apps/<surface>/index.ts`, executable `package.json` script targets,
+ * and source modules guarded by `import.meta.main`).
+ * A feature whose `evidence.code` files are
  * NOT in the transitive closure is genuinely unreachable — no `.js`-mirror
  * noise, no basename collisions, no barrel/test false-positives.
  *
@@ -28,28 +30,68 @@ import { dirname, join, relative, resolve } from "node:path"
 const REPO_ROOT = resolve(import.meta.dir, "..", "..")
 const SRC = join(REPO_ROOT, "src")
 
-/** Production entrypoints — EVERY shipped surface's root module, auto-
- *  discovered as `src/apps/<surface>/index.ts`. A feature is "wired" iff
- *  reachable from at least one. Auto-discovery (vs a hand list) is what fixes
- *  the agent audit's false positives — apps/bench, apps/eval, apps/probe,
- *  apps/headless are ALL real surfaces and must seed the closure. */
-const discoverEntrypoints = async (): Promise<string[]> => {
+const SCRIPT_ENTRY_RE = /\bsrc\/[A-Za-z0-9_./-]+\.ts\b/g
+
+const packageScriptEntrypoints = async (): Promise<string[]> => {
+  const raw = await readFile(join(REPO_ROOT, "package.json"), "utf8").catch(() => "")
+  let scripts: Record<string, unknown> = {}
+  try {
+    const parsed = JSON.parse(raw) as { scripts?: Record<string, unknown> }
+    scripts = parsed.scripts ?? {}
+  } catch {
+    return []
+  }
+  const out = new Set<string>()
+  for (const command of Object.values(scripts)) {
+    if (typeof command !== "string") continue
+    for (const candidate of command.match(SCRIPT_ENTRY_RE) ?? []) {
+      const absolute = join(REPO_ROOT, candidate)
+      try {
+        if ((await stat(absolute)).isFile()) out.add(candidate)
+      } catch {
+        /* stale script target; package checks own that failure */
+      }
+    }
+  }
+  return [...out]
+}
+
+const importMetaMainEntrypoints = async (): Promise<string[]> => {
   const out: string[] = []
+  for (const file of await walk(SRC)) {
+    const content = await readFile(file, "utf8").catch(() => "")
+    // Accept both Bun's direct `import.meta.main` and the typed-cast form
+    // `(import.meta as { main?: boolean }).main` used by strict TS modules.
+    if (/\bimport\.meta(?:\.main|\s+as\s+\{[^}]+\}\)\.main)\b/.test(stripComments(content))) {
+      out.push(relative(REPO_ROOT, file))
+    }
+  }
+  return out
+}
+
+/** Production entrypoints — EVERY shipped surface's root module, auto-
+ *  discovered as `src/apps/<surface>/index.ts`, executable src targets named
+ *  by package scripts, and direct-run modules guarded by `import.meta.main`.
+ *  The extra sources cover real alternate roots such as bench/cli.ts and the
+ *  installable GitHub Actions from-pr runner. */
+const discoverEntrypoints = async (): Promise<string[]> => {
+  const out = new Set(await packageScriptEntrypoints())
+  for (const entrypoint of await importMetaMainEntrypoints()) out.add(entrypoint)
   let apps: string[]
   try {
     apps = await readdir(join(SRC, "apps"))
   } catch {
-    return out
+    return [...out]
   }
   for (const app of apps) {
     const idx = join(SRC, "apps", app, "index.ts")
     try {
-      if ((await stat(idx)).isFile()) out.push(relative(REPO_ROOT, idx))
+      if ((await stat(idx)).isFile()) out.add(relative(REPO_ROOT, idx))
     } catch {
       /* no index */
     }
   }
-  return out
+  return [...out]
 }
 
 const isSkipped = (name: string): boolean =>

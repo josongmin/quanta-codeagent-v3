@@ -26,6 +26,11 @@ purpose: 'Default-OFF NOOP-apply registry knob: enforce planner-selected primary
 evidence:
   code:
     - src/runner/knobs/knobs/primary-rail.ts
+    - src/config/knob-schema/schemas/bench-a.ts
+    - src/runner/batch/eval/knobs-bench.ts
+    - src/runner/batch/eval/closure-session.ts
+    - src/runner/batch/eval/repair-phase-policy.ts
+    - src/runner/batch/eval/repair/index.ts
   adrs: [17]
   tests:
     unit:

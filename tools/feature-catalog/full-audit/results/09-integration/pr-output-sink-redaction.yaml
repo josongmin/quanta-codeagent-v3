@@ -1,0 +1,50 @@
+version: 1
+feature_id: pr-output-sink-redaction
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/integrations/github/pr-output-sink.ts:createPrOutputSink
+entrypoints: [src/apps/cli/from-pr-cmd-runner.ts]
+activation: ["standalone from-pr runner with a non-dry-run GitHub event"]
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: on
+producer: [src/apps/cli/from-pr-cmd.ts]
+consumer:
+  - src/apps/cli/from-pr-cmd.ts
+  - src/integrations/github/pr-output-sink.ts:createPrOutputSink
+reachable: yes
+surface_findings:
+  - "The standalone from-pr runner constructs the sink with the production redactor before posting."
+  - "The runner is installable from the Actions workflow template but is not registered in the interactive CLI dispatcher."
+  - "Webhook dispatch also exercises context load and write-back through hermetic gh and a real socket."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/integrations/github/cli-real-adapters-hellgate-r3.test.ts tests/integration/github-webhook-dispatch-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Production redaction, idempotency, signed dispatch, context load, post, and failure behavior pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg createPrOutputSink src/apps/cli/from-pr-cmd.ts src/integrations/github
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Live CLI construction path is present; catalog evidence now includes it.
+  - kind: test
+    command: bun test tests/unit/integrations/github/pr-output-sink.test.ts tests/unit/integrations/github/pr-output-sink-redaction-hellgate.test.ts tests/unit/integrations/github/cli-real-adapters-hellgate-r3.test.ts tests/integration/github-webhook-dispatch-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Sink security and production-adapter rails passed in the 384-case grouped run.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

@@ -151,4 +151,43 @@ describe("feature catalog full-audit", () => {
     const report = validateAuditState(snapshot, [record], new Set(["a"]))
     expect(report.errors).toContain("default-OFF PASS lacks OFF identity proof: a")
   })
+
+  test("non-runtime verdict cannot claim production reachability", () => {
+    const result = AuditRecordSchema.safeParse({
+      version: 1,
+      feature_id: "policy-doc",
+      snapshot_head: "a".repeat(40),
+      status: "closed",
+      owner_seam: "docs/decisions/0001-policy.md",
+      entrypoints: [],
+      activation: ["human review"],
+      effective_defaults: { cli: "na", web: "na", bench: "na", headless: "na", daemon: "na" },
+      producer: ["docs/decisions/0001-policy.md"],
+      consumer: [],
+      reachable: "yes",
+      surface_findings: ["documentation only"],
+      off_identity_proof: null,
+      on_efficacy_proof: null,
+      failure_posture: "na",
+      security_posture: "na",
+      observability: "na",
+      verdict: "non-runtime",
+      blocker: null,
+      disposition: "keep",
+      receipts: [
+        {
+          kind: "source",
+          command: "test -f docs/decisions/0001-policy.md",
+          revision: "abcdef0",
+          result: "pass",
+          evidence: "document exists",
+        },
+      ],
+      audited_at: "2026-07-19",
+      auditor: "a",
+      review_state: "pending",
+      reviewer: null,
+    })
+    expect(result.success).toBe(false)
+  })
 })

@@ -1,0 +1,55 @@
+version: 1
+feature_id: spec-fidelity-steer-knob
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/runner/batch/eval/driver/config-build.ts:buildDirectiveSteers
+entrypoints: [src/apps/bench/index.ts]
+activation: [QUANTA_BENCH_SPEC_FIDELITY_STEER=1, "spec-fidelity posture module"]
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/config/knob-schema/schemas/bench-a.ts:specFidelitySteerSchema
+  - src/runner/batch/eval/knobs-bench.ts:benchPostureFromState
+consumer:
+  - src/runner/batch/eval/driver/config-build.ts:buildDirectiveSteers
+reachable: yes
+surface_findings:
+  - "Bench: ON injects a minimal-literal-fix steer only when the public issue declares concrete expected output."
+  - "Missing specification fails closed with no prompt mutation."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/spec-fidelity-steer-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset knob with declared output leaves the steer absent.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/spec-fidelity-steer-wiring-hellgate.test.ts tests/unit/extract-issue-codeblock-recall.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: ON plus declared output injects the steer; unsupported markers and removed recipes remain absent.
+failure_posture: fail-closed
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Feature is reachable through production config building.
+  - kind: test
+    command: bun test tests/unit/spec-fidelity-steer-wiring-hellgate.test.ts tests/unit/extract-issue-codeblock-recall.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: ON, OFF, fail-closed, precision, and code-block recall cases pass.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

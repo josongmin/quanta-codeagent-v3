@@ -29,6 +29,10 @@ purpose: |
 evidence:
   code:
     - src/runner/knobs/knobs/lsp-steer.ts
+    - src/config/knob-schema/schemas/bench-gap-1.ts
+    - src/runner/batch/eval/knobs-bench.ts
+    - src/runner/batch/eval/driver/config-build.ts
+    - src/agent/localize-phase-guard.ts
   adrs: [24, 535]
   tests:
     unit:

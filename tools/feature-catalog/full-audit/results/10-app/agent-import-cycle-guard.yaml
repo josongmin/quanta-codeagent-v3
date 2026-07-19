@@ -1,0 +1,44 @@
+version: 1
+feature_id: agent-import-cycle-guard
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: tests/unit/agent-import-cycle.test.ts
+entrypoints: ["bun test tests/unit"]
+activation: ["unit/CI test discovery"]
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - tests/unit/agent-import-cycle.test.ts
+  - tests/unit/agent-import-cycle-hellgate.test.ts
+consumer: ["Bun test runner and CI unit suite"]
+reachable: no
+surface_findings:
+  - "This is an active CI governance ratchet, not a runtime product feature."
+  - "The synthetic hellgate exercises the RED branches for cycle and top-level imported-value use."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent-import-cycle.test.ts tests/unit/agent-import-cycle-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Live tree invariant plus 21 synthetic anti-vacuum cases pass.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/agent-import-cycle.test.ts tests/unit/agent-import-cycle-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 23 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

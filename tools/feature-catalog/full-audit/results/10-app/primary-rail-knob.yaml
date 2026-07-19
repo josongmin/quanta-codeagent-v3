@@ -1,0 +1,56 @@
+version: 1
+feature_id: primary-rail-knob
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/runner/batch/eval/repair-phase-policy.ts:primaryRailAdmitsRepair
+entrypoints: [src/apps/bench/index.ts]
+activation: [QUANTA_BENCH_PRIMARY_RAIL=1, "closure-capability preset primary-rail=1"]
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/config/knob-schema/schemas/bench-a.ts:primaryRailSchema
+  - src/runner/batch/eval/closure-session.ts:buildClosureSession
+consumer:
+  - src/runner/batch/eval/repair-phase-policy.ts
+  - src/runner/batch/eval/repair/index.ts
+reachable: yes
+surface_findings:
+  - "Bench: ON admits repair only on a proven-red primary rail and blocks non-primary false greens."
+  - "OFF preserves the legacy agent-command validation path."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts tests/unit/repair-primary-rail-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset posture is false and absent primaryRailStep uses the original agent-command gate.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/repair-primary-rail-hellgate.test.ts tests/unit/primary-rail.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Red rail blocks false-green completion; green rail clears; admission requires a red rail.
+failure_posture: fail-closed
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Feature is reachable through closure session, repair policy, and repair validator.
+  - kind: test
+    command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts tests/unit/repair-primary-rail-hellgate.test.ts tests/unit/primary-rail.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: OFF identity, admission, finish gate, and repair validation cases pass.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

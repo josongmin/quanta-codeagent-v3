@@ -1,0 +1,51 @@
+version: 1
+feature_id: model-tag-auto-hook
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/retrieval/auto-hook/default-registrar.ts:createDefaultRegistrar
+entrypoints: []
+activation: ["factory construction, target registration, then installAll(invalidator)"]
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/retrieval/auto-hook/default-registrar.ts:createDefaultRegistrar]
+consumer: []
+reachable: no
+surface_findings:
+  - "No production composition root imports auto-hook or calls installAll."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/retrieval/auto-hook-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Uninstalled registrar leaves the invalidator registry unchanged.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/retrieval/auto-hook-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 12 isolated registration, invalidation, cleanup, idempotency, and concurrency cases pass.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: No real EmbedCache or VectorStore is staged and installed through the registrar.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg retrieval/auto-hook src tests
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production consumer exists outside the owner slice.
+  - kind: test
+    command: bun test tests/unit/retrieval/auto-hook-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 12 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

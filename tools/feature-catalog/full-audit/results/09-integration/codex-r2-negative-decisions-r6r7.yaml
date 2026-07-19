@@ -1,0 +1,38 @@
+version: 1
+feature_id: codex-r2-negative-decisions-r6r7
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: docs/decisions/0343-per-turn-image-retry-rebuild.md
+entrypoints: []
+activation: ["future ADR supersession only when a documented reopen trigger fires"]
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - docs/decisions/0343-per-turn-image-retry-rebuild.md
+  - docs/decisions/0344-provider-wm-live-reads.md
+consumer: []
+reachable: no
+surface_findings:
+  - "This entry records two deliberate non-implementation decisions and reopen triggers; it makes no runtime claim."
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: na
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: hold
+receipts:
+  - kind: source
+    command: bun fc validate --strict
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Both negative-decision ADRs resolve from the catalog entry.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

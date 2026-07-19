@@ -3,7 +3,7 @@ title: ModelTag invalidator auto-hook — EmbedCache + VectorStore registrar (AD
 section: 4
 subsystem: retrieval — embedder swap → cache + store auto-invalidate seam
 order: 273
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [cli]
 monitoring: integrated

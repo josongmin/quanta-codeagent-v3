@@ -1,0 +1,51 @@
+version: 1
+feature_id: bench-leaderboard-analyze
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/apps/bench/commands/analyze.ts:cmdLeaderboard
+entrypoints: [src/apps/bench/cli.ts, tools/leaderboard-dashboard/server.ts]
+activation: ["quanta-bench leaderboard/diff/explain", "bun run tools/leaderboard-dashboard/server.ts"]
+effective_defaults:
+  cli: na
+  web: na
+  bench: on
+  headless: on
+  daemon: na
+producer:
+  - src/apps/bench/analyze/leaderboard.ts
+  - src/apps/bench/analyze/verdicts.ts
+consumer:
+  - src/apps/bench/commands/analyze.ts
+  - src/apps/bench/cli.ts
+reachable: yes
+surface_findings:
+  - "Bench CLI imports and dispatches every listed analysis owner through an executable package-script root."
+  - "The local dashboard is a separate executable tool surface; it does not imply browser integration with the main web daemon."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/bench-leaderboard-analyze-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Verdict bucketing, denominator exclusions, strongest-status dedup, and malformed input failure pass.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: bun test tests/unit/feature-catalog-reachability.test.ts && bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Package-script entrypoint reaches commands/analyze and its owners.
+  - kind: test
+    command: bun test tests/unit/bench-leaderboard-analyze-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 6 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

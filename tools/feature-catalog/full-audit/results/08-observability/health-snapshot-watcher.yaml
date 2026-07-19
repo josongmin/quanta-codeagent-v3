@@ -1,0 +1,46 @@
+version: 1
+feature_id: health-snapshot-watcher
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/observability/metrics/health-snapshot-watcher.ts:startHealthSnapshotWatcher
+entrypoints: []
+activation: ["explicit startHealthSnapshotWatcher call; no current caller"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/observability/metrics/health-snapshot-watcher.ts:startHealthSnapshotWatcher]
+consumer: []
+reachable: no
+surface_findings:
+  - "Only the hellgate imports startHealthSnapshotWatcher; no daemon or observability composition root owns its handle."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-health-snapshot-watcher-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 14 isolated interval, SIGHUP, manual emit, stop, retry, and serialization cases pass.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: No production composition root starts, stops, or observes the watcher.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg health-snapshot-watcher src tests
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production call site exists.
+  - kind: test
+    command: bun test tests/unit/observability-health-snapshot-watcher-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 14 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null
