@@ -389,11 +389,15 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
   {
     name: "search_codebase",
     origin: "@/tool searchWire (retrieval pipeline)",
-    gate: { kind: "env-flag", env: "QUANTA_INDEX" },
-    default: { cli: "opt-in" },
+    // The host builds the lexical wire by default.  `QUANTA_INDEX` promotes
+    // that existing wire to hybrid/semantic; it does not control tool
+    // presence.  The only absence condition is the explicit
+    // `QUANTA_PIPELINE=none` kill-switch, represented by this injected slot.
+    gate: { kind: "config-slot", slot: "searchWire" },
+    default: { cli: "on" },
     risk: "read-only",
     adr: "0159",
-    note: "Opt-in — registered when the retrieval index pipeline is built.",
+    note: "CLI default-ON lexical repository search. The host injects searchWire unless QUANTA_PIPELINE=none; QUANTA_INDEX only upgrades this same facade to hybrid/semantic search.",
   },
   {
     name: "request_user_input",

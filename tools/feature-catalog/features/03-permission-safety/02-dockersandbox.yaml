@@ -33,7 +33,7 @@ wiring:
       status: missing
     web:
       status: na
-purpose: 'DockerSandbox is a complete per-command Sandbox.run() backend: policy→docker argv→spawn→stdout/stderr→exit/timeout/output cap, with daemon-unavailable fail-closed and container env allowlisting. It is not a CLI shell selector: wiring it into the host bash path would replace the host toolchain with the image toolchain, so a separate explicitly-scoped consumer is required.'
+purpose: 'DockerSandbox is a complete per-command Sandbox.run() backend: policy→docker argv→spawn→stdout/stderr→exit/timeout/output cap, with daemon-unavailable fail-closed, container env allowlisting, and a scrubbed host Docker-client environment. It is not a CLI shell selector: wiring it into the host bash path would replace the host toolchain with the image toolchain, so a separate explicitly-scoped consumer is required.'
 evidence:
   code:
     - src/runtime/sandbox.ts
@@ -47,4 +47,4 @@ knobs: []
 deliberate_hold:
   reason: 'No production consumer constructs DockerSandbox. A global replacement for runShell is unsafe: the verified node:22-slim image lacks the host Bun/git/rg toolchain, so it would break normal CLI development commands.'
   promotion_path: 'Keep the backend seam-only until a separately scoped, image-pinned container tool owns lifecycle, workspace mount, and toolchain compatibility.'
-notes: '2026-07-19 local daemon contract: 17/17 passed across contract + integration suites, including real `--network none` and env non-leak checks. The existing runAgent test proves a deliberately sandbox-backed tool maps backend failure to tool_result; it does not make DockerSandbox a production tool.'
+notes: '2026-07-19 local daemon contract: 18/18 passed across contract + integration suites, including real `--network none`, container env non-leak, and host Docker-client credential-scrub checks. The existing runAgent test proves a deliberately sandbox-backed tool maps backend failure to tool_result; it does not make DockerSandbox a production tool.'

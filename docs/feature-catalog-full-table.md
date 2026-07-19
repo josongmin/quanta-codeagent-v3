@@ -1,5 +1,9 @@
 # Feature Catalog (fc) — 전체 등록 항목 표
 
+> Archived snapshot. This file is not maintained against the live feature
+> catalog; use `tools/feature-catalog/features/**/*.yaml` and the generated
+> `docs/10.feature-catalog.md` for current inventory and activation claims.
+
 생성: 2026-07-07 · 총 1021 feature / 13 카테고리
 완성도(maturity): L1 스케치 → L2 → L3 → L4 → L5 검증완료 · status: stable/new/refined/hold · cli=CLI wiring · cfg=설정노출
 
@@ -431,12 +435,10 @@
 | tier | tier | L4 | stable | full | n-a |
 | quantamemory-path-embed-embedmodel-recalllimit-distill-conso | QUANTA_MEMORY[_PATH/_EMBED/_EMBED_MODEL/_RECALL_LIMIT/_DISTILL/_CONSOLIDATE/_SEL | L4 | stable | full | integrated |
 | snapshot-deep-copy | `snapshot()` deep-copy | L5 | stable | full | integrated |
-| stage1-phase2-consume-and-vendor-glob-wire | Stage1 → Phase 2 consume wire + vendor-rule glob wire (ADR-0233) | L3 | new | full | integrated |
 | per-string-empty-patch-refine | Per-string 캡 + empty-patch refine | L5 | refined | full | integrated |
 | semantic-index-real-embedder | semantic index 실 embedder + pluggable vector-store backend (ADR-0392, ADR-0424) | L3 | new | full | integrated |
 | codex-2-phase-consolidator | Codex 2-phase memory consolidator — per-thread distill + cross-session synthesizer | L4 | stable | full | static |
 | memory-learning-default-on | Memory learning default-ON via session factory (ADR-0413) | L4 | stable | full | integrated |
-| stage1-store-agent-port | ADR-0216 Stage1StorePortV2 (agent-side, no-throw, 4-verb persist seam) | L3 | stable | full | integrated |
 | auto-dream-cross-session | auto-dream — cross-session memory consolidation trigger (H16) | L3 | new | full | integrated |
 | consolidator-session-hook | Session-end consolidator hook — runMemoryConsolidatorHook (no-throw L4 wire) | L4 | stable | full | integrated |
 | distill-redaction-port | Consolidator distill-input redaction port — abstracted seam for Phase 1 LLM | L4 | stable | full | integrated |

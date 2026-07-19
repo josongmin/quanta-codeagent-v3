@@ -1,6 +1,6 @@
 # Default-OFF SOTA++ execution board (SSOT)
 
-**Truth snapshot:** working tree, 2026-07-19 (Waves A–Q). Closure **159/175 wired = 90.9%**, drift 0. decisions {measure-first 61, enable-now 66, repair-first 7, hold 41}. Uncommitted (working tree = truth).
+**Truth snapshot:** working tree, 2026-07-19 (structural re-audit after Waves A–Q). Closure **165/174 wired = 94.8%**, drift 0. decisions {measure-first 67, enable-now 68, repair-first 0, hold 39}. Uncommitted (working tree = truth).
 **Concurrent state:** peer-message and subagent-mailbox CLI seed mappings are reconciled in the authority ledger; checker has no transient mapping errors. Other working-tree changes remain independently owned.
 **Execution authority:** this board, its ledger, and linked leaf tickets
 **Supporting inventory:** [../../analysis/jul-16-default-off-gate-inventory.md](../../analysis/jul-16-default-off-gate-inventory.md)
@@ -26,8 +26,8 @@ Eligible denominator = all catalog rows minus `external_blocked`, `platform_unav
 - Resolved: read outline receives the production tree-sitter adapter only under its own gate.
 - Resolved: playbook trigger loads a confined disk registry and reaches the real external prompt queue.
 - Resolved: known catalog truth drift is corrected and `bun fc diff` is GREEN.
-- Resolved: authority ledger is fully populated — **175 eligible rows** (173 at DOF-00; Wave N added `presets-slash-sticky-model`, and CLI-seeded peer-message surfacing is now represented as its own row), all 30 live CLI seed gates, `unknown_surfaces=0`, zero `unknown` proof tiers, drift=0.
-- Denominator: the frozen 175 was pre-fold; DOF-00 yielded **173** (`per-tool-granular-registry` superseded by `surface-wire-r2`; `lane-manager-parallel` uncatalogued fold — both dropped). Wave N added `presets-slash-sticky-model` ⇒ **174**. Proof tiers now: real-loop / wire / unit across the set; the security fix + drift ratchet + consolidations are the Wave L–Q deltas.
+- Resolved: authority ledger is fully populated — **174 eligible rows**, all 30 live CLI seed gates, `unknown_surfaces=0`, zero `unknown` proof tiers, drift=0.
+- Denominator: the historical 175-row note included the now-deleted Stage1 V2 duplicate. Current source authority is **174**; do not combine historical receipts with this denominator. Proof tiers now: real-loop / wire / unit across the set; the security fix + drift ratchet + consolidations are the Wave L–Q deltas.
 
 ## Ticket board
 
@@ -49,7 +49,7 @@ Eligible denominator = all catalog rows minus `external_blocked`, `platform_unav
 | [DOF-30](tickets/DOF-30-stub-kill-or-wire.md) | P1 | complete | DOF-00 | disposition sweep of 42 dormant rows: 20 stale ledger reachability corrected seam-only/producer-only→wired (call-site verified), 21 deliberate_hold w/ promotion owner recorded, 0 delete; recovery-router single-authority done; lane-manager/bug-fix moot (source deleted) |
 | [DOF-40](tickets/DOF-40-partial-fail-closed-hardening.md) | P1 | in_progress | DOF-00 | 10 families hardened fail-closed: microcompact, vendor-glob, approval-state attribution, command-hook stdin+**exec-throw fail-open FIXED**, compaction race, landlock (fail-open bug fixed), canvas/observability, sendNow, structured-output parity, appshot judge-brand; +212 adversarial tests. Remaining: mid-turn end-to-end wires (composition-root, concurrent-hot) |
 | [DOF-50](tickets/DOF-50-tauri-promotion-gate.md) | P2 | hold | DOF-10 | external/platform evidence |
-| [DOF-90](tickets/DOF-90-closure-audit.md) | P0 | terminal-honest | all non-hold | closure **159/175 wired (90.9%)**. `QUANTA_TYPED_EVENT_REPLAY` promotes stored compaction events through a bounded, exactly-once reader without replaying direct context/mention variants; `streamCancellation` now has a real sampling-loop consumer but remains host-injected. **zero unknowns**, 0 checker errors, drift 0. The remaining 16 dormant rows require external deps or would be dead-wire; behavioral candidates remain operator-A/B (61 measure-first), with 41 deliberate holds. |
+| [DOF-90](tickets/DOF-90-closure-audit.md) | P0 | terminal-honest | all non-hold | closure **165/174 wired (94.8%)**. `QUANTA_TYPED_EVENT_REPLAY` promotes stored compaction events through a bounded, exactly-once reader without replaying direct context/mention variants; `streamCancellation` now has a real sampling-loop consumer; command-hooks is a real `post_compact` consumer when explicitly configured. `search_codebase` manifest now correctly states default lexical availability; `QUANTA_INDEX` only promotes semantics. **zero unknowns**, 0 checker errors, drift 0. The 9 dormant rows require external/product contracts, a lifecycle owner, or would duplicate an existing authority; behavioral candidates remain operator-A/B (67 measure-first), with 39 deliberate holds. |
 
 ## Current receipts
 
@@ -57,7 +57,7 @@ Truth is the current working tree, 2026-07-19; no commit receipt is claimed (con
 
 - Source typecheck: `bun run typecheck` (src) exit 0; total `tsc` = 92 errors = the pre-existing test-file baseline (0 introduced by Waves L–Q).
 - Structural ratchet: `bun test tests/unit/god-code-ratchet.test.ts` 6 pass, 0 fail.
-- Authority ledger: **175 eligible rows**, 30 runtime CLI seeds; checker → `unknown_surfaces=0 unknown_values=0`, 0 errors, **drift=0**. `bun test tests/unit/default-off-ledger-hellgate.test.ts` → 6 pass / 0 fail — now includes the **drift ratchet** (`reachability=wired ⟹ activation≠unwired`, Wave L) + its red-on-injection.
+- Authority ledger: **174 eligible rows**, 30 runtime CLI seeds; checker → `unknown_surfaces=0 unknown_values=0`, 0 errors, **drift=0**. `bun test tests/unit/default-off-ledger-hellgate.test.ts` → 6 pass / 0 fail — now includes the **drift ratchet** (`reachability=wired ⟹ activation≠unwired`, Wave L) + its red-on-injection.
 - Catalog: `bun fc validate` / `check-evidence` / `build` / `diff` all exit 0 for **1,028 features**; `diff: no changes`.
 - Security: **subagent-fs-ownership false-fence FIXED** (Wave Q) — `apply_patch`/`apply_patch_structured`/`scripted_replace` no longer bypass `QUANTA_FS_OWNERSHIP_ENFORCE`; hellgate 10 pass + red-on-injection, security-path regression 49 pass.
 - Consolidations (proven duplicates deleted): retrieval/semantic ADR-0254 port (Wave M), recovery-router wrapper + ratelimit dead-store half (Wave P) — all byte-identical, tests green.

@@ -8,6 +8,11 @@ Legend — category: `correctness-bug`, `error-swallow`, `silent-error`, `race-c
 
 ## C-1 · CRITICAL · Double `usage_count` increment in Stage1 reuse consumer
 
+> **Disposition (2026-07-19):** Superseded by deletion. The agent-side V2
+> Stage1 reuse store had no production consumer and was removed rather than
+> retaining a duplicate persistence/selection authority. The canonical
+> `@/memory/consolidate` Phase 1 → Phase 2 path remains the runtime owner.
+
 - **File:** [src/agent/memory-consolidator-hook.ts:579-584](../../../src/agent/memory-consolidator-hook.ts#L579-L584)
 - **Adapter impls (the actual double-bump):**
   - sqlite: [src/agent/memory/stage1-store/sqlite.ts:91](../../../src/agent/memory/stage1-store/sqlite.ts#L91) (`incrementStmt`) **and** [:97](../../../src/agent/memory/stage1-store/sqlite.ts#L97) (`selectMarkStmt`) — both run `usage_count = usage_count + 1`

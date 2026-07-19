@@ -254,7 +254,6 @@ These tickets are the execution units. Most own one primary seam family; `T01` i
 - Covers: `L3 C-1/C-2/C-3/C-4/C-5/C-7/C-18/C-20`.
 - Touch files:
   - [memory-consolidator-hook.ts](../../../src/agent/memory-consolidator-hook.ts)
-  - [sqlite.ts](../../../src/agent/memory/stage1-store/sqlite.ts), [in-memory.ts](../../../src/agent/memory/stage1-store/in-memory.ts)
   - [sqlite.ts](../../../src/memory/adapters/sqlite.ts), [memory.ts](../../../src/agent/memory.ts)
   - [inject.ts](../../../src/agent/context-change/inject.ts)
   - likely new tests in `src/agent/memory/**/__tests__/` and `src/memory/**/__tests__/`
@@ -500,7 +499,7 @@ These tickets are the execution units. Most own one primary seam family; `T01` i
 
 - `continue_from isolation` — `L2 H3` — prior settled subagent output is still readable by task id without owner/lineage proof. Primary file: [agent-tool.ts](../../../src/subagent/agent-tool.ts).
 
-- `Memory stage1 / consolidator contract` — `L3 C-1/C-2/C-3/C-4` — stage1 reuse still double-bumps usage and consolidator logger call sites still do not structurally enforce their no-throw contract. Primary files: [memory-consolidator-hook.ts](../../../src/agent/memory-consolidator-hook.ts), [sqlite.ts](../../../src/agent/memory/stage1-store/sqlite.ts), [in-memory.ts](../../../src/agent/memory/stage1-store/in-memory.ts).
+- `Memory stage1 / consolidator contract` — `L3 C-1/C-2/C-3/C-4` — the unconsumed agent-side V2 Stage1 store was removed on 2026-07-19. Remaining consolidator work is tracked against the canonical `@/memory/consolidate` owner, not a duplicate reuse adapter.
 
 - `Memory adapter promise / cancel contracts` — `L3 C-5/C-6/C-7` — `SqliteStore.delete()` still sync-throws, consolidation LLM requests still do not carry the caller signal, and `buildOne()` is still non-exhaustive for future context-event additions. Primary files: [sqlite.ts](../../../src/memory/adapters/sqlite.ts), [memory-consolidate.ts](../../../src/agent/memory-consolidate.ts), [inject.ts](../../../src/agent/context-change/inject.ts).
 

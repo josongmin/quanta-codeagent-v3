@@ -134,6 +134,71 @@ const ripgrepDefiners =
     // reproducible truncation/results run-to-run.
   }
 
+type RankedFile = OwnerSiblingArgs["stage1Files"][number]
+type DefinerLookup = (symbol: string) => readonly string[]
+
+const siblingBucket = (
+  args: OwnerSiblingArgs,
+  owner: RankedFile,
+  symbol: string,
+  definers: DefinerLookup,
+  stage1Set: ReadonlySet<string>,
+  maxSiblingDefiners: number,
+): OwnerSibling[] => {
+  const defs = [...new Set(definers(symbol))].sort()
+  if (defs.length > maxSiblingDefiners) {
+    args.onTruncate?.({ symbol, definerCount: defs.length, cap: maxSiblingDefiners })
+    return []
+  }
+  return defs
+    .filter((file) => file !== "" && file !== owner.file && !stage1Set.has(file))
+    .map((file) => ({ file, forSymbol: symbol }))
+}
+
+const bucketsForOwner = (
+  args: OwnerSiblingArgs,
+  owner: RankedFile,
+  definers: DefinerLookup,
+  stage1Set: ReadonlySet<string>,
+  maxSiblingDefiners: number,
+): OwnerSibling[][] => {
+  const source = args.readSource(owner.file)
+  if (source === null) return []
+  return defsInSource(source)
+    .filter((symbol) => issueMentions(args.issueText, symbol))
+    .map((symbol) => siblingBucket(args, owner, symbol, definers, stage1Set, maxSiblingDefiners))
+    .filter((bucket) => bucket.length > 0)
+}
+
+const collectSiblingBuckets = (
+  args: OwnerSiblingArgs,
+  definers: DefinerLookup,
+  maxFiles: number,
+  maxSiblingDefiners: number,
+): OwnerSibling[][] => {
+  const buckets: OwnerSibling[][] = []
+  const stage1Set = new Set(args.stage1Files.map((candidate) => candidate.file))
+  for (const owner of args.stage1Files.slice(0, maxFiles)) {
+    if (args.signal?.aborted === true) break
+    buckets.push(...bucketsForOwner(args, owner, definers, stage1Set, maxSiblingDefiners))
+  }
+  return buckets
+}
+
+const drainSiblingBuckets = (buckets: OwnerSibling[][], maxResults: number): OwnerSibling[] => {
+  const out: OwnerSibling[] = []
+  const seen = new Set<string>()
+  let idx = 0
+  while (out.length < maxResults && buckets.some((bucket) => bucket.length > 0)) {
+    const item = buckets[idx % buckets.length]?.shift()
+    idx++
+    if (item === undefined || seen.has(item.file)) continue
+    seen.add(item.file)
+    out.push(item)
+  }
+  return out
+}
+
 /**
  * Resolve owner siblings for the closure session: the other files that define a
  * symbol the localized owner also defines (override co-change sites).
@@ -145,60 +210,6 @@ export const resolveOwnerSiblings =
     const maxResults = args.maxResults ?? 8
     const maxSiblingDefiners = args.maxSiblingDefiners ?? DEFAULT_MAX_SIBLING_DEFINERS
     const definers = args.listDefiners ?? ripgrepDefiners(args.cwd, args.signal)
-    const out: OwnerSibling[] = []
-    const seen = new Set<string>()
-
-    const stage1Top = args.stage1Files.slice(0, maxFiles)
-    // Dedup against the FULL stage-1 list (not just the probed top-K): a sibling
-    // that is itself a lower-ranked localized candidate must not be re-added (it
-    // would double-count its stage-1 score AND the owner-resolve boost).
-    const stage1Set = new Set(args.stage1Files.map((f) => f.file))
-
-    // Collect one bucket of sibling candidates per (owner, anchor) — each bucket
-    // sorted+deduped (deterministic). Then round-robin across buckets so one noisy
-    // anchor can't starve the others, bounded by maxResults.
-    const buckets: OwnerSibling[][] = []
-    for (const sf of stage1Top) {
-      if (args.signal?.aborted === true) break
-      const source = args.readSource(sf.file)
-      if (source === null) continue
-      // Anchors = symbols this owner DEFINES that the issue text MENTIONS. Both
-      // conditions matter: "defines" keeps it to the owner's surface, "mentions"
-      // keeps it to what the bug is actually about (no over-expansion on every
-      // method). This is why `extractSymbols` (backtick-only) being empty on
-      // #14315 doesn't matter — `runshell` is in the prose and defined in base.
-      const anchors = defsInSource(source).filter((sym) => issueMentions(args.issueText, sym))
-      for (const sym of anchors) {
-        const defs = [...new Set(definers(sym))].sort()
-        // A symbol defined in MORE than `maxSiblingDefiners` files is
-        // NON-DISCRIMINATING — a ubiquitous method (`save` ~25 django files,
-        // `get` ~38), not an override family. Including it would flood
-        // ownerResolved with noise at the top owner-resolve boost (+3, strongest),
-        // outranking the real owner. This is an anchor-DISCRIMINATION (recall-side
-        // cost) bound, distinct from `maxResults` (output size). It is a NAMED arg
-        // (not a buried constant), and when it truncates we EMIT telemetry so a
-        // dropped override family is attributable instead of silently vanishing.
-        if (defs.length > maxSiblingDefiners) {
-          args.onTruncate?.({ symbol: sym, definerCount: defs.length, cap: maxSiblingDefiners })
-          continue
-        }
-        const bucket = defs
-          // sibling only: not the owner itself, not an already-localized file.
-          .filter((file) => file !== "" && file !== sf.file && !stage1Set.has(file))
-          .map((file) => ({ file, forSymbol: sym }))
-        if (bucket.length > 0) buckets.push(bucket)
-      }
-    }
-
-    // Round-robin drain across buckets; dedup by file; bound by maxResults.
-    let idx = 0
-    while (out.length < maxResults && buckets.some((b) => b.length > 0)) {
-      const bucket = buckets[idx % buckets.length]
-      idx++
-      const item = bucket?.shift()
-      if (item === undefined || seen.has(item.file)) continue
-      seen.add(item.file)
-      out.push(item)
-    }
-    return out
+    const buckets = collectSiblingBuckets(args, definers, maxFiles, maxSiblingDefiners)
+    return drainSiblingBuckets(buckets, maxResults)
   }

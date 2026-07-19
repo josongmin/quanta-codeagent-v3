@@ -31,11 +31,13 @@ import { DockerSandbox, SandboxUnavailableError } from "@/runtime"
 describe("DockerSandbox e2e — stub docker binary, real spawn pipeline", () => {
   let dir: string
   let argvLog: string
+  let envLog: string
   let stubBin: string
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "docker-sandbox-e2e-"))
     argvLog = join(dir, "argv.txt")
+    envLog = join(dir, "env.txt")
     stubBin = join(dir, "docker-stub")
   })
   afterEach(() => {
@@ -59,6 +61,7 @@ describe("DockerSandbox e2e — stub docker binary, real spawn pipeline", () => 
     stderr?: string
     exit?: number
     sleepMs?: number
+    recordEnv?: boolean
   }): void => {
     // `printf '%b'` interprets backslash escapes (\n, \t) — so a JS string
     // with `\n` is emitted as an actual newline on the wire.
@@ -80,6 +83,7 @@ describe("DockerSandbox e2e — stub docker binary, real spawn pipeline", () => 
       // 0x1e = ASCII RS (record separator) — safe inside any user command tail
       `    printf '%s\\x1e' "$arg" >> "${argvLog}"`,
       "  done",
+      ...(opts.recordEnv ? [`  env | sort > "${envLog}"`] : []),
       ...(opts.stdout !== undefined ? [`  printf '%b' ${JSON.stringify(opts.stdout)}`] : []),
       ...(opts.stderr !== undefined ? [`  printf '%b' ${JSON.stringify(opts.stderr)} 1>&2`] : []),
       ...(opts.sleepMs !== undefined ? [`  exec sleep ${(opts.sleepMs / 1000).toFixed(3)}`] : []),
@@ -151,6 +155,23 @@ describe("DockerSandbox e2e — stub docker binary, real spawn pipeline", () => 
     expect(res.stderr).toBe("err-payload")
     expect(res.exitCode).toBe(7)
     expect(res.timedOut).toBe(false)
+  })
+
+  test("2b. Docker client is scrubbed while requested container env remains available", async () => {
+    process.env.DOCKER_SANDBOX_HOST_SECRET = "must-not-reach-docker-client"
+    try {
+      writeStub({ stdout: "ok", exit: 0, recordEnv: true })
+      const sb = new DockerSandbox({ dockerBin: stubBin })
+      const res = await sb.run("noop", { envAllowlist: ["PATH", "LANG"], timeoutMs: 10_000 })
+      expect(res.exitCode).toBe(0)
+      const seen = readFileSync(envLog, "utf8")
+      expect(seen).not.toContain("DOCKER_SANDBOX_HOST_SECRET")
+      expect(seen).not.toContain("must-not-reach-docker-client")
+      expect(seen).toContain("PATH=")
+      expect(seen).toContain("LANG=")
+    } finally {
+      delete process.env.DOCKER_SANDBOX_HOST_SECRET
+    }
   })
 
   test("3. maxOutputBytes cap truncates with a visible marker (cap-fires path is integration-only)", async () => {

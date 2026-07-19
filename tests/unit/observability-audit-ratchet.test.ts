@@ -193,8 +193,7 @@ describe("audit ratchet — G2 bounded-growth (F3-class)", () => {
 //  G3 — every matcher banner literal exists in a tool source (audit F6)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const collectMatcherBanners = (): string[] => {
-  const src = readUtf8(join(SRC_AGENT, "run-ledger-attribution", "matchers.ts"))
+const collectMatcherBannersFrom = (src: string): string[] => {
   const out = new Set<string>()
   // startsWith("...") and .test("...") (single arg, double-quoted literal).
   const re = /(?:startsWith|test)\s*\(\s*"((?:[^"\\]|\\.)+)"/g
@@ -206,6 +205,12 @@ const collectMatcherBanners = (): string[] => {
   }
   return [...out]
 }
+
+const producerAnchor = (banner: string): string =>
+  banner.startsWith("\\n") ? banner.slice("\\n".length) : banner
+
+const missingMatcherBanners = (matcherSrc: string, toolSrc: string): string[] =>
+  collectMatcherBannersFrom(matcherSrc).filter((banner) => !toolSrc.includes(producerAnchor(banner)))
 
 const collectAllToolSources = (): string => {
   const buf: string[] = []
@@ -240,10 +245,11 @@ const collectAllToolSources = (): string => {
 
 describe("audit ratchet — G3 banner cross-source pinning (F6-class)", () => {
   test("every matcher banner literal appears in src/tool/** or src/subagent/**", () => {
-    const banners = collectMatcherBanners()
+    const matcherSrc = readUtf8(join(SRC_AGENT, "run-ledger-attribution", "matchers.ts"))
+    const banners = collectMatcherBannersFrom(matcherSrc)
     expect(banners.length).toBeGreaterThan(0) // sanity: at least the audited 5
     const toolSrc = collectAllToolSources()
-    const missing = banners.filter((b) => !toolSrc.includes(b))
+    const missing = missingMatcherBanners(matcherSrc, toolSrc)
     if (missing.length > 0) {
       const detail = missing.map((b) => `  - "${b}"`).join("\n")
       throw new Error(
@@ -255,5 +261,12 @@ describe("audit ratchet — G3 banner cross-source pinning (F6-class)", () => {
       )
     }
     expect(missing.length).toBe(0)
+  })
+
+  test("the scanner goes RED for a synthetic orphan matcher banner", () => {
+    const syntheticMatcher = 'if (payload.startsWith("definitely-orphaned-banner:")) return null'
+    expect(missingMatcherBanners(syntheticMatcher, "producer output has another banner")).toEqual([
+      "definitely-orphaned-banner:",
+    ])
   })
 })

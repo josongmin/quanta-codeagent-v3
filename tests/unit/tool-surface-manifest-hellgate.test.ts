@@ -174,6 +174,16 @@ describe("tool-surface manifest — GATED factories match the manifest two-way",
 })
 
 describe("tool-surface manifest — CLI default-ON seed derives from the SSOT", () => {
+  test("search_codebase declares the default lexical wire, not the optional index promotion", () => {
+    const entry = GATED_TOOLS.find((e) => e.name === "search_codebase")
+    expect(entry).toBeDefined()
+    expect(entry?.gate).toEqual({ kind: "config-slot", slot: "searchWire" })
+    expect(entry?.default.cli).toBe("on")
+    // QUANTA_INDEX controls semantic/hybrid promotion only.  If the manifest
+    // grew an env gate here, the CLI seed would incorrectly turn indexing on.
+    expect("env" in (entry?.gate ?? {})).toBe(false)
+  })
+
   test("seedEnvVarsForSurface('cli') is exactly the CLI-default-ON tool gates", () => {
     // jun-26 coordination-trio gating: QUANTA_SUBAGENT_MAILBOX / QUANTA_TEAM_PEER_MSG /
     // QUANTA_OBJECTIVE_TOOLS were FLIPPED to opt-in (engagement-UNVERIFIED, frontier

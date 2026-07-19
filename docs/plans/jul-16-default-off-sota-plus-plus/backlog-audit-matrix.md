@@ -151,7 +151,6 @@ Generated from `tools/feature-catalog/default-off-ledger.yaml` after the source 
 | spawn-batch-tool | enable-now | wired | wire | wire | none | composition/wire covered; no execution receipt |
 | spec-fidelity-steer-knob | measure-first | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | spinner-stall-detection | enable-now | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
-| stage1-phase2-consume-and-vendor-glob-wire | repair-first | seam-only | unit | unit | none | dormant/unconsumed; no promotion proof |
 | stale-read-guard | enable-now | wired | real-loop | unit | none | real-loop covered; no execution receipt |
 | streaming-boomerang | hold | seam-only | unit | unit | none | dormant/unconsumed; no promotion proof |
 | streaming-cancellation-primitive | hold | seam-only | unit | unit | none | dormant/unconsumed; no promotion proof |

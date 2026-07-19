@@ -755,6 +755,44 @@ export const compactIfNeeded = async (input: CompactInput): Promise<CompactResul
   return { compacted: true, messages, summaryTokens }
 }
 
+const reportAttributionFailure = (
+  input: CompactInput,
+  provenance: RecoveryProvenance,
+  error: unknown,
+): void => {
+  logger.warn(`compaction.postCompactEmit: ${errMessage(error)}`)
+  if (input.onAttributionFailure === undefined) return
+  try {
+    input.onAttributionFailure(provenance, error)
+  } catch (sinkError) {
+    logger.warn(`compaction.onAttributionFailure: ${errMessage(sinkError)}`)
+  }
+}
+
+const emitPostCompact = async (
+  input: CompactInput,
+  provenance: RecoveryProvenance,
+): Promise<void> => {
+  try {
+    await input.postCompactEmit?.(provenance)
+  } catch (error) {
+    reportAttributionFailure(input, provenance, error)
+  }
+}
+
+const setPostCompactObjective = (input: CompactInput, provenance: RecoveryProvenance): void => {
+  if (input.objectiveSetNextActions === undefined || input.threadId === undefined) return
+  try {
+    const turnTag =
+      provenance.attributedTurnId === undefined ? "" : ` [turn ${provenance.attributedTurnId}]`
+    input.objectiveSetNextActions(input.threadId, [
+      `agent compacted: reason ${provenance.reason} — ${provenance.resumeStep}${turnTag}`,
+    ])
+  } catch (error) {
+    logger.warn(`compaction.objectiveSetNextActions: ${errMessage(error)}`)
+  }
+}
+
 /** ADR-0409 — fire `postCompactEmit` and the Objective wire if either is set.
  *  Both seams are NO-THROW (any error is swallowed so an emitter glitch never
  *  aborts the compaction). Kept as a separate helper so `compactIfNeeded`'s
@@ -786,40 +824,8 @@ const emitPostCompactIfWired = async (
     ...(input.attributedTurnId !== undefined ? { attributedTurnId: input.attributedTurnId } : {}),
     ...(input.threadId !== undefined ? { attributedThreadId: input.threadId } : {}),
   }
-  try {
-    await input.postCompactEmit?.(provenance)
-  } catch (e) {
-    // DOF-40 fail-closed — a dropped/failed async attribution must NOT vanish
-    // silently. Surface it (with the STAMPED provenance so it is attributable to
-    // the correct turn) via the caller's sink when wired, always logging too.
-    // The sink itself is guarded so a throwing sink cannot turn a swallowed emit
-    // into an aborted turn (the no-throw contract of this whole seam).
-    logger.warn(`compaction.postCompactEmit: ${errMessage(e)}`)
-    if (input.onAttributionFailure !== undefined) {
-      try {
-        input.onAttributionFailure(provenance, e)
-      } catch (sinkErr) {
-        logger.warn(`compaction.onAttributionFailure: ${errMessage(sinkErr)}`)
-      }
-    }
-  }
-  if (input.objectiveSetNextActions !== undefined && input.threadId !== undefined) {
-    try {
-      // DOF-40 — carry the stamped turn id into the action string when present so
-      // the objective record is self-attributing (a persisted next-action read
-      // later is tied to the turn that produced it, not a since-advanced ambient
-      // turn). Appended AFTER the existing text so the resume contract is
-      // unchanged; omitted entirely when no turn was stamped (byte-identical).
-      const turnTag =
-        provenance.attributedTurnId !== undefined ? ` [turn ${provenance.attributedTurnId}]` : ""
-      input.objectiveSetNextActions(input.threadId, [
-        `agent compacted: reason ${provenance.reason} — ${provenance.resumeStep}${turnTag}`,
-      ])
-    } catch (e) {
-      // side-channel — log + swallow.
-      logger.warn(`compaction.objectiveSetNextActions: ${errMessage(e)}`)
-    }
-  }
+  await emitPostCompact(input, provenance)
+  setPostCompactObjective(input, provenance)
 }
 
 // ──────────────────────────────────────────────────────────────────────────

@@ -275,6 +275,19 @@ export interface DockerSandboxOptions {
 
 const DEFAULT_IMAGE = "node:22-slim"
 const CONTAINER_WORKDIR = "/workspace"
+/** Host-side Docker client variables. This is deliberately distinct from the
+ * container allowlist: Docker itself must never inherit provider credentials
+ * simply because it is executed from the agent process. */
+const DOCKER_CLIENT_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "DOCKER_HOST",
+  "DOCKER_CONFIG",
+  "DOCKER_CONTEXT",
+  "DOCKER_CERT_PATH",
+  "DOCKER_TLS_VERIFY",
+] as const
 /** Hard cap on the `docker version` availability probe — a daemon that doesn't
  *  respond within this budget is treated as unavailable. Short because the
  *  probe blocks scenario startup; longer than 5s and a hung daemon could
@@ -286,6 +299,13 @@ const DOCKER_PROBE_TIMEOUT_MS = 5_000
 const pushFlag = (argv: string[], flag: string, value: string | undefined) => {
   if (value !== undefined) argv.push(flag, value)
 }
+
+/** Docker resolves `--env NAME` from its own process environment. Build the
+ * host client environment from the daemon keys plus exactly those names the
+ * caller deliberately forwards to the container; ambient parent variables
+ * cannot cross either boundary. */
+const dockerClientEnv = (containerAllowlist: readonly string[]): ReturnType<typeof asScrubbedEnv> =>
+  asScrubbedEnv(scrubEnv([...new Set([...DOCKER_CLIENT_ENV_ALLOWLIST, ...containerAllowlist])]))
 
 /**
  * Real isolation via `docker run --rm`. Policy → docker flags:
@@ -319,10 +339,12 @@ export class DockerSandbox implements Sandbox {
   /** True iff the docker CLI is present AND a daemon answers `docker version`. */
   async isAvailable(): Promise<boolean> {
     try {
-      const proc = Bun.spawn([this.dockerBin, "version"], {
+      const proc = bunScrubbedSpawner([this.dockerBin, "version"], {
+        cwd: process.cwd(),
+        env: dockerClientEnv([]),
         stdout: "ignore",
         stderr: "ignore",
-      })
+      }) as Subprocess<"ignore", "ignore", "ignore">
       const timer = setTimeout(() => {
         try {
           proc.kill()
@@ -382,7 +404,12 @@ export class DockerSandbox implements Sandbox {
     const timeoutMs = policy.timeoutMs ?? DEFAULT_TIMEOUT_MS
     let timedOut = false
 
-    const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe" })
+    const proc = bunScrubbedSpawner(argv, {
+      cwd: process.cwd(),
+      env: dockerClientEnv(policy.envAllowlist ?? DEFAULT_ENV_ALLOWLIST),
+      stdout: "pipe",
+      stderr: "pipe",
+    }) as Subprocess<"ignore", "pipe", "pipe">
     // SIGTERM→SIGKILL escalation (KILL_GRACE_MS): a `docker run` that ignores
     // TERM is force-killed; `disarm` clears the grace timer in cleanup.
     const { kill, disarm } = escalatingKill(proc, SANDBOX_TREE_KILLER)

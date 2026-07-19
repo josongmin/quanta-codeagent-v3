@@ -31,9 +31,9 @@ purpose: |
   `@/agent/budget-ledger`. Ships five pre-built presets so callers never
   need to know the `Stage` shape for the common cases. RRF uses the
   Cormack 2009 published k=60 constant (formula numerically locked by
-  hellgate HELL-PI-04). Default-OFF — nothing in @/agent / @/runner /
-  @/apps instantiates a pipeline at construction (HELL-PI-14 enforces
-  this via source-text grep).
+  hellgate HELL-PI-04). The runner search root consumes these presets through
+  `assemblePipeline`: CLI construction gets lexical search by default and
+  `QUANTA_INDEX=on` upgrades the same path to semantic/hybrid presets.
 evidence:
   code:
     - src/retrieval/pipeline/types.ts
@@ -52,16 +52,7 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold:
-  reason: |
-    No automatic wiring into the dispatch loop, the agent assembly root, or
-    any surface. The composer is a leaf primitive — callers in @/agent
-    opt in by importing the sub-barrel explicitly and adapting their
-    concrete adapters (`LexicalSearchPort`, `SemanticIndex`, etc.) to the
-    inline duck-typed ports declared in `types.ts`. Cross-slice wiring is
-    a separate ADR.
-  promotion_path: |
-    Documented in ADR; wire when ROI concrete.
+deliberate_hold: null
 notes: |
   RRF formula and the k=60 constant are inlined in `compose.ts` rather
   than imported from the sibling `score-fusion-rrf.ts`. This is a

@@ -1,6 +1,6 @@
 # ADR-0216: Stage1Store port (agent-side, no-throw, 4-verb surface)
 
-- Status: Accepted
+- Status: Superseded (2026-07-19)
 - Date: 2026-05-25
 - Renumbered: from initially-drafted ADR-0207 (collision with the
   parallel-agent ADR `0207-stage1-outputs-persist.md` that landed a
@@ -10,6 +10,12 @@
   the rows persisted here), ADR-0131 (4-state memory outcome enum —
   optional `outcome` / `outcomeEvidence` fields), ADR-0207 (sibling
   port — usage/selection layer in `src/memory/stage1-store/`).
+
+> **Superseded:** A production-composition audit found this agent-side V2
+> wrapper had no runtime consumer and could not feed the canonical Phase 2
+> contract without adding a duplicate cache. The V2 slice was removed. The
+> live authority is the canonical `@/memory/consolidate` Phase 1 → Phase 2
+> store path.
 
 ## Context
 

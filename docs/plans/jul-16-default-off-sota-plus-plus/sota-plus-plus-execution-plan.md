@@ -36,7 +36,7 @@
 - **SP-21 retrieval/semantic ADR-0254 포트**: `src/retrieval/semantic/{port,in-memory-index,index}.ts`의 text-in `SemanticIndex`는 live wire가 안 씀(live는 `@/retrieval/pipeline` vector-in). concrete impl `createInMemoryIndex` consumer 0. → 통합(pipeline 타입으로) 또는 삭제, `duplicate_of: search-pipeline`.
 - **SP-22 recovery-router-codex-spec**: `codexSpecRoute` 테이블이 SSOT(decorator-policy/retry/fallback 소비), `RecoveryRouter.route()`는 `recovery.ts:253` 한 곳만 — **router가 redundant path**. DI-slot 배선 대신 router를 policy로 흡수하거나 단일권위 명시.
 - **SP-23 .codex-plugin 2차 discovery**: live는 `.quanta/plugins`(`plugin-loader.ts`), `.codex-plugin` 스캐너(`plugin-discovery/discovery.ts`)는 mention `plugin://`에도 안 붙는 2차 구현 → 통합(하나의 discovery로).
-- **SP-24 stage1-phase2 orphan store**: live 파이프라인은 `@/memory/consolidate` store 사용, 레저가 가리키는 `@/agent/memory/stage1-store`+vendor-glob consume는 caller 0 → consolidate/delete 결정.
+- **SP-24 stage1-phase2 orphan store**: resolved by deleting the unconsumed `@/agent/memory/stage1-store` duplicate; live Phase1/Phase2 uses only the canonical `@/memory/consolidate` store, while vendor glob remains independently wired.
 - **SP-25 ratelimit DualWindowStore 죽은 half**: `parseDualWindowSnapshot`는 live(`stream-consume.ts:199`), per-account `DualWindowStore.observe/current`는 caller 0 → `.observe()`를 같은 헤더경로서 호출하거나 삭제.
 
 **검증**: god-code green, 삭제행은 `decision: delete-proven-duplicate`+duplicate_of/lifecycle_evidence, 삭제 후 typecheck+테스트 green, red-on-injection(삭제 seam import 복원→컴파일 실패로 dead 확증).

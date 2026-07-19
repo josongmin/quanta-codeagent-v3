@@ -365,6 +365,10 @@ interface DeniedRecord {
  */
 export const CIRCUMVENTION_TTL_TURNS = DENIAL_LIMITS.maxTotal
 
+/** Hard session-memory ceiling for distinct denied effects. This is a resource
+ * bound, not a detection heuristic: records remain exact path signatures. */
+export const CIRCUMVENTION_MAX_RECORDS = 1024
+
 /** A raised circumvention signal. */
 export interface CircumventionSignal {
   readonly path: string
@@ -387,11 +391,33 @@ export interface CircumventionSignal {
  */
 export class CircumventionTracker {
   private readonly denied = new Map<string, DeniedRecord>()
+  private lastPrunedTurn: number | undefined
+
+  private pruneExpired(turn: number): void {
+    if (this.lastPrunedTurn === turn) return
+    this.lastPrunedTurn = turn
+    for (const [key, rec] of this.denied) {
+      if (turn - rec.deniedAtTurn > CIRCUMVENTION_TTL_TURNS) this.denied.delete(key)
+    }
+  }
+
+  private enforceCapacity(): void {
+    while (this.denied.size > CIRCUMVENTION_MAX_RECORDS) {
+      const oldestKey = this.denied.keys().next().value
+      if (oldestKey === undefined) return
+      this.denied.delete(oldestKey)
+    }
+  }
 
   /** Record that `sig` was SOFT-denied via `tool` at monotonic `turn`. HARD_DENY
    *  hits MUST NOT be passed here (they are terminal — §161 of the test plan). */
   noteDenied(sig: EffectSignature, tool: string, turn: number): void {
-    this.denied.set(sigKey(sig), { deniedByTool: tool, deniedAtTurn: turn })
+    this.pruneExpired(turn)
+    const key = sigKey(sig)
+    // Refresh insertion order as well as provenance so capacity eviction is LRU.
+    this.denied.delete(key)
+    this.denied.set(key, { deniedByTool: tool, deniedAtTurn: turn })
+    this.enforceCapacity()
   }
 
   /**
@@ -405,14 +431,10 @@ export class CircumventionTracker {
     tool: string,
     turn: number,
   ): CircumventionSignal | undefined {
+    this.pruneExpired(turn)
     const key = sigKey(sig)
     const rec = this.denied.get(key)
     if (rec === undefined) return undefined
-    // TTL: a stale deny no longer matches (and is pruned).
-    if (turn - rec.deniedAtTurn > CIRCUMVENTION_TTL_TURNS) {
-      this.denied.delete(key)
-      return undefined
-    }
     // Same-tool re-attempt is NOT circumvention (the denial-limit handles it).
     if (rec.deniedByTool === tool) return undefined
     return {
@@ -432,6 +454,7 @@ export class CircumventionTracker {
   /** Drop all signatures (denial-limit reset / session boundary). */
   reset(): void {
     this.denied.clear()
+    this.lastPrunedTurn = undefined
   }
 
   /** Read-only count (tests / telemetry). */

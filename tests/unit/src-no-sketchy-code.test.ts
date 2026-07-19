@@ -620,8 +620,6 @@ const RULES: readonly Rule[] = [
       "agent/budget-ledger.ts":
         "BURN-DOWN: human-readable Date formatting in error message — not model-facing replay",
       "agent/hooks.ts": "BURN-DOWN: hook-elapsed measurement for telemetry — not model-facing",
-      "agent/memory/stage1-store/sqlite.ts":
-        "BURN-DOWN: SQLite persisted-row timestamp; replay-stable via the store",
       "agent/repro-test/execute.ts":
         "BURN-DOWN: crypto fallback when randomUUID unavailable — last-resort token, not model-facing",
       "agent/subagent-persistence-store/jsonl-store.ts":

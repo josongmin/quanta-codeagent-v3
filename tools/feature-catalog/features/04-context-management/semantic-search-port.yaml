@@ -8,12 +8,12 @@ status: new
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
 labels: [absorbed:cline, absorbed:cursor, surface:core, default-off, slice-primitive, "adr:0254", "adr:0093"]
 depends_on: []
 config_refs:
-  env: []
+  env: [QUANTA_INDEX, QUANTA_PIPELINE]
 surface_integration:
   cli: full
   web: na
@@ -21,7 +21,7 @@ surface_integration:
   verified: "2026-06-09"
   evidence:
     cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph (createHeadlessEmbedder consumed by src/runner/assemble/pipeline.ts)"
-    web: "pure internal slice primitive (ui_surfaces n-a), no consumer wires it, no UI affordance"
+    web: "pure internal slice primitive (ui_surfaces n-a); runner pipeline consumes it only for semantic presets, with no browser-specific affordance"
 purpose: |
   Cline / Cursor `CLIENT_SIDE_TOOL_V2_SEMANTIC_SEARCH_FULL` 패턴 흡수의 slice
   primitive. quanta는 `grep`/`glob`/`lsp_nav` 같은 lexical retrieval과
@@ -41,8 +41,8 @@ purpose: |
     - `EmbedError = empty-text | embed-failed` (closed discriminated union)
     - headless-embedder: Bernstein hash → Mulberry32 PRNG → L2-normalized
       fixed-dim vector (same text ⇒ byte-identical vector)
-    - default-OFF byte-identical: 유일 src/ consumer는
-      `src/runner/assemble/pipeline.ts` (createHeadlessEmbedder)
+    - semantic preset에서 runner가 `src/runner/assemble/pipeline.ts`의
+      `createHeadlessEmbedder`를 소비한다; index/provider 선택은 별도 sibling이 소유한다
 evidence:
   code:
     - src/retrieval/semantic/types.ts

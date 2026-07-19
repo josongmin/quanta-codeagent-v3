@@ -48,7 +48,7 @@ evidence:
     unit:
       - tests/unit/vendor-rules-detector-hellgate.test.ts
       - tests/unit/vendor-glob-unconsumed-failclosed-hellgate.test.ts
-      - tests/unit/stage1-phase2-consume-and-vendor-glob-e2e-hellgate.test.ts
+      - tests/unit/vendor-glob-prompt-e2e-hellgate.test.ts
     integration: []
     contract: []
 knobs: []

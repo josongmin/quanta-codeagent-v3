@@ -48,6 +48,36 @@ const toCommandHookEvent = (event: HookEvent): CommandHookEvent => {
   return { type: event.type, payload: event }
 }
 
+type CommandHookVerdict = Awaited<ReturnType<typeof runCommandHooks>>
+type CommandHookRun =
+  | { readonly ok: true; readonly verdict: CommandHookVerdict }
+  | { readonly ok: false; readonly error: unknown }
+
+const runCommandHookSafely = async (
+  gate: CommandHookGate,
+  deps: CommandHookDeps,
+  event: HookEvent,
+): Promise<CommandHookRun> => {
+  try {
+    return { ok: true, verdict: await runCommandHooks(gate, deps, toCommandHookEvent(event)) }
+  } catch (error) {
+    return { ok: false, error }
+  }
+}
+
+const projectHookResult = (type: HookEvent["type"], result: CommandHookRun): unknown => {
+  if (!result.ok) {
+    if (!DENY_CAPABLE_EVENTS.has(type)) return undefined
+    const reason = result.error instanceof Error ? result.error.message : String(result.error)
+    return { deny: `command-hook execution failed (fail-closed): ${reason}` }
+  }
+  if (result.verdict.deny !== null) return { deny: result.verdict.deny.reason }
+  if (type === TOOL_GATING_EVENT && "updatedInput" in result.verdict) {
+    return { updatedInput: result.verdict.updatedInput }
+  }
+  return undefined
+}
+
 /**
  * Register command-hook handlers on `bus`. No-op (registers nothing) when the
  * gate is not armed — preserving the default-OFF byte-identical contract.
@@ -71,26 +101,8 @@ export const installCommandHooks = (
 
   for (const type of eventTypes) {
     bus.on(type, async (event) => {
-      let verdict: Awaited<ReturnType<typeof runCommandHooks>>
-      try {
-        verdict = await runCommandHooks(gate, deps, toCommandHookEvent(event))
-      } catch (err) {
-        // Fail-CLOSED on a deny-capable event: an exec-adapter throw must block
-        // the guarded action, NOT silently pass it through via the bus's catch.
-        if (DENY_CAPABLE_EVENTS.has(type)) {
-          const reason = err instanceof Error ? err.message : String(err)
-          return { deny: `command-hook execution failed (fail-closed): ${reason}` }
-        }
-        // Observer events (post_tool_use*, permission_request, …) cannot block;
-        // a throw there has no gating impact — let the bus continue.
-        return undefined
-      }
-      if (verdict.deny !== null) return { deny: verdict.deny.reason }
-      // updatedInput only meaningful on the tool-gating event.
-      if (type === TOOL_GATING_EVENT && "updatedInput" in verdict) {
-        return { updatedInput: verdict.updatedInput }
-      }
-      return undefined
+      const result = await runCommandHookSafely(gate, deps, event)
+      return projectHookResult(type, result)
     })
   }
   return bus
