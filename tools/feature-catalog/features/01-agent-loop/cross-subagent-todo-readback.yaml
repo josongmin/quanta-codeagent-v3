@@ -3,7 +3,7 @@ title: Cross-subagent todo readback (Roo bidirectional extension)
 section: 1
 subsystem: Cross-subagent todo readback (ADR-0255)
 order: 255
-maturity: L3
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
@@ -49,7 +49,14 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    Seam-only: no AgentConfig slot, turn-boundary propagation call, or surface
+    consumer constructs the store. Unit tests prove only the isolated port and
+    adapter behavior.
+  promotion_path: |
+    Add a host-owned store instance, explicit child-to-parent propagation at a
+    safe boundary, and an integration test that reads the propagated snapshot.
 notes: |
   Sibling of ADR-0219 focus chain. Intentional API divergence: status
   enum uses underscore (in_progress / completed) — Roo wire format —

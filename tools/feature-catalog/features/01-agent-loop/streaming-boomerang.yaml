@@ -3,7 +3,7 @@ title: streaming-boomerang — Roo Boomerang async-iterator progressive consumpt
 section: 1
 subsystem: subagent / mode-typed delegation (ADR-0218 sibling)
 order: 251
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: n-a

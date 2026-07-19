@@ -68,6 +68,7 @@ jobs:
           bun fc validate
           bun fc diff
           bun fc lint
+          bun fc:audit validate
       - name: silent-catch baseline gate (R10 — read-only --check mode)
         # Read-only counterpart of `bun run baseline:silent-catch`. CI cannot
         # commit a tightened BASELINES table, so this step BLOCKS when:

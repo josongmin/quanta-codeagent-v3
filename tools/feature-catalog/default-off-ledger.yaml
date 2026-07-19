@@ -4,7 +4,7 @@ scope:
   include_runtime_cli_seed_features: true
   limitations:
     - The bounded denominator is the union of catalog rows labelled default-off and mapped live CLI seed owners.
-    - Campaign-wide exclusions are not yet structured in the catalog, so this ledger does not claim all 1027 rows are classified.
+    - Campaign-wide exclusions are not yet structured in the catalog, so this ledger does not claim all 1028 rows are classified.
     - Proof tiers cite the strongest existing test found by source audit; receipts are minted only by running the cited command at a recorded revision (no prose counts imported).
 
 runtime_cli_seed_mappings:
@@ -36,6 +36,8 @@ runtime_cli_seed_mappings:
   QUANTA_COVERAGE_TOOL: code-coverage
   QUANTA_PROMPT_CACHE_STATUS: prompt-cache-observability
   QUANTA_SIDE_AGENT: background-side-agent
+  QUANTA_SUBAGENT_MAILBOX: subagent-mailbox
+  QUANTA_PEER_MSG_SURFACE: peer-message-surfacing
 
 row_defaults: {}
 
@@ -1357,6 +1359,18 @@ rows:
     rollback: 정책 미주입
     duplicate_of: null
     lifecycle_evidence: null
+  - feature_id: peer-message-surfacing
+    gate_owner: [QUANTA_PEER_MSG_SURFACE]
+    activation: host-seeded
+    effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/host/runtime/peer-message-sink-wire.ts
+    rollback: QUANTA_PEER_MSG_SURFACE=0
+    duplicate_of: null
+    lifecycle_evidence: null
   - feature_id: pipeline-composition-root-wire
     gate_owner: [QUANTA_PIPELINE]
     activation: env/config
@@ -2010,6 +2024,18 @@ rows:
     decision: enable-now
     owner_seam: src/agent/tier1/subagent-introspect.ts
     rollback: 두 게이트 모두 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: subagent-mailbox
+    gate_owner: [QUANTA_SUBAGENT_MAILBOX]
+    activation: host-seeded
+    effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/agent/subagent-mailbox/index.ts
+    rollback: QUANTA_SUBAGENT_MAILBOX=0
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: subagent-read-inbox

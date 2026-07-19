@@ -1,5 +1,5 @@
 id: feature-catalog-tool
-title: feature-catalog tool — `bun fc` CLI (build / validate / list / audit / lint)
+title: feature-catalog tool — `bun fc` + full-audit CLI
 section: 10
 subsystem: 메타 도구 (YAML SSOT → docs/10.feature-catalog.md auto-render)
 order: 50
@@ -32,7 +32,9 @@ purpose: |
   empty stub / cross-link drift), `lint --update-baseline`은 ratchet으로
   empty-stub 증가를 막는다. `check-changed <base-ref>`는 PR-time gate로 새
   src 파일이 catalog에 등록되지 않으면 fail. CI fence(`bun fc diff`)는 MD
-  drift를 감지한다.
+  drift를 감지한다. `bun fc:audit`는 고정 HEAD의 전수-audit snapshot,
+  priority queue, per-feature result overlay, PASS/CONDITIONAL/SEAM_ONLY 등
+  효능 판정을 별도 SSOT로 관리한다.
 evidence:
   code:
     - tools/feature-catalog/cli.ts
@@ -43,6 +45,11 @@ evidence:
     - tools/feature-catalog/check-changed.ts
     - tools/feature-catalog/yaml.ts
     - tools/feature-catalog/refresh-baseline.ts
+    - tools/feature-catalog/full-audit/schema.ts
+    - tools/feature-catalog/full-audit/model.ts
+    - tools/feature-catalog/full-audit/io.ts
+    - tools/feature-catalog/full-audit/cli.ts
+    - tools/feature-catalog/full-audit/README.md
     - tools/feature-catalog/README.md
     - src/apps/cli/internal.ts
   adrs: []
@@ -55,6 +62,7 @@ evidence:
       - tests/unit/feature-catalog-yaml.test.ts
       - tests/unit/feature-catalog-baseline.test.ts
       - tests/unit/feature-catalog-check-changed.test.ts
+      - tests/unit/_arch/feature-catalog-full-audit.test.ts
     integration: []
     contract: []
 knobs: []

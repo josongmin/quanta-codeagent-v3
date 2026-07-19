@@ -72,7 +72,7 @@ evidence:
     - src/apps/cli/index.ts
     - src/apps/agent/index.ts
     - src/apps/web-daemon/index.ts
-  adrs: [268]
+  adrs: [268, "docs/decisions/0186-distributed-tracing.md"]
   tests:
     unit:
       - tests/unit/observability/otel-exporter-hellgate.test.ts

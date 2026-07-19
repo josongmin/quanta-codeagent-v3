@@ -1,0 +1,52 @@
+version: 1
+feature_id: inline-trigger-wiring
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/skill/playbook/trigger/fs-watch-adapter.ts:createFsWatchInlineTrigger
+entrypoints: []
+activation: ["factory call only; no host constructs the watcher"]
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: off
+producer: [src/skill/playbook/trigger/fs-watch-adapter.ts:createFsWatchInlineTrigger]
+consumer: []
+reachable: no
+surface_findings:
+  - "CLI: missing; no production import outside the trigger slice"
+  - "Web: not applicable"
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill/playbook/inline-trigger-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 15 focused cases pass; isolated watcher behavior only
+failure_posture: degraded
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: No CLI, side-conversation, status, or daemon host constructs the watcher or consumes TriggerEvent.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg skill/playbook/trigger outside the owner slice
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: no production consumer; only tests and static policy references
+  - kind: test
+    command: bun test tests/unit/skill/playbook/inline-trigger-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 15 pass, 0 fail
+  - kind: source
+    command: bun fc reachability | rg inline-trigger-wiring
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: grandfathered unreachable at src/skill/playbook/trigger/port.ts
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

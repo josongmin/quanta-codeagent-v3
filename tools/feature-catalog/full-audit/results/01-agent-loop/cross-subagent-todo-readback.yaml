@@ -1,0 +1,52 @@
+version: 1
+feature_id: cross-subagent-todo-readback
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/agent/todo-readback/default-store.ts:defaultTodoReadbackStore
+entrypoints: []
+activation: ["factory call only; no host constructs or propagates the store"]
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/agent/todo-readback/default-store.ts:defaultTodoReadbackStore]
+consumer: []
+reachable: no
+surface_findings:
+  - "CLI: missing; no production import outside src/agent/todo-readback"
+  - "Web: not applicable; no todo readback projection"
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/todo-readback-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 15 isolated store cases pass; no host propagation proof
+failure_posture: fail-loud
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: No AgentConfig slot, turn-boundary propagation call, or UI consumer exists.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg todo-readback outside the owner slice
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: no production consumer; only tests reference the slice
+  - kind: test
+    command: bun test tests/unit/agent/todo-readback-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 15 pass, 0 fail
+  - kind: source
+    command: bun fc reachability | rg cross-subagent-todo-readback
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: grandfathered unreachable at src/agent/todo-readback/port.ts
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

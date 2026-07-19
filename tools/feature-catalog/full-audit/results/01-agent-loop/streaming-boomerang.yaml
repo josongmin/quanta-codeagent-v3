@@ -1,0 +1,57 @@
+version: 1
+feature_id: streaming-boomerang
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/agent/streaming-boomerang/default-streamer.ts:defaultStreamer
+entrypoints: []
+activation: ["factory call only; no delegation runner constructs the streamer"]
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer: [src/agent/streaming-boomerang/default-streamer.ts:defaultStreamer]
+consumer: []
+reachable: no
+surface_findings:
+  - "CLI: missing; every defaultStreamer reference is slice-local or test-only"
+  - "Web: not applicable; progressive chunk bridge is absent"
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/streaming-boomerang-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: HELL-SB-08 proves the existing result-only path remains unchanged when no streamer is wired
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/streaming-boomerang-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 18 isolated primitive cases pass; no production composition proof
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: The subagent delegation runner never constructs defaultStreamer and no parent-turn consumer projects its chunks.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg streaming-boomerang outside the owner slice
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: no production consumer; only tests and source-policy references
+  - kind: test
+    command: bun test tests/unit/agent/streaming-boomerang-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 18 pass, 0 fail
+  - kind: source
+    command: bun fc reachability | rg streaming-boomerang
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: grandfathered unreachable at src/agent/streaming-boomerang/port.ts
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

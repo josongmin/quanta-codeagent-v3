@@ -1,0 +1,52 @@
+version: 1
+feature_id: n-phase-hitl
+snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+status: closed
+owner_seam: src/agent/n-phase/default-driver.ts:createDefaultNPhaseDriver
+entrypoints: []
+activation: ["port-present: NPhaseDriver; no host injects or constructs it"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: na
+  headless: off
+  daemon: na
+producer: [src/agent/n-phase/default-driver.ts:createDefaultNPhaseDriver]
+consumer: []
+reachable: no
+surface_findings:
+  - "CLI: missing; no production import outside src/agent/n-phase"
+  - "Web: missing; no web command or approval consumer"
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/n-phase-hellgate.test.ts tests/unit/agent/n-phase-rollback-stale-feedback-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 22 pass, 0 fail; proves the isolated driver only
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No AgentConfig slot, CLI or IDE composition-root injection, or other production consumer exists.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg production imports of agent/n-phase outside src/agent/n-phase
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: zero production consumers
+  - kind: test
+    command: bun test tests/unit/agent/n-phase-hellgate.test.ts tests/unit/agent/n-phase-rollback-stale-feedback-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 22 pass, 0 fail, 114 assertions
+  - kind: source
+    command: bun fc reachability | rg n-phase-hitl
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: grandfathered unreachable at src/agent/n-phase/types.ts
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: pending
+reviewer: null

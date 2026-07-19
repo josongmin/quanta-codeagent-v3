@@ -3,7 +3,7 @@ title: N-phase HITL state machine (plan-exit-flow 일반화)
 section: 1
 subsystem: N-phase HITL workflow (ADR-0243; Cursor 흡수)
 order: 243
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [cli, ide]
 monitoring: n-a

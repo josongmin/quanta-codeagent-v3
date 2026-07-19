@@ -59,6 +59,7 @@
     "probe": "bun run src/apps/probe/index.ts",
     "bench:verified": "bun run src/apps/bench/index.ts --swebench /Users/songmin/Documents/code-new/quanta-benchmark-corpus/external/swebench/verified/raw/instances.jsonl",
     "fc": "bun run tools/feature-catalog/cli.ts",
+    "fc:audit": "bun run tools/feature-catalog/full-audit/cli.ts",
     "pm": "bun run tools/pm/check.ts",
     "pm:all": "bun run tools/pm/check.ts --all",
     "pm:all:strict": "bun run tools/pm/check.ts --all --strict",

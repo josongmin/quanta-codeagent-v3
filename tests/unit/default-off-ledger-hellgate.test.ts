@@ -17,8 +17,10 @@ describe("DOF-00 default-off authority ledger hellgate", () => {
     const ledger = await loadDefaultOffLedger(LEDGER_PATH)
     const report = await checkDefaultOffLedger(ledger, { catalogDir: CATALOG_DIR })
 
-    expect(report.runtimeCliSeedCount).toBe(28)
+    expect(report.runtimeCliSeedCount).toBe(30)
     expect(report.eligibleFeatureIds.length).toBeGreaterThanOrEqual(150)
+    expect(report.eligibleFeatureIds).toContain("subagent-mailbox")
+    expect(report.eligibleFeatureIds).toContain("peer-message-surfacing")
     expect(report.eligibleFeatureIds).toEqual([...report.eligibleFeatureIds].sort())
     // DOF-00 completion invariant: every eligible row resolves every surface
     // default (zero `unknown` cells). Construction-phase allowed unknowns; the

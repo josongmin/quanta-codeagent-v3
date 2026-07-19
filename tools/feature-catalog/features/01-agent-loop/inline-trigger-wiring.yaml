@@ -3,7 +3,7 @@ title: Inline-trigger watcher — Aider-style source-comment dispatch primitive
 section: 1
 subsystem: Playbook trigger primitive (ADR-0250)
 order: 250
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: n-a
@@ -45,7 +45,14 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    Seam-only: no CLI, status, side-conversation, or daemon host constructs the
+    watcher or consumes TriggerEvent. Unit tests prove the isolated primitive,
+    not production reachability.
+  promotion_path: |
+    Wire createFsWatchInlineTrigger at one production composition root and add
+    an integration test that observes a source marker reaching that consumer.
 notes: |
   Why fs.watch and not chokidar: install is blocked in this environment
   (verify-workflow memory). The port surface is unchanged so the swap to

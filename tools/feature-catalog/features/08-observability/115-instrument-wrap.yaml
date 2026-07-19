@@ -36,7 +36,9 @@ evidence:
     - src/observability/metrics/instrument-budget.ts
     - src/observability/metrics/instrument-lsp.ts
     - src/observability/metrics/observability-helper.ts
-  adrs: ["docs/decisions/0159-monitoring-impl-wrap-dashboard-alerts.md"]
+  adrs:
+    - docs/decisions/0158-monitoring-recipe.md
+    - docs/decisions/0159-monitoring-impl-wrap-dashboard-alerts.md
   tests:
     unit:
       - tests/unit/observability-metrics-instrument-hellgate.test.ts

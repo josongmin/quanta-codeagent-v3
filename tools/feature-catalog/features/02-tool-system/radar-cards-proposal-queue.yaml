@@ -46,7 +46,7 @@ evidence:
     - src/agent/loop/turn-loop.ts
     - src/apps/cli/slash/registry-surface.ts
     - src/apps/cli/repl/surface-compose.ts
-  adrs: [231]
+  adrs: [231, "docs/decisions/0188-bug-fix-proposal-queue.md"]
   tests:
     unit:
       - tests/unit/radar/radar-hellgate.test.ts
