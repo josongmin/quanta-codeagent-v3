@@ -16,8 +16,9 @@
  * One preflight request. Caller (a remote-tool dispatcher about to invoke a
  * mutating action) supplies an opaque `agentId`, an `action` discriminator
  * (caller convention: e.g. `"tool.exec"`, `"connector.write"`), and a
- * `resource` string the policy table can match. `requestedAt` is absolute
- * epoch-ms — lets the attestor reject stale requests under clock skew.
+ * `resource` string the policy table can match. `requestedAt` is carried for
+ * the future remote policy contract; this local adapter does not yet have a
+ * caller-defined skew/freshness policy and therefore does not enforce it.
  */
 export interface AttestRequest {
   readonly agentId: string
@@ -67,7 +68,13 @@ export type AttestResult =
 export class AttestError extends Error {
   constructor(
     message: string,
-    public readonly code: "headless" | "tampered" | "expired" | "scope-mismatch" | "internal",
+    public readonly code:
+      | "headless"
+      | "tampered"
+      | "expired"
+      | "scope-mismatch"
+      | "misconfigured"
+      | "internal",
   ) {
     super(message)
     this.name = "AttestError"

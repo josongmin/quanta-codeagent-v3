@@ -4,6 +4,8 @@
 >
 > **어딧 핵심 수치**: unwired/seam-only 라벨 41행 중 **18행이 실은 ENV-GATED-LIVE**(라벨만 stale), 진짜 dormant는 **21행**. repair-first 17 중 **11행은 blocker가 STALE**(이미 고쳐짐/배선됨). 진짜 신규 코드 갭은 **6건**, 통합대상 중복은 **5건**.
 
+> **2026-07-19 current-state addendum**: 아래 Track 목록은 당시 실행 계획이다. 현재 authority는 `default-off-ledger.yaml`과 `00-index.md`이며, live source 재감사 결과는 **163/172 wired (94.8%)**, unknown 0이다. `typed-event` bounded reader, stream cancellation, compaction `PostCompact` consumer는 이미 landed했고, `search_codebase`는 기본 lexical wire(semantic index opt-in과 별개)로 정정됐다. 남은 9건은 외부/product contract 4, lifecycle owner 없는 producer 3, existing inline authority와 중복되는 port 1, loop producer 없는 transport seam 1이다. 따라서 아래의 “배선 가능” 목록을 현재 작업 지시로 해석하지 않는다.
+
 ---
 
 ## 어딧이 뒤집은 전제 (증거)
@@ -56,8 +58,8 @@
 
 라이브 소비자 없는 진짜 seam. SOTA++/ROI무관 = **내부 소비자를 만들 수 있는 것은 만들고, 외부의존은 forward-contract로 보존**. 각각 RFC+consumer 설계.
 
-- **내부 소비자 배선 가능(신규 작업 후보)**: streaming-boomerang/streaming-cancellation-primitive(loop이 AbortSignal 채택), template-literal-windsurf(barrel 노출+skill/playbook 소비), multi-source-rules-vendor-detector(rule-load서 detectAll), node-repl-persistent-kernel(도구 등록), budget-probe-ledger-wire(pipeline budget-gate 스테이지 구성), model-tag-auto-hook/versioning(retrieval 캐시 무효화 배선), codex-r2-observability-decorators(MetricsRegistry 스레드), compaction-visibility(post_compact 훅 구독자).
-- **외부의존 = forward-contract 보존(건드리면 손해)**: bridge-attestation(서명 시크릿), jwks-agent-identity(외부 IdP), message-batches-client-core(폴링 인프라), codex-r2-{sqlite-session-registry, multi-process-flock}(disk 레지스트리 selector), voice(mic 바이너리+STT), realtime-ws(유료 소켓), github-*(gh auth), dockersandbox(Docker 데몬).
+- **내부 소비자 배선 가능(신규 작업 후보)**: streaming-boomerang(loop lifecycle producer), template-literal-windsurf(barrel 노출+skill/playbook 소비), multi-source-rules-vendor-detector(rule-load서 detectAll), node-repl-persistent-kernel(도구 등록), budget-probe-ledger-wire(pipeline budget-gate 스테이지 구성), model-tag-auto-hook/versioning(retrieval 캐시 무효화 배선), codex-r2-observability-decorators(Production MetricsRegistry adapter + cache ownership 결정).
+- **외부의존 = forward-contract 보존(건드리면 손해)**: bridge-attestation(프로비저닝된 서명 시크릿 + preflight authority), jwks-agent-identity(외부 IdP), message-batches-client-core(폴링 인프라), codex-r2-{sqlite-session-registry, multi-process-flock}(disk 레지스트리 selector), voice(mic 바이너리+STT), realtime-ws(유료 소켓), github-*(gh auth), dockersandbox(Docker 데몬 + hardened profile 계약).
 - **model-preset-sticky-resolver**: SP-33이 소비자 신설로 해소(dormant→wired).
 
 ## Track 5 — efficacy A/B (operator, 코드갭 아님) 【SP-5x】

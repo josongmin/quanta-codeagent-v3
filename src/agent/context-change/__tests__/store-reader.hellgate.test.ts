@@ -79,4 +79,24 @@ describe("SP-31 context-event store reader", () => {
     })
     expect(brokenReader.read()).toEqual([])
   })
+
+  test("selection happens before the bounded prompt budget", () => {
+    const store = createInMemoryTypedHistoryEventStore()
+    for (let i = 0; i < 16; i++) store.append(event(`/before-${i}`, i))
+    const compaction = {
+      kind: "compaction_event" as const,
+      trigger: "pre_sampling" as const,
+      reason: "context_limit" as const,
+      tokensBefore: 100,
+      tokensAfter: 50,
+      at: 17,
+    }
+    store.append(compaction)
+
+    const reader = createContextEventStoreReader(store, {
+      include: (entry) => entry.kind === "compaction_event",
+    })
+    expect(reader.read()).toEqual([compaction])
+    expect(reader.read()).toEqual([])
+  })
 })

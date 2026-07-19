@@ -4,7 +4,7 @@ section: 3
 subsystem: Remote attestation seam (preflight + HMAC-SHA256 STS) — Claude Desktop onBridgePermissionPreflight + 9-event stream absorption
 order: 246
 maturity: L3
-status: stable
+status: hold
 ui_surfaces: [n-a]
 monitoring: n-a
 telemetry_keys: ["quanta.bridge_attest"]
@@ -21,8 +21,8 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
-    web: "pure internal security primitive (HMAC-SHA256 STS token mint plus preflight), node:crypto only, no UI affordance on any surface"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts); no production constructor/import consumer exists."
+    web: "pure internal security primitive (HMAC-SHA256 STS token mint plus preflight); no web consumer or affordance."
 purpose: |
   Closed-port leaf slice for remote permission preflight + short-lived STS
   token issuance. Absorbs Claude Desktop's `onBridgePermissionPreflight` round
@@ -41,9 +41,12 @@ purpose: |
   (a future MCP `bridge_attest_preflight` tool, a Tauri sidecar bridge wrapper,
   an org-policy proxy) opts in via constructor.
 
-  Plane discipline: imports `node:crypto` ONLY. No `@/agent`, no `@/permission`,
-  no `@/observability`. Re-usable in a Tauri sidecar, worker thread, or
-  standalone attestation binary.
+  Construction is fail-closed: caller-owned HMAC material is mandatory and must
+  be at least 32 UTF-8 bytes. There is no test-secret fallback.
+
+  Plane discipline: imports `node:crypto` and `@/shared` (error helper) only.
+  No `@/agent`, `@/permission`, or `@/observability`. Re-usable in a Tauri
+  sidecar, worker thread, or standalone attestation binary.
 evidence:
   code:
     - src/security/bridge-attest/types.ts
@@ -60,8 +63,8 @@ evidence:
 knobs:
   - name: secret
     where: defaultAttestor constructor opt
-    default: "test-secret (with logger.warn)"
-    purpose: HMAC-SHA256 signing secret; absent → fail-loud fallback
+    default: "required; no default"
+    purpose: HMAC-SHA256 signing secret; absent, blank, or under 32 UTF-8 bytes → fail-closed constructor error
   - name: policyTable
     where: defaultAttestor constructor opt
     default: "{} (every action → prompt-user)"
@@ -90,8 +93,8 @@ deliberate_hold:
     this slice produces tokens; transport is the caller's choice. JWT / JWKS /
     asymmetric signing migration is a future ADR; current HMAC is symmetric for
     round-trip simplicity. OS-keyring secret backend mirrors ADR-0050's deferred
-    OS-keyring path. Cross-process token cache (multi-process replay protection)
-    is future work.
+    OS-keyring path. Cross-process token cache, caller-defined request-freshness
+    policy, and multi-process replay protection are future work.
   promotion_path: |
     L4 = first real caller wires the port (a Tauri sidecar bridge wrapper, an
     org-policy proxy, or an MCP `bridge_attest_preflight` tool) + the 9-event

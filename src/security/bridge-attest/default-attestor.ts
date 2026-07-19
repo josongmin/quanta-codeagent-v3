@@ -7,12 +7,10 @@
  *     16-byte random nonce
  *   - injectable `clock` for test-time TTL determinism
  *   - injectable `onEvent` for the 9-event lifecycle stream (default no-op)
- *   - secret fallback: when no `secret` is supplied, falls back to the literal
- *     `"test-secret"` string with a one-shot `logger.warn` — keeps unit tests
- *     and headless smoke from panicking but makes a real-deployment misconfig
- *     visible in the log.
+ *   - fail-closed secret validation: construction rejects a missing, blank, or
+ *     shorter-than-32-byte HMAC secret before any token can be minted
  *
- * Plane discipline: imports `node:crypto` + `@/shared/logger` ONLY. No
+ * Plane discipline: imports `node:crypto` + `@/shared` ONLY. No
  * `@/agent`, no `@/permission`, no `@/observability`.
  *
  * NO-THROW: `preflight` never throws; internal failures surface as
@@ -20,23 +18,24 @@
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { errMessage } from "@/shared"
-import { logger } from "@/shared/logger"
 import type { BridgeAttestor } from "./port"
-import type {
-  AttestEvent,
-  AttestEventSink,
-  AttestRequest,
-  AttestResult,
-  PolicyTable,
-  StsToken,
+import {
+  AttestError,
+  type AttestEvent,
+  type AttestEventSink,
+  type AttestRequest,
+  type AttestResult,
+  type PolicyTable,
+  type StsToken,
 } from "./types"
 
 /**
- * Constructor options. All fields optional with documented defaults — the
- * hellgate suite asserts every default by symbol.
+ * Constructor options. Policy, clock, and event sink have documented defaults;
+ * signing material is required so this adapter cannot silently mint forgeable
+ * tokens.
  */
 export interface DefaultAttestorOpts {
-  /** HMAC-SHA256 signing secret. MISSING → falls back to `"test-secret"` + warn. */
+  /** HMAC-SHA256 signing secret. Required and at least 32 UTF-8 bytes. */
   readonly secret?: string
   /** action → verdict table. Default `{}` (every action → prompt-user). */
   readonly policyTable?: PolicyTable
@@ -46,20 +45,30 @@ export interface DefaultAttestorOpts {
   readonly onEvent?: AttestEventSink
 }
 
-/** Fallback secret when none supplied — visibly mis-configured. */
-const FALLBACK_SECRET = "test-secret"
+/** Minimum entropy-bearing HMAC key material. SHA-256's 256-bit output is the
+ * security target; accepting short convenience strings would make a future
+ * production caller trivially forgeable. */
+const MIN_SECRET_BYTES = 32
 
 // STS token TTL — 5 minutes by default. Matches AWS STS short-lived
 // credential convention; long enough for typical preflight→action latency,
 // short enough to bound exposure on accidental leak.
 const DEFAULT_STS_TOKEN_TTL_MS = 300_000
 
-/** Warn once per process when fallback secret is used. */
-let warnedFallback = false
-
-/** Reset the one-shot fallback warning latch — test-only helper. */
-export const __resetFallbackWarnedForTests = (): void => {
-  warnedFallback = false
+const requireSecret = (secret: string | undefined): string => {
+  if (secret === undefined || secret.trim().length === 0) {
+    throw new AttestError(
+      "bridge attestor requires a non-empty HMAC signing secret",
+      "misconfigured",
+    )
+  }
+  if (Buffer.byteLength(secret, "utf8") < MIN_SECRET_BYTES) {
+    throw new AttestError(
+      `bridge attestor HMAC signing secret must be at least ${MIN_SECRET_BYTES} UTF-8 bytes`,
+      "misconfigured",
+    )
+  }
+  return secret
 }
 
 /** Build the canonical signing payload — kept centralised so mint + verify
@@ -131,16 +140,7 @@ const nextRequestId = (clock: () => number): string =>
  * concurrent attestors (e.g. per-session).
  */
 export const defaultAttestor = (opts: DefaultAttestorOpts = {}): BridgeAttestor => {
-  let secret = opts.secret ?? ""
-  if (secret.length === 0) {
-    secret = FALLBACK_SECRET
-    if (!warnedFallback) {
-      warnedFallback = true
-      logger.warn(
-        "[bridge-attest] no secret supplied — falling back to test-secret. This is INSECURE for production.",
-      )
-    }
-  }
+  const secret = requireSecret(opts.secret)
   const policyTable: PolicyTable = opts.policyTable ?? {}
   const clock = opts.clock ?? Date.now
   const onEvent: AttestEventSink = opts.onEvent ?? (() => {})

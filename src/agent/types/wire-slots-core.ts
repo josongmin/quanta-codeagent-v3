@@ -358,12 +358,13 @@ export interface WireSlotsCoreConfig {
    * jun-7-misc 06 (ADR ≥0497) — model-based fast-apply MERGE rung. When the
    * deterministic edit ladder (exact + fuzzy) misses, this port asks a dedicated
    * apply model to fold a terse edit sketch into the full original file and
-   * return the merged file; the `edit` tool verifies the proposal and routes it
-   * through the SAME gated commit path. The composition root constructs it behind
+   * return the merged file; the `edit` tool verifies the proposal but requires a
+   * separate host-owned FastApplyMergeReviewSeam before commit. The composition root constructs the producer behind
    * `QUANTA_FAST_APPLY_MERGE=1` + a configured `QUANTA_FAST_APPLY_MODEL`
    * (`optional-ports.ts`) and the dispatch seam threads it onto
-   * `ToolContext.fastApplyMerge`. Absent ⇒ no merge rung, byte-identical
-   * (RFC §1.2 default-OFF).
+   * `ToolContext.fastApplyMerge`. The normal host intentionally does not invent
+   * review authority from a post-write diff observer, so without an explicit
+   * reviewer the tool fails closed before provider dispatch.
    */
   fastApplyMerge?: FastApplyPort
   /**

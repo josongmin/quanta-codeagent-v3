@@ -1,5 +1,5 @@
 id: inspect-cmd-toolcall-expand
-title: `/inspect <toolCallId>` — 세션 JSONL projection + 확장 패널 (input/decision/result/recovery) (ADR-0239 Track I)
+title: '`/inspect <toolCallId>` — 세션 JSONL projection + 확장 패널 (input/decision/result/recovery) (ADR-0239 Track I)'
 section: 10
 subsystem: REPL slash — 사후 tool-call 단위 확장 viewer
 order: 2391

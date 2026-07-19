@@ -18,7 +18,7 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
+    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts); no production verifier constructor/import consumer exists."
     web: "pure internal security primitive (JWKS fetch/cache/verify with Web Crypto), no UI affordance on any surface"
 purpose: |
   Codex agent-task 등록 패턴 흡수의 verify-only foundation. 외부 dispatcher가
@@ -32,6 +32,12 @@ purpose: |
   TTL-bounded — stale serve 금지. Plane discipline: Web Crypto + `fetch`만
   의존, 다른 quanta slice import 0. Default-OFF — dispatch/loop/agent/runner/
   scheduler/realtime 전부 미주입.
+
+  This is a signature-verification primitive, not an authentication policy:
+  it does not require `exp`, validate issuer/audience/not-before claims, or
+  enforce JWK `use`/`key_ops` consistency. A future production consumer must
+  own those tenant-specific constraints before an allow decision can depend on
+  this result.
 evidence:
   code:
     - src/security/jwks-identity/types.ts
@@ -53,10 +59,12 @@ deliberate_hold:
     결정 필요), Cloud Tasks callback 통합, realtime/SSE auth wire 는 후속
     슬라이스. 본 ADR 은 consumer 반쪽 (외부 발급 token 검증) 만 ship.
   promotion_path: |
-    1) agent-task registrar 가 `JwksClient` 주입받아 외부 dispatcher 응답
+    1) issuer, audience, required exp/nbf, permitted algorithm, and JWK
+       use/key_ops contract를 가진 auth-policy wrapper를 먼저 만든다.
+    2) agent-task registrar 가 그 wrapper를 주입받아 외부 dispatcher 응답
        토큰 검증 후 follow-up enqueue (composition-root opt-in).
-    2) Realtime/SSE 경로가 connection-auth 단계에서 verify 호출.
-    3) Signing 슬라이스 추가 시 동일 `JsonWebKey` 타입 재사용.
+    3) Realtime/SSE 경로가 connection-auth 단계에서 같은 wrapper를 호출.
+    4) Signing 슬라이스 추가 시 동일 `JsonWebKey` 타입 재사용.
 notes: |
   Algorithm whitelist 는 RS256 + ES256 두 개 (real-world ~전수 커버).
   EdDSA/HS256/RS384/RS512 는 typed `unsupported-alg` — 향후 추가는 default-OFF

@@ -677,8 +677,11 @@ const wireSubagentToolGates = <T extends OptionalPortBase>(base: T, env: Optiona
  *   - `applyModel`: `runtimeConfig().fastApplyModel` (`QUANTA_FAST_APPLY_MODEL`).
  *
  * Default-OFF byte-identical (RFC §1.2): gate unset / model absent / model
- * empty ⇒ `base` returned UNCHANGED (no port, no allocation). A pre-set
- * `fastApplyMerge` is preserved verbatim (caller-override-precedence).
+ * empty ⇒ `base` returned UNCHANGED (no port, no allocation). This function
+ * builds only the provider port; it deliberately does not invent a
+ * FastApplyMergeReviewSeam from a diff observer. Therefore normal hosts remain
+ * fail-closed before provider dispatch until a review owner is explicitly wired.
+ * A pre-set `fastApplyMerge` is preserved verbatim (caller-override-precedence).
  */
 const wireFastApplyMerge = <T extends OptionalPortBase>(base: T): T => {
   if (!runtimeConfig().fastApplyMerge) return base

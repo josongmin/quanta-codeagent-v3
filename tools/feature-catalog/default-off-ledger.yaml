@@ -413,30 +413,6 @@ rows:
     rollback: unset QUANTA_INDEX
     duplicate_of: null
     lifecycle_evidence: null
-  - feature_id: codex-r2-compaction-event-emit
-    gate_owner: [AgentConfig.compactionEventEmit]
-    activation: port-present
-    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
-    risk: behavioral-cost
-    decision: hold
-    owner_seam: src/agent/loop.ts
-    rollback: slot 미주입
-    duplicate_of: null
-    lifecycle_evidence: null
-  - feature_id: codex-r2-context-change-injection-wire
-    gate_owner: [AgentConfig.contextEventsForTurn]
-    activation: port-present
-    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
-    risk: behavioral-cost
-    decision: hold
-    owner_seam: src/agent/context-change/inject.ts
-    rollback: slot 미주입
-    duplicate_of: null
-    lifecycle_evidence: null
   - feature_id: codex-r2-disk-persistence-and-env-swap
     gate_owner: [QUANTA_SESSION_REGISTRY_DISK_DIR]
     activation: env/config
@@ -482,7 +458,7 @@ rows:
     risk: behavioral-cost
     decision: hold
     owner_seam: src/observability/codex-r2-metrics/cache-metrics-decorator.ts
-    rollback: assemble auto-wrap 미배선
+    rollback: CLI MetricsRegistry 미주입 + prebuilt system cache bypass
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: codex-r2-plugin-system

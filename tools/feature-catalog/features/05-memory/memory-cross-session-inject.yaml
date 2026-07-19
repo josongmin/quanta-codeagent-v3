@@ -50,7 +50,6 @@ purpose: |
       candidate (`>` cap test, not `>=`)
     - oldest-first ordering deterministic on tie-break (V8 stable
       sort)
-configurable: integrated
 evidence:
   code:
     - src/memory/cross-session/port.ts

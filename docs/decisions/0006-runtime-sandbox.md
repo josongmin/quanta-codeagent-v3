@@ -13,9 +13,9 @@ policy)`)를 도입한다. 구현 둘:
 - `LocalSandbox` — `runShell`과 동일한 `Bun.spawn(["bash","-lc",cmd])`
   기반의 **best-effort 인프로세스 confinement**. 보안 경계가 아님을
   코드 주석이 명시.
-- `DockerSandbox` — `docker run --rm`로 **실 격리**. 정책을 docker 플래그로
-  매핑(`--network none`, `-v host:/workspace`, `--env NAME`, `--memory`/
-  `--cpus`). Docker 부재 시 `SandboxUnavailableError`를 던지고 **조용히
+- `DockerSandbox` — `docker run --rm`로 host process와 분리된 실행 경계를
+  제공한다. 정책을 docker 플래그로 매핑(`--network none`, `-v host:/workspace`,
+  `--env NAME`, 옵션 `--memory`/`--cpus`). Docker 부재 시 `SandboxUnavailableError`를 던지고 **조용히
   LocalSandbox로 강등하지 않는다** — fallback은 호출자가 명시 선택.
 
 기본은 LocalSandbox(default-off Docker). 정책 위반(jail escape)은
@@ -44,12 +44,18 @@ policy)`)를 도입한다. 구현 둘:
   | env 스크럽 | 강제 (allowlist만) | 강제 (`--env NAME`) |
   | cwd 시작 + 명시적 escape 거부 | 강제 | 강제 (bind-mount) |
   | output cap / timeout | 강제 | 강제 |
-  | 절대경로 FS 격리 (chroot) | **미강제** | 강제 |
+  | 절대경로 FS 격리 (chroot) | **미강제** | 컨테이너 rootfs에서 분리; 마운트 workspace는 기본 writable |
   | 네트워크 차단 | **미강제(advisory)** | 강제 (`--network none`) |
-  | CPU/메모리 한도 | **미강제** | 강제 (`--memory`/`--cpus`) |
+  | CPU/메모리 한도 | **미강제** | 옵션이 제공될 때만 강제 (`--memory`/`--cpus` 기본값 없음) |
 
   Local의 `cwdJail`은 작업 디렉토리 설정 + *명시적으로 요청된* escape
   거부일 뿐 chroot가 아니다. `allowNetwork:false`는 Local에서 advisory.
+- Docker backend의 현재 하드닝 한계: default image는 mutable tag
+  `node:22-slim`, 컨테이너는 기본 root user, capability/no-new-privileges/
+  pids 제한이 없고 workspace mount는 writable이다. 따라서 신뢰할 수 없는
+  작업을 위한 hardened sandbox로 승격하려면 digest-pinned image, read-only
+  mount/명시적 writable scratch, non-root user, capability drop,
+  no-new-privileges, pids 및 자원 기본값을 소유한 별도 profile이 필요하다.
 - Docker 데몬 의존: `DockerSandbox`는 데몬 부재 시 실행 불가
   (`isAvailable`로 선검사 후 `SandboxUnavailableError`). contract 티어
   게이트로 검증(ADR-0003).

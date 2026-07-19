@@ -1,5 +1,5 @@
 id: llm-adapter-mantle
-title: Anthropic Mantle LLM adapter (Phase-1 hold: external SDK unpublished — throws provider-missing-dependency)
+title: 'Anthropic Mantle LLM adapter (Phase-1 hold: external SDK unpublished — throws provider-missing-dependency)'
 section: 8
 subsystem: LLM provider seam — cloud transport
 order: 5

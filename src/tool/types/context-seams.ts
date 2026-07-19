@@ -245,6 +245,22 @@ export interface FastApplyMergeSeam {
   ): Promise<FastApplyMergeResultMirror>
 }
 
+/** Mandatory authority boundary for a model-produced whole-file merge. The
+ * deterministic edit ladder can prove an exact/fuzzy replacement, but cannot
+ * prove that an arbitrary full-file proposal preserved unrelated semantics.
+ * A host that intentionally enables the merge rung must therefore supply an
+ * explicit reviewer which sees the complete before/after payload. Absent,
+ * reject, or throw is deny — the edit falls back to its typed mismatch and no
+ * model proposal reaches disk. */
+export interface FastApplyMergeReviewSeam {
+  approve(input: {
+    readonly path: string
+    readonly before: string
+    readonly after: string
+    readonly editSketch: string
+  }): Promise<boolean>
+}
+
 /** Canonical seam declaration for the `session_config` tool. Lives in
  *  `./types` (not in `./session_config`) so `ToolContext` can reference it
  *  without a circular import; the tool file re-exports it for downstream

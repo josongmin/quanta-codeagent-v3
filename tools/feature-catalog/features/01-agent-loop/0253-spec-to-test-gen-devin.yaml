@@ -65,7 +65,7 @@ knobs:
   - name: GenerateOptions.headerComment
     type: string?
     default: undefined
-    purpose: 생성 파일 최상단 주석 (예: ADR 출처). 없으면 헤더 라인 생략.
+    purpose: "생성 파일 최상단 주석 (예: ADR 출처). 없으면 헤더 라인 생략."
 deliberate_hold: null
 notes: |
   MVP scope 1-method port. 후속 슬라이스가 `playbook.successCriteria` →

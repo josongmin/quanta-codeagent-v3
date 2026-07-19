@@ -161,6 +161,28 @@ describe("ADR-0332 §C — compaction-event emit", () => {
     })
     expect(on.contextEventsForTurn?.().map((event) => event.kind)).toEqual(["compaction_event"])
   })
+
+  test("stored compaction is not delayed behind unrelated shared-store events", () => {
+    const store = createInMemoryTypedHistoryEventStore()
+    for (let i = 0; i < 16; i++) {
+      store.append({ kind: "cwd_change", from: `/before-${i}`, to: `/after-${i}`, at: i })
+    }
+    store.append({
+      kind: "compaction_event",
+      reason: "token_budget",
+      trigger: "pre_sampling",
+      tokensBefore: 12_000,
+      tokensAfter: 3_000,
+      at: 17,
+    })
+    const cfg = makeBareCfg()
+    installCodexR2Wires(cfg, {
+      store,
+      getSnapshot: () => makeSnapshot(),
+      replayStoredEvents: true,
+    })
+    expect(cfg.contextEventsForTurn?.().map((event) => event.kind)).toEqual(["compaction_event"])
+  })
 })
 
 describe("ADR-0332 §D — mention injector", () => {

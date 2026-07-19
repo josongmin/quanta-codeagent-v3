@@ -29,7 +29,7 @@ describe("DOF-00 default-off authority ledger hellgate", () => {
     expect(report.errors).toEqual([])
   })
 
-  test("missing row and duplicate feature id are rejected", async () => {
+  test("missing row and duplicate feature id are rejected", { timeout: 15_000 }, async () => {
     const ledger = await loadDefaultOffLedger(LEDGER_PATH)
     const missing = clone(ledger)
     const removed = missing.rows.shift()

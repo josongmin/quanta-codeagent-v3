@@ -7,6 +7,7 @@
 import type { Dirent } from "node:fs"
 import { readdir, readFile } from "node:fs/promises"
 import { join, relative } from "node:path"
+import { parseDocument } from "yaml"
 import { z } from "zod"
 import { parseYaml } from "./yaml"
 
@@ -284,44 +285,42 @@ export interface AxisScores {
   readonly total: number // 0..12
 }
 
-export function computeAxisScores(f: Feature): AxisScores {
-  // monitoring
-  const monMap = { integrated: 3, partial: 2, planned: 1, static: 0, none: 0, "n-a": 0 } as const
-  const monitoring = (monMap[f.monitoring] ?? 0) as 0 | 1 | 2 | 3
+const monitoringScore = (monitoring: Feature["monitoring"]): 0 | 1 | 2 | 3 => {
+  const scores = { integrated: 3, partial: 2, planned: 1, static: 0, none: 0, "n-a": 0 } as const
+  return scores[monitoring] ?? 0
+}
 
-  // hellgate
+const wiringScore = (feature: Feature): 0 | 1 | 2 | 3 => {
+  const hasCli = feature.ui_surfaces.includes("cli")
+  const hasAnyRealSurface = feature.ui_surfaces.some(
+    (surface) => surface !== "none" && surface !== "n-a",
+  )
+  if (!hasAnyRealSurface) return 0
+  if (!hasCli) return 1
+  if (feature.configurable === "integrated") return 3
+  if (feature.configurable === "partial" || feature.configurable === "static") return 2
+  return 1
+}
+
+const structureScore = (codePaths: readonly string[]): 0 | 1 | 2 | 3 => {
+  const hasSliceBarrel = codePaths.some((path) => /^src\/[^/]+\/index\.ts$/.test(path))
+  if (hasSliceBarrel || codePaths.length >= 5) return 3
+  if (codePaths.length >= 2) return 2
+  if (codePaths.length === 1) return 1
+  return 0
+}
+
+export function computeAxisScores(f: Feature): AxisScores {
   const allTests = [
     ...f.evidence.tests.unit,
     ...f.evidence.tests.integration,
     ...f.evidence.tests.contract,
   ]
+  const monitoring = monitoringScore(f.monitoring)
   const hellCount = allTests.filter((t) => t.includes("hellgate")).length
   const hellgate = Math.min(hellCount, 3) as 0 | 1 | 2 | 3
-
-  // wiring
-  const hasCli = f.ui_surfaces.includes("cli")
-  const hasAnyRealSurface = f.ui_surfaces.some((s) => s !== "none" && s !== "n-a")
-  let wiring: 0 | 1 | 2 | 3 = 0
-  if (!hasAnyRealSurface) {
-    wiring = 0
-  } else if (!hasCli) {
-    wiring = 1
-  } else {
-    const cfg = f.configurable
-    if (cfg === "integrated") wiring = 3
-    else if (cfg === "partial" || cfg === "static") wiring = 2
-    else wiring = 1
-  }
-
-  // structure
-  const codeLen = f.evidence.code.length
-  const hasSliceBarrel = f.evidence.code.some((p) => /^src\/[^/]+\/index\.ts$/.test(p))
-  let structure: 0 | 1 | 2 | 3 = 0
-  if (codeLen === 0) structure = 0
-  else if (codeLen === 1) structure = 1
-  else if (codeLen <= 4) structure = 2
-  else structure = 3
-  if (hasSliceBarrel && structure < 3) structure = 3
+  const wiring = wiringScore(f)
+  const structure = structureScore(f.evidence.code)
 
   return {
     monitoring,
@@ -460,6 +459,19 @@ export interface LoadedFeature {
 }
 
 /**
+ * The catalog's compact parser owns the supported feature subset, but its
+ * permissive scalar handling must not let a file cease to be YAML for every
+ * standard consumer. Validate the original bytes first so duplicate keys and
+ * reserved leading scalars cannot be silently accepted as catalog truth.
+ */
+function assertStandardYaml(text: string, path: string): void {
+  const document = parseDocument(text, { uniqueKeys: true })
+  if (document.errors.length === 0) return
+  const details = document.errors.map((error) => error.message.split("\n")[0]).join("; ")
+  throw new Error(`YAML syntax failed at ${relative(process.cwd(), path)}: ${details}`)
+}
+
+/**
  * Load + validate all features under `dir`. Throws on first parse/zod error
  * with a clear message including the source path.
  */
@@ -472,6 +484,7 @@ export async function loadFeatures(
     const text = await readFile(path, "utf8")
     let raw: unknown
     try {
+      assertStandardYaml(text, path)
       raw = parseYaml(text)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -520,70 +533,94 @@ export interface InvariantViolation {
   readonly message: string
 }
 
+const invariantViolation = (
+  feature: Feature,
+  path: string,
+  invariant: string,
+  message: string,
+): InvariantViolation => ({ invariant, featureId: feature.id, path, message })
+
+const collectLabelInvariants = (feature: Feature, path: string): InvariantViolation[] => {
+  const violations: InvariantViolation[] = []
+  const surfaceLabels = feature.labels.filter((label) => label.startsWith("surface:"))
+  const tierLabels = feature.labels.filter((label) => label.startsWith("tier:"))
+  if (surfaceLabels.length > 1) {
+    violations.push(
+      invariantViolation(
+        feature,
+        path,
+        "labels-uniqueness",
+        `multiple surface:* labels: [${surfaceLabels.join(", ")}] (single-valued axis)`,
+      ),
+    )
+  }
+  if (tierLabels.length > 1) {
+    violations.push(
+      invariantViolation(
+        feature,
+        path,
+        "labels-uniqueness",
+        `multiple tier:* labels: [${tierLabels.join(", ")}] (single-valued axis)`,
+      ),
+    )
+  }
+  const hasDefaultOn = feature.labels.some((label) => /^default-on\b/.test(label))
+  const hasDefaultOff = feature.labels.some((label) => /^default-off\b/.test(label))
+  if (hasDefaultOn && hasDefaultOff) {
+    violations.push(
+      invariantViolation(
+        feature,
+        path,
+        "default-posture-single-axis",
+        "labels claim BOTH default-on and default-off — pick one (stale-opposite doc drift)",
+      ),
+    )
+  }
+  return violations
+}
+
+const collectLifecycleInvariants = (feature: Feature, path: string): InvariantViolation[] => {
+  const violations: InvariantViolation[] = []
+  if (feature.maturity === "L4" && feature.owners.length === 0) {
+    violations.push(
+      invariantViolation(
+        feature,
+        path,
+        "l4-owners-non-empty",
+        "maturity=L4 requires owners.length >= 1",
+      ),
+    )
+  }
+  if (feature.deliberate_hold !== null && feature.status === "refined") {
+    violations.push(
+      invariantViolation(
+        feature,
+        path,
+        "deliberate-hold-vs-progressing-status",
+        "deliberate_hold set but status=refined (contradicts progress)",
+      ),
+    )
+  }
+  if (feature.lifecycle_stage === "deprecated" && feature.maturity === "L5") {
+    violations.push(
+      invariantViolation(
+        feature,
+        path,
+        "lifecycle-vs-maturity",
+        "lifecycle_stage=deprecated cannot be maturity=L5",
+      ),
+    )
+  }
+  return violations
+}
+
 export function validateInvariants(features: readonly LoadedFeature[]): InvariantViolation[] {
   const violations: InvariantViolation[] = []
   for (const { feature, path } of features) {
-    // Invariant 1: labels uniqueness (surface:*, tier:*).
-    const surfaceLabels = feature.labels.filter((l) => l.startsWith("surface:"))
-    const tierLabels = feature.labels.filter((l) => l.startsWith("tier:"))
-    if (surfaceLabels.length > 1) {
-      violations.push({
-        invariant: "labels-uniqueness",
-        featureId: feature.id,
-        path,
-        message: `multiple surface:* labels: [${surfaceLabels.join(", ")}] (single-valued axis)`,
-      })
-    }
-    if (tierLabels.length > 1) {
-      violations.push({
-        invariant: "labels-uniqueness",
-        featureId: feature.id,
-        path,
-        message: `multiple tier:* labels: [${tierLabels.join(", ")}] (single-valued axis)`,
-      })
-    }
-    // Invariant 1b: default-posture is single-axis — a feature must NOT claim BOTH
-    // `default-on` and `default-off` labels. When a knob's default flips, a stale
-    // opposite label is the exact doc-drift class the 0399 (edit-fresh-hash) and
-    // memory-auto-trigger entries hit; both markers on one entry is always drift.
-    const hasDefaultOn = feature.labels.some((l) => /^default-on\b/.test(l))
-    const hasDefaultOff = feature.labels.some((l) => /^default-off\b/.test(l))
-    if (hasDefaultOn && hasDefaultOff) {
-      violations.push({
-        invariant: "default-posture-single-axis",
-        featureId: feature.id,
-        path,
-        message:
-          "labels claim BOTH default-on and default-off — pick one (stale-opposite doc drift)",
-      })
-    }
-    // Invariant 2: L4 owners non-empty (extends L5 gate).
-    if (feature.maturity === "L4" && feature.owners.length === 0) {
-      violations.push({
-        invariant: "l4-owners-non-empty",
-        featureId: feature.id,
-        path,
-        message: "maturity=L4 requires owners.length >= 1",
-      })
-    }
-    // Invariant 3: deliberate_hold contradicts status=refined.
-    if (feature.deliberate_hold !== null && feature.status === "refined") {
-      violations.push({
-        invariant: "deliberate-hold-vs-progressing-status",
-        featureId: feature.id,
-        path,
-        message: "deliberate_hold set but status=refined (contradicts progress)",
-      })
-    }
-    // Invariant 4: lifecycle=deprecated cannot be maturity=L5.
-    if (feature.lifecycle_stage === "deprecated" && feature.maturity === "L5") {
-      violations.push({
-        invariant: "lifecycle-vs-maturity",
-        featureId: feature.id,
-        path,
-        message: "lifecycle_stage=deprecated cannot be maturity=L5",
-      })
-    }
+    violations.push(
+      ...collectLabelInvariants(feature, path),
+      ...collectLifecycleInvariants(feature, path),
+    )
   }
   return violations
 }

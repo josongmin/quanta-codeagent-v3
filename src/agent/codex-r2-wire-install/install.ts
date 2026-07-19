@@ -118,13 +118,17 @@ const buildContextEventsProducer = (
   }
   // The store is shared by context-change, compaction and mention producers.
   // Only compaction events lack a direct prompt injection path; replaying the
-  // other variants here would duplicate their owning surface. Index-based
-  // consumption avoids timestamp-cursor loss and bounds each prompt addition.
+  // other variants here would duplicate their owning surface. The reader
+  // filters before applying its bounded prompt budget, so unrelated shared
+  // history cannot delay a stored compaction across multiple turns.
   const replayReader =
-    replayStoredEvents && store !== undefined ? createContextEventStoreReader(store) : undefined
+    replayStoredEvents && store !== undefined
+      ? createContextEventStoreReader(store, {
+          include: (event) => event.kind === "compaction_event",
+        })
+      : undefined
   return (): readonly ContextEvent[] => {
-    const replayedCompactions =
-      replayReader?.read().filter((event) => event.kind === "compaction_event") ?? []
+    const replayedCompactions = replayReader?.read() ?? []
     try {
       const current = getSnapshot()
       if (prev === undefined) {

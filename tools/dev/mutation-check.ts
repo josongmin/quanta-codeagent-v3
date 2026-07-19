@@ -236,23 +236,21 @@ const MUTATIONS: readonly Mutation[] = [
     severity: "CRITICAL",
     guards: "T02 L1 H1 — mid-stream abort classifies as aborted (NOT error/RUNTIME_UNKNOWN)",
     src: "src/agent/loop/stream-consume.ts",
-    find: `    if (
-      config.signal.aborted ||
-      (e instanceof LLMError && e.kind === "aborted") ||
-      abortReason === "abort"
-    ) {
-    )
-      return { status: "aborted", result: { aborted: true } }`,
+    find: `  if (
+    config.signal.aborted ||
+    (e instanceof LLMError && e.kind === "aborted") ||
+    abortReason === "abort"
+  )
+    return { status: "aborted", result: { aborted: true } }`,
     // Pre-fix: an abort thrown mid-stream fell through to {error} →
     // classifyLLMError("aborted")="fatal" → reported as a runtime failure.
-    replace: `    if (
-      false &&
-      (config.signal.aborted ||
-        (e instanceof LLMError && e.kind === "aborted") ||
-        abortReason === "abort")
-    ) {
-      return { status: "aborted", result: { aborted: true } }
-    }`,
+    replace: `  if (
+    false &&
+    (config.signal.aborted ||
+      (e instanceof LLMError && e.kind === "aborted") ||
+      abortReason === "abort")
+  )
+    return { status: "aborted", result: { aborted: true } }`,
     gate: "tests/unit/agent/turn-closeout-hellgate.test.ts",
     only: "mid-stream abort ⇒ reason aborted",
   },
@@ -263,15 +261,11 @@ const MUTATIONS: readonly Mutation[] = [
     severity: "HIGH",
     guards: "T08 L8 H1 — destructive reset on a protected branch is DENIED (no ref needed)",
     src: "src/permission/branch-only.ts",
-    find: `    const isDestructive = allToks.some(
-      (t) => t === "--hard" || t === "--merge" || t === "--keep",
-    )
+    find: `    const isDestructive = allToks.some((t) => t === "--hard" || t === "--merge" || t === "--keep")
     if (isDestructive && currentBranch && protectedBranches.includes(currentBranch)) {`,
     // Pre-fix: only an explicit protected-branch REF target was denied, so a
     // bare `git reset --hard HEAD~3` on main fell through to allow.
-    replace: `    const isDestructive = allToks.some(
-      (t) => t === "--hard" || t === "--merge" || t === "--keep",
-    )
+    replace: `    const isDestructive = allToks.some((t) => t === "--hard" || t === "--merge" || t === "--keep")
     if (false && isDestructive && currentBranch && protectedBranches.includes(currentBranch)) {`,
     gate: "src/permission/__tests__/fail-closed-base.hellgate.test.ts",
     only: "destructive reset on a protected branch",

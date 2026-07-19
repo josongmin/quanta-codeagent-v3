@@ -4,12 +4,13 @@
  * (which constructs the port BY HAND and drives the edit tool). THIS test proves
  * the missing seam the e2e test could not: that the REAL composition root
  * (`wireOptionalAgentPorts` → `AgentConfig.fastApplyMerge`) and the REAL dispatch
- * threading (`buildToolContext` → `ToolContext.fastApplyMerge`) make the port
- * PRODUCTION-REACHABLE when the strict knob is ON — and byte-identically absent
- * when it is OFF.
+ * threading (`buildToolContext` → `ToolContext.fastApplyMerge`) make the producer
+ * port available when the strict knob is ON. That alone is NOT production
+ * activation: a separate host-owned `FastApplyMergeReviewSeam` is mandatory for
+ * a whole-file proposal to reach a provider or commit.
  *
  * The wire is split across two owned files; this test pins BOTH halves:
- *   (a) PRODUCTION-REACHABLE: `QUANTA_FAST_APPLY_MERGE=1` (+ a configured
+ *   (a) PRODUCER-REACHABLE: `QUANTA_FAST_APPLY_MERGE=1` (+ a configured
  *       `QUANTA_FAST_APPLY_MODEL`) ⇒ the comp-root populates
  *       `config.fastApplyMerge`, and `dispatchTool` threads it onto
  *       `ctx.fastApplyMerge` (captured by a probe tool through the REAL dispatch).
@@ -105,7 +106,7 @@ afterEach(() => {
 
 describe("jun-7-misc 06 fast-apply MERGE composition-root WIRE hellgate", () => {
   // ───────────────────────────────────────────────────────────────────────────
-  // (a) PRODUCTION-REACHABLE — knob ON + apply model ⇒ comp-root populates the
+  // (a) PRODUCER-REACHABLE — knob ON + apply model ⇒ comp-root populates the
   //     port AND dispatch threads it onto ctx.fastApplyMerge.
   // ───────────────────────────────────────────────────────────────────────────
   test("WIRE-01 ON: comp-root populates config.fastApplyMerge", () => {
@@ -116,6 +117,18 @@ describe("jun-7-misc 06 fast-apply MERGE composition-root WIRE hellgate", () => 
     )
     expect(wired.fastApplyMerge).toBeDefined()
     expect(typeof wired.fastApplyMerge?.apply).toBe("function")
+  })
+
+  test("WIRE-02 ON: producer port is not mistaken for review authority", () => {
+    const sink: { ctx?: ToolContext } = {}
+    const wired = wireWith(
+      { QUANTA_FAST_APPLY_MERGE: "1", QUANTA_FAST_APPLY_MODEL: APPLY_MODEL },
+      makeBase(sink),
+    )
+    // The normal comp-root deliberately does not manufacture a reviewer from a
+    // post-write diff observer. Without an explicit future host owner, the edit
+    // rung must reject before provider dispatch.
+    expect("fastApplyMergeReview" in wired).toBe(false)
   })
 
   // NOTE: the dispatch-layer THREADING (config.fastApplyMerge → ctx.fastApplyMerge

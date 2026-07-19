@@ -269,10 +269,10 @@ export interface ToolContext {
    *  fuzzy both fail to anchor): it hands the apply model the CURRENT file +
    *  a terse edit sketch derived from `old_string`/`new_string` and gets back a
    *  full MERGED file PROPOSAL. The proposal is then re-verified IN the edit tool
-   *  (must drop the old text, contain the new text, differ from the original) and
-   *  routed through the SAME gated commit + diff-sink path as any edit — a model
-   *  merge is NEVER a side-channel blind write. On `{ok:false}` / a port throw /
-   *  any verification miss the ladder falls through to the existing typed
+   *  and MUST be explicitly approved through `fastApplyMergeReview` before its
+   *  normal gated commit. A diff sink is observation-only and is never treated as
+   *  approval. On missing/rejected/throwing review, `{ok:false}` / a port throw /
+   *  or any verification miss the ladder falls through to the existing typed
    *  mismatch (byte-identical recovery). Duck-typed (structural mirror of
    *  `FastApplyPort` in `@/agent/fast-apply-fallback`) so `@/tool` never imports
    *  `@/agent`; the dispatch seam wires the concrete port from
@@ -280,6 +280,11 @@ export interface ToolContext {
    *  `QUANTA_FAST_APPLY_MODEL` are both set. ABSENT (default) ⇒ the ladder is the
    *  byte-identical `exact → fuzzy → typed mismatch`, ZERO apply-model dispatch. */
   fastApplyMerge?: FastApplyMergeSeam
+  /** Authority owner for a whole-file model merge. This is intentionally NOT
+   * auto-wired from `QUANTA_FAST_APPLY_MERGE`: the environment gate selects a
+   * capability, while the host must supply a real review decision over complete
+   * pre/post bytes. Missing, false, or throwing ⇒ fail-closed mismatch. */
+  fastApplyMergeReview?: FastApplyMergeReviewSeam
   /** jun-26 edit-escalate (frontier-parity) — OPTIONAL auto-escalation flag. When
    *  `true`, the `edit` tool runs the deterministic whitespace-tolerant fuzzy
    *  ladder on an exact MISS even when the caller did NOT set `input.fuzzy`
@@ -535,6 +540,7 @@ export type EditToolContext = CoreToolContext &
     | "readFileState"
     | "fastApplyFallback"
     | "fastApplyMerge"
+    | "fastApplyMergeReview"
     | "autoEscalateFuzzy"
     | "editFreshHash"
     | "globWriteGuard"
@@ -559,6 +565,7 @@ import type {
   CodeCellDispatchSeam,
   CriticalSectionSeam,
   FastApplyFallbackSeam,
+  FastApplyMergeReviewSeam,
   FastApplyMergeSeam,
   FileHistorySink,
   GitWriteGuard,
@@ -593,6 +600,7 @@ export type {
   FastApplyFailureMirror,
   FastApplyFallbackSeam,
   FastApplyMergeResultMirror,
+  FastApplyMergeReviewSeam,
   FastApplyMergeSeam,
   FileHistorySink,
   GitWriteGuard,

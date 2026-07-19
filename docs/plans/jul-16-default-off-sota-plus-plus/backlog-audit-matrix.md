@@ -34,8 +34,6 @@ Generated from `tools/feature-catalog/default-off-ledger.yaml` after the source 
 | code-coverage | enable-now | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | code-mode-js-runtime | measure-first | wired | real-loop | wire | none | real-loop covered; no execution receipt |
 | codebase-indexer | hold | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
-| codex-r2-compaction-event-emit | hold | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
-| codex-r2-context-change-injection-wire | hold | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | codex-r2-disk-persistence-and-env-swap | hold | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | codex-r2-mention-injection-pipeline | hold | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | codex-r2-multi-process-flock | hold | seam-only | unit | unit | none | dormant/unconsumed; no promotion proof |
@@ -153,7 +151,7 @@ Generated from `tools/feature-catalog/default-off-ledger.yaml` after the source 
 | spinner-stall-detection | enable-now | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | stale-read-guard | enable-now | wired | real-loop | unit | none | real-loop covered; no execution receipt |
 | streaming-boomerang | hold | seam-only | unit | unit | none | dormant/unconsumed; no promotion proof |
-| streaming-cancellation-primitive | hold | seam-only | unit | unit | none | dormant/unconsumed; no promotion proof |
+| streaming-cancellation-primitive | hold | wired | real-loop | unit | none | host-injected live loop; ordinary surfaces lack a typed-cause producer |
 | structured-output-mode | repair-first | wired | wire | unit | none | composition/wire covered; no execution receipt |
 | subagent-6-tools | enable-now | wired | wire | unit | none | composition/wire covered; no execution receipt |
 | subagent-fs-ownership-enforce | repair-first | wired | wire | unit | none | composition/wire covered; no execution receipt |

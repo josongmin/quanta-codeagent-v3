@@ -159,7 +159,11 @@ describe("fc YAML hellgate — red-on-injection (has teeth)", () => {
   const FIXTURE_UNIT = "tests/unit/probe.test.ts" // a real file (no false path fail)
   const FIXTURE_FAKE = "tests/unit/this-fc-hellgate-fixture-does-not-exist-zzz.test.ts"
 
-  function fixtureYaml(): string {
+  function fixtureYaml({
+    withDuplicate = true,
+  }: {
+    readonly withDuplicate?: boolean
+  } = {}): string {
     return [
       "id: fc-hellgate-injection-probe",
       "title: injection probe",
@@ -170,9 +174,11 @@ describe("fc YAML hellgate — red-on-injection (has teeth)", () => {
       "evidence:",
       "  code: []",
       "  tests:",
-      // (1) duplicate `unit:` key at indent 4 → first list silently dropped
+      // (1) duplicate `unit:` key at indent 4 → first list silently dropped.
+      // The dangling-evidence rail below deliberately disables this separate
+      // syntax violation so it can reach its own assertion.
       `    unit: ["${FIXTURE_UNIT}"]`,
-      `    unit: ["${FIXTURE_UNIT}"]`,
+      ...(withDuplicate ? [`    unit: ["${FIXTURE_UNIT}"]`] : []),
       // (2) a fabricated dangling path
       `    integration: ["${FIXTURE_FAKE}"]`,
       "    contract: []",
@@ -205,7 +211,7 @@ describe("fc YAML hellgate — red-on-injection (has teeth)", () => {
       const featDir = join(dir, "01-agent-loop")
       const { mkdir } = await import("node:fs/promises")
       await mkdir(featDir, { recursive: true })
-      await writeFile(join(featDir, "probe.yaml"), fixtureYaml(), "utf8")
+      await writeFile(join(featDir, "probe.yaml"), fixtureYaml({ withDuplicate: false }), "utf8")
 
       const features = await loadFeaturesStrict(dir)
       expect(features.length).toBe(1)

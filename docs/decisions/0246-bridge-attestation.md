@@ -40,7 +40,9 @@ interface BridgeAttestor {
 
 `base64url(HMAC-SHA256(secret, "${scope}|${expiresAt}|${nonce}"))`
 
-- `secret` is read from constructor opt; absent → falls back to a literal `"test-secret"` string with a `logger.warn` so unit tests and headless smoke do not panic but a real deployment is visibly mis-configured.
+- `secret` is a mandatory caller-owned constructor input. Missing, blank, or
+  shorter-than-32-UTF-8-byte material makes construction fail with
+  `AttestError("misconfigured")`; the adapter never substitutes a known test key.
 - `expiresAt` is absolute epoch-ms; verify rejects when `Date.now() > expiresAt` (clock injected for testability via `clock?: () => number`).
 - `nonce` is 16 bytes of `randomBytes` — guarantees collision-free tokens even at identical (scope, expiresAt).
 - Scope is opaque string (caller convention: `"tool:<name>:action:<id>"`).
@@ -51,7 +53,7 @@ interface BridgeAttestor {
 
 ### D. Default-attestor adapter
 
-Pure in-process implementation: policy-table `Record<action, "allow" | "deny" | "prompt-user">` (default `"prompt-user"` on miss) + HMAC-SHA256 via `node:crypto`. Plane-discipline: imports `node:crypto` ONLY — no `@/agent`, no `@/permission`, no `@/observability`.
+Pure in-process implementation: policy-table `Record<action, "allow" | "deny" | "prompt-user">` (default `"prompt-user"` on miss) + HMAC-SHA256 via `node:crypto`. Plane-discipline: imports `node:crypto` plus the shared error helper — no `@/agent`, no `@/permission`, no `@/observability`.
 
 ### E. Headless stub
 
@@ -74,13 +76,13 @@ Pure in-process implementation: policy-table `Record<action, "allow" | "deny" | 
 11. default-OFF: barrel import alone produces no side effects (byte-identical state)
 12. AttestResult 3-arm exhaustive: removing one arm in test fixture is a TS error
 13. 1000 tokens minted at identical (scope, expiresAt) all distinct (nonce collision-free)
-14. secret 미주입 → `"test-secret"` fallback works + logger.warn fired exactly once
+14. missing, blank, or under-32-byte signing secret fails closed at construction
 15. `preflight-error` arm: throwing inner policy table surfaces as `{kind:"deny", reason}` + emits `preflight-error` event (NO-THROW public surface)
 
 ## Configurable knobs
 
-- `defaultAttestor({ secret?, policyTable?, clock?, onEvent? })` — all optional with documented defaults.
-- `secret` default `"test-secret"` + warn (NEVER silently empty).
+- `defaultAttestor({ secret?, policyTable?, clock?, onEvent? })` — policy, clock, and event sink have documented defaults; construction requires `secret`.
+- `secret` has no default: missing, blank, or under-32-UTF-8-byte material is rejected before a token can be minted.
 - `policyTable` default `{}` (every action → `"prompt-user"`).
 - `clock` default `Date.now`.
 - `onEvent` default no-op (default-OFF — no consumer wired in dispatch/loop).
@@ -103,3 +105,4 @@ Pure in-process implementation: policy-table `Record<action, "allow" | "deny" | 
 - JWT / JWKS / asymmetric signing — current HMAC is symmetric for round-trip simplicity. Migration to asymmetric is a future ADR.
 - OS-keyring secret backend — `secret` is currently a constructor opt. Keyring integration mirrors ADR-0050's deferred OS-keyring path.
 - Cross-process token cache — single-process only; multi-process replay protection is future work.
+- Request freshness / replay policy — `requestedAt` remains part of the port but this local adapter has no caller-defined skew budget or nonce ledger, so a future consumer must bind and enforce that contract before promotion.

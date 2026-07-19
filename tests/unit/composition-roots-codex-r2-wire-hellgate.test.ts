@@ -23,6 +23,7 @@
 import { describe, expect, test } from "bun:test"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import type { AgentConfig, AgentOutcome } from "@/agent/types"
+import { assembleAgentConfig as assembleAgentConfigWithEnv } from "@/host/runtime/agent-config-assembler"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { type AssembleRequest, assembleAgentConfig } from "../../src/apps/agent/assemble"
 import { runMode as runInteractiveMode } from "../../src/apps/agent/mode-presets/interactive"
@@ -90,6 +91,41 @@ describe("ADR-0334 §A — assemble.ts wires slots when sessionId present", () =
     expect(cfg.systemPromptCacheKey).toBeUndefined()
     expect(cfg.contextEventsForTurn).toBeDefined()
     expect(cfg.compactionEventEmit).toBeDefined()
+  })
+
+  test("typed compaction events stay side-channel-off and replay exactly once only when enabled", () => {
+    const event = {
+      kind: "compaction_event" as const,
+      trigger: "pre_sampling" as const,
+      reason: "context_limit" as const,
+      tokensBefore: 100,
+      tokensAfter: 40,
+      messagesRemoved: 2,
+      at: 1,
+      turnId: "compaction-proof",
+    }
+
+    const off = assembleAgentConfigWithEnv(
+      { mode: "interactive", base: baseFor({ sessionId: "compaction-off" }) },
+      {},
+    )
+    off.compactionEventEmit?.(event)
+    expect(
+      off.contextEventsForTurn?.().filter((candidate) => candidate.kind === "compaction_event"),
+    ).toEqual([])
+
+    const on = assembleAgentConfigWithEnv(
+      { mode: "interactive", base: baseFor({ sessionId: "compaction-on" }) },
+      { QUANTA_TYPED_EVENT_REPLAY: "1" },
+    )
+    on.compactionEventEmit?.(event)
+    const firstRead = on
+      .contextEventsForTurn?.()
+      .filter((candidate) => candidate.kind === "compaction_event")
+    expect(firstRead).toEqual([event])
+    expect(
+      on.contextEventsForTurn?.().filter((candidate) => candidate.kind === "compaction_event"),
+    ).toEqual([])
   })
 })
 

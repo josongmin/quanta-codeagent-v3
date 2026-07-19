@@ -1,5 +1,5 @@
 id: decision-emit-phase3-cap-jail-budget
-title: `decision` event emit Phase 3 — cap / jail / budget 게이트 wire (ADR-0269)
+title: "`decision` event emit Phase 3 — cap / jail / budget 게이트 wire (ADR-0269)"
 section: 3
 subsystem: cap/jail/budget 게이트 — decision-emit Phase 3 (admissibility 외부 chokepoint)
 order: 269

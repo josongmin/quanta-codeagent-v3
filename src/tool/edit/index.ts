@@ -8,7 +8,7 @@ import { guardWrite } from "../stale-read-guard"
 import { captureToolDiff } from "../tool-diff-capture"
 import type { EditToolContext, Tool, ToolEvent, ToolFailure } from "../types"
 import { resolveEditBase } from "../worktree/cwd-override"
-import { applyExactEdit } from "./exact"
+import { applyExactEdit, type EditOutcome } from "./exact"
 import { applyFuzzyEdit } from "./fuzzy"
 import { type LineRange, lineCount, validateLineRanges } from "./line-range"
 import { classifyMismatch, formatEditMismatchMarker, formatStrategyHint } from "./strategy-hint"
@@ -254,6 +254,12 @@ const tryFastApplyMergeRung = async (
 ): Promise<string | null> => {
   const port = ctx.fastApplyMerge
   if (port === undefined) return null
+  // A complete model-produced file has no generic deterministic proof that it
+  // preserved unrelated semantics. The diff sink is post-write observation
+  // only, so it cannot serve as this authority. Do not even spend a provider
+  // call unless the host supplied an explicit pre-commit reviewer.
+  const reviewer = ctx.fastApplyMergeReview
+  if (reviewer === undefined) return null
   // R1 adversarial fix — when the caller declared a bounded `line_ranges` scope,
   // the deterministic ladder honors it, but a WHOLE-FILE merge cannot. A model
   // merge handed the entire file could mutate lines OUTSIDE the declared scope
@@ -286,6 +292,17 @@ const tryFastApplyMergeRung = async (
   if (!result.ok || result.merged === null) return null
   const reject = verifyEditScopedMerge(source, result.merged, input.old_string, input.new_string)
   if (reject !== null) return null
+  try {
+    const approved = await reviewer.approve({
+      path: input.path,
+      before: source,
+      after: result.merged,
+      editSketch: buildEditSketch(input.old_string, input.new_string),
+    })
+    if (approved !== true) return null
+  } catch {
+    return null
+  }
   return result.merged
 }
 
@@ -313,6 +330,42 @@ const resolveLineRanges = (
     }
   }
   return { ok: true, ranges }
+}
+
+/** Resolve the optional whole-file merge proposal after deterministic matching
+ * has failed, or construct the existing typed mismatch. Keeping this recovery
+ * branch separate makes `planEdit` own only the normal edit flow. */
+const planMergeOrMismatch = async (
+  ctx: EditToolContext,
+  source: string,
+  input: Input,
+  lineRanges: readonly LineRange[] | undefined,
+  result: EditOutcome,
+  wantFuzzy: boolean,
+): Promise<
+  | { kind: "ready"; before: string; next: string; message: string }
+  | { kind: "failure"; result: { ok: false; output: string; failure: ToolFailure } }
+> => {
+  const merged = await tryFastApplyMergeRung(ctx, source, input, lineRanges)
+  if (merged !== null) {
+    return {
+      kind: "ready",
+      before: source,
+      next: merged,
+      message: "applied via fast-apply merge",
+    }
+  }
+  const wantsLineCount = result.kind === "ambiguous" || lineRanges !== undefined
+  const fileLineCount = wantsLineCount ? lineCount(source) : undefined
+  const isLocateMiss = result.kind === "not-found" || result.kind === "fuzzy-no-confident"
+  const nearestNote =
+    wantFuzzy && isLocateMiss
+      ? (nearestCandidateHint(source, input.old_string) ?? undefined)
+      : undefined
+  return {
+    kind: "failure",
+    result: buildMismatchResult(result, input.path, fileLineCount, nearestNote),
+  }
 }
 
 /** Plan the edit: read the file, gate on the optional hash precondition,
@@ -363,15 +416,6 @@ const planEdit = async (
     // path below is BYTE-IDENTICAL to the legacy mismatch. When wired, a verified
     // merge becomes the `ready` bytes that flow through the SAME gated commit +
     // diff-sink path as any edit — never a blind write.
-    const merged = await tryFastApplyMergeRung(ctx, source, input, lineRanges)
-    if (merged !== null) {
-      return {
-        kind: "ready",
-        before: source,
-        next: merged,
-        message: "applied via fast-apply merge",
-      }
-    }
     // H12 paired improvement — annotate AMBIGUOUS failures (the anchor matched
     // multiple spots) with the file's total line count so the model can pick a
     // `line_ranges` value on retry to disambiguate by scope, instead of a blind
@@ -379,8 +423,6 @@ const planEdit = async (
     // in-range match) also get it so the model can widen/narrow the span. Other
     // failure classes (not-found / fuzzy-no-confident) keep their byte-identical
     // legacy output — a line count doesn't help re-find missing text.
-    const wantsLineCount = result.kind === "ambiguous" || lineRanges !== undefined
-    const fileLineCount = wantsLineCount ? lineCount(source) : undefined
     // jun-26 edit-escalate — on the auto-escalate ON path, append a Claude-style
     // nearest-candidate note for a `not-found` miss when a whitespace-equal file
     // line exists (the model was "off by whitespace"). Gated by the SAME flag as
@@ -391,15 +433,7 @@ const planEdit = async (
     // for which a whitespace-equal line is the useful nearest signal. Ambiguous
     // (matched 2+) is excluded — there the model needs disambiguation, not a
     // nearest line.
-    const isLocateMiss = result.kind === "not-found" || result.kind === "fuzzy-no-confident"
-    const nearestNote =
-      wantFuzzy && isLocateMiss
-        ? (nearestCandidateHint(source, input.old_string) ?? undefined)
-        : undefined
-    return {
-      kind: "failure",
-      result: buildMismatchResult(result, input.path, fileLineCount, nearestNote),
-    }
+    return planMergeOrMismatch(ctx, source, input, lineRanges, result, wantFuzzy)
   }
   // Surface the pre-edit `source` so a SUCCESSFUL commit can hand the
   // before/after to the optional tool-diff sink (ADR-0440) — no recompute,

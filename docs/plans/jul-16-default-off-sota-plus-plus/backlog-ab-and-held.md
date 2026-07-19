@@ -2,8 +2,8 @@
 
 > 레저·소스·테스트를 대조한 백로그다. 기능별 **역할 / 왜 default-ON 안 했나 / 코드위치**는 레저 ID와 대조한다. 경쟁사 비교는 별도 출처 상태를 명시하며, 인용 없는 항목은 roadmap 근거로 쓰지 않는다.
 >
-> **Closure 현황 (2026-07-19 source re-audit)**: eligible 174행, **wired 165/174 = 94.8%**, runtime CLI seed 30, unknown-surface 0, unknown-value 0, checker error 0.
-> decisions: measure-first 67 · **enable-now 68** · repair-first 0 · hold 39.
+> **Closure 현황 (2026-07-19 source re-audit)**: eligible 172행, **wired 163/172 = 94.8%**, runtime CLI seed 30, unknown-surface 0, unknown-value 0, checker error 0. `compaction-event-emit`와 `context-change-injection`은 normal host에 항상 조립되는 production wire라 default-off denominator에서 제외했다.
+> decisions: measure-first 67 · **enable-now 68** · repair-first 0 · hold 37.
 >
 > **남은 9행의 성격**: 4개는 실제 외부 계약/credential 또는 image policy가 먼저 필요하고, 3개는 producer-only여서 수명 소유자가 없으며, 1개는 기존 inline 구현의 중복 포트, 1개는 실행 loop producer가 없는 transport seam이다. 가짜 consumer를 만들지 않는 한 이들은 `wired`가 될 수 없다. measure-first 67행은 행동/비용을 바꿔 **efficacy A/B(operator 결정)**가 선행돼야 기본값을 바꿀 수 있다.
 
@@ -106,12 +106,10 @@
 
 hold는 "기본 활성화 보류" 결정이며 미배선과 동의어가 아니다. 46개 중 **26개는 이미 wired**이고, dormant 계열은 seam-only 11·producer-only 7·consumer-only 1·forward-contract 1이다. 후자만 살아있는 consumer 없이 억지 배선하면 dead-wire가 된다. 나머지는 외부 의존, 안전성, 비용, 또는 operator configuration 때문에 기본값을 유지한다.
 
-### B-1. codex-r2 흡수 primitive (11) — 대부분 producer/seam만, 라이브 소비 경로 미개통
+### B-1. codex-r2 흡수 primitive — producer/seam과 조건부 live wire 혼재
 
 | feature_id | 역할(흡수한 codex 능력) | 현황 | 왜 HELD | 코드위치 |
 |---|---|---|---|---|
-| codex-r2-compaction-event-emit | compaction 발생을 typed `compaction_event`로 store에 append | wired producer, 소비 no-op | 이벤트 append되나 라이브 턴에 렌더하는 소비자 미개통 | `src/agent/loop/compaction-wire.ts:697` |
-| codex-r2-context-change-injection-wire | cwd/mode/repo-rules 변화를 `<context-update>` user msg로 | 구조상 배선, diff-detector inert | `getSnapshot&store` 채워질 때만+activeSkillCursor `[]` fail-closed | `src/agent/context-change/inject.ts:173` |
 | codex-r2-disk-persistence-and-env-swap | logs_2.sqlite/JSONL-parity 세션 백엔드 스왑(재시작 넘어 재사용) | wired, env-off면 in-memory | `QUANTA_SESSION_REGISTRY_DISK_DIR` unset ⇒ 디스크경로 미진입 | `src/agent/session-resource-registry/global.ts:85` |
 | codex-r2-mention-injection-pipeline | `@skill/plugin://@@app/@file/@Symbol` 7-sigil 파서 | `@file`은 라이브, plugin/app 활성화는 HELD | plugin discovery source 미배선 | `src/agent/mention-injection/parser.ts:287` |
 | codex-r2-multi-process-flock | 세션별 O_EXCL 락+stale-reap+refcount(다중 프로세스 안전) | disk registry 선택 시 wired | `QUANTA_SESSION_REGISTRY_DISK_DIR`가 없는 기본 경로에서는 미사용; disk registry 선택·다중 프로세스 receipt가 필요 | `src/agent/session-resource-registry/disk-adapter/disk-store.ts:332` |
@@ -144,7 +142,7 @@ hold는 "기본 활성화 보류" 결정이며 미배선과 동의어가 아니�
 
 | feature_id | 역할 | 현황 | 왜 HELD (외부의존) | 코드위치 |
 |---|---|---|---|---|
-| bridge-attestation | host-bridge 액션마다 HMAC STS 토큰 mint/verify + 정책테이블 | seam-only | 프로비저닝된 서명 시크릿+preflight caller 필요(없으면 `"test-secret"` fallback INSECURE) | `src/security/bridge-attest/default-attestor.ts:133` |
+| bridge-attestation | host-bridge 액션마다 HMAC STS 토큰 mint/verify + 정책테이블 | seam-only | 프로비저닝된 32-byte+ 서명 시크릿과 preflight caller 필요; 누락/blank/weak secret은 생성 시 fail-closed | `src/security/bridge-attest/default-attestor.ts` |
 | jwks-agent-identity | JWKS 클라이언트로 서명된 agent-identity JWT 검증 | forward-contract | **외부 JWKS 엔드포인트 + IdP 발급자** 필요(verify-only) | `src/security/jwks-identity/default-client.ts:48` |
 | streaming-boomerang | back-pressure 단일슬롯 취소가능 스트리밍 spawn | seam-only | 실 agent loop 브리지 producer 미작성 | `src/agent/streaming-boomerang/default-streamer.ts:324` |
 | streaming-cancellation-primitive | CancellationController + AbortSignal 왕복 어댑터 | **wired, host opt-in** | sampling loop이 `AgentConfig.streamCancellation`을 provider/turn signal과 cancellable stream cleanup에 실제 소비. 표준 CLI/web에는 typed cause producer가 없어 broad enable은 보류 | `src/agent/loop/stream-cancellation-wire.ts` |
@@ -154,14 +152,14 @@ hold는 "기본 활성화 보류" 결정이며 미배선과 동의어가 아니�
 | github-actions-trigger-adapter | GITHUB_EVENT_PATH 읽어 ProactiveTrigger 발사(self-loop 방어 3중) | wired | **GitHub Actions 러너 env** 안에서만 유의미 | `src/integrations/github/event-source-actions.ts:63` |
 | github-pr-from-pr-cli | `from-pr` — 트리거 폴링→gh로 PR 컨텍스트→idempotent 코멘트 | standalone runner only | top-level CLI dispatcher에는 아직 등록되지 않음; `from-pr-cmd-runner`를 직접 실행하고 Actions env·gh auth·network가 있어야 동작 | `src/apps/cli/from-pr-cmd-runner.ts:1` |
 | gh-pr-code-tour | `gh pr diff` 파싱해 헌크별 numbered 투어(read-only) | wired(ci-bot preset) | **gh CLI + network** | `src/tool/gh/pr-code-tour.ts:151` |
-| dockersandbox | `docker run --rm`로 TRUE 격리(--network none, bind jail) | **seam-only** ⚠️레저 정정됨 | 라이브 selector 없음(no `new DockerSandbox`). 2026-07-19 로컬 daemon의 contract는 통과했지만 기본 `node:22-slim`에 host Bun/git/rg가 없어 기존 bash 전역 대체는 기능 퇴행; image-pinned 전용 consumer가 먼저 필요 | `src/runtime/sandbox.ts:306` |
+| dockersandbox | `docker run --rm` 실행 경계(--network none, bind mount) | **seam-only** ⚠️레저 정정됨 | 라이브 selector 없음(no `new DockerSandbox`). 2026-07-19 로컬 daemon contract는 통과했지만 기본 `node:22-slim`은 mutable/root/writable mount이며 CPU·memory 기본값도 없다. host Bun/git/rg 부재까지 있어 기존 bash 전역 대체는 기능 퇴행; digest-pinned hardened profile을 소유한 전용 consumer가 먼저 필요 | `src/runtime/sandbox.ts:306` |
 
 ### B-4. 패치 / 체크포인트 / git (11) — 대부분 env-gated로 배선됨, default-OFF 유지
 
 | feature_id | 역할 | 현황 | 왜 HELD | 코드위치 |
 |---|---|---|---|---|
 | fast-apply-fallback | V4A apply 실패 시 side-conversation 모델로 1회 fast-apply 재시도 | **wired(env-gated)** ⚠️레저 activation stale | `QUANTA_FAST_APPLY` 시 end-to-end; default-OFF | `apply-patch.ts:626` |
-| fast-apply-merge | `{original,editSketch}`를 apply-model에 보내 머지 파일 추출 | wired(env-gated) | `QUANTA_FAST_APPLY_MERGE=1`+`_MODEL` 필요; mutating, 비용 A/B | `merge-runner.ts:141` |
+| fast-apply-merge | `{original,editSketch}`를 apply-model에 보내 머지 파일 추출 | **hold, producer wired** | env/model만으로는 활성화 불가: complete before/after를 승인하는 `FastApplyMergeReviewSeam`이 없으면 provider dispatch 전에 mismatch로 fail-closed. ToolDiffSink는 post-write 관측이라 승인 권한이 아니다. | `src/tool/edit/index.ts` |
 | force-background | queued 백그라운드 서브에이전트를 즉시/FIFO-head 승격 | wired(env-gated) | `QUANTA_FORCE_BACKGROUND`+admission queue 필요 | `src/agent/subagent-background.ts:172` |
 | per-tool-checkpoint-granularity | 도구별 granular 체크포인트 정책(개별 record/rewind) | **wired(env-gated)** ⚠️레저 stale | `QUANTA_PER_TOOL_RECORD`+shadowOdb, default-OFF | `src/agent/per-tool-checkpoint/index.ts:34` |
 | identity-mid-session-prompt-rebuild | `/identity` 스왑 후 다음 턴 system prompt 리빌드 클로저 | consumer-only(forward-seam) | 라이브는 인라인 `buildPromptFromIdentityMode` 사용, 이 포트 caller 없음 | `src/apps/cli/repl/system-prompt-rebuilder.ts:57` |

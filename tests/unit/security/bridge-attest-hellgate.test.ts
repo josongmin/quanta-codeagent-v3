@@ -15,12 +15,12 @@
  *  11.  default-OFF: barrel import alone produces no side effects
  *  12.  AttestResult 3-arm exhaustive (compile-time + runtime branch coverage)
  *  13.  1000 tokens minted at identical (scope, expiresAt) all distinct
- *  14.  secret 미주입 → "test-secret" fallback works + warn fires once
+ *  14.  missing/blank/weak signing secret fails closed at construction
  *  15.  preflight-error arm: throwing inner policy table surfaces as deny
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import {
-  __resetFallbackWarnedForTests,
+  AttestError,
   type AttestEvent,
   type AttestResult,
   defaultAttestor,
@@ -28,6 +28,10 @@ import {
   type PolicyTable,
   type StsToken,
 } from "@/security/bridge-attest"
+
+/** Explicit test-only HMAC key: production construction rejects convenience
+ * strings and must always receive caller-owned secret material. */
+const TEST_SECRET = "test-only-hmac-secret-material-32bytes"
 
 /** Mutable injectable clock helper. */
 const makeClock = (
@@ -43,16 +47,9 @@ const makeClock = (
 }
 
 describe("bridge-attest hellgate (ADR-0246)", () => {
-  beforeEach(() => {
-    __resetFallbackWarnedForTests()
-  })
-  afterEach(() => {
-    __resetFallbackWarnedForTests()
-  })
-
   test("1. preflight allow → kind:'allow' + non-empty stsToken", async () => {
     const policy: PolicyTable = { "tool.exec": { kind: "allow" } }
-    const att = defaultAttestor({ secret: "k", policyTable: policy })
+    const att = defaultAttestor({ secret: TEST_SECRET, policyTable: policy })
     const r = await att.preflight({
       agentId: "a",
       action: "tool.exec",
@@ -70,7 +67,7 @@ describe("bridge-attest hellgate (ADR-0246)", () => {
     const policy: PolicyTable = {
       "tool.exec": { kind: "deny", reason: "org-blocklist" },
     }
-    const att = defaultAttestor({ secret: "k", policyTable: policy })
+    const att = defaultAttestor({ secret: TEST_SECRET, policyTable: policy })
     const r = await att.preflight({
       agentId: "a",
       action: "tool.exec",
@@ -86,7 +83,7 @@ describe("bridge-attest hellgate (ADR-0246)", () => {
 
   test("3. preflight prompt-user → kind:'prompt-user', no token leak", async () => {
     const policy: PolicyTable = { "tool.exec": { kind: "prompt-user", reason: "confirm please" } }
-    const att = defaultAttestor({ secret: "k", policyTable: policy })
+    const att = defaultAttestor({ secret: TEST_SECRET, policyTable: policy })
     const r: AttestResult = await att.preflight({
       agentId: "a",
       action: "tool.exec",
@@ -106,7 +103,7 @@ describe("bridge-attest hellgate (ADR-0246)", () => {
 
   test("4. mintToken + verify valid → roundtrip true", async () => {
     const clock = makeClock()
-    const att = defaultAttestor({ secret: "k", clock: clock.now })
+    const att = defaultAttestor({ secret: TEST_SECRET, clock: clock.now })
     const tok: StsToken = await att.mintToken("scope/A", 60_000)
     expect(tok.scope).toBe("scope/A")
     expect(tok.expiresAt).toBe(clock.now() + 60_000)
@@ -116,7 +113,7 @@ describe("bridge-attest hellgate (ADR-0246)", () => {
 
   test("5. verify expired → false (TTL elapsed via injected clock)", async () => {
     const clock = makeClock()
-    const att = defaultAttestor({ secret: "k", clock: clock.now })
+    const att = defaultAttestor({ secret: TEST_SECRET, clock: clock.now })
     const tok = await att.mintToken("scope/A", 1_000)
     clock.advance(2_000)
     const ok = await att.verify(tok.token, "scope/A")
@@ -124,7 +121,7 @@ describe("bridge-attest hellgate (ADR-0246)", () => {
   })
 
   test("6. verify tampered → false (flipped byte fails MAC)", async () => {
-    const att = defaultAttestor({ secret: "k" })
+    const att = defaultAttestor({ secret: TEST_SECRET })
     const tok = await att.mintToken("scope/A", 60_000)
     // Flip a character in the MAC segment (4th part). Keep length identical
     // so the constant-time compare actually runs.
@@ -138,7 +135,7 @@ describe("bridge-attest hellgate (ADR-0246)", () => {
   })
 
   test("7. revoke → subsequent verify returns false", async () => {
-    const att = defaultAttestor({ secret: "k" })
+    const att = defaultAttestor({ secret: TEST_SECRET })
     const tok = await att.mintToken("scope/A", 60_000)
     expect(await att.verify(tok.token, "scope/A")).toBe(true)
     await att.revoke(tok.token)
@@ -149,7 +146,7 @@ describe("bridge-attest hellgate (ADR-0246)", () => {
 
   test("8. ttl 0ms → token already expired on mint", async () => {
     const clock = makeClock()
-    const att = defaultAttestor({ secret: "k", clock: clock.now })
+    const att = defaultAttestor({ secret: TEST_SECRET, clock: clock.now })
     const tok = await att.mintToken("scope/A", 0)
     // expiresAt == now; verify path treats `now > expiresAt` as expired, so
     // advance clock by 1ms to deterministically expire.
@@ -158,7 +155,7 @@ describe("bridge-attest hellgate (ADR-0246)", () => {
   })
 
   test("9. scope mismatch → verify('tok', 'other-scope') false", async () => {
-    const att = defaultAttestor({ secret: "k" })
+    const att = defaultAttestor({ secret: TEST_SECRET })
     const tok = await att.mintToken("scope/A", 60_000)
     expect(await att.verify(tok.token, "scope/B")).toBe(false)
   })
@@ -167,7 +164,7 @@ describe("bridge-attest hellgate (ADR-0246)", () => {
     const clock = makeClock()
     const events: AttestEvent[] = []
     const att = defaultAttestor({
-      secret: "k",
+      secret: TEST_SECRET,
       policyTable: { "tool.exec": { kind: "allow" } },
       clock: clock.now,
       onEvent: (e) => events.push(e),
@@ -191,7 +188,7 @@ describe("bridge-attest hellgate (ADR-0246)", () => {
     await att.verify(tok2.token, "scope/E")
     // deny path: emits preflight-denied (covers 8th distinct kind)
     const att2 = defaultAttestor({
-      secret: "k",
+      secret: TEST_SECRET,
       policyTable: { "tool.exec": { kind: "deny", reason: "no" } },
       clock: clock.now,
       onEvent: (e) => events.push(e),
@@ -200,7 +197,7 @@ describe("bridge-attest hellgate (ADR-0246)", () => {
     // error path: throwing policy reader surfaces preflight-error.
     // We synthesise a throwing Proxy as the policy table — production tables are plain objects.
     const att3 = defaultAttestor({
-      secret: "k",
+      secret: TEST_SECRET,
       policyTable: new Proxy({} as PolicyTable, {
         get() {
           throw new Error("table-broken")
@@ -236,7 +233,7 @@ describe("bridge-attest hellgate (ADR-0246)", () => {
     // side effects (no throw, no log spam) on the happy path. We assert
     // by snapshotting an unrelated counter — there is none, so the test
     // simply confirms construction + a preflight + a verify do not throw.
-    const att = defaultAttestor({ secret: "k", policyTable: { a: { kind: "allow" } } })
+    const att = defaultAttestor({ secret: TEST_SECRET, policyTable: { a: { kind: "allow" } } })
     const r = await att.preflight({ agentId: "a", action: "a", resource: "/", requestedAt: 0 })
     expect(r.kind).toBe("allow")
     if (r.kind === "allow") {
@@ -265,9 +262,15 @@ describe("bridge-attest hellgate (ADR-0246)", () => {
         }
       }
     }
-    const allow = defaultAttestor({ secret: "k", policyTable: { a: { kind: "allow" } } })
-    const deny = defaultAttestor({ secret: "k", policyTable: { a: { kind: "deny", reason: "r" } } })
-    const prompt = defaultAttestor({ secret: "k", policyTable: { a: { kind: "prompt-user" } } })
+    const allow = defaultAttestor({ secret: TEST_SECRET, policyTable: { a: { kind: "allow" } } })
+    const deny = defaultAttestor({
+      secret: TEST_SECRET,
+      policyTable: { a: { kind: "deny", reason: "r" } },
+    })
+    const prompt = defaultAttestor({
+      secret: TEST_SECRET,
+      policyTable: { a: { kind: "prompt-user" } },
+    })
     const r1 = await allow.preflight({ agentId: "x", action: "a", resource: "/", requestedAt: 0 })
     const r2 = await deny.preflight({ agentId: "x", action: "a", resource: "/", requestedAt: 0 })
     const r3 = await prompt.preflight({ agentId: "x", action: "a", resource: "/", requestedAt: 0 })
@@ -278,7 +281,7 @@ describe("bridge-attest hellgate (ADR-0246)", () => {
 
   test("13. 1000 tokens minted at identical (scope, expiresAt) all distinct", async () => {
     const clock = makeClock()
-    const att = defaultAttestor({ secret: "k", clock: clock.now })
+    const att = defaultAttestor({ secret: TEST_SECRET, clock: clock.now })
     const tokens = new Set<string>()
     for (let i = 0; i < 1000; i++) {
       const tok = await att.mintToken("scope/SAME", 60_000)
@@ -287,38 +290,24 @@ describe("bridge-attest hellgate (ADR-0246)", () => {
     expect(tokens.size).toBe(1000)
   })
 
-  test("14. secret 미주입 → 'test-secret' fallback works + warn fires once", async () => {
-    __resetFallbackWarnedForTests()
-    // Capture stderr writes — logger.warn ends up on stderr per shared/logger.ts.
-    const origWrite = process.stderr.write.bind(process.stderr)
-    let warnCount = 0
-    // biome-ignore lint/suspicious/noExplicitAny: stream override for capture
-    ;(process.stderr.write as any) = (chunk: string | Uint8Array): boolean => {
-      const s = typeof chunk === "string" ? chunk : Buffer.from(chunk).toString()
-      if (s.includes("[bridge-attest]") && s.includes("test-secret")) warnCount++
-      return true
+  test("14. missing, blank, and weak secrets fail closed before token mint", () => {
+    for (const secret of [undefined, "", "   ", "test-secret", "x".repeat(31)]) {
+      try {
+        defaultAttestor({ secret })
+        throw new Error("expected invalid secret to reject construction")
+      } catch (error) {
+        expect(error).toBeInstanceOf(AttestError)
+        expect((error as AttestError).code).toBe("misconfigured")
+      }
     }
-    try {
-      // First construction triggers warn.
-      const att1 = defaultAttestor()
-      const tok = await att1.mintToken("scope/A", 60_000)
-      expect(await att1.verify(tok.token, "scope/A")).toBe(true)
-      // Second construction: warn must NOT re-fire within the same process.
-      const att2 = defaultAttestor()
-      const tok2 = await att2.mintToken("scope/B", 60_000)
-      expect(await att2.verify(tok2.token, "scope/B")).toBe(true)
-      expect(warnCount).toBe(1)
-    } finally {
-      // biome-ignore lint/suspicious/noExplicitAny: restore stream
-      ;(process.stderr.write as any) = origWrite
-    }
+    expect(() => defaultAttestor({ secret: TEST_SECRET })).not.toThrow()
   })
 
   test("15. preflight-error arm: throwing inner policy table surfaces as deny", async () => {
     const events: AttestEvent[] = []
     // Throwing Proxy as policy table — forces the NO-THROW deny arm.
     const att = defaultAttestor({
-      secret: "k",
+      secret: TEST_SECRET,
       policyTable: new Proxy({} as PolicyTable, {
         get() {
           throw new Error("policy-broken")

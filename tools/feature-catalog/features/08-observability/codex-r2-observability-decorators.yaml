@@ -15,12 +15,12 @@ depends_on:
   - codex-r2-system-prompt-cache-and-audit
   - codex-r2-composition-install-and-registry
 surface_integration:
-  cli: full
+  cli: partial
   web: na
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    cli: "auto-wrap is reachable only when the host supplies ADR-0144 MetricsRegistry; the normal CLI supplies legacy Metrics, and its prebuilt system prompt bypasses cache getOrBuild."
     web: "Pure internal telemetry decorators (emit hit/miss/eviction counters to a metric port), no UI affordance on any surface."
 purpose: |
   Two NO-THROW wrapping decorators emit hit/miss/eviction counters as
@@ -54,4 +54,4 @@ knobs:
     default: '"codex_r2"'
     notes: 'Prefix prepended to every metric name. Override per-deploy to namespace into a multi-tenant metrics store.'
 deliberate_hold: null
-notes: 'Production wire-up (auto-wrap inside assemble.ts) deferred to a future ADR. Drift-detector observability (ADR-0326 DriftDetectedError counter) is a candidate sibling decorator — separate ADR. Histogram support requires extending MetricEmitterPort — separate ADR.'
+notes: 'Auto-wrap exists in the shared assembler, but the normal CLI passes legacy Metrics rather than ADR-0144 MetricsRegistry. In addition, the normal prebuilt system prompt bypasses systemPromptCache.getOrBuild, so cache counters have no live producer. Promotion requires a production MetricsRegistry adapter and an explicit cache-ownership decision; do not treat import reachability as emitted telemetry.'

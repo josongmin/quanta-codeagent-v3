@@ -146,6 +146,9 @@ const buildRealPort = (
 const ctxOf = (over: Partial<ToolContext> = {}): ToolContext => ({
   cwd: "/",
   signal: new AbortController().signal,
+  // Positive real-runner cases use an explicit host review authority. Normal
+  // production composition currently omits it and therefore remains fail-closed.
+  fastApplyMergeReview: { approve: async () => true },
   ...over,
 })
 
@@ -221,7 +224,7 @@ describe("jun-7-misc 06 fast-apply MERGE rung E2E hellgate (REAL runner + REAL e
     expect(resolved[0]?.fallback).toBe(APPLY_MODEL)
   })
 
-  test("E2E-02 ON: the merge flows through the gated diff sink (proposal, not a side write)", async () => {
+  test("E2E-02 ON: an approved merge reaches the normal post-write diff sink", async () => {
     const { fs, writes } = makeFs({ "app.ts": ORIGINAL })
     const { resolver } = makeRoleResolver()
     const merged = "import {alpha} from 'x'\nconst beta = 42\ngamma()\n"
@@ -232,8 +235,8 @@ describe("jun-7-misc 06 fast-apply MERGE rung E2E hellgate (REAL runner + REAL e
     const port = buildRealPort(sideConversation, resolver)
     const tool = makeEditTool(fs)
 
-    // Wire the real tool-diff sink so we can prove the merged result is surfaced
-    // to the reviewer/diff gate (§4.c) — the same path ANY edit takes.
+    // The explicit review already approved this proposal. Wire the real tool-diff
+    // sink to prove normal post-write observation still receives the committed edit.
     const diffs: Array<{ before: string; after: string; path: string }> = []
     const res = await run(
       tool,
@@ -284,6 +287,25 @@ describe("jun-7-misc 06 fast-apply MERGE rung E2E hellgate (REAL runner + REAL e
     // ZERO provider dispatch, ZERO role resolution — the runner was never reached.
     expect(dispatches.length).toBe(0)
     expect(resolved.length).toBe(0)
+  })
+
+  test("E2E-03b port without host review is fail-closed before real provider dispatch", async () => {
+    const { fs, files, writes } = makeFs({ "app.ts": ORIGINAL })
+    const { resolver, resolved } = makeRoleResolver()
+    const { sideConversation, dispatches } = makeLlm(() => ({ ok: true, text: "unreachable" }))
+    const port = buildRealPort(sideConversation, resolver)
+
+    const res = await run(
+      makeEditTool(fs),
+      { path: "app.ts", old_string: "const  beta  =  1", new_string: "const beta = 42" },
+      ctxOf({ fastApplyMerge: port, fastApplyMergeReview: undefined }),
+    )
+
+    expect(res.ok).toBe(false)
+    expect(files.get("app.ts")).toBe(ORIGINAL)
+    expect(writes).toHaveLength(0)
+    expect(dispatches).toHaveLength(0)
+    expect(resolved).toHaveLength(0)
   })
 
   test("E2E-04 OFF byte-identity: the not_found output equals the no-port baseline EXACTLY", async () => {
