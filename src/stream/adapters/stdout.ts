@@ -74,38 +74,35 @@ export class StdoutStream implements StreamPort {
     this.inText = true
   }
 
-  /** Close an inline answer/reasoning run before a visible event. Transient
-   * progress updates intentionally preserve the open run so they cannot insert
-   * a newline between streaming deltas. */
-  private closeOpenStreams(eventType: AgentEvent["type"]): boolean {
-    const transient =
-      eventType === "output_progress" ||
-      eventType === "in_progress" ||
-      eventType === "ratelimit_snapshot" ||
-      eventType === "item_started" ||
-      eventType === "item_updated" ||
-      eventType === "item_completed"
-    if ((this.inText || this.inThinking) && transient) return true
-
-    if (eventType !== "assistant_text" && this.inText) {
-      this.drainPainterTail()
-      this.write("\n")
-      this.inText = false
-    }
-    if (eventType !== "assistant_thinking" && this.inThinking) {
-      this.write("\n")
-      this.inThinking = false
-    }
-    return false
-  }
-
   emit(event: AgentEvent): void {
     // Events that produce no visible stdout line — must not trigger the inText
     // flush or they insert a spurious \n between streaming text deltas.
     // output_progress fires on every token (live counter → status-bar only),
     // in_progress fires between deltas (heartbeat), item_* and ratelimit_snapshot
     // are all no-ops in the switch below.
-    if (this.closeOpenStreams(event.type)) return
+    if (
+      (this.inText || this.inThinking) &&
+      (event.type === "output_progress" ||
+        event.type === "in_progress" ||
+        event.type === "ratelimit_snapshot" ||
+        event.type === "item_started" ||
+        event.type === "item_updated" ||
+        event.type === "item_completed")
+    )
+      return
+
+    if (event.type !== "assistant_text" && this.inText) {
+      this.drainPainterTail()
+      this.write("\n")
+      this.inText = false
+    }
+
+    // jun-11 (#11) — symmetric: close an open DIM reasoning run when any non-
+    // thinking event arrives (so the answer / tool line starts on its own line).
+    if (event.type !== "assistant_thinking" && this.inThinking) {
+      this.write("\n")
+      this.inThinking = false
+    }
 
     switch (event.type) {
       case "session_start":
@@ -205,12 +202,9 @@ export class StdoutStream implements StreamPort {
       case "subagent_cancel":
         this.write(renderSubagentCancel(event))
         break
-<<<<<<< HEAD
-=======
       case "peer_message":
         this.write(renderPeerMessage(event))
         break
->>>>>>> origin/main
       case "subagent_spawn":
         this.write(renderSubagentSpawn(event))
         break
@@ -348,12 +342,6 @@ const renderInterrupted = (event: Extract<AgentEvent, { type: "interrupted" }>):
 const renderSubagentCancel = (event: Extract<AgentEvent, { type: "subagent_cancel" }>): string =>
   `${DIM}✂ subagent ${event.subagentId} (${event.outcome}, via ${event.source})${RESET}\n`
 
-<<<<<<< HEAD
-/** Multi-agent lifecycle observation. Keep the `type` token visible: this is
- *  the compact stdout counterpart of the structured `/agents --tree` feed.
- *  Descriptions cross a UI boundary, so redact again even though the registry
- *  already bounds and scrubs them at emission time. */
-=======
 /** jul-15 W2 — a surfaced peer / side-agent message (Codex "Sent from another
  *  task" parity, terminal dialect). A DIM attribution label line above the body,
  *  the body collapsed to {@link PEER_BODY_MAX_LINES} lines with a "+N more" marker
@@ -386,7 +374,6 @@ const renderPeerMessage = (event: Extract<AgentEvent, { type: "peer_message" }>)
  *  (Copied verbatim from the concurrent multi-agent-panel work committed on
  *  feat/fc-evidence-relink so main's exhaustive switch is complete NOW and the
  *  eventual feat→main merge of these two functions is a no-op — jul-15.) */
->>>>>>> origin/main
 const renderSubagentSpawn = (event: Extract<AgentEvent, { type: "subagent_spawn" }>): string => {
   const parent = event.parentTaskId === undefined ? "" : ` parent=${event.parentTaskId}`
   const agentType = event.agentType === undefined ? "" : ` type=${event.agentType}`
@@ -395,12 +382,8 @@ const renderSubagentSpawn = (event: Extract<AgentEvent, { type: "subagent_spawn"
 
 /** Multi-agent lifecycle transition. Final text and errors are model-/runtime-
  * derived, so do not bypass the terminal redaction boundary when surfacing a
-<<<<<<< HEAD
- * compact completion summary. */
-=======
  * compact completion summary. (Copied verbatim from feat/fc-evidence-relink — see
  * renderSubagentSpawn.) */
->>>>>>> origin/main
 const renderSubagentStatus = (event: Extract<AgentEvent, { type: "subagent_status" }>): string => {
   const turns = event.turns === undefined ? "" : ` turns=${event.turns}`
   const preview =

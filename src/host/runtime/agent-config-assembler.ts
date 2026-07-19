@@ -107,11 +107,8 @@ import { buildAppshotPortWire } from "./appshot-port-wire"
 import { persistBudgetLedger } from "./budget-ledger-persist"
 import { buildAppPluginMentionDeps } from "./internal/mention-app-plugin-deps"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
-import { maybeWirePeerTeamMessaging } from "./peer-team-wire"
-<<<<<<< HEAD
-=======
 import { maybeWirePeerMessageSurface } from "./peer-message-sink-wire"
->>>>>>> origin/main
+import { maybeWirePeerTeamMessaging } from "./peer-team-wire"
 import { maybeWirePiiRedaction } from "./pii-redaction-wire"
 import { maybeWireProgressSink } from "./progress-sink-wire"
 import { maybeWireBashSandboxEscalation, maybeWireWriteBudget } from "./security-rails-wire"
@@ -509,13 +506,8 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
   // Absent ⇒ no pii block ⇒ byte-identical default-OFF (the secret branch of
   // the same RedactionConfig is untouched).
   maybeWirePiiRedaction(cfg, env)
-<<<<<<< HEAD
   maybeWireSideAgent(cfg, config)
   maybeWireWriteBudget(cfg, config)
-=======
-  maybeWireSideAgent(cfg, env)
-  maybeWireWriteBudget(cfg, env)
->>>>>>> origin/main
   maybeWireBudgetLedger(cfg, env)
 }
 
@@ -536,8 +528,8 @@ const parseLedgerUsd = (raw: string | undefined): number | undefined => {
  *  on any mode — including the otherwise-uncapped interactive/ide modes —
  *  without code. */
 const envCostDialOverrides = (env: AssemblerEnv): Partial<BudgetDials> => {
-  const maxCostUsd = parseLedgerUsd(env["QUANTA_MAX_COST_USD"])
-  const maxCostPerTurnUsd = parseLedgerUsd(env["QUANTA_MAX_COST_PER_TURN_USD"])
+  const maxCostUsd = parseLedgerUsd(env.QUANTA_MAX_COST_USD)
+  const maxCostPerTurnUsd = parseLedgerUsd(env.QUANTA_MAX_COST_PER_TURN_USD)
   return {
     ...(maxCostUsd !== undefined ? { maxCostUsd } : {}),
     ...(maxCostPerTurnUsd !== undefined ? { maxCostPerTurnUsd } : {}),
@@ -561,8 +553,8 @@ const envCostDialOverrides = (env: AssemblerEnv): Partial<BudgetDials> => {
 const maybeWireBudgetLedger = (cfg: AgentConfig, env: AssemblerEnv): void => {
   if (cfg.budgetLedger !== undefined) return
   if (!gateOn(env, "QUANTA_BUDGET_LEDGER")) return
-  const sessionHardLimit = parseLedgerUsd(env["QUANTA_BUDGET_LEDGER_SESSION_USD"])
-  const dailyHardLimit = parseLedgerUsd(env["QUANTA_BUDGET_LEDGER_DAILY_USD"])
+  const sessionHardLimit = parseLedgerUsd(env.QUANTA_BUDGET_LEDGER_SESSION_USD)
+  const dailyHardLimit = parseLedgerUsd(env.QUANTA_BUDGET_LEDGER_DAILY_USD)
   if (sessionHardLimit === undefined && dailyHardLimit === undefined) return
   const ledger = defaultBudgetLedger({
     policy: {
@@ -574,7 +566,7 @@ const maybeWireBudgetLedger = (cfg: AgentConfig, env: AssemblerEnv): void => {
   // spend on construction and write-through after each record, so several runs
   // (a campaign / daemon) share ONE rolling budget (the "Cline $50/afternoon"
   // case). Absent path ⇒ in-memory only (per-session enforcement still live).
-  const path = env["QUANTA_BUDGET_LEDGER_PATH"]
+  const path = env.QUANTA_BUDGET_LEDGER_PATH
   cfg.budgetLedger =
     path !== undefined && path.length > 0 ? persistBudgetLedger(ledger, path) : ledger
 }
@@ -619,17 +611,13 @@ const maybeWireSideAgent = (
   // (both satisfy `SideAgentDaemonRegistry`/`SideAgentDaemonPort`), so the
   // `side_agent_*` tools are byte-identical from the model's view. Gate OFF ⇒ the
   // EXACT legacy in-process path below (byte-identical default).
-<<<<<<< HEAD
   if (config.sideAgentProcess) {
-=======
-  if (runtimeConfig().sideAgentProcess) {
     // jul-15 W2 boundary (audit W2-A2): the OS-PROCESS backer's findings arrive
     // over IPC into `reg.findings()` (pull via `side_agent_findings`), NOT through
     // the session `subagentMailbox`, so they are NOT auto-surfaced as
     // `peer_message` events like the in-process backer's are. Push-surfacing the
     // process backer would require threading the notify-decorated mailbox across
     // the fork boundary — a follow-up; findings remain user-reachable via the tool.
->>>>>>> origin/main
     cfg.sideAgentDaemons = createProcessSideAgentDaemonRegistry({
       fork: nodeProcessForkPort,
       scheduler: {
@@ -638,12 +626,6 @@ const maybeWireSideAgent = (
       },
       now: () => Date.now(),
       workerModulePath: sideAgentWorkerModulePath(),
-      // Thread the SPAWNING agent's real lineage depth across the fork boundary
-      // (registry injects it as QUANTA_SIDE_AGENT_PARENT_DEPTH). `cfg.depth` is
-      // the same depth the daemon-creation authority (`admitsDaemonChild`) gates
-      // on; the forked worker's daemon config then runs at its TRUE lineage
-      // instead of the always-floor. `?? 0` mirrors the root-is-depth-0 contract
-      // used at the subagent block wire above (`parentDepth: cfg.depth ?? 0`).
       parentDepth: cfg.depth ?? 0,
       cwd: cfg.cwd,
     })
