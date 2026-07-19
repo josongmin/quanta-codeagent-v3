@@ -16,8 +16,6 @@
  *   the legacy retry/fallback path runs unchanged.
  */
 
-import type { LLMErrorKind } from "@/shared"
-
 /**
  * One of six closed actions the caller should take in response to an LLM error.
  * The router's job is to collapse the 16-kind `LLMErrorKind` space onto this
@@ -48,12 +46,3 @@ export type RecoveryAction =
   | "fatal"
   | "fallback_provider"
   | "reactive_compaction"
-
-/**
- * Pure port: classify-already-done → action. The caller supplies the kind
- * (from `classify(e)` in `src/shared/error-classifier.ts` or directly from
- * `LLMError.kind`); the router returns the action.
- */
-export interface RecoveryRouter {
-  route(kind: LLMErrorKind): RecoveryAction
-}

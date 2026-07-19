@@ -119,7 +119,7 @@ rows:
     reachability: wired
     proof: { on: wire, off_identity: unit, receipt: null }
     risk: provider-cost
-    decision: repair-first
+    decision: measure-first
     owner_seam: src/tool/appshot/loop.ts
     rollback: unset QUANTA_APPSHOT
     duplicate_of: null
@@ -277,7 +277,7 @@ rows:
     reachability: wired
     proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: behavioral-cost
-    decision: repair-first
+    decision: measure-first
     owner_seam: src/agent/branch-search/anchor.ts
     rollback: BranchSearchAnchor 미주입
     duplicate_of: null
@@ -541,7 +541,7 @@ rows:
     reachability: wired
     proof: { on: wire, off_identity: unit, receipt: null }
     risk: security
-    decision: repair-first
+    decision: measure-first
     owner_seam: src/agent/command-hooks/runner.ts
     rollback: QUANTA_COMMAND_HOOKS=0
     duplicate_of: null
@@ -1187,7 +1187,7 @@ rows:
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
-    decision: repair-first
+    decision: enable-now
     owner_seam: src/observability/ndjson/index.ts
     rollback: unset QUANTA_NDJSON_INGEST_PORT
     duplicate_of: null
@@ -1529,15 +1529,20 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: ratelimit-dual-window-snapshot
+    # RESOLVED (jul-19): the repair-first blocker was a dead half — the row mixed
+    # the LIVE `parseDualWindowSnapshot` (consumed at stream-consume.ts:199 →
+    # BudgetMeter) with the 0-consumer per-account `createAccountRateLimitStore`.
+    # Audited + DELETED the dead store half (nothing accumulated per-account); the
+    # live parse is untouched. Now a clean always-on parse seam.
     gate_owner: [parseDualWindowSnapshot caller]
     activation: always
     effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: external
-    decision: repair-first
-    owner_seam: src/llm/ratelimit-snapshot/dual-window.ts
-    rollback: export-only(consumer 없음)
+    decision: enable-now
+    owner_seam: src/agent/loop/stream-consume.ts
+    rollback: 항상 파싱(BudgetMeter feed)
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: ratelimit-snapshot-render
@@ -1589,15 +1594,23 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: recovery-router-codex-spec
-    gate_owner: [codexSpecRoute DI]
+    # CONSOLIDATED (jul-19): the repair-first blocker (redundant `RecoveryRouter`
+    # object vs the live `codexSpecRoute` table) is RESOLVED. Audit confirmed
+    # `CodexSpecRouter.route` was literally `return codexSpecRoute(kind)` (thin
+    # wrapper, parity-tested) and recovery.ts:253 consumed only the string action.
+    # Re-pointed recovery.ts at `codexSpecRoute` directly + DELETED the router
+    # interface/class/factory (recovery-router.ts). codexSpecRoute IS now the
+    # single retry-routing SSOT (decorators + recovery all derive from it);
+    # 197 tests byte-identical. The RecoveryAction string union stays in port.ts.
+    gate_owner: [codexSpecRoute]
     activation: always
     effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
     reachability: wired
     proof: { on: wire, off_identity: unit, receipt: null }
     risk: behavioral-cost
-    decision: repair-first
-    owner_seam: src/llm/retry/index.ts
-    rollback: RetryingLLM 하드코드 유지(현행) # DOF-30 disposition=wire; codexSpecRoute only barrel-exported (src/llm/retry/index.ts:15), no RetryingLLM/FallbackLLM consumer — wire to single retry-policy authority
+    decision: enable-now
+    owner_seam: src/llm/retry/codex-spec-router.ts
+    rollback: codexSpecRoute 단일권위(항상 소비)
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: remote-runner
@@ -1784,7 +1797,7 @@ rows:
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
-    decision: repair-first
+    decision: measure-first
     owner_seam: src/agent/shadow-verify/runner.ts
     rollback: fake 위에 합성(현행 미배선)
     duplicate_of: null
@@ -1960,13 +1973,20 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: subagent-fs-ownership-enforce
+    # SECURITY FIX (jul-19, Wave Q): the repair-first blocker was a REAL false
+    # fence — `extractWriteEffects` only saw a top-level `path`, so `apply_patch`/
+    # `apply_patch_structured` (targets inside `input.patch`) + `scripted_replace`
+    # (`input.file`) escaped a fenced subagent's owned subtree entirely. Fixed via
+    # `patchWriteEffects` (closed V4A op parse: add/delete/update+moveTo) + `file`
+    # duck-read, unioned into dispatch consultOwnership. Heuristic-free,
+    # red-on-injection proven, OFF byte-identical. The fence now genuinely enforces.
     gate_owner: [QUANTA_FS_OWNERSHIP_ENFORCE]
     activation: env/config
     effective_default: { cli: off, web: na, bench: na, headless: off, daemon: off }
     reachability: wired
     proof: { on: wire, off_identity: unit, receipt: null }
     risk: security
-    decision: repair-first
+    decision: enable-now
     owner_seam: src/agent/ownership-policy.ts
     rollback: unset QUANTA_FS_OWNERSHIP_ENFORCE
     duplicate_of: null

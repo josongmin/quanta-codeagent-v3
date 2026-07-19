@@ -7,14 +7,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import {
-  CodexSpecRouter,
-  codexSpecRoute,
-  codexSpecRouterEmittedActions,
-  createDefaultRecoveryRouter,
-  type RecoveryAction,
-  type RecoveryRouter,
-} from "@/llm"
+import { codexSpecRoute, codexSpecRouterEmittedActions, type RecoveryAction } from "@/llm"
 import type { LLMErrorKind } from "@/shared"
 
 describe("codexSpecRoute — 16 kinds × correct action", () => {
@@ -52,41 +45,7 @@ describe("codexSpecRoute — 16 kinds × correct action", () => {
   })
 })
 
-describe("CodexSpecRouter — class wrapper parity with pure function", () => {
-  test("class.route(k) === codexSpecRoute(k) for every kind", () => {
-    const router: RecoveryRouter = new CodexSpecRouter()
-    const kinds: readonly LLMErrorKind[] = [
-      "overloaded",
-      "rate_limit",
-      "server_error",
-      "network",
-      "auth",
-      "bad_request",
-      "not_found",
-      "not_implemented",
-      "stream_corrupt",
-      "aborted",
-      "unknown",
-      "context_window_exceeded",
-      "cyber_policy",
-      "too_many_failed_attempts",
-      "thread_rollback_failed",
-      "sandbox_error",
-    ]
-    for (const k of kinds) {
-      expect(router.route(k)).toBe(codexSpecRoute(k))
-    }
-  })
-
-  test("createDefaultRecoveryRouter() returns a Codex-spec router (parity)", () => {
-    const router = createDefaultRecoveryRouter()
-    expect(router.route("rate_limit")).toBe("retry_after_backoff")
-    expect(router.route("context_window_exceeded")).toBe("reactive_compaction")
-    expect(router.route("cyber_policy")).toBe("hitl_handoff")
-  })
-})
-
-describe("RecoveryRouter — negative invariants (the spec's required negatives)", () => {
+describe("codexSpecRoute — negative invariants (the spec's required negatives)", () => {
   // The user's spec calls out these specific negatives. We pin them as
   // hellgate cases so a future "looks-cleaner" refactor that breaks them
   // turns red here, not in production.

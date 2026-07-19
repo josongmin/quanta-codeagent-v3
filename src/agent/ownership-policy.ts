@@ -21,6 +21,8 @@
  */
 
 import isPathInside from "is-path-inside"
+import { parsePatch } from "@/patch"
+import { canonicalizeEffectPath } from "@/permission"
 import { canonicalizePath } from "@/storage"
 
 export interface OwnershipPolicy {
@@ -87,6 +89,49 @@ export const checkWriteEffects = (
     effects.map((e) => ({ path: canonicalizePath(e.path) })),
     policy,
   )
+}
+
+/** The default write tools whose FS targets live INSIDE `input.patch` (a V4A
+ *  patch string) rather than a top-level `path`/`file` field — so the
+ *  circumvention leaf's `extractWriteEffects` cannot see them and the ownership
+ *  fence would silently pass them (a FALSE FENCE). Closed, named set. */
+const PATCH_WRITE_TOOLS: ReadonlySet<string> = new Set(["apply_patch", "apply_patch_structured"])
+
+/**
+ * Write-effects for the patch-carrying tools. SECURITY-load-bearing: without
+ * this, a fenced subagent (`QUANTA_FS_OWNERSHIP_ENFORCE=1`) escapes its owned
+ * subtree via `apply_patch` — the primary edit tool — because the extractor
+ * only duck-reads top-level `path`/`file`, and a patch's targets are inside
+ * `input.patch`. Parses the CLOSED V4A op set (add/delete/update, each with a
+ * literal `path`, update carrying an optional literal `moveTo`) and emits one
+ * canonical effect per touched path. Heuristic-free: closed tool set + closed op
+ * union + literal schema fields (no regex/guessing). PURE, NO-THROW: an
+ * unparseable patch yields `[]` (it won't apply anyway; the apply-time FsJail
+ * re-validates). The emitted paths are canonicalized the SAME lexical way as
+ * `extractWriteEffects`, so `checkWriteEffects` re-canonicalizes them
+ * symlink-resolved identically.
+ */
+export const patchWriteEffects = (
+  toolName: string,
+  input: unknown,
+  cwd: string,
+): readonly { readonly path: string }[] => {
+  if (!PATCH_WRITE_TOOLS.has(toolName)) return []
+  if (input === null || typeof input !== "object" || !("patch" in input)) return []
+  const patch = (input as { patch: unknown }).patch
+  if (typeof patch !== "string" || patch.length === 0) return []
+  try {
+    const effects: { path: string }[] = []
+    for (const op of parsePatch(patch).ops) {
+      effects.push({ path: canonicalizeEffectPath(op.path, cwd) })
+      if (op.kind === "update" && op.moveTo !== undefined && op.moveTo.length > 0) {
+        effects.push({ path: canonicalizeEffectPath(op.moveTo, cwd) })
+      }
+    }
+    return effects
+  } catch {
+    return []
+  }
 }
 
 /** Build a policy from the raw subagent surfaces (relative or absolute strings),

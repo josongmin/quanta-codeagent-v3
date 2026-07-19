@@ -55,7 +55,7 @@
  */
 
 import { assertNever, type LLMErrorKind } from "@/shared"
-import type { RecoveryAction, RecoveryRouter } from "./port"
+import type { RecoveryAction } from "./port"
 
 /** Pure routing function — exposed for direct testing without instantiating
  *  the class. Identical to `CodexSpecRouter.prototype.route`. */
@@ -124,10 +124,3 @@ export const codexSpecRouterEmittedActions: ReadonlySet<RecoveryAction> = new Se
   "fatal",
   "reactive_compaction",
 ])
-
-/** `RecoveryRouter` implementation honoring the Codex-spec mapping above. */
-export class CodexSpecRouter implements RecoveryRouter {
-  route(kind: LLMErrorKind): RecoveryAction {
-    return codexSpecRoute(kind)
-  }
-}

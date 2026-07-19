@@ -1,4 +1,4 @@
-import { type assembleFromEvents, createDefaultRecoveryRouter, isRefusalStopReason } from "@/llm"
+import { type assembleFromEvents, codexSpecRoute, isRefusalStopReason } from "@/llm"
 import { LLMError } from "@/shared"
 import { DEFAULT_REFUSAL_FALLBACK_PROMPT } from "./refusal-fallback"
 import { classifyLLMError, isPromptTooLong } from "./retry"
@@ -18,7 +18,6 @@ const MAX_CONSECUTIVE_EMPTIES = 2
  *  refusal loop and pressures the model past real safety boundaries, and `n>1`
  *  is forbidden without measurement ([[no-heuristics-only-validated]]). */
 const MAX_REFUSAL_FALLBACKS = 1
-const defaultRecoveryRouter = createDefaultRecoveryRouter()
 
 /** Per-kind same-turn recovery budget caps (ADR documented in this module
  *  header + the conversation_action_noop branch of loop.ts). Frozen so a test
@@ -250,7 +249,7 @@ const decideTypedStreamError = (
   // Preserve the existing provider-message PTL signal: many adapters can only
   // classify the HTTP status as bad_request even though the body names overflow.
   if (isPromptTooLong(error)) return { do: "compact" }
-  switch (defaultRecoveryRouter.route(error.kind)) {
+  switch (codexSpecRoute(error.kind)) {
     case "reactive_compaction":
       return { do: "compact" }
     case "hitl_handoff":

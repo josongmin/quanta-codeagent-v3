@@ -326,11 +326,21 @@ export const extractWriteEffects = (
       path,
     }))
   }
-  // Non-shell write tool: duck-read a string `path` from the input.
-  if (input !== null && typeof input === "object" && "path" in input) {
-    const p = (input as { path: unknown }).path
-    if (typeof p === "string" && p.length > 0) {
-      return [{ kind: "write", path: canonicalizeEffectPath(p, cwd) }]
+  // Non-shell write tool: duck-read a string target from the input. Two literal
+  // schema fields cover the default write tools: `path` (write/edit/notebook/
+  // lsp_format) and `file` (scripted_replace). Closed field set, no heuristic.
+  // NOTE: patch-carrying tools (apply_patch/apply_patch_structured) put their
+  // targets INSIDE `input.patch` and are handled by `patchWriteEffects` in the
+  // @/agent ownership layer (this leaf may not import @/patch); see
+  // src/agent/ownership-policy.ts.
+  if (input !== null && typeof input === "object") {
+    for (const field of ["path", "file"] as const) {
+      if (field in input) {
+        const p = (input as Record<string, unknown>)[field]
+        if (typeof p === "string" && p.length > 0) {
+          return [{ kind: "write", path: canonicalizeEffectPath(p, cwd) }]
+        }
+      }
     }
   }
   return []

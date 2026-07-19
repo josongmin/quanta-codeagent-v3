@@ -28,7 +28,7 @@ import { deny, isSessionApprovalRequiredError } from "./dispatch-helpers"
 import { checkDispatchAllowed } from "./dispatch-seam-guard"
 import type { DispatchResult } from "./dispatch-types"
 import { resolveCollaborationMode } from "./mode"
-import { checkWriteEffects } from "./ownership-policy"
+import { checkWriteEffects, patchWriteEffects } from "./ownership-policy"
 import { reproDoubtStep } from "./repro-doubt-guard"
 import { toolGenAiAttrs, withActiveSpanScope } from "./session-resources"
 import type { AgentConfig } from "./types"
@@ -332,7 +332,14 @@ const consultOwnership = (
 ): DispatchResult | null => {
   if (config.ownershipPolicy?.enforced !== true) return null
   const own = checkWriteEffects(
-    extractWriteEffects(call.name, call.input, shellCommand, config.cwd, isReadOnly),
+    [
+      // top-level `path`/`file` + shell targets (circumvention leaf) …
+      ...extractWriteEffects(call.name, call.input, shellCommand, config.cwd, isReadOnly),
+      // … UNION the patch-carrying tools' targets (inside `input.patch`), which
+      // the leaf cannot see — closes the apply_patch/apply_patch_structured false
+      // fence (a fenced subagent otherwise escapes its owned set via apply_patch).
+      ...patchWriteEffects(call.name, call.input, config.cwd),
+    ],
     config.ownershipPolicy,
   )
   if (own.allowed) return null
