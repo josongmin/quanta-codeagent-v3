@@ -180,6 +180,17 @@ User asked to "finish everything" with a 3-round adversarial audit. Round 1 (5 p
 
 Rails: ledger-hellgate 6/0, fc validate/check-evidence 1027 all-resolved / diff no-changes, tsc 92 baseline unchanged (0 new), biome clean. Closure **89.7% (156/174)**, drift 0, errors 0, decisions {measure-first 61, enable-now 64, repair-first 7, hold 42}. **The 3-round audit's honest terminal finding: 1 security fix was the only genuine remaining code; the rest is correctly held (dead-wire/external/operator-A/B).**
 
+### Wave R — `apply_patch_structured` explicit CLI promotion (2026-07-19)
+
+Resolved the contradiction where the live tool-surface SSOT already seeded `QUANTA_ENABLE_STRUCTURED_PATCH=1` for CLI while the ledger still said `repair-first` and the feature catalog still described a dead/default-OFF seam. The CLI default-ON posture is now an explicit product decision:
+
+- **Contract:** `apply_patch_structured` is the per-op-atomic, cross-op-partial sibling of `apply_patch`. A failed op preserves its target bytes; successful siblings before and after it remain applied; any partial outcome is tool-level `ok:false` with per-file `messageForModel`. Callers requiring whole-patch atomicity keep using `apply_patch`.
+- **Security parity:** the promoted tool retains the real `FsJailFileSystemPort`, mutating permission classification, serialized execution, subagent ownership fence, and one-call write budget. `QUANTA_ENABLE_STRUCTURED_PATCH=0` omits the tool and restores the legacy CLI menu.
+- **Receipt:** revision `25d19d89b`; `bun test tests/integration/apply-patch-structured-cli-promotion-e2e.test.ts` → 3 pass / 0 fail on the real registry + real temporary filesystem, including partial-success byte assertions and a symlink-escape negative control. The broader apply/ownership/write-budget family → 44 pass / 0 fail; source typecheck passed.
+- **Authority update:** proof `unit→wire`, decision `repair-first→enable-now`, owner seam moved to `src/tool/surface/gated-tools.ts`; catalog `L3/new→L4/stable`, stale deliberate-hold removed.
+
+Closure remains **89.7% (156/174)** because the feature was already wired. Decisions are now **{measure-first 61, enable-now 65, repair-first 6, hold 42}**.
+
 ### Wave N — SOTA++ Track 3/4: activation + dormant-seam wiring (2026-07-18, 7 parallel agents)
 
 Completed `/presets` end-to-end + registered it everywhere (fc + all slash drift-guards, per user "커맨드 슬래시 fc같은거 다 등록"), and worked the T4 dormant seams — each with the same discipline (genuine consumer or **honest refuse**, never a forced dead-wire/heuristic). Closure **87.9%→89.1% (155/174)** from REAL wiring (not gaming) — drift 0, errors 0, fc validate/check-evidence/diff clean.

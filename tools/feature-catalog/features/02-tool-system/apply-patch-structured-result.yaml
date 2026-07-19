@@ -3,28 +3,28 @@ title: applyPatchStructured — per-file outcome + messageForModel (self-correct
 section: 2
 subsystem: 패치 적용 — 구조화 per-file 결과 (Cursor ApplyAgentDiff 흡수, ADR-0464)
 order: 464
-maturity: L3
-status: new
+maturity: L4
+status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 owners: ["@songmin"]
-labels: [absorbed:cursor, surface:cli]
+labels: [absorbed:cursor, surface:cli, default-on-cli]
 depends_on: [v4a-apply-patch]
 config_refs:
-  env: []
+  env: [QUANTA_ENABLE_STRUCTURED_PATCH]
 surface_integration:
   cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-19"
   evidence:
-    cli: "runs in the interactive CLI — 5/5 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "pure additive patch-apply library seam with no tool wired (deliberate_hold dead seam), no UI affordance on any surface"
+    cli: "explicitly promoted default-ON: tool-surface SSOT seeds QUANTA_ENABLE_STRUCTURED_PATCH=1, buildDefaultTools registers apply_patch_structured, and the real-FS promotion rail proves partial success + jail isolation; =0 restores the legacy menu"
+    web: "wired sibling tool remains opt-in; the web host does not seed QUANTA_ENABLE_STRUCTURED_PATCH"
 purpose: |
   Cursor ApplyAgentDiff 흡수 — 기존 applyPatch는 첫 bad hunk에서 patch 전체를
-  wholesale throw + rollback(전부-or-전무). 이 ADDITIVE/default-OFF seam은 새
+  wholesale throw + rollback(전부-or-전무). 이 ADDITIVE/gated sibling은 새
   applyPatchStructured(patch, fs)를 추가: op 단위 PER-FILE ISOLATION으로 한 파일이
   실패해도 나머지는 적용되고, Result<StructuredApplyOutcome>를 RETURN한다.
   AppliedChange[] = { path, changeType(created|modified|deleted), movedTo?,
@@ -35,6 +35,13 @@ purpose: |
   self-correct 재emit하게 한다. 기존 throwing applyPatch는 byte-identical로 불변 —
   새 entrypoint를 호출할 때만 동작. @/patch는 pure 유지(@/tool FsJailViolationError는
   structural duck-type으로 인식, upward import 없음).
+
+  CLI PROMOTION (2026-07-19): apply_patch_structured는 tool-surface SSOT에서
+  명시적으로 default-ON이다. 제품 계약은 per-op atomic + cross-op partial
+  success다. 실패 op의 target bytes는 보존되고 성공 sibling은 유지되며,
+  tool-level ok:false + per-file messageForModel로 실패가 숨지 않는다. 기존
+  apply_patch의 whole-patch atomic contract는 그대로 병존한다. rollback은
+  QUANTA_ENABLE_STRUCTURED_PATCH=0이며 이때 legacy tool menu가 복원된다.
 evidence:
   code:
     - src/patch/structured.ts
@@ -47,24 +54,19 @@ evidence:
     unit:
       - tests/unit/patch-structured-apply-hellgate.test.ts
       - tests/unit/apply-patch-structured-tool-wire-hellgate.test.ts
-    integration: []
+    integration:
+      - tests/integration/apply-patch-structured-cli-promotion-e2e.test.ts
     contract: []
 knobs: ["QUANTA_ENABLE_STRUCTURED_PATCH"]
-deliberate_hold:
-  reason: |
-    도구-표면 배선 보류 (slice fence: src/tool/index.ts / src/apps/cli/** 는 이
-    슬라이스 파일 아님). applyPatchStructured는 현재 어떤 호출자도 사용하지 않음
-    (dead seam). default-OFF — 새 entrypoint 호출 시에만 동작.
-  promotion_path: |
-    활성화는 (a) apply_patch 도구의 새 flag 또는 (b) sibling 도구로 노출 + (c) loop가
-    partial-실패 시 messageForModel을 다음 턴 컨텍스트에 피드백하는 와이어링 — 전부
-    ADR-0464 Integration TODOs로 인계.
+deliberate_hold: null
 notes: |
-  L2 seam (2026-06-03): per-op 적용은 canonical applyPatch({ops:[op]})에 위임 —
+  최초 seam (2026-06-03): per-op 적용은 canonical applyPatch({ops:[op]})에 위임 —
   locator/fuzzy-tier/pre-flight/rollback 로직 중복 0. 각 op는 자기 원자성 유지(실패
   op의 파일은 prior on-disk content로 intact). 외부 루프만 한 op 실패를 tolerate.
   cross-op 원자성은 이 path에서 의도적으로 포기(필요한 caller는 applyPatch 계속 사용).
-  hellgate 14 케이스: happy 3-change-type + before/after, move→modified+movedTo,
+  CLI promotion receipt @25d19d89b: real registry + real temporary filesystem에서
+  partial sibling persistence, failed-target byte preservation, symlink escape 격리 검증.
+  hellgate: happy 3-change-type + before/after, move→modified+movedTo,
   isolation(앞뒤 sibling 둘 다 적용 + prior intact), jail isolated(structural),
   delete-missing isolated, non-Patch입력 no-throw, throwing port no-throw,
-  messageForModel 전 error-kind + unknown fallback, default-OFF byte-identity 앵커.
+  messageForModel 전 error-kind + unknown fallback, legacy applyPatch byte-identity 앵커.

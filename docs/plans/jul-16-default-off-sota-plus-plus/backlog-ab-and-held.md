@@ -170,7 +170,7 @@ hold는 "기본 활성화 보류" 결정이며 미배선과 동의어가 아니�
 
 | feature_id | 역할 | 왜 REPAIR-FIRST (구체 blocker) | 코드위치 |
 |---|---|---|---|
-| apply-patch-structured-result | V4A 패치 op별 적용, per-file 구조화 결과(Cursor applied_changes shape) | partial-apply=앞 op는 commit된 채 뒤 op fail→whole-patch rollback 없음, 안전성 리뷰 필요 | `src/patch/structured.ts:65` |
+| apply-patch-structured-result | **Wave R에서 enable-now로 승격됨** — V4A patch의 per-op atomic/cross-op partial sibling | real-FS partial/jail receipt `25d19d89b`; 실패 target 보존 + 성공 sibling 유지가 명시적 제품 계약, `=0` rollback | `src/tool/surface/gated-tools.ts:77` |
 | approval-gate-wire | ApprovalStateMachine로 도구 승인에 durable attribution ID | port 미주입 시 `approvalId=""`로 조용히 degrade; 전 서피스 SM 주입 필요 | `src/agent/approval-gate-wire/wire.ts:124` |
 | appshot-verify-loop | generate→render→screenshot→judge 반복 정제 | CDP+judge assembly는 존재; Chrome/provider 실운영 receipt와 반복 비용 policy가 없음 | `src/host/runtime/agent-config-assembler.ts:345` |
 | branch-search-progress | N개 branch-search 후보를 Shadow-ODB에 anchor, git delta 측정 | delta는 scoring/selector에서 소비됨; winner selection의 efficacy·cost가 기본 ON blocker | `src/agent/branch-search/tool.ts:161` |
@@ -211,8 +211,8 @@ hold는 "기본 활성화 보류" 결정이며 미배선과 동의어가 아니�
 
 ### 아직 잘 만들어졌다고 말할 수 없는 지점
 
-- 113개 전 행의 `proof.receipt`가 null이다. 현재 레저 체커는 schema·커버리지·CLI seed parity를 검사하지만, feature의 ON runtime rail이나 external dependency를 실행하지 않는다.
-- `apply-patch-structured-result`의 partial-apply는 현행 의도된 semantics다. whole-patch atomicity가 제품 계약이면 rollback journal/transaction mode와 real-FS rollback test가 필요하다.
+- 이 감사 스냅샷 당시 113개 전 행의 `proof.receipt`가 null이었다. Wave R에서 `apply-patch-structured-result`가 첫 명시적 promotion receipt를 얻었고, 나머지 null 행에 대해서는 여전히 레저 체커의 schema·커버리지·CLI seed parity만으로 ON runtime efficacy나 external dependency 실행을 주장하지 않는다.
+- `apply-patch-structured-result`의 partial-apply는 Wave R에서 명시적으로 promotion됐다. whole-patch atomicity는 기존 `apply_patch`, per-op atomic/cross-op partial + targeted retry는 `apply_patch_structured`가 소유한다. real-FS 실패-target byte 보존과 jail escape 격리는 receipt `25d19d89b`로 고정됐다.
 - `approval-gate-wire`는 state-machine request 실패 시 legacy resolver fallback을 허용한다. durable approval attribution을 보안 통제로 승격하기 전 strict fail-closed surface policy가 필요하다.
 - `collect-evidence`, command hooks, shadow verify, appshot은 untrusted repo 실행·mutation·Chrome/provider cost가 걸려 있어 real external receipt와 permission/sandbox policy 없이는 default-ON 후보가 아니다.
 - `stage1-phase2-consume-and-vendor-glob-wire`는 여전히 seam-only다. DB lifecycle과 Phase2 DI의 composition root가 실제 잔여 wire다.

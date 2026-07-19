@@ -1,6 +1,6 @@
 # Default-OFF backlog — per-feature audit matrix (2026-07-18)
 
-Generated from `tools/feature-catalog/default-off-ledger.yaml` after the source audit. `wired` proves an assembly/consumer path, not efficacy or an external operational receipt. Every `receipt` is currently `null`.
+Generated from `tools/feature-catalog/default-off-ledger.yaml` after the source audit. `wired` proves an assembly/consumer path, not efficacy or an external operational receipt. Wave R adds the first explicit promotion receipt for `apply-patch-structured-result`; other rows retain their snapshot state.
 
 | feature_id | decision | reachability | ON proof | OFF proof | receipt | audit verdict |
 |---|---|---|---|---|---|---|
@@ -8,7 +8,7 @@ Generated from `tools/feature-catalog/default-off-ledger.yaml` after the source 
 | adversarial-repro-knob | measure-first | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | agent-jobs-batch | enable-now | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | ai-session-title | enable-now | wired | real-loop | unit | none | real-loop covered; no execution receipt |
-| apply-patch-structured-result | repair-first | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
+| apply-patch-structured-result | enable-now | wired | wire | unit | `25d19d89b` | explicit CLI promotion; real registry + real-FS partial/jail rail |
 | approval-gate-wire | repair-first | wired | real-loop | unit | none | real-loop covered; no execution receipt |
 | appshot-verify-loop | repair-first | wired | wire | unit | none | composition/wire covered; no execution receipt |
 | assistant-language-auto-detect | measure-first | wired | wire | unit | none | composition/wire covered; no execution receipt |
@@ -177,4 +177,3 @@ Generated from `tools/feature-catalog/default-off-ledger.yaml` after the source 
 | vscode-chatsessions-surface | hold | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | web-agent-state-channel | enable-now | wired | wire | unit | none | composition/wire covered; no execution receipt |
 | worktree-tool | measure-first | wired | wire | unit | none | composition/wire covered; no execution receipt |
-

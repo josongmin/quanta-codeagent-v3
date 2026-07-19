@@ -93,10 +93,19 @@ rows:
     activation: host-seeded
     effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof:
+      on: wire
+      off_identity: unit
+      receipt:
+        feature_id: apply-patch-structured-result
+        command: bun test tests/integration/apply-patch-structured-cli-promotion-e2e.test.ts
+        test_path: tests/integration/apply-patch-structured-cli-promotion-e2e.test.ts
+        revision: 25d19d89b
+        exit_code: 0
+        proof_tier: wire
     risk: mutating
-    decision: repair-first
-    owner_seam: src/patch/structured.ts
+    decision: enable-now
+    owner_seam: src/tool/surface/gated-tools.ts
     rollback: QUANTA_ENABLE_STRUCTURED_PATCH=0
     duplicate_of: null
     lifecycle_evidence: null
