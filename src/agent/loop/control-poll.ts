@@ -1,3 +1,4 @@
+import { rootMailboxRecipient } from "@/agent/subagent-mailbox"
 import type { Message } from "@/llm"
 import { errMessage } from "@/shared"
 import { cancelSubagent } from "../control-op-handler"
@@ -93,12 +94,17 @@ export interface PeerInboxDrain {
 /** Drain THIS agent's auto-delivered peer mail at the turn-top seam (sibling of
  *  {@link pollFollowUpQueue}). Returns null when no port is wired (default-OFF,
  *  byte-identical) or the inbox is empty. The agent's mailbox identity is its
- *  stable `mailboxAgentId` (the root session leaves it unset ⇒ `"root"`). */
+ *  stable `mailboxAgentId` (the root session leaves it unset ⇒ `"root"`).
+ *
+ *  The drain PORT stays DUCK-TYPED (received via assembly, never imported here);
+ *  only the pure `rootMailboxRecipient` id-resolver is imported — the F1 (jul-15)
+ *  SSOT that keeps this READ id byte-identical to the side-agent finding WRITE
+ *  recipient (host assembler), so the two ends can never dead-letter again. */
 export const pollPeerInbox = (cfg: AgentConfig): Message | null => {
   const port = cfg.peerInbox
   if (port === undefined) return null
   try {
-    return port.drainFor(cfg.mailboxAgentId ?? "root")
+    return port.drainFor(rootMailboxRecipient(cfg.mailboxAgentId))
   } catch (e) {
     cfg.stream.emit({ type: "error", message: `peerInbox.drainFor failed: ${errMessage(e)}` })
     return null

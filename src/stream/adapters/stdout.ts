@@ -1,4 +1,4 @@
-import { redactValue, type TerminalWriter, writeStdout } from "@/shared"
+import { redactValue, sanitizeLogText, type TerminalWriter, writeStdout } from "@/shared"
 import type { StreamPort } from "../ports"
 import type { AgentEvent } from "../types"
 
@@ -205,6 +205,12 @@ export class StdoutStream implements StreamPort {
       case "subagent_cancel":
         this.write(renderSubagentCancel(event))
         break
+<<<<<<< HEAD
+=======
+      case "peer_message":
+        this.write(renderPeerMessage(event))
+        break
+>>>>>>> origin/main
       case "subagent_spawn":
         this.write(renderSubagentSpawn(event))
         break
@@ -342,10 +348,45 @@ const renderInterrupted = (event: Extract<AgentEvent, { type: "interrupted" }>):
 const renderSubagentCancel = (event: Extract<AgentEvent, { type: "subagent_cancel" }>): string =>
   `${DIM}✂ subagent ${event.subagentId} (${event.outcome}, via ${event.source})${RESET}\n`
 
+<<<<<<< HEAD
 /** Multi-agent lifecycle observation. Keep the `type` token visible: this is
  *  the compact stdout counterpart of the structured `/agents --tree` feed.
  *  Descriptions cross a UI boundary, so redact again even though the registry
  *  already bounds and scrubs them at emission time. */
+=======
+/** jul-15 W2 — a surfaced peer / side-agent message (Codex "Sent from another
+ *  task" parity, terminal dialect). A DIM attribution label line above the body,
+ *  the body collapsed to {@link PEER_BODY_MAX_LINES} lines with a "+N more" marker
+ *  (Codex `collapsedLineCount`). The body was already redacted + sanitized at the
+ *  emit boundary; `redactStr` + per-line `sanitizeLogText` here are belt-and-
+ *  suspenders (a peer_message from any path can never forge terminal UI — the body
+ *  is untrusted-peer content, same anti-forge posture as the read tool). */
+const PEER_BODY_MAX_LINES = 4
+const renderPeerMessage = (event: Extract<AgentEvent, { type: "peer_message" }>): string => {
+  const label =
+    event.provenance.source === "side-agent"
+      ? `sent by ${event.provenance.daemonId} — side agent finding`
+      : `sent by ${event.from} — from another task [${event.kind}]`
+  const head = `${DIM}✉ ${sanitizeLogText(label)}${RESET}\n`
+  const lines = redactStr(event.body)
+    .split("\n")
+    .map(sanitizeLogText)
+  const shown = lines.slice(0, PEER_BODY_MAX_LINES)
+  const extra = lines.length - shown.length
+  const body = shown.map((l) => `${DIM}  ${l}${RESET}`).join("\n")
+  const more =
+    extra > 0
+      ? `\n${DIM}  … (+${extra} more line${extra === 1 ? "" : "s"} — subagent_read_messages to view)${RESET}`
+      : ""
+  return `${head}${body}${more}\n`
+}
+
+/** Multi-agent-panel SUBSTRATE — subagent lifecycle spawn line. Description is
+ *  model-/runtime-derived, so it routes through the terminal redaction boundary.
+ *  (Copied verbatim from the concurrent multi-agent-panel work committed on
+ *  feat/fc-evidence-relink so main's exhaustive switch is complete NOW and the
+ *  eventual feat→main merge of these two functions is a no-op — jul-15.) */
+>>>>>>> origin/main
 const renderSubagentSpawn = (event: Extract<AgentEvent, { type: "subagent_spawn" }>): string => {
   const parent = event.parentTaskId === undefined ? "" : ` parent=${event.parentTaskId}`
   const agentType = event.agentType === undefined ? "" : ` type=${event.agentType}`
@@ -354,7 +395,12 @@ const renderSubagentSpawn = (event: Extract<AgentEvent, { type: "subagent_spawn"
 
 /** Multi-agent lifecycle transition. Final text and errors are model-/runtime-
  * derived, so do not bypass the terminal redaction boundary when surfacing a
+<<<<<<< HEAD
  * compact completion summary. */
+=======
+ * compact completion summary. (Copied verbatim from feat/fc-evidence-relink — see
+ * renderSubagentSpawn.) */
+>>>>>>> origin/main
 const renderSubagentStatus = (event: Extract<AgentEvent, { type: "subagent_status" }>): string => {
   const turns = event.turns === undefined ? "" : ` turns=${event.turns}`
   const preview =

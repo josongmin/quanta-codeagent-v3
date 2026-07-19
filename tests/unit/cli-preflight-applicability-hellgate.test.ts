@@ -108,21 +108,28 @@ describe("#19 preflight — edit applicability", () => {
     expect(w?.toLowerCase()).toContain("line_ranges")
   })
 
-  test("an ABSOLUTE path is read as-is (NOT joined under cwd)", async () => {
-    // Reader keyed on the absolute path only; if the resolver wrongly did
-    // path.resolve(cwd, "/abs/x.ts") it would still be "/abs/x.ts" (absolute
-    // wins), but a clean read + correct verdict proves the abs branch works.
+  test("an absolute path INSIDE cwd is read and checked normally", async () => {
     const clean = await preflightApplyWarning(
-      editAction({ path: "/abs/x.ts", old_string: "beta", new_string: "BETA" }),
-      { cwd, readFile: reader({ "/abs/x.ts": SRC }) },
+      editAction({ path: "/repo/x.ts", old_string: "beta", new_string: "BETA" }),
+      { cwd, readFile: reader({ "/repo/x.ts": SRC }) },
     )
-    expect(clean).toBeUndefined() // found + unique under the absolute path
-    const stale = await preflightApplyWarning(
-      editAction({ path: "/abs/x.ts", old_string: "MISSING", new_string: "z" }),
-      { cwd, readFile: reader({ "/abs/x.ts": SRC }) },
+    expect(clean).toBeUndefined()
+  })
+
+  test("an absolute path OUTSIDE cwd is rejected before the preview reader can touch it", async () => {
+    let reads = 0
+    const warning = await preflightApplyWarning(
+      editAction({ path: "/outside/secret.txt", old_string: "secret", new_string: "redacted" }),
+      {
+        cwd,
+        readFile: async () => {
+          reads += 1
+          return "secret"
+        },
+      },
     )
-    expect(stale).toBeDefined()
-    expect(stale).toContain("/abs/x.ts")
+    expect(warning).toContain("outside the workspace jail")
+    expect(reads).toBe(0)
   })
 })
 
@@ -186,6 +193,20 @@ describe("#19 preflight — apply_patch applicability", () => {
     expect(w).toContain("apply_patch_structured")
     expect(w?.toLowerCase()).toContain("one or more files may fail")
     expect(files["/repo/x.ts"]).toBe("alpha\nDELTA\ngamma\n")
+  })
+
+  test("patch preflight rejects an outside target before any reader call", async () => {
+    let reads = 0
+    const patch = "*** Begin Patch\n*** Update File: /outside/secret.txt\n@@\n-secret\n+redacted\n*** End Patch\n"
+    const warning = await preflightApplyWarning(patchAction(patch, "apply_patch_structured"), {
+      cwd,
+      readFile: async () => {
+        reads += 1
+        return "secret\n"
+      },
+    })
+    expect(warning).toContain("outside the workspace jail")
+    expect(reads).toBe(0)
   })
 })
 

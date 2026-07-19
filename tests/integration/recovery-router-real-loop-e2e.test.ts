@@ -112,10 +112,14 @@ describe("recovery-router bridge — context_window_exceeded drives reactive com
       { role: "user" as const, content: [{ type: "text" as const, text: "second request" }] },
       { role: "assistant" as const, content: [{ type: "text" as const, text: "older turn two" }] },
       { role: "user" as const, content: [{ type: "text" as const, text: "third request" }] },
+<<<<<<< HEAD
       {
         role: "assistant" as const,
         content: [{ type: "text" as const, text: "older turn three" }],
       },
+=======
+      { role: "assistant" as const, content: [{ type: "text" as const, text: "older turn three" }] },
+>>>>>>> origin/main
       { role: "user" as const, content: [{ type: "text" as const, text: "current request" }] },
     ]
     const stream = new RecordingStream()
@@ -177,12 +181,26 @@ describe("recovery-router bridge — fatal/hitl kinds terminate the loop with NO
   }
 })
 
+<<<<<<< HEAD
 describe("recovery-router bridge — typed router owns kinded outer recovery", () => {
   test("context_window_exceeded KIND with a non-PTL message ⇒ loop compacts from the typed route", async () => {
+=======
+// ── DELIBERATE-HOLD CONTROL (non-vacuity + documents the unwired seam) ────────
+// `codexSpecRoute` is a DELIBERATE-HOLD seam: it is NOT wired into `runAgent`.
+// The proof is a kind whose codex action (`reactive_compaction`) does NOT take
+// effect in the live loop UNLESS the loop's own (message-based) PTL signal is
+// also present. A bare `context_window_exceeded` kind with a NON-PTL message is
+// therefore treated FATAL by the live loop — the exact opposite of what a WIRED
+// router would do. This discriminates the bridge above (it is not "everything
+// completes") AND pins the documented gap: the codex table alone changes nothing.
+describe("recovery-router bridge — CONTROL: codex table is NOT wired (kind alone ≠ route)", () => {
+  test("context_window_exceeded KIND with a non-PTL message ⇒ loop treats it FATAL (router unwired)", async () => {
+>>>>>>> origin/main
     const kind: LLMErrorKind = "context_window_exceeded"
     // The table SAYS reactive_compaction …
     expect(codexSpecRoute(kind)).toBe("reactive_compaction")
     const stream = new RecordingStream()
+<<<<<<< HEAD
     const history = [
       { role: "user" as const, content: [{ type: "text" as const, text: "first request" }] },
       { role: "assistant" as const, content: [{ type: "text" as const, text: "older response" }] },
@@ -232,5 +250,24 @@ describe("recovery-router bridge — typed router owns kinded outer recovery", (
         (event) => event.type === "error" && event.message.includes("operator intervention"),
       ),
     ).toBe(true)
+=======
+    // … but with NO context-window wording the loop's message-based PTL check
+    // misses, and since the kind is neither in RETRYABLE_KINDS nor a PTL marker,
+    // classifyLLMError falls through to "fatal".
+    const llm = new KindedScriptedLLM([
+      { throw: new LLMError("some opaque provider failure", { kind }) },
+      { events: text("must-not-be-reached") },
+    ])
+    const out = await withTimeout(
+      runAgent(rrConfig({ llm, stream, maxTurns: 3 })),
+      15_000,
+      "recovery-router-unwired-control",
+    )
+    // The routed compaction did NOT happen — the codex table is not consulted.
+    expect(out.reason).toBe("error")
+    expect(llm.calls).toBe(1)
+    expect(recoveryReasons(stream)).not.toContain("compact")
+    expect(recoveryReasons(stream)).not.toContain("backoff")
+>>>>>>> origin/main
   })
 })

@@ -141,6 +141,10 @@ export const TIMELINE_FORMATTED_AGENT_EVENT_TYPES = [
   "response_queued",
   "interrupted",
   "subagent_cancel",
+  // jul-15 W2 — a surfaced peer / side-agent message is a content-bearing
+  // user-facing notice, so it gets a FORMATTED row (from→to [kind]), same posture
+  // as subagent_cancel.
+  "peer_message",
   "plan_created",
   "plan_updated",
   "plan_snapshot",
@@ -170,6 +174,11 @@ export const TIMELINE_FALLBACK_AGENT_EVENT_TYPES = [
   // Multi-agent-panel SUBSTRATE — subagent lifecycle events render via the
   // generic fallback row here; the DEDICATED `/agents --tree` panel (a later
   // wave) consumes them off the `@/protocol/subagent` seam, not this timeline.
+<<<<<<< HEAD
+=======
+  // (Copied verbatim from feat/fc-evidence-relink so the inventory partition is
+  // complete NOW — the eventual feat→main merge of these entries is a no-op.)
+>>>>>>> origin/main
   "subagent_spawn",
   "subagent_status",
 ] as const satisfies readonly AgentEventType[]
@@ -226,6 +235,8 @@ const renderBody = (event: AgentEvent): string => {
     response_queued: (event) => `queued ${event.reason}`,
     interrupted: (event) => `interrupted ${event.source}`,
     subagent_cancel: (event) => `subagent_cancel ${event.subagentId} ${event.outcome}`,
+    peer_message: (event) =>
+      `peer_message ${event.provenance.source === "side-agent" ? `finding ${event.provenance.daemonId}` : `${event.from}→${event.to} [${event.kind}]`}`,
     plan_created: (event) => `plan_created ${event.plan.name}`,
     plan_updated: (event) => `plan_updated v${event.version}`,
     plan_snapshot: (event) => `plan_snapshot ${event.plan.name}`,

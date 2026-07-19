@@ -8,13 +8,13 @@
 
 **R3 최종 (2026-07-16)**: R2-후 편집 11건 자체가 미검증이라 3라운드째 투입(적대어딧 ≥3회 하드룰) — F1-F9 반영 9건 전부 정상, 신규 코드 인용 2건 line-exact, 잔여 = MED 2(02 acceptance 3-way 스코프 충돌 조건화 / 03-A↔04 방향 규칙 명시)·LOW 4(버전스큐 구제 모집단을 "구 피어 공히"로 대칭화, resumeFromSeq 다이어그램 잔여 토큰, 05 의존 +01, MASTER §7 단서) → **전부 반영 완료. 판정: CLEAN — 계획 문서로서 수렴 종료.** 다음 감사 표면은 구현물(01 S0 스파이크부터).
 
-**구현 closeout (2026-07-19, HEAD `7d8aa9fd6` 기준)**: 01–05와 인접 W1-B/W4-b/P8가 전부 랜딩됐다. 후속 어딧의 B1/H/P0/C/J/B-MED-7/sqlite 권한도 닫혔다. 남은 `serve deny/다중 approval` 직접 spawn e2e는 하위 실경로와 web-daemon e2e가 중복 커버하는 선택 LOW이며, 제품 기능 blocker가 아니다. live 후속표는 [audit-followups-jul17.md](audit-followups-jul17.md)다.
+**구현 closeout (2026-07-19, HEAD `7d8aa9fd6` 기준)**: 01–05와 인접 W1-B/W4-b/P8가 전부 랜딩됐다. 후속 어딧의 B1/H/P0/C/J/B-MED-7/sqlite 권한도 닫혔다. `serve --stdio`는 approve/deny/연속 2회 approval까지 실제 child spawn 경로로 직접 봉인했다. live 후속표는 [audit-followups-jul17.md](audit-followups-jul17.md)다.
 
 | 티켓 | 내용 | Effort | 상태 (07-19) | 의존 |
 |---|---|---|---|---|
 | [00](00-MASTER-PLAN.md) | MASTER — evidence·목표 아키텍처 v2·경계·hazards | — | SSOT (실행순서는 [ROADMAP-unified](ROADMAP-unified.md)) | — |
 | [01](01-connect-session-handle.md) | `connect()`(ws/stdio) + verb 표면 + hoist + liveness/버전스큐 + conformance | L | ✅ **LANDED** c89bc49c1 (적대어딧 2R — hang 3종 사멸, resumeFromSeq는 05로 descope) | — |
-| [02](02-serve-stdio-entrypoint.md) | `quanta serve --stdio` + heartbeat hoist + transport 스탬프 seam | M | ✅ **LANDED** a83e28cd4 + approval wire-defer 5b4110f18 (8/8 real-spawn e2e) | 01✅ |
+| [02](02-serve-stdio-entrypoint.md) | `quanta serve --stdio` + heartbeat hoist + transport 스탬프 seam | M | ✅ **LANDED** a83e28cd4 + approval wire-defer 5b4110f18 (10/10 real-spawn e2e) | 01✅ |
 | [03](03-protocol-copy-drift-guard.md) | field-shape 라쳇(A) → 번들 소비(B) → 클라 수렴 평가(C) | XS+M+XS | ✅ **전량 완료** — A 896b0ae86(+764b70215) / B 9080a8853(생성물 번들) / [C](03c-ws-client-convergence.md) hold 판정 | — |
 | [04](04-wire-fidelity-negotiation.md) | fidelity opt-in full payload | L | ✅ **LANDED** bbd289d40 (S1-S5, 적대어딧 통과) | 01✅, 03-A✅ |
 | [05](05-durable-resume-composition.md) | durable resume | S+M | ✅ **LANDED** W4-b 527f78811 + core a38ee957f + door-resume 1f578f28f | 01✅ |

@@ -28,6 +28,7 @@ import type { Tool, ToolContext, ToolResult } from "@/tool"
 import { buildDefaultTools } from "@/tool"
 import { makeApplyPatchStructuredTool } from "@/tool/apply-patch-structured-tool"
 import type { GuardedPatchFileSystemPort } from "@/tool/patch-mutation-safety"
+import { ReadFileState } from "@/tool/stale-read-guard"
 
 const TOOL_NAME = "apply_patch_structured"
 
@@ -206,6 +207,31 @@ describe("apply_patch_structured — adapter behavior (no-throw boundary)", () =
     expect(res.ok).toBe(false)
     const s = res.structured as { appliedChanges: { error?: string }[] }
     expect(s.appliedChanges.some((c) => c.error !== undefined)).toBe(true)
+  })
+
+  test("stale preflight stat failure ⇒ rejected result and ZERO mutation, never a generator throw", async () => {
+    const fs = memFs({ "a.txt": "before\n" })
+    fs.statTarget = async () => {
+      throw new Error("EACCES: cannot stat target")
+    }
+    const tool = makeApplyPatchStructuredTool(fs)
+    const state = new ReadFileState()
+    const context: ToolContext = {
+      cwd: "/jail",
+      signal: new AbortController().signal,
+      readFileState: state,
+    }
+
+    const result = await run(
+      tool,
+      { patch: wrapPatch("*** Update File: a.txt", "@@", "-before", "+after") },
+      context,
+    )
+
+    expect(result.ok).toBe(false)
+    expect(result.failure).toEqual({ mode: "rejected", reason: "stale_read_check_failed" })
+    expect(result.output).toContain("cannot safely verify")
+    expect(fs.files.get("a.txt")).toBe("before\n")
   })
 
   test("toModelOutput renders structured outcome; falls back to output when absent", async () => {

@@ -12,11 +12,26 @@ export {
   formatPeerBody,
   type PeerInboxAdapterOptions,
 } from "./peer-inbox"
-export { createSubagentMailbox } from "./store"
+export {
+  createDefaultSubagentMailbox,
+  createSubagentMailbox,
+  DEFAULT_SUBAGENT_MAILBOX_MAX_UNDELIVERED_PER_SENDER,
+} from "./store"
+export {
+  type PeerMessageNotice,
+  type PeerMessageProvenance,
+  type PeerMessageSink,
+  type SurfaceNotifyOptions,
+  surfaceNotifyMailbox,
+} from "./surface-notify"
 export {
   type TeamMembershipGate,
   teamScopedMailbox,
 } from "./team-scoped"
+export {
+  ROOT_MAILBOX_AGENT_ID,
+  rootMailboxRecipient,
+} from "./types"
 export type {
   CreateSubagentMailboxOptions,
   MailboxMessage,

@@ -1,10 +1,19 @@
+<<<<<<< HEAD
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+=======
+>>>>>>> origin/main
 import { mkdtempSync } from "node:fs"
 import { rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+<<<<<<< HEAD
 import { runAgent } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput, SystemBlock } from "@/llm"
+=======
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { runAgent } from "@/agent"
+import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+>>>>>>> origin/main
 import { buildSessionMemoryAutoWires } from "@/runner/session-memory-auto"
 import { __resetRuntimeConfig } from "@/shared"
 import { defaultTools, ToolRegistry } from "@/tool"
@@ -41,6 +50,7 @@ import { cfg, RecordingStream, withTimeout } from "./_harness"
 const convo = (i: StreamInput): string =>
   i.messages
     .flatMap((m) =>
+<<<<<<< HEAD
       m.content.map((b) =>
         b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "",
       ),
@@ -53,6 +63,12 @@ const systemText = (system: StreamInput["system"]): string => {
   return (system as SystemBlock[]).map((block) => block.text).join("\n")
 }
 
+=======
+      m.content.map((b) => (b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "")),
+    )
+    .join(" ")
+
+>>>>>>> origin/main
 // The distill prompt begins with this marker (see src/agent/memory-distill.ts).
 const DISTILL_MARKER = "You distill durable long-term memory"
 
@@ -73,7 +89,10 @@ const DISTILL_JSON = JSON.stringify([
 class DualRoleLLM implements LLMPort {
   readonly model = "auto-trigger-test-model"
   distillCalls = 0
+<<<<<<< HEAD
   readonly seenSystem: string[] = []
+=======
+>>>>>>> origin/main
   private loopTurn = 0
   async *stream(i: StreamInput): AsyncIterable<StreamEvent> {
     if (convo(i).includes(DISTILL_MARKER)) {
@@ -82,7 +101,10 @@ class DualRoleLLM implements LLMPort {
       yield { type: "message_stop", stop_reason: "end_turn" }
       return
     }
+<<<<<<< HEAD
     this.seenSystem.push(systemText(i.system))
+=======
+>>>>>>> origin/main
     const n = this.loopTurn++
     if (n < 3) {
       yield { type: "tool_use_start", id: `t${n}`, name: "read" }
@@ -95,6 +117,7 @@ class DualRoleLLM implements LLMPort {
   }
 }
 
+<<<<<<< HEAD
 class PromptCapturingLLM implements LLMPort {
   readonly model = "auto-trigger-prompt-capture-model"
   readonly seenSystem: string[] = []
@@ -105,6 +128,8 @@ class PromptCapturingLLM implements LLMPort {
   }
 }
 
+=======
+>>>>>>> origin/main
 describe("memory auto-trigger — session-end consolidation fires through runAgent", () => {
   let tempHome: string
   beforeEach(() => {
@@ -128,9 +153,13 @@ describe("memory auto-trigger — session-end consolidation fires through runAge
     })
     if (wires === undefined) throw new Error("expected auto-trigger wires (default-ON)")
     // Pre-condition: the durable store is empty before the session runs.
+<<<<<<< HEAD
     const stage1Store = wires.memoryConsolidator.store
     if (stage1Store === undefined) throw new Error("expected auto-trigger stage1 store")
     const before = await stage1Store.fetchSince(null)
+=======
+    const before = await wires.memoryConsolidator.store!.fetchSince(null)
+>>>>>>> origin/main
     expect(before.length).toBe(0)
 
     const out = await withTimeout(
@@ -140,12 +169,16 @@ describe("memory auto-trigger — session-end consolidation fires through runAge
           stream: new RecordingStream(),
           registry: new ToolRegistry([...defaultTools]),
           sessionId: "auto-trigger-e2e-1",
+<<<<<<< HEAD
           messages: [
             {
               role: "user",
               content: [{ type: "text", text: "look at three files then summarize" }],
             },
           ],
+=======
+          messages: [{ role: "user", content: [{ type: "text", text: "look at three files then summarize" }] }],
+>>>>>>> origin/main
           maxTurns: 10,
           // The block the ASSEMBLER produced — NOT a hand-built literal.
           memoryConsolidator: wires.memoryConsolidator,
@@ -167,7 +200,11 @@ describe("memory auto-trigger — session-end consolidation fires through runAge
     // call ran and a REAL sqlite row was written (fresh readback off the store
     // the assembler minted, NOT the config slot).
     expect(llm.distillCalls).toBe(1)
+<<<<<<< HEAD
     const rows = await stage1Store.fetchSince(null)
+=======
+    const rows = await wires.memoryConsolidator.store!.fetchSince(null)
+>>>>>>> origin/main
     expect(rows.length).toBe(1)
     const row = rows[0]
     if (!row) throw new Error("expected one distilled stage1 row")
@@ -178,6 +215,7 @@ describe("memory auto-trigger — session-end consolidation fires through runAge
     wires.dispose()
   })
 
+<<<<<<< HEAD
   test("session-end persisted stage1 entry reaches the NEXT session's system prompt", async () => {
     const priorLlm = new DualRoleLLM()
     const prior = await buildSessionMemoryAutoWires({
@@ -284,6 +322,8 @@ describe("memory auto-trigger — session-end consolidation fires through runAge
     next.dispose()
   })
 
+=======
+>>>>>>> origin/main
   test("CONTROL: QUANTA_MEMORY_AUTO=off ⇒ assembler returns NO wires ⇒ no session-end firing (non-vacuous)", async () => {
     const llm = new DualRoleLLM()
     // Explicit opt-out ⇒ the assembler returns undefined (no consolidator block
@@ -305,12 +345,16 @@ describe("memory auto-trigger — session-end consolidation fires through runAge
           stream: new RecordingStream(),
           registry: new ToolRegistry([...defaultTools]),
           sessionId: "auto-trigger-e2e-off-1",
+<<<<<<< HEAD
           messages: [
             {
               role: "user",
               content: [{ type: "text", text: "look at three files then summarize" }],
             },
           ],
+=======
+          messages: [{ role: "user", content: [{ type: "text", text: "look at three files then summarize" }] }],
+>>>>>>> origin/main
           maxTurns: 10,
         }),
       ),
@@ -369,9 +413,13 @@ describe("memory auto-trigger — session-end consolidation fires through runAge
     // Session-end distill never ran (boundary not reached) and no durable row
     // was written despite the block being fully wired.
     expect(distillLlm.distillCalls).toBe(0)
+<<<<<<< HEAD
     const stage1Store = wires.memoryConsolidator.store
     if (stage1Store === undefined) throw new Error("expected auto-trigger stage1 store")
     const rows = await stage1Store.fetchSince(null)
+=======
+    const rows = await wires.memoryConsolidator.store!.fetchSince(null)
+>>>>>>> origin/main
     expect(rows.length).toBe(0)
 
     wires.dispose()

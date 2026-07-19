@@ -42,4 +42,4 @@ crash/torn·lock·seq·replay·누출·게이트·v1정직성 7축 실행 repro 
 |---|---|---|---|
 | ~~γ-sqlite~~ ✅ DONE(b177f24af) | MED-보안 | threads.db가 `new Database` mode 미지정→0o644 world-readable. 04 full 전문(비밀) 저장 시 노출. H1(JsonlSessionEventLog 0o600) sqlite 대응 누락 | mkdir 0o700+chmodSync 0o600+회귀테스트 |
 | ~~β-gate-combo~~ ✅ DONE(2026-07-19 closeout) | MED-설정안전 | serve --stdio(wireDefer)+QUANTA_INLINE_APPROVAL_RESOLVER 동시 ON시 inherited env가 wire onApproval을 조용히 우회할 수 있었음 | explicit wire delivery가 우선하도록 fail-closed 변경 + runtime-controller unit/usage/0543 봉인 |
-| 02-deny-e2e | LOW | serve --stdio approval **deny/다중** 직접 spawn e2e 부재(approve만). 기능=kernel deny 경로(web-daemon e2e 검증)라 무결, serve 서피스 직접 커버만 갭 | 중복 커버라 ROI 낮음, 여력시 |
+| ~~02-deny-e2e~~ ✅ DONE(2026-07-19 closeout) | LOW | serve --stdio approval deny/다중 직접 spawn e2e 부재 | deny typed settlement+무실행, 연속 2회 exact-id approve+두 tool effect를 실제 child 경로로 봉인(10/10) |

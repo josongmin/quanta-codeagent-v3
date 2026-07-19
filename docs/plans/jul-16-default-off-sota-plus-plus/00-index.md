@@ -1,6 +1,7 @@
 # Default-OFF SOTA++ execution board (SSOT)
 
-**Truth snapshot:** `896b0ae86` + working-tree audit corrections, 2026-07-16
+**Truth snapshot:** working tree, 2026-07-19 (Waves A–Q). Closure **156/174 wired = 89.7%**, drift 0. decisions {measure-first 61, enable-now 64, repair-first 7, hold 42}. Uncommitted (working tree = truth).
+⚠️ **Concurrent-merge state (NOT this work):** the tree is mid-merge — `src/host/runtime/agent-config-assembler.ts` is `UU` (unmerged, 3 HEAD↔origin/main conflict markers) and the ledger checker shows 2 transient errors (`QUANTA_PEER_MSG_SURFACE`/`QUANTA_SUBAGENT_MAILBOX` seeded into `cli-feature-gates.ts` by a concurrent session without their `runtime_cli_seed_mappings` rows). These are a concurrent session's `origin/main` merge, not the Wave L–Q deltas; they must be resolved by that session / a human before a clean `fc`/typecheck.
 **Execution authority:** this board, its ledger, and linked leaf tickets
 **Supporting inventory:** [../../analysis/jul-16-default-off-gate-inventory.md](../../analysis/jul-16-default-off-gate-inventory.md)
 **Superseded plan:** [../jul-16-gate-flip-campaign.md](../jul-16-gate-flip-campaign.md) is historical input, not execution authority.
@@ -25,8 +26,8 @@ Eligible denominator = all catalog rows minus `external_blocked`, `platform_unav
 - Resolved: read outline receives the production tree-sitter adapter only under its own gate.
 - Resolved: playbook trigger loads a confined disk registry and reaches the real external prompt queue.
 - Resolved: known catalog truth drift is corrected and `bun fc diff` is GREEN.
-- Resolved: authority ledger is fully populated — 173 eligible rows, all 28 live CLI seed gates, `unknown_surfaces=0`, zero `unknown` proof tiers. `bench-find-refs-steer` has an ON/OFF prompt-composition wire test; its efficacy receipt remains absent. Prior 85/85 and STRONG/MEDIUM/WEAK prose counts remain non-authoritative and are not imported.
-- Denominator correction: the frozen 175 was pre-fold; the current deterministic catalog yields **173**. `per-tool-granular-registry` is superseded by `surface-wire-r2` (same `QUANTA_PER_TOOL_RECORD` owner) and `lane-manager-parallel` is no longer a catalog row (uncatalogued fold) — both dropped from the eligible set. Working-tree label drift that had stripped `default-off` from `surface-wire-r2` and `recovery-router-codex-spec` (HEAD carried it) was restored from the committed source of truth.
+- Resolved: authority ledger is fully populated — **174 eligible rows** (173 at DOF-00; Wave N added `presets-slash-sticky-model` as a new fc-registered `/presets` feature), all 28 live CLI seed gates, `unknown_surfaces=0`, zero `unknown` proof tiers, drift=0.
+- Denominator: the frozen 175 was pre-fold; DOF-00 yielded **173** (`per-tool-granular-registry` superseded by `surface-wire-r2`; `lane-manager-parallel` uncatalogued fold — both dropped). Wave N added `presets-slash-sticky-model` ⇒ **174**. Proof tiers now: real-loop / wire / unit across the set; the security fix + drift ratchet + consolidations are the Wave L–Q deltas.
 
 ## Ticket board
 
@@ -48,18 +49,18 @@ Eligible denominator = all catalog rows minus `external_blocked`, `platform_unav
 | [DOF-30](tickets/DOF-30-stub-kill-or-wire.md) | P1 | complete | DOF-00 | disposition sweep of 42 dormant rows: 20 stale ledger reachability corrected seam-only/producer-only→wired (call-site verified), 21 deliberate_hold w/ promotion owner recorded, 0 delete; recovery-router single-authority done; lane-manager/bug-fix moot (source deleted) |
 | [DOF-40](tickets/DOF-40-partial-fail-closed-hardening.md) | P1 | in_progress | DOF-00 | 10 families hardened fail-closed: microcompact, vendor-glob, approval-state attribution, command-hook stdin+**exec-throw fail-open FIXED**, compaction race, landlock (fail-open bug fixed), canvas/observability, sendNow, structured-output parity, appshot judge-brand; +212 adversarial tests. Remaining: mid-turn end-to-end wires (composition-root, concurrent-hot) |
 | [DOF-50](tickets/DOF-50-tauri-promotion-gate.md) | P2 | hold | DOF-10 | external/platform evidence |
-| [DOF-90](tickets/DOF-90-closure-audit.md) | P0 | terminal-honest | all non-hold | closure **152/173 wired (87.9%)**, **zero unknowns** (ambiguous/unknown/unowned=0), 0 checker errors; 21 dormant = 1 forbidden-root + 20 deliberate_hold unique primitives (dead-wire forbidden). **87.9% is the honest reachability ceiling** — raw 90% conflicts with the objective's "don't delete unique dormant work" clause. Remaining 50 measure-first = genuine behavioral/provider-cost efficacy A/B (operator decision), not unflipped safe features. |
+| [DOF-90](tickets/DOF-90-closure-audit.md) | P0 | terminal-honest | all non-hold | closure **156/174 wired (89.7%)** (Waves L–Q wired @@app/plugin, consolidated dead semantic port, /presets full, template-literal, node-repl, vendor-detector; +2 consolidations; +1 security fix), **zero unknowns**, 0 checker errors, drift 0 (drift-ratchet enforced). **89.7% is the honest ceiling** — the remaining 18 dormant need external deps (creds/network/docker/platform) or would be dead-wire if forced; 3-round adversarial audit (Wave Q) confirmed the only remaining code was 1 security fix, everything else is operator-A/B (61 measure-first) or preserve-as-forward-contract (42 hold). |
 
 ## Current receipts
 
-Truth is the current working tree over `896b0ae86`; no commit receipt is claimed.
+Truth is the current working tree, 2026-07-19; no commit receipt is claimed (concurrent sessions also edit this tree — `src/ipc/session/*`, `sdk/connect.ts` are not this work).
 
-- Focused owner and cross-owner batches: 319 pass, 0 fail across web, memory, CLI profile, prompt suppression, read outline, playbook registry, and real queue dispatch.
-- Source typecheck: `bun run typecheck` exit 0.
+- Source typecheck: `bun run typecheck` (src) exit 0; total `tsc` = 92 errors = the pre-existing test-file baseline (0 introduced by Waves L–Q).
 - Structural ratchet: `bun test tests/unit/god-code-ratchet.test.ts` 6 pass, 0 fail.
-- Authority ledger: 173 eligible rows, 28 runtime CLI seeds; `bun run tools/feature-catalog/default-off-ledger-checker.ts` → `eligible=173 runtime_cli_seeds=28 unknown_surfaces=0 unknown_values=0`, 0 errors. `bun test tests/unit/default-off-ledger-hellgate.test.ts` → 4 pass / 0 fail (anti-vacuum flipped to the completion invariant `unknown_surfaces===0`; red-on-injection still fails parity for exactly one mutated CLI default).
-- Catalog: `bun fc validate`, `bun fc check-evidence`, `bun fc build`, and `bun fc diff` all exit 0 for 1,021 features; `diff: no changes` after regenerating `docs/10.feature-catalog.md`.
-- Safe-default audit: five CLI-effective-ON candidates are retained (`BRACKETED_PASTE`, `AT_AUTOCOMPLETE`, `PREFLIGHT_CHECK`, `COVERAGE_TOOL`, `PROMPT_CACHE_STATUS`); no additional flip is allowed until subprocess OFF/inheritance/telemetry receipts exist.
+- Authority ledger: **174 eligible rows**, 28 runtime CLI seeds; checker → `unknown_surfaces=0 unknown_values=0`, 0 errors, **drift=0**. `bun test tests/unit/default-off-ledger-hellgate.test.ts` → 6 pass / 0 fail — now includes the **drift ratchet** (`reachability=wired ⟹ activation≠unwired`, Wave L) + its red-on-injection.
+- Catalog: `bun fc validate` / `check-evidence` / `build` / `diff` all exit 0 for **1,027 features**; `diff: no changes`.
+- Security: **subagent-fs-ownership false-fence FIXED** (Wave Q) — `apply_patch`/`apply_patch_structured`/`scripted_replace` no longer bypass `QUANTA_FS_OWNERSHIP_ENFORCE`; hellgate 10 pass + red-on-injection, security-path regression 49 pass.
+- Consolidations (proven duplicates deleted): retrieval/semantic ADR-0254 port (Wave M), recovery-router wrapper + ratelimit dead-store half (Wave P) — all byte-identical, tests green.
 - Whole-tree typecheck remains RED on pre-existing/concurrent test-shape errors outside these owner seams; it is not promoted to a completion receipt.
 
 ### Parallel wave receipts (2026-07-16, 6 disjoint owner-seam leaves, base b92b3798f)

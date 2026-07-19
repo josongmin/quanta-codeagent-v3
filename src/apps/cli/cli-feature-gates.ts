@@ -143,6 +143,22 @@ export const CLI_FEATURE_GATES: readonly CliFeatureGate[] = [
     gate: "QUANTA_SPINNER_STALL",
     describe: "LLM stream stall detector → operator notice (per-episode latch)",
   },
+  // jul-15 (peer-mail surfacing) — inter-agent + side-agent mail becomes VISIBLE
+  // to the user (Codex "Sent from another task" parity). The surface decorator
+  // needs a mailbox to wrap, so BOTH the mailbox substrate AND the surface knob
+  // are seeded on the interactive CLI: `QUANTA_SUBAGENT_MAILBOX` mints the
+  // per-session mailbox (re-enabling it here — the jun-26 frontier-audit opt-in
+  // was about UNVERIFIED coordination-tool-menu engagement, orthogonal to
+  // surfacing mail to the user), `QUANTA_PEER_MSG_SURFACE` installs the
+  // enqueue-time `peer_message` notifier.
+  {
+    gate: "QUANTA_SUBAGENT_MAILBOX",
+    describe: "In-memory inter-agent mailbox (subagent_send_message / _read_messages)",
+  },
+  {
+    gate: "QUANTA_PEER_MSG_SURFACE",
+    describe: "Surface peer/side-agent mail to the user as a transcript notice at enqueue time",
+  },
 ] as const
 
 /** The seed-loop projection (what `index.ts` iterates). */

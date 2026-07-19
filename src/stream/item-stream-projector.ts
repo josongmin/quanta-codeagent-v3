@@ -92,6 +92,10 @@ export class ItemStreamProjector {
         return this.onPlanUpdate(ev.delta, ev.version)
       case "subagent_cancel":
         return this.onSubagentCancel(ev.subagentId, ev.outcome)
+      // jul-15 W2 — a surfaced peer/side-agent message folds onto ONE atomic
+      // `peerMessage` item (started+completed), the SAME shape as subagent_cancel.
+      case "peer_message":
+        return this.onPeerMessage(ev)
       case "turn_start":
       case "done":
         return this.closeAll()
@@ -219,6 +223,22 @@ export class ItemStreamProjector {
     return [
       { phase: "started", itemId, itemType: "subagent", index: this.index++ },
       { phase: "completed", itemId, itemType: "subagent", text: outcome },
+    ]
+  }
+
+  /**
+   * jul-15 W2 — project a surfaced `peer_message` onto ONE atomic `peerMessage`
+   * item (started+completed, mirrors {@link onSubagentCancel}). A surfaced message
+   * is terminal, so it opens and closes in one shot (no open-item state). The
+   * attribution + body ride `completed.text` as `<from>→<to> [kind] <body>`; a
+   * unique item id keeps concurrent messages distinct within a turn.
+   */
+  private onPeerMessage(ev: Extract<AgentEvent, { type: "peer_message" }>): ItemStreamCore[] {
+    const itemId = `item-peer-${ev.from}-${ev.sentAt}-${this.index}`
+    const text = `${ev.from}→${ev.to} [${ev.kind}] ${ev.body}`
+    return [
+      { phase: "started", itemId, itemType: "peerMessage", index: this.index++ },
+      { phase: "completed", itemId, itemType: "peerMessage", text },
     ]
   }
 

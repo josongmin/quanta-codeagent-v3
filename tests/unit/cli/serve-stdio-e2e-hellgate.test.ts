@@ -35,6 +35,7 @@ import {
   encodeSessionTransportMessage,
   SessionHandleClosedError,
   type SessionTransportMessage,
+  SessionTurnCorrelationLostError,
   tryDecodeSessionTransportMessage,
 } from "@/ipc/session"
 import type { SessionEvent } from "@/protocol/session"
@@ -42,7 +43,14 @@ import { connect, transports } from "@/sdk"
 
 const REPO_ROOT = new URL("../../../", import.meta.url).pathname
 const CLI_ENTRY = join(REPO_ROOT, "src", "apps", "cli", "index.ts")
-const POLLUTER_ENTRY = join(REPO_ROOT, "tests", "unit", "cli", "fixtures", "serve-stdio-polluted-entry.ts")
+const POLLUTER_ENTRY = join(
+  REPO_ROOT,
+  "tests",
+  "unit",
+  "cli",
+  "fixtures",
+  "serve-stdio-polluted-entry.ts",
+)
 const BUN = process.execPath
 
 /* ------------------------------------------------------------------ helpers */
@@ -58,35 +66,49 @@ const textCassette = (marker: string): string =>
     ],
   })}\n`
 
+const toolCallReplay = (id: string, command: string): string =>
+  JSON.stringify({
+    id: "replay",
+    events: [
+      { type: "tool_use_start", id, name: "bash" },
+      { type: "tool_use_end", id, input: { command } },
+      { type: "message_stop", stop_reason: "tool_use" },
+    ],
+  })
+
+const completedReplay = (doneMarker: string): string =>
+  JSON.stringify({
+    id: "replay",
+    events: [
+      { type: "text_delta", delta: doneMarker },
+      { type: "message_stop", stop_reason: "end_turn" },
+    ],
+  })
+
 /** Approval-suspension cassette: turn 1 calls bash (parks on approval), the
  *  post-approval re-run calls bash again (consumes the lease, tool EXECUTES),
  *  then the loop's next stream completes with text. */
 const approvalCassette = (command: string, doneMarker: string): string =>
-  [
-    JSON.stringify({
-      id: "replay",
-      events: [
-        { type: "tool_use_start", id: "t1", name: "bash" },
-        { type: "tool_use_end", id: "t1", input: { command } },
-        { type: "message_stop", stop_reason: "tool_use" },
-      ],
-    }),
-    JSON.stringify({
-      id: "replay",
-      events: [
-        { type: "tool_use_start", id: "t1b", name: "bash" },
-        { type: "tool_use_end", id: "t1b", input: { command } },
-        { type: "message_stop", stop_reason: "tool_use" },
-      ],
-    }),
-    JSON.stringify({
-      id: "replay",
-      events: [
-        { type: "text_delta", delta: doneMarker },
-        { type: "message_stop", stop_reason: "end_turn" },
-      ],
-    }),
-  ].join("\n") + "\n"
+  `${[
+    toolCallReplay("t1", command),
+    toolCallReplay("t1b", command),
+    completedReplay(doneMarker),
+  ].join("\n")}\n`
+
+/** Two sequential approval parks. Each command is proposed once to mint its
+ *  approval and once again after the wire response to consume the exact lease. */
+const multipleApprovalCassette = (
+  firstCommand: string,
+  secondCommand: string,
+  doneMarker: string,
+): string =>
+  `${[
+    toolCallReplay("t1", firstCommand),
+    toolCallReplay("t1b", firstCommand),
+    toolCallReplay("t2", secondCommand),
+    toolCallReplay("t2b", secondCommand),
+    completedReplay(doneMarker),
+  ].join("\n")}\n`
 
 /** ENTIRE child env (the spawn transport passes it VERBATIM — nothing is
  *  auto-injected, so enabling the maturity gate here is the test's explicit
@@ -335,6 +357,91 @@ describe("quanta serve --stdio — spawned session.v1 server (ticket 02)", () =>
         expect(seen.some((e) => e.type === "approval.requested")).toBe(true)
         // …and the REAL tool effect landed (not a scripted echo).
         expect(existsSync(marker)).toBe(true)
+      } finally {
+        await session.close()
+      }
+    },
+    { timeout: 90_000 },
+  )
+
+  test(
+    "APPROVAL deny: exact wire decision settles awaitTurnEnd typed and the tool NEVER executes",
+    async () => {
+      const dir = mkTmp()
+      const cassette = join(dir, "cassette.jsonl")
+      const marker = join(dir, "deny-must-not-exist")
+      writeFileSync(cassette, approvalCassette(`touch ${marker}`, "UNREACHABLE"))
+      const approvals: string[] = []
+      const session = await connect({
+        transport: transports.stdio({
+          command: [BUN, CLI_ENTRY, "serve", "--stdio", "--cwd", dir],
+          env: childEnv({ QUANTA_SERVE_STDIO: "1", QUANTA_LLM_REPLAY: cassette }),
+          cwd: dir,
+        }),
+        onApproval: async (approval) => {
+          approvals.push(approval.approvalId)
+          return "deny"
+        },
+      })
+      try {
+        await session.input.append("deny the gated thing")
+        await session.turn.run()
+        let failure: unknown
+        try {
+          await session.awaitTurnEnd()
+        } catch (error) {
+          failure = error
+        }
+        expect(failure).toBeInstanceOf(SessionTurnCorrelationLostError)
+        expect((failure as SessionTurnCorrelationLostError).reason).toBe("approval_denied")
+        expect(approvals).toHaveLength(1)
+        expect(existsSync(marker)).toBe(false)
+      } finally {
+        await session.close()
+      }
+    },
+    { timeout: 90_000 },
+  )
+
+  test(
+    "MULTIPLE approvals: two sequential wire parks resolve exact ids; both real tool effects land once",
+    async () => {
+      const dir = mkTmp()
+      const cassette = join(dir, "cassette.jsonl")
+      const firstMarker = join(dir, "approval-one")
+      const secondMarker = join(dir, "approval-two")
+      writeFileSync(
+        cassette,
+        multipleApprovalCassette(
+          `touch ${firstMarker}`,
+          `touch ${secondMarker}`,
+          "SERVE_MULTI_DONE",
+        ),
+      )
+      const approvals: string[] = []
+      const session = await connect({
+        transport: transports.stdio({
+          command: [BUN, CLI_ENTRY, "serve", "--stdio", "--cwd", dir],
+          env: childEnv({ QUANTA_SERVE_STDIO: "1", QUANTA_LLM_REPLAY: cassette }),
+          cwd: dir,
+        }),
+        onApproval: async (approval) => {
+          approvals.push(approval.approvalId)
+          return "approve"
+        },
+      })
+      try {
+        await session.input.append("run both gated steps")
+        await session.turn.run()
+        const end = await session.awaitTurnEnd()
+        expect(end.type).toBe("turn.completed")
+        if (end.type === "turn.completed") {
+          expect(end.assistantText ?? "").toContain("SERVE_MULTI_DONE")
+        }
+        expect(approvals).toHaveLength(2)
+        expect(new Set(approvals).size).toBe(2)
+        expect(existsSync(firstMarker)).toBe(true)
+        expect(existsSync(secondMarker)).toBe(true)
       } finally {
         await session.close()
       }

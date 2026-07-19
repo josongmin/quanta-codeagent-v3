@@ -82,6 +82,10 @@ export const mailboxToSideAgentMailbox = (mailbox: MailboxPort): SideAgentMailbo
       to,
       kind: "broadcast",
       body: detail !== undefined && detail.length > 0 ? `${summary}\n\n${detail}` : summary,
+      // jul-15 W2 — tag the display provenance so the surfacing decorator + UI
+      // attribute this as a SIDE-AGENT finding (not ordinary peer mail); the
+      // delivery store ignores `provenance`. `from` IS the daemon id.
+      provenance: { source: "side-agent", daemonId: from },
     })
   },
 })

@@ -12,7 +12,7 @@
 | 축 | 커밋 | 종료 증거 |
 |---|---|---|
 | 01 public SDK door | c89bc49c1 + 후속 hardening | `connect()`/`SessionHandle`, ws/stdio, liveness, typed rejection, conformance |
-| 02 serve --stdio | a83e28cd4 + 5b4110f18 | strict default-OFF gate, honest transport stamp, wire approval, 8 real-spawn scenarios |
+| 02 serve --stdio | a83e28cd4 + 5b4110f18 | strict default-OFF gate, honest transport stamp, wire approve/deny/2-step approval, 10 real-spawn scenarios |
 | 03 protocol convergence | 896b0ae86 + 9080a8853 | field-shape ratchet + generated bundle; client merge는 경계상 hold |
 | 04 full fidelity | bbd289d40 | peer-local opt-in negotiation, default preview byte identity, strip/leak rails |
 | 05 durable resume | 527f78811 + a38ee957f + 1f578f28f | JSONL event log, seq continuity, durable replay, explicit `resumed` caught-up marker |
@@ -30,9 +30,8 @@
   exact published id. Unknown ids remain a separate no-event survivability edge.
 - Feature catalog YAML is authoritative; regenerate
   `docs/10.feature-catalog.md` with `bun fc build` after YAML edits.
-- The only intentionally deferred item is the direct spawned-serve
-  deny/multiple-approval duplication rail. Kernel and web-daemon real paths
-  already cover the semantics; it is LOW and not a product blocker.
+- Spawned serve directly covers approve, deny, and two sequential approvals;
+  no approval-surface coverage item remains deferred.
 
 ## Re-open conditions
 

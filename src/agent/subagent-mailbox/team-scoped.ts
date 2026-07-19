@@ -57,6 +57,10 @@ const droppedMessage = (init: {
     kind: init.kind,
     body: init.body,
     sentAt: 0,
+    // F3 (jul-15) — the honesty marker. The `subagent_send_message` tool renders
+    // a present `denied` as `{ ok:false }` + guidance so a dropped send is never
+    // reported as a fake success. Set ONLY here (the delivery store never sets it).
+    denied: "cross-team",
     ...(init.correlationId !== undefined ? { correlationId: init.correlationId } : {}),
   })
 

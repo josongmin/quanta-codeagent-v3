@@ -576,6 +576,14 @@ const KIND_MAP: Record<RecordedEventType, TrajectoryKind> = {
   // IS recorded: it is durable agent intent. `reason:"progress_update"` keeps
   // the line greppable apart from other recovery-kind events.
   progress_update: "recovery",
+  // Peer/side-agent message surfacing (jul-15 W2): rides the existing `recovery`
+  // family (same rationale as `progress_update` / `plan_*` — a same-turn
+  // observation point, no new TrajectoryKind). RECORDED (not skipped like the
+  // transient render-only signals): peer mail is content-bearing and its durable
+  // copy is otherwise CONDITIONAL on the recipient later draining it into working
+  // memory, so the trajectory is the only guaranteed record. `reason:"peer_message"`
+  // in `dataOf` keeps it greppable; the body is already redacted at the emit boundary.
+  peer_message: "recovery",
   error: "error",
   usage: "llm_usage",
   done: "session_end",
@@ -722,6 +730,23 @@ const dataOf = (e: RecordedEvent): Record<string, unknown> => {
         ...(e.finalSummary !== undefined ? { finalSummary: e.finalSummary } : {}),
         ...(e.completedSubtitle !== undefined ? { completedSubtitle: e.completedSubtitle } : {}),
         ...(e.turn !== undefined ? { turn: e.turn } : {}),
+      }
+    case "peer_message":
+      // Peer/side-agent message surfacing (jul-15 W2): durable record of inter-
+      // agent mail addressed to the session owner. `reason:"peer_message"` keeps
+      // the recovery-kind line greppable. `body` is ALREADY redacted at the emit
+      // boundary; the recorder's own redaction policy still applies on top. The
+      // optional `correlationId` is conditionally spread (byte-exact JSON).
+      return {
+        reason: "peer_message",
+        from: e.from,
+        to: e.to,
+        messageKind: e.kind,
+        body: e.body,
+        provenance: e.provenance.source,
+        ...(e.provenance.source === "side-agent" ? { daemonId: e.provenance.daemonId } : {}),
+        ...(e.correlationId !== undefined ? { correlationId: e.correlationId } : {}),
+        sentAt: e.sentAt,
       }
     case "done":
       return { reason: e.reason, turns: e.turns }

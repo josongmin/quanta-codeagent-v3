@@ -6,7 +6,7 @@ import {
 } from "@/agent/fast-apply-fallback"
 import { DEFAULT_REFUSAL_FALLBACK_PROMPT } from "@/agent/refusal-fallback"
 import { dispatchSideConversation } from "@/agent/side-conversation"
-import { createSubagentMailbox } from "@/agent/subagent-mailbox"
+import { createDefaultSubagentMailbox } from "@/agent/subagent-mailbox"
 import type { LLMPort } from "@/llm"
 import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-model-override"
 import { projectAgentEventToAgentStateObservation } from "@/protocol/agent-state"
@@ -63,14 +63,6 @@ const CLOSEOUT_CRITIC_TRUTHY = new Set(["1", "on", "true"])
 /** T08 — model-refusal recovery gate + optional re-prompt override. */
 const QUANTA_REFUSAL_FALLBACK_ENV = "QUANTA_REFUSAL_FALLBACK"
 const QUANTA_REFUSAL_FALLBACK_PROMPT_ENV = "QUANTA_REFUSAL_FALLBACK_PROMPT"
-
-/** Per-sender undelivered quota baked into the env-gated wire (R3 audit-H).
- *  Hosts wiring the mailbox by hand still get to override via the closed-port
- *  option; this constant only governs the default-on path. 32 = ~16× the
- *  expected steady-state sibling fan-out (subagent siblings rarely exceed 4)
- *  while still being tiny vs the 1024-cell global cap, so legitimate burst
- *  traffic stays below it and a hostile flood is capped within ~1 round-trip. */
-const DEFAULT_SUBAGENT_MAILBOX_MAX_UNDELIVERED_PER_SENDER = 32
 
 type OptionalPortEnv = Readonly<Record<string, string | undefined>>
 
@@ -184,7 +176,7 @@ export const wireOptionalAgentPorts = <T extends OptionalPortBase>(
   // BAKED IN — the audit-H R2 contract becomes a property of every production
   // wiring instead of a knob a downstream caller might forget to set.
   if (next.subagentMailbox === undefined && envGateOn(env, QUANTA_SUBAGENT_MAILBOX_ENV)) {
-    next = { ...next, subagentMailbox: defaultSubagentMailbox() } as T
+    next = { ...next, subagentMailbox: createDefaultSubagentMailbox() } as T
   }
 
   // RFC jun-6-code-mode (Phase 1) — wire the `code_cell` per-cell dispatch-port
@@ -575,13 +567,6 @@ const decodeCloseoutVerdict = (finalText: string): CloseoutCriticVerdict => {
   }
 }
 
-/** Mailbox factory shared with the `QUANTA_SUBAGENT_MAILBOX` gate so a
- *  `followup`-only operator still gets the same per-sender DoS cap baked in. */
-const defaultSubagentMailbox = () =>
-  createSubagentMailbox({
-    maxUndeliveredPerSender: DEFAULT_SUBAGENT_MAILBOX_MAX_UNDELIVERED_PER_SENDER,
-  })
-
 /**
  * RFC-02 (ADR-0436) + RFC-04 (ADR-0437) — composition-root activation of the
  * `spawn_batch` / `list_agents` / `followup_task` subagent tools, plus the
@@ -595,7 +580,7 @@ const defaultSubagentMailbox = () =>
  *     a shared {@link TurnWakeRegistry} (the TRIGGER substrate the subagent
  *     runner registers per-child wakers into — this is what makes a followup
  *     actually wake a child instead of degrading to `cause:"no_waker"`) +
- *     a {@link createSubagentMailbox} (the DELIVERY substrate) when the host
+ *     a {@link createDefaultSubagentMailbox} (the DELIVERY substrate) when the host
  *     did not already wire one via `QUANTA_SUBAGENT_MAILBOX`.
  *   - `QUANTA_SUBAGENT_STEER=on` (+ followup) ⇒ `subagent.enableSteer = true` +
  *     the SESSION steer plane (retention + finalization) so `mode:"steer"` is
@@ -755,7 +740,7 @@ const wireFollowupDeps = <T extends OptionalPortBase>(base: T): T => {
     next = { ...next, subagentTurnWake: new TurnWakeRegistry() } as T
   }
   if (next.subagentMailbox === undefined) {
-    next = { ...next, subagentMailbox: defaultSubagentMailbox() } as T
+    next = { ...next, subagentMailbox: createDefaultSubagentMailbox() } as T
   }
   return wireSteerPlane(next)
 }
