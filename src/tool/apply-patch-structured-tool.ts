@@ -1,4 +1,4 @@
-// `apply_patch_structured` tool — ADR-0464 CLI-facing wire (default-OFF).
+// `apply_patch_structured` tool — ADR-0464 CLI-promoted wire.
 //
 // WHAT: a model-facing `Tool` that parses a V4A patch text and applies it via
 // the pure `@/patch` slice's `applyPatchStructured(patch, fs)` — the ADDITIVE,
@@ -13,8 +13,9 @@
 // all-or-nothing-across-the-patch + throws typed errors to the dispatch seam;
 // this tool's contract is partial-success + structured per-file outcome. Two
 // distinct result shapes ⇒ two tools, exactly like the `shadow*` / `mcp_tasks*`
-// caller-wired siblings. Default tool menu stays BYTE-IDENTICAL unless the host
-// opts in (see `buildStructuredPatchTool` registration note below).
+// caller-wired siblings. The CLI explicitly promotes this sibling default-ON;
+// other surfaces remain opt-in, and QUANTA_ENABLE_STRUCTURED_PATCH=0 restores
+// the legacy CLI menu.
 //
 // ADAPTER / PORT: this tool needs the SAME `PatchFileSystemPort` the existing
 // `apply_patch` tool uses — `FsJailFileSystemPort` (the ONE `@/storage` jail).
@@ -94,10 +95,11 @@ const renderChange = (c: AppliedChange): string => {
  * port is omitted the tool constructs an `FsJailFileSystemPort` rooted at
  * `ctx.cwd` per call (byte-identical jail to `apply_patch`).
  *
- * DO NOT register this in `buildDefaultTools` — it is caller-wired behind the
- * `QUANTA_ENABLE_STRUCTURED_PATCH` env gate (see the call-site note in the
- * slice report). When the gate is unset the tool is NEVER constructed and the
- * default tool menu is byte-identical.
+ * DO NOT register this unconditionally in `buildDefaultTools` — it is
+ * caller-wired behind the `QUANTA_ENABLE_STRUCTURED_PATCH` env gate. The CLI
+ * surface explicitly seeds that gate default-ON from the tool-surface SSOT;
+ * other surfaces stay opt-in. An explicit `=0` keeps the tool unconstructed
+ * and restores the legacy menu byte-for-byte.
  */
 export const makeApplyPatchStructuredTool = (fs?: PatchFileSystemPort): Tool<Input> =>
   defineTool<Input>({

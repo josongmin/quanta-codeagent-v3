@@ -1,4 +1,4 @@
-// Hellgate — ADR-0464: `apply_patch_structured` tool wire (default-OFF).
+// Hellgate — ADR-0464: `apply_patch_structured` gated tool wire.
 //
 // The tool itself (`makeApplyPatchStructuredTool(fs)`) is the apps-layer
 // adapter over the pure `@/patch.applyPatchStructured` + the SAME
@@ -7,9 +7,10 @@
 // human wires into `src/apps/agent/index.ts` + `buildDefaultTools`). This
 // battery proves:
 //
-//   1. GATE-OFF (env unset / !== "1") ⇒ the gate predicate is false, so the
-//      tool is NOT appended ⇒ default tool menu is byte-identical (zero alloc:
-//      the factory is never called).
+//   1. GATE-OFF (env unset / !== "1") ⇒ the low-level gate predicate is false,
+//      so the tool is NOT appended ⇒ legacy tool menu is byte-identical (zero
+//      alloc: the factory is never called). The CLI promotion seeds "1" before
+//      this builder; non-CLI surfaces do not.
 //   2. GATE-ON ("1") ⇒ the adapter is constructed and satisfies the Tool port
 //      (name / schema / isReadOnly / hitlTier / execute generator).
 //   3. A clean partial-apply ⇒ ok:false with per-file render + structured
