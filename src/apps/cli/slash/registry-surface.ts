@@ -20,10 +20,6 @@
  *   ...APP_SLASH_COMMANDS]` into the historic `BUILTINS`.
  */
 
-import { existsSync } from "node:fs"
-import { access, mkdir, readFile, writeFile } from "node:fs/promises"
-import { homedir } from "node:os"
-import { dirname, join } from "node:path"
 import {
   createActivityStore,
   fleetToActivity,
@@ -55,7 +51,6 @@ import { sessionCmd } from "../session-cmd"
 import type { SlashCommand, SlashContext } from "../slash-contract"
 import { snapshotCmd } from "../snapshot-cmd"
 import { statusCmd } from "../status-cmd"
-import { formatSegmentedUsage } from "../status-line"
 import { runVoiceCmd } from "../voice-cmd"
 import { runVoiceLiveCmd } from "../voice-live-cmd"
 import { webCmd } from "../web-cmd"
@@ -66,210 +61,21 @@ import { kbCmd } from "./kb-cmd"
 import { mcpResourcesCmd } from "./mcp-resources-cmd"
 import { modelCmd } from "./model-cmd"
 import { onboardCmd } from "./onboard-cmd"
+import {
+  identityCmd,
+  modeCmd,
+  profileCmd,
+  stickyModelCmd,
+} from "./registry-surface/config-posture-cmds"
 import { briefCmd, effortCmd, focusChainCmd } from "./registry-surface/focus-effort-brief"
+import {
+  colorCmd,
+  contextCmd,
+  navigateCmd,
+  usageCmd,
+  waitCmd,
+} from "./registry-surface/preferences-cmds"
 import { runSkillsRender } from "./render-helpers"
-
-const VALID_THEMES = [
-  "auto",
-  "light",
-  "dark",
-  "claude",
-  "none",
-  "light-daltonized",
-  "dark-daltonized",
-] as const
-type Theme = (typeof VALID_THEMES)[number]
-const THEME_SET: ReadonlySet<string> = new Set<string>(VALID_THEMES)
-const isTheme = (s: string): s is Theme => THEME_SET.has(s)
-
-interface Preferences {
-  theme?: Theme
-  preferredCwd?: string
-}
-
-const WAIT_MAX_SECONDS = 3600
-
-const prefsHomeFromCtx = (ctx?: SlashContext): string =>
-  ctx?.prefsHome ?? runtimeConfig().prefsHome ?? homedir()
-
-const prefsFilePath = (ctx: SlashContext): string => {
-  if (ctx.prefsPath !== undefined) return ctx.prefsPath
-  return join(prefsHomeFromCtx(ctx), ".quanta", "preferences.json")
-}
-
-const readPrefs = async (path: string): Promise<Preferences> => {
-  if (!existsSync(path)) return {}
-  try {
-    const raw = await readFile(path, "utf8")
-    const parsed: unknown = JSON.parse(raw)
-    if (parsed === null || typeof parsed !== "object") return {}
-    return parsed as Preferences
-  } catch {
-    return {}
-  }
-}
-
-const writePrefs = async (path: string, prefs: Preferences): Promise<void> => {
-  await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, `${JSON.stringify(prefs, null, 2)}\n`, "utf8")
-}
-
-const contextCmd: SlashCommand = {
-  name: "/context",
-  describe: "Show segmented context-window usage (System/Rules/Conversation/…)",
-  async run(_args, ctx) {
-    // Track D: when the surface wires the `contextUsage` seam, render the
-    // segmented per-category breakdown (Cursor UsageBar shape). The breakdown
-    // is computed by the host from the latest assembled prompt using the
-    // loop's OWN token estimator (no second heuristic here).
-    const breakdown = ctx.contextUsage?.()
-    if (breakdown !== undefined) {
-      ctx.out(`${formatSegmentedUsage(breakdown)}\n`)
-      return 0
-    }
-    // Fallback (seam absent / no prompt assembled yet): legacy placeholder line
-    // + the env-reported last token count, byte-identical to the prior body.
-    const lastTokens = runtimeConfig().lastTokens
-    ctx.out("context: no prompt assembled yet (per-turn usage not available)\n")
-    if (lastTokens !== undefined && lastTokens !== "") {
-      ctx.out(`last reported tokens: ${lastTokens}\n`)
-    }
-    return 0
-  },
-}
-
-interface UsageLine {
-  input_tokens?: unknown
-  output_tokens?: unknown
-}
-
-const tallyUsage = (raw: string): { input: number; output: number; lines: number } => {
-  let input = 0
-  let output = 0
-  let lines = 0
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim()
-    if (trimmed === "") continue
-    try {
-      const obj = JSON.parse(trimmed) as UsageLine
-      if (typeof obj.input_tokens === "number") input += obj.input_tokens
-      if (typeof obj.output_tokens === "number") output += obj.output_tokens
-      lines += 1
-    } catch {
-      // best-effort tally — skip malformed
-    }
-  }
-  return { input, output, lines }
-}
-
-const usageCmd: SlashCommand = {
-  name: "/usage",
-  describe: "Show aggregated lifetime + recent usage",
-  async run(_args, ctx) {
-    const path = join(prefsHomeFromCtx(ctx), ".quanta", "usage.jsonl")
-    if (!existsSync(path)) {
-      ctx.out("(no usage recorded yet)\n")
-      return 0
-    }
-    let raw: string
-    try {
-      raw = await readFile(path, "utf8")
-    } catch (e) {
-      ctx.err(`usage: failed to read ${path}: ${errMessage(e)}\n`)
-      return 1
-    }
-    const { input, output, lines } = tallyUsage(raw)
-    ctx.out(`usage (${lines} record${lines === 1 ? "" : "s"}):\n`)
-    ctx.out(`  input_tokens:  ${input}\n`)
-    ctx.out(`  output_tokens: ${output}\n`)
-    ctx.out(`  total_tokens:  ${input + output}\n`)
-    return 0
-  },
-}
-
-const colorCmd: SlashCommand = {
-  name: "/color",
-  describe: "Get or set color theme (auto|light|dark|claude|none|light-daltonized|dark-daltonized)",
-  async run(args, ctx) {
-    const path = prefsFilePath(ctx)
-    const prefs = await readPrefs(path)
-    if (args.length === 0) {
-      ctx.out(`${prefs.theme ?? "auto"}\n`)
-      return 0
-    }
-    if (args.length > 1) {
-      ctx.err("/color: expected at most one argument\n")
-      return 1
-    }
-    const next = args[0]
-    if (next === undefined || !isTheme(next)) {
-      ctx.err(`/color: invalid theme: ${next} (valid: ${VALID_THEMES.join("|")})\n`)
-      return 1
-    }
-    await writePrefs(path, { ...prefs, theme: next })
-    ctx.out(`theme set to ${next}\n`)
-    return 0
-  },
-}
-
-const navigateCmd: SlashCommand = {
-  name: "/navigate",
-  describe: "Set preferred working directory (use '-' to unset)",
-  async run(args, ctx) {
-    if (args.length !== 1) {
-      ctx.err("/navigate: expected exactly one argument (absolute path or '-')\n")
-      return 1
-    }
-    const arg = args[0] as string
-    const path = prefsFilePath(ctx)
-    const prefs = await readPrefs(path)
-    if (arg === "-") {
-      const next: Preferences = { ...prefs }
-      delete next.preferredCwd
-      await writePrefs(path, next)
-      ctx.out("preferredCwd cleared\n")
-      return 0
-    }
-    try {
-      await access(arg)
-    } catch {
-      ctx.err(`/navigate: path does not exist: ${arg}\n`)
-      return 1
-    }
-    await writePrefs(path, { ...prefs, preferredCwd: arg })
-    ctx.out(`${arg}\n`)
-    return 0
-  },
-}
-
-const defaultSleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => {
-    setTimeout(resolve, ms)
-  })
-
-const waitCmd: SlashCommand = {
-  name: "/wait",
-  describe: `Sleep N seconds then exit (cap ${WAIT_MAX_SECONDS}s)`,
-  async run(args, ctx) {
-    if (args.length !== 1) {
-      ctx.err("/wait: expected exactly one argument (positive seconds)\n")
-      return 1
-    }
-    const arg = args[0] as string
-    const seconds = Number(arg)
-    if (!Number.isFinite(seconds) || seconds <= 0) {
-      ctx.err(`/wait: invalid seconds: ${arg}\n`)
-      return 1
-    }
-    if (seconds > WAIT_MAX_SECONDS) {
-      ctx.err(`/wait: exceeds cap of ${WAIT_MAX_SECONDS}s\n`)
-      return 1
-    }
-    const sleep = ctx.sleep ?? defaultSleep
-    await sleep(seconds * 1000)
-    return 0
-  },
-}
 
 const skillsCmd: SlashCommand = {
   name: "/skills",
@@ -730,172 +536,6 @@ const makeHelpCmd = (lookupBuiltins: () => readonly SlashCommand[]): SlashComman
   category: "help",
   run: (args, ctx) => runHelpRender(lookupBuiltins(), args, ctx),
 })
-
-const profileCmd: SlashCommand = {
-  name: "/profile",
-  describe: "Show or switch the active tool profile (ADR-0213)",
-  category: "config",
-  async run(args, ctx) {
-    if (ctx.profile === undefined) {
-      ctx.out("/profile: not wired in this surface\n")
-      return 0
-    }
-    if (args.length === 0) {
-      const current = ctx.profile.get()
-      const list = ctx.profile.list().join(", ")
-      ctx.out(`/profile: current = ${current}\n`)
-      ctx.out(`/profile: available = ${list}\n`)
-      return 0
-    }
-    if (args.length > 1) {
-      ctx.err(`/profile: takes at most one argument; got ${args.length}\n`)
-      return 1
-    }
-    const name = args[0] as string
-    const res = ctx.profile.set(name)
-    if (res === "ok") {
-      ctx.out(`/profile: set to '${name}'\n`)
-      return 0
-    }
-    ctx.err(`/profile: unknown profile '${name}'; known = ${res.known.join(", ")}\n`)
-    return 1
-  },
-}
-
-const identityCmd: SlashCommand = {
-  name: "/identity",
-  describe: "Show or switch the active identity mode (ADR-0211)",
-  category: "config",
-  async run(args, ctx) {
-    if (ctx.identity === undefined) {
-      ctx.out("/identity: not wired in this surface\n")
-      return 0
-    }
-    if (args.length === 0) {
-      const current = ctx.identity.get()
-      const list = ctx.identity.list().join(", ")
-      ctx.out(`/identity: current = ${current}\n`)
-      ctx.out(`/identity: available = ${list}\n`)
-      return 0
-    }
-    if (args.length > 1) {
-      ctx.err(`/identity: takes at most one argument; got ${args.length}\n`)
-      return 1
-    }
-    const mode = args[0] as string
-    const res = ctx.identity.set(mode)
-    if (res === "ok") {
-      ctx.out(`/identity: set to '${mode}'\n`)
-      return 0
-    }
-    ctx.err(`/identity: unknown mode '${mode}'; known = ${res.known.join(", ")}\n`)
-    return 1
-  },
-}
-
-const stickyModelCmd: SlashCommand = {
-  name: "/sticky-model",
-  describe: "Show or set the per-mode sticky model (ADR-0462)",
-  category: "config",
-  async run(args, ctx) {
-    if (ctx.stickyModel === undefined) {
-      ctx.out("/sticky-model: not wired in this surface\n")
-      return 0
-    }
-    if (args.length === 0) {
-      const snapshot = await ctx.stickyModel.list()
-      const entries = Object.entries(snapshot)
-      if (entries.length === 0) ctx.out("/sticky-model: no per-mode models set\n")
-      else for (const [mode, modelId] of entries) ctx.out(`/sticky-model: ${mode} = ${modelId}\n`)
-      ctx.out(`/sticky-model: modes = ${ctx.stickyModel.modes().join(", ")}\n`)
-      ctx.out("/sticky-model: usage = /sticky-model <mode> <modelId>\n")
-      return 0
-    }
-    if (args.length !== 2) {
-      ctx.err(`/sticky-model: usage = /sticky-model <mode> <modelId> (got ${args.length} arg(s))\n`)
-      return 1
-    }
-    const mode = args[0] as string
-    const modelId = args[1] as string
-    const res = await ctx.stickyModel.set(mode, modelId)
-    if (res === "ok") {
-      ctx.out(`/sticky-model: ${mode} → ${modelId}\n`)
-      return 0
-    }
-    if (res.kind === "invalid-mode") {
-      ctx.err(`/sticky-model: unknown mode '${mode}'; known = ${res.known.join(", ")}\n`)
-      return 1
-    }
-    ctx.err(`/sticky-model: write failed — ${res.message}\n`)
-    return 1
-  },
-  complete: (args, partial, ctx) => {
-    if (ctx.stickyModel === undefined) return []
-    const seed = partial.toLowerCase()
-    // arg 0 = <mode>; arg 1 = <modelId>. `args` excludes the partial token, so
-    // length 0 ⇒ completing the mode, length 1 ⇒ completing the modelId.
-    if (args.length === 0) {
-      return ctx.stickyModel
-        .modes()
-        .filter((m) => m.toLowerCase().startsWith(seed))
-        .map((m) => ({ value: m, kind: "argument" as const }))
-    }
-    if (args.length === 1) {
-      return ctx.stickyModel
-        .candidates()
-        .filter((id) => id.toLowerCase().startsWith(seed))
-        .map((id) => ({ value: id, kind: "argument" as const }))
-    }
-    return []
-  },
-}
-
-/** #13 — `/mode` interactive permission-posture switch (RFC-08 mode-cycle, the
- *  non-keyboard counterpart to shift+tab). No args ⇒ show the active rung + the
- *  selectable list; one named arg ⇒ jump to it. The wire mutates the SAME
- *  `ModeCycleStore` the session loop projects into `permissionModeState` before
- *  each turn, so the new posture applies on the NEXT submitted prompt. `bypass`
- *  is reachable without a second confirm — parity with shift+tab's 4-rung cycle,
- *  whose bypass rung the user already opted into unconfirmed. */
-const modeCmd: SlashCommand = {
-  name: "/mode",
-  describe: "Show or switch permission posture (default|acceptEdits|plan|bypass)",
-  category: "config",
-  async run(args, ctx) {
-    if (ctx.mode === undefined) {
-      ctx.out("/mode: not wired in this surface\n")
-      return 0
-    }
-    const { get, set, list } = ctx.mode
-    if (args.length === 0) {
-      const cur = get()
-      ctx.out(`🔐 permission mode: ${cur}\n`)
-      for (const key of list()) ctx.out(` ${key === cur ? "*" : " "} ${key}\n`)
-      ctx.out("use: /mode <name>\n")
-      return 0
-    }
-    if (args.length > 1) {
-      ctx.err(`/mode: takes at most one argument; got ${args.length}\n`)
-      return 1
-    }
-    const arg = (args[0] as string).trim()
-    const result = set(arg)
-    if (result !== "ok") {
-      ctx.err(`/mode: unknown posture '${arg}'; known = ${result.known.join(", ")}\n`)
-      return 1
-    }
-    ctx.out(`🔐 permission mode: ${get()}\n`)
-    return 0
-  },
-  complete: (args, partial, ctx) => {
-    if (ctx.mode === undefined || args.length >= 1) return []
-    const seed = partial.toLowerCase()
-    return ctx.mode
-      .list()
-      .filter((k) => k.toLowerCase().startsWith(seed))
-      .map((k) => ({ value: k, kind: "argument" as const }))
-  },
-}
 
 /** Build the surface-layer registry. `helpRegistryLookup` is supplied by
  *  `slash-commands.ts` so `/help` reflects the LIVE concatenated registry

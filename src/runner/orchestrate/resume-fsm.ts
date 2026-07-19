@@ -1,8 +1,10 @@
 import { loadSession } from "@/agent"
+import { wireSessionGitFingerprint } from "@/agent/git-observability"
 import type { Message } from "@/llm"
 import { reconcileToolPairing } from "@/memory/history-sanitization"
 import type { StructuredLogger } from "@/observability"
 import { loadSessionById, type SessionMeta, saveSessionById } from "@/session"
+import { defaultGitRunner } from "@/storage/git-runner"
 
 /**
  * Session-resume state machine — surface-AGNOSTIC.
@@ -56,6 +58,15 @@ export interface ResolveResumeInput {
    *  session store. Only the path-mode branch consults this; id-mode / new-session
    *  keep their own store accessors. */
   loadSessionFn?: (path: string) => Promise<{ sessionId: string; messages: Message[] } | null>
+  /** ADR-0106/0110 session-creation git-fingerprint capture seam. Absent ⇒ the
+   *  real {@link wireSessionGitFingerprint} against {@link defaultGitRunner} is
+   *  used, so every production caller captures `gitSha` / `gitBranch` /
+   *  `gitOriginUrl` best-effort at mint time (a cheap `git rev-parse`; empty
+   *  outside a repo, never throws). Present ⇒ used verbatim so owner-local
+   *  leaf-unit tests can stub the capture without a real git process. Only the
+   *  two fresh-mint branches (`--new-session` + default auto-mint) consult this
+   *  — a resumed/path-loaded session keeps its previously-captured fingerprint. */
+  captureFingerprintFn?: (meta: SessionMeta) => Promise<SessionMeta>
 }
 
 /** Resolved session-startup state. `idMeta` is `undefined` when the run is in
@@ -106,6 +117,12 @@ const reconcileLoadedHistory = (messages: readonly Message[]): Message[] => {
  *  - `--new-session [--title t]` → V2 id-mode (fresh id, stub saved) */
 export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeResolution> => {
   const { resume, newSession, title, cwd, initialSessionId, slog, onSessionMinted } = input
+  // ADR-0106/0110 — resolve the fresh-mint git-fingerprint capture once. Default
+  // is the real best-effort wrapper (a cheap `git rev-parse`; never throws; empty
+  // outside a repo). Injectable for owner-local leaf-unit tests.
+  const captureFingerprint =
+    input.captureFingerprintFn ??
+    ((meta: SessionMeta) => wireSessionGitFingerprint(meta, defaultGitRunner))
   // Surface opt-in (CLI interactive banner) to keep the structured id-mode echo
   // off the human terminal. Default false ⇒ fires unconditionally (byte-identical).
   const emitIdMode = (fields: Record<string, unknown>): void => {
@@ -179,14 +196,19 @@ export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeRe
   if (newSession) {
     const newId = crypto.randomUUID()
     const now = Date.now()
-    const idMeta: SessionMeta = {
+    // ADR-0106/0110 — attach the git fingerprint at mint time so the persisted
+    // meta (and the returned `idMeta`) carry `gitSha` / `gitBranch` /
+    // `gitOriginUrl` that the list-badge / export / rewind readers surface.
+    // Best-effort: outside a repo the three fields stay absent and this never
+    // throws, so session start is never blocked by git.
+    const idMeta: SessionMeta = await captureFingerprint({
       id: newId,
       title: title ?? defaultUntitled(now),
       cwd,
       createdAt: now,
       lastTouched: now,
       archived: false,
-    }
+    })
     await saveSessionById(idMeta, { reason: "fresh", turns: 0, messages: [] })
     onSessionMinted?.(newId)
     emitIdMode({
@@ -208,14 +230,16 @@ export const resolveResume = async (input: ResolveResumeInput): Promise<ResumeRe
   // interactive session is persisted to disk and resumable by default.
   const autoId = crypto.randomUUID()
   const autoNow = Date.now()
-  const autoMeta: SessionMeta = {
+  // ADR-0106/0110 — same fresh-mint fingerprint attach as the `--new-session`
+  // branch above (best-effort; absent outside a repo; never throws).
+  const autoMeta: SessionMeta = await captureFingerprint({
     id: autoId,
     title: defaultUntitled(autoNow),
     cwd,
     createdAt: autoNow,
     lastTouched: autoNow,
     archived: false,
-  }
+  })
   await saveSessionById(autoMeta, { reason: "fresh", turns: 0, messages: [] })
   onSessionMinted?.(autoId)
   emitIdMode({

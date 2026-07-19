@@ -1,6 +1,7 @@
 import type { AgentConfig, AgentOutcome } from "@/agent"
 import type { InboundMode } from "@/agent/inbound-mode"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
+import { buildPursuitContinuationPrompt } from "@/agent/objective"
 import type { Message } from "@/llm"
 import { buildAutorunEligibility } from "@/permission"
 import {
@@ -21,7 +22,6 @@ import { loadSessionById } from "@/session"
 import { errMessage, gateOnStrict, logger, runtimeConfig } from "@/shared"
 import type { PlaybookPlanQueueSink } from "@/skill/playbook"
 import { readCliKnob } from "../cli-knobs-accessor"
-import { buildPursuitContinuationPrompt } from "@/agent/objective"
 import { startGoalContinuationTicker } from "../goal-continuation-hook"
 import { startReactorWatchBridge } from "../reactor-watch-bridge"
 import { wireInboxBannerOntoSlot } from "./automation-banner"
@@ -38,8 +38,12 @@ import {
   type PlaybookTriggerWireHandle,
 } from "./playbook-trigger-wire"
 import { composePromptPipeline, type DispatchSlash } from "./prompt-pipeline"
-import { maybeCreatePromptSuggestionWire } from "./prompt-suggestion-wire"
+import {
+  buildPromptSuggestionTurnCompletionAdapter,
+  maybeCreatePromptSuggestionWire,
+} from "./prompt-suggestion-wire"
 import { normalizeCliPromptInput } from "./prompt-types"
+import { stripAutomationTickerHandler } from "./session-loop/automation"
 import { performSessionSwitch, type SessionSwitchReceipt } from "./session-loop/session-switch"
 import {
   buildPromptPipelineNotifyDeps,
@@ -53,36 +57,17 @@ import {
   shouldWireBackground,
   warnLiveBackgroundTurns,
 } from "./session-loop/turn-helpers"
+import type { SessionLoopSinks } from "./session-loop/types"
 import type { SessionSetupResult } from "./session-setup"
 import { type SessionState, updateSessionState } from "./session-state"
 import { runOneTurn } from "./turn-runner"
 
+export type { SessionLoopSinks } from "./session-loop/types"
 // Re-export the complete prior public surface so every importer of
 // `./session-loop` stays byte-compatible (the helper cluster moved to the
 // sibling `./session-loop/turn-helpers`, but `shouldWireBackground` was a
 // public export consumed by the background-ctrlb hellgate test).
-export { shouldWireBackground }
-
-/** Slice-C: per-turn render + state side-effects the surface owns. Each
- *  callback is injected so the loop module is pure (no metrics / costPanel
- *  imports beyond the typed slots above). The host wires the actual
- *  metrics snapshot fold + lifecycle pills flush. */
-export interface SessionLoopSinks {
-  /** Render the per-turn cost+cache dashboard (default-OFF when metrics
-   *  are disabled — the sink should short-circuit). */
-  readonly renderTurnDashboard: () => void
-  /** Fold the per-turn token delta into the cost panel + render the
-   *  turn-summary panel + reset the summary collector. */
-  readonly renderAndResetSummary: (outcome: { messages: readonly Message[] }) => void
-  /** Snapshot the lifecycle pills (subagent / follow-up / mcp) + flush.
-   *  UUX-6-23: the loop passes its live `externalPromptQueue.size()` so the
-   *  follow-up pill counts mid-turn-queued prompts too (the queue is born
-   *  inside the loop, AFTER the sinks are composed — hence the argument
-   *  rather than a captured dep). Optional for legacy/one-off callers. */
-  readonly flushLifecyclePills: (live?: { readonly externalQueued: number }) => void
-  /** Render a NON-abort turn-level error inline + on the status bar. */
-  readonly renderTurnError: (err: unknown) => void
-}
+export { shouldWireBackground, stripAutomationTickerHandler }
 
 /** Dependencies for {@link runSessionLoop}. Every dep is EXPLICIT so the
  *  loop owns ZERO closure captures over the surface state. */
@@ -237,22 +222,6 @@ export interface RunSessionLoopDeps {
    *  prompt). Absent ⇒ Ctrl+B is unwired ⇒ the turn path is byte-identical
    *  (default-OFF). The one-shot path NEVER wires it (no prompt to return to). */
   readonly backgroundPortal?: import("./background-turn-portal").BackgroundTurnPortal
-}
-
-/** ALBB-14 double-arm fix — project the REPL's live automation slot onto the
- *  per-turn `runAgent` CONFIG path with the `handler` DROPPED. The REPL owns a
- *  persistent session-scoped ticker (the single owner); the config-path slot
- *  needs only `engine` (for the `automation_update` tool). Dropping `handler`
- *  makes the shared-lifecycle bootstrap ticker short-circuit
- *  (`startAutomationEngineTicker` returns `undefined` when `handler` is absent)
- *  so it never arms a SECOND `setInterval` on the same engine during a turn.
- *  `undefined` in ⇒ `undefined` out (no slot ⇒ no compose entry). */
-export const stripAutomationTickerHandler = (
-  slot: NonNullable<AgentConfig["automationEngine"]> | undefined,
-): NonNullable<AgentConfig["automationEngine"]> | undefined => {
-  if (slot === undefined) return undefined
-  const { handler: _replOwnedHandler, ...engineOnly } = slot
-  return engineOnly
 }
 
 /** Run the per-session orchestration: ONE-shot when `setup.argPrompt`
@@ -842,8 +811,7 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     if (objectiveStore !== undefined) {
       let lastGoalPillKey = ""
       const refreshGoalPill = (): void => {
-        const active =
-          setup.sessionId !== undefined ? objectiveStore.get(setup.sessionId) : null
+        const active = setup.sessionId !== undefined ? objectiveStore.get(setup.sessionId) : null
         const view =
           active !== null && active.status === "active" && active.goal.length > 0
             ? { text: active.goal, elapsedMs: Date.now() - active.createdAt }
@@ -867,6 +835,14 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
     // render) unless QUANTA_ENABLE_PROMPT_SUGGESTION === "1".
     const promptSuggestion = maybeCreatePromptSuggestionWire(process.env, setup.llm, (text) =>
       process.stderr.write(`\x1b[2m${text}\x1b[0m\n`),
+    )
+    const promptSuggestionTurnCompletion = buildPromptSuggestionTurnCompletionAdapter(
+      promptSuggestion,
+      {
+        planMode: () => setup.planMode || activeIdentityModeState?.get() === "plan",
+        providerRateLimitRemainingPercent: setup.providerRateLimitRemainingPercent,
+        pendingPromptLabels: () => setup.midTurnApprovalChannel.pendingLabels?.(),
+      },
     )
     const runInteractiveBranch = async (): Promise<void> => {
       while (abort.signal.aborted !== true) {
@@ -985,20 +961,8 @@ export const runSessionLoop = async (deps: RunSessionLoopDeps): Promise<void> =>
         notifyTurnComplete(notify, out, notifyCwdBasename ?? "")
         // ADR-0467 — prompt suggestion (pre-next-prompt). No-op when the wire
         // is null (default-OFF). No-throw: run() always resolves.
-        await promptSuggestion?.run({
+        await promptSuggestionTurnCompletion?.run({
           messages: surfaceState.history,
-          // The suppression-context view is conservative: the CLI session loop
-          // exposes no live plan-mode / rate-limit / elicitation / pending-
-          // permission signal here, so all four are `false`. This only widens
-          // when (not whether) a suggestion shows — the reject-gate (the crown
-          // jewel) still vets every model output fully. Thread real signals here
-          // if the surface starts tracking them.
-          state: {
-            planMode: false,
-            rateLimited: false,
-            elicitationActive: false,
-            pendingPermission: false,
-          },
           signal: abort.signal,
         })
       }

@@ -19,6 +19,12 @@
  */
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
+import {
+  createSubagentDeliveryController,
+  createTargetResolver,
+  type DeliveryMailboxPort,
+  type SubagentControlRegistry,
+} from "@/agent/subagent-delivery"
 import { createSubagentRunner } from "@/agent/subagent-runner"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -58,13 +64,43 @@ class NullStream implements StreamPort {
 
 const fakeMailbox = () => {
   const sent: Array<{ to: string; body: string }> = []
+  let seq = 0
   const port: MailboxSendPort = {
     send: (init) => {
       sent.push({ to: init.to, body: init.body })
-      return init
+      seq += 1
+      return { id: `msg-${seq}` }
     },
   }
   return { port, sent }
+}
+
+/** WS3: `followup_task` consumes the delivery CONTROLLER (RFC §4.4), driven over
+ *  the real endpoint the runner registered into `wake`. Preserves every
+ *  wake/queue/no_waker assertion below. */
+const followupDeps = (
+  reg: TaskRegistry,
+  mailbox: ReturnType<typeof fakeMailbox>,
+  wake: TurnWakeRegistry,
+) => {
+  const control = wake as unknown as SubagentControlRegistry
+  return {
+    delivery: createSubagentDeliveryController({
+      control,
+      mailbox: mailbox.port as unknown as DeliveryMailboxPort,
+      formatPeer: (from, kind, body) => `[teammate ${from} — untrusted] [${kind}] ${body}`,
+      resolveTarget: createTargetResolver({ registry: reg, control }),
+      newDeliveryId: (() => {
+        let n = 0
+        return () => {
+          n += 1
+          return `del-${n}`
+        }
+      })(),
+      steerEnabled: false,
+    }),
+    callerLabel: "parent",
+  }
 }
 
 /** A flush of the microtask/timer queue so a parked `await gate.wait()` and the
@@ -223,7 +259,7 @@ describe("end-to-end — followup_task wakes a real runAgent child loop", () => 
     void id
     const out = handleFollowupTask(
       { agentId: "child-A", message: "do more" },
-      { registry: reg, mailbox: mailbox.port, wake, callerLabel: "parent" },
+      followupDeps(reg, mailbox, wake),
     )
     expect(out.kind).toBe("success")
     if (out.kind === "success") expect(out.triggered).toBe(true) // woke
@@ -246,7 +282,16 @@ describe("end-to-end — followup_task wakes a real runAgent child loop", () => 
     // before the loop parks must be observed by the NEXT park (queued→resume).
     const wake = new TurnWakeRegistry()
     const gate = new SubagentTurnGate()
-    const unreg = wake.register("busy-1", (r) => gate.wake(r))
+    // WS3: the controller drives the typed ENDPOINT, so bridge the endpoint's
+    // wake to the gate (the runner does exactly this). A mid-turn wake ⇒ gate
+    // returns "queued".
+    const unreg = wake.registerEndpoint("busy-1", {
+      mailboxLabel: "busy-1",
+      wake: () => gate.wake("followup"),
+      interrupt: () => "interrupted_active",
+      steer: () => "accepted",
+      currentTurnId: () => "turn-fake",
+    })
     const reg = new TaskRegistry()
     reg.register({ id: "busy-1", description: "child" })
     const mailbox = fakeMailbox()
@@ -254,7 +299,7 @@ describe("end-to-end — followup_task wakes a real runAgent child loop", () => 
     // Loop is mid-turn (not parked). followup_task ⇒ queued.
     const out = handleFollowupTask(
       { agentId: "busy-1", message: "later" },
-      { registry: reg, mailbox: mailbox.port, wake, callerLabel: "parent" },
+      followupDeps(reg, mailbox, wake),
     )
     expect(out.kind).toBe("success")
     if (out.kind === "success") expect(out.triggered).toBe(false) // queued
@@ -281,7 +326,7 @@ describe("end-to-end — followup_task wakes a real runAgent child loop", () => 
     const mailbox = fakeMailbox()
     const out = handleFollowupTask(
       { agentId: "child-Z", message: "hi" },
-      { registry: reg, mailbox: mailbox.port, wake, callerLabel: "parent" },
+      followupDeps(reg, mailbox, wake),
     )
     expect(out.kind).toBe("error")
     if (out.kind === "error") expect(out.cause).toBe("no_waker")

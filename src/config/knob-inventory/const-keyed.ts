@@ -34,6 +34,23 @@ export const CONST_KEYED: readonly KnobInventoryEntry[] = [
       "shared/item-stream.ts (itemStreamEnabled; wired host/runtime context-binding + agent/optional-ports)",
   },
   {
+    // Ticket 04 (jul-16 transport-unified SDK) — wire fidelity opt-in. ON ⇒ the
+    // host bridge sets `argsFull`/`resultFull` (model-visible verbatim payload)
+    // alongside the preview on `tool.invoked`/`tool.completed`; the ipc bridge
+    // then STRIPS them for any wire peer that did not negotiate `requestedFidelity`
+    // (S2/S3). OFF ⇒ the fields are never produced ⇒ byte-identical on every
+    // consumer (wire, in-proc, JSONL log, sqlite archive). Read via gateOn at the
+    // host wiring seam (NOT loadFromEnv), so it is declared here.
+    envKey: "QUANTA_SESSION_FULL_FIDELITY",
+    kind: "bool",
+    default: false,
+    group: "observability",
+    home: "runtime-config",
+    describe: "Wire full-fidelity tool args/result (per-peer negotiated; opt-in).",
+    readSite:
+      "shared/full-fidelity.ts (fullFidelityEnabled; wired host/runtime context-binding + ipc/session bridge strip)",
+  },
+  {
     envKey: "QUANTA_FAST_APPLY",
     kind: "bool",
     default: false,
@@ -58,6 +75,16 @@ export const CONST_KEYED: readonly KnobInventoryEntry[] = [
     group: "agent-feature",
     home: "runtime-config",
     describe: "Subagent follow-up task tool (opt-in).",
+    readSite: "agent/optional-ports.ts",
+  },
+  {
+    envKey: "QUANTA_SUBAGENT_STEER",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      'Targeted child steer — mode:"steer" delivery + post-stream safe-point (RFC jul-18 WS4; requires QUANTA_SUBAGENT_FOLLOWUP; opt-in).',
     readSite: "agent/optional-ports.ts",
   },
   {
@@ -217,15 +244,6 @@ export const CONST_KEYED: readonly KnobInventoryEntry[] = [
     readSite: "integrations/github/event-source-actions.ts",
   },
   {
-    envKey: "QUANTA_SCHEDULER",
-    kind: "bool",
-    default: false,
-    group: "scheduler",
-    home: "runtime-config",
-    describe: "Background scheduler runtime (opt-in).",
-    readSite: "scheduler/runtime.ts",
-  },
-  {
     envKey: "QUANTA_AUTOMATION_INTERVAL_MS",
     kind: "int",
     default: undefined,
@@ -298,5 +316,24 @@ export const CONST_KEYED: readonly KnobInventoryEntry[] = [
     home: "runtime-config",
     describe: "OAuth originator override.",
     readSite: "auth/chatgpt-oauth/config.ts",
+  },
+  {
+    // ADR-0540 W1-A — extends the CLI jun-10 inline-interactive approval machinery
+    // to headless. ON ⇒ a mid-turn approval ask resolves INLINE (auto-policy
+    // surface, same turn, no deferred throw + turn re-run); OFF ⇒ byte-identical
+    // deferred path. const-keyed via `HEADLESS_INLINE_APPROVAL_GATE`.
+    // ADR-0540 W1-B — the SAME gate also arms the web-daemon's daemon-owned
+    // post-approval continuation (the daemon re-issues `turn.run`; clients see
+    // the `serverAutoContinues` capability marker and skip their re-issue).
+    // const-keyed there via `WEB_INLINE_APPROVAL_GATE`.
+    envKey: "QUANTA_INLINE_APPROVAL_RESOLVER",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "ADR-0540 approval resolver gate: headless inline + web-daemon continuation (opt-in).",
+    readSite:
+      "apps/headless/approval-wiring.ts (W1-B also: apps/web-daemon/server/approval-continuation.ts)",
   },
 ]

@@ -104,6 +104,12 @@ const fakeRegistry = (entries: ReadonlyArray<GranularCheckpointEntry> = []): Gra
   return {
     list: () => items.slice(),
     lookup: (tag: CheckpointTag) => items.find((e) => e.tag === tag) ?? null,
+    stats: () => ({
+      entryCount: items.length,
+      entryCap: 200,
+      counterCount: 0,
+      counterCap: 1000,
+    }),
     clear: () => {
       items.length = 0
     },

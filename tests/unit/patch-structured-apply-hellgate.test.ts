@@ -1,6 +1,6 @@
 // Hellgate — structured per-file apply (ADR-0464).
 //
-// Proves the additive, default-OFF `applyPatchStructured` path:
+// Proves the additive, explicitly-gated `applyPatchStructured` path:
 //   - happy path: multi-file patch all apply → allOk true, before/after capture
 //   - create/modify/delete change_type correctness
 //   - move op → changeType "modified" + movedTo + after at destination
@@ -12,7 +12,7 @@
 //   - allOk flag semantics
 //   - no-throw on programmer-bug input (non-Patch)
 //   - messageForModel maps each typed error kind
-//   - DEFAULT-OFF byte-identity: the throwing `applyPatch` is unchanged.
+//   - LEGACY-PATH byte-identity: the throwing `applyPatch` is unchanged.
 
 import { describe, expect, test } from "bun:test"
 import {

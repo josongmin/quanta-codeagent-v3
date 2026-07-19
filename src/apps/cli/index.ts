@@ -1,10 +1,12 @@
 import { SessionBootstrapError } from "@/host/bootstrap"
+import { AgentArgsError } from "@/host/runtime"
 import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { selectRemoteRunner } from "@/remote"
 import { errMessage, logger, setTerminalIo } from "@/shared"
 import { seedEnvVarsForSurface } from "@/tool"
 import { CLI_FEATURE_GATE_NAMES } from "./cli-feature-gates"
 import { loadEnvFiles } from "./dotenv"
+import { applyToolProfileFlag } from "./internal/argv"
 import { runRemoteCmd } from "./remote-cmd"
 import { runRepl, runSessionMain, runSlashMain, topLevelUsage } from "./repl"
 import { SessionStartupError } from "./repl/session-startup-error"
@@ -214,6 +216,22 @@ const main = async (): Promise<void> => {
     process.exit(await runMcpServerCmd(mcpArgv))
   }
 
+  // jul-16 ticket 02 — `quanta serve --stdio` session.v1 server subcommand
+  // (quanta AS a session server an IDE / sidecar drives over stdin/stdout, the
+  // Codex app-server shape). MATURITY-gated on `QUANTA_SERVE_STDIO=1` (strict
+  // `=== '1'`); unset ⇒ the command exits 64 and serves NOTHING (default-OFF
+  // byte-identical — a bare `quanta` run never reaches this). The composition
+  // root (`serve-stdio-cmd.ts`) injects the stdio transport into
+  // `openHeadlessRuntimeSession`; dynamic import keeps the heavy bootstrap off
+  // the common startup path. Mirrors the `mcp-server` route: `--help` and the
+  // gate-off path return BEFORE any assembly, and stdin EOF / SIGTERM trigger a
+  // graceful session close inside the command.
+  if (process.argv[2] === "serve") {
+    const serveArgv = process.argv.slice(3)
+    const { runServeStdioCmd } = await import("./serve-stdio-cmd")
+    process.exit(await runServeStdioCmd(serveArgv))
+  }
+
   // ADR-0312 — `quanta webhook` GitHub-webhook HOST subcommand (inbound HTTP →
   // verified-HMAC + dedup + mention-filter → reactor-watch IPC). SECURITY/RCE-
   // adjacent inbound-network surface: gated on `QUANTA_GITHUB_WEBHOOK=1` (strict
@@ -259,6 +277,11 @@ const main = async (): Promise<void> => {
     process.exit(0)
   }
 
+  // DOF-11 — validate the shipping CLI's profile flag before session/LLM
+  // assembly, then seed the existing bootstrap authority. `/profile` mutates
+  // the ToolProfileSessionState created from this same env input.
+  applyToolProfileFlag(rawArgs, process.env)
+
   // Delegate to the REPL/one-shot orchestrator. All agent assembly, resume
   // state machine, interactive loop and per-turn save plumbing lives there.
   await runRepl()
@@ -279,6 +302,10 @@ const main = async (): Promise<void> => {
 installUnhandledRejectionDefense()
 
 main().catch((e) => {
+  if (e instanceof AgentArgsError) {
+    logger.error(e.message)
+    process.exit(64)
+  }
   if (e instanceof SessionBootstrapError || e instanceof SessionStartupError) {
     logger.error(e.message)
     process.exit(e.exitCode)

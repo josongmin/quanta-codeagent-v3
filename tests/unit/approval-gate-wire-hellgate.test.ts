@@ -40,6 +40,8 @@ import {
   type ApprovalStateMachinePort,
   createApprovalStateMachine,
 } from "@/agent/approval-state-machine"
+import { createObjectiveStore } from "@/agent/objective"
+import { createRunLedger } from "@/agent/run-ledger"
 
 const baseReq = (over: Partial<ApprovalGateRequest> = {}): ApprovalGateRequest => ({
   threadId: over.threadId ?? "thread-1",
@@ -99,6 +101,36 @@ const recordingSM = (
 }
 
 describe("approval-gate-wire (ADR-0407)", () => {
+  it("RuntimeApprovalRequiredError stays pending under its kernel approval id until approval.respond", async () => {
+    const objective = createObjectiveStore()
+    const ledger = createRunLedger()
+    const sm = createApprovalStateMachine({ objective, ledger })
+    objective.set("thread-1", { goal: "ship the change" })
+    const gate = createApprovalGate({ approvalSM: sm })
+    const kernelApprovalId = "kernel-approval-42"
+    const deferred = Object.assign(new Error("approval deferred to kernel"), {
+      name: "RuntimeApprovalRequiredError",
+      approval: { approvalId: kernelApprovalId },
+    })
+
+    await expect(
+      gate.open(baseReq(), async () => {
+        throw deferred
+      }),
+    ).rejects.toBe(deferred)
+
+    // The deferred approval is not a denial: kernel identity, objective
+    // blocker, and waiting ledger entry all remain live until a terminal event.
+    expect(sm.get(kernelApprovalId)?.status).toBe("pending")
+    expect(objective.get("thread-1")?.blockers).toHaveLength(1)
+    expect(ledger.get(kernelApprovalId)?.status).toBe("waiting")
+
+    sm.settle(kernelApprovalId, "approve")
+    expect(sm.get(kernelApprovalId)?.status).toBe("approved")
+    expect(objective.get("thread-1")?.blockers).toHaveLength(0)
+    expect(ledger.get(kernelApprovalId)?.status).toBe("completed")
+  })
+
   it("SM undefined ⇒ resolver invoked once + approvalId is empty (legacy passthrough)", async () => {
     const gate = createApprovalGate({})
     let resolverCalls = 0

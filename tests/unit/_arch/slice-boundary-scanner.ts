@@ -28,6 +28,10 @@ export interface SliceBoundaryConfig {
   readonly requireSliceBarrel?: boolean
   /** Require sub-slice barrels relative to `src/<slice>/`. */
   readonly requireSubSliceBarrels?: readonly string[]
+  /** Explicit budget for the runtime+type-position apps-surface AST scan. The
+   *  default behavioural-test deadline can be too short for a large slice under
+   *  full-suite CPU contention without changing this structural assertion. */
+  readonly surfaceIsolationScanTimeoutMs?: number
   /** Layer-2 composition slices (e.g. `@/host`) are NOT pure libraries: they
    *  legitimately read `process.env`, write startup stdio, and import every
    *  lower layer. Only the ONE invariant that still applies to them — surface
@@ -43,8 +47,7 @@ const SURFACE_PATTERNS = [/^@\/apps\b/, /(^|\/)apps\//, /(^|\/)src\/apps\//] as 
  *  surface-isolation guard — a core/wiring slice may never reference these,
  *  runtime OR type-position. Exported so the negative-proof battery can drive
  *  the SAME predicate the guard uses (no second copy to drift). */
-export const isSurfaceSpec = (spec: string): boolean =>
-  SURFACE_PATTERNS.some((p) => p.test(spec))
+export const isSurfaceSpec = (spec: string): boolean => SURFACE_PATTERNS.some((p) => p.test(spec))
 
 const NODE_SURFACE_MODULES = new Set<string>([
   "node:readline",
@@ -55,20 +58,37 @@ const NODE_SURFACE_MODULES = new Set<string>([
 
 export const sliceDir = (slice: string): string => join(REPO_ROOT, "src", slice)
 
+/** Is `name` a PRODUCTION `.ts` slice member to be scanned? Excludes:
+ *   - non-`.ts` and `.d.ts` (declaration-only) files;
+ *   - `*.test.ts` (incl. `*.hellgate.test.ts`) — TEST files that legitimately
+ *     import peer slices' tools end-to-end. Matches the god-code ratchet
+ *     walker's `!p.endsWith(".test.ts")` exclusion so both walkers see the same
+ *     production file set;
+ *   - `.from-worktree` / `.my-backup` artifacts (unless `includeBackupArtifacts`).
+ *  (`__tests__/` DIRECTORIES are pruned by the caller before descent.) */
+const isScannableSliceFile = (name: string, includeBackupArtifacts: boolean): boolean => {
+  if (!name.endsWith(".ts") || name.endsWith(".d.ts")) return false
+  if (name.endsWith(".test.ts")) return false
+  if (!includeBackupArtifacts && (name.includes(".from-worktree") || name.includes(".my-backup"))) {
+    return false
+  }
+  return true
+}
+
 export const listSliceTsFiles = (dir: string, includeBackupArtifacts: boolean): string[] => {
   const out: string[] = []
   for (const name of readdirSync(dir)) {
     const full = join(dir, name)
     const st = statSync(full)
     if (st.isDirectory()) {
+      // Test-only directories: a `__tests__/` sub-tree holds TEST files that
+      // legitimately exercise cross-slice CONTRACTS end-to-end (importing a
+      // peer slice's tool under test is what the test IS). These are not
+      // production slice members, so — like the god-code / no-raw-nul walkers —
+      // they must not be scanned under the production purity rules.
+      if (name === "__tests__") continue
       out.push(...listSliceTsFiles(full, includeBackupArtifacts))
-    } else if (st.isFile() && name.endsWith(".ts") && !name.endsWith(".d.ts")) {
-      if (
-        !includeBackupArtifacts &&
-        (name.includes(".from-worktree") || name.includes(".my-backup"))
-      ) {
-        continue
-      }
+    } else if (st.isFile() && isScannableSliceFile(name, includeBackupArtifacts)) {
       out.push(full)
     }
   }
@@ -139,10 +159,7 @@ const collectAstHits = (
 const collectModuleConstStringLiterals = (sf: ts.SourceFile): ReadonlyMap<string, string> => {
   const table = new Map<string, string>()
   for (const stmt of sf.statements) {
-    if (
-      !ts.isVariableStatement(stmt) ||
-      (stmt.declarationList.flags & ts.NodeFlags.Const) === 0
-    ) {
+    if (!ts.isVariableStatement(stmt) || (stmt.declarationList.flags & ts.NodeFlags.Const) === 0) {
       continue
     }
     for (const decl of stmt.declarationList.declarations) {
@@ -238,9 +255,7 @@ export const extractImports = (src: string): Array<{ line: number; spec: string 
  * ports were hoisted to `@/agent/surface-ports`. The surface-isolation guard
  * scans these in ADDITION to runtime imports so the inversion cannot regress.
  */
-export const extractTypeOnlyModuleRefs = (
-  src: string,
-): Array<{ line: number; spec: string }> => {
+export const extractTypeOnlyModuleRefs = (src: string): Array<{ line: number; spec: string }> => {
   const out: Array<{ line: number; spec: string }> = []
   const sf = parseSourceFile(src)
   const visit = (node: ts.Node): void => {
@@ -323,6 +338,26 @@ export const isImportDeniedByConfig = (spec: string, config: SliceBoundaryConfig
 const leafName = (sliceDirPath: string, filePath: string): string => {
   const base = relative(sliceDirPath, filePath)
   return base.split("/").pop() ?? base
+}
+
+/** Does an env-allow entry cover this slice file? An entry WITHOUT a `/` is a
+ *  bare BASENAME (`from-env.ts`) — matched against the file's leaf name (legacy
+ *  behavior). An entry WITH a `/` is a slice-relative PATH suffix
+ *  (`container-exec/tool.ts`) — matched against the file's path RELATIVE to the
+ *  slice dir. Path-scoped entries exist precisely for non-unique basenames (e.g.
+ *  the 10 `tool.ts` files under `@/tool`): they exempt exactly ONE file, so a
+ *  future env read in a SIBLING `<other>/tool.ts` still trips the guard. */
+const isEnvAllowed = (
+  allow: ReadonlySet<string>,
+  sliceDirPath: string,
+  filePath: string,
+): boolean => {
+  if (allow.has(leafName(sliceDirPath, filePath))) return true
+  const rel = relative(sliceDirPath, filePath)
+  for (const entry of allow) {
+    if (entry.includes("/") && (rel === entry || rel.endsWith(`/${entry}`))) return true
+  }
+  return false
 }
 
 const scanProcessEnvArgv = (src: string): Array<{ line: number; hit: string }> =>
@@ -413,6 +448,13 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
   const envAllow = new Set(config.envAllowFiles ?? [])
   const consoleAllow = new Set(config.consoleAllowFiles ?? [])
   const includeBackup = config.includeBackupArtifacts ?? false
+  const registerSurfaceIsolationGuard = (name: string, body: () => void): void => {
+    if (config.surfaceIsolationScanTimeoutMs === undefined) {
+      test(name, body)
+      return
+    }
+    test(name, body, config.surfaceIsolationScanTimeoutMs)
+  }
 
   describe(`@/${config.slice} — architecture guard`, () => {
     const files = listSliceTsFiles(dir, includeBackup)
@@ -421,33 +463,36 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
       expect(files.length).toBeGreaterThan(0)
     })
 
-    test("no file imports from any `apps/**` (surface isolation, incl. type-position)", () => {
-      const violations: string[] = []
-      for (const f of files) {
-        const src = readFileSync(f, "utf8")
-        // Runtime imports (value `import`/`export … from`, dynamic `import()`)…
-        for (const { line, spec } of extractImports(src)) {
-          if (isSurfaceSpec(spec)) {
-            violations.push(`${relative(dir, f)}:${line}  import "${spec}"`)
+    registerSurfaceIsolationGuard(
+      "no file imports from any `apps/**` (surface isolation, incl. type-position)",
+      () => {
+        const violations: string[] = []
+        for (const f of files) {
+          const src = readFileSync(f, "utf8")
+          // Runtime imports (value `import`/`export … from`, dynamic `import()`)…
+          for (const { line, spec } of extractImports(src)) {
+            if (isSurfaceSpec(spec)) {
+              violations.push(`${relative(dir, f)}:${line}  import "${spec}"`)
+            }
+          }
+          // …AND type-position refs (`import type`, `export type`, `import("x").T`).
+          // A core/wiring slice referencing a surface is an inversion even when
+          // erased — this is the exact form that hid the `@/agent`→`apps/cli`
+          // surface-port inversion. (For non-`apps` peer libs, type contracts stay
+          // allowed; only the surface boundary is checked here.)
+          for (const { line, spec } of extractTypeOnlyModuleRefs(src)) {
+            if (isSurfaceSpec(spec)) {
+              violations.push(`${relative(dir, f)}:${line}  type-import "${spec}"`)
+            }
           }
         }
-        // …AND type-position refs (`import type`, `export type`, `import("x").T`).
-        // A core/wiring slice referencing a surface is an inversion even when
-        // erased — this is the exact form that hid the `@/agent`→`apps/cli`
-        // surface-port inversion. (For non-`apps` peer libs, type contracts stay
-        // allowed; only the surface boundary is checked here.)
-        for (const { line, spec } of extractTypeOnlyModuleRefs(src)) {
-          if (isSurfaceSpec(spec)) {
-            violations.push(`${relative(dir, f)}:${line}  type-import "${spec}"`)
-          }
+        if (violations.length > 0) {
+          throw new Error(
+            `@/${config.slice} must not reference apps/** (incl. type-only):\n\n${violations.join("\n")}`,
+          )
         }
-      }
-      if (violations.length > 0) {
-        throw new Error(
-          `@/${config.slice} must not reference apps/** (incl. type-only):\n\n${violations.join("\n")}`,
-        )
-      }
-    })
+      },
+    )
 
     // Layer-2 composition slices run ONLY the surface-isolation invariant above.
     if (config.surfaceIsolationOnly) return
@@ -469,8 +514,7 @@ export const registerSliceBoundarySuite = (config: SliceBoundaryConfig): void =>
     test("no file reads process.env or process.argv (must take plain config)", () => {
       const violations: string[] = []
       for (const f of files) {
-        const leaf = leafName(dir, f)
-        if (envAllow.has(leaf)) continue
+        if (isEnvAllowed(envAllow, dir, f)) continue
         for (const { line, hit } of scanProcessEnvArgv(readFileSync(f, "utf8"))) {
           violations.push(`${relative(dir, f)}:${line}  ${hit}`)
         }

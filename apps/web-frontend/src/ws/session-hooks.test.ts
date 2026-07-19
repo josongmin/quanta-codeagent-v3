@@ -11,6 +11,7 @@ import {
   applySessionEventToTranscript,
   initialTranscript,
   markEventSeen,
+  readServerAutoContinues,
   transcriptReducer,
 } from "./session-hooks"
 
@@ -80,6 +81,7 @@ const snapshot = (state: SessionStateView): SessionSnapshotLite => ({
     subagents: false,
     automation: false,
     shellSnapshot: false,
+    serverAutoContinues: false,
     transport: "websocket",
   },
   pendingApproval: null,
@@ -510,5 +512,20 @@ describe("session-hooks transcript projection", () => {
     })
     expect(state.messages[0]?.role).toBe("system")
     expect(state.messages[0]?.text).toContain("soft")
+  })
+})
+
+describe("readServerAutoContinues — defensive read (ADR-0540 W1-B, audit M-2)", () => {
+  it("marker true ⇒ daemon-owned continuation", () => {
+    expect(readServerAutoContinues({ serverAutoContinues: true })).toBe(true)
+  })
+  it("marker false ⇒ client-owned continuation", () => {
+    expect(readServerAutoContinues({ serverAutoContinues: false })).toBe(false)
+  })
+  it("LEGACY daemon (field ABSENT) ⇒ false — guards the stall direction", () => {
+    // A legacy snapshot predating the field must NOT read as daemon-owned: a
+    // stuck-true here would make the browser skip its post-approval turn.run
+    // re-issue against a daemon that never re-issues (ADR-0512 P3 stall).
+    expect(readServerAutoContinues({} as { serverAutoContinues?: boolean })).toBe(false)
   })
 })

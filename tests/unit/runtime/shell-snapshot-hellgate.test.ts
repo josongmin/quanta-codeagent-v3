@@ -103,10 +103,10 @@ describe("ADR-0204 shell-snapshot hellgate", () => {
   })
 
   // ─── HELL-SS-04 ────────────────────────────────────────────────────
-  test("HELL-SS-04 restore wraps bash -c argv with `source <path>; <cmd>`", () => {
+  test("HELL-SS-04 restore wraps bash -c argv with a safely quoted source path", () => {
     const handle = dummyHandle("/tmp/snap-abc.sh")
     const outcome = buildRestoredArgv(handle, ["bash", "-c", "ls"])
-    expect(outcome.argv).toEqual(["bash", "-c", "source /tmp/snap-abc.sh; ls"])
+    expect(outcome.argv).toEqual(["bash", "-c", "source '/tmp/snap-abc.sh'; ls"])
     expect(outcome.degradeReason).toBeUndefined()
   })
 

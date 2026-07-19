@@ -131,6 +131,10 @@ export interface SessionSetupResult {
   readonly briefStore: import("@/agent").BriefStore
   readonly llm: LLMPort
   readonly planMode: boolean
+  /** Live provider quota remaining percentage from the session BudgetMeter.
+   *  Undefined when no meter exists or no provider headers have been observed;
+   *  consumers must treat that as unavailable rather than infer headroom. */
+  readonly providerRateLimitRemainingPercent: (() => number | undefined) | undefined
   readonly metrics: SessionBootstrapResult["features"]["metrics"]
   readonly state: SessionBootstrapResult["features"]["state"]
   readonly mcpClients: SessionBootstrapResult["features"]["mcpClients"]
@@ -435,6 +439,10 @@ export const setupSession = async (
     briefStore: boot.briefStore,
     llm: sessionLlm,
     planMode: boot.features.planMode,
+    providerRateLimitRemainingPercent:
+      boot.budgetMeter !== undefined
+        ? () => boot.budgetMeter?.providerRateLimitRemainingPercent()
+        : undefined,
     metrics: boot.features.metrics,
     state: boot.features.state,
     mcpClients: boot.features.mcpClients as unknown as SessionSetupResult["mcpClients"],

@@ -14,6 +14,7 @@ config_refs:
     - QUANTA_WEB_PORT
     - QUANTA_WEB_BIND
     - QUANTA_WEB_AUTH_TOKEN
+    - QUANTA_WEB_ALLOW_UNAUTHENTICATED_WILDCARD
 owners: ["@songmin"]
 labels: ["adr-0315", "surface:web", "tier:1"]
 depends_on:
@@ -36,7 +37,10 @@ purpose: |
   `createSessionTransportBridge` over a fresh `RuntimeSession`. Auth via
   `Authorization: Bearer <token>` OR `?token=<token>` (browsers cannot set
   upgrade headers — the query path is the documented fallback); constant-
-  time compare. `GET /health` reports live session count + uptime.
+  time compare. Defaults to loopback; explicit IPv4/IPv6 wildcard binds require
+  a non-empty token or the strict
+  `QUANTA_WEB_ALLOW_UNAUTHENTICATED_WILDCARD=1` exposure acknowledgement, else
+  startup fails closed. `GET /health` reports live session count + uptime.
   Graceful shutdown on SIGINT/SIGTERM closes the listener with force=true
   FIRST so Bun delivers the close frame, then `registry.closeAll()`, then
   `runtime.close()` — the ordering is locked by a `handle.stop()` test

@@ -68,7 +68,6 @@ import {
   rootMailboxRecipient,
 } from "@/agent/subagent-mailbox"
 import { createSubagentRunner } from "@/agent/subagent-runner"
-import { untrustedEnvelopeEnabled } from "@/agent/untrusted-envelope"
 import {
   type BrowserPort,
   createCdpBrowser,
@@ -94,25 +93,25 @@ import { defaultPromptCacheObserver } from "@/observability/prompt-cache"
 import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
-import { gateOn, runtimeConfig } from "@/shared"
+import { gateOn, runtimeConfigFromEnv } from "@/shared"
 import { createProcessSideAgentDaemonRegistry } from "@/side-agent"
 import { skillMcpDepsEnabled } from "@/skill/skill-mcp-deps"
 import { resolveJailed } from "@/storage"
 import type { AgentEvent, StreamPort } from "@/stream"
 import type { AppshotArtifactSink, AppshotSlot } from "@/tool"
-import { createSessionWriteBudget } from "@/tool/_shared/write-budget"
 import { type BrowserNetSink, type DnsResolver, nodeDnsResolver } from "@/tool/browser"
 import { ReadFileState, staleReadGuardEnabled } from "@/tool/stale-read-guard"
 import type { WebSearchProvider } from "@/tool/web"
 import { providerFromEnv } from "@/tool/web/providers"
 import { buildAppshotPortWire } from "./appshot-port-wire"
 import { persistBudgetLedger } from "./budget-ledger-persist"
+import { buildAppPluginMentionDeps } from "./internal/mention-app-plugin-deps"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
-import { maybeWirePeerTeamMessaging } from "./peer-team-wire"
 import { maybeWirePeerMessageSurface } from "./peer-message-sink-wire"
+import { maybeWirePeerTeamMessaging } from "./peer-team-wire"
 import { maybeWirePiiRedaction } from "./pii-redaction-wire"
 import { maybeWireProgressSink } from "./progress-sink-wire"
-import { maybeWireBashSandboxEscalation } from "./sandbox-escalation-wire"
+import { maybeWireBashSandboxEscalation, maybeWireWriteBudget } from "./security-rails-wire"
 import { nodeProcessForkPort, sideAgentWorkerModulePath } from "./side-agent-fork-port"
 
 /** Minimal env view this assembler reads. The surface owns the actual
@@ -254,6 +253,7 @@ const mentionResolverDep = (cwd: string, env: AssemblerEnv) => ({
     cwd,
     env,
     ...buildMentionSymbolDeps(cwd, env),
+    ...buildAppPluginMentionDeps(cwd, env),
   }),
 })
 
@@ -436,7 +436,11 @@ const maybeWireWebSearch = (cfg: AgentConfig, env: AssemblerEnv): void => {
  *  `spawn_agent` router (the default parallel-worker surface), so it stays OFF
  *  by default to avoid handing the model two redundant parallel-spawn APIs. When
  *  on, children run through the same depth-guarded `SubagentRunner`. */
-const maybeWireBackgroundSubagent = (cfg: AgentConfig, env: AssemblerEnv): void => {
+const maybeWireBackgroundSubagent = (
+  cfg: AgentConfig,
+  env: AssemblerEnv,
+  config: ReturnType<typeof runtimeConfigFromEnv>,
+): void => {
   if (!gateOn(env, "QUANTA_SUBAGENT_BG")) return
   const slot = cfg as AgentConfig & {
     subagentBackground?: { scheduler: BackgroundSubagentScheduler }
@@ -447,7 +451,7 @@ const maybeWireBackgroundSubagent = (cfg: AgentConfig, env: AssemblerEnv): void 
   // `maxQueued` (QUANTA_BG_MAX_QUEUED) is honored ONLY when the queue is on;
   // absent ⇒ the scheduler's built-in DEFAULT_MAX_QUEUED (64). Default-OFF path
   // is byte-identical.
-  const subagentQueue = runtimeConfig().subagentQueue
+  const subagentQueue = config.subagentQueue
   const maxQueued = parseAssemblerPositiveInt(env.QUANTA_BG_MAX_QUEUED)
   slot.subagentBackground = {
     scheduler: defaultBackgroundSubagentScheduler({
@@ -477,6 +481,7 @@ const parseAssemblerPositiveInt = (raw: string | undefined): number | undefined 
  *  under the cognitive-complexity cap; each helper is independently env-gated,
  *  caller-override-safe, and a no-op when its gate/resource is absent. */
 const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void => {
+  const config = runtimeConfigFromEnv(env)
   maybeWireBrowser(cfg, env)
   // G1 — runs AFTER maybeWireBrowser so it can read the freshly-wired
   // `cfg.browser.port`; no-op unless QUANTA_APPSHOT=1 AND a browser is present.
@@ -489,7 +494,7 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
   // QUANTA_PEER_MSG_SURFACE is on AND a mailbox is present (byte-identical default).
   maybeWirePeerMessageSurface(cfg, env)
   maybeWireWebSearch(cfg, env)
-  maybeWireBackgroundSubagent(cfg, env)
+  maybeWireBackgroundSubagent(cfg, env, config)
   maybeWireReadFileState(cfg, env)
   maybeWireDiagnostics(cfg, env)
   maybeWireSkillMcp(cfg, env)
@@ -501,8 +506,8 @@ const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void 
   // Absent ⇒ no pii block ⇒ byte-identical default-OFF (the secret branch of
   // the same RedactionConfig is untouched).
   maybeWirePiiRedaction(cfg, env)
-  maybeWireSideAgent(cfg, env)
-  maybeWireWriteBudget(cfg, env)
+  maybeWireSideAgent(cfg, config)
+  maybeWireWriteBudget(cfg, config)
   maybeWireBudgetLedger(cfg, env)
 }
 
@@ -523,8 +528,8 @@ const parseLedgerUsd = (raw: string | undefined): number | undefined => {
  *  on any mode — including the otherwise-uncapped interactive/ide modes —
  *  without code. */
 const envCostDialOverrides = (env: AssemblerEnv): Partial<BudgetDials> => {
-  const maxCostUsd = parseLedgerUsd(env["QUANTA_MAX_COST_USD"])
-  const maxCostPerTurnUsd = parseLedgerUsd(env["QUANTA_MAX_COST_PER_TURN_USD"])
+  const maxCostUsd = parseLedgerUsd(env.QUANTA_MAX_COST_USD)
+  const maxCostPerTurnUsd = parseLedgerUsd(env.QUANTA_MAX_COST_PER_TURN_USD)
   return {
     ...(maxCostUsd !== undefined ? { maxCostUsd } : {}),
     ...(maxCostPerTurnUsd !== undefined ? { maxCostPerTurnUsd } : {}),
@@ -548,8 +553,8 @@ const envCostDialOverrides = (env: AssemblerEnv): Partial<BudgetDials> => {
 const maybeWireBudgetLedger = (cfg: AgentConfig, env: AssemblerEnv): void => {
   if (cfg.budgetLedger !== undefined) return
   if (!gateOn(env, "QUANTA_BUDGET_LEDGER")) return
-  const sessionHardLimit = parseLedgerUsd(env["QUANTA_BUDGET_LEDGER_SESSION_USD"])
-  const dailyHardLimit = parseLedgerUsd(env["QUANTA_BUDGET_LEDGER_DAILY_USD"])
+  const sessionHardLimit = parseLedgerUsd(env.QUANTA_BUDGET_LEDGER_SESSION_USD)
+  const dailyHardLimit = parseLedgerUsd(env.QUANTA_BUDGET_LEDGER_DAILY_USD)
   if (sessionHardLimit === undefined && dailyHardLimit === undefined) return
   const ledger = defaultBudgetLedger({
     policy: {
@@ -561,40 +566,9 @@ const maybeWireBudgetLedger = (cfg: AgentConfig, env: AssemblerEnv): void => {
   // spend on construction and write-through after each record, so several runs
   // (a campaign / daemon) share ONE rolling budget (the "Cline $50/afternoon"
   // case). Absent path ⇒ in-memory only (per-session enforcement still live).
-  const path = env["QUANTA_BUDGET_LEDGER_PATH"]
+  const path = env.QUANTA_BUDGET_LEDGER_PATH
   cfg.budgetLedger =
     path !== undefined && path.length > 0 ? persistBudgetLedger(ledger, path) : ledger
-}
-
-/** jun-6 exfil-rail (a) — mint ONE per-session `SessionWriteBudget` when the
- *  write-budget is opted in (`QUANTA_WRITE_BUDGET=1`) AND a cap is configured
- *  (`QUANTA_WRITE_BUDGET_MAX=<N>`, a positive integer). BOTH must be present —
- *  the cap is a KNOB value with NO hardcoded default (no-heuristics rule), so an
- *  enabled-but-uncapped config stays inert. `untrustedContext` is resolved from
- *  the EXISTING untrusted-envelope gate (`QUANTA_UNTRUSTED_ENVELOPE`): the budget
- *  fires ONLY when the session is operating on untrusted input — a trusted
- *  codegen session keeps unlimited writes. The over-cap verdict is `confirm` (the
- *  narrow default per RFC §7 — the user can wave it through). Dispatch binds the
- *  current turn so the counter resets per turn. Caller-override-safe; absent gate
- *  / no cap ⇒ slot unset ⇒ no counter, byte-identical (default-OFF). */
-const maybeWireWriteBudget = (cfg: AgentConfig, env: AssemblerEnv): void => {
-  if (cfg.writeBudget !== undefined) return
-  if (!gateOn(env, "QUANTA_WRITE_BUDGET")) return
-  const max = parseWriteBudgetMax(env["QUANTA_WRITE_BUDGET_MAX"])
-  if (max === undefined) return
-  cfg.writeBudget = createSessionWriteBudget({
-    untrustedContext: untrustedEnvelopeEnabled(env),
-    maxWritesPerTurn: max,
-    overVerdict: "confirm",
-  })
-}
-
-/** Parse the `QUANTA_WRITE_BUDGET_MAX` cap from the injected env bag: a positive
- *  integer, else `undefined` (the budget stays inert). No magic default. */
-const parseWriteBudgetMax = (raw: string | undefined): number | undefined => {
-  if (raw === undefined || !/^\d+$/.test(raw.trim())) return undefined
-  const n = Number.parseInt(raw.trim(), 10)
-  return Number.isInteger(n) && n > 0 ? n : undefined
 }
 
 /** N1 — mint the live side-agent daemon registry when opted in
@@ -624,8 +598,11 @@ const parseWriteBudgetMax = (raw: string | undefined): number | undefined => {
  *  passes; sharing the foreground subagent block's runner (one budget) is a
  *  follow-up — functionally the dedicated runner still honors the per-pass
  *  `maxTurns` + the registry's `maxConcurrent` guard. */
-const maybeWireSideAgent = (cfg: AgentConfig, env: AssemblerEnv): void => {
-  if (!gateOn(env, "QUANTA_SIDE_AGENT")) return
+const maybeWireSideAgent = (
+  cfg: AgentConfig,
+  config: ReturnType<typeof runtimeConfigFromEnv>,
+): void => {
+  if (!config.sideAgent) return
   const slot = cfg as AgentConfig & { sideAgentDaemons?: unknown }
   if (slot.sideAgentDaemons !== undefined) return
   // §4.3 — OS-PROCESS backer selection. When `QUANTA_SIDE_AGENT_PROCESS` is ALSO
@@ -634,7 +611,7 @@ const maybeWireSideAgent = (cfg: AgentConfig, env: AssemblerEnv): void => {
   // (both satisfy `SideAgentDaemonRegistry`/`SideAgentDaemonPort`), so the
   // `side_agent_*` tools are byte-identical from the model's view. Gate OFF ⇒ the
   // EXACT legacy in-process path below (byte-identical default).
-  if (runtimeConfig().sideAgentProcess) {
+  if (config.sideAgentProcess) {
     // jul-15 W2 boundary (audit W2-A2): the OS-PROCESS backer's findings arrive
     // over IPC into `reg.findings()` (pull via `side_agent_findings`), NOT through
     // the session `subagentMailbox`, so they are NOT auto-surfaced as
@@ -649,6 +626,7 @@ const maybeWireSideAgent = (cfg: AgentConfig, env: AssemblerEnv): void => {
       },
       now: () => Date.now(),
       workerModulePath: sideAgentWorkerModulePath(),
+      parentDepth: cfg.depth ?? 0,
       cwd: cfg.cwd,
     })
     return
@@ -950,7 +928,7 @@ export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): Ag
   // `QUANTA_SANDBOX_ESCALATION` is on (else clears any stale handler). Runs AFTER
   // the optional slots so it can read the freshly-resolved `cfg.admissibility`
   // permission store. Knob-OFF ⇒ no handler ⇒ the bash tool is byte-identical.
-  maybeWireBashSandboxEscalation(cfg)
+  maybeWireBashSandboxEscalation(cfg, runtimeConfigFromEnv(env))
   // RFC jun-6 Binding 2 — peer teammate messaging (auto-delivered inbox +
   // team-scoped bus). Wires `cfg.peerInbox` (turn-loop drain), wraps the shared
   // mailbox with the team-membership decorator, mints the team registry, and

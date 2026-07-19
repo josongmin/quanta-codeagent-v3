@@ -1,4 +1,4 @@
-// Hellgate — ADR-0464: `apply_patch_structured` tool wire (default-OFF).
+// Hellgate — ADR-0464: `apply_patch_structured` gated tool wire.
 //
 // The tool itself (`makeApplyPatchStructuredTool(fs)`) is the apps-layer
 // adapter over the pure `@/patch.applyPatchStructured` + the SAME
@@ -7,9 +7,10 @@
 // human wires into `src/apps/agent/index.ts` + `buildDefaultTools`). This
 // battery proves:
 //
-//   1. GATE-OFF (env unset / !== "1") ⇒ the gate predicate is false, so the
-//      tool is NOT appended ⇒ default tool menu is byte-identical (zero alloc:
-//      the factory is never called).
+//   1. GATE-OFF (env unset / !== "1") ⇒ the low-level gate predicate is false,
+//      so the tool is NOT appended ⇒ legacy tool menu is byte-identical (zero
+//      alloc: the factory is never called). The CLI promotion seeds "1" before
+//      this builder; non-CLI surfaces do not.
 //   2. GATE-ON ("1") ⇒ the adapter is constructed and satisfies the Tool port
 //      (name / schema / isReadOnly / hitlTier / execute generator).
 //   3. A clean partial-apply ⇒ ok:false with per-file render + structured
@@ -23,10 +24,11 @@
 // ADR-0280 automationEngine conditional-append pattern at src/tool/index.ts.
 
 import { describe, expect, test } from "bun:test"
-import type { PatchFileSystemPort } from "@/patch"
 import type { Tool, ToolContext, ToolResult } from "@/tool"
 import { buildDefaultTools } from "@/tool"
 import { makeApplyPatchStructuredTool } from "@/tool/apply-patch-structured-tool"
+import type { GuardedPatchFileSystemPort } from "@/tool/patch-mutation-safety"
+import { ReadFileState } from "@/tool/stale-read-guard"
 
 const TOOL_NAME = "apply_patch_structured"
 
@@ -39,7 +41,7 @@ const isStructuredPatchOn = (env: NodeJS.ProcessEnv): boolean =>
  *  is on. `built` records whether the factory was invoked (zero-alloc proof). */
 const buildToolsWithGate = (
   env: NodeJS.ProcessEnv,
-  fs?: PatchFileSystemPort,
+  fs?: GuardedPatchFileSystemPort,
 ): { tools: Tool[]; built: boolean } => {
   const base = buildDefaultTools()
   if (!isStructuredPatchOn(env)) return { tools: base, built: false }
@@ -60,7 +62,7 @@ const run = async (tool: Tool, input: unknown, c: ToolContext): Promise<ToolResu
 // --- In-memory PatchFileSystemPort so tests need no disk/jail. -----------------
 const memFs = (
   seed: Record<string, string> = {},
-): PatchFileSystemPort & {
+): GuardedPatchFileSystemPort & {
   files: Map<string, string>
 } => {
   const files = new Map<string, string>(Object.entries(seed))
@@ -85,6 +87,11 @@ const memFs = (
     },
     async exists(p) {
       return files.has(p)
+    },
+    async statTarget(p) {
+      return files.has(p)
+        ? { exists: true, resolvedPath: `/jail/${p}`, mtimeMs: 0 }
+        : { exists: false }
     },
   }
 }
@@ -118,6 +125,7 @@ describe("apply_patch_structured wire — gate", () => {
     expect(tool.isReadOnly()).toBe(false)
     expect(tool.isConcurrencySafe({ patch: "" } as never)).toBe(false)
     expect(tool.hitlTier?.({} as never)).toBe("pre-approval-ok")
+    expect(tool.interruptBehavior?.({} as never)).toBe("block")
     expect(typeof tool.execute).toBe("function")
     // appended AFTER the byte-identical base set
     expect(tools[tools.length - 1]?.name).toBe(TOOL_NAME)
@@ -172,7 +180,7 @@ describe("apply_patch_structured — adapter behavior (no-throw boundary)", () =
   })
 
   test("throwing port ⇒ captured as per-file failure, NO throw escapes execute", async () => {
-    const exploding: PatchFileSystemPort = {
+    const exploding: GuardedPatchFileSystemPort = {
       async readFile() {
         throw new Error("port boom: readFile")
       },
@@ -188,6 +196,9 @@ describe("apply_patch_structured — adapter behavior (no-throw boundary)", () =
       async exists() {
         throw new Error("port boom: exists")
       },
+      async statTarget() {
+        throw new Error("port boom: statTarget")
+      },
     }
     const tool = makeApplyPatchStructuredTool(exploding)
     const patch = wrapPatch("*** Add File: new.txt", "+content")
@@ -196,6 +207,31 @@ describe("apply_patch_structured — adapter behavior (no-throw boundary)", () =
     expect(res.ok).toBe(false)
     const s = res.structured as { appliedChanges: { error?: string }[] }
     expect(s.appliedChanges.some((c) => c.error !== undefined)).toBe(true)
+  })
+
+  test("stale preflight stat failure ⇒ rejected result and ZERO mutation, never a generator throw", async () => {
+    const fs = memFs({ "a.txt": "before\n" })
+    fs.statTarget = async () => {
+      throw new Error("EACCES: cannot stat target")
+    }
+    const tool = makeApplyPatchStructuredTool(fs)
+    const state = new ReadFileState()
+    const context: ToolContext = {
+      cwd: "/jail",
+      signal: new AbortController().signal,
+      readFileState: state,
+    }
+
+    const result = await run(
+      tool,
+      { patch: wrapPatch("*** Update File: a.txt", "@@", "-before", "+after") },
+      context,
+    )
+
+    expect(result.ok).toBe(false)
+    expect(result.failure).toEqual({ mode: "rejected", reason: "stale_read_check_failed" })
+    expect(result.output).toContain("cannot safely verify")
+    expect(fs.files.get("a.txt")).toBe("before\n")
   })
 
   test("toModelOutput renders structured outcome; falls back to output when absent", async () => {
@@ -210,6 +246,30 @@ describe("apply_patch_structured — adapter behavior (no-throw boundary)", () =
     // structured absent ⇒ falls back to output verbatim
     const fallback: ToolResult = { ok: false, output: "raw-fallback-text" }
     expect(tool.toModelOutput(fallback)).toBe("raw-fallback-text")
+  })
+
+  test("mutating window enters and exits the injected critical section exactly once", async () => {
+    const tool = makeApplyPatchStructuredTool(memFs())
+    let entered = 0
+    let exited = 0
+    const context: ToolContext = {
+      cwd: "/jail",
+      signal: new AbortController().signal,
+      criticalSection: {
+        begin: () => {
+          entered += 1
+          return {
+            end: () => {
+              exited += 1
+            },
+          }
+        },
+      },
+    }
+    const res = await run(tool, { patch: wrapPatch("*** Add File: new.txt", "+content") }, context)
+    expect(res.ok).toBe(true)
+    expect(entered).toBe(1)
+    expect(exited).toBe(1)
   })
 
   test("default-port path (no fs arg) constructs an FsJailFileSystemPort from ctx.cwd", () => {

@@ -39,7 +39,7 @@
 
 import { tlsMitmAuthorized } from "@/runtime/network-proxy/mitm-gate"
 import { gateDisabledStrict, gateOn, gateOnStrict } from "./env-flag"
-import { knobOverrideCount, knobOverrides, knobOverridesVersion } from "./knob-overrides"
+import { knobOverrideCount, knobOverridesVersion, sessionSafeKnobOverrides } from "./knob-overrides"
 import {
   DEFAULT_CRITICAL_SECTION_MAX_MS,
   parseBashAutoBackground,
@@ -58,6 +58,9 @@ import {
   stringOrUndef,
 } from "./runtime-config/parsers"
 import type { RuntimeConfig } from "./runtime-config/types"
+
+/** Shared parser input for process and injected composition-root env views. */
+export type RuntimeConfigEnv = Readonly<Record<string, string | undefined>>
 
 // Re-export the COMPLETE original public surface so every importer of
 // `@/shared/runtime-config` (and the `@/shared` barrel) stays byte-compatible
@@ -82,11 +85,11 @@ export type { RuntimeConfig } from "./runtime-config/types"
  *  ORIGINAL field-declaration order and freezes once — byte-identical to the
  *  legacy single object literal (same keys, defaults, coercion, insertion order).
  *  Each slice is a `const` arrow initialized during module eval, so it is defined
- *  before the first `loadFromEnv` call (which only happens later, from
+ *  before the first `runtimeConfigFromEnv` call (which only happens later, from
  *  `runtimeConfig()`). Kept ABOVE the slices so the runtime-config-knobs parity
- *  gate — which scans the source between `const loadFromEnv = ` and `let cached`
+ *  gate — which scans the source between `runtimeConfigFromEnv` and `let cached`
  *  — still sees every `env.QUANTA_*` read (they now live in the slices). */
-const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
+export const runtimeConfigFromEnv = (env: RuntimeConfigEnv): RuntimeConfig => {
   return Object.freeze({
     ...parseCompactionSlice(env),
     ...parseCapabilitySlice(env),
@@ -100,7 +103,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
 // ─────────────────────────────────────────────────────────────────────────────
 // Per-domain env sub-parsers. Each is a PURE function that reads only from `env`
 // and returns its contiguous slice of the config as a `Partial<RuntimeConfig>`.
-// The composer (`loadFromEnv`) spreads them in the SAME order the fields were
+// The composer (`runtimeConfigFromEnv`) spreads them in the SAME order the fields were
 // originally declared, so the assembled object is BYTE-IDENTICAL to the legacy
 // single object literal (same keys, same defaults, same coercion, same insertion
 // order) — this is a mechanical size split of a god-function, not a behavior
@@ -109,7 +112,7 @@ const loadFromEnv = (env: NodeJS.ProcessEnv): RuntimeConfig => {
 
 /** Compaction, micro-compaction, and the dispatch/edit/skill/MCP capability
  *  gates (the leading run of the legacy literal, up to `mcpSampling`). */
-const parseCompactionSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+const parseCompactionSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
   return {
     logLevel: parseLogLevel(env["QUANTA_LOG_LEVEL"]),
     compactTokens: parsePositiveInt(env["QUANTA_COMPACT_TOKENS"], "QUANTA_COMPACT_TOKENS"),
@@ -167,7 +170,7 @@ const parseCompactionSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =>
 
 /** Token-accounting, MCP roots/oauth, read/vcs/lang tool gates, and the
  *  capability/team/artifact/code-mode cluster. */
-const parseCapabilitySlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+const parseCapabilitySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
   return {
     // delta-token-accounting (RFC jun-6) — strict `=== "1"` opt-in. Default
     // false ⇒ the loop never constructs the counter and calls `estimateTokens`
@@ -199,6 +202,8 @@ const parseCapabilitySlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =>
     // W6 — strict opt-in. Default false ⇒ no notebook_edit tool (byte-identical).
     notebookEdit: gateOn(env, "QUANTA_NOTEBOOK_EDIT"),
     debugTools: gateOn(env, "QUANTA_DEBUG_TOOLS"),
+    // ADR-0249 — strict opt-in. Default false ⇒ no node_repl tool (byte-identical).
+    nodeRepl: gateOn(env, "QUANTA_NODE_REPL"),
     testRunner: gateOn(env, "QUANTA_TEST_RUNNER"),
     evidence: gateOn(env, "QUANTA_EVIDENCE"),
     // H15 — opt-in (`gateOn` vocab; #24). Default false ⇒ responses-wire byte-identical
@@ -272,7 +277,7 @@ const parseCapabilitySlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =>
 /** File-history, remember-patterns, paste/skill-creator, deny-reason/hunk,
  *  sandbox-escalation, rate-limit, PTY, subagent/appshot, MCP connectors/
  *  resources/annotations, mid-turn capture, and the prompt-directive bundle. */
-const parseToolSurfaceSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+const parseToolSurfaceSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
   return {
     // file_history_rewind — opt-in (`gateOn` vocab; #24). Default false ⇒ no per-file
     // history store, no capture sink, no file_history_rewind tool (byte-identical).
@@ -291,6 +296,12 @@ const parseToolSurfaceSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =
     // jun-6 skill-creator — opt-in (`gateOn` vocab; #24). Default false ⇒ no writer
     // port, `skill_create` not registered (byte-identical default tool surface).
     skillCreator: gateOn(env, "QUANTA_SKILL_CREATOR"),
+    // ADR-0252 skill template-literal — opt-in (`gateOn` vocab; #24). Default false
+    // ⇒ the `Skill` body is never scanned for `{{ name }}` (a literal `{{ x }}`
+    // emits verbatim, byte-identical). ON ⇒ `createDefaultTemplateExpander` resolves
+    // `{{ name }}` against the caller's `key=value` args tokens; unknown var ⇒ typed
+    // short-circuit surfaced to the model (no guess).
+    skillTemplateVars: gateOn(env, "QUANTA_SKILL_TEMPLATE_VARS"),
     // C6 — opt-in (`gateOn` vocab; #24). Default false ⇒ no structured deny reason
     // attached / no content prefix / DecisionEvent unchanged (byte-identical).
     surfaceDenyReason: gateOn(env, "QUANTA_DENY_REASON"),
@@ -407,7 +418,7 @@ const parseToolSurfaceSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> =
 
 /** FS-jail / cap-enforce, session + transcript, tool-output caps, LLM stream
  *  timings, bench/swebench dirs + knobs, hooks, deferred/async, auto-dream. */
-const parseSessionBenchSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+const parseSessionBenchSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
   return {
     // SECURITY protection (filesystem jail) — tearing it down requires the
     // deliberate, unambiguous `=off`; a loose `=0` must NOT silently drop the jail.
@@ -445,6 +456,12 @@ const parseSessionBenchSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> 
     quantaHome: stringOrUndef(env["QUANTA_HOME"]),
     benchHome: stringOrUndef(env["QUANTA_BENCH_HOME"]),
     benchResultsDir: stringOrUndef(env["QUANTA_BENCH_RESULTS_DIR"]),
+    // Daemon/persistence path knobs (ADR-0503 P4 read-routing) — string-or-undef
+    // (no fixed default); the consumers keep their exact HOME-based fallback +
+    // non-empty guards, so absent ⇒ byte-identical to the prior raw process.env reads.
+    webDbDir: stringOrUndef(env["QUANTA_WEB_DB_DIR"]),
+    sessionRegistrySqlitePath: stringOrUndef(env["QUANTA_SESSION_REGISTRY_SQLITE_PATH"]),
+    sessionRegistryDiskDir: stringOrUndef(env["QUANTA_SESSION_REGISTRY_DISK_DIR"]),
     cachePathspecsExtra: parseStringList(env["QUANTA_BENCH_CACHE_PATHSPECS_EXTRA"]),
     dedupEnvPrefixesExtra: parseStringList(env["QUANTA_DEDUP_ENV_PREFIXES_EXTRA"]),
     permissionStateFile: stringOrUndef(env["QUANTA_PERMISSION_STATE"]),
@@ -500,7 +517,7 @@ const parseSessionBenchSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> 
  *  oauth-revoke, ipynb outputs, BYOK, session auto-title, tool-interrupt +
  *  critical-section, permission hook, and the exfil-rail (glob/budget/scouting/
  *  secret-egress). */
-const parseSecuritySlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+const parseSecuritySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
   return {
     // Log rate-limit is a DoS guard; disabling it requires the unambiguous `=off`.
     logRateLimitDisabled: gateDisabledStrict(env, "QUANTA_LOG_RATE_LIMIT"),
@@ -594,7 +611,7 @@ const parseSecuritySlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
  *  guardian/auto-review/approval-ladder, auto-mode/circumvent, fs-ownership,
  *  central-config (dir/sources/trusted-paths), fast-apply, MCP protocol max,
  *  and the scriptable status-line config (the trailing run of the legacy literal). */
-const parseConfigTailSlice = (env: NodeJS.ProcessEnv): Partial<RuntimeConfig> => {
+const parseConfigTailSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
   return {
     // jun-7 TLS-MITM — OPERATOR-OPT-IN (stronger gate). Requires BOTH the master
     // switch `=1` AND the verbatim ack phrase, so a stray `=1` cannot mint a
@@ -716,8 +733,8 @@ export const runtimeConfig = (): RuntimeConfig => {
   if (cached === undefined || cachedVersion !== version) {
     cached =
       knobOverrideCount() === 0
-        ? loadFromEnv(process.env)
-        : loadFromEnv({ ...process.env, ...knobOverrides() })
+        ? runtimeConfigFromEnv(process.env)
+        : runtimeConfigFromEnv({ ...process.env, ...sessionSafeKnobOverrides() })
     cachedVersion = version
   }
   return cached

@@ -11,12 +11,8 @@
 // §9.3 — account dual-window ratelimit (Codex used_percent/window_minutes
 // per-account accumulation). Distinct from the single-window remaining/reset
 // family below; lives in the same slice (shares the B3-parity reset band).
-export type {
-  AccountRateLimitStore,
-  DualWindowSnapshot,
-  RateLimitWindow,
-} from "./dual-window"
-export { createAccountRateLimitStore, parseDualWindowSnapshot } from "./dual-window"
+export type { DualWindowSnapshot, RateLimitWindow } from "./dual-window"
+export { parseDualWindowSnapshot } from "./dual-window"
 export type { RateLimitNotice } from "./notice"
 export { snapshotToNotice } from "./notice"
 export type { HeaderLookup, RateLimitSnapshot } from "./parse"

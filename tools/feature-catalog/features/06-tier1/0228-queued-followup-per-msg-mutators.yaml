@@ -27,9 +27,14 @@ purpose: |
   paused state, append to next LLM turn user message WITHOUT aborting
   current turn). Exposed via `/queue {list|retry|edit|delete|send-now}`
   CLI subcommands. Mutators are typed Result<…> with closed error union
-  (`not-found` / `already-active` / `invalid-text` / `send-not-possible`).
-  Default-OFF: store unmodified if mutators never called (byte-identical
-  to ADR-0128 baseline).
+  (`not-found` / `already-active` / `invalid-text` / `send-not-possible` /
+  `send-not-ready`). DOF-40 fail-closed timing window: when the send-now
+  sink is wired but its downstream target is not installed yet (the
+  first-turn composition-root late-bind window), sendNow returns the
+  TRANSIENT `send-not-ready` and KEEPS the entry (never a silent drop —
+  the operator retries once the loop is up); terminal failures
+  (`send-not-possible`) still remove the entry. Default-OFF: store
+  unmodified if mutators never called (byte-identical to ADR-0128 baseline).
 evidence:
   code:
     - src/agent/plan-queue.ts
@@ -39,6 +44,7 @@ evidence:
     unit:
       - tests/unit/queue-per-msg-mutators-hellgate.test.ts
       - tests/unit/cli/queue-cmd-hellgate.test.ts
+      - tests/unit/plan-queue-sendnow-failclosed-hellgate.test.ts
     integration: []
     contract: []
   adrs:

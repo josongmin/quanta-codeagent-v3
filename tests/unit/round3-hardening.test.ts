@@ -104,9 +104,14 @@ describe("R3-1 — loadGlobRules caps rule count at MAX_RULE_FILES (DoS guard)",
       body: `R${i}`,
     }))
     const paths = Array.from({ length: 200 }, (_, i) => `src/dir-${i}/file.ts`)
-    const started = Date.now()
+    // This is a CPU-DoS rail, so measure CPU consumed by the bounded selection
+    // work rather than wall clock. Whole-suite worker contention can preempt
+    // this synchronous test (1.3s wall time with unchanged work), but does not
+    // make `selectGlobRules` itself more expensive.
+    const started = process.cpuUsage()
     selectGlobRules(rules, paths)
-    expect(Date.now() - started).toBeLessThan(1000)
+    const elapsed = process.cpuUsage(started)
+    expect((elapsed.user + elapsed.system) / 1000).toBeLessThan(1000)
   })
 })
 

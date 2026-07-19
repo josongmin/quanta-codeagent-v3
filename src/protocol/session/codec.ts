@@ -159,6 +159,12 @@ export const decodeSessionCommand = (raw: string): SessionCommand => {
   if (!isSessionCommandType(envelope.payload.type)) {
     throw new SessionProtocolValidationError("bad_command_type")
   }
+  // B-MED-7 — the ADDITIVE, optional daemon-continuation stamp on `turn.run`
+  // (a mistyped scalar would silently break the string-keyed adoption match,
+  // so fail closed; absence is the byte-identical common case).
+  if (envelope.payload.type === "turn.run") {
+    assertOptionalString(envelope.payload, "command", "causedByApprovalId")
+  }
   return envelope.payload as unknown as SessionCommand
 }
 

@@ -304,6 +304,8 @@ const capabilityManifestForConfig = (config: AgentConfig): CapabilityManifest =>
   automation: false,
   shellSnapshot: false,
   transport: "inproc",
+  // ADR-0540 W1-B — bench sessions have no daemon continuation owner.
+  serverAutoContinues: false,
 })
 
 const promptTextFromMessages = (messages: readonly Message[]): string => {
@@ -559,6 +561,35 @@ const runAgentOnce = async (
     ...(tap.lastVerifyCmd !== undefined ? { lastVerifyCmd: tap.lastVerifyCmd } : {}),
   }
 }
+
+/** Bind the app driver's fixed repair inputs once for breadth fork attempts. */
+const repairForkRunner = (
+  instance: Instance,
+  deps: RunInstanceDeps,
+  signal: AbortSignal,
+  w: Wiring,
+  precomputedHint: string | undefined,
+  reproHint: string | undefined,
+  closureHint: string | undefined,
+  repairPosture: BenchPosture,
+  stateOverride: BenchKnobState | undefined,
+): Parameters<typeof buildRepairBreadthRunCandidates>[0]["runAgentOnFork"] =>
+  (forkSandbox, seedMsg, laneLlm) =>
+    runAgentOnce(
+      instance,
+      deps,
+      forkSandbox,
+      signal,
+      w,
+      seedMsg,
+      deps.timeoutMs,
+      precomputedHint,
+      reproHint,
+      closureHint,
+      repairPosture,
+      stateOverride,
+      laneLlm,
+    )
 
 const classifyPhaseCapture = async (args: {
   readonly instance: Instance
@@ -846,22 +877,17 @@ const runRepairPhase = async (
     primaryRailStep,
     chaRepairTargets,
     perCandidateSeed,
-    runAgentOnFork: (forkSandbox, seedMsg, laneLlm) =>
-      runAgentOnce(
-        instance,
-        deps,
-        forkSandbox,
-        signal,
-        w,
-        seedMsg,
-        deps.timeoutMs,
-        precomputedHint,
-        reproHint,
-        closureHint,
-        repairPosture,
-        stateOverride,
-        laneLlm,
-      ),
+    runAgentOnFork: repairForkRunner(
+      instance,
+      deps,
+      signal,
+      w,
+      precomputedHint,
+      reproHint,
+      closureHint,
+      repairPosture,
+      stateOverride,
+    ),
   })
   // jun-30 SOTA++ acceptance: dual-guard the repair chooser on BOTH the
   // reproducing set and the owner-near PUBLIC regression set that was confirmed

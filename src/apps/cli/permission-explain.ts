@@ -39,6 +39,7 @@ import {
   type PermissionMode,
   type ThreadPermission,
 } from "@/permission"
+import { errMessage, logger } from "@/shared"
 import { buildDefaultTools, type Tool } from "@/tool"
 import { bold, cyan, dim, renderBox } from "@/ui/ui-helpers"
 import { postureByKey } from "./mode-cycle"
@@ -115,10 +116,14 @@ const resolveToolTier = (tool: Tool): HITLTier => {
   let baseline: HITLTier
   try {
     baseline = inferToolTier(tool, undefined)
-  } catch {
+  } catch (e) {
     // A tool whose classifier requires a non-undefined input falls back to
     // the static inference rule — identical to `inferToolTier`'s own
     // fail-closed branch. Never crash the slash command.
+    logger.warn("permission inspector tool-tier classifier failed; using fail-closed fallback", {
+      error: errMessage(e),
+      tool: tool.name,
+    })
     baseline = tool.isReadOnly() ? "none" : "always-confirm"
   }
   // Layer the operator-override registry on top so the displayed tier matches
@@ -229,7 +234,8 @@ const renderStoreGrants = (state: PermissionInspectSlashState): string[] => {
     if (grant === undefined && hosts.size === 0 && otherThreads <= 0 && denials.length === 0) {
       lines.push(`  ${dim("(no persistent grants recorded)")}`)
     }
-  } catch {
+  } catch (e) {
+    logger.warn("permission inspector store read failed", { error: errMessage(e) })
     lines.push(`  ${dim("(store unreadable — grants not shown)")}`)
   }
   return lines
@@ -350,7 +356,10 @@ const resolveLiveMode = (ctx: SlashContext): PermissionMode => {
     const key = ctx.mode?.get()
     if (typeof key !== "string" || key.length === 0) return DEFAULT_MODE
     return postureByKey(key).permissionMode
-  } catch {
+  } catch (e) {
+    logger.warn("permission inspector mode read failed; using default mode", {
+      error: errMessage(e),
+    })
     return DEFAULT_MODE
   }
 }

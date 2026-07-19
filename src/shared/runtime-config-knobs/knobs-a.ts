@@ -133,6 +133,13 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     describe: "Skill-creator agent-callable tool gate.",
   },
   {
+    envKey: "QUANTA_SKILL_TEMPLATE_VARS",
+    kind: "bool",
+    default: false,
+    group: "tool",
+    describe: "Windsurf `{{ name }}` template-literal substitution in the skill body (ADR-0252).",
+  },
+  {
     envKey: "QUANTA_ASYNC_TOOLS",
     kind: "bool",
     default: false,

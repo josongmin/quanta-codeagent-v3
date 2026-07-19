@@ -34,6 +34,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { ConnectedSessionTransport, SessionTransport } from "@/ipc/session"
 import type { SessionEvent, SessionSnapshotLite } from "@/protocol/session"
+import { capabilitiesFor, makeSnapshotLite } from "../support/session-fixtures"
 import type { SessionDispatchResult } from "@/sdk/runtime"
 import { supported } from "@/protocol/session"
 import { startWebDaemon } from "@/apps/web-daemon/server"
@@ -97,16 +98,14 @@ afterAll(() => {
   }
 })
 
-const CAPS = {
-  approvals: "operator" as const,
+const CAPS = capabilitiesFor({
+  approvals: "operator",
   tools: true,
-  memory: false,
   artifacts: true,
   subagents: true,
-  automation: false,
   shellSnapshot: true,
-  transport: "websocket" as const,
-}
+  transport: "websocket",
+})
 
 const okResult = (snap: SessionSnapshotLite): SessionDispatchResult => ({
   revision: snap.revision,
@@ -121,7 +120,7 @@ const stubFactory = (): (() => Promise<RuntimeFacade>) => {
     let session: RuntimeSession | undefined
     return {
       createSession: async (): Promise<RuntimeSession> => {
-        const snapshot: SessionSnapshotLite = {
+        const snapshot: SessionSnapshotLite = makeSnapshotLite({
           sessionId: LIVE_SESSION_ID,
           revision: 1,
           seq: 0,
@@ -135,9 +134,7 @@ const stubFactory = (): (() => Promise<RuntimeFacade>) => {
             messageCount: 0,
           },
           capabilities: CAPS,
-          pendingApproval: null,
-          openArtifacts: [],
-        }
+        })
         session = {
           sessionId: LIVE_SESSION_ID,
           snapshot: async () => snapshot,

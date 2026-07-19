@@ -156,10 +156,16 @@ export type LastTurnOutcome = "success" | "partial" | "uncertain" | "fail"
 /**
  * Audit event emitted whenever {@link injectSimulatedTurn} injects OR rejects
  * via one of its self-wake guards. Pre-aborted triggers are upstream drops
- * and intentionally emit no `reactor.self_wake` event. The composition root
- * subscribes via the event bus / stream and exports to telemetry — runaway
- * diagnostic if the count climbs above the ADR-0132 validation budget
- * (≤50/day per workspace).
+ * and intentionally emit no `reactor.self_wake` event. Delivered through the
+ * OPTIONAL `onEvent` sink on `injectSimulatedTurn`.
+ *
+ * NO production consumer is wired yet: the only live driver
+ * `apps/cli/repl/session-loop.ts` (~L745) calls `injectSimulatedTurn({...})`
+ * WITHOUT passing `onEvent`, so this event currently goes nowhere in prod. The
+ * seam is intentional-but-unwired — ADR-0132 acceptance criterion
+ * `reactor.self_wake count <50/day` remains OPEN. Wire a consumer (event bus /
+ * stream → telemetry, runaway diagnostic if the count climbs above the ≤50/day
+ * validation budget) once the reactor is validated.
  */
 export interface ReactorSelfWakeEvent {
   readonly type: "reactor.self_wake"

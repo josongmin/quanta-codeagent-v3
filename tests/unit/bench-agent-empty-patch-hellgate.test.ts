@@ -103,7 +103,15 @@ describe("bench agent empty patch boundary", () => {
     }
   }, 60_000)
 
-  test("completed no-edit + budget cap preserves budget_exhausted authority and never invokes verifier/testCmd", async () => {
+  test("completed no-edit + 0-turn budget: clean completion WINS over post-turn meter (never invokes verifier/testCmd)", async () => {
+    // SHIPPED CONTRACT (turn-outcome.ts:112-124, ALBB-17 / RFC may-22): a cleanly
+    // COMPLETED final turn is terminal on its own merit — the natural `completed`
+    // outcome wins even when this turn also crossed the post-turn budget meter.
+    // Meter exhaustion only pre-empts a CONTINUATION (`result.kind === "tools"`),
+    // NEVER a completion (mirrors the L4 ledger placement, deliberately AFTER the
+    // natural outcome). `maxTurns: 0` exhausts the meter after turn 1 (turns=1>0),
+    // but `CompletedNoEditLLM` ends turn 1 with `end_turn`, so `completed` wins.
+    // (The budget-PREEMPTS-turn-1 path is the sibling below, which continues.)
     const dir = mkdtempSync(join(tmpdir(), "bench-agent-budget-empty-"))
     const marker = join(dir, "verifier-ran")
     const repo = join(dir, "repo")
@@ -118,6 +126,53 @@ describe("bench agent empty patch boundary", () => {
       }
       const deps = {
         llm: new CompletedNoEditLLM(),
+        maxTurns: 3,
+        timeoutMs: 20_000,
+        measurementStability: { maxAttempts: 3 },
+        budgetMeterFactory: () => new BudgetMeter({ dials: { maxTurns: 0 } }),
+      }
+
+      const result = await runInstance(instance, deps)
+
+      expect(result.passed).toBe(false)
+      expect(result.patch).toBe("")
+      // Natural completion wins over the crossed meter — NOT budget_exhausted.
+      expect(result.stopReason).toBe("completed")
+      expect(result.error).toBeUndefined()
+      expect(existsSync(marker)).toBe(false)
+      expect(classifyOutcome(result)).toEqual({
+        kind: "real-fail",
+        subkind: "completed_unresolved",
+      })
+      expect(result.budget?.attemptOutcomes).toEqual([
+        { kind: "real-fail", subkind: "completed_unresolved" },
+      ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+
+  test("no-edit CONTINUATION + 0-turn budget: meter PRE-EMPTS the turn (budget_exhausted, verifier/testCmd never run)", async () => {
+    // SIBLING to the above: proves the budget authority is REAL when the turn is
+    // about to CONTINUE. `ReadLoopLLM` emits a `read` tool_use (stop_reason
+    // "tool_use" ⇒ `result.kind === "tools"`), so after `tick("turn")` on turn 1
+    // (turns=1 > maxTurns=0) the post-turn `checkExhausted()` fires and stops the
+    // loop with `budget_exhausted` — a config that ACTUALLY preempts (vs the
+    // completion above, which the meter is not allowed to override).
+    const dir = mkdtempSync(join(tmpdir(), "bench-agent-budget-continue-"))
+    const marker = join(dir, "verifier-ran")
+    const repo = join(dir, "repo")
+    try {
+      mkdirSync(repo, { recursive: true })
+      writeFileSync(join(repo, "marker.txt"), "seed\n")
+      const instance: Instance = {
+        id: "budget-continue-terminal",
+        repoPath: repo,
+        problemStatement: "Inspect the file but never edit it.",
+        testCmd: `sh -c 'printf verifier > ${marker}; exit 0'`,
+      }
+      const deps = {
+        llm: new ReadLoopLLM(),
         maxTurns: 3,
         timeoutMs: 20_000,
         measurementStability: { maxAttempts: 3 },

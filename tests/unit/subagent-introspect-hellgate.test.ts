@@ -7,12 +7,20 @@
  */
 import { describe, expect, test } from "bun:test"
 import { buildSessionFeatures } from "../../src/agent/features"
+import {
+  createSubagentDeliveryController,
+  createTargetResolver,
+  type DeliveryMailboxPort,
+  type SubagentControlRegistry,
+} from "../../src/agent/subagent-delivery"
 import { buildSubagentIntrospectBlock } from "../../src/agent/tier1/subagent-introspect"
 import type { AgentConfig } from "../../src/agent/types"
+import { logger } from "../../src/shared"
 import {
   AgentMetaRegistry,
   createIntrospectTools,
   createSubagent6Tools,
+  FollowupTaskInputSchema,
   handleFollowupTask,
   handleListAgents,
   handleSpawnAgent,
@@ -23,7 +31,6 @@ import {
   type WakeOutcome,
 } from "../../src/subagent"
 import { ownersForRegistry } from "../../src/subagent/agent-tool"
-import { logger } from "../../src/shared"
 import type { Tool, ToolEvent } from "../../src/tool"
 
 const ctxLess = { cwd: "/tmp", signal: new AbortController().signal }
@@ -35,13 +42,16 @@ const drive = async (tool: Tool, input: unknown): Promise<ToolEvent> => {
   return last
 }
 
-/** A fake mailbox capturing sends. */
+/** A fake mailbox capturing sends. Returns a minted `{id}` (the real store
+ *  returns a `MailboxMessage`) so the delivery controller can stamp messageId. */
 const fakeMailbox = () => {
   const sent: Array<{ from: string; to: string; body: string }> = []
+  let seq = 0
   const port: MailboxSendPort = {
     send: (init) => {
       sent.push({ from: init.from, to: init.to, body: init.body })
-      return init
+      seq += 1
+      return { id: `msg-${seq}` }
     },
   }
   return { port, sent }
@@ -227,8 +237,15 @@ describe("list_agents — RFC-04 / ADR-0437", () => {
 describe("list_agents — F-B lineage enumeration gate", () => {
   const trivialRunner: SubagentRunner = async () => ({ ok: true, finalText: "x", turns: 1 })
 
-  const stampChild = async (reg: TaskRegistry, lineage: string, prompt: string): Promise<string> => {
-    const s = await handleSpawnAgent({ prompt }, { runner: trivialRunner, registry: reg, requesterLineage: lineage })
+  const stampChild = async (
+    reg: TaskRegistry,
+    lineage: string,
+    prompt: string,
+  ): Promise<string> => {
+    const s = await handleSpawnAgent(
+      { prompt },
+      { runner: trivialRunner, registry: reg, requesterLineage: lineage },
+    )
     if (s.kind !== "success") throw new Error("spawn failed")
     await reg.waitForSettle(s.agentId)
     return s.agentId
@@ -276,28 +293,73 @@ describe("list_agents — F-B lineage enumeration gate", () => {
 })
 
 describe("followup_task — RFC-04 / ADR-0437", () => {
+  // WS3 migration (RFC jul-18 §4.4): `handleFollowupTask` no longer sequences
+  // mailbox-send + wake itself — it consumes the delivery CONTROLLER. The setup
+  // now registers a typed control ENDPOINT (whose `wake()`/`interrupt()` return
+  // the scripted outcome + record the command) so every legacy assertion is
+  // preserved, driven through the real controller + target resolver (the same
+  // registry/ownership/self/settled policy, now owned by the controller).
   const setup = (wakeReturn: WakeOutcome | "no-register" = "woke") => {
     const reg = new TaskRegistry()
     const mb = fakeMailbox()
     const wake = new TurnWakeRegistry()
     const target = spawnRunning(reg, "child task")
+    // `wakeCalls` records the control commands the controller issued: "followup"
+    // for a wake, "interrupt" for a per-turn interrupt (the exact vocabulary the
+    // pre-WS3 waker saw), so #9's interrupt-path assertion still holds.
     const wakeCalls: string[] = []
     if (wakeReturn !== "no-register") {
-      wake.register(target, (reason) => {
-        wakeCalls.push(reason)
-        return wakeReturn
+      wake.registerEndpoint(target, {
+        mailboxLabel: target,
+        wake: () => {
+          wakeCalls.push("followup")
+          return wakeReturn
+        },
+        interrupt: () => {
+          wakeCalls.push("interrupt")
+          // idle→woke_idle, busy→interrupted_active (both schedule/handle a turn);
+          // "no-register" is handled by the absent-endpoint branch below.
+          return wakeReturn === "woke" ? "woke_idle" : "interrupted_active"
+        },
+        steer: () => "accepted",
+        currentTurnId: () => "turn-fake",
       })
     }
     return { reg, mb, wake, target, wakeCalls }
   }
 
-  const deps = (s: ReturnType<typeof setup>, over: Record<string, unknown> = {}) => ({
-    registry: s.reg,
-    mailbox: s.mb.port,
-    wake: s.wake,
-    callerLabel: "parent",
-    ...over,
-  })
+  /** Build the controller-backed followup deps from the setup. `over` folds the
+   *  legacy self/lineage/label knobs into the target resolver (the host closes
+   *  them into the controller now). */
+  const deps = (
+    s: ReturnType<typeof setup>,
+    over: {
+      ownAgentId?: string
+      requesterLineage?: string
+    } = {},
+  ) => {
+    const control = s.wake as unknown as SubagentControlRegistry
+    const delivery = createSubagentDeliveryController({
+      control,
+      mailbox: s.mb.port as unknown as DeliveryMailboxPort,
+      formatPeer: (from, kind, body) => `[teammate ${from} — untrusted] [${kind}] ${body}`,
+      resolveTarget: createTargetResolver({
+        registry: s.reg,
+        control,
+        ...(over.requesterLineage !== undefined ? { requesterLineage: over.requesterLineage } : {}),
+        ...(over.ownAgentId !== undefined ? { ownTaskId: over.ownAgentId } : {}),
+      }),
+      newDeliveryId: (() => {
+        let n = 0
+        return () => {
+          n += 1
+          return `del-${n}`
+        }
+      })(),
+      steerEnabled: false,
+    })
+    return { delivery, callerLabel: "parent" }
+  }
 
   // 7. delivers + triggers
   test("idle target: delivers via mailbox AND triggers (triggered:true)", () => {
@@ -325,10 +387,29 @@ describe("followup_task — RFC-04 / ADR-0437", () => {
   })
 
   // 9. interrupt
-  test("interrupt:true passes reason 'interrupt' to the waker", () => {
+  test("mode:\"interrupt\" passes reason 'interrupt' to the waker", () => {
     const s = setup("woke")
-    handleFollowupTask({ agentId: s.target, message: "now", interrupt: true }, deps(s))
+    handleFollowupTask({ agentId: s.target, message: "now", mode: "interrupt" }, deps(s))
     expect(s.wakeCalls).toEqual(["interrupt"])
+  })
+
+  // 9b. WS5 — the deprecated `interrupt?: boolean` was DELETED (RFC §4.4 "No
+  // indefinite dual truth"). The `.strict()` schema now REJECTS it as an unknown
+  // key, so the boolean cannot be silently re-introduced. This pins the deletion:
+  // before WS5 the field existed and this parse SUCCEEDED (RED); now it fails.
+  test('WS5: deprecated interrupt boolean is GONE — {interrupt:true} rejected as unknown key; mode:"interrupt" is the path', () => {
+    const rejected = FollowupTaskInputSchema.safeParse({
+      agentId: "a",
+      message: "m",
+      interrupt: true,
+    })
+    expect(rejected.success).toBe(false) // unknown-key rejection (strict schema)
+    const supported = FollowupTaskInputSchema.safeParse({
+      agentId: "a",
+      message: "m",
+      mode: "interrupt",
+    })
+    expect(supported.success).toBe(true)
   })
 
   // 10. target not found ⇒ no side effect
@@ -379,24 +460,32 @@ describe("followup_task — RFC-04 / ADR-0437", () => {
     if (out.kind === "error") expect(out.cause).toBe("id_unknown")
   })
 
-  // resolveLabel applied to mailbox 'to'
-  test("resolveLabel maps agentId to mailbox label", () => {
+  // label resolution: task id → mailbox label. Post-WS3 the controller resolves
+  // the delivery address via `control.labelOf()` (the endpoint's mailboxLabel),
+  // so re-register the endpoint under a distinct mailbox label and assert the
+  // send targets it (the same jun-07 BUG#4 phantom-address guard, now owned by
+  // the controller).
+  test("delivery resolves agentId to the child's mailbox label", () => {
     const s = setup("woke")
-    handleFollowupTask(
-      { agentId: s.target, message: "x" },
-      deps(s, { resolveLabel: () => "child/0" }),
-    )
+    s.wake.registerEndpoint(s.target, {
+      mailboxLabel: "child/0",
+      wake: () => "woke",
+      interrupt: () => "woke_idle",
+      steer: () => "accepted",
+      currentTurnId: () => "turn-fake",
+    })
+    handleFollowupTask({ agentId: s.target, message: "x" }, deps(s))
     expect(s.mb.sent[0]?.to).toBe("child/0")
   })
 
   // jul-7 re-audit F-E [HIGH]: followup_task DELIVERS a message AND triggers/interrupts a
   // turn on the target by id, with no lineage gate — a sibling could inject into (or
-  // interrupt:true ABORT) another lineage's running child. Gate it like wait/send/output.
+  // mode:"interrupt" ABORT) another lineage's running child. Gate it like wait/send/output.
   test("F-E: cross-lineage followup_task ⇒ ownership_denied, NO send, NO wake", () => {
     const s = setup("woke")
     ownersForRegistry(s.reg).set(s.target, "agent-A") // target owned by lineage A
     const out = handleFollowupTask(
-      { agentId: s.target, message: "INJECT", interrupt: true },
+      { agentId: s.target, message: "INJECT", mode: "interrupt" },
       deps(s, { requesterLineage: "agent-B" }), // sibling B attacks
     )
     expect(out.kind).toBe("error")
@@ -451,14 +540,37 @@ describe("introspect default-OFF + gating — RFC-04 §8.15", () => {
     expect(tools.map((t) => t.name)).toEqual([])
   })
 
+  // WS3: `followup_task` is built when the delivery CONTROLLER is wired (not raw
+  // mailbox+wake). Build a minimal controller over the registry/wake/mailbox.
+  const makeDelivery = (
+    reg: TaskRegistry,
+    wake: TurnWakeRegistry,
+    mb: ReturnType<typeof fakeMailbox>,
+  ) => {
+    const control = wake as unknown as SubagentControlRegistry
+    return createSubagentDeliveryController({
+      control,
+      mailbox: mb.port as unknown as DeliveryMailboxPort,
+      formatPeer: (from, kind, body) => `[teammate ${from} — untrusted] [${kind}] ${body}`,
+      resolveTarget: createTargetResolver({ registry: reg, control }),
+      newDeliveryId: (() => {
+        let n = 0
+        return () => {
+          n += 1
+          return `del-${n}`
+        }
+      })(),
+      steerEnabled: false,
+    })
+  }
+
   test("both gates + substrate ⇒ both tools, names exact", () => {
     const reg = new TaskRegistry()
     const wake = new TurnWakeRegistry()
     const mb = fakeMailbox()
     const tools = createIntrospectTools({
       registry: reg,
-      mailbox: mb.port,
-      wake,
+      delivery: makeDelivery(reg, wake, mb),
       callerLabel: "parent",
       enableIntrospect: true,
       enableFollowup: true,
@@ -482,11 +594,16 @@ describe("introspect default-OFF + gating — RFC-04 §8.15", () => {
     const wake = new TurnWakeRegistry()
     const mb = fakeMailbox()
     const id = spawnRunning(reg, "child")
-    wake.register(id, () => "woke")
+    wake.registerEndpoint(id, {
+      mailboxLabel: id,
+      wake: () => "woke",
+      interrupt: () => "woke_idle",
+      steer: () => "accepted",
+      currentTurnId: () => "turn-fake",
+    })
     const tools = createIntrospectTools({
       registry: reg,
-      mailbox: mb.port,
-      wake,
+      delivery: makeDelivery(reg, wake, mb),
       callerLabel: "parent",
       enableFollowup: true,
     })

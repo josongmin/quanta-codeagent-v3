@@ -60,6 +60,8 @@ evidence:
       - tests/unit/approval-gate-wire-hellgate.test.ts
       - tests/unit/admissibility-hellgate.test.ts
       - tests/unit/admissibility-gate.test.ts
+      - tests/unit/approval-attribution-gap-hellgate.test.ts
+      - tests/unit/host/runtime-approval-pending-leak-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
@@ -72,3 +74,27 @@ notes: |
   distinction. Acceptable: attribution answers "was the agent allowed", not
   "by what rule". request_user_input wiring is a separate follow-up (different
   return shape — UserInputOutcome 2-arm vs reviewer multi-verb).
+
+  DOF-40 PRODUCER→CONSUMER STATUS. The ESCALATION lifecycle IS wired
+  end-to-end in production: reviewAndDecide (admissibility-gate/hitl.ts) builds
+  the gate from config.approvalStateMachine (threaded from the observability
+  wire via dispatch.ts) and runs reviewAction inside gate.open. The deferred
+  (web/SDK) escalation producer is the gate's `kernelApprovalIdOf` bridge — a
+  resolver that throws RuntimeApprovalRequiredError has request(kernelId)
+  minted under the kernel-owned approvalId, so the host's later
+  resolveApprovalDecision → settle(kernelId) matches the pending SM record and
+  attributes to Objective+RunLedger (pinned by runtime-approval-pending-leak
+  test 3). RESIDUAL FAIL-CLOSED GAP: the plain always-confirm deferred path
+  (config.onConfirm → runOnConfirm) mints an approvalId and throws WITHOUT
+  going through gate.open, so no request(id) is produced; the host's
+  settle(approvalId) then hits an unknown SM id. Pre-DOF-40 that returned null
+  silently (audit trail dropped). DOF-40 makes it explicit via the SM's
+  `onUnattributed` gap sink (approval-state-machine feature). WIRED (2026-07-18):
+  the composition-root promotion owner — the observability wire
+  (`src/agent/observability-wire/wire.ts`) — now passes `onUnattributed` to a
+  REAL consumer (a structured `logger.warn` operator floor + an optional
+  `onApprovalGap` observer on ObservabilityWireOpts), so this residual
+  always-confirm gap SURFACES in production under `QUANTA_OBSERVABILITY=on`
+  instead of dropping silently. Still outside THIS slice's fence — the wiring
+  lives in the observability-wire slice (see approval-state-machine promotion
+  path), pinned by tests/unit/observability-wire-approval-gap-hellgate.test.ts.

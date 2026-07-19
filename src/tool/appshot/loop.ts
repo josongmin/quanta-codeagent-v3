@@ -24,7 +24,13 @@
  */
 
 import { errMessage } from "@/shared/errors"
-import type { AppSpec, AppshotArtifactSink, AppshotPort, VerifyVerdict } from "./port"
+import {
+  type AppSpec,
+  type AppshotArtifactSink,
+  type AppshotPort,
+  isRealJudgePass,
+  type VerifyVerdict,
+} from "./port"
 
 /** Hard floor/ceiling on the iteration cap so a caller can never request an
  *  unbounded (or zero) loop. The model picks within `[MIN, MAX]`; out-of-range
@@ -59,6 +65,20 @@ export type AppshotStepError =
   | { readonly kind: "screenshot_over_cap"; readonly bytes: number; readonly cap: number }
   | { readonly kind: "verify_failed"; readonly message: string }
   | { readonly kind: "aborted" }
+  /** The CDP browser (render/screenshot arrows) is structurally unavailable —
+   *  reported by {@link AppshotPort.availability} BEFORE any effect. A typed
+   *  refusal, NOT a runtime failure: no browser launch was even attempted. */
+  | { readonly kind: "browser_unavailable" }
+  /** The LLM-judge (verify arrow) is structurally unavailable — reported by
+   *  {@link AppshotPort.availability} BEFORE any effect. A typed refusal: the loop
+   *  will NOT scaffold/render/screenshot only to have no way to judge the result
+   *  (which could fabricate a pass). No judge ⇒ no pass, ever. */
+  | { readonly kind: "judge_unavailable" }
+  /** The judge returned `pass: true` but the verdict is NOT branded by
+   *  `judgeVerdict` — i.e. NOT a real judge result (a stub, a fabricated pass, an
+   *  unavailable-judge placeholder). Fail-closed: the loop refuses to claim a pass
+   *  no real judge produced. This is the "a pass requires a real judge" gate. */
+  | { readonly kind: "unverified_pass" }
 
 /** One iteration's record. `verdict` is present iff the full arrow chain
  *  (scaffold→render→screenshot→verify) completed; otherwise `error` says where
@@ -74,10 +94,14 @@ export interface AppshotIteration {
   readonly startedAt: number
 }
 
-/** Why the loop terminated. `pass` = a verdict said pass; `exhausted` = hit the
- *  cap with the last verdict still failing; `failed` = an effect error ended it
- *  fail-closed (Chrome down, LLM throw, jail escape, abort). */
-export type AppshotOutcomeKind = "pass" | "exhausted" | "failed"
+/** Why the loop terminated. `pass` = a REAL-judge verdict said pass; `exhausted`
+ *  = hit the cap with the last verdict still failing; `failed` = an effect error
+ *  ended it fail-closed at CALL TIME (Chrome throw, LLM throw, jail escape,
+ *  abort); `refused` = a fail-closed pre-flight/contract refusal that ran NO
+ *  effect chain to a verdict (browser/judge structurally unavailable, or a
+ *  `pass` that no real judge produced). `refused` is DISTINCT from `failed` so a
+ *  consumer never mistakes "unavailable/unverifiable" for "attempted and broke". */
+export type AppshotOutcomeKind = "pass" | "exhausted" | "failed" | "refused"
 
 /** Final loop result — fully typed, NEVER thrown. */
 export interface AppshotResult {
@@ -272,6 +296,15 @@ export const runAppshotLoop = async (
   const cap = clampIter(req.maxIter)
   const state: LoopState = { iterations: [], feedback: [] }
 
+  // FAIL-CLOSED PRE-FLIGHT: if the port declares an arrow structurally
+  // unavailable, refuse UP FRONT — never scaffold/render only to be unable to
+  // judge (which risks fabricating a pass), never crash into a runtime `*_failed`.
+  // The judge gate is checked first: no judge ⇒ no pass is ever possible.
+  const availabilityRefusal = preflightRefusal(deps.port)
+  if (availabilityRefusal !== undefined) {
+    return finalize(state, "refused", { error: availabilityRefusal })
+  }
+
   for (let i = 0; i < cap; i++) {
     const spec: AppSpec = { prompt: req.prompt, feedback: [...state.feedback] }
     const iteration = await runIteration(deps, spec, req, i)
@@ -279,21 +312,64 @@ export const runAppshotLoop = async (
     if (iteration.entryUrl !== undefined) state.entryUrl = iteration.entryUrl
     if (iteration.artifactId !== undefined) state.artifactId = iteration.artifactId
 
-    // An effect error ends the loop fail-closed (RFC §8).
-    if (iteration.error !== undefined) {
-      return finalize(state, "failed", { error: iteration.error })
-    }
-
-    // Full chain completed — record the verdict.
-    const verdict = iteration.verdict
-    if (verdict !== undefined) {
-      state.lastVerdict = verdict
-      if (verdict.pass) return finalize(state, "pass", { lastVerdict: verdict })
-      // Fold the critique into the next iteration's feedback (the edit arrow).
-      if (verdict.notes.length > 0) state.feedback.push(verdict.notes)
-    }
+    const terminal = classifyIteration(state, iteration)
+    if (terminal !== undefined) return terminal
   }
 
   // Hit the cap without a pass — fail-closed carrying the last verdict.
   return finalize(state, "exhausted", {})
+}
+
+/**
+ * Fold ONE completed iteration into the loop state and decide whether it
+ * TERMINATES the loop. Returns a terminal {@link AppshotResult} (effect error,
+ * real-judge pass, or fail-closed `unverified_pass` refusal) or `undefined` to
+ * continue. Mutates `state` (records the verdict + threads feedback). Kept out of
+ * `runAppshotLoop` so the driver stays low-complexity.
+ */
+const classifyIteration = (
+  state: LoopState,
+  iteration: AppshotIteration,
+): AppshotResult | undefined => {
+  // An effect error ends the loop fail-closed (RFC §8).
+  if (iteration.error !== undefined) {
+    return finalize(state, "failed", { error: iteration.error })
+  }
+  const verdict = iteration.verdict
+  if (verdict === undefined) return undefined
+  state.lastVerdict = verdict
+  // FAIL-CLOSED PASS GATE: honor `pass` ONLY when the verdict is BRANDED by a
+  // real judge (`isRealJudgePass`). An unbranded `pass: true` (a stub, a
+  // fabricated pass, an unavailable-judge placeholder) is REFUSED as
+  // `unverified_pass` — the loop never claims success no real judge produced.
+  if (isRealJudgePass(verdict)) return finalize(state, "pass", { lastVerdict: verdict })
+  if (verdict.pass) {
+    return finalize(state, "refused", {
+      error: { kind: "unverified_pass" },
+      lastVerdict: verdict,
+    })
+  }
+  // Fold the critique into the next iteration's feedback (the edit arrow).
+  if (verdict.notes.length > 0) state.feedback.push(verdict.notes)
+  return undefined
+}
+
+/** Fail-closed pre-flight: read the port's optional availability report. Returns
+ *  a typed refusal error when an arrow is structurally unavailable (judge first —
+ *  no judge ⇒ no pass is ever possible), else undefined (proceed). A port that
+ *  does not implement `availability()` is assumed fully wired (the production
+ *  wire always has both arrows). A THROWING availability probe is itself treated
+ *  as unavailable (fail-closed) — never a crash. */
+const preflightRefusal = (port: AppshotPort): AppshotStepError | undefined => {
+  if (port.availability === undefined) return undefined
+  let avail: ReturnType<NonNullable<AppshotPort["availability"]>>
+  try {
+    avail = port.availability()
+  } catch {
+    // A probe that throws cannot vouch for availability ⇒ refuse (judge-first).
+    return { kind: "judge_unavailable" }
+  }
+  if (avail.judge !== true) return { kind: "judge_unavailable" }
+  if (avail.browser !== true) return { kind: "browser_unavailable" }
+  return undefined
 }

@@ -22,6 +22,11 @@ export type RuntimeBase = RuntimeAgentConfigBase & {
    *  {@link createTurnStreamPort} runs a fresh {@link ItemStreamProjector} so the
    *  session wire carries `item.*` events. Absent ⇒ no projector, byte-identical. */
   itemStream?: boolean
+  /** Ticket 04 — `QUANTA_SESSION_FULL_FIDELITY` resolved ONCE at the composition
+   *  boundary ({@link wireRuntimePorts}). When true, each turn's bridge carries the
+   *  full model-visible tool args/result alongside the preview (the ipc bridge then
+   *  strips them per-peer, S3). Absent ⇒ preview-only, byte-identical. */
+  fullFidelity?: boolean
   /** A2 — the SINGLE per-session Canvas artifact registry (the SAME instance the
    *  `artifact_*` tools + generation-tool `artifactSink` write into), lifted onto
    *  the base by the composition root ONLY when `QUANTA_ARTIFACT_STORE` is on.
@@ -73,6 +78,14 @@ export type RuntimeBase = RuntimeAgentConfigBase & {
    *  Duck-typed `unknown` (no cycle into the agent slice). Absent ⇒ assembler
    *  mints its own. */
   objective?: unknown
+  /** §9.6 `/presets` — surface-owned role→model resolver threaded DOWN from the
+   *  CLI compose seam (mirrors `objective`). Carried on the base so
+   *  `buildAgentConfigFromBase` spreads it onto `AgentConfig.roleModelResolver`
+   *  and `resolveChildLlm` consults it. Already a field of `RuntimeAgentConfigBase`
+   *  (via `Omit<AgentConfig, …>`); redeclared here beside `objective` for the
+   *  compose-key parity + doc. Absent ⇒ `wireOptionalAgentPorts` defaults the
+   *  SSOT resolver (caller-fallback verbatim), byte-identical. */
+  roleModelResolver?: AgentConfig["roleModelResolver"]
 }
 
 export interface RuntimeConfirmSlot {
@@ -123,7 +136,6 @@ export interface RuntimeContextSnapshot {
   readonly memorySummaryMd?: AgentConfig["memorySummaryMd"]
   readonly stage1OutputsStore?: AgentConfig["stage1OutputsStore"]
   readonly memoryConsolidator?: AgentConfig["memoryConsolidator"]
-  readonly granularRegistry?: AgentConfig["granularRegistry"]
   readonly onPromptAssembled?: AgentConfig["onPromptAssembled"]
   readonly workingState?: AgentConfig["workingState"]
   readonly onWorkingStateReady?: AgentConfig["onWorkingStateReady"]
@@ -153,6 +165,9 @@ export interface RuntimeContextSnapshot {
   /** `/goal` (Codex parity) — surface objective store on the snapshot so the
    *  per-turn base carries it into `maybeWireObjective` (mirrors `browserNet`). */
   readonly objective?: unknown
+  /** §9.6 `/presets` — surface role→model resolver on the snapshot so the
+   *  compose PASS_THROUGH patch carries it onto the base (mirrors `objective`). */
+  readonly roleModelResolver?: AgentConfig["roleModelResolver"]
 }
 
 /** S1 (jul-04) — structural mirror of `@/tool/browser`'s `BrowserNetSink`, kept
@@ -188,7 +203,6 @@ export type RuntimeContextPatch = Partial<
     | "memorySummaryMd"
     | "stage1OutputsStore"
     | "memoryConsolidator"
-    | "granularRegistry"
     | "onPromptAssembled"
     | "workingState"
     | "onWorkingStateReady"
@@ -205,6 +219,7 @@ export type RuntimeContextPatch = Partial<
     | "radar"
     | "browserNet"
     | "objective"
+    | "roleModelResolver"
   >
 >
 
@@ -297,6 +312,21 @@ export type RuntimeBootstrapOverlay = {
    *  commands across sessions). Absent ⇒ slot omitted (default-OFF,
    *  byte-identical: the gate's `trustScopeGrants` returns false). */
   readonly trustScope?: AgentConfig["trustScope"]
+  /** SECURITY-RAIL (a) — the per-session `SessionWriteBudget` minted by the
+   *  comp-root's {@link wireSecurityRails} when `QUANTA_WRITE_BUDGET=1` (+ cap).
+   *  When set, the base carries `writeBudget` so the per-turn dispatch binds the
+   *  current turn onto `ToolContext.writeBudget` and the (N+1)th write in an
+   *  untrusted turn is rejected. Absent ⇒ slot omitted (default-OFF,
+   *  byte-identical: no counter). The web daemon / assembler set `cfg.writeBudget`
+   *  directly; the interactive CLI rides this overlay slot. */
+  readonly writeBudget?: AgentConfig["writeBudget"]
+  /** jul-16 GAP-3 (02 serve --stdio) — the wire transport this surface's
+   *  composition root declares, stamped onto `capabilities.transport`. Set by
+   *  the connect stdio door (`"stdio"`); absent ⇒ the base omits the slot and
+   *  `buildCapabilityManifest` falls back to `"inproc"` (byte-identical to the
+   *  pre-seam hardcode). Presence-only seam, mirrors `serverAutoContinues` (the
+   *  web daemon stamps its own `"websocket"` on the base directly). */
+  readonly sessionTransport?: import("@/protocol/session").CapabilityManifest["transport"]
 }
 
 export interface RuntimeBootstrapHelpers {

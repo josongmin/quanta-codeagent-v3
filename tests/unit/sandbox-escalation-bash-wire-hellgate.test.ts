@@ -32,7 +32,7 @@ import type { PermissionStore, ToolAction } from "@/permission"
 import { __resetDefaultPermissionStore, createPermissionStore } from "@/permission"
 import { __resetShellSandbox } from "@/runtime"
 import type { PerCallSandboxAvailability, PerCallSandboxPort } from "@/runtime/os-sandbox"
-import { __resetRuntimeConfig } from "@/shared"
+import { runtimeConfigFromEnv } from "@/shared"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool"
 import { bashTool } from "@/tool/bash"
 import { __setBashPerCallSandboxFactory } from "@/tool/bash/per-call-factory"
@@ -79,14 +79,20 @@ let store: PermissionStore
 /** Install the REAL host wire with a fresh injected permission store (the
  *  gate-shared store the surface threads onto `admissibility.permissionStore`)
  *  + a fake onConfirm authority. */
-const wireWith = (approve: boolean): void => {
+const wireWith = (approve: boolean, max?: string): void => {
   const onConfirm = async (_a: ToolAction): Promise<ConfirmDecision> => ({
     decision: approve ? "allow" : "deny",
   })
-  maybeWireBashSandboxEscalation({
-    onConfirm,
-    admissibility: { permissionStore: store },
-  } as never)
+  maybeWireBashSandboxEscalation(
+    {
+      onConfirm,
+      admissibility: { permissionStore: store },
+    } as never,
+    runtimeConfigFromEnv({
+      QUANTA_SANDBOX_ESCALATION: "1",
+      ...(max !== undefined ? { QUANTA_SANDBOX_ESCALATION_MAX: max } : {}),
+    }),
+  )
 }
 
 beforeEach(async () => {
@@ -95,8 +101,6 @@ beforeEach(async () => {
   store = createPermissionStore({ filePath: join(dir, "perm-state.json"), debounceMs: 0 })
   await store.load()
   __setBashPerCallSandboxFactory(() => blockingSandbox())
-  process.env.QUANTA_SANDBOX_ESCALATION = "1"
-  __resetRuntimeConfig()
 })
 
 afterEach(() => {
@@ -104,9 +108,6 @@ afterEach(() => {
   __setBashPerCallSandboxFactory(undefined)
   __setBashSandboxEscalationHandler(undefined)
   __resetDefaultPermissionStore()
-  delete process.env.QUANTA_SANDBOX_ESCALATION
-  delete process.env.QUANTA_SANDBOX_ESCALATION_MAX
-  __resetRuntimeConfig()
 })
 
 describe("RFC jun-6 Binding 1 — bash sandbox-escalation LIVE wire", () => {
@@ -134,10 +135,7 @@ describe("RFC jun-6 Binding 1 — bash sandbox-escalation LIVE wire", () => {
   })
 
   test("HELL-3: cap exhaustion — past QUANTA_SANDBOX_ESCALATION_MAX, no further re-run (typed exhausted)", async () => {
-    process.env.QUANTA_SANDBOX_ESCALATION = "1"
-    process.env.QUANTA_SANDBOX_ESCALATION_MAX = "1"
-    __resetRuntimeConfig()
-    wireWith(true)
+    wireWith(true, "1")
     // First escalation in the turn is admitted + approved → re-runs.
     const first = await collect({ command: "echo first-ok", mode: "read" }, ctx({ turnId: "T" }))
     expect(first.ok).toBe(true)
@@ -149,10 +147,11 @@ describe("RFC jun-6 Binding 1 — bash sandbox-escalation LIVE wire", () => {
   })
 
   test("HELL-4: knob-OFF ⇒ byte-identical — no handler, blocked command surfaces as a plain failure", async () => {
-    delete process.env.QUANTA_SANDBOX_ESCALATION
-    __resetRuntimeConfig()
     // Wire is a no-op when the knob is off (clears any handler).
-    maybeWireBashSandboxEscalation({ onConfirm: async () => true } as never)
+    maybeWireBashSandboxEscalation(
+      { onConfirm: async () => true } as never,
+      runtimeConfigFromEnv({}),
+    )
     const r = await collect({ command: "echo never-unsandboxed", mode: "read" }, ctx())
     // No escalation: the sandboxed failure stands, no escalation note, the
     // original command never ran unsandboxed.

@@ -38,6 +38,16 @@ export const DAEMON: readonly KnobInventoryEntry[] = [
     readSite: "apps/web-daemon/runtime-factory.ts",
   },
   {
+    envKey: "QUANTA_WEB_SUBAGENTS",
+    kind: "bool",
+    default: false,
+    group: "web-daemon",
+    home: "runtime-config",
+    describe:
+      "Web-daemon subagent orchestration source gate — wires the onSubagentEvent sink that streams spawn-tree/status to the Sub-Agents panel (opt-in; absent ⇒ no sink, byte-identical).",
+    readSite: "apps/web-daemon/subagent-source.ts",
+  },
+  {
     envKey: "QUANTA_OTEL_ENDPOINT",
     kind: "string",
     default: undefined,
@@ -260,24 +270,6 @@ export const DAEMON: readonly KnobInventoryEntry[] = [
       "win32 shell mode: 'error' (refuse, default) | 'auto' (POSIX-first ladder " +
       "bash→pwsh→cmd) | 'bash' | 'pwsh' | 'cmd'.",
     readSite: "runtime/shell-argv.ts",
-  },
-  {
-    envKey: "QUANTA_SESSION_REGISTRY_SQLITE_PATH",
-    kind: "string",
-    default: undefined,
-    group: "session-registry",
-    home: "runtime-config",
-    describe: "SQLite registry backend path.",
-    readSite: "agent/session-resource-registry/global.ts",
-  },
-  {
-    envKey: "QUANTA_SESSION_REGISTRY_DISK_DIR",
-    kind: "string",
-    default: undefined,
-    group: "session-registry",
-    home: "runtime-config",
-    describe: "Disk registry backend dir.",
-    readSite: "agent/session-resource-registry/global.ts",
   },
   {
     envKey: "QUANTA_SESSION_REGISTRY_WAL_THRESHOLD_BYTES",

@@ -92,6 +92,7 @@ evidence:
   tests:
     unit:
       - tests/unit/canvas-web-components-hellgate.test.ts
+      - tests/unit/canvas-fanout-failclosed-hellgate.test.ts
       - tests/unit/tool-diff-capture-hellgate.test.ts
       - apps/web-frontend/src/components/canvas/DiffView.test.tsx
       - apps/web-frontend/src/components/canvas/DiffStats.test.tsx
@@ -133,3 +134,23 @@ notes: |
   binary/truncated/gutter, verbatim usage, gate-OFF byte-identical,
   snapshot-on-connect, per-push delta, detach-freeze, two-conn independence,
   NO-THROW hostile send) + 7 frontend test files.
+  DOF-40 (2026-07-17, fail-closed hardening): the canvas SHARED fan-out
+  (`*-source.ts` capture → subscriber Set) previously swallowed a throwing
+  subscriber (a dead/throwing WS `send` on a LIVE connection) with a bare
+  `catch {}` — ISOLATED from siblings but SILENTLY starved (zero operator
+  signal). New `canvas-fanout.ts#fanOutIsolated` keeps sibling isolation AND
+  makes the failure OBSERVABLE: each source gains an optional
+  `onSubscriberError` seam + a `failureCount()` health counter; the
+  per-connection `canvas-emitter.ts` gains a matching `onSendError` +
+  `sendFailureCount()` so a throwing `ws.send` is surfaceable (not just
+  swallowed) before the turn continues. Default-OFF byte-identical: no
+  observer injected (current composition-root call sites pass none) ⇒ legacy
+  swallow, siblings still fed, `capture`/`emit` never throw. A hostile
+  observer never breaks the fan-out/turn (defense-in-depth swallow). 17
+  hellgate cases (canvas-fanout-failclosed-hellgate.test.ts): isolation,
+  index+message surfacing, snapshot-under-mutation, hostile-observer,
+  per-event backpressure (100 events × 3 subs, 1 always-dead → siblings get
+  all 100, 100 failures counted), OFF byte-identical, emitter send-throw.
+  Composition-root observer wiring is a FOLLOW-UP (server.ts is off-limits) —
+  the load-bearing deliverable is the surfaceable seam + counter; today the
+  seam is unconsumed so production is byte-identical.

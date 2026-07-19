@@ -169,9 +169,17 @@ export const assembleAutomation = (
   // `kind:"errored"` — we don't swallow.
   const handler: AutomationHandler = async (a) => {
     const override = await resolveFireModel(a, availability)
+    const heartbeat =
+      a.kind === "heartbeat" && a.targetThreadId !== undefined && a.inheritedPolicy !== undefined
+        ? { targetThreadId: a.targetThreadId, inheritedPolicy: a.inheritedPolicy }
+        : {}
+    const dispatchOpts = {
+      ...heartbeat,
+      ...(override !== undefined ? { modelOverride: override } : {}),
+    }
     await deps.agentLoop.enqueueUserMessage(
       a.prompt,
-      override !== undefined ? { modelOverride: override } : undefined,
+      Object.keys(dispatchOpts).length > 0 ? dispatchOpts : undefined,
     )
   }
 

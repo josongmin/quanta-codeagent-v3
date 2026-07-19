@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  __acquirePyrightTestIsolationForTest,
   __resetLspAvailabilityCacheForTest,
   __resetSharedPyrightSessionsForTest,
   __setLspAvailabilityOverrideForTest,
@@ -42,10 +43,19 @@ class FakePyrightClient extends LspClient {
   }
 }
 
+let releasePyrightTestIsolation: (() => void) | undefined
+beforeEach(async () => {
+  releasePyrightTestIsolation = await __acquirePyrightTestIsolationForTest()
+})
 afterEach(async () => {
-  await __resetSharedPyrightSessionsForTest()
-  __setPyrightClientFactoryForTest(null)
-  __setPyrightWarmupTimingForTest(null)
+  try {
+    await __resetSharedPyrightSessionsForTest()
+    __setPyrightClientFactoryForTest(null)
+    __setPyrightWarmupTimingForTest(null)
+  } finally {
+    releasePyrightTestIsolation?.()
+    releasePyrightTestIsolation = undefined
+  }
 })
 
 const env = scopedEnv(["QUANTA_BENCH_PRESET"])
@@ -58,7 +68,7 @@ describe("bench strict LSP grounding fail-closed", () => {
         QUANTA_BENCH_PRESET: "agentless-v3-thin-strict",
       })
       __resetLspAvailabilityCacheForTest()
-      __setLspAvailabilityOverrideForTest((bin) => (bin === "pyright-langserver" ? false : true))
+      __setLspAvailabilityOverrideForTest((bin) => bin !== "pyright-langserver")
       const dir = mkdtempSync(join(tmpdir(), "bench-strict-lsp-missing-"))
       try {
         writeFileSync(join(dir, "bug.py"), "def add(a, b):\n    return a - b\n")
@@ -96,7 +106,7 @@ describe("bench strict LSP grounding fail-closed", () => {
         QUANTA_BENCH_PRESET: "agentless-v1",
       })
       __resetLspAvailabilityCacheForTest()
-      __setLspAvailabilityOverrideForTest((bin) => (bin === "pyright-langserver" ? false : true))
+      __setLspAvailabilityOverrideForTest((bin) => bin !== "pyright-langserver")
       const dir = mkdtempSync(join(tmpdir(), "bench-thin-lsp-open-"))
       try {
         writeFileSync(join(dir, "bug.py"), "def add(a, b):\n    return a - b\n")

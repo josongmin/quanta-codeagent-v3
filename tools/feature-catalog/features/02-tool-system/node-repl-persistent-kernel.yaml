@@ -3,25 +3,25 @@ title: Node REPL persistent kernel — Jupyter-style per-session node process
 section: 2
 subsystem: Node REPL (ADR-0249)
 order: 249
-maturity: L2
-status: new
+maturity: L3
+status: refined
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [n-a]
-configurable: static
+configurable: integrated
 owners: ["@songmin"]
-labels: [absorbed:codex, surface:cli, default-off, slice-primitive]
+labels: [absorbed:codex, surface:cli, default-off, gated-tool]
 depends_on: []
 config_refs:
-  env: []
+  env: [QUANTA_NODE_REPL]
 surface_integration:
-  cli: missing
+  cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-18"
   evidence:
-    cli: "src evidence not reachable from the interactive CLI entry (src/apps/cli/index.ts) — wired only into other apps (eval/bench/probe/headless) or unwired"
-    web: "pure internal slice primitive (per-session node subprocess kernel), no tool surface wired and no UI affordance"
+    cli: "gated `node_repl` tool registered via DefaultToolPorts.nodeRepl (src/tool/index.ts CONDITIONAL_REGISTRATIONS); composition root mints createDefaultNodeReplKernel() when QUANTA_NODE_REPL is on (src/host/runtime/agent-arg-builder/gated-tool-ports.ts nodeReplPortSlot). Default-OFF byte-identical when unset."
+    web: "pure internal slice primitive + gated tool; no dedicated web UI affordance (tool-menu only)"
 purpose: |
   Codex `~/.codex/node_repl/active_execs/{execId}.json` 패턴 흡수의 slice
   primitive — 한 세션 동안 살아 있는 `node -i` 서브프로세스를 유지해서
@@ -51,26 +51,38 @@ evidence:
     - src/runtime/node-repl/state-store.ts
     - src/runtime/node-repl/headless-stub.ts
     - src/runtime/node-repl/index.ts
+    - src/tool/node-repl/index.ts
+    - src/host/runtime/agent-arg-builder/gated-tool-ports.ts
   adrs: [249]
   tests:
     unit:
       - tests/unit/runtime/node-repl-hellgate.test.ts
+      - tests/unit/tool/node-repl-tool-hellgate.test.ts
     integration: []
     contract: []
-knobs: []
-deliberate_hold:
-  reason: |
-    - full Jupyter protocol envelope (msg_id / parent_header / metadata) —
-      이번 라운드는 단순 stdin/stdout line-protocol 만
-    - multi-output frame (stream / display_data / execute_result 분리) —
-      현재는 stdout 한 덩어리 + stderr 한 덩어리
-    - restart policy (process crash 시 자동 재기동 + 변수 replay) —
-      Codex 도 안 함; 폐기 가능성 높음
-    - tool wiring (`node_repl_exec` 같은 새 도구) — 슬라이스 primitive만
-      먼저 안전하게 착륙시키고 후속에서 와이어
-    - conversation-checkpoint / fork 연동 (스냅샷 시 살아 있는 커널 핸들
-      같이 보존) — checkpoint 슬라이스 쪽에서 합의된 후
+knobs:
+  - name: QUANTA_NODE_REPL
+    where: src/shared/runtime-config.ts
+    default: "false"
+    purpose: "Gate the `node_repl` persistent-kernel tool (strict opt-in, default-OFF; arbitrary Node code exec, always-confirm)."
 notes: |
+  SHIPPED (2026-07-18, Wave N): the gated `node_repl` tool is the production
+  consumer. Registration is data-driven (`src/tool/index.ts`
+  CONDITIONAL_REGISTRATIONS, `DefaultToolPorts.nodeRepl`); the composition root
+  mints ONE stateful `createDefaultNodeReplKernel()` per session ONLY when
+  `QUANTA_NODE_REPL` is on (`gated-tool-ports.ts` `nodeReplPortSlot`).
+  always-confirm (arbitrary Node code, full host access), default-OFF
+  byte-identical when unset. DISTINCT from `code_cell` (one-shot QuickJS-WASM
+  sandbox, NO persistent state) — variable-persistent Node kernel, unique
+  primitive. measure-first before any surface auto-seeds it (opt-in everywhere).
+
+  Future scope (NOT built — the tool ships with a simple stdin/stdout
+  line-protocol): full Jupyter protocol envelope (msg_id/parent_header),
+  multi-output frames (stream/display_data/execute_result), restart policy
+  (Codex doesn't do this either — likely dropped), checkpoint/fork kernel-handle
+  preservation (pending checkpoint-slice agreement).
+
+
   Sibling 시 import 방향: src/runtime/node-repl/ → @/shared 만. 다른
   슬라이스 역참조 없음. tsconfig `@/runtime/*` alias 이미 존재해서 추가
   alias 등록 불필요.

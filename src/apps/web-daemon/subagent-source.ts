@@ -34,6 +34,7 @@
 import type { SubagentObservation } from "@/protocol/subagent"
 import { encodeSubagentFrame, subagentObservationToMessage } from "@/protocol/subagent-frame"
 import { redactSecrets } from "@/security"
+import { sliceWholeChars } from "@/shared"
 import { gateOn } from "@/shared/env-flag"
 
 /** The Bun `Server` pub/sub topic every connection subscribes to so a single
@@ -60,7 +61,7 @@ const PREVIEW_CAP = 240
 /** Bound + secret-scrub a UI-crossing string via the `@/security` SoT. */
 const boundedRedact = (s: string | undefined): string | undefined => {
   if (s === undefined) return undefined
-  const bounded = s.length > PREVIEW_CAP ? s.slice(0, PREVIEW_CAP) : s
+  const bounded = s.length > PREVIEW_CAP ? sliceWholeChars(s, PREVIEW_CAP) : s
   return redactSecrets(bounded, { origin: "tool_result" }).text
 }
 

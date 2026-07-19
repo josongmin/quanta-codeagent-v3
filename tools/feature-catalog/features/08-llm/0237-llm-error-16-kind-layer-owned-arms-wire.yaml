@@ -39,7 +39,6 @@ evidence:
   code:
     - src/llm/retry/too-many-failed-attempts.ts
     - src/llm/retry/codex-spec-router.ts
-    - src/llm/retry/recovery-router.ts
     - src/agent/per-tool-checkpoint/rollback-llm-error-bridge.ts
     - src/runtime/os-sandbox/llm-error-bridge.ts
   adrs:
@@ -53,6 +52,7 @@ evidence:
 knobs: []
 deliberate_hold: null
 notes: |
-  Closes the `recovery-router-codex-spec` catalog deliberate-hold.
+  Closes typed emitter reachability only. `RetryingLLM` / `FallbackLLM`
+  composition through `recovery-router-codex-spec` remains deferred.
   `exactOptionalPropertyTypes` discipline — `Knobs` shapes omit fields
   rather than set undefined.

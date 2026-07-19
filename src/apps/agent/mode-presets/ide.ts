@@ -53,6 +53,7 @@
 import type { AgentConfig, BranchSearchConfig } from "@/agent"
 import { wireOptionalAgentPorts } from "@/agent"
 import type { PermissionContext } from "@/permission"
+import { gateOn } from "@/shared/env-flag"
 import { StdoutStream, type StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 import {
@@ -63,6 +64,7 @@ import {
 } from "../assemble"
 import { exitCodeForOutcome } from "../run"
 import {
+  resolveModePresetGlobRules,
   resolveModePresetPromptSurfaceProfile,
   resolveModePresetRepoRules,
   resolveModePresetSystemPrompt,
@@ -87,6 +89,13 @@ const buildIdeBase = async (
   const promptSurfaceProfile = resolveModePresetPromptSurfaceProfile(req.mode, req.base.system)
   // WS4 R3 — the IDE drives a real repo on the user's cwd → honor AGENTS.md.
   const repoRules = await resolveModePresetRepoRules(req.mode, req.base.repoRules, cwd)
+  // WS4 follow-on — multi-source vendor glob-rules (default-OFF `QUANTA_VENDOR_RULES`;
+  // trust-gated ⇒ empty on untrusted modes ⇒ globRules unset ⇒ OFF byte-identical).
+  const globRules = await resolveModePresetGlobRules(
+    req.mode,
+    cwd,
+    gateOn(process.env, "QUANTA_VENDOR_RULES"),
+  )
   // The IDE host normally injects a structured StreamPort; StdoutStream is a
   // safe fallback for a headless smoke of the ide assembly.
   const stream: StreamPort = req.base.stream ?? new StdoutStream()
@@ -109,6 +118,7 @@ const buildIdeBase = async (
       system: resolveModePresetSystemPrompt(req.mode, req.base.system, cwd),
       ...(promptSurfaceProfile !== undefined ? { promptSurfaceProfile } : {}),
       ...(repoRules !== undefined ? { repoRules } : {}),
+      ...(globRules.length > 0 ? { globRules: { rules: globRules } } : {}),
       cwd,
       maxTurns: req.base.maxTurns ?? 200,
       // T01 (audit L5 H-2): inherit the composition-root's REAL SIGINT-wired

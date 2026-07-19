@@ -14,6 +14,7 @@ import type { TurnIndicator } from "../../../../src/apps/cli/turn-indicator"
 import type { TurnSummaryCollector } from "../../../../src/apps/cli/turn-summary"
 import type { Message } from "../../../../src/llm"
 import type { RuntimeContext } from "../../../../src/sdk/runtime"
+import { capabilitiesFor, makeSnapshotLite } from "../../../support/session-fixtures"
 
 /**
  * Slice-C (T2 rewrite): runtime behavior coverage for `runSessionLoop`.
@@ -214,29 +215,19 @@ const buildSetup = async (
             sessionId: "session-loop-sdk",
             dispatch: async () => ({ revision: 0, seq: 0, events: [] }),
             subscribe: () => () => undefined,
-            snapshot: async () => ({
-              sessionId: "session-loop-sdk",
-              revision: 0,
-              seq: 0,
-              state: {
-                status: "idle",
-                draftInput: "",
-                permissionMode: "default",
-                messageCount: bridgeState.messages.length,
-              },
-              capabilities: {
-                approvals: "operator",
-                tools: true,
-                memory: false,
-                artifacts: true,
-                subagents: false,
-                automation: automationEngine !== undefined,
-                shellSnapshot: false,
-                transport: "inproc" as const,
-              },
-              pendingApproval: null,
-              openArtifacts: [],
-            }),
+            snapshot: async () =>
+              makeSnapshotLite({
+                sessionId: "session-loop-sdk",
+                revision: 0,
+                seq: 0,
+                state: { messageCount: bridgeState.messages.length },
+                capabilities: {
+                  approvals: "operator",
+                  tools: true,
+                  artifacts: true,
+                  automation: automationEngine !== undefined,
+                },
+              }),
             attachSessionTransport: async () => ({ close: async () => undefined }),
             close: async () => {
               runtimeCalls.sessionClose += 1
@@ -486,16 +477,12 @@ beforeAll(async () => {
         describe: () => ({
           sessionId: "session-loop-sdk",
           permissionMode: "default",
-          capabilityManifest: {
+          capabilityManifest: capabilitiesFor({
             approvals: "operator",
             tools: true,
-            memory: false,
             artifacts: true,
-            subagents: false,
             automation: options?.sessionDeps?.automationEngine !== undefined,
-            shellSnapshot: false,
-            transport: "inproc" as const,
-          },
+          }),
         }),
         runTurn: async ({ history, prompt }: { history: readonly Message[]; prompt: string }) => {
           if (bridgeState.failWith !== undefined) throw bridgeState.failWith

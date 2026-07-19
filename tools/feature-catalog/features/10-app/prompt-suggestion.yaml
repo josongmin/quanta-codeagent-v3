@@ -48,9 +48,9 @@ purpose: |
   Default-OFF: gated on `QUANTA_ENABLE_PROMPT_SUGGESTION === "1"` (mirrors
   Claude's `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION`). Unset ⇒ the orchestrator
   returns `{kind:"suppress", reason:"gate_off"}` WITHOUT calling the model —
-  zero LLM calls, nothing rendered, byte-identical to today. Nothing in
-  `@/apps` imports the barrel yet; surface + composition-root wiring are
-  integration steps.
+  zero LLM calls, nothing rendered, byte-identical to today. The interactive
+  CLI wires the adapter in `session-loop.ts` and invokes it after completed
+  turns; web/headless surfaces do not consume it.
 evidence:
   code:
     - src/agent/prompt-suggestion/types.ts
@@ -60,6 +60,7 @@ evidence:
     - src/agent/prompt-suggestion/orchestrator.ts
     - src/agent/prompt-suggestion/index.ts
     - src/apps/cli/repl/prompt-suggestion-wire.ts
+    - src/apps/cli/repl/session-loop.ts
   adrs: [467]
   tests:
     unit:
@@ -71,16 +72,13 @@ knobs:
   - name: QUANTA_ENABLE_PROMPT_SUGGESTION
     default: 'unset (OFF)'
     purpose: |
-      `1` opts a deployment into the feature (still requires a surface to wire
-      the `SuggestFn` adapter + call `runPromptSuggestion`). Any other value /
-      unset keeps it fully OFF — no model call, no render.
-deliberate_hold:
-  reason: |
-    No CLI surface and no composition-root adapter are wired in this slice (those
-    files are out of its scope fence). The slice is a dead, default-OFF seam
-    until the human applies the integration TODOs in ADR-0467.
+      `1` opts the interactive CLI into the live adapter and orchestrator. Any
+      other value / unset keeps it fully OFF — no model call, no render.
+deliberate_hold: null
 notes: |
   Reject gate is PURE & TOTAL and reusable anywhere a model-produced "next
   prompt" needs vetting. Thresholds (minWords 2 / maxWords 12 / maxChars 100)
   are the competitor's exact numbers, pinned in `SUGGESTION_LIMITS` with
-  provenance — not invented heuristics.
+  provenance — not invented heuristics. Default promotion remains measure-first
+  because enabling it adds a model call; live suppression-state wiring must be
+  complete before promotion.

@@ -20,6 +20,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { runShell } from "@/runtime"
+import { buildRestoredArgv } from "@/runtime/shell-snapshot"
 import type { ShellSnapshotRestoreSeam } from "@/runtime/types"
 
 // ---------------------------------------------------------------------------
@@ -29,6 +30,7 @@ import type { ShellSnapshotRestoreSeam } from "@/runtime/types"
 
 let workDir: string
 let snapPath: string
+const unsetMarkerCommand = ["echo MARK=", "${HELLGATE_MARK:-unset}"].join("")
 
 beforeAll(() => {
   workDir = mkdtempSync(join(tmpdir(), "quanta-shell-snap-wire-"))
@@ -67,7 +69,7 @@ const stubSeam = (): { seam: ShellSnapshotRestoreSeam; calls: { n: number } } =>
 
 describe("HELL-SS-WIRE-01 default-OFF byte-identical", () => {
   test("absent shellSnapshot: HELLGATE_MARK is unset (snapshot never sourced)", async () => {
-    const r = await runShell("echo MARK=${HELLGATE_MARK:-unset}", { cwd: workDir })
+    const r = await runShell(unsetMarkerCommand, { cwd: workDir })
     expect(r.exitCode).toBe(0)
     expect(r.stdout.trim()).toBe("MARK=unset")
   })
@@ -80,13 +82,36 @@ describe("HELL-SS-WIRE-01 default-OFF byte-identical", () => {
 describe("HELL-SS-WIRE-02 seam present → restore called + argv reflects source", () => {
   test("snapshot seam wired: HELLGATE_MARK=present from sourced snapshot", async () => {
     const { seam, calls } = stubSeam()
-    const r = await runShell("echo MARK=${HELLGATE_MARK:-unset}", {
+    const r = await runShell(unsetMarkerCommand, {
       cwd: workDir,
       shellSnapshot: seam,
     })
     expect(r.exitCode).toBe(0)
     expect(r.stdout.trim()).toBe("MARK=present")
     expect(calls.n).toBe(1)
+  })
+
+  test("snapshot restore runs inside a sandbox wrapper and safely quotes a spaced path", async () => {
+    const spacedDir = mkdtempSync(join(tmpdir(), "quanta shell snapshot "))
+    const spacedPath = join(spacedDir, "captured env.sh")
+    writeFileSync(spacedPath, "export SNAPSHOT_WRAPPED_MARK=restored\n", "utf8")
+    try {
+      const r = await runShell('printf "%s" "$SNAPSHOT_WRAPPED_MARK"', {
+        cwd: workDir,
+        // A real sandbox adapter prepends its executable and therefore hides
+        // the shell prefix if restoration is incorrectly applied afterward.
+        perCallWrap: async (argv) => ({ argv: ["env", ...argv], sandboxApplied: true }),
+        shellSnapshot: {
+          handle: { id: "spaced", path: spacedPath },
+          restore: (handle, prefix) =>
+            buildRestoredArgv({ ...handle, capturedAtMs: 0, shell: "bash" }, prefix),
+        },
+      })
+      expect(r.exitCode).toBe(0)
+      expect(r.stdout).toBe("restored")
+    } finally {
+      rmSync(spacedDir, { recursive: true, force: true })
+    }
   })
 })
 
@@ -104,7 +129,7 @@ describe("HELL-SS-WIRE-03 passthrough seam still produces ShellResult", () => {
         return { argv: [...prefix] }
       },
     }
-    const r = await runShell("echo MARK=${HELLGATE_MARK:-unset}", {
+    const r = await runShell(unsetMarkerCommand, {
       cwd: workDir,
       shellSnapshot: seam,
     })

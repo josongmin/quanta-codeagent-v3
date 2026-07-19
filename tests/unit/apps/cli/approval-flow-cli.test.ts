@@ -7,6 +7,7 @@ import type { SessionSetupResult } from "@/apps/cli/repl/session-setup"
 import type { Message } from "@/llm"
 import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import type { RuntimeContext } from "@/sdk/runtime"
+import { makeSnapshotLite } from "../../../support/session-fixtures"
 import { makeFakeRuntimeContext, makeFakeSessionSetup } from "./_cli-fakes"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
@@ -67,29 +68,14 @@ const stubSetup = (approvalDecisions: readonly ApprovalDecisionResult[]) => {
         sessionId: "approval-flow-cli",
         dispatch: async () => ({ revision: 0, seq: 0, events: [] }),
         subscribe: () => () => undefined,
-        snapshot: async () => ({
-          sessionId: "approval-flow-cli",
-          revision: 0,
-          seq: 0,
-          state: {
-            status: "idle" as const,
-            draftInput: "",
-            permissionMode: "default",
-            messageCount: outcome.messages.length,
-          },
-          capabilities: {
-            approvals: "operator" as const,
-            tools: true,
-            memory: false,
-            artifacts: false,
-            subagents: false,
-            automation: false,
-            shellSnapshot: false,
-            transport: "inproc" as const,
-          },
-          pendingApproval: null,
-          openArtifacts: [],
-        }),
+        snapshot: async () =>
+          makeSnapshotLite({
+            sessionId: "approval-flow-cli",
+            revision: 0,
+            seq: 0,
+            state: { messageCount: outcome.messages.length },
+            capabilities: { approvals: "operator", tools: true },
+          }),
         attachSessionTransport: async () => ({ close: async () => undefined }),
         close: async () => {
           counters.sessionClose += 1

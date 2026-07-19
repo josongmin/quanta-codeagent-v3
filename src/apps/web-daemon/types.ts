@@ -30,6 +30,11 @@ export interface WebDaemonConfig {
    */
   readonly authToken: string | undefined
   /**
+   * Explicit acknowledgement for an unauthenticated wildcard bind. The entry
+   * script defaults this to false and accepts env opt-in only for exact `1`.
+   */
+  readonly allowUnauthenticatedWildcard?: boolean
+  /**
    * Factory that produces a `RuntimeFacade` for the daemon. We accept a
    * factory (not a built facade) so test code can hand in a stub and the
    * production composition root can hand in the real CLI runtime.

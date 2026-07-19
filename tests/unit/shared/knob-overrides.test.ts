@@ -9,6 +9,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import {
   __resetKnobOverrides,
+  filterSessionForbidden,
   getKnobOverride,
   knobOverrideCount,
   knobOverrides,
@@ -121,5 +122,30 @@ describe("SECURITY carve-out — strict knobs are NOT session-settable (RFC §4.
     // SESSION_FORBIDDEN_KNOBS and this override lands ⇒ cap becomes 5 ⇒ RED.
     expect(setKnobOverride("QUANTA_MAX_DESCENDANT_DEPTH", "5")).toBe(false)
     expect(runtimeConfig().maxDescendantDepth).toBe(1) // still pinned to policy
+  })
+
+  // Reader-side defense-in-depth (C1): `filterSessionForbidden` is what
+  // `runtimeConfig()` merges instead of raw `knobOverrides()`. The store can never
+  // hold a forbidden key (writer gate), so testing it through the store is vacuous —
+  // the PURE filter is tested with a forbidden key PRESENT to prove it drops it even
+  // if a future writer bypassed the gate.
+  test("filterSessionForbidden DROPS forbidden keys, KEEPS allowed (reader backstop)", () => {
+    const filtered = filterSessionForbidden({
+      QUANTA_CODE_MODE: "1", // security-forbidden ⇒ dropped
+      QUANTA_MAX_DESCENDANT_DEPTH: "5", // nesting-policy forbidden ⇒ dropped
+      QUANTA_LOG_LEVEL: "debug", // allowed ⇒ survives
+      QUANTA_MICROCOMPACT: "1", // allowed ⇒ survives
+    })
+    // RED-ON-INJECTION: if the filter returned the record as-is (drop neutralized),
+    // the two forbidden keys would be present and these go RED.
+    expect("QUANTA_CODE_MODE" in filtered).toBe(false)
+    expect("QUANTA_MAX_DESCENDANT_DEPTH" in filtered).toBe(false)
+    expect(filtered).toEqual({ QUANTA_LOG_LEVEL: "debug", QUANTA_MICROCOMPACT: "1" })
+  })
+
+  // Paired control: an all-allowed record passes through UNCHANGED (no over-drop).
+  test("filterSessionForbidden is byte-identical for an all-allowed record (no over-drop)", () => {
+    const allowed = { QUANTA_LOG_LEVEL: "info", QUANTA_MICROCOMPACT: "1" }
+    expect(filterSessionForbidden(allowed)).toEqual(allowed)
   })
 })

@@ -9,6 +9,7 @@
 
 export {
   createPeerInboxDrain,
+  formatPeerBody,
   type PeerInboxAdapterOptions,
 } from "./peer-inbox"
 export {

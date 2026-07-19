@@ -191,6 +191,31 @@ describe("CLI-05: functional — createCliImportHandler()", () => {
     expect(errBuf).toContain("unknown provider: bogus_provider")
   })
 
+  test.each([
+    "cursor",
+    "aider",
+  ])("HELL-12a: unsupported stub provider %s is rejected before import or persistence", async (provider) => {
+    const fn = createCliImportHandler()
+    let outBuf = ""
+    let errBuf = ""
+    const deps: SessionCommandDeps = {
+      out: (s) => {
+        outBuf += s
+      },
+      err: (s) => {
+        errBuf += s
+      },
+      confirm: async () => false,
+    }
+
+    const rc = await fn([provider], deps)
+
+    expect(rc).toBe(1)
+    expect(errBuf).toContain(`unknown provider: ${provider}`)
+    expect(errBuf).toContain("expected claude_code")
+    expect(outBuf).toBe("")
+  })
+
   test("HELL-13: handler with extra positional rejects with exit 1", async () => {
     const fn = createCliImportHandler()
     let errBuf = ""

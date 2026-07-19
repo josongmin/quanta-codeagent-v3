@@ -19,6 +19,7 @@
  * deterministic winner. Default-OFF ⇒ never invoked ⇒ byte-identical.
  */
 
+import { sliceWholeChars } from "@/shared"
 import type { CandidateLocationFocus } from "./location-set-fanout"
 
 /** One candidate as the selector sees it (no full source — bounded diff + signals). */
@@ -100,7 +101,9 @@ const renderCandidate = (c: LlmSelectCandidate): string =>
     `repro_pass: ${c.reproPass} | regression_failures: ${c.regressionFailures}`,
     ...renderEvidence(c),
     "```diff",
-    c.patch.length > MAX_PATCH_CHARS ? `${c.patch.slice(0, MAX_PATCH_CHARS)}\n…(truncated)` : c.patch,
+    c.patch.length > MAX_PATCH_CHARS
+      ? `${sliceWholeChars(c.patch, MAX_PATCH_CHARS)}\n…(truncated)`
+      : c.patch,
     "```",
   ].join("\n")
 

@@ -55,14 +55,16 @@ describe("formatSegmentedUsage — bar width stability", () => {
 })
 
 describe("formatSegmentedUsage — labels", () => {
-  test("renders k/k total label and Full fullness", () => {
+  test("renders k/k total label and codex-style context-left headline", () => {
     const out = formatSegmentedUsage(view(76_800, 120_000))
     expect(out).toContain("76.8k/120k")
-    expect(out).toContain("64% Full")
+    // S3 (jul-03) — codex-rs `Context N% left` head is REMAINING (100 − %used):
+    // 76.8k/120k = 64% used ⇒ 36% left.
+    expect(out).toContain("Context 36% left")
   })
 
-  test("at/over 100% shows bare 'Full'", () => {
-    expect(formatSegmentedUsage(view(120_000, 120_000))).toContain("· Full")
+  test("at/over 100% shows 'Context 0% left'", () => {
+    expect(formatSegmentedUsage(view(120_000, 120_000))).toContain("· Context 0% left")
   })
 
   test("legend row per present category with a percent", () => {

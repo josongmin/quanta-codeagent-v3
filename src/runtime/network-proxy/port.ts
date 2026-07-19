@@ -14,6 +14,7 @@
  */
 
 import type { NetworkPolicyAmendment } from "./amendment"
+import type { ScoutingSignal } from "./scouting"
 import type { DecisionLogEntry, ProxyAddress } from "./types"
 
 export interface NetworkProxyPort {
@@ -21,6 +22,9 @@ export interface NetworkProxyPort {
   listen(): Promise<ProxyAddress>
   /** The bound address. Throws if called before `listen` resolves. */
   address(): ProxyAddress
+  /** Latest advisory denied-host fan-out signal. `null` until the configured
+   * scouting threshold is reached (or when scouting is not configured). */
+  scoutingSignal(): ScoutingSignal | null
   /** The live amend-set this proxy consults (post-denial approvals). */
   readonly amendments: NetworkPolicyAmendment
   /** Append-only per-connection decision log (audit). */

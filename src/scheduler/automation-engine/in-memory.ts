@@ -85,6 +85,9 @@ export const inMemoryAutomationEngine = (
     claimedAt?: number
     model?: string
     modelFallbacks?: ReadonlyArray<string>
+    kind?: "heartbeat"
+    targetThreadId?: string
+    inheritedPolicy?: EngineAutomation["inheritedPolicy"]
   }): EngineAutomation => {
     const base = {
       id: over.id,
@@ -104,6 +107,11 @@ export const inMemoryAutomationEngine = (
       ...(over.claimedAt !== undefined ? { claimedAt: over.claimedAt } : {}),
       ...(over.model !== undefined ? { model: over.model } : {}),
       ...(over.modelFallbacks !== undefined ? { modelFallbacks: over.modelFallbacks } : {}),
+      ...(over.kind !== undefined ? { kind: over.kind } : {}),
+      ...(over.targetThreadId !== undefined ? { targetThreadId: over.targetThreadId } : {}),
+      ...(over.inheritedPolicy !== undefined
+        ? { inheritedPolicy: Object.freeze({ ...over.inheritedPolicy }) }
+        : {}),
     }
   }
 
@@ -155,8 +163,11 @@ export const inMemoryAutomationEngine = (
       // B2 — model/modelFallbacks are immutable per-automation fields; carry
       // them across the fire so a fired/retrying row keeps its routing config.
       ...(existing.model !== undefined ? { model: existing.model } : {}),
-      ...(existing.modelFallbacks !== undefined
-        ? { modelFallbacks: existing.modelFallbacks }
+      ...(existing.modelFallbacks !== undefined ? { modelFallbacks: existing.modelFallbacks } : {}),
+      ...(existing.kind !== undefined ? { kind: existing.kind } : {}),
+      ...(existing.targetThreadId !== undefined ? { targetThreadId: existing.targetThreadId } : {}),
+      ...(existing.inheritedPolicy !== undefined
+        ? { inheritedPolicy: existing.inheritedPolicy }
         : {}),
       // claimToken/claimedAt cleared on finalize (omitted ⇒ absent).
     })
@@ -176,6 +187,8 @@ export const inMemoryAutomationEngine = (
           message: `automation '${input.id}' already scheduled`,
         })
       }
+      const heartbeatError = validateHeartbeatSchedule(input, rows.values())
+      if (heartbeatError !== undefined) return Promise.resolve(heartbeatError)
       const row = buildRow({
         id: input.id,
         title: input.title,
@@ -187,6 +200,9 @@ export const inMemoryAutomationEngine = (
         fireCount: 0,
         ...(input.model !== undefined ? { model: input.model } : {}),
         ...(input.modelFallbacks !== undefined ? { modelFallbacks: input.modelFallbacks } : {}),
+        ...(input.kind !== undefined ? { kind: input.kind } : {}),
+        ...(input.targetThreadId !== undefined ? { targetThreadId: input.targetThreadId } : {}),
+        ...(input.inheritedPolicy !== undefined ? { inheritedPolicy: input.inheritedPolicy } : {}),
       })
       rows.set(row.id, row)
       return Promise.resolve({ ok: true, value: row })
@@ -271,6 +287,9 @@ export const inMemoryAutomationEngine = (
         ...(best.lastError !== undefined ? { lastError: best.lastError } : {}),
         ...(best.model !== undefined ? { model: best.model } : {}),
         ...(best.modelFallbacks !== undefined ? { modelFallbacks: best.modelFallbacks } : {}),
+        ...(best.kind !== undefined ? { kind: best.kind } : {}),
+        ...(best.targetThreadId !== undefined ? { targetThreadId: best.targetThreadId } : {}),
+        ...(best.inheritedPolicy !== undefined ? { inheritedPolicy: best.inheritedPolicy } : {}),
         claimToken,
         claimedAt: now,
       })
@@ -349,3 +368,28 @@ const invalid = (message: string): EngineResult<never> => ({
   code: "invalid-input",
   message,
 })
+
+const validateHeartbeatSchedule = (
+  input: ScheduleInput,
+  rows: Iterable<EngineAutomation>,
+): EngineResult<never> | undefined => {
+  if (input.kind !== "heartbeat") return undefined
+  if (input.targetThreadId === undefined || input.targetThreadId.length === 0) {
+    return invalid("heartbeat requires targetThreadId")
+  }
+  if (input.inheritedPolicy === undefined) return invalid("heartbeat requires inheritedPolicy")
+  for (const row of rows) {
+    if (
+      row.kind === "heartbeat" &&
+      row.targetThreadId === input.targetThreadId &&
+      (row.status === "scheduled" || row.status === "running")
+    ) {
+      return {
+        ok: false,
+        code: "heartbeat-thread-occupied",
+        message: `thread '${input.targetThreadId}' already has a live heartbeat`,
+      }
+    }
+  }
+  return undefined
+}

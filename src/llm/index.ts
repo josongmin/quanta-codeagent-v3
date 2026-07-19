@@ -130,12 +130,12 @@ export type {
 } from "./responses-continuation-store"
 export { defaultResponsesContinuationStore } from "./responses-continuation-store"
 export { responsesContinuationLlmPort } from "./responses-continuation-wrapping"
-export type { RecoveryAction, RecoveryRouter } from "./retry"
+export type { RecoveryAction, RetryDisposition } from "./retry"
 export {
-  CodexSpecRouter,
   codexSpecRoute,
   codexSpecRouterEmittedActions,
-  createDefaultRecoveryRouter,
+  isFallbackKind,
+  retryDispositionForKind,
 } from "./retry"
 export type { DecodedProviderEvent, ParsedSseFrame } from "./streaming-events"
 export {

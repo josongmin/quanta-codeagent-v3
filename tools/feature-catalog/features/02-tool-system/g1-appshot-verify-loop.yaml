@@ -83,6 +83,7 @@ evidence:
       - tests/unit/appshot-loop-hellgate.test.ts
       - tests/unit/appshot-tool-hellgate.test.ts
       - tests/unit/appshot-reachability-hellgate.test.ts
+      - tests/unit/appshot-fail-closed-hellgate.test.ts
       - tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
     integration: []
     contract: []
@@ -133,3 +134,30 @@ notes: |
   SCAFFOLD is Phase-1 deterministic (renderScaffoldHtml: spec prompt + feedback
   escaped into a single-file page through the FS-jail). A model-authored codegen
   body that still writes through makeJailedScaffold is a Phase-2 follow-up.
+
+  FAIL-CLOSED CONTRACT (DOF-40 — the TOOL's owned layer, hardened 2026-07-16):
+    - A PASS REQUIRES A REAL JUDGE. `VerifyVerdict` carries an un-forgeable
+      module-private brand (Symbol in port.ts); `judgeVerdict(pass,notes)` is the
+      SOLE constructor a real LLM-judge may use, and the loop honors `pass` ONLY
+      via `isRealJudgePass` (branded). A plain `{ pass:true }` literal — a stub, a
+      fabricated pass, an unavailable-judge placeholder — is DOWN-GRADED to a typed
+      `refused`/`unverified_pass` outcome (never claimed as success). The production
+      judge parser (appshot-port-wire.ts#parseVerdict) mints branded verdicts, so
+      only a REAL LLM stream can produce a pass.
+    - STRUCTURAL UNAVAILABILITY ⇒ TYPED REFUSAL. `AppshotPort.availability()`
+      (optional) is a fail-closed pre-flight: judge:false ⇒ `judge_unavailable`,
+      browser:false ⇒ `browser_unavailable`, a THROWING probe ⇒ `judge_unavailable`
+      — all BEFORE any effect runs (no scaffold/render/judge), so an unwired arrow
+      is a typed refusal, NOT a crash-caught runtime `*_failed` nor a fabricated
+      pass. Absent availability() ⇒ fully-wired assumed (the composition root only
+      wires when browser AND judge exist), so OFF/legacy paths stay byte-identical.
+    - New `refused` outcome (distinct from `failed`) maps to a `mode:"rejected"`
+      ToolResult (ok:false), so the model can never read a refusal/failure as a
+      passing verdict. Bounds unchanged: [MIN=1,MAX=8] hard-clamp (min floor, max
+      ceiling) still enforced — a huge/zero/non-finite request can never run
+      unbounded or empty.
+    - STILL DEFERRED (record promotion owner): the real CDP browser + judge LLM
+      COMPOSITION in agent-config-assembler.ts#maybeWireAppshot (gated on
+      QUANTA_APPSHOT=1 AND live browser AND judge). This leaf hardened the tool's
+      OWNED fail-closed contract; the assembler's gating (slot-unset ⇒ tool absent
+      when browser/judge missing) is the outer fail-closed and remains its owner's.

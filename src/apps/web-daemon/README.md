@@ -13,18 +13,29 @@ bun run web:daemon
 bun run src/apps/web-daemon/index.ts
 ```
 
-Defaults: `0.0.0.0:4096`, no auth. The wildcard bind lets phones / other
-LAN devices on the same Wi-Fi reach the daemon — combined with Vite's
-`host: true`, the SPA's URL pill renders a working LAN URL. Pin to
-loopback with `QUANTA_WEB_BIND=127.0.0.1` when you don't want LAN
-exposure:
+Defaults: `127.0.0.1:4096`, no auth. This keeps the daemon local to the
+machine unless LAN exposure is explicitly requested. Bind a wildcard with a
+non-empty bearer token to let phones or other LAN devices connect:
 
 ```bash
 QUANTA_WEB_PORT=4196 \
-QUANTA_WEB_BIND=127.0.0.1 \
+QUANTA_WEB_BIND=0.0.0.0 \
 QUANTA_WEB_AUTH_TOKEN=dev-only \
 bun run web:daemon
 ```
+
+An unauthenticated IPv4 or IPv6 wildcard bind fails startup unless the operator
+sets the exact acknowledgement below. This keeps unauthenticated LAN use
+possible, but makes the exposure deliberate:
+
+```bash
+QUANTA_WEB_BIND=0.0.0.0 \
+QUANTA_WEB_ALLOW_UNAUTHENTICATED_WILDCARD=1 \
+bun run web:daemon
+```
+
+Values such as `true`, `on`, an empty token, or whitespace-only token do not
+satisfy the acknowledgement/auth requirement.
 
 > The entry script requires a composition root to inject a `runtimeFactory`
 > via `main({ runtimeFactory })`. Running `bun run` with no override exits
@@ -66,6 +77,11 @@ either:
   set custom upgrade headers).
 
 Constant-time compare. Missing / wrong token returns HTTP `401`.
+
+`QUANTA_WEB_BIND=0.0.0.0` or `QUANTA_WEB_BIND=::` additionally requires a
+non-empty `QUANTA_WEB_AUTH_TOKEN`, unless
+`QUANTA_WEB_ALLOW_UNAUTHENTICATED_WILDCARD=1` explicitly acknowledges the
+unauthenticated network exposure. The default bind is loopback.
 
 ## Hard rules
 

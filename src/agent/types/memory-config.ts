@@ -16,6 +16,9 @@
  */
 
 import type { Phase1Port, Stage1StorePort } from "@/memory"
+import type { TriggerPolicy } from "@/memory/auto-trigger"
+
+type DistillRedactor = (content: string) => string
 
 /**
  * Nested option shape for `AgentConfig.memory` — long-term memory tuning
@@ -118,6 +121,11 @@ export type MemoryConsolidatorBlock = {
   port?: Phase1Port
   /** Stage1Store (SQLite upsert sink). REQUIRED; absent ⇒ skip. */
   store?: Stage1StorePort
+  /** Host-injected secret redactor applied before the rollout reaches Phase 1. */
+  redact?: DistillRedactor
+  /** Resolved by the memory-auto composition root and consumed by the live
+   *  session-end hook before a mirrored Stage-1 entry becomes injectable. */
+  promotionPolicy?: TriggerPolicy
   /** Stable thread id for the Stage1Output PRIMARY KEY. Falls back to
    *  `config.sessionId` when omitted; if BOTH are absent the call is
    *  skipped (the consolidator refuses an empty thread id). */

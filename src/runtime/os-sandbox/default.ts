@@ -6,6 +6,7 @@ import {
   type NativeLandlockConfig,
   nativeLandlockOsSandbox,
 } from "./landlock-native"
+import { sandboxUnavailableRefusal } from "./refusal"
 import { compileSeatbeltProfile } from "./seatbelt"
 import type {
   OsSandbox,
@@ -96,19 +97,16 @@ const spawnImpl = async (args: {
   if (platform === "darwin") {
     const sandboxExec = await which("sandbox-exec")
     if (sandboxExec === null) {
-      return passthrough(spec, spawner, {
-        sandboxApplied: false,
-        degradeReason: "sandbox-exec-missing",
-      })
+      // FAIL-CLOSED (DOF-40): sandbox requested, sandbox-exec absent ⇒ typed
+      // refusal, command NOT run (was fail-open passthrough).
+      return sandboxUnavailableRefusal("sandbox-exec-missing")
     }
     const profile = compileSeatbeltProfile(policy, spec.cwd)
     if (profile === null) {
       // Shouldn't happen given the off/danger short-circuit above, but the
-      // null branch is part of the typed contract — degrade honestly.
-      return passthrough(spec, spawner, {
-        sandboxApplied: false,
-        degradeReason: "profile-uncompilable",
-      })
+      // null branch is part of the typed contract — FAIL-CLOSED refusal, not a
+      // silent unsandboxed run.
+      return sandboxUnavailableRefusal("profile-uncompilable")
     }
     return runSeatbelt({ sandboxExec, profile, spec, spawner })
   }
@@ -133,10 +131,10 @@ const spawnImpl = async (args: {
     if (await isBubblewrapAvailable(which)) {
       return spawnViaBubblewrap(spec, policy, spawner)
     }
-    return passthrough(spec, spawner, {
-      sandboxApplied: false,
-      degradeReason: "linux-bwrap-missing — install bubblewrap (apt/dnf/pacman)",
-    })
+    // FAIL-CLOSED (DOF-40): no native landlock, no bwrap ⇒ a REQUESTED sandbox
+    // cannot be enforced. Refuse the spawn (typed refusal, command NOT run)
+    // instead of the old degraded passthrough that ran the command unsandboxed.
+    return sandboxUnavailableRefusal("linux-bwrap-missing")
   }
 
   // Windows (win32) — ADR-0441 broker-helper backend:
@@ -155,18 +153,14 @@ const spawnImpl = async (args: {
     if (native !== null) {
       return nativeWindowsOsSandbox(winCfg).spawn(spec, policy)
     }
-    return passthrough(spec, spawner, {
-      sandboxApplied: false,
-      degradeReason:
-        "win32-sandbox-helper-missing — install quanta-win-sandbox.exe for isolation (degraded to passthrough)",
-    })
+    // FAIL-CLOSED (DOF-40): sandbox requested, Windows helper absent ⇒ typed
+    // refusal, command NOT run (was fail-open degraded passthrough).
+    return sandboxUnavailableRefusal("win32-sandbox-helper-missing")
   }
 
-  // Other platforms (sunos, aix, etc.): passthrough + reason.
-  return passthrough(spec, spawner, {
-    sandboxApplied: false,
-    degradeReason: `unsupported-platform:${platform}`,
-  })
+  // Other platforms (sunos, aix, etc.): a requested sandbox cannot be enforced
+  // ⇒ FAIL-CLOSED refusal, never a silent unsandboxed run.
+  return sandboxUnavailableRefusal(`unsupported-platform:${platform}`)
 }
 
 const runSeatbelt = async (args: {

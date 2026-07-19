@@ -1,7 +1,7 @@
 import { z } from "zod"
-import { errMessage } from "@/shared"
+import { errMessage, runtimeConfig } from "@/shared"
+import { withDelegationPolicy } from "@/shared/delegation-policy"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
-import { delegationSuppressEnabled, withDelegationPolicy } from "@/shared/delegation-policy"
 import { validateAgentType } from "./agent-type"
 import { TaskRegistry } from "./registry"
 import type { SubagentRequest, SubagentResult, SubagentRunner, TaskBudget, TaskKind } from "./types"
@@ -214,13 +214,16 @@ export interface AgentToolOptions {
 
 type ToolDenyOr<T> = { kind: "deny"; event: ToolEvent } | { kind: "ok"; value: T }
 
-/** Read the caller's recursion depth off the ToolContext if the host set it.
- *  `ToolContext.depth?: number` is part of the public type; the `>= 0`
- *  typeof guard is a defensive backstop against hosts that leave the field
- *  unset (treated as root) or pass nonsense. */
-const ctxDepth = (ctx: ToolContext): number => {
+/** Read the caller's recursion depth off the ToolContext. `ToolContext.depth?`
+ *  is part of the public type. ABSENT ⇒ 0 (genuine root, per the depth contract).
+ *  MALFORMED (NaN / negative / non-integer) ⇒ `null` so the caller fail-CLOSES —
+ *  mirrors the runner's authoritative `childDepthOf` `SpawnLineageError` discipline
+ *  (this slice can't import `@/agent/spawn-depth`: the subagent slice fence), so a
+ *  corrupt `ctx.depth` NEVER silently coerces to root here. */
+const ctxDepth = (ctx: ToolContext): number | null => {
   const d = ctx.depth
-  return typeof d === "number" && d >= 0 ? d : 0
+  if (d === undefined) return 0
+  return typeof d === "number" && Number.isInteger(d) && d >= 0 ? d : null
 }
 
 const summarize = (r: SubagentResult): string => {
@@ -444,7 +447,9 @@ const checkBackgroundConcurrencyCap = (
 ): ToolEvent | null => {
   if (input.background !== true || maxConcurrent === undefined) return null
   if (countRunning(registry) < maxConcurrent) return null
-  return deny(`Subagent denied: ${maxConcurrent} concurrent subagents already running (cap reached).`)
+  return deny(
+    `Subagent denied: ${maxConcurrent} concurrent subagents already running (cap reached).`,
+  )
 }
 
 interface PreparedAgentExecution {
@@ -463,7 +468,16 @@ const prepareAgentExecution = (
   maxDepth: number,
   opts: AgentToolOptions,
 ): ToolDenyOr<PreparedAgentExecution> => {
-  const childDepth = ctxDepth(ctx) + 1
+  const parentDepth = ctxDepth(ctx)
+  if (parentDepth === null) {
+    return {
+      kind: "deny",
+      event: deny(
+        "Subagent denied: malformed caller depth — cannot derive child lineage (fail-closed).",
+      ),
+    }
+  }
+  const childDepth = parentDepth + 1
   const requesterLineage = lineageOf(ctx)
   if (childDepth > maxDepth) {
     return {
@@ -657,7 +671,7 @@ const AGENT_TOOL_BASE_DESCRIPTION =
  *  single-agent-first delegation policy when the opt-in knob is set (default-OFF
  *  ⇒ byte-identical). Reads the knob at construction time. */
 export const agentToolDescription = (): string =>
-  withDelegationPolicy(AGENT_TOOL_BASE_DESCRIPTION, delegationSuppressEnabled())
+  withDelegationPolicy(AGENT_TOOL_BASE_DESCRIPTION, runtimeConfig().subagentDelegateSuppress)
 
 export const createAgentTool = (
   opts: AgentToolOptions,

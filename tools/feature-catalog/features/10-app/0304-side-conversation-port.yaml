@@ -1,60 +1,36 @@
 id: side-conversation-port
-title: SideConversationPort — CLI engine-internal leak closure (CLI-02)
+title: Side conversation host port
 section: 10
 subsystem: REPL surface composition
 order: 76
-maturity: L3
-status: new
+maturity: L4
+status: stable
 ui_surfaces: [cli]
 monitoring: n-a
 modes: [interactive]
 configurable: integrated
-config_refs:
-  env: []
 owners: ["@songmin"]
-labels: ["surface:cli", "tier:2", "adr-0304", "refactor"]
-depends_on:
-  - repl-slash-ctx-mega-wire
+labels: ["surface:cli", "refactor"]
+depends_on: [runtime-sdk-cutover]
 surface_integration:
   cli: full
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-16"
   evidence:
-    cli: "runs in the interactive CLI — 5/7 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "pure port-extraction refactor (closes a CLI engine-internal import leak), no UI affordance"
-purpose: |
-  Closes the engine-internal leak in the CLI slash-surface where
-  `buildReplSlashCtx` imported `assembleConfig` + `SessionDeps` from
-  `@/apps/cli/internal` to wire the `/side` slash. Introduces a typed
-  `SideConversationPort` injected from the host bootstrap; the slash-surface
-  consumes only the port (no engine internals). After the runtime-SDK session
-  host cutover there is no dedicated `side-conv-wire.ts` helper — the live
-  wire is built in surface composition/runtime host and `runSideChat`
-  (`src/runner/orchestrate/side-chat.ts`) remains unchanged.
+    cli: "The slash surface receives a runtime-owned starter, not runner assembly internals."
+    web: "No web surface."
+purpose: "The host runtime owns isolated side-conversation configuration and the CLI consumes only a typed starter closure."
 evidence:
   code:
     - src/apps/cli/repl/slash-surface.ts
     - src/apps/cli/repl/surface-compose.ts
-    - src/apps/cli/side-cmd.ts
-    - src/apps/cli/slash-contract.ts
-    - src/host/runtime/session-host.ts
-    - src/runner/side-conversation-port.ts
-    - src/runner/orchestrate/side-chat.ts
-  adrs:
-    - docs/decisions/0304-side-conversation-port.md
+    - src/host/runtime/internal/context-binding/side-conversation.ts
+  adrs: [304]
   tests:
-    unit:
-      - tests/unit/apps/cli/side-conv-port-hellgate.test.ts
-      - tests/unit/apps/cli/slashctx-ports-wire-hellgate.test.ts
-      - tests/unit/cli/side-cmd.test.ts
-      - tests/unit/cli/wire-tir-hellgate.test.ts
+    unit: [tests/unit/apps/cli/side-conv-port-hellgate.test.ts, tests/unit/host/runtime-side-conversation-isolation-hellgate.test.ts]
     integration: []
     contract: []
 knobs: []
 deliberate_hold: null
-notes: |
-  Companion of ADR-0299 (CLI-01) and ADR-0303 (thin-surface). Each port
-  extraction shrinks the cross-surface import count counted by the
-  ratchet test. `tests/unit/apps/cli/repl-thin-surface-ownership-hellgate.test.ts`
-  now also pins the absence of `./side-conv-wire`.
+notes: "The obsolete runner port was removed after host cutover."

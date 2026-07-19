@@ -76,6 +76,17 @@ evidence:
       # §6.2 — counter consistency: replace ⇒ tokenTotal()===estimateTokens
       # (snapshot()) no drift; adversarial in-place edit DRIFTS; tokenReseed heals.
       - tests/unit/microcompaction-x-token-delta-hellgate.test.ts
+      # DOF-40 fail-closed (pure core): out-of-bounds tuning REFUSES (typed
+      # MicrocompactTuningError) instead of silently mis-evicting — keepRecent<=0
+      # / non-integer / negative floor / NaN floor all throw BEFORE any evict;
+      # VALID tuning unchanged (bounded evict, working set retained).
+      - tests/unit/microcompaction-tuning-failclosed-hellgate.test.ts
+      # DOF-40 fail-closed (WIRE, real maybeCompact): ON-proof (valid ⇒ real
+      # eviction observed in the live wm, last keepRecent kept) + paired FAIL-
+      # CLOSED (invalid keepRecent=0 injected via runtimeConfig spy ⇒ VISIBLE
+      # recovery:{compact,microcompact-refused}, transcript UNTOUCHED, no silent
+      # wrong evict) + OFF-identity (unset ⇒ byte-identical object refs, no event).
+      - tests/unit/microcompaction-wire-failclosed-hellgate.test.ts
     integration:
       # §6.3 — REAL runAgent: knob-ON clears old tool dumps with ZERO summarizer
       # calls + reasoning verbatim (tier-2 no-op); knob-OFF byte-identical
@@ -115,3 +126,17 @@ notes: |
   ADR-0409 `src/agent/microcompact/`(compaction-visibility.yaml)와 혼동 금지: 그건 whole-MESSAGE
   -drop(orphan guard 無, unwired), 본 슬라이스는 in-place tool-result CONTENT clearing(orphan-safe,
   wired). 다른 알고리즘·다른 safety profile·다른 cost.
+
+  DOF-40 FAIL-CLOSED HARDENING (tuning): keep-recent/floor tuning이 out-of-bounds일 때
+  silent mis-eviction하던 boundary를 typed refusal로 봉인. 이전 갭=pure core가
+  `keepRecent<=0`(→ `Math.max(0,·)`가 working set 전부 evict), non-integer keepRecent(→
+  bogus slice), `tokensSavedFloor=NaN`(→ floor gate `<=NaN` 항상 false → unbounded commit)를
+  전부 SILENT하게 수용(`changed:true`, 무-signal). 이제 `microcompactToolResults`가 스캔/evict
+  전에 `validateMicrocompactTuning`으로 REFUSE(typed `MicrocompactTuningError`, 위반 param 명시).
+  bound=type contract(keepRecent ≥1 int; floor ≥0 finite int)이지 invented threshold 아님
+  (no-heuristics: refusal/bounds만, magnitude 발명 X). env는 이미 `parsePositiveInt`가 정화하나,
+  core가 SSOT chokepoint라 미래 per-session injection path도 커버. WIRE(`maybeMicrocompact`)는
+  refusal을 catch → `recovery:{compact,microcompact-refused}` VISIBLE 방출 + pass SKIP(no
+  wm.replace) = fail CLOSED(turn crash도, silent wrong evict도 아님). cadence-clock는 refuse도
+  스탬프해 misconfigured session이 매 턴 re-throw 안 함. OFF path(knob unset)는 core 미호출이라
+  byte-identical 유지(§6.3 + wire fail-closed OFF-identity 케이스 봉인).

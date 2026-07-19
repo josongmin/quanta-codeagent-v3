@@ -3,10 +3,11 @@ import { z } from "zod"
 import type { runAgent } from "../../src/agent/loop"
 import { buildEffectiveConfig } from "../../src/agent/session-resources"
 import { createSubagentRunner } from "../../src/agent/subagent-runner"
+import { buildChildConfig } from "../../src/agent/subagent-runner-child-config"
 import type { AgentConfig, AgentOutcome } from "../../src/agent/types"
 import type { Message } from "../../src/llm"
 import type { isGitRepo, withWorktree } from "../../src/runtime/worktree"
-import { __resetRuntimeConfig } from "../../src/shared/runtime-config"
+import { __resetRuntimeConfig, runtimeConfigFromEnv } from "../../src/shared/runtime-config"
 import type { SubagentRequest } from "../../src/subagent/types"
 import type { Tool, ToolEvent } from "../../src/tool"
 import { ToolRegistry } from "../../src/tool"
@@ -221,6 +222,50 @@ describe("createSubagentRunner — child config overrides", () => {
     const runner = createSubagentRunner(parentConfig(), { run })
     await runner(req({ toolFilter: [] }))
     expect(at(seen, 0).registry.specs()).toEqual([])
+  })
+
+  test("extraTools bypasses toolFilter without restoring filtered inherited tools", async () => {
+    // GAP7-2: a batch dispatch supplies its per-row reporter through
+    // `extraTools`. It is child-local capability injection, not an inherited
+    // capability, so the request's filter must not drop it. The paired
+    // negatives ensure this does not accidentally turn the filter into a
+    // bypass for the parent's write/bash tools.
+    const { run, seen } = capturing()
+    const reporter = fakeTool("report_agent_job_result")
+    const runner = createSubagentRunner(parentConfig(), { run })
+
+    await runner(req({ toolFilter: ["read"], extraTools: [reporter] }))
+
+    const child = at(seen, 0).registry
+    expect(child.has("read")).toBe(true)
+    expect(child.get("report_agent_job_result")).toBe(reporter)
+    expect(child.has("write")).toBe(false)
+    expect(child.has("bash")).toBe(false)
+  })
+
+  test("QUANTA_FS_OWNERSHIP_ENFORCE parser result is wired into child config", () => {
+    const childFromEnv = (value: string): AgentConfig =>
+      buildChildConfig(
+        parentConfig(),
+        req({ ownedSurfaces: ["src"], forbiddenSurfaces: ["src/secrets"] }),
+        "/repo",
+        { agentId: "child", parentId: "parent" },
+        undefined,
+        undefined,
+        undefined,
+        runtimeConfigFromEnv({ QUANTA_FS_OWNERSHIP_ENFORCE: value }),
+      )
+
+    expect(childFromEnv("off").ownershipPolicy).toMatchObject({
+      owned: ["/repo/src"],
+      forbidden: ["/repo/src/secrets"],
+      enforced: false,
+    })
+    expect(childFromEnv("1").ownershipPolicy).toMatchObject({
+      owned: ["/repo/src"],
+      forbidden: ["/repo/src/secrets"],
+      enforced: true,
+    })
   })
 
   test("maxTurns = budget.maxTurns ?? parent.maxTurns", async () => {

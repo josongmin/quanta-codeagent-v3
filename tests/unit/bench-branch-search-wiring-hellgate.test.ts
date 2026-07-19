@@ -66,10 +66,10 @@ const baseInstance = (swebench: boolean): Instance =>
         id: "h-1",
         repoPath: "/tmp/x",
         problemStatement: "fix it",
-        testCmd: "true",
+        testCmd: "pytest -q",
         swebench: { instanceId: "x__1", repo: "x/x", baseCommit: "deadbeef" },
       }
-    : { id: "h-1", repoPath: "/tmp/x", problemStatement: "fix it", testCmd: "true" }
+    : { id: "h-1", repoPath: "/tmp/x", problemStatement: "fix it", testCmd: "pytest -q" }
 const baseDeps = { llm: new StubLLM(), maxTurns: 1, timeoutMs: 5_000 }
 
 const buildOnce = (): ReturnType<typeof buildConfig> => {
@@ -224,7 +224,7 @@ describe("bench branch-search hellgate — adversarial K values", () => {
     expect(cfg.branchSearch?.defaultN).toBe(3)
     expect(cfg.subagent).toEqual({})
     expect(cfg.skills).toEqual({})
-    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["true"] }) // swebench branch wires this
+    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["pytest -q"] }) // swebench branch wires this
     // lsp-nav grows the registry beyond baseline.
     delete process.env.QUANTA_BENCH_LSP
     const ac2 = new AbortController()
@@ -251,7 +251,7 @@ describe("bench branch-search hellgate — adversarial K values", () => {
     const ac = new AbortController()
     const cfg = buildConfig(baseInstance(true), baseDeps, "/tmp/sb", ac.signal, stubStream)
     // verifyGuard auto-wires for swebench (orthogonal).
-    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["true"] })
+    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["pytest -q"] })
     // branchSearch MUST NOT auto-enable (cost discipline — explicit opt-in only).
     expect("branchSearch" in cfg).toBe(false)
   })

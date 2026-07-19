@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -13,10 +13,28 @@ import { createStubRuntimeFactory } from "./fixture"
 
 const cleanup: WebDaemonHandle[] = []
 
+const networkEnvKeys = [
+  "QUANTA_WEB_BIND",
+  "QUANTA_WEB_AUTH_TOKEN",
+  "QUANTA_WEB_ALLOW_UNAUTHENTICATED_WILDCARD",
+] as const
+const originalNetworkEnv = Object.fromEntries(
+  networkEnvKeys.map((key) => [key, process.env[key]]),
+) as Record<(typeof networkEnvKeys)[number], string | undefined>
+
+beforeEach(() => {
+  for (const key of networkEnvKeys) delete process.env[key]
+})
+
 afterEach(async () => {
   while (cleanup.length > 0) {
     const handle = cleanup.pop()
     if (handle !== undefined) await handle.stop().catch(() => undefined)
+  }
+  for (const key of networkEnvKeys) {
+    const value = originalNetworkEnv[key]
+    if (value === undefined) delete process.env[key]
+    else process.env[key] = value
   }
 })
 
@@ -32,6 +50,27 @@ const boot = async (
   })
   cleanup.push(handle)
   return handle
+}
+
+const attemptBoot = async (overrides: {
+  readonly bind?: string
+  readonly authToken?: string | undefined
+}): Promise<{ readonly handle: WebDaemonHandle } | { readonly error: unknown }> => {
+  const { factory } = createStubRuntimeFactory()
+  try {
+    const handle = await main({ port: 0, runtimeFactory: factory, ...overrides })
+    cleanup.push(handle)
+    return { handle }
+  } catch (error) {
+    return { error }
+  }
+}
+
+const expectRejectedWildcard = async (bind: string, authToken?: string): Promise<void> => {
+  const result = await attemptBoot({ bind, authToken })
+  expect("error" in result).toBe(true)
+  if (!("error" in result)) return
+  expect(String(result.error)).toContain("wildcard bind requires QUANTA_WEB_AUTH_TOKEN")
 }
 
 describe("constantTimeEquals", () => {
@@ -126,6 +165,50 @@ describe("daemon auth gate (HTTP upgrade path)", () => {
     const handle = await boot()
     const res = await fetch(`http://127.0.0.1:${handle.port}/no-such-path`)
     expect(res.status).toBe(404)
+  })
+})
+
+describe("daemon bind/auth startup policy", () => {
+  test("default startup binds loopback rather than an unauthenticated wildcard", async () => {
+    const result = await attemptBoot({ authToken: undefined })
+    if (!("handle" in result)) throw result.error
+    expect(result.handle.hostname).toBe("127.0.0.1")
+  })
+
+  test("IPv4 wildcard without auth fails closed before startup", async () => {
+    await expectRejectedWildcard("0.0.0.0")
+  })
+
+  test("IPv6 wildcard without auth fails closed before startup", async () => {
+    await expectRejectedWildcard("::")
+  })
+
+  test("wildcard with an empty token is still unauthenticated and fails closed", async () => {
+    await expectRejectedWildcard("0.0.0.0", "")
+  })
+
+  test("loopback remains available without auth", async () => {
+    const result = await attemptBoot({ bind: "127.0.0.1", authToken: undefined })
+    if (!("handle" in result)) throw result.error
+    expect(result.handle.hostname).toBe("127.0.0.1")
+  })
+
+  test("wildcard remains available with a non-empty auth token", async () => {
+    const result = await attemptBoot({ bind: "0.0.0.0", authToken: "lan-secret" })
+    if (!("handle" in result)) throw result.error
+    expect(result.handle.hostname).toBe("0.0.0.0")
+  })
+
+  test("wildcard remains available with an explicit strict acknowledgement", async () => {
+    process.env.QUANTA_WEB_ALLOW_UNAUTHENTICATED_WILDCARD = "1"
+    const result = await attemptBoot({ bind: "0.0.0.0", authToken: undefined })
+    if (!("handle" in result)) throw result.error
+    expect(result.handle.hostname).toBe("0.0.0.0")
+  })
+
+  test("loose acknowledgement spelling does not authorize a wildcard", async () => {
+    process.env.QUANTA_WEB_ALLOW_UNAUTHENTICATED_WILDCARD = "true"
+    await expectRejectedWildcard("0.0.0.0")
   })
 })
 

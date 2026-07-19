@@ -42,5 +42,6 @@ evidence:
     unit:
       - tests/unit/agent/language-detect.test.ts
       - tests/unit/agent/language-hint-prompt-hellgate.test.ts
-    integration: []
+    integration:
+      - tests/integration/language-detect-turn-context-consumer-e2e.test.ts
     contract: []

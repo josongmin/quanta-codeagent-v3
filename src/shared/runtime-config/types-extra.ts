@@ -560,18 +560,15 @@ export interface RuntimeConfigPaths {
    *  (gateOn vocab) AND `QUANTA_STATUS_LINE_CONFIG` is a JSON object carrying a
    *  usable `command`. Absent ⇒ the built-in segmented `/context` status render
    *  is the only render (byte-identical).
-   *  SEAM (validated, not yet composed at the render root): the runner
-   *  (`apps/cli/status-command-runner.ts` `runStatusCommand`), the payload
-   *  assembler (`buildStatusPayload`), and the palette SSOT (`getColorPalette`)
-   *  all exist and are unit-tested (args-based spawn / CC `Status` JSON on stdin /
-   *  ANSI-aware first-line truncation), but NO production code reads this field at
-   *  the REPL status-render call-site to invoke the command per status tick yet.
-   *  Until that auto-render composition lands (a deliberate follow-up), this
-   *  field has zero production consumers and statusLineConfig has NO production
-   *  render effect — byte-identical even when ON, because the field is unread at
-   *  the render root. Intended end state: when ON the CLI REPL runs the
+   *  LIVE consumer: `apps/cli/repl/session-setup.ts` (~L387) reads
+   *  `runtimeConfig().statusLineConfig`; when defined it builds a session status
+   *  view and a `StatusLineDriver` (`createStatusLineDriver`) that runs the
    *  operator-authored command per status tick (args-based spawn, NO shell, CC
-   *  `Status` JSON on stdin) and renders its first stdout line in place of the
-   *  fixed line. */
+   *  `Status` JSON on stdin) and routes its first stdout line into the pills row
+   *  as the far-right segment. Backed by the runner
+   *  (`apps/cli/status-command-runner.ts` `runStatusCommand`), the payload
+   *  assembler (`buildStatusPayload`), and the palette SSOT (`getColorPalette`).
+   *  Default false ⇒ no driver is created, no view thunk, no poll — byte-identical.
+   *  A live render consumer exists when ON. */
   readonly statusLineConfig: StatusLineConfig | undefined
 }

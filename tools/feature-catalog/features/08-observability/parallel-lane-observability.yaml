@@ -44,7 +44,8 @@ evidence:
     - src/runner/batch/eval/lane-progress.ts
     - src/apps/bench/lane-progress-renderer.ts
     - src/llm/with-recording-lane.ts
-  adrs: []
+  adrs:
+    - docs/decisions/0541-parallel-lane-observability.md
   tests:
     unit:
       - tests/unit/lane-progress-hellgate.test.ts

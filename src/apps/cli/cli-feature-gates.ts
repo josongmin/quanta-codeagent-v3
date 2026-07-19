@@ -44,6 +44,15 @@ export const CLI_FEATURE_GATES: readonly CliFeatureGate[] = [
     gate: "QUANTA_STALE_READ_GUARD",
     describe: "Block write/edit of a file externally modified since the agent read it",
   },
+  // Protective correctness guard — defer a mid-flight abort until an atomic FS
+  // critical section (apply-patch / write / scripted-replace) completes, so an
+  // interrupt cannot leave a half-written file. OFF byte-identical in normal
+  // operation; the deferral is watchdog-bounded (cannot hang). ALSO a
+  // RuntimeConfig field → its `/help` row comes from ENV_TABLE (derived skips).
+  {
+    gate: "QUANTA_TOOL_INTERRUPT_BLOCK",
+    describe: "Defer an interrupt until an atomic file write finishes (no half-written files)",
+  },
   // ADR-0471 (H2) — structural prompt-injection defense. ALSO a RuntimeConfig
   // field, so its `/help` row comes from ENV_TABLE (curated) — the derived
   // section skips it (exactly-once parity).

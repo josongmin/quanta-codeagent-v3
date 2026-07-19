@@ -264,6 +264,30 @@ describe("runMemoryConsolidatorHook — happy path + force_summarization", () =>
     store.close()
   })
 
+  test("resolved minUsageCount can keep a newly mirrored row out of next-session injection", async () => {
+    const port = makePort({ summary: "carry forward" })
+    const store = makeStore()
+    const mirror = new InMemoryStage1Store({ now: () => 123 })
+    const out = await runMemoryConsolidatorHook({
+      sessionOk: true,
+      consolidator: {
+        enabled: true,
+        port,
+        store,
+        promotionPolicy: { promoteThreshold: 0, minUsageCount: 2 },
+      },
+      sessionId: "s-min-usage",
+      rolloutMessages: rollout(5),
+      turnCount: 5,
+      stage1OutputsStore: mirror,
+      now: () => 123,
+    })
+    expect(out.kind).toBe("distilled")
+    expect(mirror.get("s-min-usage")?.usageCount).toBe(1)
+    expect(mirror.get("s-min-usage")?.selectedForPhase2).toBe(false)
+    store.close()
+  })
+
   test("forceSummarization:true alone (enabled UNSET) → still distills", async () => {
     const port = makePort()
     const store = makeStore()

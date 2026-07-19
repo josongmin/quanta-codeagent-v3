@@ -29,14 +29,14 @@ import { dirname } from "node:path"
 import { errMessage, omitUndef, type Result } from "@/shared"
 import { InMemoryRadarStore } from "./in-memory-store"
 import type { RadarOpError, RadarStore } from "./port"
-import type { CardKind, CardStatus, ProposeOpts, RadarCard } from "./types"
+import type { BugFixProposalMetadata, CardKind, CardStatus, ProposeOpts, RadarCard } from "./types"
 
 /** No-op warning sink. Replace via opts.onWarn for visibility. */
 const defaultOnWarn = (_msg: string): void => {
   /* swallow — opt-in observability via opts.onWarn */
 }
 
-const KNOWN_KINDS: readonly CardKind[] = ["suggestion", "warning", "next-step"]
+const KNOWN_KINDS: readonly CardKind[] = ["suggestion", "warning", "next-step", "bug-fix"]
 const KNOWN_STATUSES: readonly CardStatus[] = ["active", "adopted", "dismissed", "expired"]
 
 const isCardKind = (v: unknown): v is CardKind =>
@@ -44,6 +44,28 @@ const isCardKind = (v: unknown): v is CardKind =>
 
 const isCardStatus = (v: unknown): v is CardStatus =>
   typeof v === "string" && (KNOWN_STATUSES as readonly string[]).includes(v)
+
+const isBugFixMetadata = (v: unknown): v is BugFixProposalMetadata => {
+  if (typeof v !== "object" || v === null) return false
+  const b = v as Record<string, unknown>
+  return (
+    typeof b.errorSummary === "string" &&
+    typeof b.file === "string" &&
+    typeof b.line === "number" &&
+    Array.isArray(b.hypothesisRanked) &&
+    b.hypothesisRanked.every(
+      (h) =>
+        typeof h === "object" &&
+        h !== null &&
+        typeof (h as Record<string, unknown>).cause === "string" &&
+        typeof (h as Record<string, unknown>).fix === "string" &&
+        (["high", "medium", "low"] as const).includes(
+          (h as Record<string, unknown>).confidence as "high" | "medium" | "low",
+        ),
+    ) &&
+    (b.verifyRail === undefined || typeof b.verifyRail === "string")
+  )
+}
 
 const isRadarCard = (v: unknown): v is RadarCard => {
   if (typeof v !== "object" || v === null) return false
@@ -56,6 +78,8 @@ const isRadarCard = (v: unknown): v is RadarCard => {
   if (typeof r.createdAtMs !== "number") return false
   if (!isCardStatus(r.status)) return false
   if (typeof r.engagementCount !== "number") return false
+  if (r.kind === "bug-fix" && !isBugFixMetadata(r.bugFix)) return false
+  if (r.bugFix !== undefined && !isBugFixMetadata(r.bugFix)) return false
   return true
 }
 
@@ -147,6 +171,7 @@ export class JsonlFileRadarStore implements RadarStore {
           description: op.card.description,
           ...(op.card.sessionId !== undefined ? { sessionId: op.card.sessionId } : {}),
           createdAtMs: op.card.createdAtMs,
+          ...(op.card.bugFix !== undefined ? { bugFix: op.card.bugFix } : {}),
         })
       } else if (op.op === "setStatus") {
         this.setStatus(op.id, op.status)

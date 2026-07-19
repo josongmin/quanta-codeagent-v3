@@ -105,6 +105,11 @@ export const buildSurfaceDispatch = (args: {
    *  the surface minted the store; absent ⇒ slot omitted ⇒ `/goal` prints "not
    *  wired" (default-OFF byte-identical). */
   readonly goal?: SlashContext["goal"]
+  /** §9.6 `/presets` — the shared `StickyPresetResolver` (the SAME instance the
+   *  loop's role→model resolution consults). Present iff the surface minted it;
+   *  absent ⇒ slot omitted ⇒ `/presets` prints "not wired" (default-OFF
+   *  byte-identical). */
+  readonly presets?: SlashContext["presets"]
 }): ((input: string) => Promise<boolean>) => {
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
@@ -190,6 +195,10 @@ export const buildSurfaceDispatch = (args: {
       // `/goal` (Codex parity) — shared objective store + thread id. Absent ⇒
       // slot omitted ⇒ `/goal` prints "not wired" (default-OFF byte-identical).
       ...(args.goal !== undefined ? { goal: args.goal } : {}),
+      // §9.6 `/presets` — shared sticky preset resolver (SAME instance the loop
+      // consults for role→model). Absent ⇒ slot omitted ⇒ `/presets` prints
+      // "not wired" (default-OFF byte-identical).
+      ...(args.presets !== undefined ? { presets: args.presets } : {}),
     }
     await runSlashCommand(input, ctx)
     return true

@@ -47,6 +47,18 @@ export type SubagentBlock = {
    *  the shared instance (host-side cleanup is owned by the loop's cleanup
    *  hook, ADR-0011). */
   taskRegistry?: import("../../subagent").TaskRegistry
+  /** WS4 (RFC jul-18 §3.5, §4.3) — the SESSION-shared steer plane: ONE retention
+   *  store (accepted-steer payloads keyed by `deliveryId`) + ONE finalization port
+   *  (closes every accepted steer exactly once). The delivery controller
+   *  (tier1/subagent-introspect) retains INTO the store on admission; the child
+   *  loop (threaded by the runner) drains + finalizes THROUGH the port. Shared so
+   *  the two ends address one payload map — no second registry (RFC §4.3). Present
+   *  ONLY when `enableSteer` (default-OFF ⇒ absent ⇒ no retention, no safe-point,
+   *  byte-identical). */
+  steerPlane?: {
+    readonly retention: import("../subagent-delivery/controller").SteerRetentionStore
+    readonly finalization: import("../subagent-delivery/ports").SubagentSteerFinalizationPort
+  }
   /** jun-15 P0-b — OPT-IN session Activity Spine store. When the surface provides
    *  one, the tier-1 `run_workflow` tool streams its live phases/steps into it so
    *  `/activity` shows the running multi-agent workflow. Absent ⇒ no activity
@@ -105,6 +117,13 @@ export type SubagentBlock = {
    *  (trigger). With no live waker the tool delivers the message and reports
    *  honest degradation (`cause:"no_waker"`). */
   enableFollowup?: boolean
+  /** WS4 (RFC jul-18 §9) — opt-in `mode:"steer"` targeted child steer. Absent/
+   *  `false` ⇒ the delivery controller's `steerEnabled` is FALSE, so a
+   *  `mode:"steer"` request is rejected as `mode_disabled` (never a silent queue)
+   *  AND the child loop runs NO post-stream safe-point drain (byte-identical). The
+   *  composition root sets this from `QUANTA_SUBAGENT_STEER`. Requires
+   *  `enableFollowup` (steer rides the same delivery/control substrate). */
+  enableSteer?: boolean
   /** §25.1 — opt-in `run_workflow` tool (LLM-authored declarative multi-agent
    *  orchestration). Absent/`false` ⇒ NOT registered (byte-identical). `true` ⇒
    *  the tier-1 subagent block builds it against the SAME injected runner the

@@ -42,6 +42,22 @@ export interface PendingApprovalView {
   readonly scopeContext?: ApprovalScopeContext
 }
 
+/**
+ * Ticket 04 (S4) — the token-usage view carried on {@link SessionStateView}. The
+ * kernel already accumulates usage into its session state on every mid-turn
+ * `usage` event (`bumpSessionState({ lastTokenUsage })`), but `toSessionStateView`
+ * historically dropped it, so a snapshot-only wire consumer never saw mid-turn
+ * usage. This projects it — a numeric-only view (no strings ⇒ no redaction /
+ * strip concern; the S3 per-peer strip does not apply). Gated on
+ * `QUANTA_SESSION_FULL_FIDELITY` at the projection site (default-OFF absent).
+ */
+export interface SessionTokenUsageView {
+  readonly promptTokens?: number
+  readonly completionTokens?: number
+  readonly totalTokens?: number
+  readonly costMicroUsd?: number
+}
+
 export interface SessionStateView {
   readonly status: "idle" | "running" | "awaiting_approval" | "failed" | "closed"
   readonly draftInput: string
@@ -58,6 +74,10 @@ export interface SessionStateView {
     readonly policy?: import("@/shared/turn-policy-types").TurnPolicySnapshot
   }
   readonly lastLlmContinuation?: LlmContinuationObservation
+  /** Ticket 04 (S4) — the most recent mid-turn token usage. Present ONLY when
+   *  `QUANTA_SESSION_FULL_FIDELITY` is ON (projection-gated); absent ⇒ byte-
+   *  identical default-OFF. See {@link SessionTokenUsageView}. */
+  readonly lastTokenUsage?: SessionTokenUsageView
 }
 
 export interface SessionSnapshotLite {

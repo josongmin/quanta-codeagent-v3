@@ -117,7 +117,7 @@ export const reproGroundingSchema: KnobSchema<boolean> = {
 }
 
 /* ── repro-doubt (QUANTA_BENCH_REPRO_DOUBT) ───────────────────────────────── */
-interface ReproDoubtValue {
+export interface ReproDoubtValue {
   readonly stuckRuns: number
 }
 const parseReproDoubt = (raw: string | undefined): ReproDoubtValue | undefined => {

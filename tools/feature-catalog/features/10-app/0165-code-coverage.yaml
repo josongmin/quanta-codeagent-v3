@@ -10,7 +10,7 @@ monitoring: integrated
 modes: [interactive, headless, batch, ci-bot]
 configurable: integrated
 config_refs:
-  env: []
+  env: [QUANTA_COVERAGE_TOOL]
 owners: ["@songmin"]
 labels: ["adr-0165", "tier:1", "observability", "coverage"]
 depends_on:
@@ -34,7 +34,8 @@ purpose: |
   Weighted totals — a 1000-line file at 50% does NOT weight the same as a
   10-line file at 100%. `bun test --coverage` and nyc/istanbul both miss
   `MetricSink` integration; no modern agent surfaces typed per-file
-  coverage.
+  coverage. The CLI tool manifest seeds an unset `QUANTA_COVERAGE_TOOL` to
+  `1`; an explicit falsy value removes the tool without weakening jail or HITL.
 evidence:
   code:
     - src/observability/coverage/port.ts
@@ -51,7 +52,10 @@ evidence:
       - tests/unit/tool/coverage-check-hellgate.test.ts
     integration: []
     contract: []
-knobs: []
+knobs:
+  - name: QUANTA_COVERAGE_TOOL
+    default: "CLI unset -> 1 (on); other surfaces follow host config"
+    purpose: "Expose the read-only coverage_check tool; explicit falsy value is the rollback"
 deliberate_hold: null
 notes: |
   37 hellgate cases combined. Verdict is closed 2-arm; adding a 3rd arm

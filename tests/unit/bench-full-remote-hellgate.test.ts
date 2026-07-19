@@ -188,6 +188,11 @@ const countCalls = (
   pred: (c: { cmd: string; args: string[] }) => boolean,
 ): number => calls.filter(pred).length
 
+/** Default full-remote cassettes are per-instance files under the parent of
+ * `$HOME/quanta/bench-trajectory.jsonl`, fetched as one tar/base64 archive. */
+const isTrajectoryArchiveFetch = (c: { cmd: string; args: string[] }): boolean =>
+  c.cmd === "ssh" && c.args.some((arg) => arg.includes("tar -C $HOME/quanta/trajectories -cf - ."))
+
 const waitForCondition = async (
   pred: () => boolean,
   opts: { timeoutMs?: number; pollMs?: number } = {},
@@ -318,9 +323,10 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
 
   test("DEFAULT-ON: trajectory cassette is fetched back before terminating", async () => {
     // With default-on recording EVERY full-remote run must leave a readable
-    // trajectory locally — so the box's cassette is scp'd back (mirrors the
-    // observe/report fetch). Red-on-injection: drop the trajectory
-    // fetchOptionalArtifact (or its default-on gate) and this fails.
+    // trajectory locally — so the box's per-instance cassettes are archived
+    // back before terminate (mirrors the observe/report fetch). Red-on-
+    // injection: drop fetchTrajectoryFiles (or its default-on gate) and this
+    // fails; changing it to a stale flat-cassette fetch also fails.
     const savedRec = process.env.QUANTA_BENCH_RECORD_TRAJECTORY
     delete process.env.QUANTA_BENCH_RECORD_TRAJECTORY
     try {
@@ -328,10 +334,12 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       await createFullRemoteBackend({ ...baseCfg, spawn: fn })
         .run()
         .catch(() => undefined)
-      const fetchedTrajectory = calls.some(
-        (c) => c.cmd === "ssh" && c.args.some((a) => /cat \S*bench-trajectory\.jsonl/.test(a)),
+      const trajectoryFetchIndex = calls.findIndex(isTrajectoryArchiveFetch)
+      const terminateIndex = calls.findIndex(
+        (c) => c.cmd === "aws" && c.args.includes("terminate-instances"),
       )
-      expect(fetchedTrajectory).toBe(true)
+      expect(trajectoryFetchIndex).toBeGreaterThanOrEqual(0)
+      expect(terminateIndex).toBeGreaterThan(trajectoryFetchIndex)
     } finally {
       if (savedRec === undefined) delete process.env.QUANTA_BENCH_RECORD_TRAJECTORY
       else process.env.QUANTA_BENCH_RECORD_TRAJECTORY = savedRec
@@ -351,10 +359,7 @@ describe("full-remote executor (injected spawn — no real box/token)", () => {
       )
       const cmd = benchRun?.args.join(" ") ?? ""
       expect(cmd).not.toContain("QUANTA_BENCH_RECORD_TRAJECTORY=")
-      const fetchedTrajectory = calls.some(
-        (c) => c.cmd === "ssh" && c.args.some((a) => /cat \S*bench-trajectory\.jsonl/.test(a)),
-      )
-      expect(fetchedTrajectory).toBe(false)
+      expect(calls.some(isTrajectoryArchiveFetch)).toBe(false)
     } finally {
       if (savedRec === undefined) delete process.env.QUANTA_BENCH_RECORD_TRAJECTORY
       else process.env.QUANTA_BENCH_RECORD_TRAJECTORY = savedRec

@@ -169,14 +169,14 @@ describe("verify-checkpoint-bridge wiring — hellgate", () => {
     expect(markVerifiedCalls).toEqual(["/abs/workspace/B"])
   })
 
-  test("(3b) ALBB-21: markVerified throw ⇒ still no throw AND one logger.debug breadcrumb", async () => {
+  test("(3b) ALBB-21: markVerified throw ⇒ still no throw AND one logger.warn breadcrumb", async () => {
     // The empty catch used to swallow SILENTLY: a `markVerified` failure left
     // the verified anchor un-advanced with no greppable trace of WHY. The fix
-    // keeps the no-throw contract but logs ONE `logger.debug` line inside the
+    // keeps the no-throw contract but logs ONE `logger.warn` line inside the
     // catch. Direct bridge test (the catch lives in `defaultVerifyCheckpointBridge`)
     // so the microtask timing is deterministic and the spy is unambiguous.
     const { odb, markVerifiedCalls } = makeOdbSpy({ throwOnMark: true })
-    const debugSpy = spyOn(logger, "debug").mockImplementation(() => {})
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {})
     try {
       const bridge = defaultVerifyCheckpointBridge(odb)
       let threw: unknown = null
@@ -186,23 +186,23 @@ describe("verify-checkpoint-bridge wiring — hellgate", () => {
       })
       expect(threw).toBeNull()
       expect(markVerifiedCalls).toEqual(["/abs/workspace/B2"])
-      expect(debugSpy).toHaveBeenCalledTimes(1)
+      expect(warnSpy).toHaveBeenCalledTimes(1)
     } finally {
-      debugSpy.mockRestore()
+      warnSpy.mockRestore()
     }
   })
 
-  test("(3c) ALBB-21: markVerified SUCCEEDS ⇒ NO logger.debug breadcrumb (only the failure logs)", async () => {
-    // Red-on-injection guard: a blanket `logger.debug` on every call (not just
+  test("(3c) ALBB-21: markVerified SUCCEEDS ⇒ NO logger.warn breadcrumb (only the failure logs)", async () => {
+    // Red-on-injection guard: a blanket `logger.warn` on every call (not just
     // the catch) would make the breadcrumb meaningless. The happy path must be
     // silent.
     const { odb } = makeOdbSpy() // markVerified resolves
-    const debugSpy = spyOn(logger, "debug").mockImplementation(() => {})
+    const warnSpy = spyOn(logger, "warn").mockImplementation(() => {})
     try {
       await defaultVerifyCheckpointBridge(odb).onVerifySuccess("/abs/workspace/B3")
-      expect(debugSpy).toHaveBeenCalledTimes(0)
+      expect(warnSpy).toHaveBeenCalledTimes(0)
     } finally {
-      debugSpy.mockRestore()
+      warnSpy.mockRestore()
     }
   })
 

@@ -12,6 +12,8 @@
 
 import { describe, expect, test } from "bun:test"
 import { runTurn } from "@/agent/loop/same-turn-engine"
+import { type BgSummaryPayload } from "@/agent/compaction"
+import { BackgroundSummarizationController } from "@/agent/compaction/background"
 import { freshRecovery } from "@/agent/recovery"
 import type { TurnSession, TurnState } from "@/agent/turn-context"
 import type { AgentConfig } from "@/agent/types"
@@ -72,5 +74,83 @@ describe("same-turn-engine #14 post-prep abort recheck", () => {
 
     expect(result.kind).toBe("aborted")
     expect(streamCalled).toBe(false)
+  })
+
+  test("a stream abort cancels an armed background summarizer before it can do late work", async () => {
+    const ctrl = new AbortController()
+    let releaseSummarizer: (() => void) | undefined
+    let lateSummarizerWork = 0
+    const bgCompaction = new BackgroundSummarizationController<BgSummaryPayload>(
+      async ({ cancel }) => {
+        await new Promise<void>((resolve) => {
+          releaseSummarizer = resolve
+        })
+        // This models the expensive provider action after the async boundary.
+        // A stream-aborted turn must flip this token first, so no late work runs.
+        if (!cancel.aborted) lateSummarizerWork += 1
+        return {
+          ok: true,
+          value: { summary: [], resultingTokens: 0, summarizedPrefixLen: 0 },
+        }
+      },
+      () => 0,
+      {
+        startAtUnusedTokens: 1,
+        startAtUnusedPercent: 0,
+        persistUnusedTokens: 0,
+        persistUnusedPercent: 0,
+      },
+    )
+    // Arm the real controller before the stream begins. This is deliberately
+    // independent of proactive compaction: the regression is the early stream
+    // exit that bypassed the normal turn-boundary reconciliation path.
+    expect(bgCompaction.maybeStart({ usedTokens: 100, limitTokens: 100 })).toBe(true)
+
+    const registry = new ToolRegistry([])
+    const config = {
+      llm: {
+        stream: async function* () {
+          ctrl.abort()
+          throw new Error("provider observed abort")
+        },
+      },
+      registry,
+      stream: { emit: () => {} },
+      permission: { mode: "default" },
+      messages: [],
+      system: "",
+      cwd: "/tmp",
+      maxTurns: 1,
+      signal: ctrl.signal,
+    } as unknown as AgentConfig
+    const session: TurnSession = {
+      config,
+      specs: registry.specs(),
+      guards: [],
+      bgCompaction,
+    }
+    const state: TurnState = {
+      wm: createWorkingMemory<Message>([
+        { role: "user", content: [{ type: "text", text: "hi" }] },
+      ]),
+      rec: freshRecovery(),
+      breaker: undefined,
+      toolHistory: undefined,
+      workingState: undefined,
+      collector: undefined,
+      toolChoiceState: {} as TurnState["toolChoiceState"],
+      citations: [],
+      onRedaction: () => {},
+      onTurnTiming: undefined,
+    }
+
+    const result = await runTurn(1, session, state)
+    expect(result.kind).toBe("aborted")
+    expect(bgCompaction.hasPendingPass()).toBe(true)
+
+    releaseSummarizer?.()
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(lateSummarizerWork).toBe(0)
   })
 })

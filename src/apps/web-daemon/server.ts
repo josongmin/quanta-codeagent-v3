@@ -22,6 +22,7 @@ import type { RuntimeSession } from "@/sdk/runtime"
 import { loadSessionById } from "@/session"
 import { errMessage, logger } from "@/shared"
 import type { CostReadoutTotals, WebReadoutSources } from "./readout"
+import { setupApprovalContinuation } from "./server/approval-continuation"
 import { type CanvasArtifactFeed, setupCanvasArtifactBridge } from "./server/canvas-artifact-bridge"
 import { buildFetchHandler } from "./server/fetch-handler"
 import { setupFollowerApproval } from "./server/follower-approval"
@@ -42,7 +43,10 @@ import { installSubagentSource, type SubagentSourceHandle } from "./subagent-sou
 import type { WebDaemonConfig, WebDaemonHandle } from "./types"
 
 export { parseFollowerApprovalTimeoutMs } from "./server/follower-approval"
-export { HEARTBEAT_INTERVAL_MS, replyToHeartbeat } from "./server/heartbeat"
+// jul-16 — heartbeat responder hoisted to `@/ipc/session` (every session.v1
+// server can pong now, not just this WS daemon). Re-exported here so existing
+// `@/apps/web-daemon/server` importers are unchanged.
+export { HEARTBEAT_INTERVAL_MS, replyToHeartbeat } from "@/ipc/session"
 export {
   _serveStaticSpaForTest,
   CONFIG_ALLOWED_KEYS,
@@ -298,6 +302,12 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
   } = setupFollowerApproval(config, sharedSession)
   let followerApprovalUnsub = followerApprovalUnsub0
   let followerSweepTimer = followerSweepTimer0
+  // ADR-0540 W1-B — daemon-owned post-approval continuation. Gate ON ⇒ every
+  // `approval.resolved(approve)` enqueues a daemon-minted bare `turn.run` on
+  // the session dispatch tail (clients see the `serverAutoContinues` capability
+  // marker and skip their own re-issue). Gate OFF ⇒ `unsub` is null and NOTHING
+  // was subscribed (byte-identical legacy client-owned continuation).
+  let approvalContinuationUnsub = setupApprovalContinuation(sharedSession, process.env).unsub
 
   // UUX-1-11 — readout sources for `GET /readout/:name`. The production
   // runtime-factory exposes a `readoutSources` getter (agents / plan / skills /
@@ -385,6 +395,11 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
         clearInterval(followerSweepTimer)
         followerSweepTimer = null
       }
+      // ADR-0540 W1-B — detach the daemon-owned continuation subscription so a
+      // late `approval.resolved` can never enqueue against a closed session
+      // (optional-call form, mirroring `threadStore?.close()` below).
+      approvalContinuationUnsub?.()
+      approvalContinuationUnsub = null
       // UUX-1-11 — stop the cost fold so it never fires against a closed session.
       if (transcriptPersistUnsub !== null) {
         transcriptPersistUnsub()

@@ -19,15 +19,16 @@
  */
 import { describe, expect, test } from "bun:test"
 import { wireOptionalAgentPorts } from "../../src/agent/optional-ports"
+import {
+  createSubagentDeliveryController,
+  createTargetResolver,
+  type DeliveryMailboxPort,
+  type SubagentControlRegistry,
+} from "../../src/agent/subagent-delivery"
 import { buildSubagentBatchBlock } from "../../src/agent/tier1/subagent-batch"
 import { buildSubagentIntrospectBlock } from "../../src/agent/tier1/subagent-introspect"
 import type { AgentConfig } from "../../src/agent/types"
-import {
-  handleFollowupTask,
-  type MailboxSendPort,
-  TaskRegistry,
-  TurnWakeRegistry,
-} from "../../src/subagent"
+import { handleFollowupTask, TaskRegistry, TurnWakeRegistry } from "../../src/subagent"
 import type { Tool, ToolEvent } from "../../src/tool"
 
 /** Minimal `OptionalPortBase`-shaped config. Only the fields the wire reads
@@ -143,13 +144,19 @@ describe("subagent tool knobs — composition-root wire (ADR-0436/0437)", () => 
 
     const childId = registry.newId()
     registry.register({ id: childId, description: "child task" })
-    // Simulate the subagent runner registering a per-child waker keyed by the
-    // child's registry task id (registerChildWaker in subagent-runner.ts) INTO
-    // the SAME wired registry.
+    // Simulate the subagent runner registering a per-child control ENDPOINT keyed
+    // by the child's registry task id (WS2 registerEndpoint) INTO the SAME wired
+    // registry — this is what the WS3 delivery controller drives.
     let woken = ""
-    const unregister = wake.register(childId, (reason) => {
-      woken = reason
-      return "woke"
+    const unregister = wake.registerEndpoint(childId, {
+      mailboxLabel: childId,
+      wake: () => {
+        woken = "followup"
+        return "woke"
+      },
+      interrupt: () => "woke_idle",
+      steer: () => "accepted",
+      currentTurnId: () => "turn-fake",
     })
 
     // Drive the actual registered tool via Tool.execute (true end-to-end).
@@ -172,13 +179,27 @@ describe("subagent tool knobs — composition-root wire (ADR-0436/0437)", () => 
     const registry = new TaskRegistry()
     const childId = registry.newId()
     registry.register({ id: childId, description: "child" })
-    // No waker registered into the wired registry ⇒ honest no_waker degrade.
+    // No control ENDPOINT registered into the wired registry ⇒ the ensure-turn
+    // wake has no live receiver ⇒ honest no_waker degrade (surfaced as error).
+    const wake = wired.subagentTurnWake as NonNullable<AgentConfig["subagentTurnWake"]>
+    const control = wake as unknown as SubagentControlRegistry
     const out = handleFollowupTask(
       { agentId: childId, message: "x" },
       {
-        registry,
-        mailbox: wired.subagentMailbox as unknown as MailboxSendPort,
-        wake: wired.subagentTurnWake as NonNullable<AgentConfig["subagentTurnWake"]>,
+        delivery: createSubagentDeliveryController({
+          control,
+          mailbox: wired.subagentMailbox as unknown as DeliveryMailboxPort,
+          formatPeer: (from, kind, body) => `[teammate ${from} — untrusted] [${kind}] ${body}`,
+          resolveTarget: createTargetResolver({ registry, control }),
+          newDeliveryId: (() => {
+            let n = 0
+            return () => {
+              n += 1
+              return `del-${n}`
+            }
+          })(),
+          steerEnabled: false,
+        }),
         callerLabel: "parent",
       },
     )

@@ -21,6 +21,7 @@
  *   - E2E: spawn → exec → write → wait → close end-to-end with real subprocess
  */
 import { afterEach, describe, expect, test } from "bun:test"
+import type { Subprocess } from "bun"
 import {
   dispatchSubagent6,
   handleCloseAgent,
@@ -59,6 +60,11 @@ const trackPty = (): PtyTable => {
   ptyTables.push(t)
   return t
 }
+
+/** Test-only inert kill handle for manually-installed PTY slots. Production
+ * slots receive an injected or legacy process-tree killer from exec_command. */
+const inertKillHandle = { kill: () => {}, disarm: () => {} }
+const inertPtyProcess = {} as Subprocess<"pipe", "pipe", "pipe">
 
 afterEach(() => {
   // Defensive: every test that creates a PtyTable through `trackPty` gets
@@ -164,11 +170,11 @@ describe("HELLGATE — handleExecCommand", () => {
     // is on `table.size()` so a stub slot suffices.
     for (let i = 0; i < MAX_PTY; i++) {
       table.set(900_000 + i, {
-        // biome-ignore lint/suspicious/noExplicitAny: stub slot for the cap probe
-        proc: {} as any,
+        proc: inertPtyProcess,
         startedAt: 0,
         command: "stub",
         exited: Promise.resolve(0),
+        killHandle: inertKillHandle,
       })
     }
     const r = await handleExecCommand(
@@ -258,6 +264,7 @@ describe("HELLGATE — handleWriteStdin", () => {
       startedAt: Date.now(),
       command: "cat > /dev/null",
       exited: proc.exited as Promise<number>,
+      killHandle: inertKillHandle,
     })
     try {
       const r1 = await handleWriteStdin({ pid: proc.pid, data: "abc" }, { ptyTable: table })
@@ -294,6 +301,7 @@ describe("HELLGATE — handleWriteStdin", () => {
       startedAt: Date.now(),
       command: "true",
       exited: proc.exited as Promise<number>,
+      killHandle: inertKillHandle,
     })
     // Wait for the child to fully die.
     await proc.exited
@@ -324,6 +332,7 @@ describe("HELLGATE — handleWriteStdin", () => {
       startedAt: Date.now(),
       command: "cat",
       exited: proc.exited as Promise<number>,
+      killHandle: inertKillHandle,
     })
     try {
       const results = await Promise.all([
@@ -356,6 +365,33 @@ describe("HELLGATE — handleSpawnAgent", () => {
     )
     expect(r.kind).toBe("error")
     if (r.kind === "error") expect(r.cause).toBe("depth_exceeded")
+  })
+
+  // FAIL-CLOSED: a MALFORMED parentDepth (NaN / negative / non-integer) must DENY,
+  // not compute a spuriously-shallow child that wrongly passes the cap. maxDepth is
+  // WIDE (100) so a fail-OPEN regression (coercing NaN→0 ⇒ child 1 <= 100 ⇒ pass)
+  // would flip these RED. Mirrors the authoritative runner childDepthOf discipline.
+  test("malformed parentDepth (NaN / -1 / 2.5) ⇒ DENIED cause:depth_exceeded (fail-closed, wide cap)", async () => {
+    for (const bad of [Number.NaN, -1, 2.5]) {
+      const reg = new TaskRegistry()
+      const r = await handleSpawnAgent(
+        { prompt: "do a thing" },
+        { runner: slowRunner(10), registry: reg, maxDepth: 100, parentDepth: bad },
+      )
+      expect(r.kind).toBe("error")
+      if (r.kind === "error") expect(r.cause).toBe("depth_exceeded")
+    }
+  })
+
+  // Paired control: an ABSENT parentDepth is a genuine root (0) — must ADMIT under a
+  // wide cap. Proves the deny above is the malformed-guard, not "any non-cap denies".
+  test("absent parentDepth is genuine root ⇒ ADMITTED under wide cap (paired control)", async () => {
+    const reg = new TaskRegistry()
+    const r = await handleSpawnAgent(
+      { prompt: "p" },
+      { runner: slowRunner(10), registry: reg, maxDepth: 100 },
+    )
+    expect(r.kind).not.toBe("error")
   })
 
   test("happy path returns agentId AND an ownerToken (capability cap)", async () => {
@@ -725,7 +761,10 @@ describe("HELLGATE — handleCloseAgent", () => {
     )
     if (spawn.kind !== "success") throw new Error("spawn failed")
 
-    const r = await handleCloseAgent({ agentId: spawn.agentId }, { registry: reg, hostAuthority: true })
+    const r = await handleCloseAgent(
+      { agentId: spawn.agentId },
+      { registry: reg, hostAuthority: true },
+    )
     expect(r.kind).toBe("success")
     expect(reg.get(spawn.agentId)?.status).toBe("stopped")
   })
@@ -961,8 +1000,13 @@ describe("HELLGATE — PtyTable instrumentation", () => {
   test("size + has + get + delete are consistent", () => {
     const table = trackPty()
     expect(table.size()).toBe(0)
-    // biome-ignore lint/suspicious/noExplicitAny: stub slot
-    table.set(7, { proc: {} as any, startedAt: 1, command: "cmd", exited: Promise.resolve(0) })
+    table.set(7, {
+      proc: inertPtyProcess,
+      startedAt: 1,
+      command: "cmd",
+      exited: Promise.resolve(0),
+      killHandle: inertKillHandle,
+    })
     expect(table.size()).toBe(1)
     expect(table.has(7)).toBe(true)
     expect(table.get(7)?.command).toBe("cmd")
@@ -973,10 +1017,20 @@ describe("HELLGATE — PtyTable instrumentation", () => {
 
   test("snapshot returns a stable readonly array (Codex getSnapshot analogue)", () => {
     const table = trackPty()
-    // biome-ignore lint/suspicious/noExplicitAny: stub slots
-    table.set(1, { proc: {} as any, startedAt: 100, command: "a", exited: Promise.resolve(0) })
-    // biome-ignore lint/suspicious/noExplicitAny: stub slots
-    table.set(2, { proc: {} as any, startedAt: 200, command: "b", exited: Promise.resolve(0) })
+    table.set(1, {
+      proc: inertPtyProcess,
+      startedAt: 100,
+      command: "a",
+      exited: Promise.resolve(0),
+      killHandle: inertKillHandle,
+    })
+    table.set(2, {
+      proc: inertPtyProcess,
+      startedAt: 200,
+      command: "b",
+      exited: Promise.resolve(0),
+      killHandle: inertKillHandle,
+    })
     const snap = table.snapshot()
     expect(snap.length).toBe(2)
     expect(snap.map((s) => s.pid).sort()).toEqual([1, 2])
@@ -1136,6 +1190,7 @@ describe("E2E — realistic 6-tool flow using real Bun.spawn + a SubagentRunner"
       startedAt: Date.now(),
       command: "cat",
       exited: proc.exited as Promise<number>,
+      killHandle: inertKillHandle,
     })
 
     try {

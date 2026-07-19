@@ -3,11 +3,15 @@
  *
  * Each test guards a CLASS of bug found in the audit, not a single instance:
  *
- *   G1 (F1-class)  — dead-wire prevention. The ADR-0409 post_compact wire
- *                    threads four artefacts through `src/agent/loop.ts`. A
- *                    refactor that removes any of them re-creates the
- *                    "compaction-visibility silently fires nothing" bug. We
- *                    grep the file for each marker.
+ *   G1 (F1-class)  — dead-wire prevention. The ADR-0409 post_compact wire is
+ *                    deliberately split across the event factory
+ *                    (`loop-helpers.ts`), proactive producer
+ *                    (`loop/compaction-wire.ts`), and reactive producer
+ *                    (`loop/recovery-executor.ts`). A refactor that removes a
+ *                    live call from any owner re-creates the
+ *                    "compaction-visibility silently fires nothing" bug. The
+ *                    behavioral rail is `compaction-emit-e2e.test.ts`; this
+ *                    guard pins each producer's call structure.
  *
  *   G2 (F3-class)  — bounded-growth prevention. Every store under
  *                    `src/agent/<slice>/store.ts` MUST either expose a cap
@@ -36,44 +40,93 @@ const TOOL_DIRS = [join(REPO_ROOT, "src", "tool"), join(REPO_ROOT, "src", "subag
 
 const readUtf8 = (path: string): string => readFileSync(path, "utf8")
 
-// The 2026-06 loop decomposition split the monolithic `loop.ts` into a thin
-// re-export shim + the `src/agent/loop/` slice. The wire markers these ratchets
-// pin now live across those files, so read the WHOLE loop surface (shim + slice)
-// — the invariant is "the loop threads these markers," not "in one file."
-const readLoopSurface = (): string => {
-  const parts = [readUtf8(join(SRC_AGENT, "loop.ts"))]
-  const loopDir = join(SRC_AGENT, "loop")
-  try {
-    for (const f of readdirSync(loopDir).sort()) {
-      if (f.endsWith(".ts")) parts.push(readUtf8(join(loopDir, f)))
-    }
-  } catch {
-    // No loop/ dir (pre-decomposition tree) — the shim read alone is the surface.
-  }
-  return parts.join("\n")
+// ─────────────────────────────────────────────────────────────────────────────
+//  G1 — ADR-0409 post_compact live owner contracts (audit F1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type PostCompactOwnerContract = {
+  readonly owner: string
+  readonly source: string
+  readonly required: readonly [RegExp, string][]
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  G1 — ADR-0409 post_compact wire markers in loop.ts (audit F1)
-// ─────────────────────────────────────────────────────────────────────────────
+const postCompactOwnerContracts = (): readonly PostCompactOwnerContract[] => [
+  {
+    owner: "event factory",
+    source: readUtf8(join(SRC_AGENT, "loop-helpers.ts")),
+    required: [
+      [
+        /export const buildPostCompactEmit\s*=\s*\([\s\S]*?if \(hooks === undefined\) return undefined/,
+        "absent HookBus must preserve the no-op path",
+      ],
+      [
+        /await hooks\.emit\s*\(\s*\{\s*type:\s*["']post_compact["'],\s*threadId,\s*provenance\s*}\s*\)/,
+        "factory must emit the typed post_compact event",
+      ],
+    ],
+  },
+  {
+    owner: "proactive producer",
+    source: readUtf8(join(SRC_AGENT, "loop", "compaction-wire.ts")),
+    required: [
+      [
+        /const postCompactEmit\s*=\s*buildPostCompactEmit\s*\(\s*config\.hooks,\s*config\.sessionId \?\? ["']["']\s*\)/,
+        "proactive producer must build the event callback from the configured HookBus",
+      ],
+      [
+        /postCompactEmit !== undefined \? \{ postCompactEmit \} : \{\}/,
+        "proactive producer must pass the callback into compactIfNeeded",
+      ],
+      [
+        /postCompactEmit !== undefined \|\| objectiveSetNextActions !== undefined[\s\S]{0,100}recoveryReason:\s*["']token_budget_exceeded["'] as const/,
+        "proactive producer must preserve the recovery taxonomy when either advisory wire is active",
+      ],
+    ],
+  },
+  {
+    owner: "reactive producer",
+    source: readUtf8(join(SRC_AGENT, "loop", "recovery-executor.ts")),
+    required: [
+      [
+        /const postCompactEmit\s*=\s*buildPostCompactEmit\s*\(\s*config\.hooks,\s*threadId\s*\)/,
+        "reactive producer must build the event callback from the configured HookBus",
+      ],
+      [
+        /if \(postCompactEmit !== undefined\)\s*\{\s*try\s*\{\s*await postCompactEmit\s*\(\s*provenance\s*\)/,
+        "reactive producer must invoke the callback after a successful compaction",
+      ],
+      [
+        /surfacePostCompactFailure\s*\(\s*session,\s*["']post_compact hook["'],\s*e\s*\)/,
+        "reactive producer must surface a callback failure instead of silently swallowing it",
+      ],
+    ],
+  },
+]
 
-describe("audit ratchet — G1 post_compact wire-presence (F1-class)", () => {
-  test("loop.ts threads all four post_compact wire markers", () => {
-    const loopTs = readLoopSurface()
-    // Each marker corresponds to one part of the ADR-0409 wire. A refactor
-    // that removes any of them resurrects the dead-emit bug F1 fixed.
-    const requiredMarkers: ReadonlyArray<readonly [string, string]> = [
-      ["buildPostCompactEmit(", "proactive site must call the helper"],
-      ['type: "post_compact"', "reactive site must emit the typed event"],
-      ["recoveryReason:", "compactIfNeeded input must carry the taxonomy"],
-      ["objectiveSetNextActions", "Objective bridge must be wired"],
-    ]
-    const missing = requiredMarkers.filter(([m]) => !loopTs.includes(m))
-    if (missing.length > 0) {
-      const detail = missing.map(([m, why]) => `  - "${m}"  (${why})`).join("\n")
-      throw new Error(`loop.ts is missing required post_compact wire markers:\n${detail}`)
+const missingPostCompactRequirements = (contract: PostCompactOwnerContract): string[] =>
+  contract.required.filter(([pattern]) => !pattern.test(contract.source)).map(([, reason]) => reason)
+
+describe("audit ratchet — G1 post_compact live owner contracts (F1-class)", () => {
+  test("each owner preserves its live post_compact call structure", () => {
+    const contracts = postCompactOwnerContracts()
+    // Anti-vacuum floor: this guard intentionally owns all three live seams.
+    expect(contracts.length).toBe(3)
+    const missing = contracts.flatMap((contract) =>
+      missingPostCompactRequirements(contract).map((reason) => `  - ${contract.owner}: ${reason}`),
+    )
+    expect(missing).toEqual([])
+  })
+
+  test("the G1 scanner goes RED when a required live call is removed", () => {
+    const contracts = postCompactOwnerContracts()
+    const mutated = contracts.map((contract) => {
+      const [pattern] = contract.required[0] ?? []
+      if (pattern === undefined) throw new Error(`${contract.owner} has no mutation target`)
+      return { ...contract, source: contract.source.replace(pattern, "/* removed by mutation */") }
+    })
+    for (const contract of mutated) {
+      expect(missingPostCompactRequirements(contract).length).toBeGreaterThan(0)
     }
-    expect(missing.length).toBe(0)
   })
 })
 

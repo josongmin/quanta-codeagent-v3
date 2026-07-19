@@ -370,20 +370,40 @@ export const deleteMethod = (deps: Deps, entryId: string): Result<void, QueueMut
   return okR(undefined)
 }
 
+/** Ask the sink to accept the payload, converting every possible outcome
+ *  (ok / rejected-terminal / rejected-transient / throw / no-sink) into a
+ *  typed marker WITHOUT touching the queue. Removal is decided by the caller
+ *  based on this marker so a TRANSIENT rejection can preserve the entry.
+ *
+ *   - "delivered"  ⇒ sink accepted (`{ok:true}`).
+ *   - "not-ready"  ⇒ sink rejected with `retryable:true` (the composition-root
+ *                    timing window: target not installed yet). FAIL-CLOSED —
+ *                    the caller KEEPS the entry.
+ *   - "not-possible" ⇒ no sink wired, sink threw, or sink rejected WITHOUT
+ *                    `retryable` (terminal). The caller REMOVES the entry. */
+const attemptSend = (
+  sink: SendNowSink | undefined,
+  payload: SendNowInjection,
+): "delivered" | "not-ready" | "not-possible" => {
+  if (sink === undefined) return "not-possible"
+  try {
+    const r = sink.inject(payload)
+    if (r.ok === true) return "delivered"
+    // A rejection that flags itself retryable is the TRANSIENT timing
+    // window; anything else is a terminal refusal.
+    return r.retryable === true ? "not-ready" : "not-possible"
+  } catch {
+    // A thrown sink is treated as terminal — a well-behaved sink returns
+    // `{ok:false}`; a throw is a bug we cannot classify as retryable.
+    return "not-possible"
+  }
+}
+
 export const sendNowMethod = (deps: Deps, entryId: string): Result<void, QueueMutateError> => {
   const { store, sendNowSink } = deps
   const located = locateLive(store, entryId)
   if (located === null) return errR("not-found")
   const { queue, index, entry } = located
-
-  // Remove FIRST so a sink-side throw can't leave the entry in a
-  // half-state (contract on the public docs: "entry removed before
-  // sink call"). If the sink rejects, caller sees error + removed
-  // entry; they can re-enqueue if intent demands.
-  queue.splice(index, 1)
-  cleanupEmptyQueue(store, queue)
-
-  if (sendNowSink === undefined) return errR("send-not-possible")
 
   const payload: SendNowInjection = {
     threadId: entry.threadId,
@@ -393,12 +413,29 @@ export const sendNowMethod = (deps: Deps, entryId: string): Result<void, QueueMu
     metadata: entry.metadata,
     ...(entry.label !== undefined ? { label: entry.label } : {}),
   }
-  // No-throw guard: callers MUST NOT see a thrown error from a sink
-  // they wired. Convert any throw / non-ok result to typed error.
-  try {
-    const r = sendNowSink.inject(payload)
-    return r.ok === true ? okR(undefined) : errR("send-not-possible")
-  } catch {
-    return errR("send-not-possible")
+
+  // Probe the sink BEFORE mutating the queue so a TRANSIENT "not-ready"
+  // (the composition-root timing window: sink wired, downstream target not
+  // installed yet) can KEEP the entry — fail-closed, never a silent drop.
+  // The probe itself is side-effect-free from the store's perspective (the
+  // no-throw guard lives in `attemptSend`); the ONLY store-observable effect
+  // is a successful delivery having pushed into the downstream target.
+  const outcome = attemptSend(sendNowSink, payload)
+
+  if (outcome === "not-ready") {
+    // TRANSIENT: the entry survives so `/queue send-now` in the timing
+    // window is an explicit "try again", not a swallowed drop. Nothing
+    // was delivered downstream (the sink refused), so no double-send risk.
+    return errR("send-not-ready")
   }
+
+  // TERMINAL (delivered OR not-possible): remove the entry. On delivery the
+  // payload is already in the downstream sink; on a terminal failure the
+  // caller sees the typed error + a removed entry and may re-enqueue. Remove
+  // AFTER the probe so a terminal path is still a single-shot (the sink is
+  // idempotent-per-call — it saw exactly one inject).
+  queue.splice(index, 1)
+  cleanupEmptyQueue(store, queue)
+
+  return outcome === "delivered" ? okR(undefined) : errR("send-not-possible")
 }

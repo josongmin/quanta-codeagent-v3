@@ -27,9 +27,13 @@ purpose: |
   Caller가 한 LLM 요청에 JSON Schema를 붙여 schema-constrained 응답을 강제한다.
   OpenAI는 native `response_format:{type:"json_schema", json_schema:{name,schema,strict}}`
   (Structured Outputs)로 패스스루; Anthropic은 symmetric knob이 없어 single
-  forced tool-call (input_schema=json schema + tool_choice=that tool) 전략을
-  문서화 + 순수 빌더(`toAnthropicForcedTool`)로 제공하되 본체 adapter는 본 슬라이스에서
-  와이어하지 않는다 (ARCHITECTURE.md §2 adapter asymmetry ACCEPTED — fake 금지).
+  forced tool-call (input_schema=json schema + tool_choice=that tool) 전략으로
+  PROVIDER PARITY를 확보한다 (DOF-40). 순수 빌더(`toAnthropicForcedTool`)는
+  `buildAnthropicMessagesRequest`(=AnthropicAdapter.openRawStream이 호출하는 codec)에
+  `resolveAnthropicResponseFormat`로 실제 소비된다 — responseFormat present ⇒ 그
+  single forced tool이 caller tools/toolChoice를 override하고 tool_choice가
+  `{type:"tool",name}`으로 강제된다. 즉 Anthropic도 이제 constraint를 실제로 wire에
+  emit한다 (silent no-op 제거). fake 아님 — 문서화된 SOTA 전략의 실배선.
 
   신규 leaf `src/llm/structured-output.ts` (`@/shared`만 import):
     - `ResponseFormat` — OpenAI 모양 1:1 wire fragment (번역 레이어 없음)
@@ -41,39 +45,53 @@ purpose: |
       doc에서 pin) + non-object schema 거부, opaque 400 방지
     - `toOpenAIResponseFormat` / `toAnthropicForcedTool` — 순수 mapper
 
-  `StreamInput.responseFormat?` (optional) 추가; OpenAI adapter `openRawStream`에
-  additive conditional spread 1개. 미지정 ⇒ response_format 키 자체가 wire에서 빠짐
-  (byte-identical default-OFF, opt-in per request). validator는 adversarial/huge/
-  malformed/non-string 입력에 throw 없이 typed Err.
+  `StreamInput.responseFormat?` (optional): OpenAI adapter `openRawStream`은
+  native `response_format` spread, Anthropic codec은 forced-tool 변환. 미지정 ⇒
+  두 provider 모두 wire byte-identical (OpenAI=no response_format key, Anthropic=
+  forced tool/tool_choice 없음; pre-feature HEAD codec과 byte-compare로 검증됨).
+  invalid responseFormat(illegal name/non-object schema)은 request 구성 시점에
+  typed LLMError로 throw (opaque 400/silent-accept 금지). validator는
+  adversarial/huge/malformed/non-string 입력에 throw 없이 typed Err.
 evidence:
   code:
     - src/llm/structured-output.ts
     - src/llm/types.ts
     - src/llm/adapters/openai.ts
+    - src/llm/anthropic-messages-codec.ts
   adrs:
     - docs/decisions/0469-structured-output-mode.md
   tests:
     unit:
       - tests/unit/llm-structured-output-hellgate.test.ts
+      - tests/unit/llm-structured-output-anthropic-parity-hellgate.test.ts
     integration: []
     contract: []
 knobs:
   - name: StreamInput.responseFormat
     default: absent
     purpose: |
-      Per-request opt-in. Absent ⇒ adapters emit byte-identical pre-feature
-      wire (no response_format key). Present ⇒ OpenAI spreads json_schema;
+      Per-request opt-in. Absent ⇒ BOTH adapters emit byte-identical pre-feature
+      wire (OpenAI: no response_format key; Anthropic: no forced tool/tool_choice).
+      Present ⇒ OpenAI spreads native json_schema, Anthropic emits the single
+      forced tool (input_schema=schema, tool_choice pinned) — provider parity.
       caller confirms obedience via validateAgainstResponseSchema.
 deliberate_hold:
   reason: |
-    Anthropic adapter forced-tool wiring — `toAnthropicForcedTool` 빌더는 있으나
-    본체 adapter는 `responseFormat`를 아직 소비 안 함 (scope fence).
-    OpenAI Responses surface (openai-responses-wire.ts) passthrough 미와이어.
-    Loop-level auto-validate 미와이어 — caller가 명시적으로 validator 호출.
+    DONE (DOF-40): Anthropic forced-tool wiring — `buildAnthropicMessagesRequest`
+    (adapter openRawStream codec) now consumes `responseFormat` via
+    `resolveAnthropicResponseFormat`, so Anthropic actually emits the forced-tool
+    constraint. Provider parity achieved; invalid fragment throws typed LLMError.
+    STILL DEFERRED:
+    - OpenAI Responses surface (openai-responses-wire.ts) passthrough 미와이어.
+    - Loop-level auto-validate 미와이어 — caller가 명시적으로 validator 호출.
   promotion_path: |
-    L3: Anthropic forced-tool adapter wire + Responses surface passthrough +
-    optional loop-level auto-validate hook.
+    L3: OpenAI Responses-surface passthrough + optional loop-level auto-validate
+    hook (Chat-Completions + Anthropic Messages parity already wired).
 notes: |
   ADR-0079 tool_choice / ADR-0083 vision passthrough와 동일한 additive-spread
   패턴. validator의 유일한 magic number(name 64/charset)는 OpenAI SDK 계약에서 pin —
   임의 휴리스틱 없음.
+  Anthropic parity(DOF-40): forced-tool은 OpenAI native `response_format`와 달리
+  기존 tools/toolChoice를 override한다 (single-forced-tool 전략의 정의). OFF
+  byte-identity는 pre-feature HEAD codec과 전-knob byte-compare로 검증됨
+  (tests/unit/llm-structured-output-anthropic-parity-hellgate.test.ts).

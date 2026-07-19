@@ -83,10 +83,23 @@ const ATTACH_SESSION_EVENT_RENDERERS: AttachRendererRegistry = {
     const name = event.artifact.name ?? event.artifact.artifactId
     return `\n[artifact ready] ${name} (${event.artifact.mimeType})\n`
   },
-  "session.created": (event) =>
-    `[session ${event.model !== undefined ? `· ${event.model}` : "connected"}]\n`,
+  "session.created": (event) => renderAttachModelPill(event.model),
   "session.closed": () => "\n[session closed by daemon]\n",
 }
+
+/**
+ * AUDIT-γ H2 — the `[session · <model>]` connection pill.
+ *
+ * SHARED by two producers: the wire `session.created` event renderer above, and
+ * the SNAPSHOT-driven path the attach client now uses. The engine stopped
+ * fanning `session.created` to the transport bridge ("snapshot is the source of
+ * truth"), so a wire attach that settles its handshake purely on the snapshot
+ * frame gets the model from `snapshot.state.modelSlug` and renders it HERE —
+ * otherwise the pill (which model am I attached to?) is dead for `quanta
+ * attach` and bot `connect()`.
+ */
+export const renderAttachModelPill = (modelSlug: string | undefined): string =>
+  `[session ${modelSlug !== undefined && modelSlug !== "" ? `· ${modelSlug}` : "connected"}]\n`
 
 export const renderSessionEvent = (event: SessionEvent): string => {
   const renderer = ATTACH_SESSION_EVENT_RENDERERS[event.type] as

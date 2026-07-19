@@ -15,10 +15,10 @@
  */
 
 import { Database } from "bun:sqlite"
-import { mkdirSync } from "node:fs"
+import { chmodSync, mkdirSync } from "node:fs"
 import { join } from "node:path"
 import type { SessionEvent } from "@/protocol/session"
-import { quantaHomeDir } from "@/shared"
+import { quantaHomeDir, runtimeConfig } from "@/shared"
 
 export interface ThreadInfo {
   readonly id: string
@@ -71,10 +71,20 @@ const SCHEMA = `
  * the parent directory is created with `mkdir -p` semantics.
  */
 export const openThreadStore = (): ThreadStore => {
-  const dir = process.env.QUANTA_WEB_DB_DIR ?? join(quantaHomeDir(), "web-daemon")
-  mkdirSync(dir, { recursive: true })
+  // ADR-0503 P4 — the DB-dir override is routed through the typed runtimeConfig()
+  // (webDbDir) so a `/config set` reaches it and it is testable without mutating
+  // the real environment; absent ⇒ the exact same ~/.quanta/web-daemon fallback.
+  const dir = runtimeConfig().webDbDir ?? join(quantaHomeDir(), "web-daemon")
+  // owner-only dir — symmetric with the JSONL event log (audit H1): the DB
+  // holds full SESSION TRANSCRIPTS (prompts, tool I/O, and under ticket-04
+  // `QUANTA_SESSION_FULL_FIDELITY` the untruncated tool payloads), so it must
+  // never land world-readable (0o644) on a multi-user host.
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
   const dbPath = join(dir, "threads.db")
   const db = new Database(dbPath)
+  // bun:sqlite creates the file under the process umask (0o644 on umask 022) —
+  // clamp it (and any pre-existing db from before this fix) to owner-only.
+  chmodSync(dbPath, 0o600)
   db.exec(SCHEMA)
 
   const insertEvent = db.prepare(

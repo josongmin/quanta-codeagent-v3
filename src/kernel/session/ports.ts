@@ -114,6 +114,14 @@ export type SessionHostTurnEvent =
       readonly toolCallId: string
       readonly toolName: string
       readonly argsPreview?: string
+      /** Ticket 04 — the FULL (model-visible, redaction-applied) tool args, set
+       *  ONLY when the production fidelity gate is ON. Additive-optional: absent
+       *  ⇒ byte-identical default-OFF. The ipc bridge strips it for non-negotiated
+       *  wire peers (S3). */
+      readonly argsFull?: string
+      /** Ticket 04 — set when the full payload exceeded the size cap and was
+       *  DROPPED (not truncated); the consumer must fall back to the preview. */
+      readonly fidelityDegraded?: true
     }
   | {
       readonly type: "tool.completed"
@@ -122,6 +130,12 @@ export type SessionHostTurnEvent =
       readonly outcome: "ok" | "error" | "denied" | "timeout"
       readonly resultPreview?: string
       readonly durationMs?: number
+      /** Ticket 04 — the FULL (model-visible, redaction-applied) tool result,
+       *  gate-ON only (see `tool.invoked.argsFull`). */
+      readonly resultFull?: string
+      /** Ticket 04 — full result exceeded the cap and was dropped (see
+       *  `tool.invoked.fidelityDegraded`). */
+      readonly fidelityDegraded?: true
     }
   | {
       readonly type: "usage"

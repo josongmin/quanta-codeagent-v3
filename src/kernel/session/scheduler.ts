@@ -1,6 +1,7 @@
 import type { Message } from "@/llm"
 import type { ArtifactRef, SessionCommand, SessionEvent, TurnRunCommand } from "@/protocol/session"
 import { SessionProtocolValidationError } from "@/protocol/session"
+import { errMessage } from "@/shared"
 import { isAbort } from "@/shared/abortable"
 import { writeStderr } from "@/shared/terminal-io"
 import type {
@@ -71,7 +72,7 @@ let observerErrorSink: (error: unknown) => void = (error) => {
   // Documented diagnostic surface — routed through the ADR-0303 injected terminal
   // sink (default NOOP) so this kernel module owns no raw terminal; overridable
   // via `setKernelObserverErrorSink` to route into structured telemetry.
-  const detail = error instanceof Error ? (error.stack ?? error.message) : String(error)
+  const detail = error instanceof Error ? (error.stack ?? error.message) : errMessage(error)
   writeStderr(
     `[kernel.session] onCommitted observer threw (diagnostic, not a turn failure): ${detail}\n`,
   )
@@ -99,7 +100,7 @@ export const setKernelObserverErrorSink = (
  * (measure-first — diagnostic, never a gate).
  */
 let streamAppendErrorSink: (error: unknown) => void = (error) => {
-  const detail = error instanceof Error ? (error.stack ?? error.message) : String(error)
+  const detail = error instanceof Error ? (error.stack ?? error.message) : errMessage(error)
   writeStderr(
     `[kernel.session] stream eventLog.append rejected (diagnostic, not a turn failure): ${detail}\n`,
   )
@@ -123,6 +124,53 @@ let streamAppendFailures = 0
 /** Read the current process-global stream-append failure count (ALBB-04). */
 export const getKernelStreamAppendFailures = (): number => streamAppendFailures
 
+/**
+ * B1 (jul-18 release-blocker) — TERMINAL-append-error sink, SYMMETRIC with
+ * {@link streamAppendErrorSink}. ALBB-04 isolated the per-turn STREAM append
+ * path, but the TERMINAL append (`turn.completed` / `turn.aborted` /
+ * `turn.failed` + their trailing `session.state.updated`) was still a bare
+ * `await appendEvents(...)`: a durable-log ENOSPC / read-only-dir throw there
+ * propagated out of the terminal handler → out of `dispatchSessionCommand`
+ * BEFORE the engine ever published the terminal events. The turn's LLM cost was
+ * already spent, yet no terminal event reached the subscriber/bridge, so a wire
+ * client's `awaitTurnEnd()` hung forever and the completed turn was silently
+ * lost.
+ *
+ * The INVARIANT this restores: a turn's terminal event MUST reach the
+ * subscriber/bridge regardless of persistence success — persistence is a
+ * side-effect, never the gate on delivery. So the terminal append is routed
+ * HERE (diagnostic, no-throw) and the handler CONTINUES to RETURN its events,
+ * which the engine then publishes via `publishPendingEvents`; `awaitTurnEnd`
+ * always settles. The failure is NOT swallowed: it is surfaced on this sink
+ * (default `writeStderr`) AND counted (`terminalAppendFailures`) so an operator
+ * knows persistence degraded. Only durable logs can throw here — the default
+ * InMemory log never does, so the default path is byte-identical.
+ */
+let terminalAppendErrorSink: (error: unknown) => void = (error) => {
+  const detail = error instanceof Error ? (error.stack ?? error.message) : errMessage(error)
+  writeStderr(
+    `[kernel.session] terminal eventLog.append rejected (diagnostic — terminal event still delivered to subscribers so awaitTurnEnd settles; persistence DEGRADED): ${detail}\n`,
+  )
+}
+
+/** Override the terminal-append-error sink (e.g. to route into structured
+ *  telemetry). Returns the previous sink so callers can restore it. */
+export const setKernelTerminalAppendErrorSink = (
+  sink: (error: unknown) => void,
+): ((error: unknown) => void) => {
+  const previous = terminalAppendErrorSink
+  terminalAppendErrorSink = sink
+  return previous
+}
+
+/** Monotonic count of TERMINAL `eventLog.append` rejections isolated by
+ *  {@link appendTerminalEvents} (B1). Diagnostic-only, process-global; exposed
+ *  for measurement, NOT consulted by any control-flow gate. */
+let terminalAppendFailures = 0
+
+/** Read the current process-global terminal-append failure count (B1). */
+export const getKernelTerminalAppendFailures = (): number => terminalAppendFailures
+
 const notifyCommitted = async (
   ctx: KernelDispatchContext,
   args: KernelCommittedEvents,
@@ -140,6 +188,33 @@ const appendEvents = async (
   events: readonly SessionEvent[],
 ): Promise<void> => {
   for (const event of events) await eventLog.append(event)
+}
+
+/**
+ * B1 — isolate the TERMINAL persistence write. A terminal turn event
+ * (`turn.completed` / `turn.aborted` / `turn.failed` and their trailing
+ * `session.state.updated`) MUST be RETURNED (and thus published to the
+ * subscriber/bridge by the engine's `publishPendingEvents`) even if the durable
+ * event-log `append` rejects — otherwise the turn (whose LLM cost was already
+ * spent) is silently lost and a wire client's `awaitTurnEnd()` hangs forever.
+ *
+ * This wraps {@link appendEvents} so a persistence throw is routed to the
+ * no-throw {@link terminalAppendErrorSink} (default stderr) + counted, and the
+ * caller CONTINUES to its `return`. It NEVER swallows silently and it NEVER
+ * reclassifies the terminal — the turn's outcome was already decided upstream;
+ * persistence is a side-effect, not the gate on delivery. Symmetric with the
+ * per-stream-event isolation `runTurn` already applies (ALBB-04).
+ */
+const appendTerminalEvents = async (
+  eventLog: KernelDispatchContext["eventLog"],
+  events: readonly SessionEvent[],
+): Promise<void> => {
+  try {
+    await appendEvents(eventLog, events)
+  } catch (error) {
+    terminalAppendFailures += 1
+    terminalAppendErrorSink(error)
+  }
 }
 
 const readyEvents = (args: {
@@ -181,10 +256,7 @@ const reconcileSessionPostureState = (
   }
 }
 
-const rewriteStateUpdatedEvent = (
-  event: SessionEvent,
-  state: KernelSessionState,
-): SessionEvent =>
+const rewriteStateUpdatedEvent = (event: SessionEvent, state: KernelSessionState): SessionEvent =>
   event.type === "session.state.updated"
     ? {
         ...event,
@@ -334,7 +406,9 @@ const onTurnCompleted = async (args: {
     ...completedState,
     seq,
   }
-  await appendEvents(args.ctx.eventLog, completionEvents)
+  // B1 — persist-BUT-still-deliver: a durable-log throw here must not lose the
+  // completed turn nor hang `awaitTurnEnd`. The events are RETURNED regardless.
+  await appendTerminalEvents(args.ctx.eventLog, completionEvents)
   return {
     state: nextState,
     events: [...args.events, ...completionEvents],
@@ -449,7 +523,8 @@ const onTurnAborted = async (args: {
       state: toSessionStateView(nextState),
     },
   ]
-  await appendEvents(args.ctx.eventLog, abortedEvents)
+  // B1 — terminal delivery is decoupled from persistence (see appendTerminalEvents).
+  await appendTerminalEvents(args.ctx.eventLog, abortedEvents)
   return {
     state: nextState,
     events: [...args.events, ...abortedEvents],
@@ -494,7 +569,8 @@ const onTurnFailed = async (args: {
       state: toSessionStateView(nextState),
     },
   ]
-  await appendEvents(args.ctx.eventLog, failedEvents)
+  // B1 — terminal delivery is decoupled from persistence (see appendTerminalEvents).
+  await appendTerminalEvents(args.ctx.eventLog, failedEvents)
   return { state: nextState, events: [...args.events, ...failedEvents] }
 }
 
@@ -537,7 +613,8 @@ const onTurnErrored = async (args: {
       state: toSessionStateView(nextState),
     },
   ]
-  await appendEvents(args.ctx.eventLog, failedEvents)
+  // B1 — terminal delivery is decoupled from persistence (see appendTerminalEvents).
+  await appendTerminalEvents(args.ctx.eventLog, failedEvents)
   return {
     state: nextState,
     events: [...args.events, ...failedEvents],
@@ -758,7 +835,11 @@ const settlePreAbortedTurnRun = async (args: {
       },
     ]
   }
-  await appendEvents(ctx.eventLog, cancelEvents)
+  // B1 — this settles a `turn.run` (aborted at the dispatch boundary). A durable
+  // append throw must NOT swallow the state echo: persist through the no-throw
+  // terminal sink so `notifyCommitted` still publishes and the events still
+  // return, keeping the subscriber/bridge in sync with the returned state.
+  await appendTerminalEvents(ctx.eventLog, cancelEvents)
   await notifyCommitted(ctx, { state: cancelledState, events: cancelEvents })
   return { state: cancelledState, events: cancelEvents }
 }

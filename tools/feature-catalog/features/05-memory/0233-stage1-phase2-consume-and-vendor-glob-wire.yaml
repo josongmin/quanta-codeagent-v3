@@ -43,12 +43,58 @@ evidence:
       - tests/unit/stage1-store-hellgate.test.ts
       - tests/unit/vendor-detector-glob-rules-wire-hellgate.test.ts
       - tests/unit/vendor-rules-detector-hellgate.test.ts
+      - tests/unit/vendor-glob-unconsumed-failclosed-hellgate.test.ts
+      - tests/unit/stage1-phase2-consume-and-vendor-glob-e2e-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    SEAM-ONLY (DOF-40 verified @b92b3798f): 아직 production caller 부재.
+    (1) live glob load path = src/apps/cli/rule-indicator.ts:260 이 legacy
+    loadGlobRules(cwd) 호출 (loadGlobRulesWithVendors 는 배럴 재export +
+    JSDoc 언급뿐, call-site 0). (2) consumeStage1ForPhase2 (Stage1 SELECT
+    소비 helper) 도 call-site 0 — src/agent/memory-consolidator-hook.ts 의
+    runPhase2 는 fetchSince 만 쓰고 reuse-consume 경로는 미도달. 두 seam
+    모두 host 가 명시 주입할 때만 동작하므로 default-OFF byte-identical.
+  promotion_path: |
+    (a) vendor glob: src/apps/cli/rule-indicator.ts 의 loadGlobRules(cwd)
+    호출을 loadGlobRulesWithVendors(cwd, {vendorDetectorEnabled, onUnconsumed})
+    로 승격 (rule-indicator = 미소유 파일, 별 leaf). onUnconsumed 를 진단
+    싱크로 배선해 drop 가시화. (b) stage1 consume: agent composition root
+    (host/runtime) 가 stage1StoreV2 주입 + phase2 경로가 consumeStage1ForPhase2
+    호출. promotion owner: @songmin (composition-root leaf).
 notes: |
   ADR-0207 leaf 는 src/memory 직접 wire; ADR-0216 agent-side 는 agent
   composition root wire. 본 entry 는 두 sibling 모두에서 SELECT path 활성화
   + vendor glob splice 의 closed-loop 봉인. negative-invariant: host 가
   store 를 주입하지 않으면 SELECT 호출 자체가 일어나지 않음 (no I/O leak).
+
+  DOF-40 재확인 (END-TO-END usability proof 추가, 여전히 SEAM-ONLY/HELD):
+  자연 consumer 두 곳 모두 미소유 composition root — vendor glob 은
+  src/apps/cli/rule-indicator.ts:260 (legacy loadGlobRules 호출), stage1
+  consume 는 src/agent/memory-consolidator-hook.ts:runPhase2 (fetchSince 만
+  사용). autonomous consumer 날조 금지. 대신 owned 파일에서 consume API 가
+  DROP-IN USABLE 임을 실증: (A) REAL createDefaultVendorDetector 가 real
+  .windsurfrules fixture (legacy 가 절대 안 읽는 경로) 를 walk →
+  loadGlobRulesWithVendors → selectGlobRules → renderGlobRulesBlock 가
+  방출한 PROMPT STRING 안에 vendor body 가 실제로 도달 (intermediate
+  GlobRule[] 이 아니라 model 이 읽는 문자열). (B) REAL 소유 adapter
+  inMemoryStage1Store 에 fresh record write → consumeStage1ForPhase2 ⇒
+  REUSE + fresh-readback 로 owned 스토어 row 가 실제 consume 됨 (usageCount
+  +1, selectedForPhase2 flip). red-on-injection 검증: vendor compose neuter
+  + stage1 reuse fake 주입 시 3/6 red (A1/A2 paired/B1 readback). OFF-identity:
+  detector 미enable ⇒ 합성=legacy content, vendor body prompt 부재 (paired
+  control 로 enable 시 등장). store 부재 ⇒ store_missing, zero I/O.
+  커버: stage1-phase2-consume-and-vendor-glob-e2e-hellgate.test.ts (6/6).
+
+  DOF-40 fail-closed hardening (path b — real consumer 를 이 leaf 에서
+  명명 불가, rule-indicator/composition-root 미소유): loadGlobRulesWithVendors
+  가 enabled arm 에서 vendor 룰을 drop 할 때 SILENT swallow 를 제거.
+  이전엔 detected = result.rules 로 DetectionResult.errors (per-file 파싱
+  실패) 를 통째로 버렸고, compose-time filter/collision/cap drop 도 신호 0.
+  이제 onUnconsumed sink (closed VendorRuleUnconsumedReason union: parse_error
+  / empty_or_no_trigger / vendor_filtered / max_files_cap / collision_lost)
+  로 모든 drop 을 명시 표면화. RESULT-IDENTITY: sink 유무는 반환 GlobRule[]
+  를 바꾸지 않음 (관찰만). OFF arm: detector 미호출 + sink 미발화 =
+  byte-identical. red-on-injection 검증: silent-drop 복원 시 5/9 red.

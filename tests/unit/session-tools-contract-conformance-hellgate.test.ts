@@ -26,7 +26,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "@/tool"
+import { defaultTools, type Tool, ToolRegistry, type ToolContext, type ToolEvent, type ToolResult } from "@/tool"
 import { createCommunicateUpdateTool } from "@/tool/communicate-update"
 import { coverageCheckTool } from "@/tool/coverage_check"
 import { docxWriteTool, pptxWriteTool, xlsxWriteTool } from "@/tool/document/authoring"
@@ -88,6 +88,25 @@ const byName = (tools: Tool[], name: string): Tool => {
   if (t === undefined) throw new Error(`tool not found: ${name}`)
   return t
 }
+
+describe("default tool auto-discovery conformance", () => {
+  test("every registered default tool advertises a complete model-facing contract without a hand-maintained list", () => {
+    const registry = new ToolRegistry(defaultTools)
+    const discovered = registry.all()
+    expect(discovered.length).toBeGreaterThanOrEqual(20) // anti-vacuum floor
+    expect(new Set(discovered.map((tool) => tool.name)).size).toBe(discovered.length)
+
+    const advertised = new Map(registry.specs().map((spec) => [spec.name, spec]))
+    for (const tool of discovered) {
+      const spec = advertised.get(tool.name)
+      expect(spec, `${tool.name} must be advertised by the live registry`).toBeDefined()
+      expect(tool.description.trim().length, `${tool.name} needs a model-facing description`).toBeGreaterThan(0)
+      expect(spec?.input_schema, `${tool.name} needs an input schema`).toBeDefined()
+      expect(typeof tool.isReadOnly()).toBe("boolean")
+      expect(typeof tool.isConcurrencySafe({} as never)).toBe("boolean")
+    }
+  })
+})
 
 // ── throwing-port factories ────────────────────────────────────────────────
 

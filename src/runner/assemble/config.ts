@@ -1,5 +1,4 @@
 import type { AgentConfig } from "@/agent"
-import type { GranularRegistryPort } from "@/agent/checkpoint/granular-registry"
 import type { LLMPort, Message } from "@/llm"
 import type { EmbedderPort, PersistentStorePort } from "@/memory"
 import type { Metrics } from "@/observability"
@@ -182,14 +181,6 @@ export interface SessionDeps {
    *  (byte-identical pre-ADR-0269 path; gates' return values + side
    *  effects unchanged). */
   decisionEmitter?: AgentConfig["decisionEmitter"]
-  /** ADR-0300/0304 — per-session granular checkpoint registry. The
-   *  surface composer instantiates ONE registry per session and mirrors
-   *  it here so `assembleConfig` carries it onto `AgentConfig.
-   *  granularRegistry`. Helper-only — the agent loop NEVER reads it;
-   *  caller-side surface wires (per-tool snapshot recorder, future
-   *  /rewind-tool revision) consume it directly. Absent ⇒ omitted from
-   *  AgentConfig entirely (byte-identical default-OFF). */
-  granularRegistry?: GranularRegistryPort
   /** `session_config` tool seam — read + write over the agent's own SDK
    *  posture (effort tier, permission mode, identity mode, tool profile,
    *  model, provider). Built by the composition root from the pre-existing
@@ -253,9 +244,7 @@ const buildMemoryAndModeSpreads = (
 
 const buildPromptVariantSpreads = (d: SessionDeps): Partial<AgentConfig> => ({
   ...(d.focusChain !== undefined ? { focusChain: d.focusChain } : {}),
-  ...(d.promptSurfaceProfile !== undefined
-    ? { promptSurfaceProfile: d.promptSurfaceProfile }
-    : {}),
+  ...(d.promptSurfaceProfile !== undefined ? { promptSurfaceProfile: d.promptSurfaceProfile } : {}),
   ...(() => {
     const state = d.toolProfileState
     return state !== undefined
@@ -337,7 +326,6 @@ const buildExecutionPlaneSpreads = (d: SessionDeps): Partial<AgentConfig> => ({
   ...(d.responsesContinuation !== undefined
     ? { responsesContinuation: d.responsesContinuation }
     : {}),
-  ...(d.granularRegistry !== undefined ? { granularRegistry: d.granularRegistry } : {}),
   ...(d.stage1OutputsStore !== undefined ? { stage1OutputsStore: d.stage1OutputsStore } : {}),
   ...(d.automationEngine !== undefined ? { automationEngine: d.automationEngine } : {}),
   ...(d.sessionConfigPort !== undefined ? { sessionConfigPort: d.sessionConfigPort } : {}),

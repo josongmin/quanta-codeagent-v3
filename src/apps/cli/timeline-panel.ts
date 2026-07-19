@@ -174,8 +174,6 @@ export const TIMELINE_FALLBACK_AGENT_EVENT_TYPES = [
   // Multi-agent-panel SUBSTRATE — subagent lifecycle events render via the
   // generic fallback row here; the DEDICATED `/agents --tree` panel (a later
   // wave) consumes them off the `@/protocol/subagent` seam, not this timeline.
-  // (Copied verbatim from feat/fc-evidence-relink so the inventory partition is
-  // complete NOW — the eventual feat→main merge of these entries is a no-op.)
   "subagent_spawn",
   "subagent_status",
 ] as const satisfies readonly AgentEventType[]

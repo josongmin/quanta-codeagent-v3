@@ -132,7 +132,10 @@ describe("loop routes history through WorkingMemory", () => {
       toolUseScript("c1", "read", { path: "/tmp/__nope_working_loop__.txt" }),
       textScript("wrapped up"),
     ])
-    const out = await runAgent(cfg({ llm }))
+    // This test owns the closed tool transcript only. Keep the turn budget
+    // unbounded so the separately-tested tail-budget injector cannot add its
+    // intentional synthetic user reminder at the second turn.
+    const out = await runAgent(cfg({ llm, maxTurns: Number.POSITIVE_INFINITY }))
 
     expect(out.reason).toBe("completed")
     // Buffer grew across the two turns: seed user, assistant tool_use,

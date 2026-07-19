@@ -1,4 +1,4 @@
-import type { ImageBlock } from "@/llm"
+import type { ImageBlock } from "@/llm/types"
 import type { ItemStreamDeltaKind, ItemStreamItemType } from "@/shared/item-stream"
 import type {
   LlmSurfaceId,
@@ -108,6 +108,15 @@ export interface ToolInvokedEvent extends SessionEventEnvelope<"tool.invoked"> {
   /** Truncated argument preview — at most ~256 chars; the full args live in
    *  the artifact / session log. */
   readonly argsPreview?: string
+  /** Ticket 04 (wire fidelity opt-in) — the FULL model-visible args, present
+   *  ONLY when `QUANTA_SESSION_FULL_FIDELITY` is ON. ADDITIVE-OPTIONAL: absent ⇒
+   *  byte-identical default-OFF wire (the 03-A field-shape guard pre-authorized
+   *  this `argsFull?` contract). The ipc bridge strips it for any wire peer that
+   *  did not negotiate `requestedFidelity` (S3) — the server-side sole defense. */
+  readonly argsFull?: string
+  /** Ticket 04 — set when the full payload exceeded the size cap and was dropped
+   *  (the consumer must fall back to `argsPreview`). */
+  readonly fidelityDegraded?: true
 }
 
 export interface ToolCompletedEvent extends SessionEventEnvelope<"tool.completed"> {
@@ -118,6 +127,12 @@ export interface ToolCompletedEvent extends SessionEventEnvelope<"tool.completed
   readonly resultPreview?: string
   /** Wall-clock duration on the host side. */
   readonly durationMs?: number
+  /** Ticket 04 — the FULL model-visible result, gate-ON only (see
+   *  `ToolInvokedEvent.argsFull`). */
+  readonly resultFull?: string
+  /** Ticket 04 — full result exceeded the cap and was dropped (see
+   *  `ToolInvokedEvent.fidelityDegraded`). */
+  readonly fidelityDegraded?: true
 }
 
 /**

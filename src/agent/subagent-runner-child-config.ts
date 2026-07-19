@@ -1,5 +1,5 @@
 import type { Message } from "@/llm"
-import { runtimeConfig } from "@/shared"
+import { type RuntimeConfig, runtimeConfig } from "@/shared"
 import type { SubagentTurnGate } from "@/subagent"
 import { type Tool, ToolRegistry } from "@/tool"
 import type { SubagentRequest } from "../subagent/types"
@@ -137,6 +137,7 @@ const buildChildBase = (
   cwd: string,
   mailboxId: string,
   toolNamespace: ToolNamespaceStrategy | undefined,
+  childRuntime: Pick<RuntimeConfig, "fsOwnershipEnforce">,
 ): ChildBase => {
   const filtered = filterRegistry(parent.registry, req.toolFilter, req.extraTools)
   const registry =
@@ -145,7 +146,7 @@ const buildChildBase = (
     ...(req.ownedSurfaces ? { owned: req.ownedSurfaces } : {}),
     ...(req.forbiddenSurfaces ? { forbidden: req.forbiddenSurfaces } : {}),
     cwd,
-    enforced: runtimeConfig().fsOwnershipEnforce,
+    enforced: childRuntime.fsOwnershipEnforce,
   })
   const messages: Message[] = [
     { role: "user", content: [{ type: "text", text: buildSeedPrompt(req) }] },
@@ -165,12 +166,45 @@ const buildChildBase = (
   }
 }
 
+/** WS2 (RFC jul-18 §4.2) — the child's control surface (port + active-turn
+ *  holder), threaded ONLY when the control capability is wired. Absent ⇒ no port
+ *  / no ref allocated ⇒ the loop never polls conversation actions (byte-identical
+ *  to the prior child config shape). Extracted so the caller stays under biome's
+ *  cognitive-complexity cap. */
+const childControlConfig = (
+  control: ChildControlWiring | undefined,
+):
+  | Pick<
+      AgentConfig,
+      "conversationActionPort" | "activeTurnRef" | "childSteerDrain" | "steerFinalization"
+    >
+  | Record<string, never> =>
+  control === undefined
+    ? {}
+    : {
+        // MED-2 — thread the loop-facing port + ref ONLY when present (steer plane
+        // wired). Steer OFF ⇒ absent ⇒ byte-identical followup child (RFC §9).
+        ...(control.conversationActionPort !== undefined
+          ? { conversationActionPort: control.conversationActionPort }
+          : {}),
+        ...(control.activeTurnRef !== undefined ? { activeTurnRef: control.activeTurnRef } : {}),
+        // WS4 — thread the steer drain view + finalization ONLY when present
+        // (steer plane wired). Absent ⇒ no safe-point drain (byte-identical).
+        ...(control.childSteerDrain !== undefined
+          ? { childSteerDrain: control.childSteerDrain }
+          : {}),
+        ...(control.steerFinalization !== undefined
+          ? { steerFinalization: control.steerFinalization }
+          : {}),
+      }
+
 const buildChildInheritedConfig = (
   parent: AgentConfig,
   req: SubagentRequest,
   mailboxIds: MailboxIds,
   turnGate: SubagentTurnGate | undefined,
   spawnedAsTaskId: string | undefined,
+  control: ChildControlWiring | undefined,
 ): Partial<AgentConfig> => {
   const childEffort = resolveChildEffort(req)
   return {
@@ -183,6 +217,7 @@ const buildChildInheritedConfig = (
     ...(parent.teamRegistry ? { teamRegistry: parent.teamRegistry } : {}),
     ...(parent.peerInbox ? { peerInbox: parent.peerInbox } : {}),
     ...(turnGate !== undefined ? { subagentTurnGate: turnGate } : {}),
+    ...childControlConfig(control),
     ...(childEffort !== undefined ? { sessionEffort: childEffort } : {}),
     ...(parent.onConfirm ? { onConfirm: parent.onConfirm } : {}),
     ...(parent.embedder ? { embedder: parent.embedder } : {}),
@@ -203,6 +238,20 @@ const buildChildInheritedConfig = (
   }
 }
 
+/** WS2 (RFC jul-18 §4.2) — the control bits threaded onto the child config when
+ *  the control capability is wired. Structurally the fields the child loop
+ *  consumes; the runner owns the full {@link ChildControlSurface} + endpoint. */
+export interface ChildControlWiring {
+  /** MED-2 — present only when the steer plane exists (gate ON); steer OFF ⇒ the
+   *  child is byte-identical to the pre-jul-18 followup baseline (RFC §9). */
+  readonly conversationActionPort?: NonNullable<AgentConfig["conversationActionPort"]>
+  readonly activeTurnRef?: NonNullable<AgentConfig["activeTurnRef"]>
+  /** WS4 — loop-facing steer drain view + finalization port, present only when
+   *  the session steer plane exists (gate ON). Absent ⇒ no safe-point drain. */
+  readonly childSteerDrain?: NonNullable<AgentConfig["childSteerDrain"]>
+  readonly steerFinalization?: NonNullable<AgentConfig["steerFinalization"]>
+}
+
 /** Assemble the child-only config; intentionally omits parent durable state. */
 export const buildChildConfig = (
   parent: AgentConfig,
@@ -212,10 +261,14 @@ export const buildChildConfig = (
   toolNamespace?: ToolNamespaceStrategy,
   turnGate?: SubagentTurnGate,
   spawnedAsTaskId?: string,
+  childRuntime: Pick<RuntimeConfig, "fsOwnershipEnforce"> = runtimeConfig(),
+  // WS2 — appended AFTER `childRuntime` to preserve the historical positional
+  // call sites (the runtime override was the 8th positional arg pre-WS2).
+  control?: ChildControlWiring,
 ): AgentConfig => {
   const req = applyNamedAgent(parent, rawReq)
   return {
-    ...buildChildBase(parent, req, cwd, mailboxIds.agentId, toolNamespace),
-    ...buildChildInheritedConfig(parent, req, mailboxIds, turnGate, spawnedAsTaskId),
+    ...buildChildBase(parent, req, cwd, mailboxIds.agentId, toolNamespace, childRuntime),
+    ...buildChildInheritedConfig(parent, req, mailboxIds, turnGate, spawnedAsTaskId, control),
   } as AgentConfig
 }

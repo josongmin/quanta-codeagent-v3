@@ -1,0 +1,63 @@
+id: 0543-serve-stdio-entrypoint
+title: quanta serve --stdio — session.v1 stdio server entrypoint (Codex app-server parity)
+section: 9
+subsystem: Public SDK session door (docs/plans/jul-16-transport-unified-sdk ticket 02)
+order: 543
+maturity: L2
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:cli", "gate:QUANTA_SERVE_STDIO", "plan:jul-16-transport-unified-sdk"]
+depends_on: [0541-sdk-transport-door]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-07-18"
+  evidence:
+    cli: "quanta serve --stdio subcommand (src/apps/cli/serve-stdio-cmd.ts, argv route in index.ts); real-child-spawn e2e drives it via connect()+transports.stdio"
+    web: "web-daemon gains the honest 'websocket' transport stamp via the same GAP-3 seam (no new browser affordance)"
+purpose: |
+  The IDE/sidecar side of ticket 01's public SDK door: `quanta serve --stdio`
+  makes quanta a session.v1 server an external client (`connect()` +
+  transports.stdio) drives over the child's stdin/stdout — the Codex app-server
+  pattern. GATE `QUANTA_SERVE_STDIO=1` (gateOnStrict, a stray on/true refused;
+  OFF ⇒ exit 64, stdout EMPTY, guidance on stderr — NOT in CLI_FEATURE_GATES so
+  never auto-seeded to "1"). Wiring: createSessionStdioTransport(stdin /
+  protocol-stdout) → openHeadlessRuntimeSession's input.transport (which
+  attaches the transport to a real headless RuntimeSession); --cwd/--model/
+  --permission-mode flags. stdin EOF and SIGTERM both drive session.close()
+  (JsonlSessionEventLog lock release) → exit 0 (graceful, not a signal death);
+  no child/PTY residue. stdout is the PURE protocol channel — every log/banner
+  goes to stderr, and a child tool's (bash) stdout must not inherit it.
+
+  GAP-3 (transport stamp honesty): base.ts capabilities.transport was hardcoded
+  "inproc" for every session (a lie for websocket web-daemon). A presence-only
+  composition seam (base.sessionTransport ?? "inproc", the W1-B
+  serverAutoContinues pattern) lets serve stamp "stdio" and web-daemon
+  "websocket" — completing the conformance 3-way "different-is-correct"
+  assertion. Heartbeat responder hoisted web-daemon → @/ipc/session (shared by
+  every session.v1 server).
+
+  STATUS: COMPLETE (10/10 e2e green — approval WIRE-delegation landed 5b4110f18 via the 3rd 'wire-defer' headless mode: gate OFF exit64/empty-stdout,
+  core connect→append→turn.run→awaitTurnEnd + transport==="stdio", stdin-EOF /
+  SIGTERM exit0, stdout-purity + polluter control). Approval coverage includes
+  approve, deny with typed settlement/no tool effect, and two sequential exact-id
+  approvals with both real tool effects.
+  Approval precedence is fail-closed: this surface's explicit wire delivery
+  wins over an inherited QUANTA_INLINE_APPROVAL_RESOLVER=1, so a parent process
+  cannot silently replace connect({onApproval}) with inline auto-approval.
+evidence:
+  code:
+    - src/apps/cli/serve-stdio-cmd.ts
+    - src/apps/cli/index.ts
+    - src/apps/headless/session-bridge.ts
+    - src/host/runtime/internal/context-binding/base.ts
+    - src/ipc/session/heartbeat.ts
+  adrs: ["docs/plans/jul-16-transport-unified-sdk/02-serve-stdio-entrypoint.md"]
+  tests:
+    integration:
+      - tests/unit/cli/serve-stdio-e2e-hellgate.test.ts

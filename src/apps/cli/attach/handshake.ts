@@ -1,107 +1,12 @@
 /**
- * session.v1 connect-handshake driver (PURE).
- *
- * The daemon publishes ONE shared session over a single WS speaking session.v1.
- * A joining client does NOT know the canonical session id up front, so it
- * follows the same discovery dance the web frontend uses
- * (`apps/web-frontend/src/ws/client.ts`):
- *
- *   1. send a `connect` frame carrying a non-empty DISCOVERY SENTINEL
- *      (`"ui-session"`) — never the real id (we don't have it yet);
- *   2. the bridge rejects it with `target: "connect"`, `reason:
- *      "session_id_mismatch"`, and `sessionId: <canonical>` — we ADOPT that id
- *      and immediately re-handshake addressed to it;
- *   3. the bridge replies with a `snapshot` (and any replay tail) — the
- *      handshake is now READY and every subsequent command must carry the
- *      canonical id.
- *
- * This unit owns ONLY the frame-shaping + id-adoption decision; the transport
- * (socket I/O) lives in `attach-client.ts`. Keeping it pure makes the
- * discovery→adopt logic unit-testable without a live socket — the transport
- * client (`@/ipc/session`) deliberately does NOT replicate the frontend
- * `SessionClient`'s adoption loop, so we reproduce it here.
+ * session.v1 connect-handshake driver — CONSUMER SHIM (S3, jul-16 SDK ticket
+ * 01). The pure discovery→adopt driver MOVED to `@/ipc/session/attach-flow`
+ * so the CLI attach client and the public SDK `connect()` door share ONE
+ * handshake implementation (SSOT hoist, not a copy). This module re-exports
+ * it under the attach slice's historical names — every existing import site
+ * (`@/apps/cli/attach`) keeps working unmodified, which is the behavior-
+ * preservation proof for the move.
  */
 
-import type { SessionTransportMessage } from "@/ipc/session"
-
-/** Matches the frontend's discovery sentinel verbatim — the bridge keys its
- *  mismatch-reject off "not the canonical id", and the sentinel is simply a
- *  non-empty placeholder that can never equal a real (uuid-shaped) id. */
-export const HANDSHAKE_DISCOVERY_SESSION_ID = "ui-session"
-
-export interface AttachHandshake {
-  /** Canonical, server-minted session id once learned; `undefined` until then. */
-  readonly sessionId: string | undefined
-  /** True once a snapshot has settled the handshake (commands may now flow). */
-  readonly ready: boolean
-  /** Build the FIRST connect frame (discovery sentinel). */
-  initialConnect(): SessionTransportMessage
-  /**
-   * Feed an inbound transport message. Returns a `connect` frame to SEND when
-   * the handshake must re-issue (canonical id just adopted), else `undefined`.
-   */
-  onMessage(message: SessionTransportMessage): SessionTransportMessage | undefined
-}
-
-const connectFrame = (sessionId: string): SessionTransportMessage => ({
-  kind: "connect",
-  sessionId,
-})
-
-export const createAttachHandshake = (): AttachHandshake => {
-  let sessionId: string | undefined
-  let ready = false
-
-  // NOTE (v1 scope): this slice has NO reconnect/resume path. A joining client
-  // performs the discovery→adopt dance ONCE; a daemon-initiated close exits the
-  // CLI cleanly (see attach-client.ts close/error listeners) rather than
-  // silently re-dialing. The frontend's resume-cursor (`resumeFromSeq`) is
-  // therefore deliberately omitted — both the initial AND the re-handshake
-  // (id-adoption) connect frames are bare. If a future seam adds reconnect, it
-  // would track the highest observed seq here and seed `resumeFromSeq` on the
-  // re-dial; until that path exists, tracking it would be misleading dead code.
-
-  return {
-    get sessionId() {
-      return sessionId
-    },
-    get ready() {
-      return ready
-    },
-    initialConnect() {
-      return connectFrame(sessionId ?? HANDSHAKE_DISCOVERY_SESSION_ID)
-    },
-    onMessage(message) {
-      switch (message.kind) {
-        case "rejected": {
-          // Only a CONNECT-target reject carries the canonical id for adoption;
-          // a COMMAND-target reject (dedup / revision / validation) is handled
-          // elsewhere and never re-drives the handshake.
-          if (
-            message.target === "connect" &&
-            message.sessionId.length > 0 &&
-            message.sessionId !== HANDSHAKE_DISCOVERY_SESSION_ID &&
-            sessionId !== message.sessionId
-          ) {
-            sessionId = message.sessionId
-            // Re-handshake to the canonical id — bare (no resume cursor; the
-            // discovery bootstrap never resumes and there is no reconnect path).
-            return connectFrame(sessionId)
-          }
-          return undefined
-        }
-        case "snapshot": {
-          // A server may answer the discovery connect with a snapshot directly
-          // (no reject) — adopt the id from the snapshot in that case.
-          if (sessionId === undefined || sessionId !== message.snapshot.sessionId) {
-            sessionId = message.snapshot.sessionId
-          }
-          ready = true
-          return undefined
-        }
-        default:
-          return undefined
-      }
-    },
-  }
-}
+export type { AttachHandshake } from "@/ipc/session"
+export { createAttachHandshake, HANDSHAKE_DISCOVERY_SESSION_ID } from "@/ipc/session"

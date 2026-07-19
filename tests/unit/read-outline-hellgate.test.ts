@@ -108,6 +108,7 @@ describe("read-outline hellgate", () => {
       })
     }
     const out = renderOutline(lines.join("\n"), { lang: "typescript", decls }, 80)
+    expect(out).toContain("outline budget reached")
     expect(out).toContain("more declarations elided")
     // The first function always renders (head is useful even on a tiny budget).
     expect(out).toContain("function f0()")
@@ -174,6 +175,7 @@ describe("read-outline hellgate", () => {
     }
     const out = renderOutline(text, parsed, 1)
     expect(out).toContain("function a()")
+    expect(out).toContain("outline budget exceeded by first declaration")
     expect(out).toContain("more declarations elided")
   })
 

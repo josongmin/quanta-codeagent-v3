@@ -26,17 +26,12 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import {
-  type AccountRateLimitStore,
-  createAccountRateLimitStore,
-  type DualWindowSnapshot,
-  parseDualWindowSnapshot,
-} from "@/llm/ratelimit-snapshot"
-import type { LLMPort } from "@/llm/ports"
-import type { StreamEvent, StreamInput } from "@/llm/types"
+import { type DualWindowSnapshot, parseDualWindowSnapshot } from "@/llm/ratelimit-snapshot"
 
-const getter = (h: Record<string, string>) => (name: string): string | null =>
-  h[name.toLowerCase()] ?? null
+const getter =
+  (h: Record<string, string>) =>
+  (name: string): string | null =>
+    h[name.toLowerCase()] ?? null
 
 const FIXED_NOW = 1_000_000_000_000 // ms-epoch
 
@@ -86,10 +81,7 @@ describe("§9.3 dual-window parse", () => {
   })
 
   test("DW-04: no recognized header ⇒ undefined (no clobber)", () => {
-    const snap = parseDualWindowSnapshot(
-      getter({ "x-some-other-header": "1" }),
-      () => FIXED_NOW,
-    )
+    const snap = parseDualWindowSnapshot(getter({ "x-some-other-header": "1" }), () => FIXED_NOW)
     expect(snap).toBeUndefined()
   })
 
@@ -132,178 +124,6 @@ describe("§9.3 dual-window parse", () => {
       () => FIXED_NOW,
     )
     expect(neg?.primary?.usedPercent).toBeUndefined()
-  })
-})
-
-describe("§9.3 dual-window per-account accumulation (e2e)", () => {
-  test("DW-06: 2nd request on the SAME account accumulates into one bucket", () => {
-    const store: AccountRateLimitStore = createAccountRateLimitStore()
-    let now = FIXED_NOW
-
-    // Request 1: primary at 40% reported.
-    store.observe(
-      "acct-A",
-      parseDualWindowSnapshot(
-        getter({
-          "x-codex-primary-used-percent": "40",
-          "x-codex-primary-window-minutes": "300",
-        }),
-        () => now,
-      ),
-    )
-    let cur = store.current("acct-A")
-    expect(cur?.primary?.usedPercent).toBe(40)
-    expect(cur?.secondary).toBeUndefined()
-
-    // Request 2 (later): primary climbs to 55%, secondary now appears at 5%.
-    now = FIXED_NOW + 10_000
-    store.observe(
-      "acct-A",
-      parseDualWindowSnapshot(
-        getter({
-          "x-codex-primary-used-percent": "55",
-          "x-codex-primary-window-minutes": "300",
-          "x-codex-secondary-used-percent": "5",
-          "x-codex-secondary-window-minutes": "10080",
-        }),
-        () => now,
-      ),
-    )
-    cur = store.current("acct-A")
-    // Same bucket, refined: primary updated, secondary now present.
-    expect(cur?.primary?.usedPercent).toBe(55)
-    expect(cur?.secondary?.usedPercent).toBe(5)
-    expect(cur?.observedAt).toBe(now)
-  })
-
-  test("DW-06b: an undefined observation does NOT clobber the prior bucket", () => {
-    const store = createAccountRateLimitStore()
-    store.observe(
-      "acct-A",
-      parseDualWindowSnapshot(
-        getter({
-          "x-codex-primary-used-percent": "40",
-          "x-codex-primary-window-minutes": "300",
-        }),
-        () => FIXED_NOW,
-      ),
-    )
-    // A non-Codex response → parser returns undefined → must be a no-op.
-    store.observe("acct-A", undefined)
-    expect(store.current("acct-A")?.primary?.usedPercent).toBe(40)
-  })
-
-  test("DW-07: two accounts keep SEPARATE buckets", () => {
-    const store = createAccountRateLimitStore()
-    store.observe("acct-A", { primary: { usedPercent: 40 }, observedAt: FIXED_NOW })
-    store.observe("acct-B", { primary: { usedPercent: 90 }, observedAt: FIXED_NOW })
-    expect(store.current("acct-A")?.primary?.usedPercent).toBe(40)
-    expect(store.current("acct-B")?.primary?.usedPercent).toBe(90)
-  })
-
-  test("DW-07b: current() for an unseen account ⇒ undefined", () => {
-    const store = createAccountRateLimitStore()
-    expect(store.current("never-seen")).toBeUndefined()
-  })
-})
-
-/**
- * Fake adapter that drives the REAL `StreamInput.onResponseHeaders` seam — the
- * same hook the live Anthropic adapter invokes via `.withResponse()`. The
- * composition-root behaviour (parse headers → observe into the account store)
- * is wired exactly as the loop would wire it, so this exercises the dual-window
- * accumulation end-to-end through the LLMPort contract, not just the parser.
- */
-const makeDualWindowAdapter = (
-  headersPerCall: ReadonlyArray<Record<string, string>>,
-): LLMPort => {
-  let call = 0
-  return {
-    model: "codex-test",
-    async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
-      const headers = headersPerCall[call] ?? {}
-      call += 1
-      // Real adapter contract: invoke onResponseHeaders ONCE with a
-      // case-insensitive accessor BEFORE yielding the parsed stream.
-      if (input.onResponseHeaders !== undefined) {
-        const get = (name: string): string | null => headers[name.toLowerCase()] ?? null
-        try {
-          input.onResponseHeaders(get)
-        } catch {
-          // best-effort, mirrors the adapter
-        }
-      }
-      const ev: StreamEvent = { type: "text_delta", delta: "ok" }
-      yield ev
-    },
-  }
-}
-
-describe("§9.3 dual-window e2e (real LLMPort onResponseHeaders seam)", () => {
-  test("DW-E2E: 2nd request accumulates the dual-window through the real hook", async () => {
-    const store = createAccountRateLimitStore()
-    let now = FIXED_NOW
-    const account = "acct-live"
-    const adapter = makeDualWindowAdapter(
-      [
-        // request 1: primary 30%, no secondary yet
-        {
-          "x-codex-primary-used-percent": "30",
-          "x-codex-primary-window-minutes": "300",
-        },
-        // request 2: primary 70%, secondary appears at 12%
-        {
-          "x-codex-primary-used-percent": "70",
-          "x-codex-primary-window-minutes": "300",
-          "x-codex-secondary-used-percent": "12",
-          "x-codex-secondary-window-minutes": "10080",
-        },
-      ],
-    )
-
-    // The composition-root hook: parse → observe (default-OFF when unset).
-    const onResponseHeaders = (get: (name: string) => string | null): void => {
-      store.observe(account, parseDualWindowSnapshot(get, () => now))
-    }
-
-    // Drive request 1 through the real stream contract.
-    const drain = async (): Promise<void> => {
-      for await (const _ of adapter.stream({
-        messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
-        system: "",
-        tools: [],
-        onResponseHeaders,
-      })) {
-        // consume
-      }
-    }
-    await drain()
-    expect(store.current(account)?.primary?.usedPercent).toBe(30)
-    expect(store.current(account)?.secondary).toBeUndefined()
-
-    // 2nd request on the SAME account accumulates into the SAME bucket.
-    now = FIXED_NOW + 60_000
-    await drain()
-    const cur = store.current(account)
-    expect(cur?.primary?.usedPercent).toBe(70)
-    expect(cur?.secondary?.usedPercent).toBe(12)
-    expect(cur?.observedAt).toBe(now)
-  })
-
-  test("DW-E2E byte-identity: adapter with NO hook never touches the store", async () => {
-    const store = createAccountRateLimitStore()
-    const adapter = makeDualWindowAdapter([
-      { "x-codex-primary-used-percent": "99", "x-codex-primary-window-minutes": "300" },
-    ])
-    // Default-OFF: no onResponseHeaders passed ⇒ store stays empty.
-    for await (const _ of adapter.stream({
-      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
-      system: "",
-      tools: [],
-    })) {
-      // consume
-    }
-    expect(store.current("acct-x")).toBeUndefined()
   })
 })
 

@@ -1,4 +1,4 @@
-// `apply_patch_structured` tool — ADR-0464 CLI-facing wire (default-OFF).
+// `apply_patch_structured` tool — ADR-0464 CLI-promoted wire.
 //
 // WHAT: a model-facing `Tool` that parses a V4A patch text and applies it via
 // the pure `@/patch` slice's `applyPatchStructured(patch, fs)` — the ADDITIVE,
@@ -13,11 +13,13 @@
 // all-or-nothing-across-the-patch + throws typed errors to the dispatch seam;
 // this tool's contract is partial-success + structured per-file outcome. Two
 // distinct result shapes ⇒ two tools, exactly like the `shadow*` / `mcp_tasks*`
-// caller-wired siblings. Default tool menu stays BYTE-IDENTICAL unless the host
-// opts in (see `buildStructuredPatchTool` registration note below).
+// caller-wired siblings. The CLI explicitly promotes this sibling default-ON;
+// other surfaces remain opt-in, and QUANTA_ENABLE_STRUCTURED_PATCH=0 restores
+// the legacy CLI menu.
 //
-// ADAPTER / PORT: this tool needs the SAME `PatchFileSystemPort` the existing
-// `apply_patch` tool uses — `FsJailFileSystemPort` (the ONE `@/storage` jail).
+// ADAPTER / PORT: this tool needs the SAME guarded patch port the existing
+// `apply_patch` tool uses — `FsJailFileSystemPort` (the ONE `@/storage` jail +
+// jailed stat capability for stale-read preflight and baseline refresh).
 // Per the composition-root discipline (ARCHITECTURE.md §intro) the concrete
 // port is constructed at the apps layer and injected via the factory arg
 // `makeApplyPatchStructuredTool(fs)`. When no port is injected the tool mirrors
@@ -42,11 +44,17 @@ import { z } from "zod"
 import { parsePatch } from "@/patch/parser"
 import { applyPatchStructured } from "@/patch/structured"
 import type { AppliedChange, StructuredApplyOutcome } from "@/patch/structured-types"
-import type { PatchFileSystemPort } from "@/patch/types"
 import { errMessage } from "@/shared"
+import { writeBudgetEvent } from "./_shared/exfil-rail-guards"
 import { FsJailFileSystemPort } from "./apply-patch"
 import { defineTool } from "./factory"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "./types"
+import {
+  type GuardedPatchFileSystemPort,
+  guardPatchTargets,
+  guardStalePatchTargets,
+  refreshPatchBaselines,
+} from "./patch-mutation-safety"
+import type { EditToolContext, Tool, ToolEvent, ToolResult } from "./types"
 
 const schema = z.object({
   patch: z
@@ -88,17 +96,18 @@ const renderChange = (c: AppliedChange): string => {
 
 /**
  * Build the `apply_patch_structured` tool over an injected
- * {@link PatchFileSystemPort}. The composition root passes the SAME
+ * {@link GuardedPatchFileSystemPort}. The composition root passes the SAME
  * `FsJailFileSystemPort` posture the existing `apply_patch` tool uses. When the
  * port is omitted the tool constructs an `FsJailFileSystemPort` rooted at
  * `ctx.cwd` per call (byte-identical jail to `apply_patch`).
  *
- * DO NOT register this in `buildDefaultTools` — it is caller-wired behind the
- * `QUANTA_ENABLE_STRUCTURED_PATCH` env gate (see the call-site note in the
- * slice report). When the gate is unset the tool is NEVER constructed and the
- * default tool menu is byte-identical.
+ * DO NOT register this unconditionally in `buildDefaultTools` — it is
+ * caller-wired behind the `QUANTA_ENABLE_STRUCTURED_PATCH` env gate. The CLI
+ * surface explicitly seeds that gate default-ON from the tool-surface SSOT;
+ * other surfaces stay opt-in. An explicit `=0` keeps the tool unconstructed
+ * and restores the legacy menu byte-for-byte.
  */
-export const makeApplyPatchStructuredTool = (fs?: PatchFileSystemPort): Tool<Input> =>
+export const makeApplyPatchStructuredTool = (fs?: GuardedPatchFileSystemPort): Tool<Input> =>
   defineTool<Input>({
     name: "apply_patch_structured",
     description:
@@ -114,8 +123,9 @@ export const makeApplyPatchStructuredTool = (fs?: PatchFileSystemPort): Tool<Inp
     // HITL secure-by-default: a V4A patch is a multi-file workspace mutation;
     // pre-approval covers it (same posture as apply_patch / write / edit).
     hitlTier: (): "pre-approval-ok" => "pre-approval-ok",
+    interruptBehavior: (): "block" => "block",
 
-    async *execute(input: Input, ctx: ToolContext): AsyncIterable<ToolEvent> {
+    async *execute(input: Input, ctx: EditToolContext): AsyncIterable<ToolEvent> {
       const port = fs ?? new FsJailFileSystemPort({ jailRoot: ctx.cwd })
 
       // parsePatch is the only throwing surface — a grammar error is recoverable
@@ -138,9 +148,39 @@ export const makeApplyPatchStructuredTool = (fs?: PatchFileSystemPort): Tool<Inp
         return
       }
 
+      const gitDeny = guardPatchTargets(parsed, ctx.gitWriteGuard, "apply_patch_structured")
+      if (gitDeny !== null) {
+        yield gitDeny
+        return
+      }
+
+      const staleDeny = await guardStalePatchTargets(parsed, port, ctx)
+      if (staleDeny !== null) {
+        yield staleDeny
+        return
+      }
+
+      // A structured patch is one user-visible filesystem-mutating request,
+      // even when it contains several independently-applied file operations.
+      // Consume the shared turn budget exactly once AFTER parse succeeds (a
+      // malformed string cannot mutate) and BEFORE `applyPatchStructured` can
+      // touch its first file.  Do not move this inside the per-file operation
+      // loop: that would make one multi-file patch bypass the per-call cap.
+      const budgetDeny = writeBudgetEvent(ctx)
+      if (budgetDeny !== null) {
+        yield budgetDeny
+        return
+      }
+
       // applyPatchStructured is no-throw — returns Result<StructuredApplyOutcome>.
       // A misbehaving port is captured as a per-file failure inside it.
-      const result = await applyPatchStructured(parsed, port)
+      const criticalSection = ctx.criticalSection?.begin()
+      let result: Awaited<ReturnType<typeof applyPatchStructured>>
+      try {
+        result = await applyPatchStructured(parsed, port)
+      } finally {
+        criticalSection?.end()
+      }
       if (!result.ok) {
         yield {
           type: "result",
@@ -157,6 +197,15 @@ export const makeApplyPatchStructuredTool = (fs?: PatchFileSystemPort): Tool<Inp
       // dispatch seam treats it as a failure the model must address — but the
       // structured payload + per-file render carry the self-correction detail.
       const outcome = result.value
+      await refreshPatchBaselines(
+        port,
+        ctx,
+        outcome.appliedChanges.flatMap((change) =>
+          change.error === undefined && change.changeType !== "deleted"
+            ? [change.movedTo ?? change.path]
+            : [],
+        ),
+      )
       const toolResult: ToolResult = {
         ok: outcome.allOk,
         output: renderOutcome(outcome),

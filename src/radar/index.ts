@@ -16,5 +16,12 @@ export { proposeOnIdleForLongTask } from "./heuristics/idle-long-task"
 export { InMemoryRadarStore, type InMemoryRadarStoreOpts } from "./in-memory-store"
 export { JsonlFileRadarStore, type JsonlFileRadarStoreOpts } from "./jsonl-file-store"
 export type { RadarOpError, RadarStore } from "./port"
-export type { CardKind, CardStatus, ProposeOpts, RadarCard } from "./types"
+export type {
+  BugFixHypothesis,
+  BugFixProposalMetadata,
+  CardKind,
+  CardStatus,
+  ProposeOpts,
+  RadarCard,
+} from "./types"
 export { RadarError } from "./types"

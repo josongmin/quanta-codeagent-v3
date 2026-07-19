@@ -1,5 +1,4 @@
 import type { AgentConfig } from "@/agent"
-import type { GranularRegistryPort } from "@/agent/checkpoint/granular-registry"
 import type { ObjectivePort } from "@/agent/objective"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import {
@@ -35,9 +34,8 @@ type RuntimeCreateHostArgs = Omit<CreateRuntimeFacadeArgs, "boot" | "compose">
 
 export interface RuntimeFacadeComposeOptions {
   readonly automationEngine?: NonNullable<RuntimeContextAutomationEngineView>
-  readonly granularRegistry?: GranularRegistryPort
   readonly registryToolMapper?: (tool: Tool) => Tool
-  /** Per-turn prompt-assembled sink (mirrors `granularRegistry`). When set, it
+  /** Per-turn prompt-assembled sink. When set, it
    *  is patched onto the runtime context state so the built `AgentConfig` carries
    *  `onPromptAssembled` and the loop fires it each turn (REPL `/context` live
    *  breakdown). Absent ⇒ slot omitted ⇒ `AgentConfig.onPromptAssembled`
@@ -105,6 +103,14 @@ export interface RuntimeFacadeComposeOptions {
    *  the agent marking the goal complete stops the pursuit. Absent ⇒ the
    *  assembler mints its own (byte-identical). */
   readonly objective?: ObjectivePort
+  /** §9.6 `/presets` (opusplan parity) — the role→model resolver the surface
+   *  built by wrapping its SINGLE `StickyPresetResolver`
+   *  (`buildPresetRoleModelResolver(ctx.presets)`). Threaded DOWN here (mirrors
+   *  `objective`) so it lands on `AgentConfig.roleModelResolver` and
+   *  `resolveChildLlm` consults it for a delegated role's model. Absent ⇒ slot
+   *  omitted ⇒ `wireOptionalAgentPorts` defaults the SSOT resolver (which returns
+   *  the caller fallback verbatim), byte-identical to the no-preset path. */
+  readonly roleModelResolver?: AgentConfig["roleModelResolver"]
 }
 
 /** S1 (jul-04) — the write-only net-capture sink the CLI threads through
@@ -218,7 +224,6 @@ const patchRuntimeContextState = (
  *  a new `registry`) stay as explicit branches below. ADR-0512 added
  *  `onSkillScopeReady` to this set. */
 const PASS_THROUGH_COMPOSE_KEYS = [
-  "granularRegistry",
   "onPromptAssembled",
   "workingState",
   "onWorkingStateReady",
@@ -234,6 +239,7 @@ const PASS_THROUGH_COMPOSE_KEYS = [
   "radar",
   "browserNet",
   "objective",
+  "roleModelResolver",
 ] as const satisfies readonly (keyof RuntimeFacadeComposeOptions & keyof RuntimeContextPatch)[]
 
 const applyRuntimeFacadeComposeOptions = (

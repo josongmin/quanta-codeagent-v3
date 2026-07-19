@@ -26,6 +26,7 @@ import {
   type AppshotSlot,
   appshotVerifyTool,
   buildDefaultTools,
+  judgeVerdict,
   makeJailedScaffold,
   type ScaffoldResult,
   type ScaffoldWritePort,
@@ -45,7 +46,8 @@ const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
 class FakePort implements AppshotPort {
   calls = 0
   constructor(
-    private readonly verdict: VerifyVerdict = { pass: true, notes: "looks right" },
+    // REAL-judge verdict (branded) — the loop honors a pass ONLY when branded.
+    private readonly verdict: VerifyVerdict = judgeVerdict(true, "looks right"),
     private readonly throwOn?: "render",
   ) {}
   async scaffold(_spec: AppSpec, outDir: string): Promise<ScaffoldResult> {
@@ -115,7 +117,7 @@ describe("appshot_verify — outcome mapping", () => {
 
   test("C. exhausted ⇒ ok:true (a surfaced verdict, not a tool failure)", async () => {
     const tool = appshotVerifyTool({
-      port: new FakePort({ pass: false, notes: "still off" }),
+      port: new FakePort(judgeVerdict(false, "still off")),
       now: clock(),
     })
     const r = await run(tool, { prompt: "x", out_dir: "app", max_iterations: 2 }, ctx())
@@ -126,7 +128,7 @@ describe("appshot_verify — outcome mapping", () => {
 
   test("D. effect throw ⇒ ok:false + typed failure", async () => {
     const tool = appshotVerifyTool({
-      port: new FakePort({ pass: true, notes: "x" }, "render"),
+      port: new FakePort(judgeVerdict(true, "x"), "render"),
       now: clock(),
     })
     const r = await run(tool, { prompt: "x", out_dir: "app" }, ctx())

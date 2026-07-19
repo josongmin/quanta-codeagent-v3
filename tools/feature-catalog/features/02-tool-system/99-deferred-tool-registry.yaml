@@ -15,13 +15,35 @@ depends_on: [tool-output-schema-factory, tool-search]
 config_refs:
   env: [QUANTA_CAP_ENFORCE]
 surface_integration:
-  cli: full
+  cli: na
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-15"
   evidence:
-    cli: "runs in the interactive CLI — 3/3 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    cli: "TYPE SURFACE ONLY — the registry is import-reachable but deliberately has NO scheduler wired into the agent loop and NO user-visible affordance; see the machine-checkable `wiring` block (wireStatus=seam-only). The former cli=full was a false-green (a type-surface with no end-to-end effect)."
     web: "pure in-memory type-surface registry, deliberately NO scheduler wired into the loop, no UI affordance on any surface"
+wiring:
+  # THE FALSE-GREEN FIX. Old state: surface_integration.cli=full — a pure
+  # in-memory type-surface scored as fully integrated. Honest state below:
+  # the producer (the registry class) EXISTS, but there is deliberately NO
+  # consumer (no scheduler wired into the loop), so wireStatus=seam-only.
+  wireStatus: seam-only
+  activation:
+    - kind: config
+      key: capEnforce
+      value: true
+    - kind: env
+      key: QUANTA_CAP_ENFORCE
+  producer:
+    - module: src/tool/deferred/index.ts
+      exportedSymbol: DeferredResultRegistry
+      role: "issues DeferredHandle ids + parks/poll/resolve DeferredToolResult (in-memory registry)"
+  consumer: []
+  contracts:
+    cli:
+      status: na
+    web:
+      status: na
 purpose: |
   Typed seam for tools that need to return a provisional placeholder plus a
   `DeferredHandle`, with the final `ToolResult` produced out-of-band and parked

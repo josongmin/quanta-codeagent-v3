@@ -82,6 +82,13 @@ export interface NetworkProxyConfig {
    */
   readonly secretEgress?: import("./secret-egress").SecretEgressConfig
   /**
+   * jun-6 exfil-rail (C) — advisory denied-host fan-out threshold.  Present only
+   * when both the strict scouting gate and its positive operator-supplied K are
+   * configured.  The proxy evaluates its append-only decision log after each
+   * verdict; a signal is diagnostic only and never changes allow/deny policy.
+   */
+  readonly exfilScoutingThreshold?: number
+  /**
    * jun-7 TLS-MITM (Phase-2 of exfil-rail (B)) — closes the HTTPS-opaque gap.
    * Absent ⇒ a `CONNECT host:443` stays a RAW tunnel + `connect-tunnel-unscanned`
    * marker (byte-identical to the pre-slice path). When present (operator-opt-in

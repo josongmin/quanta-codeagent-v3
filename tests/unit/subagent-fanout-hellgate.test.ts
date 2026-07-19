@@ -11,23 +11,41 @@ import {
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 
 /**
- * ADR-0298 — Subagent fanout via streaming-dispatch barrier.
+ * ADR-0298 — Subagent fanout via streaming-dispatch barrier
+ *   (RECONCILED with ADR-0076 Gap-5 "FIX 6" — early-dispatch abort hole).
  *
- * Hellgate seals the parallel-spawn invariant: a single assistant message
- * carrying N `agent` tool_use blocks dispatches them CONCURRENTLY via the
- * existing `streaming-dispatch.ts` barrier engine (Phase 1 — in-flight,
- * pre-stream-end). The flip is `agent.isConcurrencySafe: () => true`; the
- * mechanism is unchanged.
+ * ORIGINAL ADR-0298 shipped sibling `agent` fan-out as IN-FLIGHT (Phase-1)
+ * concurrency: N `agent` tool_use blocks in one assistant message all started
+ * their `dispatch()` overlapping the remaining model stream, via
+ * `agent.isEarlyDispatchSafe:()=>true`.
  *
- * Safety argument (defended by the cases here):
- * - Each child runs in its own conversation envelope (separate registry +
- *   store + checkpoint + abort signal); siblings share no mutable state.
+ * FIX 6 (commit 4843c6020, jul-2 runtime bugbash — DELIBERATE, shipped,
+ * red-on-revert) RETIRED that in-flight overlap for `agent`. Rationale: an
+ * early-started `agent` is fired in flight; on a `config.signal` abort,
+ * `abandonInFlight` discards its in-flight promise and `streamingTurn` returns
+ * `{kind:"aborted"}` BEFORE the slot's `tool_result` is appended. If the child
+ * `agent` already committed a side effect (write/bash) before observing the
+ * shared signal, that mutation PERSISTS but its `tool_result` is never recorded
+ * → double-exec on resume. The fence-clean fix: the early-start gate in
+ * `scheduleResolvedCall` consults ONLY `isReadOnly`, so a NON-read-only tool
+ * (`agent`) is NEVER early-started — it runs DEFERRED in the Phase-3 serial
+ * drain. `isEarlyDispatchSafe` is still WIRED by the loop and `agent` still
+ * declares it `()=>true`, but the gate intentionally does NOT consult it
+ * (`void isEarlyDispatchSafe`). See `src/agent/streaming-dispatch.test.ts` for
+ * the owner-side FIX-6 contract this file mirrors for fanout-shaped events.
+ *
+ * POST-FIX-6 invariant this hellgate seals:
+ * - Sibling `agent` calls run SERIALLY-DEFERRED (one at a time in the Phase-3
+ *   drain), NOT concurrently in flight — peak in-flight === 1, and each agent
+ *   fully ENDS before the next STARTS (strict serial drain order).
+ * - The abort hole is CLOSED: a mid-stream abort BEFORE the drain leaves every
+ *   `agent` slot un-dispatched (`promise === undefined`), so nothing commits an
+ *   unrecorded side effect.
+ * - `resultBlocks`/ordering are UNCHANGED (Phase-4 sorts by model-call order
+ *   regardless of early/deferred) — only wall-clock overlap timing changed.
  * - The barrier still engages on the FIRST non-concurrency-safe sibling
  *   in the same turn (e.g. `write` after two `agent`s) — i.e. agent fanout
  *   does NOT regress the head-of-line barrier for genuinely unsafe tools.
- * - Result ordering follows model-call order regardless of which child
- *   resolves first (streaming-dispatch Phase 4 invariant — already covered
- *   by streaming-dispatch.test.ts; re-asserted here for fanout-shaped events).
  *
  * `parallel_worker?: boolean` is a DECLARATIVE flag (Cursor `is_parallel_worker`
  * pattern). It carries zero functional behaviour — concurrency is governed by
@@ -118,40 +136,48 @@ describe("ADR-0298 agent.isConcurrencySafe — declarative flip", () => {
 
 // ─── Section 2 — streaming-dispatch fanout integration ───────────────────────
 
-describe("ADR-0298 fanout — three sibling agent spawns dispatch concurrently", () => {
+describe("ADR-0298 fanout — sibling agent spawns run serially-deferred (post-FIX-6)", () => {
   // The `agent` tool is `isConcurrencySafe:true` but `isReadOnly:false` (its
-  // child owns an unrestricted tool set — see agent-tool.ts). T02 gates
-  // early-start on early-dispatch eligibility; `agent` opts in via
-  // `isEarlyDispatchSafe:()=>true` because its effects land INSIDE an isolated
-  // child loop, not at the parent seam. We mirror the loop's production wiring
-  // here (`registry.isEarlyDispatchSafe` falls back to `isReadOnly`, then opts
-  // `agent` in) so the fan-out invariant is exercised exactly as it ships.
+  // child owns an unrestricted tool set — see agent-tool.ts). It STILL declares
+  // `isEarlyDispatchSafe:()=>true` and the loop STILL wires that predicate — but
+  // FIX 6 (ADR-0076 Gap-5 abort-hole closure) makes `scheduleResolvedCall`
+  // consult ONLY `isReadOnly` for early-start eligibility, so a NON-read-only
+  // `agent` is NEVER early-started. We mirror the loop's production wiring here
+  // (`isConcurrencySafe`/`isReadOnly`/`isEarlyDispatchSafe` all bound exactly as
+  // `stream-consume.ts` binds them) so the fan-out invariant is exercised as it
+  // ships: `agent` is concurrency-safe + early-dispatch-declared but NOT
+  // read-only ⇒ it is DEFERRED to the Phase-3 serial drain, never in flight.
   const isConcurrencySafe = (name: string): boolean => name === "agent"
+  const isReadOnly = (name: string): boolean => name === "read"
   const isEarlyDispatchSafe = (name: string): boolean => name === "agent"
 
-  test("3 agent calls in one turn ALL start before ANY finishes (in-flight Phase 1)", async () => {
-    // DETERMINISTIC concurrency proof — no wall-clock thresholds. Each dispatch
-    // records its start, then BLOCKS on a shared barrier that only releases once
-    // all three have started. If the engine serialized the siblings, the first
-    // dispatch would block forever waiting for starts #2/#3 that can't happen
-    // until it returns — so a serial regression DEADLOCKS the barrier rather
-    // than passing on a lucky timing margin. The assertion is purely by event
-    // ORDERING (every `start:*` precedes every `end:*`).
+  test("3 agent calls in one turn run SERIALLY-DEFERRED — none in flight, each ends before the next starts (post-FIX-6)", async () => {
+    // POST-FIX-6 contract. `agent` is NON-read-only, so FIX 6 keeps it OUT of the
+    // in-flight early-start phase: all three run in the Phase-3 serial drain,
+    // one at a time, in model-call order. This is a DETERMINISTIC event-ordering
+    // proof with NO wall-clock thresholds and NO shared barrier (the old barrier
+    // deadlocked under serialization — which is exactly what FIX-6 now does).
+    //
+    // We assert two things the RETIRED in-flight path would VIOLATE and the new
+    // serial-deferred path GUARANTEES:
+    //   (a) every `start:*` is emitted at DRAIN time — i.e. AFTER the stream has
+    //       fully closed (`message_stop` observed). We witness stream progress
+    //       via `evLog` and assert no dispatch fired while the stream was open.
+    //   (b) STRICT serial interleave: end:c1 < start:c2 < end:c2 < start:c3.
+    //       Under the old in-flight fan-out all three would `start:` before any
+    //       `end:` (start:c1,start:c2,start:c3,end:...). This assertion FLIPS if
+    //       FIX-6 is reverted to early-start `agent` (red-on-injection).
     const log: string[] = []
-    const EXPECTED = 3
-    let started = 0
-    let releaseAll: () => void = () => undefined
-    const allStarted = new Promise<void>((resolve) => {
-      releaseAll = resolve
-    })
+    const evLog: string[] = []
+    let streamClosed = false
     const dispatch = async (call: StreamingCall): Promise<DispatchOutcome> => {
-      log.push(`start:${call.id}`)
-      started += 1
-      if (started === EXPECTED) releaseAll()
-      // Park here until every sibling has STARTED. With genuine in-flight
-      // concurrency all three reach this point; with serialization this never
-      // resolves (the test would time out — a hard, non-flaky failure).
-      await allStarted
+      // If ANY agent dispatched while the stream was still open, it was
+      // early-started in flight — a FIX-6 regression.
+      log.push(`start:${call.id}:streamClosed=${streamClosed}`)
+      // Yield to the microtask queue: if siblings were concurrent they would
+      // interleave their own `start:` here BEFORE this one records `end:`.
+      await Promise.resolve()
+      await Promise.resolve()
       log.push(`end:${call.id}`)
       return block(call.id, `child-${call.id}`)
     }
@@ -166,46 +192,65 @@ describe("ADR-0298 fanout — three sibling agent spawns dispatch concurrently",
     async function* tracedGen(): AsyncGenerator<StreamEvent> {
       for (const ev of events) {
         yield ev
+        evLog.push(`ev:${ev.type}`)
         await Promise.resolve()
       }
+      streamClosed = true
     }
     const res = await streamingTurn({
       events: tracedGen(),
       isConcurrencySafe,
+      isReadOnly,
       isEarlyDispatchSafe,
       dispatch,
       onToolStart: (call) => log.push(`scheduled:${call.id}`),
     })
     expect(res.kind).toBe("assembled")
-    // All three started, and every start strictly precedes every end.
+
+    // (a) DEFERRED, not in flight: no `agent` dispatch fired before the stream
+    //     closed. Every start records `streamClosed=true`.
     const starts = log.filter((l) => l.startsWith("start:"))
-    const firstEnd = log.findIndex((l) => l.startsWith("end:"))
-    expect(starts).toHaveLength(EXPECTED)
-    // No `end:*` appears before all three `start:*` — genuinely concurrent.
-    for (let i = 0; i < EXPECTED; i++) {
-      expect(log.indexOf(`start:c${i + 1}`)).toBeLessThan(firstEnd)
-    }
+    expect(starts).toHaveLength(3)
+    for (const s of starts) expect(s.endsWith("streamClosed=true")).toBe(true)
+
+    // (b) STRICT serial drain — each agent fully ENDS before the next STARTS,
+    //     in model-call order. (Under the retired in-flight fan-out all three
+    //     `start:` precede any `end:`, which flips this ordering chain.)
+    const idx = (needle: string) => log.findIndex((l) => l.startsWith(needle))
+    const s1 = idx("start:c1")
+    const e1 = log.indexOf("end:c1")
+    const s2 = idx("start:c2")
+    const e2 = log.indexOf("end:c2")
+    const s3 = idx("start:c3")
+    const e3 = log.indexOf("end:c3")
+    expect(s1).toBeLessThan(e1)
+    expect(e1).toBeLessThan(s2)
+    expect(s2).toBeLessThan(e2)
+    expect(e2).toBeLessThan(s3)
+    expect(s3).toBeLessThan(e3)
   })
 
-  test("concurrent fan-out collapses to ONE settle round, not N serial rounds", async () => {
-    // DETERMINISTIC replacement for the old wall-clock race-tolerance assertion.
-    // Instead of measuring milliseconds (machine-load flaky), we count settle
-    // ROUNDS: each dispatch parks on a single shared gate. Under concurrency all
-    // three are parked SIMULTANEOUSLY, so one `release()` settles all three
-    // (peak in-flight === 3). Under serialization only ONE is ever parked at a
-    // time, so peak in-flight would be 1. We assert peak concurrency === 3.
+  test("serial fan-out — peak in-flight is exactly ONE (never overlapped, post-FIX-6)", async () => {
+    // DETERMINISTIC peak-concurrency proof. Each dispatch bumps a live counter,
+    // then parks on its OWN macrotask timer (setTimeout 0) before decrementing.
+    // The per-call timer is the trick that makes this a two-way discriminator
+    // WITHOUT deadlocking:
+    //   - Under FIX-6 serial deferral, `drainDeferredSlots` awaits dispatch #1 to
+    //     completion (its timer fires) BEFORE starting #2, so only one is ever
+    //     parked ⇒ peak stays 1.
+    //   - Under the retired in-flight fan-out, all three dispatches are fired
+    //     synchronously as the stream is consumed, so all three timers are armed
+    //     and all three park SIMULTANEOUSLY ⇒ peak climbs to 3.
+    // A shared gate would deadlock the serial path; independent timers never do.
     let inFlight = 0
     let peak = 0
-    let release: () => void = () => undefined
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
     const dispatch = async (call: StreamingCall): Promise<DispatchOutcome> => {
       inFlight += 1
       peak = Math.max(peak, inFlight)
-      // Once all three are parked together, open the gate so they all drain.
-      if (inFlight === 3) release()
-      await gate
+      // Park on a macrotask: a concurrent sibling fired in flight parks here too
+      // (before this one's timer fires), driving `inFlight` above 1.
+      await new Promise((r) => setTimeout(r, 0))
+      peak = Math.max(peak, inFlight)
       inFlight -= 1
       return block(call.id, "x")
     }
@@ -218,12 +263,49 @@ describe("ADR-0298 fanout — three sibling agent spawns dispatch concurrently",
     await streamingTurn({
       events: gen(events),
       isConcurrencySafe,
+      isReadOnly,
       isEarlyDispatchSafe,
       dispatch,
     })
-    // Peak in-flight === 3 ⇒ all three overlapped. A serial regression caps
-    // peak at 1 and DEADLOCKS the gate (hard timeout, never a flaky pass).
-    expect(peak).toBe(3)
+    // Peak in-flight === 1 ⇒ strictly serial drain, never overlapped. Reverting
+    // FIX-6 to early-start `agent` drives all three in flight ⇒ peak === 3 (red).
+    expect(peak).toBe(1)
+  })
+
+  test("ABORT-HOLE CLOSED — a mid-stream abort leaves every `agent` slot UN-dispatched (no unrecorded side effect)", async () => {
+    // The safety half of FIX-6. Because `agent` is deferred (never early-started
+    // in flight), an abort that trips BEFORE the Phase-3 drain finds every agent
+    // slot with `promise === undefined` ⇒ nothing was dispatched ⇒ no child could
+    // have committed a write/bash whose `tool_result` is then silently discarded.
+    // Under the RETIRED in-flight path `c1`/`c2` would already be dispatched and
+    // then abandoned, so `dispatched` would be non-empty — this assertion flips
+    // on a FIX-6 revert (red-on-injection for the abort-hole itself).
+    const controller = new AbortController()
+    const dispatched: string[] = []
+    const dispatch = async (call: StreamingCall): Promise<DispatchOutcome> => {
+      dispatched.push(call.id)
+      return block(call.id, "x")
+    }
+    // Stream both agents fully, THEN trip the signal, THEN emit one more event so
+    // the for-await abort check fires on the next pump (mid-stream abort path).
+    async function* eventsThenAbort(): AsyncGenerator<StreamEvent> {
+      yield* toolUseEvents("c1", "agent", { prompt: "p1" })
+      yield* toolUseEvents("c2", "agent", { prompt: "p2" })
+      controller.abort()
+      yield { type: "text_delta", delta: "x" }
+    }
+    const res = await streamingTurn({
+      events: eventsThenAbort(),
+      isConcurrencySafe,
+      isReadOnly,
+      isEarlyDispatchSafe,
+      dispatch,
+      signal: controller.signal,
+    })
+    expect(res.kind).toBe("aborted")
+    // The hole is closed: no `agent` was ever dispatched, so nothing committed a
+    // side effect that the aborted-discard path would fail to record.
+    expect(dispatched).toEqual([])
   })
 
   test("3 spawn results retain model-call order regardless of completion order", async () => {

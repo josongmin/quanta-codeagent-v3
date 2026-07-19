@@ -31,6 +31,15 @@ const VERIFY_SELECT_ENV = scopedEnv(
   [
     "PATH",
     "QUANTA_BENCH_VERIFY_SELECT",
+    // jul-3 (`ea787de4a`) RETIRED the verify-select best-of-N SELECTION plane as a
+    // fail-closed footgun: `verifySelectN` is now `undefined` (single-pass) UNLESS
+    // the operator sets `QUANTA_BENCH_VERIFY_SELECT_ESCAPE` (knobs-bench.ts §B1).
+    // This test drives the SELECTION generation path (`buildSelectionGenerationPrompt`
+    // ⇒ the `candidate_generation` packet + prompt), so it must open the escape
+    // hatch — without it the plane stays inert and no candidate_generation packet is
+    // ever recorded (candidateGenerationHistory stays empty). Added when this test's
+    // pre-jul-3 env stopped activating the plane (jul-16 stale-test realign).
+    "QUANTA_BENCH_VERIFY_SELECT_ESCAPE",
     "QUANTA_BENCH_VERIFY_SELECT_PROOF_REQUIRED",
     "QUANTA_BENCH_SELECTOR_MODE",
     "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",
@@ -39,6 +48,7 @@ const VERIFY_SELECT_ENV = scopedEnv(
   {
     PATH: process.env.PATH,
     QUANTA_BENCH_VERIFY_SELECT: "1",
+    QUANTA_BENCH_VERIFY_SELECT_ESCAPE: "1",
     QUANTA_BENCH_VERIFY_SELECT_PROOF_REQUIRED: "1",
     QUANTA_BENCH_SELECTOR_MODE: "clean",
     QUANTA_BENCH_VERIFY_SELECT_REGRESSION: "off",

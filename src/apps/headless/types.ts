@@ -62,6 +62,28 @@ export interface HeadlessRunInput {
   readonly transport?: SessionTransport
   /** Optional retained tail window for the attached transport bridge. */
   readonly transportReplayWindow?: number
+  /** jul-16 GAP-3 (02 serve --stdio) — the wire transport the SURFACE declares
+   *  for `capabilities.transport` (the connect stdio door passes `"stdio"`).
+   *  Threaded onto the runtime overlay → base → `buildCapabilityManifest`.
+   *  Absent ⇒ omitted ⇒ `"inproc"` fallback (byte-identical). */
+  readonly sessionTransport?: import("@/protocol/session").CapabilityManifest["transport"]
+  /** jul-18 (02 serve --stdio approval wire-delegation) — how an unattended
+   *  no-operator headless session DELIVERS a mid-turn approval:
+   *   - absent (default) ⇒ the historical two-mode composition: OFF ⇒ deferred
+   *     DENY at the base `onConfirm` (a gated tool is refused inline; no wire
+   *     event), or the `QUANTA_INLINE_APPROVAL_RESOLVER` gate ⇒ inline
+   *     auto-approve. Byte-identical to the pre-jul-18 headless surface.
+   *   - `"wire"` ⇒ the THIRD "wire-defer" mode a WIRE client owns (the
+   *     `quanta serve --stdio` composition, whose `connect({onApproval})` client
+   *     drives turns): arm the runtime approval-protocol overlay in the DEFERRED
+   *     (non-interactive) posture so a mid-turn ask MINTS a pending approval +
+   *     throws `RuntimeApprovalRequiredError` → the kernel goes `awaiting_approval`
+   *     and fans an `approval.requested` wire event → the client's
+   *     `createSessionApprovalFlow` responds `approval.respond` + re-issues
+   *     `turn.run`. The inline gate still WINS when set (auto-approve, no wire
+   *     round-trip). This surface declares NO `serverAutoContinues`, so the
+   *     single wire client owns the post-approval re-issue (the attach path). */
+  readonly approvalDelivery?: "wire"
   /** Optional subagent config so the shared execution-plane helper can
    *  wire real delegation/background slots in the second-consumer surface. */
   readonly subagentConfig?: AgentConfig["subagent"]

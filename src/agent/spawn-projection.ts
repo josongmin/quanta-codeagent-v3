@@ -34,10 +34,13 @@ import type { AgentConfig } from "./types"
  *  `task_output`/`task_stop`, `wait_agent`/`close_agent`/`send_input`, …) are
  *  DELIBERATELY absent so a leaf keeps authority over its own sub-state (§5.1).
  *
- *  Frozen SSOT — a NEW spawn builder that mints a creation tool not listed here
- *  is caught by the meta-pin
- *  (`subagent-nesting-single-filter-projection-hellgate.test.ts`), which enumerates
- *  the ACTUAL builder-emitted spawn tools and fails if this set misses one. */
+ *  SSOT — a manifest spawn vector not listed here is caught by the NON-CIRCULAR
+ *  meta-pin in `subagent-nesting-single-filter-projection-hellgate.test.ts`, which
+ *  cross-checks this set against the INDEPENDENT `GATED_TOOLS` `risk:"spawns-subagent"`
+ *  classification (every such tool must be in this set OR an explicit management
+ *  exception). This is the guard `subagent_fork`/`side_agent_spawn` originally
+ *  slipped past — the earlier enumeration-only pin was circular (it pre-filtered to
+ *  names already in the set) and could not see a forgotten one. */
 export const SPAWN_TOOL_NAMES: ReadonlySet<string> = new Set([
   "agent", // trio creation tool (tier1/subagent.ts)
   "spawn_agent", // 6-tool creation variant (tier1/subagent.ts, ADR-0041)
@@ -47,6 +50,8 @@ export const SPAWN_TOOL_NAMES: ReadonlySet<string> = new Set([
   "delegate", // synchronous delegation child (tier1/delegate.ts)
   "team_create", // team spawn vector (tier1/team.ts) — NOT team_delete (§5.1)
   "branch_search", // speculative candidate fork (ADR-0084, branch-search-runner.ts) — D1 defense-in-depth
+  "subagent_fork", // background fork creation (tier1/subagent-bg.ts) — runtime-backstopped by the runner reject, but a leaf must not SEE it either
+  "side_agent_spawn", // persistent side-agent daemon creation (tier1/side-agent.ts) — a leaf must not mint daemons (the daemon-creation path is otherwise depth-blind)
 ])
 
 /** rev.4 §4.4 SINGLE capability-projection filter. Applied ONCE where

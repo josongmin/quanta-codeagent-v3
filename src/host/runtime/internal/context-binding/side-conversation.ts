@@ -4,14 +4,12 @@ import type {
   SessionHostSideConversationResult,
 } from "@/kernel/session"
 import type { Message } from "@/llm"
-import type { RuntimeAgentTurnAssembler } from "@/sdk/runtime/base"
 import { type Tool, ToolRegistry } from "@/tool"
-import { buildAgentConfigFromBase, buildAgentConfigFromBaseInput, getSessionId } from "./base"
 import type { RuntimeBase } from "./types"
 
 const SIDE_CONVERSATION_MAX_TURNS_CAP = 5
 
-const SIDE_CONVERSATION_DEFAULT_TOOLS: readonly string[] = Object.freeze([
+export const SIDE_CONVERSATION_DEFAULT_TOOLS: readonly string[] = Object.freeze([
   "read",
   "search_codebase",
   "grep",
@@ -123,44 +121,30 @@ export const createUsageTallyStream = (
   },
 })
 
-const mintSideConversationSessionId = (mainSessionId: string): string =>
-  `side:${mainSessionId}:${Math.random().toString(36).slice(2, 10)}`
-
-const createSideConversationBase = (args: {
+/** Build the side-chat config from an explicit allowlist. Do not spread the
+ * parent base: it contains session hooks and mutable stores owned by the main
+ * conversation (for example Radar and prompt-usage sinks). */
+export const buildIsolatedSideConversationConfig = (args: {
   readonly base: RuntimeBase
   readonly registry: ToolRegistry
+  readonly stream: AgentConfig["stream"]
   readonly signal: AbortSignal
   readonly maxTurns: number
-  readonly tally: UsageTally
-}): RuntimeBase => {
-  const {
-    store: _store,
-    embedder: _embedder,
-    memory: _memory,
-    metrics: _metrics,
-    run: _run,
-    subagent: _subagent,
-    compactionBreaker: _compactionBreaker,
-    verifyGuard: _verifyGuard,
-    compaction: _compaction,
-    workMetricsSink: _workMetricsSink,
-    ...rest
-  } = args.base
-
-  return {
-    ...rest,
-    registry: args.registry,
-    stream: createUsageTallyStream(args.base.stream, args.tally),
-    maxTurns: args.maxTurns,
-    signal: args.signal,
-    sessionId: mintSideConversationSessionId(getSessionId(args.base)),
-    planMode: false,
-  }
-}
+  readonly messages: readonly Message[]
+}): AgentConfig => ({
+  llm: args.base.llm,
+  registry: args.registry,
+  stream: args.stream,
+  permission: args.base.permission,
+  messages: [...args.messages],
+  system: args.base.system,
+  cwd: args.base.cwd,
+  maxTurns: args.maxTurns,
+  signal: args.signal,
+})
 
 export const startSideConversation = async (args: {
   readonly base: RuntimeBase
-  readonly turnAssembler?: RuntimeAgentTurnAssembler
   readonly question: string
   readonly messages: readonly Message[]
   readonly signal: AbortSignal
@@ -180,22 +164,16 @@ export const startSideConversation = async (args: {
   }
   const messages: Message[] = [...inherited, userTurn]
   const tally: UsageTally = { inputTokens: 0, outputTokens: 0 }
-  const isolatedBase = createSideConversationBase({
-    base: args.base,
-    registry: filteredRegistry,
-    signal: args.signal,
-    maxTurns,
-    tally,
-  })
+  const stream = createUsageTallyStream(args.base.stream, tally)
   const outcome = await runAgent(
-    buildAgentConfigFromBase(
-      buildAgentConfigFromBaseInput({
-        base: isolatedBase,
-        messages,
-        signal: args.signal,
-        turnAssembler: args.turnAssembler,
-      }),
-    ),
+    buildIsolatedSideConversationConfig({
+      base: args.base,
+      registry: filteredRegistry,
+      stream,
+      messages,
+      signal: args.signal,
+      maxTurns,
+    }),
   )
   return {
     outcome,

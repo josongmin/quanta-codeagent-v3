@@ -12,7 +12,7 @@ import { getDefaultPermissionStore, type PermissionStore } from "@/permission"
 import { bootstrapCrashResumeOffers, selectCrashResumeReinject } from "@/runner/orchestrate"
 import { runSessionCommand as runSessionCommandInner } from "@/runner/session-ops"
 import { clearSessionInterrupted, crashResumeEnabled, listSessions } from "@/session"
-import { gateOn } from "@/shared"
+import { gateOn, runtimeConfig } from "@/shared"
 import { composeShellObservers, type ShellExecObserver } from "@/tool"
 import { emitConfigMigrationImport, emitConfigMigrationNotice } from "./config-migration-notice"
 import { createIdleMonitor, DEFAULT_IDLE_MS } from "./idle-monitor"
@@ -307,7 +307,11 @@ export const runRepl = async (): Promise<void> => {
           buildWelcomeInfo(setup, setup.homeDir.length > 0 ? setup.homeDir : undefined, {
             modeCycle: gateOn(process.env, "QUANTA_MODE_CYCLE"),
             atMention: gateOn(process.env, "QUANTA_AT_AUTOCOMPLETE"),
-            untrustedEnvelope: gateOn(process.env, "QUANTA_UNTRUSTED_ENVELOPE"),
+            // Security posture must come from the frozen, strict runtime-config
+            // authority. `gateOn` accepts loose spellings such as "true"/"on",
+            // which would make the banner claim envelope protection while the
+            // dispatch seam remains disabled.
+            untrustedEnvelope: runtimeConfig().untrustedEnvelope,
           }),
         )}\n`,
       )
@@ -394,21 +398,25 @@ export const runRepl = async (): Promise<void> => {
     // CLI-06 (ADR-0307) — the per-turn loop wiring is assembled in
     // `repl/session-loop-options.ts` (same host-slimming pattern as
     // `repl/factories/`); the host owns only entry routing + compose.
-    await runSessionLoop(
-      await buildSessionLoopOptions({
-        setup,
-        surfaceState,
-        wires,
-        rfc09,
-        featureCfg,
-        env: process.env,
-        // #8 (jun-6) — host binds stdin for the in-turn reader (only consumed
-        // when QUANTA_MIDTURN_CAPTURE=1; the loop/reader slice never poke stdin).
-        inTurnStdin: process.stdin,
-        // ADR-0528 L2 — accepted crash-resume task seeded as the first turn.
-        ...(crashResumeSeeds !== undefined ? { seedPrompts: crashResumeSeeds } : {}),
-      }),
-    )
+    try {
+      await runSessionLoop(
+        await buildSessionLoopOptions({
+          setup,
+          surfaceState,
+          wires,
+          rfc09,
+          featureCfg,
+          env: process.env,
+          // #8 (jun-6) — host binds stdin for the in-turn reader (only consumed
+          // when QUANTA_MIDTURN_CAPTURE=1; the loop/reader slice never poke stdin).
+          inTurnStdin: process.stdin,
+          // ADR-0528 L2 — accepted crash-resume task seeded as the first turn.
+          ...(crashResumeSeeds !== undefined ? { seedPrompts: crashResumeSeeds } : {}),
+        }),
+      )
+    } finally {
+      wires.disposePerToolRecord?.()
+    }
   } finally {
     // Track T — tear down ring-buffer panel BEFORE other chrome dispose so
     // any DECSTBM reset lands first. Idempotent + no-op when not allocated.

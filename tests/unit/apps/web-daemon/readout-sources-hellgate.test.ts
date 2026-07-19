@@ -29,17 +29,16 @@ import {
   type WebReadoutSources,
 } from "@/apps/web-daemon/readout"
 import type { CapabilityManifest, SessionSnapshotLite } from "@/protocol/session"
+import { capabilitiesFor } from "../../../support/session-fixtures"
 
-const CAPS: CapabilityManifest = {
+const CAPS: CapabilityManifest = capabilitiesFor({
   approvals: "operator",
   tools: true,
-  memory: false,
   artifacts: true,
   subagents: true,
-  automation: false,
   shellSnapshot: true,
   transport: "websocket",
-}
+})
 
 const snap = (): SessionSnapshotLite => ({
   sessionId: "s1",

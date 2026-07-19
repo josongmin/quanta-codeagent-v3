@@ -9,6 +9,7 @@ import { classifyOutcome } from "@/runner/batch/eval/retry-policy"
 import { loadCorpus, writeSyntheticCorpus } from "../../src/apps/bench/corpus/loader"
 import { runInstance } from "../../src/apps/bench/eval"
 import type { Instance } from "../../src/apps/bench/types"
+import { withBenchObserverTestIsolation } from "../_support/bench-observer-test-isolation"
 import { scopedEnv } from "../_support/scoped-env"
 
 class NoopEndLLM implements LLMPort {
@@ -74,8 +75,7 @@ class SequentialEditLLM implements LLMPort {
     this.solveCalls += 1
     if (this.solveCalls % 2 === 1) {
       const target =
-        this.targets[Math.floor((this.solveCalls - 1) / 2)] ??
-        this.targets[this.targets.length - 1]
+        this.targets[Math.floor((this.solveCalls - 1) / 2)] ?? this.targets[this.targets.length - 1]
       if (target === undefined) throw new Error("targets is non-empty by construction")
       yield { type: "tool_use_start", id: `edit-${this.solveCalls}`, name: "edit" }
       yield {
@@ -175,12 +175,14 @@ const DEPS = { maxTurns: 2, timeoutMs: 20_000 }
 const verifySelectEnv = scopedEnv(
   [
     "QUANTA_BENCH_VERIFY_SELECT",
+    "QUANTA_BENCH_VERIFY_SELECT_ESCAPE",
     "QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT",
     "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",
     "QUANTA_BENCH_VERIFY_SELECT_REPRO",
   ],
   {
     QUANTA_BENCH_VERIFY_SELECT: "2",
+    QUANTA_BENCH_VERIFY_SELECT_ESCAPE: "1",
     QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT: undefined,
     QUANTA_BENCH_VERIFY_SELECT_REGRESSION: "off",
     QUANTA_BENCH_VERIFY_SELECT_REPRO: "positive",
@@ -190,6 +192,7 @@ const verifySelectEnv = scopedEnv(
 const verifySelectDiagnosticEnv = scopedEnv(
   [
     "QUANTA_BENCH_VERIFY_SELECT",
+    "QUANTA_BENCH_VERIFY_SELECT_ESCAPE",
     "QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT",
     "QUANTA_BENCH_VERIFY_SELECT_REGRESSION",
     "QUANTA_BENCH_VERIFY_SELECT_REPRO",
@@ -198,6 +201,7 @@ const verifySelectDiagnosticEnv = scopedEnv(
   ],
   {
     QUANTA_BENCH_VERIFY_SELECT: "2",
+    QUANTA_BENCH_VERIFY_SELECT_ESCAPE: "1",
     QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT: undefined,
     QUANTA_BENCH_VERIFY_SELECT_REGRESSION: "off",
     QUANTA_BENCH_VERIFY_SELECT_REPRO: "positive",
@@ -282,71 +286,74 @@ describe("verify-select telemetry survives early terminal no-patch", () => {
 
   test.serial(
     "ADVERSARIAL: late strict observation degradation preserves verify-select telemetry",
-    verifySelectDiagnosticEnv.run(async () => {
-      const corpusRoot = join(dir, "corpus")
-      const obs = join(dir, "obs-degraded")
-      const patchGeneratedSpy = spyOn(BenchObserver.prototype, "patchGenerated").mockImplementation(
-        () => {
+    verifySelectDiagnosticEnv.run(
+      withBenchObserverTestIsolation(async () => {
+        const corpusRoot = join(dir, "corpus")
+        const obs = join(dir, "obs-degraded")
+        const patchGeneratedSpy = spyOn(
+          BenchObserver.prototype,
+          "patchGenerated",
+        ).mockImplementation(() => {
           throw new Error("patch event sink failed")
-        },
-      )
-      try {
-        await writeSyntheticCorpus(corpusRoot)
-        const base = (await loadCorpus(corpusRoot)).find((i) => i.id === "inst-add") as Instance
-        const swebenchLike: Instance = {
-          ...base,
-          swebench: {
-            instanceId: "demo__bench-observation-selection",
-            repo: "demo/demo",
-            baseCommit: "0".repeat(40),
-          },
+        })
+        try {
+          await writeSyntheticCorpus(corpusRoot)
+          const base = (await loadCorpus(corpusRoot)).find((i) => i.id === "inst-add") as Instance
+          const swebenchLike: Instance = {
+            ...base,
+            swebench: {
+              instanceId: "demo__bench-observation-selection",
+              repo: "demo/demo",
+              baseCommit: "0".repeat(40),
+            },
+          }
+
+          const result = await runInstance(swebenchLike, {
+            ...DEPS,
+            llm: new NoopEndLLM(),
+            observe: {
+              dir: obs,
+              runId: "run-vs-bench-degraded",
+              now: (() => {
+                let ts = 1
+                return () => ts++
+              })(),
+            },
+          })
+
+          expect(result.passed).toBe(false)
+          expect(result.verdict).toBe("degraded")
+          expect(result.stopReason).toBe("completed")
+          expect(result.selectionTelemetry?.attempted).toBe(2)
+          expect(result.selectionTelemetry?.successfulGenerations).toBe(2)
+          expect(result.selectionTelemetry?.generationFailures).toBe(0)
+          expect(result.selectionTelemetry?.winnerId).toBeNull()
+          expect(result.patchBudget?.withinBudget).toBe(true)
+          expect(result.patchHygiene).toEqual({
+            patchFileCount: 0,
+            addedFiles: [],
+            filesOutsideOwner: [],
+            strayAddedFiles: [],
+            violation: false,
+          })
+          expect(result.outOfScopeFiles).toBe(false)
+          expect(result.reproOracleCalibration).toEqual({
+            goldCalibrated: false,
+            falseNegative: false,
+            available: false,
+            goldVotes: null,
+            goldK: null,
+            baseResolved: false,
+            vacuous: false,
+            baseVotes: null,
+            baseK: null,
+          })
+          expect(result.error).toContain("observation failed (strict)")
+        } finally {
+          patchGeneratedSpy.mockRestore()
         }
-
-        const result = await runInstance(swebenchLike, {
-          ...DEPS,
-          llm: new NoopEndLLM(),
-          observe: {
-            dir: obs,
-            runId: "run-vs-bench-degraded",
-            now: (() => {
-              let ts = 1
-              return () => ts++
-            })(),
-          },
-        })
-
-        expect(result.passed).toBe(false)
-        expect(result.verdict).toBe("degraded")
-        expect(result.stopReason).toBe("completed")
-        expect(result.selectionTelemetry?.attempted).toBe(2)
-        expect(result.selectionTelemetry?.successfulGenerations).toBe(2)
-        expect(result.selectionTelemetry?.generationFailures).toBe(0)
-        expect(result.selectionTelemetry?.winnerId).toBeNull()
-        expect(result.patchBudget?.withinBudget).toBe(true)
-        expect(result.patchHygiene).toEqual({
-          patchFileCount: 0,
-          addedFiles: [],
-          filesOutsideOwner: [],
-          strayAddedFiles: [],
-          violation: false,
-        })
-        expect(result.outOfScopeFiles).toBe(false)
-        expect(result.reproOracleCalibration).toEqual({
-          goldCalibrated: false,
-          falseNegative: false,
-          available: false,
-          goldVotes: null,
-          goldK: null,
-          baseResolved: false,
-          vacuous: false,
-          baseVotes: null,
-          baseK: null,
-        })
-        expect(result.error).toContain("observation failed (strict)")
-      } finally {
-        patchGeneratedSpy.mockRestore()
-      }
-    }),
+      }),
+    ),
   )
 
   test.serial(
@@ -500,9 +507,17 @@ describe("verify-select telemetry survives early terminal no-patch", () => {
           baseCommit: "0".repeat(40),
         },
       }
+      // Meter exhaustion is terminal ONLY when the turn is about to CONTINUE
+      // (result kind "tools") — a cleanly `completed` turn WINS over meter
+      // exhaustion by design (turn-outcome.ts, jul-2 4843c6020 / ALBB-17). So a
+      // NoopEndLLM (ends `end_turn`, never continues) would never trip the meter
+      // and the terminal candidate would stop `completed`, not `budget_exhausted`.
+      // ReadLoopLLM keeps issuing a `read` tool call every turn ⇒ the loop tries
+      // to continue ⇒ the `maxTurns: 0` dial trips on that continuation ⇒
+      // `budget_exhausted`, which is exactly the terminal authority under test.
       const deps = {
         ...DEPS,
-        llm: new NoopEndLLM(),
+        llm: new ReadLoopLLM(),
         budgetMeterFactory: () => new BudgetMeter({ dials: { maxTurns: 0 } }),
       }
 

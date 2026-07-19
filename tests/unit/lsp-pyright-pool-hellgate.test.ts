@@ -1,9 +1,12 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  __acquirePyrightTestIsolationForTest,
+  __resetLspAvailabilityCacheForTest,
   __resetSharedPyrightSessionsForTest,
+  __setLspAvailabilityOverrideForTest,
   __setPyrightClientFactoryForTest,
   __setPyrightWarmupTimingForTest,
   lspNavProvider,
@@ -13,12 +16,9 @@ import { type Location, LspClient, type LspClientOptions } from "@/lsp"
 /**
  * Hellgate for the pooled-pyright session lifecycle (lsp-bridge.ts). Drives the
  * REAL pool through `lspNavProvider().open` but injects a SCRIPTABLE fake client
- * so the concurrency/lifecycle bugs are deterministically reachable without a
- * live pyright. Requires `pyright-langserver` on PATH only because the provider
- * probes `--version` for availability; the actual client is the fake.
+ * and a launchable availability answer, so the concurrency/lifecycle bugs are
+ * deterministically reachable without a live `pyright-langserver` binary.
  */
-const pyrightOnPath = Bun.which("pyright-langserver") !== null
-const gate = pyrightOnPath ? describe : describe.skip
 
 type DefFn = () => Promise<Location[] | null>
 
@@ -45,13 +45,25 @@ class FakePyrightClient extends LspClient {
 
 const fatal = (): Error => new Error("transport: server stopped")
 
+let releasePyrightTestIsolation: (() => void) | undefined
+beforeEach(async () => {
+  releasePyrightTestIsolation = await __acquirePyrightTestIsolationForTest()
+  __setLspAvailabilityOverrideForTest((bin) => bin === "pyright-langserver")
+})
 afterEach(async () => {
-  await __resetSharedPyrightSessionsForTest()
-  __setPyrightClientFactoryForTest(null)
-  __setPyrightWarmupTimingForTest(null)
+  try {
+    await __resetSharedPyrightSessionsForTest()
+    __setPyrightClientFactoryForTest(null)
+    __setPyrightWarmupTimingForTest(null)
+    __setLspAvailabilityOverrideForTest(null)
+    __resetLspAvailabilityCacheForTest()
+  } finally {
+    releasePyrightTestIsolation?.()
+    releasePyrightTestIsolation = undefined
+  }
 })
 
-gate("pyright pool lifecycle (fake client)", () => {
+describe("pyright pool lifecycle (fake client)", () => {
   test("fatal error tears the session down ONCE and sibling handles fail soft (no hammering a stopped client)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pyr-pool-"))
     const file = join(dir, "noimports.py") // no import ⇒ warm-up probe is null ⇒ trivial

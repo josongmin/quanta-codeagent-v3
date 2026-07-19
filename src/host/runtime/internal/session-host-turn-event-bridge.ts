@@ -1,10 +1,18 @@
 import type { SessionHostTurnEvent, SessionHostTurnEventType } from "@/kernel/session"
-import { sliceWholeChars } from "@/shared"
+import { capFullFidelityField, sliceWholeChars } from "@/shared"
 import type { AgentEvent, AgentEventType } from "@/stream"
+
+/** Ticket 04 — per-event bridging options. `fullFidelity` (production gate ON)
+ *  makes the `tool_call`/`tool_result` arms ALSO carry the full model-visible
+ *  payload alongside the preview. Absent/false ⇒ byte-identical default-OFF. */
+export interface SessionHostTurnEventBridgeOpts {
+  readonly fullFidelity?: boolean
+}
 
 type SessionHostTurnEventBridgeRegistry = {
   [K in AgentEventType]?: (
     event: Extract<AgentEvent, { type: K }>,
+    opts: SessionHostTurnEventBridgeOpts,
   ) => SessionHostTurnEvent | undefined
 }
 
@@ -58,13 +66,19 @@ const AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGE = {
     reason: event.reason,
     ...(event.statusCode !== undefined ? { statusCode: event.statusCode } : {}),
   }),
-  tool_call: (event) => ({
+  tool_call: (event, opts) => ({
     type: "tool.invoked",
     toolCallId: event.id,
     toolName: event.name,
     ...(event.input !== undefined ? { argsPreview: previewToolArgs(event.input) } : {}),
+    // Ticket 04 — the FULL model-visible args, gate-ON only. `event.input` is the
+    // original tool input the model emitted (RFC §1.1: full already at the bridge
+    // entrance). Over-cap ⇒ dropped + `fidelityDegraded`, never truncated.
+    ...(opts.fullFidelity === true && event.input !== undefined
+      ? fullFidelitySpread(serialiseToolArgs(event.input))
+      : {}),
   }),
-  tool_result: (event) => ({
+  tool_result: (event, opts) => ({
     type: "tool.completed",
     toolCallId: event.id,
     toolName: event.name,
@@ -73,6 +87,11 @@ const AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGE = {
       ? { resultPreview: clampPreview(event.preview) }
       : {}),
     ...(event.durationMs !== undefined ? { durationMs: event.durationMs } : {}),
+    // Ticket 04 — `event.preview` is the redaction-applied model-visible result
+    // in full (RFC §1.1 — the name predates the truncation move to the wire arm).
+    ...(opts.fullFidelity === true && event.preview !== undefined && event.preview.length > 0
+      ? fullFidelitySpread(event.preview, "result")
+      : {}),
   }),
   usage: (event) => ({
     type: "usage",
@@ -129,13 +148,22 @@ const AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGE = {
   // decision — its rendering channel is CLI stdout `renderProgressUpdate`).
 } satisfies SessionHostTurnEventBridgeRegistry
 
-export const toSessionHostTurnEvent = (event: AgentEvent): SessionHostTurnEvent | undefined => {
+export const toSessionHostTurnEvent = (
+  event: AgentEvent,
+  opts: SessionHostTurnEventBridgeOpts = {},
+): SessionHostTurnEvent | undefined => {
   const handler = (
     AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGE as Partial<
-      Record<AgentEventType, (event: AgentEvent) => SessionHostTurnEvent | undefined>
+      Record<
+        AgentEventType,
+        (
+          event: AgentEvent,
+          opts: SessionHostTurnEventBridgeOpts,
+        ) => SessionHostTurnEvent | undefined
+      >
     >
   )[event.type]
-  return handler?.(event)
+  return handler?.(event, opts)
 }
 
 const PREVIEW_MAX = 256
@@ -149,12 +177,30 @@ const clampPreview = (text: string): string =>
 const clampSummary = (text: string): string =>
   text.length <= SUMMARY_MAX ? text : `${sliceWholeChars(text, SUMMARY_MAX - 1)}…`
 
-const previewToolArgs = (input: unknown): string => {
-  let serialised: string
+const previewToolArgs = (input: unknown): string => clampPreview(serialiseToolArgs(input))
+
+/** Serialise the tool input to its FULL string form (no clamp). Mirrors
+ *  `previewToolArgs` minus the truncation — the full-fidelity args carrier. */
+const serialiseToolArgs = (input: unknown): string => {
   try {
-    serialised = typeof input === "string" ? input : JSON.stringify(input)
+    return typeof input === "string" ? input : JSON.stringify(input)
   } catch {
     return "<unserialisable>"
   }
-  return clampPreview(serialised)
+}
+
+/**
+ * Ticket 04 — build the additive full-fidelity spread for a tool arm. Applies
+ * the shared size cap: within cap ⇒ `{ argsFull | resultFull: payload }`, over
+ * cap ⇒ `{ fidelityDegraded: true }` (payload DROPPED, never truncated to a
+ * lie). `<unserialisable>` args still carry (they are tiny) — the degrade path
+ * is exclusively the size cap.
+ */
+const fullFidelitySpread = (
+  payload: string,
+  field: "args" | "result" = "args",
+): { argsFull: string } | { resultFull: string } | { fidelityDegraded: true } => {
+  const capped = capFullFidelityField(payload)
+  if (capped.degraded || capped.value === undefined) return { fidelityDegraded: true as const }
+  return field === "args" ? { argsFull: capped.value } : { resultFull: capped.value }
 }

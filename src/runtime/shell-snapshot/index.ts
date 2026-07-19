@@ -35,6 +35,9 @@ export type { SnapshotSpawner } from "./zsh-capture"
 
 const SHELL_BINARIES = new Set(["bash", "sh", "zsh", "dash", "ksh"])
 
+/** Quote one shell word without relying on the caller's shell options. */
+const quoteShellWord = (value: string): string => `'${value.replace(/'/g, `'"'"'`)}'`
+
 /** Pure: is this argv shaped like `<some-shell> -c <cmd>`? */
 const isShellDashCPrefix = (
   prefix: ReadonlyArray<string>,
@@ -66,11 +69,10 @@ export const buildRestoredArgv = (
   }
   const out = [...prefix]
   const original = out[parsed.cmdIndex] ?? ""
-  // Single-quote the path is unsafe (would break on `'` in HOME) — the
-  // path lives under HOME and we sanitised the id, so direct
-  // interpolation is safe; defense-in-depth, we still wrap the source
-  // command in braces so it cannot fuse with the user command.
-  out[parsed.cmdIndex] = `source ${handle.path}; ${original}`
+  // Snapshot paths can contain spaces or apostrophes (for example under a
+  // user-controlled HOME), so source a POSIX-quoted word rather than
+  // interpolating the path into the command string.
+  out[parsed.cmdIndex] = `source ${quoteShellWord(handle.path)}; ${original}`
   return { argv: out }
 }
 

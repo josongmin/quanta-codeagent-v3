@@ -645,14 +645,6 @@ export const CLI_KNOBS: readonly CliKnob[] = [
     describe: "Fallback model id list.",
     readSite: "internal.ts",
   },
-  {
-    envKey: "QUANTA_MCP_AUTORESTART",
-    kind: "bool",
-    default: false,
-    group: "mcp",
-    describe: "MCP crash auto-restart (opt-in).",
-    readSite: "internal.ts",
-  },
   // ── TICKET-19 reverse-MCP server (quanta AS an MCP server). RCE surface, so
   //    QUANTA_MCP_SERVER is a STRICT gate (=== '1'); the EXPOSE list only widens
   //    the tools/list surface — every call still passes the permission gate.

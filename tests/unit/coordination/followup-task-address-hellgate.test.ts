@@ -14,8 +14,48 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import {
+  createSubagentDeliveryController,
+  createTargetResolver,
+  type DeliveryMailboxPort,
+  type SubagentControlRegistry,
+} from "@/agent/subagent-delivery"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import { handleFollowupTask, TaskRegistry, TurnWakeRegistry } from "@/subagent"
+
+/** Build the WS3 delivery deps over the real mailbox/registry/wake. The
+ *  task-id → mailbox-label translation (BUG#4) is now owned by the controller
+ *  via `control.labelOf()`; self/lineage fold into the target resolver. */
+const followupDeps = (
+  registry: TaskRegistry,
+  mailbox: ReturnType<typeof createSubagentMailbox>,
+  wake: TurnWakeRegistry,
+  callerLabel: string,
+  over: { ownTaskId?: string } = {},
+) => {
+  const control = wake as unknown as SubagentControlRegistry
+  return {
+    delivery: createSubagentDeliveryController({
+      control,
+      mailbox: mailbox as unknown as DeliveryMailboxPort,
+      formatPeer: (from, kind, body) => `[teammate ${from} — untrusted] [${kind}] ${body}`,
+      resolveTarget: createTargetResolver({
+        registry,
+        control,
+        ...(over.ownTaskId !== undefined ? { ownTaskId: over.ownTaskId } : {}),
+      }),
+      newDeliveryId: (() => {
+        let n = 0
+        return () => {
+          n += 1
+          return `del-${n}`
+        }
+      })(),
+      steerEnabled: false,
+    }),
+    callerLabel,
+  }
+}
 
 describe("TurnWakeRegistry — mailbox-label binding (BUG#4)", () => {
   test("binds a label on register and exposes it via labelOf", () => {
@@ -47,29 +87,34 @@ describe("TurnWakeRegistry — mailbox-label binding (BUG#4)", () => {
 })
 
 describe("handleFollowupTask — delivers to the resolved mailbox label (BUG#4)", () => {
-  const setup = () => {
+  // WS3: the task-id → mailbox-label translation is now owned by the delivery
+  // CONTROLLER (via `control.labelOf()`), not a `resolveLabel` tool dep. The
+  // child registers a typed control ENDPOINT binding its mailbox label; the
+  // controller resolves the delivery address through it.
+  const setup = (opts: { withLabel?: boolean } = {}) => {
     const registry = new TaskRegistry()
     const taskId = registry.newId()
     registry.register({ id: taskId, description: "child" })
     const mailbox = createSubagentMailbox()
     const wake = new TurnWakeRegistry()
     const childLabel = "root/0"
-    // The child wired its waker under the TASK id, binding its MAILBOX label.
-    wake.register(taskId, () => "woke", childLabel)
+    if (opts.withLabel !== false) {
+      wake.registerEndpoint(taskId, {
+        mailboxLabel: childLabel,
+        wake: () => "woke",
+        interrupt: () => "woke_idle",
+        steer: () => "accepted",
+        currentTurnId: () => "turn-fake",
+      })
+    }
     return { registry, mailbox, wake, taskId, childLabel }
   }
 
-  test("with resolveLabel wired, the message lands in the child's REAL inbox", () => {
+  test("the message lands in the child's REAL inbox (task id → mailbox label)", () => {
     const { registry, mailbox, wake, taskId, childLabel } = setup()
     const out = handleFollowupTask(
       { agentId: taskId, message: "do X" },
-      {
-        registry,
-        mailbox,
-        wake,
-        callerLabel: "root",
-        resolveLabel: (id) => wake.labelOf(id),
-      },
+      followupDeps(registry, mailbox, wake, "root"),
     )
     expect(out.kind).toBe("success")
     // The child, draining its mailbox label, sees the message.
@@ -78,29 +123,27 @@ describe("handleFollowupTask — delivers to the resolved mailbox label (BUG#4)"
     expect(mailbox.read(taskId).map((m) => m.body)).toEqual([])
   })
 
-  test("REGRESSION GUARD — without resolveLabel the message misses the inbox (the bug)", () => {
-    const { registry, mailbox, wake, taskId, childLabel } = setup()
-    handleFollowupTask(
+  test("no label bound ⇒ falls back to the task-id address (verbatim)", () => {
+    // No endpoint/label wired ⇒ `labelOf` is undefined ⇒ the controller sends to
+    // the task id verbatim (honest fallback; the ensure-turn wake degrades to
+    // no_waker since there's no live endpoint). Proves the label resolution is
+    // the ONLY thing routing to `root/N`.
+    const { registry, mailbox, wake, taskId, childLabel } = setup({ withLabel: false })
+    const out = handleFollowupTask(
       { agentId: taskId, message: "do X" },
-      { registry, mailbox, wake, callerLabel: "root" }, // no resolveLabel ⇒ old broken path
+      followupDeps(registry, mailbox, wake, "root"),
     )
-    // The message went to the task-id phantom address; the child's inbox is empty.
+    // Delivered (honest degrade), but to the task-id phantom address, not root/N.
+    expect(out.kind).toBe("error") // no_waker degrade surfaces as an honest error
     expect(mailbox.read(childLabel).map((m) => m.body)).toEqual([])
     expect(mailbox.read(taskId).map((m) => m.body)).toEqual(["do X"])
   })
 
-  test("self-target guard — a child cannot followup_task its OWN task id (ownAgentId)", () => {
+  test("self-target guard — a child cannot followup_task its OWN task id", () => {
     const { registry, mailbox, wake, taskId, childLabel } = setup()
     const out = handleFollowupTask(
       { agentId: taskId, message: "wake myself" },
-      {
-        registry,
-        mailbox,
-        wake,
-        callerLabel: childLabel,
-        resolveLabel: (id) => wake.labelOf(id),
-        ownAgentId: taskId, // the caller IS this task
-      },
+      followupDeps(registry, mailbox, wake, childLabel, { ownTaskId: taskId }),
     )
     expect(out.kind).toBe("error")
     if (out.kind === "error") expect(out.cause).toBe("self_target")
@@ -108,11 +151,11 @@ describe("handleFollowupTask — delivers to the resolved mailbox label (BUG#4)"
     expect(mailbox.read(childLabel).map((m) => m.body)).toEqual([])
   })
 
-  test("self-target guard absent (ownAgentId unset) ⇒ no guard, delivery proceeds", () => {
+  test("self-target guard absent (ownTaskId unset) ⇒ no guard, delivery proceeds", () => {
     const { registry, mailbox, wake, taskId, childLabel } = setup()
     const out = handleFollowupTask(
       { agentId: taskId, message: "hi" },
-      { registry, mailbox, wake, callerLabel: "root", resolveLabel: (id) => wake.labelOf(id) },
+      followupDeps(registry, mailbox, wake, "root"),
     )
     expect(out.kind).toBe("success")
     expect(mailbox.read(childLabel).map((m) => m.body)).toEqual(["hi"])

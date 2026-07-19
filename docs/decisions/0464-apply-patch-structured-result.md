@@ -1,16 +1,17 @@
 # ADR-0464 — Structured per-file apply result + messageForModel (self-correcting edits)
 
-**Status:** Accepted (2026-06-03)
+**Status:** Accepted (2026-06-03); CLI promotion accepted (2026-07-19)
 **Type:** Additive domain slice (`@/patch`) — new function + types alongside the
-existing throwing applier. Default-OFF by construction (opt-in entrypoint).
+existing throwing applier. Explicitly gated; CLI default-ON, other surfaces
+opt-in.
 **Scope:** `src/patch/structured-types.ts`, `src/patch/structured.ts`,
-`src/patch/message-for-model.ts`, the `index.ts` barrel re-export, and the
-hellgate `tests/unit/patch-structured-apply-hellgate.test.ts`. NO shared files,
-NO tool-surface wiring (see Integration TODOs).
-**Default-OFF:** the canonical `applyPatch` (`./applier`) is byte-identical —
-unchanged source, still throws its typed errors wholesale. Callers receive the
-new per-file behaviour ONLY by calling the new `applyPatchStructured`. A
-deployment that never calls the new entrypoint sees zero change.
+`src/patch/message-for-model.ts`, `src/tool/apply-patch-structured-tool.ts`,
+`src/tool/patch-mutation-safety.ts`, the tool-surface manifest, CLI approval
+preview/preflight, and the unit/integration promotion rails.
+**Surface posture:** the canonical `applyPatch` (`./applier`) remains
+byte-identical and all-or-nothing. The CLI explicitly seeds
+`QUANTA_ENABLE_STRUCTURED_PATCH=1`; `=0` restores the legacy tool menu. Web,
+bench, headless, daemon, and SDK embeddings remain opt-in.
 
 ADR-number note: 0461/0462 were the highest existing decisions when this slice
 was authored; this slice was assigned 0464 by the integration plan.
@@ -84,6 +85,36 @@ prior on-disk content), while the OUTER loop tolerates one op failing and keeps
 the others. An EARLIER op that succeeded stays applied even if a LATER op fails —
 this is exactly Cursor's partial `applied_changes[]`.
 
+### CLI promotion contract (2026-07-19)
+
+Promote the sibling `apply_patch_structured` tool to CLI default-ON through the
+tool-surface SSOT. This is an explicit product contract, not an accidental
+environment default:
+
+- partial success is intentional: a successful earlier or later sibling op
+  remains applied when another op fails;
+- each failed op remains individually atomic and leaves its target bytes
+  unchanged;
+- the tool-level result is `ok:false` whenever any op fails, with exact
+  per-file failure and `messageForModel` output;
+- the tool uses the same `FsJailFileSystemPort`, permission classification,
+  serialization, ownership fence, and one-call write budget as `apply_patch`;
+- the shared tool-layer mutation-safety owner hard-denies protected Git/editor
+  targets and stale update/delete targets before the first mutation;
+- successful files refresh the stale-read baseline even when a sibling fails,
+  so a targeted follow-up edit does not self-invalidate;
+- CLI approval renders the V4A body and a structured-specific applicability
+  warning before the operator accepts a partial-capable mutation;
+- the existing `apply_patch` tool remains available for callers requiring
+  whole-patch atomicity;
+- `QUANTA_ENABLE_STRUCTURED_PATCH=0` is the immediate rollback and restores the
+  legacy CLI menu without constructing this tool.
+
+The promotion is proven against the real registry and a real temporary
+filesystem by
+`tests/integration/apply-patch-structured-cli-promotion-e2e.test.ts`, including
+a symlink escape negative control.
+
 ### `@/patch` stays pure — no upward import for the jail error
 
 `FsJailViolationError` lives in `@/tool` (the slice fence forbids `@/patch →
@@ -92,20 +123,20 @@ whose `name === "FsJailViolationError"` carrying `attemptedPath`/`jailRoot`),
 so the boundary-specific hint is produced without importing upward. This mirrors
 the `ToolContext` duck-typing discipline in ARCHITECTURE.md §2.
 
-## Default-OFF / byte-identical proof
+## Legacy-path / opt-out byte-identical proof
 
 - `applier.ts`, `parser.ts`, `types.ts` source is unchanged — `applyPatch` still
   throws its typed errors and rolls back wholesale (hellgate case
   "applyPatch still THROWS wholesale on a bad hunk").
-- The new behaviour is reachable ONLY through the new `applyPatchStructured`
-  export. No existing caller (the `apply_patch` tool, the fast-apply fallback)
-  calls it, so the dispatch path is byte-identical until a human wires the
-  opt-in surface (Integration TODOs).
+- The new behaviour is reachable ONLY through the sibling
+  `apply_patch_structured` tool. `QUANTA_ENABLE_STRUCTURED_PATCH=0` omits that
+  tool from the registry; no existing `apply_patch` or fast-apply call changes
+  semantics.
 
 ## Consequences
 
-- A future tool flag / sibling tool can surface partial-success edits and feed
-  `messageForModel` back into the next turn for self-correction.
+- The CLI sibling tool surfaces partial-success edits and feeds
+  `messageForModel` back into the next turn for targeted self-correction.
 - `applyPatchStructured` reads each op's file twice (before + after) when an op
   succeeds — acceptable: it is invoked only on the opt-in path, and the reads go
   through the same jailed port.
@@ -129,11 +160,19 @@ the `ToolContext` duck-typing discipline in ARCHITECTURE.md §2.
 
 ## Test
 
-`tests/unit/patch-structured-apply-hellgate.test.ts` — 14 cases: happy
+`tests/unit/patch-structured-apply-hellgate.test.ts` covers the pure contract:
+happy
 multi-file (all 3 change types + before/after capture), move → modified +
 movedTo + after-at-destination, per-file isolation (bad hunk → that file carries
 messageForModel while siblings before AND after it still apply + prior content
 intact), jail violation isolated (structural breach), delete-of-missing isolated,
 no-throw on non-`Patch` input, no-throw on a port whose write rejects,
 messageForModel mapping for every typed error kind + unknown fallback, and the
-DEFAULT-OFF byte-identity anchor proving `applyPatch` still throws wholesale.
+legacy-path byte-identity anchor proving `applyPatch` still throws wholesale.
+
+`tests/integration/apply-patch-structured-cli-promotion-e2e.test.ts` is the
+promotion receipt rail: real registry, real filesystem partial success, failed
+target byte preservation, real jail symlink-escape isolation, wired Git/stale
+hard-deny with zero mutation, and partial-success baseline refresh. The CLI
+rails additionally prove the structured diff/preflight approval context and
+real subprocess seed plus explicit-`0` inheritance/rollback.

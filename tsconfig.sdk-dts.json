@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "declarationDir": "dist/sdk/types",
+    "rootDir": "src"
+  },
+  "include": [
+    "src/sdk/index.ts",
+    "src/agent/sticky-model/write-file-atomic.d.ts",
+    "src/tool/web/turndown.d.ts"
+  ]
+}

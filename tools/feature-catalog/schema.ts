@@ -54,6 +54,91 @@ export const SurfaceIntegrationSchema = z
   })
   .default({ cli: "unknown", web: "unknown", evidence: {}, method: "unverified" })
 
+// SOTA Tier-6 — MACHINE-CHECKABLE producer/consumer wiring contract.
+//
+// `surface_integration` above is prose + a hand-audited status word: it cannot
+// mechanically distinguish "there is a type-surface" from "it is actually wired
+// end-to-end". That gap produces FALSE-GREENs — e.g. the deferred-tool-registry
+// declared `cli: full` while its own evidence says "deliberately NO scheduler
+// wired into the loop": a pure in-memory type-surface with no end-to-end effect,
+// scored as fully integrated. The `wiring` block below closes that gap with a
+// STATIC, symbol-resolvable contract that the wiring-contract ratchet checks.
+//
+// Scope boundary (deliberate): this is a DECLARATION-vs-symbol-resolution proof
+// — every SiteRef must resolve to a real {module, exportedSymbol}, and
+// `wireStatus` must be honest about it (a `wired` surface needs BOTH a producer
+// and a consumer symbol that resolve; `seam-only` needs a producer but declares
+// NO consumer). It does NOT prove runtime composition-reachability (that the
+// consumer is invoked from a live surface builder) — that is a SEPARATE, heavier
+// proof kind (running the surface builder / import-graph BFS in reachability.ts).
+// Conflating the two is exactly what made `cli: full` untrustworthy.
+
+// A single source-site: resolve the symbol VIA the module (not fragile
+// file:line). `module` is a repo-relative `src/**.ts` path; `exportedSymbol` is
+// a name the module exports (directly OR via barrel re-export — the ratchet
+// follows `export … from` chains, mirroring reachability.ts's parseSymbols).
+// `role` is free-form prose (e.g. "issues DeferredHandle", "invokes the seam").
+export const SiteRefSchema = z.object({
+  module: z.string().min(1),
+  exportedSymbol: z.string().min(1),
+  role: z.string().min(1),
+})
+export type SiteRef = z.infer<typeof SiteRefSchema>
+
+// One activation CONDITION. A feature is typically gated by a UNION of these
+// (knob AND preset AND a wired port present), so `wiring.activation` is an
+// ARRAY, not a single knob field.
+//   env          — process env var gate (key = VAR name, value? = required literal)
+//   config       — runtime-config knob (key = config path, value? = required value)
+//   preset       — a mode/agent preset selects it (key = preset id)
+//   port-present — activated only when a port symbol is injected/wired
+//                  (key = the port symbol name)
+export const ActivationKind = z.enum(["env", "config", "preset", "port-present"])
+export const ActivationConditionSchema = z.object({
+  kind: ActivationKind,
+  key: z.string().min(1),
+  value: z.union([z.string(), z.number(), z.boolean()]).optional(),
+})
+export type ActivationCondition = z.infer<typeof ActivationConditionSchema>
+
+// Honest wiring posture — the third value is what makes "type surface only, no
+// scheduler" declarable instead of laundered into `cli: full`:
+//   wired            — producer AND consumer both exist and resolve; the
+//                      contract is exercised end-to-end at the type level.
+//   seam-only        — producer exists (the surface is real) but there is NO
+//                      consumer wired yet (e.g. a registry with no scheduler, a
+//                      port with no in-slice caller). This is the deferred-tool-
+//                      registry's true state.
+//   forward-contract — declared ahead of any producer; a placeholder that a
+//                      future implementation will fill (weakest posture).
+export const WireStatus = z.enum(["wired", "seam-only", "forward-contract"])
+export type WireStatus = z.infer<typeof WireStatus>
+
+// The full surface set — the current cli/web-only `surface_integration` model is
+// too coarse: bench/headless/daemon/sdk are all real surfaces with distinct
+// wiring. A per-surface contract can carry its OWN producer/consumer SiteRef.
+export const WiringSurface = z.enum(["cli", "web", "sdk", "headless", "bench", "daemon"])
+export type WiringSurface = z.infer<typeof WiringSurface>
+
+export const SurfaceContractSchema = z.object({
+  status: SurfaceStatus,
+  producer: SiteRefSchema.optional(),
+  consumer: SiteRefSchema.optional(),
+})
+export type SurfaceContract = z.infer<typeof SurfaceContractSchema>
+
+// The OPTIONAL machine-checkable wiring block. Absent ⇒ legacy behavior is
+// byte-identical (no wiring claim, nothing new to check). Present ⇒ the
+// wiring-contract ratchet resolves every SiteRef + enforces wireStatus honesty.
+export const WiringSchema = z.object({
+  wireStatus: WireStatus,
+  activation: z.array(ActivationConditionSchema).default([]),
+  producer: z.array(SiteRefSchema).default([]),
+  consumer: z.array(SiteRefSchema).default([]),
+  contracts: z.record(WiringSurface, SurfaceContractSchema).default({}),
+})
+export type Wiring = z.infer<typeof WiringSchema>
+
 export const RunMode = z.enum([
   "interactive",
   "headless",
@@ -105,6 +190,13 @@ export const FeatureSchema = z.object({
     .default({}),
   // SOTA Tier-5 — audited per-surface (CLI / web) integration + evidence.
   surface_integration: SurfaceIntegrationSchema,
+  // SOTA Tier-6 — OPTIONAL machine-checkable producer/consumer wiring contract.
+  // Additive: absent ⇒ byte-identical legacy. Present ⇒ the wiring-contract
+  // ratchet (tests/unit/feature-catalog-wiring-contract.test.ts) resolves every
+  // SiteRef's {module, exportedSymbol} and enforces wireStatus honesty. Lets a
+  // "type surface only, no scheduler" be declared as `seam-only` instead of
+  // being laundered into `surface_integration.cli: full` (a false-green).
+  wiring: WiringSchema.optional(),
   purpose: z.string().min(1),
   evidence: z
     .object({

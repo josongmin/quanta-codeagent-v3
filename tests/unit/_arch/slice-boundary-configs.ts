@@ -50,6 +50,20 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       "auto-sweep.ts",
       "inspector.ts",
       "inspector.hellgate.test.ts",
+      // `loop-helpers.ts` reads the DEFAULT-OFF OTel content-capture gate
+      // (`gateOn(process.env, "QUANTA_OTEL_CAPTURE_CONTENT")`) at the span-close
+      // seam — the same sanctioned default-OFF gate-at-a-seam class as the
+      // `tool` slice's `from-env.ts`/`port.ts` carve-outs. Unset/falsy ⇒ NO
+      // content leaves the process (byte-identical); the gate arms the redacted
+      // OTLP content plane only when a span sink is also live. (loop-helpers.ts is
+      // ALSO in `stdioAllowFiles` above for the git-directive sink default.)
+      "loop-helpers.ts",
+      // `loop/control-poll.ts` gates the DEFAULT-OFF control-request drain on
+      // `isControlRequestEnabled(slot.env ?? process.env)` — the `process.env`
+      // token is ONLY the DI fallback for the injected `slot.env` (tests pass a
+      // fake env); an absent slot OR gate-off ⇒ the port is never even queried
+      // (byte-identical). Same injection-first default-OFF gate-at-a-seam class.
+      "control-poll.ts",
     ],
     // `default-stdout-emitter.ts` (ADR-0220) deliberately exposes
     // `process.stderr` as the production default sink for git-directives.
@@ -100,7 +114,16 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     // must pass the parent env to the child so PATH resolves node/lldb/dlv — the
     // same env-boundary carve-out as runner.ts. The gate VALUES come from cfg; only
     // the spawned child's env inherits `process.env`.
-    envAllowFiles: ["runner.ts", "from-env.ts", "port.ts"],
+    //
+    // `container-exec/tool.ts` is a PATH-SCOPED entry (not a bare basename): it
+    // resolves the DEFAULT-OFF per-stream output cap dial `resolveStreamCap(
+    // process.env)` (QUANTA_TB_STREAM_CAP) at module load — unset/≤0 ⇒ the fixed
+    // 8K default (byte-identical); `resolveStreamCap` is PURE (takes the env bag),
+    // so the raw `process.env` is only its call-boundary argument. `tool.ts` is NOT
+    // a unique basename (10 `*/tool.ts` under @/tool), so the path-scoped form
+    // exempts EXACTLY this one file — a future env read in a sibling `*/tool.ts`
+    // still trips the guard.
+    envAllowFiles: ["runner.ts", "from-env.ts", "port.ts", "container-exec/tool.ts"],
     requireSliceBarrel: true,
   },
   memory: {
@@ -148,6 +171,10 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     denyImports: [...PEER_LIBRARY_DENY],
     stdioAllowFiles: ["logger.ts", "console-sink.ts"],
     requireSliceBarrel: true,
+    // 77 files / ~600KB: the apps runtime+type-import AST scan alone can exceed
+    // Bun's 5s behavioural-test deadline under full-unit CPU contention.
+    // This remains the same bounded structural assertion, not a policy exemption.
+    surfaceIsolationScanTimeoutMs: 20_000,
   },
   session: {
     slice: "session",
@@ -188,7 +215,12 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       // SSOTs (biome + this arch test) in lockstep so the fence can't silently drift.
       "@/runtime",
     ],
-    envAllowFiles: ["handlers-6.ts"],
+    // `exec-command.ts` spreads the parent `process.env` INTO the spawned bash
+    // child (`{ ...process.env, ...input.env }`) so PATH/HOME resolve for the
+    // subprocess — ENV PROPAGATION to a child, not a feature-flag read. Same
+    // spawner env-boundary carve-out as `handlers-6.ts` (and the `tool` slice's
+    // `port.ts`); the values only reach the child's environment.
+    envAllowFiles: ["handlers-6.ts", "exec-command.ts"],
     requireSliceBarrel: true,
   },
   skill: {
@@ -286,7 +318,44 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     //     reset/restore guard, not configurable posture.
     // These four leaf names are unique within the slice, so the carve-out
     // exempts exactly these files.
-    envAllowFiles: ["core.ts", "driver.ts", "dataset.ts", "diff-ops.ts", "registry.ts"],
+    //
+    // W3-A (bench eval-DRIVER composition root): when the `agent:batch` /
+    // SWE-bench eval driver was split out of the monolithic `driver.ts` into
+    // the `batch/eval/driver/*.ts` phase files (+ two `batch/eval/*.ts`
+    // repro wires + `batch/eval/sandbox.ts`), the `QUANTA_BENCH_*` knob-
+    // resolution reads moved with them. These are the SAME sanctioned
+    // composition-root / knob-resolution class as `core.ts`/`driver.ts`
+    // above (and the `tool` slice's `runner.ts`/`from-env.ts` precedent):
+    // each read passes the raw `process.env` bag straight into a PURE gate
+    // helper (`gateOn`/`gateDisabled`) or a PURE resolver
+    // (`resolveBenchKnobs({ envVars })`, `benchPostureFromState(state, env)`,
+    // `agentVisibleBenchVerifierCommand(instance, env)`,
+    // `benchBudgetMeterFromEnv(env)`, `resolveLlmSelectMode(env)`,
+    // `familyCoverageCoeditEnabled(env)`, `resolveReproViabilityMode(env)`) —
+    // the value is never a config-SLOT that should be threaded through the
+    // call graph; the bench surface IS the composition root that resolves
+    // these DEFAULT-OFF knobs. (`repro-viability-wire.ts` reads
+    // `args.env ?? process.env` — `process.env` is only the DI fallback for
+    // an injected env, exactly the agent slice's `control-poll.ts` pattern.)
+    // Every leaf name below is UNIQUE within the slice, so each entry exempts
+    // exactly ONE file — a future env read in a NEW driver file still trips
+    // the guard.
+    envAllowFiles: [
+      "core.ts",
+      "driver.ts",
+      "dataset.ts",
+      "diff-ops.ts",
+      "registry.ts",
+      "config-build.ts",
+      "attempt-context.ts",
+      "env-knob-parse.ts",
+      "repair-phase.ts",
+      "repro-test-prep.ts",
+      "selection-port-factories.ts",
+      "repro-adapter.ts",
+      "repro-viability-wire.ts",
+      "sandbox.ts",
+    ],
     requireSubSliceBarrels: ["assemble/index.ts", "orchestrate/index.ts", "session-ops/index.ts"],
   },
   ipc: {
@@ -410,6 +479,10 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     allowImports: [
       "@/agent/side-agent-runner",
       "@/agent/subagent-runner",
+      // Reviewed: the OS-process worker charter derives its own spawn-depth
+      // containment (childDepthOf/effectiveCap) from the shared authority leaf so
+      // a forked daemon is never a fresh unbounded root (rev.4 §4 defense-in-depth).
+      "@/agent/spawn-depth",
       "@/llm",
       "@/llm/replay",
       "@/tool",

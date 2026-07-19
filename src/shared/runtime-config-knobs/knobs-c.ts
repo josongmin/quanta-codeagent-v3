@@ -101,6 +101,29 @@ export const KNOBS_C: readonly RuntimeConfigKnob[] = [
     describe: "Bench report mirror directory override; off/0 disables the canonical mirror.",
   },
   {
+    envKey: "QUANTA_WEB_DB_DIR",
+    kind: "string",
+    default: undefined,
+    group: "web",
+    describe: "Web-daemon thread-history DB directory override; absent ⇒ ~/.quanta/web-daemon.",
+  },
+  {
+    envKey: "QUANTA_SESSION_REGISTRY_SQLITE_PATH",
+    kind: "string",
+    default: undefined,
+    group: "session",
+    describe:
+      "Session-resource-registry SQLite backend path (ADR-0367, most durable); absent ⇒ disk/in-memory fallback.",
+  },
+  {
+    envKey: "QUANTA_SESSION_REGISTRY_DISK_DIR",
+    kind: "string",
+    default: undefined,
+    group: "session",
+    describe:
+      "Session-resource-registry disk-JSONL backend directory (ADR-0351); absent ⇒ in-memory fallback.",
+  },
+  {
     envKey: "QUANTA_BENCH_CACHE_PATHSPECS_EXTRA",
     kind: "list",
     default: [],
@@ -251,5 +274,13 @@ export const KNOBS_C: readonly RuntimeConfigKnob[] = [
     default: false,
     group: "tools",
     describe: "`notebook_edit` Jupyter cell-edit tool gate (default-OFF).",
+  },
+  {
+    envKey: "QUANTA_NODE_REPL",
+    kind: "bool",
+    default: false,
+    group: "tools",
+    describe:
+      "ADR-0249 `node_repl` persistent Node kernel tool gate — arbitrary Node code exec, always-confirm (strict opt-in, default-OFF).",
   },
 ]

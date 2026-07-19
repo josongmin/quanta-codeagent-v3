@@ -1,4 +1,5 @@
 import type { RunMode } from "@/agent"
+import { type GlobRule, loadGlobRulesWithVendors } from "@/agent/glob-rules"
 import { loadRepoRules, type RepoRules } from "@/agent/repo-rules"
 import { modeLoadsRepoRules } from "@/agent/run-mode"
 import { buildSystemPromptForRunMode, promptSurfaceProfileForRunMode } from "@/agent/system-prompt"
@@ -46,4 +47,28 @@ export const resolveModePresetRepoRules = async (
   if (override !== undefined) return override
   if (!modeLoadsRepoRules(mode)) return undefined
   return loadRepoRules(cwd).catch(() => undefined)
+}
+
+/**
+ * WS4 follow-on (jul-19) — the ONE place a PRESET decides whether to surface
+ * multi-source vendor glob-rules (`.cursor/rules`, `.clinerules`, `.windsurfrules`,
+ * aider/roo, …) via {@link loadGlobRulesWithVendors} → the detector's `detectAll`.
+ *
+ * SECURITY (load-bearing): `loadGlobRulesWithVendors` is trust-BLIND — it reads
+ * repo-provided rule files with no mode awareness. So this resolver gates on the
+ * SAME {@link modeLoadsRepoRules} SSOT the repo-rules path uses: an untrusted /
+ * hermetic surface (ci-bot / daemon / batch) gets `[]`, never a repo-controlled
+ * `.windsurfrules` spliced into the trusted system prompt (self-approve vector).
+ * `enabled` is the default-OFF feature gate (`QUANTA_VENDOR_RULES`). Fail-open:
+ * a broken detector/loader must never crash session start. Empty ⇒ the caller
+ * leaves `cfg.globRules` unset ⇒ OFF byte-identical.
+ */
+export const resolveModePresetGlobRules = async (
+  mode: RunMode,
+  cwd: string,
+  enabled: boolean,
+): Promise<GlobRule[]> => {
+  if (!modeLoadsRepoRules(mode)) return [] // SECURITY: untrusted/hermetic ⇒ nothing
+  if (!enabled) return [] // FEATURE gate: default-OFF
+  return loadGlobRulesWithVendors(cwd, { vendorDetectorEnabled: true }).catch(() => [])
 }

@@ -23,6 +23,7 @@
  */
 
 import { redactSecrets } from "@/security"
+import { sliceWholeChars } from "@/shared"
 import type { AgentEvent } from "@/stream"
 
 /** The two subagent observation types (1:1 with the tapped AgentEvent arms). */
@@ -82,7 +83,7 @@ const PREVIEW_CAP = 240
 /** Bound + secret-scrub a UI-crossing string via the `@/security` SoT. */
 const boundedRedact = (s: string | undefined): string | undefined => {
   if (s === undefined) return undefined
-  const bounded = s.length > PREVIEW_CAP ? s.slice(0, PREVIEW_CAP) : s
+  const bounded = s.length > PREVIEW_CAP ? sliceWholeChars(s, PREVIEW_CAP) : s
   return redactSecrets(bounded, { origin: "tool_result" }).text
 }
 

@@ -89,6 +89,8 @@ describe("host runtime capability derivation", () => {
       automation: false,
       shellSnapshot: true,
       transport: "inproc",
+      // ADR-0540 W1-B — additive marker; absent input normalizes to false.
+      serverAutoContinues: false,
     })
     expect(Object.isFrozen(manifest)).toBe(true)
   })
@@ -115,6 +117,7 @@ describe("host runtime capability derivation", () => {
       automation: false,
       shellSnapshot: false,
       transport: "inproc",
+      serverAutoContinues: false,
     })
 
     const withApprovalBinding = createRuntimeContextBindingFromAgentConfigBase({
@@ -144,8 +147,29 @@ describe("host runtime capability derivation", () => {
       automation: true,
       shellSnapshot: true,
       transport: "inproc",
+      serverAutoContinues: false,
     })
     expect(Object.isFrozen(manifest)).toBe(true)
+  })
+
+  test("ADR-0540 W1-B — serverAutoContinues marker is TRUE iff the composition stamped it on the base", async () => {
+    const describeManifest = async (base: RuntimeAgentConfigBase) => {
+      const host = await createRuntimeContextBindingFromAgentConfigBase({ base })
+        .createRuntimeHost({
+          history: [],
+          state: undefined,
+          idMeta: undefined,
+          shutdown: async () => undefined,
+        })
+        .createSessionHost({})
+      return host.describe().capabilityManifest
+    }
+    // Absent (every non-web-daemon surface) ⇒ false — byte-identical manifest.
+    expect((await describeManifest(makeBase())).serverAutoContinues).toBe(false)
+    // Stamped by the web-daemon composition under the ADR-0540 gate ⇒ true.
+    expect(
+      (await describeManifest(makeBase({ serverAutoContinues: true }))).serverAutoContinues,
+    ).toBe(true)
   })
 
   test("A2 — artifacts capability is TRUE iff the artifact store is wired onto the base", async () => {

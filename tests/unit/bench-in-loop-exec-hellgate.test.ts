@@ -60,17 +60,17 @@ class StubLLM implements LLMPort {
   }
 }
 const stubStream: StreamPort = { emit() {} }
-const swebenchInstance = (): Instance => ({
+const swebenchInstance = (testCmd = "true"): Instance => ({
   id: "p-1",
   repoPath: "/tmp/x",
   problemStatement: "fix it",
-  testCmd: "true",
+  testCmd,
   swebench: { instanceId: "x__1", repo: "x/x", baseCommit: "deadbeef" },
 })
 const baseDeps = { llm: new StubLLM(), maxTurns: 1, timeoutMs: 5_000 }
-const buildOnce = (): ReturnType<typeof buildConfig> => {
+const buildOnce = (testCmd?: string): ReturnType<typeof buildConfig> => {
   const ac = new AbortController()
-  return buildConfig(swebenchInstance(), baseDeps, "/tmp/sb", ac.signal, stubStream)
+  return buildConfig(swebenchInstance(testCmd), baseDeps, "/tmp/sb", ac.signal, stubStream)
 }
 const userText = (cfg: ReturnType<typeof buildConfig>): string => {
   const block = cfg.messages[0]?.content[0]
@@ -90,28 +90,44 @@ describe("bench-in-loop-exec posture flip", () => {
     expect(userText(cfg)).toContain("MANDATORY")
     expect(userText(cfg)).toContain(MANDATE)
     expect(userText(cfg)).toContain(VERIFY_MODE_STEER)
-    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2, exactCommands: ["true"] })
+    // `true` is an intentional no-op test command, never an agent-visible
+    // verifier. The outcome gate remains armed, but it must not pretend that
+    // this fixture supplies an authority command.
+    expect(cfg.verifyGuard).toEqual({ mustPass: true, maxTrips: 2 })
     expect(cfg.protectTestPaths).toBe(true)
   })
 
   // SSOT (jun-28): the must-pass OVERRIDE flows buildConfig → reconcileBenchGuards
   // → verifyGuard (must-pass apply is bench-NOOP now). This pins the exact path
   // the gpt-5.4 11141 e2e PASS relied on, after the single-authority refactor.
-  test("MUST-PASS-STICKY: QUANTA_BENCH_MUST_PASS=sticky ⇒ verifyGuard.stickyRed + exactCommands preserved", () => {
+  test("MUST-PASS-STICKY: QUANTA_BENCH_MUST_PASS=sticky ⇒ verifyGuard.stickyRed", () => {
     process.env.QUANTA_BENCH_MUST_PASS = "sticky"
     const cfg = buildOnce()
     expect(cfg.verifyGuard).toEqual({
       mustPass: true,
       maxTrips: 2,
       stickyRed: true,
-      exactCommands: ["true"],
     })
   })
 
-  test("MUST-PASS-OFF: override=off ⇒ verifyGuard {mustPass:false} but exactCommands still inherited", () => {
+  test("MUST-PASS-OFF: override=off ⇒ verifyGuard {mustPass:false}", () => {
     process.env.QUANTA_BENCH_MUST_PASS = "off"
     const cfg = buildOnce()
-    expect(cfg.verifyGuard).toEqual({ mustPass: false, exactCommands: ["true"] })
+    expect(cfg.verifyGuard).toEqual({ mustPass: false })
+  })
+
+  test("MUST-PASS: a public verifier remains the exact authority for default, sticky, and off", () => {
+    const publicVerifier = "pytest tests/public.py"
+    const cases: ReadonlyArray<readonly [string | undefined, object]> = [
+      [undefined, { mustPass: true, maxTrips: 2, exactCommands: [publicVerifier] }],
+      ["sticky", { mustPass: true, maxTrips: 2, stickyRed: true, exactCommands: [publicVerifier] }],
+      ["off", { mustPass: false, exactCommands: [publicVerifier] }],
+    ]
+    for (const [override, expected] of cases) {
+      if (override === undefined) delete process.env.QUANTA_BENCH_MUST_PASS
+      else process.env.QUANTA_BENCH_MUST_PASS = override
+      expect(buildOnce(publicVerifier).verifyGuard).toEqual(expected)
+    }
   })
 
   // IN-LOOP-2: explicit OFF via env flips the posture.

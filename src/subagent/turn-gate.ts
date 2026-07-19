@@ -199,6 +199,15 @@ export class SubagentTurnGate {
     return this.parkResolve !== undefined
   }
 
+  /** WS2 (RFC jul-18 §4.2) — true once the loop has entered at least one turn
+   *  ({@link armTurn} minted a per-turn controller). Read-only: the typed
+   *  control endpoint uses it to distinguish a BUSY child (armed, not parked ⇒
+   *  `interrupt()` aborts the in-flight turn) from a child that has not started
+   *  a turn yet (`not_armed`). No behavior change — a pure accessor. */
+  isArmed(): boolean {
+    return this.turnAbort !== undefined
+  }
+
   /** Release any park with `settle` and refuse future parks. Idempotent. The
    *  runner calls this from its `finally` so a child whose loop has ended can
    *  never leave a leaked promise or accept a wake. */

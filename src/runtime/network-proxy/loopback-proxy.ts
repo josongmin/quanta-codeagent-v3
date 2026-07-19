@@ -23,8 +23,8 @@
  */
 
 import { createServer, request as httpRequest, type IncomingMessage, type Server } from "node:http"
-import { request as httpsRequestOverTls } from "node:https"
 import { isIP, connect as netConnect, type Socket } from "node:net"
+import { connect as tlsConnect } from "node:tls"
 import { classifyHost } from "@/shared/net/ssrf"
 import { NetworkPolicyAmendment } from "./amendment"
 import { decideEgress, type EgressDecision } from "./decision"
@@ -40,6 +40,7 @@ import { openBunMitmChannel } from "./mitm-channel-bun"
 import { makeNodeMitmChannelOpener } from "./mitm-channel-node"
 import type { NetworkProxyPort } from "./port"
 import { readCappedBody } from "./read-capped-body"
+import { detectScouting, type ScoutingSignal } from "./scouting"
 import { decideEgressScan, type SecretEgressConfig } from "./secret-egress"
 import type { DecisionLogEntry, NetworkProxyConfig, ProxyAddress } from "./types"
 
@@ -135,6 +136,7 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
   readonly amendments: NetworkPolicyAmendment
   private readonly server: Server
   private readonly log: DecisionLogEntry[] = []
+  private latestScoutingSignal: ScoutingSignal | null = null
   /** ticket-13 (§12.2) — append-only audit of every outbound header-rewrite rule
    *  that FIRED (or was refused). The VALUE is never recorded (see
    *  {@link HeaderRuleAudit}); each entry carries the rule index / header name /
@@ -231,6 +233,12 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
     return this.log
   }
 
+  /** Latest advisory exfil-scouting signal, if the configured denied-host
+   * threshold has been reached. The signal does not alter egress verdicts. */
+  scoutingSignal(): ScoutingSignal | null {
+    return this.latestScoutingSignal
+  }
+
   /** ticket-13 (§12.2) — the outbound header-rewrite mutation audit (value-free).
    *  Append-only; the proxy never mutates a prior entry. Empty when no header
    *  rules are configured (default-OFF) or none fired. */
@@ -277,6 +285,10 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
         ...(secretScan !== undefined ? { secretScan } : {}),
       }),
     )
+    const threshold = this.config.exfilScoutingThreshold
+    if (threshold !== undefined) {
+      this.latestScoutingSignal = detectScouting(this.log, { threshold })
+    }
   }
 
   private decide(host: string): EgressDecision {
@@ -287,7 +299,11 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
   private onRequest(req: IncomingMessage, res: import("node:http").ServerResponse): void {
     const target = this.parseHttpTarget(req)
     if (target === null) {
-      res.writeHead(400, { "content-type": "text/plain" }).end("malformed proxy request")
+      // A forward proxy cannot authorize a relative/malformed target because
+      // it has no reliable destination host. Treat it as an egress denial,
+      // rather than a recoverable origin-style bad request, to keep this
+      // boundary fail-closed and uniform with denied CONNECT requests.
+      res.writeHead(403, { "content-type": "text/plain" }).end("malformed proxy request")
       return
     }
     const decision = this.decide(target.host)
@@ -412,32 +428,44 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
     target: { host: string; port: number; url: URL },
   ): void {
     const dialed = this.dial(target.host, target.port)
-    const upstream = httpRequest(
-      {
-        host: dialed.host,
-        port: dialed.port,
-        method: req.method,
-        path: target.url.pathname + target.url.search,
-        headers: req.headers,
-      },
-      (up) => {
-        // Post-connect SSRF re-check on the resolved peer (rebinding defense).
-        if (this.peerIsBlocked(up.socket)) {
-          up.destroy()
-          if (!res.headersSent)
-            res.writeHead(403).end("egress denied: peer resolved to blocked address")
-          return
-        }
-        res.writeHead(up.statusCode ?? 502, up.headers)
-        up.pipe(res)
-      },
-    )
-    upstream.on("error", () => {
+    // Do not construct/request-pipe `httpRequest` until the raw TCP peer has
+    // passed the rebind check. Creating it first queues request bytes on the
+    // socket before the response callback sees `remoteAddress`, which leaks a
+    // request to a rebinding target despite returning 403 to the child.
+    const socket = netConnect(dialed.port, dialed.host)
+    socket.once("connect", () => {
+      if (this.peerIsBlocked(socket)) {
+        socket.destroy()
+        if (!res.headersSent)
+          res.writeHead(403).end("egress denied: peer resolved to blocked address")
+        return
+      }
+      const upstream = httpRequest(
+        {
+          host: dialed.host,
+          port: dialed.port,
+          method: req.method,
+          path: target.url.pathname + target.url.search,
+          headers: req.headers,
+          createConnection: () => socket,
+        },
+        (up) => {
+          res.writeHead(up.statusCode ?? 502, up.headers)
+          up.pipe(res)
+        },
+      )
+      upstream.on("error", () => {
+        if (!res.headersSent)
+          res.writeHead(502, { "content-type": "text/plain" }).end("upstream error")
+        else res.end()
+      })
+      req.pipe(upstream)
+    })
+    socket.on("error", () => {
       if (!res.headersSent)
         res.writeHead(502, { "content-type": "text/plain" }).end("upstream error")
       else res.end()
     })
-    req.pipe(upstream)
   }
 
   /**
@@ -477,32 +505,43 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
       headers,
       this.config.secretEgress?.headerRules,
     )
-    const upstream = httpRequest(
-      {
-        host: dialed.host,
-        port: dialed.port,
-        method: req.method,
-        path: target.url.pathname + target.url.search,
-        headers,
-      },
-      (up) => {
-        if (this.peerIsBlocked(up.socket)) {
-          up.destroy()
-          if (!res.headersSent)
-            res.writeHead(403).end("egress denied: peer resolved to blocked address")
-          return
-        }
-        res.writeHead(up.statusCode ?? 502, up.headers)
-        up.pipe(res)
-      },
-    )
-    upstream.on("error", () => {
+    // Mirror `pipeHttp`: the post-dial SSRF decision must precede writing the
+    // buffered body, otherwise a DNS-rebound peer receives it before rejection.
+    const socket = netConnect(dialed.port, dialed.host)
+    socket.once("connect", () => {
+      if (this.peerIsBlocked(socket)) {
+        socket.destroy()
+        if (!res.headersSent)
+          res.writeHead(403).end("egress denied: peer resolved to blocked address")
+        return
+      }
+      const upstream = httpRequest(
+        {
+          host: dialed.host,
+          port: dialed.port,
+          method: req.method,
+          path: target.url.pathname + target.url.search,
+          headers,
+          createConnection: () => socket,
+        },
+        (up) => {
+          res.writeHead(up.statusCode ?? 502, up.headers)
+          up.pipe(res)
+        },
+      )
+      upstream.on("error", () => {
+        if (!res.headersSent)
+          res.writeHead(502, { "content-type": "text/plain" }).end("upstream error")
+        else res.end()
+      })
+      if (bodyBuf.length > 0) upstream.write(bodyBuf)
+      upstream.end()
+    })
+    socket.on("error", () => {
       if (!res.headersSent)
         res.writeHead(502, { "content-type": "text/plain" }).end("upstream error")
       else res.end()
     })
-    if (bodyBuf.length > 0) upstream.write(bodyBuf)
-    upstream.end()
   }
 
   /** HTTPS `CONNECT host:443` tunnel path. */
@@ -693,8 +732,17 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
     // byte-identical. The MITM path reuses the SAME pure transform as the
     // plaintext path (one definition, two transports).
     headers = this.applyOutboundHeaderRules(host, headers, this.config.mitm?.headerRules)
+    // The MITM channel accepts one request and then closes, so force the
+    // corresponding upstream response to terminate after that one exchange.
+    // This is intentionally after header rewriting: a user-supplied rule may
+    // narrow other headers but cannot leave this one-shot transport hanging.
+    headers.connection = "close"
 
-    const upstream = httpsRequestOverTls(
+    // Open the upstream TLS transport ourselves instead of letting
+    // `https.request` lazily flush HTTP headers/body as its connection trigger.
+    // This gives the proxy a hard peer-check boundary BEFORE any HTTP byte is
+    // emitted to a DNS-rebound origin.
+    const upstream = tlsConnect(
       {
         // Test-only EXTRA trust root for a hermetic origin (spread FIRST so the
         // security-critical fields below ALWAYS win — `rejectUnauthorized` can
@@ -706,37 +754,33 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
         // the default trust store. NEVER our MITM CA, NEVER rejectUnauthorized:false.
         servername: host,
         rejectUnauthorized: true,
-        method: parsed.method,
-        path: parsed.path,
-        headers,
       },
-      (up) => {
-        if (this.peerIsBlocked(up.socket)) {
-          up.destroy()
+      () => {
+        if (this.peerIsBlocked(upstream)) {
+          upstream.destroy()
           this.writeChannelHttp(channel, 403, "egress denied: peer resolved to blocked address")
           return
         }
-        // Re-encrypt the upstream response back to the client over OUR TLS channel.
-        const statusLine = `HTTP/1.1 ${up.statusCode ?? 502} ${up.statusMessage ?? ""}\r\n`
-        const headerLines = Object.entries(up.headers)
-          .filter(([, v]) => v !== undefined)
-          .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : v}\r\n`)
+        const headerLines = Object.entries(headers)
+          .map(([name, value]) => `${name}: ${Array.isArray(value) ? value.join(", ") : value}\r\n`)
           .join("")
-        channel.write(`${statusLine}${headerLines}\r\n`)
-        up.on("data", (c: Buffer) => {
-          channel.write(c)
-        })
-        up.on("end", () => {
-          channel.end()
-        })
+        upstream.write(`${parsed.method} ${parsed.path} HTTP/1.1\r\n${headerLines}\r\n`)
+        if (body.length > 0 && parsed.method !== "GET" && parsed.method !== "HEAD")
+          upstream.write(body)
       },
     )
     upstream.on("error", () => {
       // Upstream cert rejection / dial failure / reset ⇒ 502, never a blind pass.
       this.writeChannelHttp(channel, 502, "upstream TLS error (cert not validated or unreachable)")
     })
-    if (body.length > 0 && parsed.method !== "GET" && parsed.method !== "HEAD") upstream.write(body)
-    upstream.end()
+    // The upstream response is already raw HTTP/1.1 bytes, so forwarding the
+    // TLS payload directly avoids a second HTTP parser/re-serializer.
+    upstream.on("data", (chunk: Buffer) => {
+      channel.write(chunk)
+    })
+    upstream.on("end", () => {
+      channel.end()
+    })
   }
 
   /**

@@ -41,6 +41,7 @@ import { startWebDaemon } from "@/apps/web-daemon/server"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import type { ConnectedSessionTransport, SessionTransport } from "@/ipc/session"
 import type { SessionEvent, SessionSnapshotLite } from "@/protocol/session"
+import { capabilitiesFor, makeSnapshotLite } from "../support/session-fixtures"
 import { supported } from "@/protocol/session"
 import type { RuntimeFacade, RuntimeSession, SessionDispatchResult } from "@/sdk/runtime"
 
@@ -64,16 +65,14 @@ afterAll(() => {
   else process.env.QUANTA_WEB_DB = prevDbGate
 })
 
-const CAPS = {
-  approvals: "operator" as const,
+const CAPS = capabilitiesFor({
+  approvals: "operator",
   tools: true,
-  memory: false,
   artifacts: true,
   subagents: true,
-  automation: false,
   shellSnapshot: true,
-  transport: "websocket" as const,
-}
+  transport: "websocket",
+})
 
 const okResult = (snap: SessionSnapshotLite): SessionDispatchResult => ({
   revision: snap.revision,
@@ -111,7 +110,7 @@ const createControllableFactory = (): {
 
   const factory = async (): Promise<RuntimeFacade> => ({
     createSession: async (): Promise<RuntimeSession> => {
-      let snapshot: SessionSnapshotLite = {
+      let snapshot: SessionSnapshotLite = makeSnapshotLite({
         sessionId: "ctl-session-1",
         revision: 1,
         seq: 0,
@@ -125,9 +124,7 @@ const createControllableFactory = (): {
           messageCount: 0,
         },
         capabilities: CAPS,
-        pendingApproval: null,
-        openArtifacts: [],
-      }
+      })
       const listeners = listenersRef.current
 
       const runTurn = async (): Promise<SessionDispatchResult> => {

@@ -501,6 +501,13 @@ const MUTATING_TOOL_TABLE: Readonly<Record<string, MutatingToolKind | null>> = O
   // + AgentConfig.codeCellDispatchFactory, QUANTA_CODE_MODE); PERMANENT entry so
   // plan-mode dispatch never trips UnknownToolError when a host registers it.
   code_cell: "write_filesystem",
+  // ADR-0249 — node_repl evaluates arbitrary Node code in a PERSISTENT `node -i`
+  // subprocess (full host access: fs/net/require). At least as powerful as `bash`
+  // ⇒ classified `bash_mutating` so plan mode BLOCKS it (plan PROPOSES; it does not
+  // run arbitrary host code mid-turn). Caller-wire (DefaultToolPorts.nodeRepl,
+  // QUANTA_NODE_REPL); PERMANENT entry so plan-mode dispatch never trips
+  // UnknownToolError when a host registers it.
+  node_repl: "bash_mutating",
   // ticket-11 (P8 git-worktree agent tools) — caller-wire, registered only when
   // `QUANTA_WORKTREE_TOOL` mints `AgentConfig.activeWorktreeSlot`. PERMANENT
   // entries so plan-mode dispatch classifies (not crashes with UnknownToolError)
@@ -658,6 +665,10 @@ export const CALLER_WIRE_TOOL_NAMES = Object.freeze([
   // code-mode (RFC jun-6-code-mode, Phase 1) — DefaultToolPorts.codeMode +
   // AgentConfig.codeCellDispatchFactory (QUANTA_CODE_MODE).
   "code_cell",
+  // ADR-0249 node_repl (persistent Node kernel) — DefaultToolPorts.nodeRepl
+  // (QUANTA_NODE_REPL). Not enumerable from the static defaultTools surface, so
+  // pinned here so the orphan-direction drift check stays exact.
+  "node_repl",
   // ticket-11 (P8 git-worktree agent tools) — caller-wire, gated on
   // AgentConfig.activeWorktreeSlot (QUANTA_WORKTREE_TOOL). Not enumerable from
   // the static `defaultTools` surface, so listed here so the orphan-direction

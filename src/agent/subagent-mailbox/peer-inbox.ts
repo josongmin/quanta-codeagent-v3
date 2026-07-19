@@ -45,14 +45,46 @@ const identityRedact = (s: string): string => s
  *  `escapeBodyForLine`, applied AFTER redaction so the two compose). */
 const escapeBodyForLine = (body: string): string => body.replace(/\r\n|\r|\n/g, "\\n")
 
-/** Render one peer message to a single provenance-tagged line. The `from` is
- *  marked `untrusted` so the model treats the body as peer DATA, not a trusted
- *  instruction. The body is redacted (caller) then newline-escaped here. */
-const renderPeerLine = (m: MailboxMessage, redact: (s: string) => string): string => {
-  const safeBody = escapeBodyForLine(redact(typeof m.body === "string" ? m.body : ""))
-  const tail = m.correlationId !== undefined ? ` (corr: ${m.correlationId})` : ""
-  return `[teammate ${m.from} — untrusted] [${m.kind}] ${safeBody}${tail}`
+/**
+ * THE one peer-message sanitizer/formatter (RFC jul-18 §4.5). Redacts secrets
+ * (caller-injected `redact`, default identity), newline-escapes, then stamps the
+ * `[teammate <from> — untrusted] [kind] …` provenance header so the recipient
+ * model treats the body as peer DATA, never a trusted instruction. Reused by the
+ * queue-drain render below AND by the delivery controller's steer/interrupt
+ * injection (RFC §4.5 — "one formatter across all effective modes"). A raw
+ * teammate body may never enter a child's context except through this seam.
+ *
+ * `correlationId` renders a ` (corr: …)` suffix (queue-drain parity); the
+ * controller's `PeerEnvelope` path omits it (steer carries the correlation on
+ * the submission, not in the visible body).
+ */
+export const formatPeerBody = (
+  args: {
+    readonly from: string
+    readonly kind: MailboxMessage["kind"]
+    readonly body: string
+    readonly correlationId?: string
+  },
+  redact: (s: string) => string = identityRedact,
+): string => {
+  const safeBody = escapeBodyForLine(redact(typeof args.body === "string" ? args.body : ""))
+  const tail = args.correlationId !== undefined ? ` (corr: ${args.correlationId})` : ""
+  return `[teammate ${args.from} — untrusted] [${args.kind}] ${safeBody}${tail}`
 }
+
+/** Render one peer message to a single provenance-tagged line. Delegates to the
+ *  shared {@link formatPeerBody} so push (queue drain) and controller-side
+ *  injection share ONE redact→escape→provenance path. */
+const renderPeerLine = (m: MailboxMessage, redact: (s: string) => string): string =>
+  formatPeerBody(
+    {
+      from: m.from,
+      kind: m.kind,
+      body: m.body,
+      ...(m.correlationId !== undefined ? { correlationId: m.correlationId } : {}),
+    },
+    redact,
+  )
 
 export interface PeerInboxAdapterOptions {
   /** Redact secrets/PII from each (untrusted) peer body before it enters the

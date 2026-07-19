@@ -26,9 +26,14 @@
  *
  * Slice fence: lives in `@/apps/web-daemon` and references only the protocol
  * `ArtifactRef` shape; it never imports `@/agent/loop` or `@/apps/cli`.
+ *
+ * DOF-40 — fail-closed: a throwing subscriber is ISOLATED (siblings + the
+ * session-event bridge stay live) but the failure is OBSERVABLE via the
+ * optional `onSubscriberError` seam. Default-OFF byte-identical.
  */
 
 import type { ArtifactRef } from "@/protocol/session"
+import { type CanvasSourceOptions, fanOutIsolated } from "./canvas-fanout"
 
 export interface CanvasArtifactSourceHandle {
   /** Feed a ready artifact ref (the bridge calls this per session
@@ -36,23 +41,21 @@ export interface CanvasArtifactSourceHandle {
   readonly sink: { capture(ref: ArtifactRef): void }
   /** Subscribe to subsequent artifact-ready refs. Returns an unsubscribe. */
   readonly subscribe: (handler: (ref: ArtifactRef) => void) => () => void
+  /** Cumulative count of subscriber deliveries that THREW (health signal). */
+  readonly failureCount: () => number
 }
 
 /** Create a fresh canvas artifact source. One per daemon (shared across the
  *  daemon's connections, like the tool-diff + usage sources). */
-export const createCanvasArtifactSource = (): CanvasArtifactSourceHandle => {
+export const createCanvasArtifactSource = (
+  opts: CanvasSourceOptions = {},
+): CanvasArtifactSourceHandle => {
   const subscribers = new Set<(ref: ArtifactRef) => void>()
+  let failures = 0
   return {
     sink: {
       capture: (ref) => {
-        for (const fn of subscribers) {
-          try {
-            fn(ref)
-          } catch {
-            // A throwing subscriber must not break the fan-out to siblings or
-            // the session-event bridge that feeds this source.
-          }
-        }
+        failures += fanOutIsolated(subscribers, ref, opts.onSubscriberError)
       },
     },
     subscribe: (handler) => {
@@ -61,5 +64,6 @@ export const createCanvasArtifactSource = (): CanvasArtifactSourceHandle => {
         subscribers.delete(handler)
       }
     },
+    failureCount: () => failures,
   }
 }

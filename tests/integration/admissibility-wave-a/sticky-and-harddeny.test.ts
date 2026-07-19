@@ -37,7 +37,13 @@ describe("Wave A: priorDenials sticky precedence", () => {
     const priorDenials: ReadonlyArray<DenialMemory> = [
       {
         sessionId: "s1",
-        actionKey: "dangerous",
+        // ALBB-11 (872b78a56, jul-9): non-shell actionKeys are now
+        // `${tool}|#${canonicalInputKey(input)}` — the bare tool name would
+        // over-approve every future call, so a discriminator is required. For
+        // the `dangerous` call with input `{}` the canonical key is
+        // `dangerous|#{}`; a stale bare `"dangerous"` no longer matches and the
+        // sticky short-circuit would be silently skipped.
+        actionKey: "dangerous|#{}",
         reviewer: "guardian_subagent",
         outcome: "guardian_denied",
         deniedAt: 9000,
@@ -70,14 +76,15 @@ describe("Wave A: priorDenials sticky precedence", () => {
     const priorDenials: ReadonlyArray<DenialMemory> = [
       {
         sessionId: "s1",
-        actionKey: "dangerous",
+        // ALBB-11 (872b78a56): canonical non-shell key for `dangerous {}`.
+        actionKey: "dangerous|#{}",
         reviewer: "guardian_subagent",
         outcome: "guardian_denied",
         deniedAt: 9000,
       },
       {
         sessionId: "s1",
-        actionKey: "dangerous",
+        actionKey: "dangerous|#{}",
         reviewer: "user",
         outcome: "user_aborted",
         deniedAt: 9500,

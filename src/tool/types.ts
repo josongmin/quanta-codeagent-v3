@@ -66,7 +66,8 @@ import type { ReadFileState } from "./stale-read-guard"
  *   - `gitWriteGuard?`      ADR-0091 git-write protection. Provider: dispatch
  *                           seam wired from `@/permission/git-write-guard`
  *                           (`gitWriteProtectReason`). Consumer: `write` /
- *                           `edit` tools, called BEFORE touching the FS.
+ *                           `edit` / both patch tools, called BEFORE touching
+ *                           the FS.
  *                           Absent ⇒ no git-write guard (legacy path).
  *
  *   - `reviewerAgent?`      ADR-0111 git_review_diff isolated reviewer.

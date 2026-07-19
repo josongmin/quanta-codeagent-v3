@@ -28,6 +28,7 @@ import { readFileSync } from "node:fs"
 import { CLI_FEATURE_GATES } from "@/apps/cli/cli-feature-gates"
 import { renderHelp } from "@/apps/cli/help-render"
 import { BUILTINS } from "@/apps/cli/slash-commands"
+import { seedEnvVarsForSurface } from "@/tool"
 import { setColorPolicy, stripAnsi } from "@/ui/ui-helpers"
 
 beforeEach(() => setColorPolicy("off"))
@@ -46,6 +47,12 @@ describe("CLI_FEATURE_GATES ⟷ /help env-table parity", () => {
 
   for (const { gate } of CLI_FEATURE_GATES) {
     test(`${gate} appears as an env row exactly once`, () => {
+      expect(envRowCount(out, gate)).toBe(1)
+    })
+  }
+
+  for (const gate of seedEnvVarsForSurface("cli")) {
+    test(`CLI-default tool gate ${gate} appears as an env row exactly once`, () => {
       expect(envRowCount(out, gate)).toBe(1)
     })
   }

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { argvImages, argvPrompt } from "../../src/apps/cli/internal"
+import { applyToolProfileFlag, resolveToolProfileFlag } from "../../src/apps/cli/internal/argv"
 
 /**
  * `argvPrompt` allowlist regression suite (audit may-22, MEDIUM-12 fix).
@@ -43,6 +44,28 @@ describe("argvPrompt — allowlist semantics", () => {
   test("known valued flags drop BOTH flag and value", () => {
     setArgv("--state", "/tmp/s.json", "--resume", "abc-id", "do", "the", "thing")
     expect(argvPrompt()).toBe("do the thing")
+  })
+
+  test("--tool-profile delegates to the host parser and keeps its value out of the prompt", () => {
+    setArgv("--tool-profile", "ask", "fix", "x")
+    const env: NodeJS.ProcessEnv = { QUANTA_TOOL_PROFILE: "write" }
+    expect(applyToolProfileFlag(process.argv.slice(2), env)).toBe("ask")
+    expect(env.QUANTA_TOOL_PROFILE).toBe("ask")
+    expect(argvPrompt()).toBe("fix x")
+  })
+
+  test("--tool-profile=value resolves through the same bridge", () => {
+    setArgv("--tool-profile=code-only", "fix", "x")
+    expect(resolveToolProfileFlag()).toBe("code-only")
+    expect(argvPrompt()).toBe("fix x")
+  })
+
+  test("invalid and missing tool-profile values fail at argv parsing", () => {
+    setArgv("--tool-profile", "bogus", "fix", "x")
+    expect(() => resolveToolProfileFlag()).toThrow(/--tool-profile must be one of/)
+
+    setArgv("--tool-profile")
+    expect(() => resolveToolProfileFlag()).toThrow(/flag '--tool-profile' requires a value/)
   })
 
   test("LEAK FIX: an unknown/new top-level flag never reaches the prompt", () => {

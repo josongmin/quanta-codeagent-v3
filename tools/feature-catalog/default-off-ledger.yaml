@@ -1,0 +1,2241 @@
+version: 1
+scope:
+  catalog_label: default-off
+  include_runtime_cli_seed_features: true
+  limitations:
+    - The bounded denominator is the union of catalog rows labelled default-off and mapped live CLI seed owners.
+    - Campaign-wide exclusions are not yet structured in the catalog, so this ledger does not claim all 1027 rows are classified.
+    - Proof tiers cite the strongest existing test found by source audit; receipts are minted only by running the cited command at a recorded revision (no prose counts imported).
+
+runtime_cli_seed_mappings:
+  QUANTA_ENABLE_ENV_PROBE: env-probe
+  QUANTA_STALE_READ_GUARD: stale-read-guard
+  QUANTA_TOOL_INTERRUPT_BLOCK: tool-interrupt-block
+  QUANTA_UNTRUSTED_ENVELOPE: untrusted-source-envelope
+  QUANTA_READ_DEDUP: read-file-unchanged-dedup
+  QUANTA_TEAM_DAG: team-dag-coordination
+  QUANTA_TEAM_BROKER: team-broker-coordination
+  QUANTA_TEAM_IDLE: team-idle-barrier-coordination
+  QUANTA_SUBAGENT_FOLLOWUP: subagent-introspect-tools
+  QUANTA_AT_AUTOCOMPLETE: at-mention-autocomplete
+  QUANTA_EXTERNAL_EDITOR: external-editor-compose
+  QUANTA_KEYBINDINGS: keybindings-config
+  QUANTA_RATELIMIT_NOTICE: ratelimit-snapshot-render
+  QUANTA_MODE_CYCLE: mode-cycle-pill
+  QUANTA_MIDTURN_CAPTURE: mid-turn-interruption
+  QUANTA_MIDTURN_VISIBLE: mid-turn-interruption
+  QUANTA_PREFLIGHT_CHECK: cli-jun11-repl-input-ux
+  QUANTA_BRACKETED_PASTE: cli-jun11-repl-input-ux
+  QUANTA_CONVERSATION_ACTIONS: conversation-action-steering
+  QUANTA_SPINNER_STALL: spinner-stall-detection
+  QUANTA_ENABLE_STRUCTURED_PATCH: apply-patch-structured-result
+  QUANTA_SUBAGENT: tier1-subagent-block
+  QUANTA_SUBAGENT_6TOOLS: subagent-6-tools
+  QUANTA_SUBAGENT_BATCH: spawn-batch-tool
+  QUANTA_SUBAGENT_INTROSPECT: subagent-introspect-tools
+  QUANTA_COVERAGE_TOOL: code-coverage
+  QUANTA_PROMPT_CACHE_STATUS: prompt-cache-observability
+  QUANTA_SIDE_AGENT: background-side-agent
+
+row_defaults: {}
+
+rows:
+  - feature_id: adaptive-thinking
+    gate_owner: [QUANTA_ADAPTIVE_THINKING]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: provider-cost
+    decision: measure-first
+    owner_seam: src/agent/loop/skill-gate.ts
+    rollback: unset QUANTA_ADAPTIVE_THINKING
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: adversarial-repro-knob
+    gate_owner: [QUANTA_BENCH_ADVERSARIAL_REPRO]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/knobs/knobs/adversarial-repro.ts
+    rollback: unset QUANTA_BENCH_ADVERSARIAL_REPRO
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: agent-jobs-batch
+    gate_owner: [QUANTA_SPAWN_AGENTS_CSV]
+    activation: resource/command
+    effective_default: { cli: off, web: na, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/apps/cli/batch-cmd.ts
+    rollback: unset QUANTA_SPAWN_AGENTS_CSV
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: ai-session-title
+    gate_owner: [QUANTA_SESSION_AUTO_TITLE, QUANTA_SESSION_TITLE_MODEL]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: na, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: provider-cost
+    decision: enable-now
+    owner_seam: src/runner/session-ops/auto-title.ts
+    rollback: unset QUANTA_SESSION_AUTO_TITLE
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: apply-patch-structured-result
+    gate_owner: [QUANTA_ENABLE_STRUCTURED_PATCH]
+    activation: host-seeded
+    effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof:
+      on: wire
+      off_identity: unit
+      receipt:
+        feature_id: apply-patch-structured-result
+        command: bun test tests/integration/apply-patch-structured-cli-promotion-e2e.test.ts
+        test_path: tests/integration/apply-patch-structured-cli-promotion-e2e.test.ts
+        revision: 25d19d89b
+        exit_code: 0
+        proof_tier: wire
+    risk: mutating
+    decision: enable-now
+    owner_seam: src/tool/surface/gated-tools.ts
+    rollback: QUANTA_ENABLE_STRUCTURED_PATCH=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: approval-gate-wire
+    gate_owner: [AgentConfig.approvalStateMachine]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: na, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: repair-first
+    owner_seam: src/agent/approval-gate-wire/wire.ts
+    rollback: approvalStateMachine 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: appshot-verify-loop
+    gate_owner: [QUANTA_APPSHOT]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: provider-cost
+    decision: measure-first
+    owner_seam: src/tool/appshot/loop.ts
+    rollback: unset QUANTA_APPSHOT
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: assistant-language-auto-detect
+    gate_owner: [QUANTA_LANG_DETECT]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/agent/language-detect/index.ts
+    rollback: unset QUANTA_LANG_DETECT
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: ast-grep-tool
+    gate_owner: [QUANTA_AST_GREP]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/tool/ast-grep/index.ts
+    rollback: unset QUANTA_AST_GREP
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: at-mention-autocomplete
+    gate_owner: [QUANTA_AT_AUTOCOMPLETE]
+    activation: host-seeded
+    effective_default: { cli: on, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/apps/cli/at-autocomplete/port.ts
+    rollback: QUANTA_AT_AUTOCOMPLETE=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: auto-dream-cross-session
+    gate_owner: [QUANTA_AUTO_DREAM]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: na, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: provider-cost
+    decision: measure-first
+    owner_seam: src/memory/dream/cross-session-trigger.ts
+    rollback: unset QUANTA_AUTO_DREAM
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: auto-mode-rule-overlay
+    gate_owner: [QUANTA_AUTO_MODE_RULES]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: na, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: security
+    decision: enable-now
+    owner_seam: src/permission/classifier.ts
+    rollback: unset QUANTA_AUTO_MODE_RULES
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: automation-engine-wire
+    gate_owner: [QUANTA_AUTOMATION]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: na, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: provider-cost
+    decision: enable-now
+    owner_seam: src/scheduler/runtime-wire.ts
+    rollback: QUANTA_AUTOMATION=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: automation-tool-inbox-cli
+    gate_owner: [QUANTA_AUTOMATION]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: na, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: provider-cost
+    decision: enable-now
+    owner_seam: src/tool/automation_update.ts
+    rollback: QUANTA_AUTOMATION=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: background-compaction
+    gate_owner: [QUANTA_BG_COMPACTION]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: provider-cost
+    decision: measure-first
+    owner_seam: src/agent/compaction/background.ts
+    rollback: unset QUANTA_BG_COMPACTION
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: background-side-agent
+    gate_owner: [QUANTA_SIDE_AGENT]
+    activation: host-seeded
+    effective_default: { cli: on, web: on, bench: na, headless: off, daemon: on }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: provider-cost
+    decision: enable-now
+    owner_seam: src/side-agent/registry.ts
+    rollback: QUANTA_SIDE_AGENT=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: bash-mode-per-call-sandbox
+    gate_owner: [bash.input.mode]
+    activation: resource/command
+    effective_default: { cli: resource, web: resource, bench: resource, headless: resource, daemon: resource }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: security
+    decision: enable-now
+    owner_seam: src/tool/bash/per-call-factory.ts
+    rollback: mode 파라미터 생략(=write 기본)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: bench-find-refs-steer
+    gate_owner: [QUANTA_BENCH_FIND_REFS]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    # ON/OFF prompt composition is covered by bench-prompt-steer-hellgate;
+    # efficacy/F2P receipt remains intentionally absent.
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/batch/eval/driver.ts
+    rollback: unset QUANTA_BENCH_FIND_REFS
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: bench-trajectory-record
+    gate_owner: [QUANTA_BENCH_RECORD_TRAJECTORY]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/apps/bench/trajectory.ts
+    rollback: unset QUANTA_BENCH_RECORD_TRAJECTORY
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: branch-search-progress
+    gate_owner: [BranchSearchAnchor DI]
+    activation: port-present
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/agent/branch-search/anchor.ts
+    rollback: BranchSearchAnchor 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: bridge-attestation
+    gate_owner: [BridgeAttestor DI]
+    activation: unwired
+    effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
+    reachability: seam-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: security
+    decision: hold
+    owner_seam: src/security/bridge-attest/default-attestor.ts
+    rollback: BridgeAttestor 미주입(현행)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: budget-probe-ledger-wire
+    gate_owner: [createBudgetProbeFromLedger caller DI]
+    activation: unwired
+    effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
+    reachability: seam-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/retrieval/budget-probe/from-ledger.ts
+    rollback: probe 미구성(현행)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: canvas-web-components
+    gate_owner: [QUANTA_WEB_CANVAS]
+    activation: env/config
+    effective_default: { cli: na, web: off, bench: na, headless: na, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/apps/web-daemon/runtime-factory.ts
+    rollback: unset QUANTA_WEB_CANVAS
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: circumvention-detector
+    gate_owner: [QUANTA_CIRCUMVENT_DETECT]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: na, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: security
+    decision: enable-now
+    owner_seam: src/permission/classifier.ts
+    rollback: unset QUANTA_CIRCUMVENT_DETECT
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: cli-jun11-repl-input-ux
+    gate_owner: [QUANTA_PREFLIGHT_CHECK, QUANTA_BRACKETED_PASTE]
+    activation: host-seeded
+    effective_default: { cli: on, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/apps/cli/preflight.ts
+    rollback: QUANTA_PREFLIGHT_CHECK=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: cli-jun11-turn-input-layer
+    gate_owner: [QUANTA_LLM_REPLAY]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/llm/factory.ts
+    rollback: unset QUANTA_LLM_REPLAY
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: closeout-critic-gate
+    gate_owner: [QUANTA_CLOSEOUT_CRITIC]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/agent/optional-ports.ts
+    rollback: unset QUANTA_CLOSEOUT_CRITIC
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: code-coverage
+    gate_owner: [QUANTA_COVERAGE_TOOL]
+    activation: host-seeded
+    effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/observability/coverage/index.ts
+    rollback: QUANTA_COVERAGE_TOOL=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: code-mode-js-runtime
+    gate_owner: [QUANTA_CODE_MODE]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: wire, receipt: null }
+    risk: security
+    decision: measure-first
+    owner_seam: src/host/runtime/agent-arg-builder.ts
+    rollback: QUANTA_CODE_MODE=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: codebase-indexer
+    gate_owner: [QUANTA_INDEX]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/retrieval/indexer/index.ts
+    rollback: unset QUANTA_INDEX
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: codex-r2-compaction-event-emit
+    gate_owner: [AgentConfig.compactionEventEmit]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/agent/loop.ts
+    rollback: slot 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: codex-r2-context-change-injection-wire
+    gate_owner: [AgentConfig.contextEventsForTurn]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/agent/context-change/inject.ts
+    rollback: slot 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: codex-r2-disk-persistence-and-env-swap
+    gate_owner: [QUANTA_SESSION_REGISTRY_DISK_DIR]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: mutating
+    decision: hold
+    owner_seam: src/agent/session-resource-registry/global.ts
+    rollback: unset QUANTA_SESSION_REGISTRY_DISK_DIR
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: codex-r2-mention-injection-pipeline
+    gate_owner: [AgentConfig.activatePlugins]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/agent/mention-injection/parser.ts
+    rollback: loop hook 미구현
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: codex-r2-multi-process-flock
+    gate_owner: [DiskRegistryConfig.lock]
+    activation: unwired
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: seam-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/agent/session-resource-registry/disk-adapter/file-lock.ts
+    rollback: disk registry 미구성
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: codex-r2-observability-decorators
+    gate_owner: [CodexR2MetricsConfig]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/observability/codex-r2-metrics/cache-metrics-decorator.ts
+    rollback: assemble auto-wrap 미배선
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: codex-r2-plugin-system
+    gate_owner: [AgentConfig.activatePlugins]
+    activation: resource/command
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/agent/plugin-discovery/discovery.ts
+    rollback: loop hook 미구현
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: codex-r2-sqlite-session-registry
+    gate_owner: [QUANTA_SESSION_REGISTRY_SQLITE_PATH]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: mutating
+    decision: hold
+    owner_seam: src/agent/session-resource-registry/sqlite-adapter/sqlite-store.ts
+    rollback: env-var swap 미배선
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: codex-r2-system-prompt-cache-and-audit
+    gate_owner: [AgentConfig.systemPromptCache]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/llm/system-prompt-cache/in-memory-cache.ts
+    rollback: cache+cacheKey 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: codex-r2-typed-event-store
+    gate_owner: [AgentConfig.typedEventStore]
+    activation: unwired
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: producer-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/memory/typed-event/in-memory-store.ts
+    rollback: store 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: collect-evidence
+    gate_owner: [cfg.evidence]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: real-loop, off_identity: real-loop, receipt: null }
+    risk: security
+    decision: repair-first
+    owner_seam: src/tool/evidence/builder.ts
+    rollback: cfg.evidence 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: command-hooks
+    gate_owner: [QUANTA_COMMAND_HOOKS, QUANTA_COMMAND_HOOKS_ACK]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: security
+    decision: measure-first
+    owner_seam: src/agent/command-hooks/runner.ts
+    rollback: QUANTA_COMMAND_HOOKS=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: compaction-visibility
+    gate_owner: [AgentConfig.postCompactEmit]
+    activation: unwired
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: producer-only
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/agent/compaction.ts
+    rollback: callback 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: conflict-parser-lib
+    gate_owner: [parseConflicts caller-import]
+    activation: resource/command
+    effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/git/conflict-parser.ts
+    rollback: caller import 없음(현행)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: conversation-action-steering
+    gate_owner: [QUANTA_CONVERSATION_ACTIONS]
+    activation: host-seeded
+    effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/agent/loop.ts
+    rollback: QUANTA_CONVERSATION_ACTIONS=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: debug-inspect
+    gate_owner: [cfg.debugTools]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: security
+    decision: measure-first
+    owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+    rollback: cfg.debugTools 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: dockersandbox
+    # TRUTH-FIX (jul-18): `DockerSandbox` class (sandbox.ts:306) is only DEFINED +
+    # re-exported (runtime/index.ts:43) — grep shows ZERO `new DockerSandbox` in
+    # production (test-only). `QUANTA_SANDBOX` actually selects the OS-level
+    # landlock/seatbelt sandbox, NOT this class; no selector ever constructs it.
+    # So reachability wired→seam-only (Wave C's 5/20 spot-check missed this row).
+    # Held: strong container-isolation forward path, needs a live backend selector
+    # + a running Docker daemon.
+    gate_owner: [DockerSandbox constructor caller]
+    activation: unwired
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: seam-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: security
+    decision: hold
+    owner_seam: src/runtime/sandbox.ts
+    rollback: unset QUANTA_SANDBOX
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: dxt-user-config
+    gate_owner: [manifest.user_config]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: external
+    decision: measure-first
+    owner_seam: src/plugin-isolation/dxt-loader.ts
+    rollback: manifest에 user_config 블록 없음
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: edit-repair-loop
+    gate_owner: [QUANTA_EDIT_REPAIR_LOOP]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/agent/edit-repair-wire.ts
+    rollback: QUANTA_EDIT_REPAIR_LOOP=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: effort-classifier
+    gate_owner: [QUANTA_EFFORT_AUTO]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/agent/effort-classifier/index.ts
+    rollback: slot inert(현행)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: embed-cache
+    gate_owner: [QUANTA_EMBED_CACHE]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: producer-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: provider-cost
+    decision: hold
+    owner_seam: src/retrieval/cache/registry.ts
+    rollback: QUANTA_EMBED_CACHE=none
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: env-probe
+    gate_owner: [QUANTA_ENABLE_ENV_PROBE]
+    activation: host-seeded
+    effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/apps/cli/repl/env-probe-wire.ts
+    rollback: QUANTA_ENABLE_ENV_PROBE=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: external-editor-compose
+    gate_owner: [QUANTA_EXTERNAL_EDITOR]
+    activation: host-seeded
+    effective_default: { cli: on, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/apps/cli/repl/surface-compose.ts
+    rollback: QUANTA_EXTERNAL_EDITOR=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: fast-apply-fallback
+    gate_owner: [QUANTA_FAST_APPLY]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/agent/fast-apply-fallback/index.ts
+    rollback: dispatch가 fallback.attempt() 미호출
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: fast-apply-merge
+    gate_owner: [QUANTA_FAST_APPLY_MERGE, QUANTA_FAST_APPLY_MODEL]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: mutating
+    decision: hold
+    owner_seam: src/agent/fast-apply-fallback/merge-runner.ts
+    rollback: 두 게이트 모두 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: fast-apply-wire
+    gate_owner: [FastApplyFallbackPort DI]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/tool/apply-patch.ts
+    rollback: port 미주입(V4A 실패 throw)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: fault-evidence-knob
+    gate_owner: [QUANTA_BENCH_FAULT_EVIDENCE]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/knobs/knobs/fault-evidence.ts
+    rollback: unset QUANTA_BENCH_FAULT_EVIDENCE
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: flock-operations-telemetry
+    gate_owner: [AcquireSessionLockOpts.metricsEmitter]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/agent/session-resource-registry/disk-adapter/file-lock.ts
+    rollback: metricsEmitter 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: force-background
+    gate_owner: [QUANTA_FORCE_BACKGROUND]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/agent/subagent-background.ts
+    rollback: unset QUANTA_FORCE_BACKGROUND
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: gh-pr-code-tour
+    gate_owner: [QUANTA_GH_CODE_TOUR]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/tool/gh/pr-code-tour.ts
+    rollback: ghTools opts.codeTour 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: git-co-change
+    gate_owner: [QUANTA_GIT_CO_CHANGE, QUANTA_GIT_TOOLS]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/apps/cli/internal.ts
+    rollback: unset QUANTA_GIT_CO_CHANGE
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: git-directive-emit-leaf
+    gate_owner: [gitDirectiveSerializer caller-import]
+    activation: unwired
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: seam-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/agent/git-directives/serializer.ts
+    rollback: pure leaf(현행)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: git-directive-emit-protocol
+    gate_owner: [AgentConfig.gitDirectiveEmit]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/git/directive-emit/phase-guard.ts
+    rollback: gitDirectiveEmit 미주입(noopEmitter)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: github-actions-trigger-adapter
+    gate_owner: [QUANTA_GH_ACTIONS_TRIGGER]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: external
+    decision: hold
+    owner_seam: src/integrations/github/event-source-actions.ts
+    rollback: QUANTA_GH_ACTIONS_TRIGGER!=1(빈 트리거)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: github-pr-from-pr-cli
+    gate_owner: [QUANTA_GH_ACTIONS_TRIGGER, QUANTA_GH_TRIGGER_PHRASES, QUANTA_GH_TRUST_SCOPE]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: network
+    decision: hold
+    owner_seam: src/apps/cli/from-pr-cmd.ts
+    rollback: env gate 미설정(exit 0)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: github-webhook-host-scaffold
+    gate_owner: [QUANTA_GITHUB_WEBHOOK]
+    activation: resource/command
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: wire, receipt: null }
+    risk: network
+    decision: enable-now
+    owner_seam: src/apps/cli/webhook-server-setup.ts
+    rollback: QUANTA_GITHUB_WEBHOOK!=1(exit 64)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: guardian-per-action-assessment
+    gate_owner: [QUANTA_GUARDIAN_ASSESSOR]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: security
+    decision: enable-now
+    owner_seam: src/permission/reviewer.ts
+    rollback: QUANTA_GUARDIAN_ASSESSOR=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: identity-mid-session-prompt-rebuild
+    gate_owner: [onChange callback DI]
+    activation: unwired
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: consumer-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/apps/cli/repl/system-prompt-rebuilder.ts
+    rollback: onChange 미주입(state-only swap)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: image-gen
+    gate_owner: [QUANTA_IMAGE_GEN]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: provider-cost
+    decision: measure-first
+    owner_seam: src/tool/image-gen/index.ts
+    rollback: QUANTA_IMAGE_GEN=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: infertooltier-secure-by-default-fallback
+    gate_owner: [hitl-tier fallback]
+    activation: always
+    effective_default: { cli: on, web: on, bench: on, headless: on, daemon: on }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: security
+    decision: enable-now
+    owner_seam: src/agent/hitl-tier.ts
+    rollback: N/A(always-on 안전 폴백)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: issue-hint-expected-actual-opt-in
+    gate_owner: [QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL, QUANTA_BENCH_ISSUE_HINT]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/knobs/knobs/issue-hint-expected-actual.ts
+    rollback: QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: item-stream-fine-grained
+    gate_owner: [QUANTA_ITEM_STREAM]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/stream/item-stream-projector.ts
+    rollback: QUANTA_ITEM_STREAM=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: jun7-manifest-codex-compat
+    gate_owner: [QUANTA_MANIFEST_COMPAT]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: security
+    decision: measure-first
+    owner_seam: src/skill/manifest-compat.ts
+    rollback: QUANTA_MANIFEST_COMPAT=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: jwks-agent-identity
+    gate_owner: [JwksIdentityClient DI]
+    activation: unwired
+    effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
+    reachability: forward-contract
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: security
+    decision: hold
+    owner_seam: src/security/jwks-identity/default-client.ts
+    rollback: verify-only foundation(미주입)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: keybindings-config
+    gate_owner: [QUANTA_KEYBINDINGS]
+    activation: host-seeded
+    effective_default: { cli: on, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/apps/cli/keybindings/load.ts
+    rollback: QUANTA_KEYBINDINGS=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: llm-record-replay
+    # TRUTH-FIX (jul-18): `replayLlmPort` IS imported + wired into the live LLM
+    # factory at src/llm/factory.ts:444, gated by `QUANTA_LLM_REPLAY=<jsonl>` (it
+    # wraps the real stream path for deterministic e2e/bench replay). So it has a
+    # live consumer → reachability consumer-only→wired, activation→env/config.
+    # Held: default-OFF test/bench determinism seam (unset ⇒ byte-identical).
+    gate_owner: [QUANTA_LLM_REPLAY]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/llm/replay/index.ts
+    rollback: unset QUANTA_LLM_REPLAY
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: loadreporules-cwd
+    gate_owner: [loadRepoRules cwd]
+    activation: always
+    effective_default: { cli: on, web: on, bench: on, headless: on, daemon: on }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/agent/repo-rules.ts
+    rollback: N/A(파일 존재시 always)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: localize-phase-knob
+    gate_owner: [QUANTA_BENCH_LOCALIZE_PHASE]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/knobs/knobs/localize-phase.ts
+    rollback: QUANTA_BENCH_LOCALIZE_PHASE=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: mcp-launch-governance
+    gate_owner: [QUANTA_CENTRAL_CONFIG]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: security
+    decision: enable-now
+    owner_seam: src/config/mcp-governance.ts
+    rollback: unset QUANTA_CENTRAL_CONFIG
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: mcp-tasks-live
+    gate_owner: [McpClient.serverSupportsTasks]
+    activation: port-present
+    effective_default: { cli: on, web: on, bench: on, headless: on, daemon: on }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: external
+    decision: enable-now
+    owner_seam: src/mcp/tasks/client-port.ts
+    rollback: 서버가 tasks/* capability 미advertise
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: mcp-tool-annotations-content
+    gate_owner: [QUANTA_MCP_TOOL_ANNOTATIONS]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: security
+    decision: measure-first
+    owner_seam: src/mcp/client.ts
+    rollback: QUANTA_MCP_TOOL_ANNOTATIONS=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: memory-cross-session-inject
+    # TRUTH-FIX (jul-18): gate is `parseEnvFlag(QUANTA_MEMORY_AUTO, defaultOn=true)`
+    # at 3 assembly sites (agent-arg-builder.ts:228 host, memory-factory.ts:140
+    # runner, auto-trigger/wire.ts:49) — an OPT-OUT gate per ADR-0413, so it ships
+    # ON wherever an agent is assembled (host→cli, runner→bench/headless). The
+    # prior `off` + `!=on` rollback mislabelled it as opt-in. decision stays
+    # measure-first: bench-efficacy A/B (memory contamination on fresh boxes) open.
+    gate_owner: [QUANTA_MEMORY_AUTO]
+    activation: inverse-kill-switch
+    effective_default: { cli: on, web: na, bench: on, headless: on, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/memory/cross-session/default-injector.ts
+    rollback: QUANTA_MEMORY_AUTO=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: message-batches-client-core
+    gate_owner: [createMessageBatchesClient caller]
+    activation: unwired
+    effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
+    reachability: producer-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: provider-cost
+    decision: hold
+    owner_seam: src/llm/message-batches.ts
+    rollback: export-only(consumer 없음)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: mid-turn-interruption
+    gate_owner: [QUANTA_MIDTURN_CAPTURE, QUANTA_MIDTURN_VISIBLE]
+    activation: host-seeded
+    effective_default: { cli: on, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/apps/cli/repl/mid-turn-capture-wire.ts
+    rollback: QUANTA_MIDTURN_CAPTURE=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: mid-turn-steering
+    gate_owner: [steering loop-embedded]
+    activation: always
+    effective_default: { cli: on, web: na, bench: on, headless: on, daemon: on }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/agent/steering.ts
+    rollback: N/A(loop-embedded, activeTurnRef 완화)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: mode-cycle-pill
+    gate_owner: [QUANTA_MODE_CYCLE]
+    activation: host-seeded
+    effective_default: { cli: on, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/apps/cli/mode-cycle.ts
+    rollback: QUANTA_MODE_CYCLE=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: model-preset-sticky-resolver
+    # WIRED (jul-18, Wave N): the producer-only preset resolver now has a live
+    # consumer — surface-compose mints one createStickyPresetResolver() into
+    # ctx.presets, driving the `/presets` slash (list/select/clear). Default-OFF
+    # byte-identical (unselected resolver returns the caller fallback verbatim).
+    gate_owner: [createStickyPresetResolver mint (surface-compose)]
+    activation: resource/command
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/apps/cli/repl/surface-compose.ts
+    rollback: no preset selected ⇒ resolve returns caller fallback verbatim
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: presets-slash-sticky-model
+    # NEW (jul-18, Wave N): the `/presets` CLI slash — first live consumer of the
+    # model-preset system. Lists presets / applies a sticky role→model pick /
+    # typed error on unknown (no silent default). fc-registered, all slash
+    # drift-guards green.
+    gate_owner: [/presets slash command]
+    activation: resource/command
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/apps/cli/slash/presets-cmd.ts
+    rollback: no preset selected ⇒ /presets prints list only (off=byte-identical)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: model-tag-auto-hook
+    gate_owner: [installAll caller DI]
+    activation: unwired
+    effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
+    reachability: producer-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/retrieval/model-tag/auto-hook.ts
+    rollback: installAll 미호출
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: model-tag-versioning
+    gate_owner: [registerInvalidationCallback caller DI]
+    activation: unwired
+    effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
+    reachability: producer-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/retrieval/model-tag/versioning.ts
+    rollback: callback 미등록
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: multi-source-rules-vendor-detector
+    # WIRED (jul-19, Wave O): the detector now has a live producer —
+    # `resolveModePresetGlobRules` (mode-presets/system.ts) calls
+    # `loadGlobRulesWithVendors`→`detectAll` and the trusted base-builders
+    # (interactive/headless/ide) attach the result to `cfg.globRules`, gated
+    # default-OFF by `QUANTA_VENDOR_RULES`. SECURITY: routed through the SSOT
+    # `modeLoadsRepoRules` trust gate (batch/ci-bot/daemon stay rule-less) so an
+    # untrusted PR's .windsurfrules can't reach the trusted prompt. OFF (unset) ⇒
+    # cfg.globRules unset ⇒ byte-identical to the pre-wire dormant state.
+    gate_owner: [QUANTA_VENDOR_RULES]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/apps/agent/mode-presets/system.ts
+    rollback: QUANTA_VENDOR_RULES!=1 (globRules unset)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: n6-pty-attach
+    gate_owner: [QUANTA_PTY_ATTACH]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: security
+    decision: measure-first
+    owner_seam: src/tool/pty/index.ts
+    rollback: QUANTA_PTY_ATTACH=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: ndjson-introspection
+    gate_owner: [QUANTA_NDJSON_INGEST_PORT]
+    activation: port-present
+    effective_default: { cli: off, web: na, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/observability/ndjson/index.ts
+    rollback: unset QUANTA_NDJSON_INGEST_PORT
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: no-patch-breaker-knob
+    gate_owner: [QUANTA_BENCH_NO_PATCH_BREAKER]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/runner/knobs/knobs/no-patch-breaker.ts
+    rollback: QUANTA_BENCH_NO_PATCH_BREAKER=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: node-repl-persistent-kernel
+    gate_owner: [cfg.nodeRepl]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: security
+    decision: measure-first
+    owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+    rollback: cfg.nodeRepl 미주입 (QUANTA_NODE_REPL=0)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: notebook-edit-cell-tool
+    gate_owner: [QUANTA_NOTEBOOK_EDIT]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: mutating
+    decision: enable-now
+    owner_seam: src/tool/notebook-edit/index.ts
+    rollback: QUANTA_NOTEBOOK_EDIT=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: notify-presence-suppression
+    gate_owner: [QUANTA_NOTIFY_PRESENCE]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/apps/cli/repl/factories/notify-and-warning.ts
+    rollback: QUANTA_NOTIFY_PRESENCE=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: observability-live-wire
+    gate_owner: [QUANTA_OBSERVABILITY]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/apps/agent/index.ts
+    rollback: QUANTA_OBSERVABILITY=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: observability-wire
+    gate_owner: [QUANTA_OBSERVABILITY]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/agent/observability-wire/wire.ts
+    rollback: QUANTA_OBSERVABILITY=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: observability-ws-sink
+    gate_owner: [QUANTA_OBSERVABILITY]
+    activation: env/config
+    effective_default: { cli: na, web: off, bench: na, headless: na, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/apps/web-daemon/server.ts
+    rollback: QUANTA_OBSERVABILITY=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: office-authoring
+    gate_owner: [QUANTA_OFFICE_AUTHORING]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: mutating
+    decision: enable-now
+    owner_seam: src/tool/document/authoring/index.ts
+    rollback: QUANTA_OFFICE_AUTHORING=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: passive-vcs-classify
+    gate_owner: [QUANTA_PASSIVE_VCS]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/git/passive-classify/index.ts
+    rollback: QUANTA_PASSIVE_VCS=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: patch-budget-admission
+    gate_owner: [QUANTA_BENCH_PATCH_BUDGET, QUANTA_BENCH_PATCH_BUDGET_STRICT]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/batch/eval/patch-budget-admission.ts
+    rollback: unset QUANTA_BENCH_PATCH_BUDGET
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: patch-hygiene-knob
+    gate_owner: [QUANTA_BENCH_PATCH_HYGIENE]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/runner/knobs/knobs/patch-hygiene.ts
+    rollback: QUANTA_BENCH_PATCH_HYGIENE=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: per-hunk-diff-accept-reject
+    gate_owner: [QUANTA_HUNK_APPROVAL]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/apps/cli/repl/hunk-select.ts
+    rollback: QUANTA_HUNK_APPROVAL=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: per-tool-checkpoint-granularity
+    gate_owner: [QUANTA_PER_TOOL_RECORD]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/agent/per-tool-checkpoint/index.ts
+    rollback: 정책 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: pipeline-composition-root-wire
+    gate_owner: [QUANTA_PIPELINE]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/assemble/search-pipeline.ts
+    rollback: QUANTA_PIPELINE=none
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: platform-base-shell-argv
+    gate_owner: [QUANTA_WIN_SHELL]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: platform
+    decision: enable-now
+    owner_seam: src/runtime/shell-argv.ts
+    rollback: unset QUANTA_WIN_SHELL
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: playbook-trigger-cli-bind
+    gate_owner: [QUANTA_PLAYBOOK_TRIGGER]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/apps/cli/repl/playbook-trigger-wire.ts
+    rollback: QUANTA_PLAYBOOK_TRIGGER=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: playbook-trigger-flag-echo
+    gate_owner: [QUANTA_PLAYBOOK_TRIGGER]
+    activation: host-seeded
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/apps/cli/repl/playbook-trigger-wire.ts
+    rollback: --playbook-trigger 생략
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: pptx-authoring
+    gate_owner: [QUANTA_OFFICE_AUTHORING]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: mutating
+    decision: enable-now
+    owner_seam: src/tool/document/authoring/pptx.ts
+    rollback: QUANTA_OFFICE_AUTHORING=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: pre-compact-hitl
+    gate_owner: [AgentConfig.onPreCompact]
+    activation: port-present
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/agent/compaction.ts
+    rollback: onPreCompact 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: precedence-rule-r3-p1
+    gate_owner: [closeout-guard rule]
+    activation: always
+    effective_default: { cli: on, web: on, bench: on, headless: on, daemon: on }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/agent/closeout-guard.ts
+    rollback: N/A(정적 우선순위 규칙)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: prefix-rule-dsl
+    gate_owner: [rule parser]
+    activation: always
+    effective_default: { cli: on, web: on, bench: on, headless: on, daemon: on }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: security
+    decision: enable-now
+    owner_seam: src/rules/parser.ts
+    rollback: N/A(정적 파서)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: primary-rail-knob
+    gate_owner: [QUANTA_BENCH_PRIMARY_RAIL]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/knobs/knobs/primary-rail.ts
+    rollback: QUANTA_BENCH_PRIMARY_RAIL=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: product-onboard-skill
+    gate_owner: [QUANTA_SKILLS]
+    activation: preset
+    effective_default: { cli: on, web: on, bench: off, headless: off, daemon: on }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/skill/system-skills/index.ts
+    rollback: QUANTA_SKILLS=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: projects-kb
+    gate_owner: [QUANTA_PROJECTS_KB]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/tool/projects-kb/index.ts
+    rollback: QUANTA_PROJECTS_KB=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: prompt-cache-observability
+    gate_owner: [QUANTA_PROMPT_CACHE_STATUS]
+    activation: host-seeded
+    effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/tool/prompt_cache_status.ts
+    rollback: QUANTA_PROMPT_CACHE_STATUS=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: prompt-suggestion
+    gate_owner: [QUANTA_ENABLE_PROMPT_SUGGESTION]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: provider-cost
+    decision: measure-first
+    owner_seam: src/apps/cli/repl/prompt-suggestion-wire.ts
+    rollback: QUANTA_ENABLE_PROMPT_SUGGESTION!=1(suppress)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: proof-driven-bench-closure
+    gate_owner: [QUANTA_BENCH_CLOSURE_DIAG]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/agent/closure/index.ts
+    rollback: QUANTA_BENCH_CLOSURE_DIAG 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: radar-cards-proposal-queue
+    gate_owner: [QUANTA_RADAR]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/radar/in-memory-store.ts
+    rollback: QUANTA_RADAR=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: ratelimit-dual-window-snapshot
+    # RESOLVED (jul-19): the repair-first blocker was a dead half — the row mixed
+    # the LIVE `parseDualWindowSnapshot` (consumed at stream-consume.ts:199 →
+    # BudgetMeter) with the 0-consumer per-account `createAccountRateLimitStore`.
+    # Audited + DELETED the dead store half (nothing accumulated per-account); the
+    # live parse is untouched. Now a clean always-on parse seam.
+    gate_owner: [parseDualWindowSnapshot caller]
+    activation: always
+    effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: external
+    decision: enable-now
+    owner_seam: src/agent/loop/stream-consume.ts
+    rollback: 항상 파싱(BudgetMeter feed)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: ratelimit-snapshot-render
+    gate_owner: [QUANTA_RATELIMIT_NOTICE]
+    activation: host-seeded
+    effective_default: { cli: on, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/apps/cli/ratelimit-notice.ts
+    rollback: QUANTA_RATELIMIT_NOTICE=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: read-file-unchanged-dedup
+    gate_owner: [QUANTA_READ_DEDUP]
+    activation: host-seeded
+    effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/tool/read/index.ts
+    rollback: QUANTA_READ_DEDUP=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: realtime-websocket-codex
+    gate_owner: [QUANTA_VOICE_LIVE]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: na, headless: na, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: network
+    decision: hold
+    owner_seam: src/realtime/default-adapter.ts
+    rollback: unset QUANTA_VOICE_LIVE
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: reasoning-carryover
+    gate_owner: [QUANTA_REASONING_CARRYOVER]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: external
+    decision: measure-first
+    owner_seam: src/llm/openai-responses-wire.ts
+    rollback: unset QUANTA_REASONING_CARRYOVER
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: recovery-router-codex-spec
+    # CONSOLIDATED (jul-19): the repair-first blocker (redundant `RecoveryRouter`
+    # object vs the live `codexSpecRoute` table) is RESOLVED. Audit confirmed
+    # `CodexSpecRouter.route` was literally `return codexSpecRoute(kind)` (thin
+    # wrapper, parity-tested) and recovery.ts:253 consumed only the string action.
+    # Re-pointed recovery.ts at `codexSpecRoute` directly + DELETED the router
+    # interface/class/factory (recovery-router.ts). codexSpecRoute IS now the
+    # single retry-routing SSOT (decorators + recovery all derive from it);
+    # 197 tests byte-identical. The RecoveryAction string union stays in port.ts.
+    gate_owner: [codexSpecRoute]
+    activation: always
+    effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/llm/retry/codex-spec-router.ts
+    rollback: codexSpecRoute 단일권위(항상 소비)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: remote-runner
+    gate_owner: [QUANTA_REMOTE_RUNNER]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: network
+    decision: enable-now
+    owner_seam: src/remote/runner/index.ts
+    rollback: unset QUANTA_REMOTE_RUNNER(exit 64)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: repair-escalation-knob
+    gate_owner: [QUANTA_BENCH_REPAIR_ESCALATION]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/knobs/knobs/repair-escalation.ts
+    rollback: QUANTA_BENCH_REPAIR_ESCALATION 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: repl-slash-ctx-mega-wire
+    gate_owner: [ReplSlashCtx port DI]
+    activation: port-present
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/apps/cli/repl/slash-surface.ts
+    rollback: port 미주입시 slot omit
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: repro-doubt-knob
+    gate_owner: [QUANTA_BENCH_REPRO_DOUBT]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/knobs/knobs/repro-doubt.ts
+    rollback: QUANTA_BENCH_REPRO_DOUBT 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: repro-test-mwe-vote
+    gate_owner: [QUANTA_BENCH_REPRO_VOTE]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/knobs/knobs/repro-vote.ts
+    rollback: QUANTA_BENCH_REPRO_VOTE 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: response-in-progress
+    gate_owner: [provider SSE event]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: repair-first
+    owner_seam: src/llm/streaming-events.ts
+    rollback: provider adapter가 이벤트 미방출
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: retry-transient-knob
+    gate_owner: [QUANTA_BENCH_RETRY_TRANSIENT]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/knobs/knobs/retry-transient.ts
+    rollback: unset QUANTA_BENCH_RETRY_TRANSIENT
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: run-ledger-attribution
+    gate_owner: [runLedger subscriber DI]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: repair-first
+    owner_seam: src/agent/run-ledger-attribution/subscriber.ts
+    rollback: composition root가 hook 미구독
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: run-tests
+    gate_owner: [cfg.testRunner]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: mutating
+    decision: enable-now
+    owner_seam: src/tool/testrun/tool.ts
+    rollback: cfg.testRunner 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: run-workflow
+    gate_owner: [QUANTA_WORKFLOW]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: real-loop, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/workflow/executor.ts
+    rollback: QUANTA_WORKFLOW=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: sandbox-escalation
+    gate_owner: [QUANTA_SANDBOX_ESCALATION]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: security
+    decision: measure-first
+    owner_seam: src/agent/sandbox-escalation/orchestrator.ts
+    rollback: QUANTA_SANDBOX_ESCALATION!=1
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: search-pipeline-composer
+    gate_owner: [SearchPipeline caller-import]
+    activation: unwired
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: off }
+    reachability: seam-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/retrieval/pipeline/compose.ts
+    rollback: dispatch loop 자동배선 없음
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: semantic-search-port
+    # CONSOLIDATED (jul-18, Wave M): the ADR-0254 text-in `SemanticIndex` port +
+    # in-memory cosine adapter were a PROVEN DUPLICATE of the live vector-in
+    # `SemanticIndex` in @/retrieval/pipeline (search-index-backend.ts:45); the
+    # text-in port had ZERO consumers. Deleted port.ts + in-memory-index.ts
+    # (createInMemoryIndex 0 callers); the deterministic headless Embedder seam
+    # survives (used live at pipeline.ts:41). tsc + fc check-evidence green.
+    gate_owner: [createHeadlessEmbedder caller-import]
+    activation: unwired
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: off }
+    reachability: seam-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    # The text-in port was DELETED as a proven duplicate (Wave M); this row now
+    # tracks the surviving deterministic headless Embedder seam, which is a
+    # genuine dormant hold (used only by pipeline.ts:41's default embedder).
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/retrieval/semantic/headless-embedder.ts
+    rollback: consumer 없음(headless stub)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: session-prewarm-ttfm
+    gate_owner: [QUANTA_PREWARM]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/agent/startup-prewarm.ts
+    rollback: QUANTA_PREWARM 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: shadow-verify
+    gate_owner: [QUANTA_SHADOW_VERIFY]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/agent/shadow-verify/runner.ts
+    rollback: fake 위에 합성(현행 미배선)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: shell-snapshot-runshell-wire
+    gate_owner: [QUANTA_SHELL_SNAPSHOT]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: security
+    decision: enable-now
+    owner_seam: src/runtime/shell-snapshot/index.ts
+    rollback: runShellWithSnapshot 미호출
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: side-agent-os-process-daemon
+    gate_owner: [QUANTA_SIDE_AGENT_PROCESS]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: external
+    decision: enable-now
+    owner_seam: src/side-agent/process.ts
+    rollback: unset QUANTA_SIDE_AGENT_PROCESS(in-process 폴백)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: skill-mcp-deps
+    gate_owner: [QUANTA_SKILL_MCP_DEPS]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: external
+    decision: enable-now
+    owner_seam: src/skill/skill-mcp-deps/resolve.ts
+    rollback: QUANTA_SKILL_MCP_DEPS!=1
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: spawn-batch-tool
+    gate_owner: [QUANTA_SUBAGENT_BATCH]
+    activation: host-seeded
+    effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: wire, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/tool/subagent-batch/batch.ts
+    rollback: QUANTA_SUBAGENT_BATCH 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: spec-fidelity-steer-knob
+    gate_owner: [QUANTA_BENCH_SPEC_FIDELITY_STEER]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/knobs/knobs/spec-fidelity-steer.ts
+    rollback: QUANTA_BENCH_SPEC_FIDELITY_STEER 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: spinner-stall-detection
+    gate_owner: [QUANTA_SPINNER_STALL]
+    activation: host-seeded
+    effective_default: { cli: on, web: na, bench: off, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/llm/spinner-stall/event-emitter.ts
+    rollback: QUANTA_SPINNER_STALL=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: stage1-phase2-consume-and-vendor-glob-wire
+    gate_owner: [Stage1StorePort DI]
+    activation: unwired
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: off }
+    reachability: seam-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: repair-first
+    owner_seam: src/agent/memory/stage1-store/sqlite.ts
+    rollback: stage1 store/vendor detector 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: stale-read-guard
+    gate_owner: [QUANTA_STALE_READ_GUARD]
+    activation: host-seeded
+    effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: security
+    decision: enable-now
+    owner_seam: src/tool/stale-read-guard/state.ts
+    rollback: QUANTA_STALE_READ_GUARD=off
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: streaming-boomerang
+    gate_owner: [createDefaultWriteback DI]
+    activation: unwired
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: off }
+    reachability: seam-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/agent/streaming-boomerang/default-streamer.ts
+    rollback: consumer 없음(현행)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: streaming-cancellation-primitive
+    gate_owner: [toAbortSignal DI]
+    activation: unwired
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
+    reachability: seam-only
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: hold
+    owner_seam: src/agent/streaming-cancellation/default.ts
+    # jul-18 wire-attempt AUDIT (agent-loop investigation): held DELIBERATELY, not
+    # by neglect. The live abort path is a plain AbortSignal — composition root
+    # `new AbortController()` (bootstrap-session.ts:432) → `abort.signal` →
+    # `config.signal` (types.ts:170) → `llm.stream({signal})` (stream-consume.ts:371)
+    # + `streamingTurn({signal})` (stream-consume.ts:389). 33 bare `.abort()`
+    # producers across CLI/host/bench/headless/web feed it; NO downstream consumer
+    # reads a typed cancel cause off the loop's abort — cause is re-derived post-hoc
+    # from WHICH signal fired (`classifyTurnAbort` turn-gate.ts:34, `interruptedCategory`
+    # stop-category.ts:309). The primitive's 3 unique offerings are all currently
+    # unconsumed: (a) typed cause — no `cancel_rate{cause}` metric / recorder envelope
+    # wants it; (b) cleanup orchestration — teardown is owned by `ctx.disposeResources`
+    # (entry.ts:121, finally-guarded both paths); (c) partial salvage — the loop's
+    # own drop-oldest/conversation-cancel capture already handles partial turns.
+    # Wiring `toAbortSignal(controller.signal)` into `config.signal` today would
+    # DUPLICATE the abort-propagation mechanism while every producer still calls the
+    # bare `.abort()` (the cause channel would latch nothing) → VACUOUS wire. The
+    # live user-abort cause already flows through the sibling mid-turn-interruption
+    # slice (`MidTurnCancelCause`, default.ts:96-134), which IS wired
+    # (mid-turn-capture-wire.ts, QUANTA_MIDTURN_CAPTURE). Promotion is GATED on a
+    # real cause CONSUMER landing first (metrics counter or recorder outcome envelope)
+    # + retrofitting the 33 producers to `cancel(cause)`; until then a wire is
+    # dead-wire-risk, so this stays catalogued-not-hidden with its reason.
+    rollback: consumer 없음(현행) — wire=vacuous until a cause-consumer + producer retrofit land
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: structured-output-mode
+    # TRUTH-FIX (jul-18): repair-first blocker ("Anthropic forced-tool unwired,
+    # ADR-0469") is STALE — `resolveAnthropicResponseFormat` IS consumed at
+    # anthropic-messages-codec.ts:256 → toAnthropicForcedTool (DOF-40 Wave B
+    # parity landed). Both OpenAI + Anthropic paths live ⇒ repair-first→measure-first.
+    gate_owner: [StreamInput.responseFormat]
+    activation: port-present
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/llm/structured-output.ts
+    rollback: responseFormat 부재(response_format 없음)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: subagent-6-tools
+    gate_owner: [QUANTA_SUBAGENT_6TOOLS]
+    activation: host-seeded
+    effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/subagent/tools-6.ts
+    rollback: QUANTA_SUBAGENT_6TOOLS 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: subagent-fs-ownership-enforce
+    # SECURITY FIX (jul-19, Wave Q): the repair-first blocker was a REAL false
+    # fence — `extractWriteEffects` only saw a top-level `path`, so `apply_patch`/
+    # `apply_patch_structured` (targets inside `input.patch`) + `scripted_replace`
+    # (`input.file`) escaped a fenced subagent's owned subtree entirely. Fixed via
+    # `patchWriteEffects` (closed V4A op parse: add/delete/update+moveTo) + `file`
+    # duck-read, unioned into dispatch consultOwnership. Heuristic-free,
+    # red-on-injection proven, OFF byte-identical. The fence now genuinely enforces.
+    gate_owner: [QUANTA_FS_OWNERSHIP_ENFORCE]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: security
+    decision: enable-now
+    owner_seam: src/agent/ownership-policy.ts
+    rollback: unset QUANTA_FS_OWNERSHIP_ENFORCE
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: subagent-introspect-tools
+    gate_owner: [QUANTA_SUBAGENT_INTROSPECT, QUANTA_SUBAGENT_FOLLOWUP]
+    activation: host-seeded
+    effective_default: { cli: on, web: off, bench: na, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/agent/tier1/subagent-introspect.ts
+    rollback: 두 게이트 모두 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: subagent-read-inbox
+    gate_owner: [AgentConfig.subagentMailbox]
+    activation: port-present
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/tool/subagent-mailbox/index.ts
+    rollback: subagentMailbox 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: subagent-resume-replay
+    gate_owner: [QUANTA_SUBAGENT_RESUME]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: repair-first
+    owner_seam: src/agent/subagent-resume/resumer.ts
+    rollback: built-not-wired(consumer 없음)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: surface-composition-wire-r1
+    gate_owner: [QUANTA_CHECKPOINT_CONV, QUANTA_IDENTITY_MODE, QUANTA_FOCUS_CHAIN_EVERY]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/apps/cli/repl/surface-compose.ts
+    rollback: 모든 knob 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: surface-wire-r2
+    gate_owner: [QUANTA_PER_TOOL_RECORD]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/apps/cli/repl/surface-compose.ts
+    rollback: unset QUANTA_PER_TOOL_RECORD
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: syntax-aware-chunking
+    # TRUTH-FIX (jul-18): repair-first blocker ("grammar ABI mismatch → silent
+    # no-op") is STALE — migrated off tree-sitter-wasms@0.1.13 to
+    # @vscode/tree-sitter-wasm@0.3.1 (tree-sitter.ts:40 resolve, wasm files
+    # present, 5 grammars load hasError=false). AST path LIVE ⇒ repair-first→measure-first.
+    gate_owner: [QUANTA_SYNTAX_CHUNK, QUANTA_READ_OUTLINE]
+    activation: env/config
+    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/tool/read/outline.ts
+    rollback: 두 게이트 미설정(line-window 폴백)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: team-broker-coordination
+    gate_owner: [QUANTA_TEAM_BROKER]
+    activation: host-seeded
+    effective_default: { cli: on, web: na, bench: na, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: security
+    decision: enable-now
+    owner_seam: src/subagent/coordination/broker.ts
+    rollback: QUANTA_TEAM_BROKER 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: team-dag-coordination
+    gate_owner: [QUANTA_TEAM_DAG]
+    activation: host-seeded
+    effective_default: { cli: on, web: na, bench: na, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/subagent/coordination/dag.ts
+    rollback: QUANTA_TEAM_DAG 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: team-idle-barrier-coordination
+    gate_owner: [QUANTA_TEAM_IDLE]
+    activation: host-seeded
+    effective_default: { cli: on, web: na, bench: na, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/subagent/coordination/idle-barrier.ts
+    rollback: QUANTA_TEAM_IDLE 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: template-literal-windsurf
+    gate_owner: [QUANTA_SKILL_TEMPLATE_VARS]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/skill/skill-tool.ts
+    rollback: QUANTA_SKILL_TEMPLATE_VARS!=1
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: three-way-restore
+    gate_owner: [/rewind-tool slash]
+    activation: resource/command
+    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: mutating
+    decision: measure-first
+    owner_seam: src/agent/per-tool-checkpoint/three-way-restore.ts
+    rollback: /rewind-tool 미등록
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: tier1-subagent-block
+    gate_owner: [QUANTA_SUBAGENT]
+    activation: host-seeded
+    effective_default: { cli: on, web: on, bench: off, headless: off, daemon: on }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/agent/tier1/subagent.ts
+    rollback: QUANTA_SUBAGENT=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: tool-interrupt-block
+    # FLIP (jul-18): CLI-seeded default-ON as a protective correctness guard
+    # (same class as stale-read-guard / untrusted-envelope). W4 evidence: OFF
+    # byte-identical in normal operation (the critical-section wrapper is
+    # transparent unless an interrupt races a write) and the deferral is
+    # watchdog-bounded (cannot hang). No efficacy dimension ⇒ no A/B needed;
+    # risk reclassified behavioral-cost→platform (runtime robustness, not a
+    # prompt/behavior lever). Consumed at dispatch/tool-context.ts:23.
+    gate_owner: [QUANTA_TOOL_INTERRUPT_BLOCK]
+    activation: host-seeded
+    effective_default: { cli: on, web: na, bench: off, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: platform
+    decision: enable-now
+    owner_seam: src/tool/critical-section.ts
+    rollback: QUANTA_TOOL_INTERRUPT_BLOCK=0
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: untrusted-source-envelope
+    gate_owner: [QUANTA_UNTRUSTED_ENVELOPE]
+    activation: host-seeded
+    effective_default: { cli: on, web: na, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: security
+    decision: enable-now
+    owner_seam: src/agent/untrusted-envelope/wrap.ts
+    rollback: QUANTA_UNTRUSTED_ENVELOPE 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: verification-plan-knob
+    gate_owner: [QUANTA_BENCH_VERIFICATION_PLAN]
+    activation: env/config
+    effective_default: { cli: na, web: na, bench: off, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: measure-first
+    owner_seam: src/runner/knobs/knobs/verification-plan.ts
+    rollback: QUANTA_BENCH_VERIFICATION_PLAN 미설정
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: voice-input-stt-slice
+    gate_owner: [recorder+transcriber DI]
+    activation: resource/command
+    effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: network
+    decision: hold
+    owner_seam: src/media/voice/index.ts
+    rollback: surface가 recorder/transcriber 미주입
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: vscode-chatsessions-surface
+    gate_owner: [vscode chatSessionsProvider]
+    activation: port-present
+    effective_default: { cli: na, web: na, bench: na, headless: na, daemon: na }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: platform
+    decision: hold
+    owner_seam: surfaces/vscode/src/chat-session-adapter.ts
+    rollback: N/A(IDE surface 전용)
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: web-agent-state-channel
+    gate_owner: [QUANTA_WEB_AGENT_STATE]
+    activation: env/config
+    effective_default: { cli: na, web: on, bench: na, headless: na, daemon: on }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: network
+    decision: enable-now
+    owner_seam: src/apps/web-daemon/agent-state-source.ts
+    rollback: unset QUANTA_WEB_AGENT_STATE
+    duplicate_of: null
+    lifecycle_evidence: null
+  - feature_id: worktree-tool
+    gate_owner: [QUANTA_WORKTREE_TOOL]
+    activation: env/config
+    effective_default: { cli: off, web: na, bench: na, headless: off, daemon: na }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: mutating
+    decision: measure-first
+    owner_seam: src/agent/tier1/worktree.ts
+    rollback: QUANTA_WORKTREE_TOOL 미설정
+    duplicate_of: null
+    lifecycle_evidence: null

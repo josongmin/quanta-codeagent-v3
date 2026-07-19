@@ -16,12 +16,11 @@
  *
  * Determinism: injected mailbox clock; no Date.now/Math.random in the asserts.
  */
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { pollPeerInbox } from "@/agent/loop/control-poll"
 import { createSubagentMailbox } from "@/agent/subagent-mailbox"
 import type { AgentConfig, AgentOutcome } from "@/agent/types"
 import { maybeWirePeerTeamMessaging } from "@/host/runtime/peer-team-wire"
-import { __resetRuntimeConfig } from "@/shared"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool"
 import { ToolRegistry } from "@/tool"
 import { teamTools } from "@/tool/team"
@@ -85,16 +84,7 @@ const runTeamTool = async (
 const textOf = (msg: { content: ReadonlyArray<{ type: string; text?: string }> } | null): string =>
   msg === null ? "" : msg.content.map((c) => (c.type === "text" ? (c.text ?? "") : "")).join("\n")
 
-const env = {}
-
-beforeEach(() => {
-  process.env.QUANTA_TEAM_PEER_MSG = "1"
-  __resetRuntimeConfig()
-})
-afterEach(() => {
-  delete process.env.QUANTA_TEAM_PEER_MSG
-  __resetRuntimeConfig()
-})
+const peerMessagingEnv = { QUANTA_TEAM_PEER_MSG: "1" }
 
 // --- tests -----------------------------------------------------------------
 
@@ -102,7 +92,7 @@ describe("RFC jun-6 Binding 2 — peer messaging LIVE composition wire", () => {
   test("HELL-1: wire injects peerInbox + scoped mailbox + team registry; team_* tools registered", () => {
     const mailbox = createSubagentMailbox({ now: stepClock() })
     const cfg = parentCfg({ subagentMailbox: mailbox })
-    maybeWirePeerTeamMessaging(cfg, env)
+    maybeWirePeerTeamMessaging(cfg, peerMessagingEnv)
 
     expect(cfg.peerInbox).toBeDefined()
     expect(cfg.teamRegistry).toBeDefined()
@@ -118,7 +108,7 @@ describe("RFC jun-6 Binding 2 — peer messaging LIVE composition wire", () => {
     const mailbox = createSubagentMailbox({ now: stepClock() })
     // Parent is the root session (mailboxAgentId unset ⇒ "root").
     const parent = parentCfg({ subagentMailbox: mailbox })
-    maybeWirePeerTeamMessaging(parent, env)
+    maybeWirePeerTeamMessaging(parent, peerMessagingEnv)
 
     // The parent (root) creates a team via the REAL team_create tool.
     const tools = teamTools(parent.teamRegistry as never)
@@ -184,7 +174,7 @@ describe("RFC jun-6 Binding 2 — peer messaging LIVE composition wire", () => {
     const { createSubagentRunner } = await import("@/agent/subagent-runner")
     const mailbox = createSubagentMailbox({ now: stepClock() })
     const parent = parentCfg({ subagentMailbox: mailbox })
-    maybeWirePeerTeamMessaging(parent, env)
+    maybeWirePeerTeamMessaging(parent, peerMessagingEnv)
     const registry = parent.teamRegistry as NonNullable<AgentConfig["teamRegistry"]>
 
     // Two disjoint teams.
@@ -237,12 +227,10 @@ describe("RFC jun-6 Binding 2 — peer messaging LIVE composition wire", () => {
   })
 
   test("HELL-4: knob-OFF ⇒ byte-identical — no peerInbox, raw mailbox, no team registry, child inherits none", async () => {
-    delete process.env.QUANTA_TEAM_PEER_MSG
-    __resetRuntimeConfig()
     const { createSubagentRunner } = await import("@/agent/subagent-runner")
     const mailbox = createSubagentMailbox({ now: stepClock() })
     const parent = parentCfg({ subagentMailbox: mailbox })
-    maybeWirePeerTeamMessaging(parent, env)
+    maybeWirePeerTeamMessaging(parent, {})
 
     // No wire happened.
     expect(parent.peerInbox).toBeUndefined()
@@ -264,7 +252,7 @@ describe("RFC jun-6 Binding 2 — peer messaging LIVE composition wire", () => {
     const mailbox = createSubagentMailbox({ now: stepClock() })
     const cfg = parentCfg({ subagentMailbox: mailbox, mailboxAgentId: "root" })
     // teamRegistry starts undefined (parentCfg sets none); the wire mints it.
-    maybeWirePeerTeamMessaging(cfg, env)
+    maybeWirePeerTeamMessaging(cfg, peerMessagingEnv)
     cfg.teamRegistry?.create("alpha", ["root", "peer"])
 
     cfg.subagentMailbox?.send({

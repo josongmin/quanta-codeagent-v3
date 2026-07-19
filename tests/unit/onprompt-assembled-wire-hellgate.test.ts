@@ -7,7 +7,7 @@
  *      anchor / byte-identical); a THROWING sink never crashes the turn.
  *   B. COMPOSE FLOW: `RuntimeFacadeComposeOptions.onPromptAssembled` reaches the
  *      live `AgentConfig.onPromptAssembled` the loop runs (mirrors the
- *      `granularRegistry` compose idiom) — proven end-to-end by driving a real
+ *      compose idiom) — proven end-to-end by driving a real
  *      turn through `createRuntimeFromAgentConfigBase({ compose })`; absent
  *      compose option ⇒ the sink is never invoked.
  */
@@ -185,7 +185,7 @@ describe("GAP3 onPromptAssembled — loop firing", () => {
 describe("GAP3 onPromptAssembled — RuntimeFacadeComposeOptions flow", () => {
   // Mirror the REAL REPL path: `runtimeContext.createRuntimeFacade({ compose })`
   // (session-loop.ts) — the only public seam that threads compose options. The
-  // `granularRegistry` idiom is wired through the IDENTICAL call.
+  // The same compose path is exercised by this real runtime facade call.
   const baseFor = (root: string, llm: LLMPort) => ({
     llm,
     registry: new ToolRegistry(defaultTools),

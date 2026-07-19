@@ -9,17 +9,9 @@ import {
   SESSION_HOST_TURN_EVENT_PROJECTION_TARGET_TYPES,
 } from "../../../src/kernel/session/session-host-turn-event-projection"
 import { SESSION_EVENT_TYPES } from "../../../src/protocol/session"
+import { capabilitiesFor } from "../../support/session-fixtures"
 
-const manifest = {
-  approvals: "operator" as const,
-  tools: true,
-  memory: false,
-  artifacts: true,
-  subagents: false,
-  automation: false,
-  shellSnapshot: false,
-  transport: "inproc" as const,
-}
+const manifest = capabilitiesFor({ approvals: "operator", tools: true, artifacts: true })
 
 describe("session-host turn-event projection inventory", () => {
   test("projection source set covers SessionHostTurnEvent exactly", () => {

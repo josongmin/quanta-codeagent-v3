@@ -9,7 +9,7 @@ import type { PermissionContext, PermissionStore, ToolAction } from "@/permissio
 import { __resetDefaultPermissionStore, createPermissionStore } from "@/permission"
 import { __resetShellSandbox } from "@/runtime"
 import type { PerCallSandboxAvailability, PerCallSandboxPort } from "@/runtime/os-sandbox"
-import { __resetRuntimeConfig } from "@/shared"
+import { runtimeConfigFromEnv } from "@/shared"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { maybeWireBashSandboxEscalation } from "@/host/runtime/sandbox-escalation-wire"
 import { __setBashPerCallSandboxFactory } from "@/tool/bash/per-call-factory"
@@ -105,14 +105,10 @@ describe("sandbox-escalation — real loop + fake LLM, block → HITL escalation
     const onConfirm = async (_a: ToolAction): Promise<ConfirmDecision> => ({
       decision: approve ? "allow" : "deny",
     })
-    // origin/main API: `maybeWireBashSandboxEscalation(cfg)` reads the gate from
-    // the GLOBAL `runtimeConfig()`, so enable it via env + reset before wiring.
-    process.env.QUANTA_SANDBOX_ESCALATION = "1"
-    __resetRuntimeConfig()
-    maybeWireBashSandboxEscalation({
-      onConfirm,
-      admissibility: { permissionStore: store },
-    } as never)
+    maybeWireBashSandboxEscalation(
+      { onConfirm, admissibility: { permissionStore: store } } as never,
+      runtimeConfigFromEnv({ QUANTA_SANDBOX_ESCALATION: "1" }),
+    )
   }
 
   const runOnce = async (command: string, label: string) => {
@@ -145,8 +141,6 @@ describe("sandbox-escalation — real loop + fake LLM, block → HITL escalation
     __setBashPerCallSandboxFactory(() => blockingSandbox())
   })
   afterEach(async () => {
-    delete process.env.QUANTA_SANDBOX_ESCALATION
-    __resetRuntimeConfig()
     __resetShellSandbox()
     __setBashPerCallSandboxFactory(undefined)
     __setBashSandboxEscalationHandler(undefined)
@@ -195,12 +189,10 @@ describe("sandbox-escalation — real loop + fake LLM, block → HITL escalation
     // escalation note, and the original command never runs unsandboxed. This
     // proves the APPROVE test's success is the ESCALATION path, not the bash
     // tool independently retrying.
-    // Knob OFF: clear the env + reset so the GLOBAL runtimeConfig has no
-    // sandboxEscalation ⇒ the 1-arg wire installs no handler (byte-identical).
-    process.env.QUANTA_SANDBOX_ESCALATION = undefined as unknown as string
-    delete process.env.QUANTA_SANDBOX_ESCALATION
-    __resetRuntimeConfig()
-    maybeWireBashSandboxEscalation({ onConfirm: async () => true } as never)
+    maybeWireBashSandboxEscalation(
+      { onConfirm: async () => true } as never,
+      runtimeConfigFromEnv({}),
+    )
     const { out } = await runOnce("echo never-unsandboxed", "sbx-esc-off")
     expect(out.reason).toBe("completed")
     const results = allToolResults(out)

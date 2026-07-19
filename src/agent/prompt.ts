@@ -1,6 +1,6 @@
 import { basename } from "node:path"
 import type { Message, SystemBlock } from "@/llm"
-import { delegationSuppressEnabled } from "@/shared/delegation-policy"
+import { runtimeConfig } from "@/shared"
 import type {
   AgentPromptMode,
   PromptActiveLeversSnapshot,
@@ -124,7 +124,7 @@ const bodyRenderCtx = (opts?: {
   // time keeps the prefix byte-stable per session (the prompt is static per
   // session, ADR-0003). Default-OFF ⇒ false ⇒ the base tool-routing atom renders
   // byte-identically; ON ⇒ the authorization-conditioned variant.
-  hasDelegationSuppress: delegationSuppressEnabled(),
+  hasDelegationSuppress: runtimeConfig().subagentDelegateSuppress,
 })
 
 /** The static system prompt. No per-turn data — keep it byte-stable so the

@@ -17,6 +17,7 @@
  * surfaces the exit code). Only a transport `error` (or a closed duplex) rejects, which the tool
  * maps to a typed `ok:false`. NO listener leak: the abort listener is removed when the call settles.
  */
+import { toError } from "@/shared"
 import type { ContainerExec, ContainerExecResult } from "./port"
 
 /** Injected line-duplex: `write` one JSON line (no trailing newline — the impl frames it); `lines`
@@ -86,7 +87,7 @@ export const containerExecOverIpc = (duplex: JsonLineDuplex): ContainerExec => {
       for await (const line of duplex.lines) route(line)
       settleAll(new Error("ipc transport closed"))
     } catch (e) {
-      settleAll(e instanceof Error ? e : new Error(String(e)))
+      settleAll(toError(e))
     }
   })()
 
@@ -125,7 +126,7 @@ export const containerExecOverIpc = (duplex: JsonLineDuplex): ContainerExec => {
           try {
             duplex.write(line)
           } catch (e) {
-            rejectClean(e instanceof Error ? e : new Error(String(e)))
+            rejectClean(toError(e))
           }
         }
         const onAbort = () => safeWrite(JSON.stringify({ id, type: "cancel" }))

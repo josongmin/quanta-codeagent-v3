@@ -199,10 +199,13 @@ describe("C. defaultOsSandbox Linux integration", () => {
     const { spawner, calls } = makeSpawner()
     const sb2 = defaultOsSandbox({ spawner, platform: "linux", which: whichNone })
     const r = await sb2.spawn({ command: ["x"], cwd: "/ws" }, POLICY_WW)
-    // Degraded passthrough: original argv, sandboxApplied=false, install hint.
-    expect((calls[0] as SpawnCall).argv).toEqual(["x"])
+    // FAIL-CLOSED (DOF-40): a requested sandbox that can't be enforced REFUSES
+    // the spawn — the command NEVER runs (was fail-open degraded passthrough).
+    expect(calls.length).toBe(0)
+    expect(r.exitCode).toBe(126)
+    expect(r.stdout).toBe("")
     expect(r.sandboxApplied).toBe(false)
-    expect((r.degradeReason as string).startsWith("linux-bwrap-missing")).toBe(true)
+    expect(r.degradeReason).toBe("linux-bwrap-missing")
   })
 
   test("HELL-BW-C11: linux + danger profile → passthrough regardless of bwrap availability", async () => {

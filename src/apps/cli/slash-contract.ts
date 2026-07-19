@@ -299,6 +299,15 @@ export interface SlashContext {
         readonly threadId: string
       }
     | undefined
+  /** §9.6 — `/presets` opusplan-style sticky model-preset wire. The SAME live
+   *  `StickyPresetResolver` the session's role→model resolution consults each
+   *  turn: `/presets <name>` calls `.select(name)` so the pick becomes STICKY
+   *  for the run; no-arg renders `listModelPresets()`. Threaded by surface-
+   *  compose ONLY when the preset resolver is minted (default-OFF). Absent ⇒
+   *  `/presets` prints "not wired in this surface" + exit 0 (byte-identical to
+   *  the rest of the presence-gated commands). Duck-typed via `@/llm` so this
+   *  contract carries no runtime preset VALUES — only the interface. */
+  readonly presets?: import("@/llm").StickyPresetResolver | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host

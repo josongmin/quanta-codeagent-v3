@@ -9,6 +9,7 @@ import {
   writeGroundingReplayDraft,
   writePromotedGroundingReplayCase,
 } from "@/../src/apps/eval/grounding"
+import { capabilitiesFor } from "../support/session-fixtures"
 
 const writeReplaySource = (root: string): { source: string; snapshot: string } => {
   const source = join(root, "session.jsonl")
@@ -98,16 +99,7 @@ const writeReplaySource = (root: string): { source: string; snapshot: string } =
           },
         },
       },
-      capabilities: {
-        approvals: "none",
-        tools: false,
-        memory: false,
-        artifacts: false,
-        subagents: false,
-        automation: false,
-        shellSnapshot: false,
-        transport: "inproc",
-      },
+      capabilities: capabilitiesFor(),
       pendingApproval: null,
       openArtifacts: [],
     }),

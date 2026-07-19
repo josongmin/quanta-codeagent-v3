@@ -19,6 +19,7 @@ import { instrumentToolsForExport } from "@/observability"
 import { PatternGrantStore, recordProposedPattern } from "@/permission"
 import type { buildSearchPipelineFromEnv } from "@/runner/assemble"
 import type { resolveSandboxProfileFromEnv } from "@/runtime"
+import { createDefaultNodeReplKernel } from "@/runtime/node-repl"
 import type { AutomationEngineSlot } from "@/scheduler/runtime-wire"
 import { gateOn, type PtyBackend, runtimeConfig } from "@/shared"
 import {
@@ -374,6 +375,12 @@ export const buildGatedToolPorts = (
     // byte-identical unless QUANTA_DEBUG_TOOLS === "1". Boolean flag — the tool
     // owns the real spawn port; high-risk (always-confirm tier).
     ...(cfg.debugTools ? { debugTools: true } : {}),
+    // ADR-0249 — gated `node_repl` persistent-kernel tool. Default-OFF: tool menu
+    // byte-identical unless QUANTA_NODE_REPL === "1". Mints ONE stateful
+    // `NodeReplKernel` per session (the variable-persistence unit); construction
+    // is IO-free (no `node` subprocess until the first exec dispatches). High-risk
+    // (arbitrary Node code, full host access) ⇒ the tool is always-confirm.
+    ...nodeReplPortSlot(cfg.nodeRepl),
     // Epic-2 — gated `run_tests` structured test-runner. Default-OFF: tool menu
     // byte-identical unless QUANTA_TEST_RUNNER === "1". High-risk (always-confirm).
     ...(cfg.testRunner ? { testRunner: true } : {}),
@@ -432,6 +439,17 @@ export const buildGatedToolPorts = (
  *  stays under biome's cognitive-complexity cap. */
 const codeModePortSlot = (codeMode: boolean): { codeMode: true } | Record<string, never> =>
   codeMode ? { codeMode: true } : {}
+
+/** ADR-0249 — spread-ready `nodeRepl` tool slot. `{}` when `QUANTA_NODE_REPL` is
+ *  off ⇒ tool not registered ⇒ byte-identical menu AND no kernel constructed.
+ *  When ON, mint ONE stateful `NodeReplKernel` (IO-free until the first exec)
+ *  threaded to `buildDefaultTools` so ONE persistent process backs the session's
+ *  variable-persistence. Extracted so `buildGatedToolPorts` stays under biome's
+ *  cognitive-complexity cap. */
+const nodeReplPortSlot = (
+  nodeRepl: boolean,
+): { nodeRepl: NonNullable<DefaultToolPorts["nodeRepl"]> } | Record<string, never> =>
+  nodeRepl ? { nodeRepl: createDefaultNodeReplKernel() } : {}
 
 /** G1 — resolve the spread-ready `appshot` slot (`{}` when the knob is OFF or no
  *  port is injectable, so the tool menu stays byte-identical). When ON AND a

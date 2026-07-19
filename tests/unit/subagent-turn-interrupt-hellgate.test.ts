@@ -1,5 +1,5 @@
 /**
- * Hellgate — RFC-04 §11 / ADR-0437 follow-up: `followup_task(interrupt:true)`
+ * Hellgate — RFC-04 §11 / ADR-0437 follow-up: `followup_task(mode:"interrupt")`
  * ACTUALLY interrupts a busy child's in-flight turn.
  *
  * Closes the last functional gap: before this, `wake(reason)` ignored the
@@ -17,7 +17,7 @@
  *     controller (a fired interrupt never pre-aborts the next turn); IDLE
  *     interrupt = plain wake (no abort); followup NEVER aborts (regression).
  *   - END-TO-END (REAL `runAgent` child loop): a BUSY child (its turn blocked in
- *     an in-flight LLM stream) + `followup_task(interrupt:true)` ⇒ the in-flight
+ *     an in-flight LLM stream) + `followup_task(mode:"interrupt")` ⇒ the in-flight
  *     stream's signal FIRES (the turn unwinds) AND a SECOND OBSERVABLE turn runs
  *     (fresh stream). A BUSY child + followup (non-interrupt) does NOT abort the
  *     in-flight stream (it completes, then the queued turn runs). An IDLE child +
@@ -27,6 +27,12 @@
  */
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
+import {
+  createSubagentDeliveryController,
+  createTargetResolver,
+  type DeliveryMailboxPort,
+  type SubagentControlRegistry,
+} from "@/agent/subagent-delivery"
 import { createSubagentRunner } from "@/agent/subagent-runner"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { AgentEvent, StreamPort } from "@/stream"
@@ -51,13 +57,45 @@ class NullStream implements StreamPort {
 
 const fakeMailbox = () => {
   const sent: Array<{ to: string; body: string }> = []
+  let seq = 0
   const port: MailboxSendPort = {
     send: (init) => {
       sent.push({ to: init.to, body: init.body })
-      return init
+      seq += 1
+      return { id: `msg-${seq}` }
     },
   }
   return { port, sent }
+}
+
+/** WS3: `followup_task` consumes the delivery CONTROLLER (RFC §4.4). The real
+ *  runner registered a real `SubagentControlEndpoint` into `wake`, so the
+ *  controller's interrupt/wake path drives that live endpoint — preserving every
+ *  in-flight-abort / fresh-turn assertion below. Build one over the same
+ *  registry/wake/mailbox. */
+const followupDeps = (
+  reg: TaskRegistry,
+  mailbox: ReturnType<typeof fakeMailbox>,
+  wake: TurnWakeRegistry,
+) => {
+  const control = wake as unknown as SubagentControlRegistry
+  return {
+    delivery: createSubagentDeliveryController({
+      control,
+      mailbox: mailbox.port as unknown as DeliveryMailboxPort,
+      formatPeer: (from, kind, body) => `[teammate ${from} — untrusted] [${kind}] ${body}`,
+      resolveTarget: createTargetResolver({ registry: reg, control }),
+      newDeliveryId: (() => {
+        let n = 0
+        return () => {
+          n += 1
+          return `del-${n}`
+        }
+      })(),
+      steerEnabled: false,
+    }),
+    callerLabel: "parent",
+  }
 }
 
 const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
@@ -225,13 +263,13 @@ describe("end-to-end — followup_task(interrupt) aborts a busy child mid-turn",
     expect(llm.calls).toBe(1)
     expect(wake.has("busy-child")).toBe(true)
 
-    // followup_task(interrupt:true) against the BUSY child.
+    // followup_task(mode:"interrupt") against the BUSY child.
     const mailbox = fakeMailbox()
     const reg = new TaskRegistry()
     reg.register({ id: "busy-child", description: "child" })
     const out = handleFollowupTask(
-      { agentId: "busy-child", message: "STOP and do this instead", interrupt: true },
-      { registry: reg, mailbox: mailbox.port, wake, callerLabel: "parent" },
+      { agentId: "busy-child", message: "STOP and do this instead", mode: "interrupt" },
+      followupDeps(reg, mailbox, wake),
     )
     expect(out.kind).toBe("success")
 
@@ -271,7 +309,7 @@ describe("end-to-end — followup_task(interrupt) aborts a busy child mid-turn",
     // NON-interrupt followup: queued, the in-flight turn must NOT be aborted.
     const out = handleFollowupTask(
       { agentId: "busy-2", message: "later" },
-      { registry: reg, mailbox: mailbox.port, wake, callerLabel: "parent" },
+      followupDeps(reg, mailbox, wake),
     )
     expect(out.kind).toBe("success")
     if (out.kind === "success") expect(out.triggered).toBe(false) // queued, not woke
@@ -314,8 +352,8 @@ describe("end-to-end — followup_task(interrupt) aborts a busy child mid-turn",
     const reg = new TaskRegistry()
     reg.register({ id: "idle-child", description: "child" })
     const out = handleFollowupTask(
-      { agentId: "idle-child", message: "more", interrupt: true },
-      { registry: reg, mailbox: mailbox.port, wake, callerLabel: "parent" },
+      { agentId: "idle-child", message: "more", mode: "interrupt" },
+      followupDeps(reg, mailbox, wake),
     )
     expect(out.kind).toBe("success")
     if (out.kind === "success") expect(out.triggered).toBe(true) // woke (idle)
@@ -334,8 +372,8 @@ describe("end-to-end — followup_task(interrupt) aborts a busy child mid-turn",
     reg.register({ id: "child-NW", description: "child" })
     const mailbox = fakeMailbox()
     const out = handleFollowupTask(
-      { agentId: "child-NW", message: "hi", interrupt: true },
-      { registry: reg, mailbox: mailbox.port, wake, callerLabel: "parent" },
+      { agentId: "child-NW", message: "hi", mode: "interrupt" },
+      followupDeps(reg, mailbox, wake),
     )
     expect(out.kind).toBe("error")
     if (out.kind === "error") expect(out.cause).toBe("no_waker")

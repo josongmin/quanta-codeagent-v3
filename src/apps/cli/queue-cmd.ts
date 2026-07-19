@@ -137,6 +137,8 @@ const explainMutateError = (op: string, err: QueueMutateError): string => {
       return `/queue ${op}: invalid text (empty, whitespace-only, or exceeds 64KiB)`
     case "send-not-possible":
       return `/queue ${op}: send-now sink not wired or rejected the payload`
+    case "send-not-ready":
+      return `/queue ${op}: send-now target not ready yet (turn starting up) — entry kept, try again`
   }
 }
 

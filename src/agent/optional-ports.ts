@@ -10,7 +10,14 @@ import { createDefaultSubagentMailbox } from "@/agent/subagent-mailbox"
 import type { LLMPort } from "@/llm"
 import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-model-override"
 import { projectAgentEventToAgentStateObservation } from "@/protocol/agent-state"
-import { gateOn, gateOnStrict, itemStreamEnabled, logger, runtimeConfig } from "@/shared"
+import {
+  emitOperatorNotice,
+  gateOn,
+  gateOnStrict,
+  itemStreamEnabled,
+  logger,
+  runtimeConfig,
+} from "@/shared"
 import type { AgentEvent } from "@/stream"
 import {
   ItemLifecycleTracker,
@@ -21,6 +28,10 @@ import {
 import { AgentMetaRegistry, TaskRegistry, TurnWakeRegistry } from "@/subagent"
 import type { CloseoutCritic, CloseoutCriticVerdict } from "./closeout-critic"
 import { buildCodeCellDispatchPort } from "./codemode-wire"
+import {
+  createSubagentSteerFinalization,
+  makeSteerRetentionStore,
+} from "./subagent-delivery/controller"
 import { materializeReviewerAgent } from "./tier1/reviewer-subagent"
 import type { AgentConfig } from "./types"
 
@@ -33,6 +44,11 @@ const QUANTA_SUBAGENT_BATCH_ENV = "QUANTA_SUBAGENT_BATCH"
 const QUANTA_SUBAGENT_INTROSPECT_ENV = "QUANTA_SUBAGENT_INTROSPECT"
 /** RFC-04 / ADR-0437 — `followup_task` deliver-and-trigger tool gate. */
 const QUANTA_SUBAGENT_FOLLOWUP_ENV = "QUANTA_SUBAGENT_FOLLOWUP"
+/** WS4 (RFC jul-18 §9) — `mode:"steer"` targeted child steer gate. Default-OFF ⇒
+ *  the controller's `steerEnabled` stays false (`mode:"steer"` ⇒ `mode_disabled`)
+ *  AND no child steer safe-point overhead (byte-identical). Rides the followup
+ *  substrate, so it only takes effect alongside `QUANTA_SUBAGENT_FOLLOWUP`. */
+const QUANTA_SUBAGENT_STEER_ENV = "QUANTA_SUBAGENT_STEER"
 /** RFC jun-6-code-mode (Phase 1) — `code_cell` dispatch-port wire gate. Strict
  *  `"1"` (mirrors `runtimeConfig().codeMode` — NOT the `=on` convention the
  *  subagent gates use) so the composition root flips the SAME knob the tool
@@ -566,6 +582,9 @@ const decodeCloseoutVerdict = (finalText: string): CloseoutCriticVerdict => {
  *     actually wake a child instead of degrading to `cause:"no_waker"`) +
  *     a {@link createDefaultSubagentMailbox} (the DELIVERY substrate) when the host
  *     did not already wire one via `QUANTA_SUBAGENT_MAILBOX`.
+ *   - `QUANTA_SUBAGENT_STEER=on` (+ followup) ⇒ `subagent.enableSteer = true` +
+ *     the SESSION steer plane (retention + finalization) so `mode:"steer"` is
+ *     admitted and the child loop runs the post-stream safe-point drain (WS4).
  *
  * Because the tier-1 batch builder requires a runner (`config.subagent` must
  * exist) and the introspect builder joins `config.subagent.taskRegistry`, ANY
@@ -578,6 +597,25 @@ const decodeCloseoutVerdict = (finalText: string): CloseoutCriticVerdict => {
  * returned UNCHANGED — no `subagent` block is created, the tier-1 builders see
  * the flags absent, and the ToolRegistry is byte-identical.
  */
+/** WS4 — set the followup + steer capability flags on the subagent block. Steer
+ *  rides the followup substrate (controller + child endpoint), so it is only
+ *  meaningful when followup is on. Extracted to keep {@link wireSubagentToolGates}
+ *  under biome's cognitive-complexity cap. */
+const applyFollowupFlags = (
+  subagent: NonNullable<AgentConfig["subagent"]>,
+  wantFollowup: boolean,
+  env: OptionalPortEnv,
+): void => {
+  if (!wantFollowup) return
+  if (subagent.enableFollowup !== true) subagent.enableFollowup = true
+  // WS4 — flip steer from `QUANTA_SUBAGENT_STEER` (+ followup). Default-OFF:
+  // absent ⇒ `enableSteer` unset ⇒ controller `steerEnabled` false + no child
+  // safe-point drain (byte-identical).
+  if (envGateOn(env, QUANTA_SUBAGENT_STEER_ENV) && subagent.enableSteer !== true) {
+    subagent.enableSteer = true
+  }
+}
+
 const wireSubagentToolGates = <T extends OptionalPortBase>(base: T, env: OptionalPortEnv): T => {
   const wantBatch = envGateOn(env, QUANTA_SUBAGENT_BATCH_ENV)
   const wantIntrospect = envGateOn(env, QUANTA_SUBAGENT_INTROSPECT_ENV)
@@ -592,7 +630,7 @@ const wireSubagentToolGates = <T extends OptionalPortBase>(base: T, env: Optiona
 
   if (wantBatch && subagent.enableBatchSpawn !== true) subagent.enableBatchSpawn = true
   if (wantIntrospect && subagent.enableIntrospect !== true) subagent.enableIntrospect = true
-  if (wantFollowup && subagent.enableFollowup !== true) subagent.enableFollowup = true
+  applyFollowupFlags(subagent, wantFollowup, env)
 
   // ALBB-12 claim 1 (belt-and-suspenders) — env-gated surfaces (daemon/ide/
   // headless/bench/eval/SDK) reach the introspect builder via THIS wire, NOT the
@@ -704,5 +742,59 @@ const wireFollowupDeps = <T extends OptionalPortBase>(base: T): T => {
   if (next.subagentMailbox === undefined) {
     next = { ...next, subagentMailbox: createDefaultSubagentMailbox() } as T
   }
-  return next
+  return wireSteerPlane(next)
+}
+
+/**
+ * WS4 (RFC jul-18 §3.5, §4.3) — mint the SESSION-shared steer plane when the
+ * steer capability is on (`subagent.enableSteer`). ONE retention store + ONE
+ * finalization port over the session mailbox, shared by BOTH the delivery
+ * controller (retains on admission) and every child loop (drains + finalizes).
+ *
+ * Default-OFF byte-identical: `enableSteer` unset ⇒ `base` returned verbatim (no
+ * plane allocated ⇒ the `onReceipt` closure never exists). Caller-override-
+ * precedence: a pre-set `steerPlane` is kept.
+ * The receipt sink routes `degraded`/`cancelled` receipts onto the GLOBAL
+ * operator-notice bus (Item 1, jul-18) so a steer that fell back to the mailbox
+ * is operator-visible; `applied` is intentionally silent. A correlated
+ * `SubagentDeliveryReceipt` UI/telemetry cascade (WS6, jul-15 `peer_message`) may
+ * still layer on top. The exactly-once + mailbox-fallback invariant is enforced
+ * by the finalization port itself regardless of the sink.
+ */
+export const wireSteerPlane = <T extends OptionalPortBase>(base: T): T => {
+  const sub = (base as Partial<AgentConfig>).subagent
+  if (sub === undefined || sub.enableSteer !== true || sub.steerPlane !== undefined) return base
+  const mailbox = (base as Partial<AgentConfig>).subagentMailbox
+  if (mailbox === undefined) return base
+  const retention = makeSteerRetentionStore()
+  const finalization = createSubagentSteerFinalization({
+    store: retention,
+    mailbox: mailbox as unknown as import("./subagent-delivery/controller").DeliveryMailboxPort,
+    // Item 1 (jul-18) — surface async steer receipts on the existing GLOBAL
+    // operator-notice bus. A steer that DEGRADED to the mailbox (or was
+    // cancelled) is an operator signal the no-op sink used to silently swallow.
+    // `applied` (success) fires NO notice: a multi-round steer would emit one per
+    // consumed step (spam) and success is not an operator alert. `emitOperator
+    // Notice` is a no-throw global (no sink installed ⇒ inert), so it can never
+    // poison the finalization path. WS6 may still layer a correlated peer_message
+    // UI cascade on top of this later — this bus is the operator-visible floor.
+    onReceipt: (r) => {
+      if (r.kind === "degraded") {
+        emitOperatorNotice({
+          severity: "warn",
+          source: "subagent",
+          message: `steer to peer degraded to ${r.effectiveMode} (${r.reason})`,
+          hint: `delivered via mailbox msg ${r.messageId}`,
+        })
+      } else if (r.kind === "cancelled") {
+        emitOperatorNotice({
+          severity: "info",
+          source: "subagent",
+          message: `steer cancelled (${r.reason})`,
+        })
+      }
+      // `applied` (success) ⇒ NO notice (see closure header).
+    },
+  })
+  return { ...base, subagent: { ...sub, steerPlane: { retention, finalization } } } as T
 }

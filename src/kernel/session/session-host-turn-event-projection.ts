@@ -153,6 +153,11 @@ export const SESSION_HOST_TURN_EVENT_PROJECTION_REGISTRY = {
         toolCallId: args.event.toolCallId,
         toolName: args.event.toolName,
         ...(args.event.argsPreview !== undefined ? { argsPreview: args.event.argsPreview } : {}),
+        // Ticket 04 — carry the optional full-fidelity payload through verbatim.
+        // Absent ⇒ omitted (byte-identical default-OFF); the ipc bridge owns the
+        // per-peer strip (S3).
+        ...(args.event.argsFull !== undefined ? { argsFull: args.event.argsFull } : {}),
+        ...(args.event.fidelityDegraded === true ? { fidelityDegraded: true as const } : {}),
       },
     }
   },
@@ -170,6 +175,9 @@ export const SESSION_HOST_TURN_EVENT_PROJECTION_REGISTRY = {
           ? { resultPreview: args.event.resultPreview }
           : {}),
         ...(args.event.durationMs !== undefined ? { durationMs: args.event.durationMs } : {}),
+        // Ticket 04 — carry-through (see the tool.invoked arm above).
+        ...(args.event.resultFull !== undefined ? { resultFull: args.event.resultFull } : {}),
+        ...(args.event.fidelityDegraded === true ? { fidelityDegraded: true as const } : {}),
       },
     }
   },

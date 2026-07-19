@@ -21,17 +21,9 @@ import { describe, expect, test } from "bun:test"
 import { toSessionHostTurnEvent } from "../../../src/host/runtime/internal/session-host-turn-event-bridge"
 import { createKernelSessionState } from "../../../src/kernel/session"
 import { projectSessionHostTurnEvent } from "../../../src/kernel/session/session-host-turn-event-projection"
+import { capabilitiesFor } from "../../support/session-fixtures"
 
-const manifest = {
-  approvals: "operator" as const,
-  tools: true,
-  memory: false,
-  artifacts: false,
-  subagents: false,
-  automation: false,
-  shellSnapshot: false,
-  transport: "inproc" as const,
-}
+const manifest = capabilitiesFor({ approvals: "operator", tools: true })
 
 describe("bridge expansion — new observability events cross the bridge", () => {
   test("BE-01: tool_progress bridges to tool.progress (keyed by tool-call id)", () => {

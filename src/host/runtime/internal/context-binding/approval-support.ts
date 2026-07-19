@@ -79,6 +79,38 @@ export const actionKeyOf = (
   return shellCommand !== null ? `${action.tool}|${shellCommand}` : action.tool
 }
 
+/**
+ * Enrich a `ToolAction` with the registry-derived `shellCommand` when the caller
+ * did not already supply it — mirroring `admissibility-gate.ts`'s
+ * `withResolvedShellCommand` gate-entry step, but at the INLINE-approval seam
+ * (`runOnConfirm` → the operator surface). The interactive surface confirm reads
+ * `action.shellCommand` to offer the `[p]`/`[P]` program-token PREFIX-grant verbs
+ * (runtime-context-compose.ts `buildCliOnConfirm`). The inline-approval-resolver
+ * path (ADR-0540) builds the action from the raw tool call and does NOT pass
+ * through `runAdmissibilityGate`'s enrichment, so without this the field stayed
+ * `undefined` and the prefix verbs silently vanished from the bash confirm.
+ *
+ * Uses the SAME `registry.extractShellCommand` source `actionKeyOf` keys on, so
+ * the offered prefix verb and the minted grant key can never disagree. A caller-
+ * supplied `shellCommand` (already resolved upstream) wins/skips. A non-shell
+ * tool, an empty/null extraction, or a thrown extraction ⇒ the action is returned
+ * UNCHANGED (same reference) — byte-identical for every non-prefix confirm.
+ */
+export const withResolvedShellCommandForConfirm = (
+  registry: ToolRegistry,
+  action: ToolAction,
+): ToolAction => {
+  if (action.shellCommand !== undefined) return action
+  let shellCommand: string | null
+  try {
+    shellCommand = registry.extractShellCommand(action.tool, action.input)
+  } catch {
+    return action
+  }
+  if (shellCommand === null || shellCommand.length === 0) return action
+  return { ...action, shellCommand }
+}
+
 export const reasonOf = (action: ToolAction): PendingApprovalView["reason"] =>
   reasonCodeFor(inferReviewKind(action.tool, action.isReadOnly))
 

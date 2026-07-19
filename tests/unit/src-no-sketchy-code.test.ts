@@ -90,8 +90,6 @@ const RULES: readonly Rule[] = [
         "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The bench-only opt-in gates (`familyCoverageCoeditEnabled(process.env)` / posture resolution) moved here verbatim with the repair-phase slice. Same posture as runner/batch/eval/driver.ts.",
       "runner/batch/eval/driver/attempt-context.ts":
         "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The bench-knob/posture resolution (`resolveBenchKnobs`/`benchPostureFromState` off process.env defaults) moved here verbatim with the attempt-context slice. Same posture as runner/batch/eval/driver.ts.",
-      "runner/batch/eval/driver/agent-phase.ts":
-        "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The `emitKnobsApplied(tap, process.env, …)` knob-telemetry read moved here verbatim with the agent-phase slice. Same posture as runner/batch/eval/driver.ts.",
       "runner/batch/eval/driver/env-knob-parse.ts":
         "jul-02 god-file split of runner/batch/eval/driver.ts — PURE code motion. The bench env-var parsers (`resolveBenchKnobs`/`benchPostureFromState` off process.env) moved here verbatim with the env-knob-parse slice. Same posture as runner/batch/eval/driver.ts.",
       "runner/batch/eval/driver/selection-phase.ts":
@@ -145,6 +143,14 @@ const RULES: readonly Rule[] = [
         "ENV PROPAGATION — docker sandbox forwards named env vars (a hardcoded ALLOWLIST) to the container; pass-through, not a feature flag.",
       "subagent/handlers-6.ts":
         "ENV PROPAGATION — subagent child-process spawn forwards parent env (merged with `input.env`); same posture as runtime/shell.ts and tool/git/runner.ts — pass-through, not a feature read.",
+      "subagent/exec-command.ts":
+        "ENV PROPAGATION — the exec-command bridge spreads the parent env INTO the spawned bash child (`{ ...process.env, ...input.env }`) so PATH/HOME resolve for the subprocess; pass-through to a child, not a feature read. Same spawner env-boundary posture as subagent/handlers-6.ts and tool/git/runner.ts.",
+      "agent/loop-helpers.ts":
+        'DEFAULT-OFF gate at a seam — reads the OTel content-capture gate `gateOn(process.env, "QUANTA_OTEL_CAPTURE_CONTENT")` at the span-close boundary. Unset/falsy ⇒ NO content leaves the process (byte-identical); the redacted OTLP content plane is armed only when the gate is on AND a span sink is live. Same sanctioned default-OFF gate-at-a-seam class as tool/web/providers/from-env.ts; mirrored in the @/agent slice-boundary envAllowFiles.',
+      "agent/loop/control-poll.ts":
+        "Injection-first DEFAULT-OFF gate — `isControlRequestEnabled(slot.env ?? process.env)`: `process.env` is ONLY the DI fallback for the injected `slot.env` (tests pass a fake env). An absent controlRequest slot OR gate-off ⇒ the port is never even queried (byte-identical). Same injection-first gate-at-a-seam posture as connectors/marketplace-policy.ts; mirrored in the @/agent slice-boundary envAllowFiles.",
+      "tool/container-exec/tool.ts":
+        "DEFAULT-OFF dial resolved at module load — `resolveStreamCap(process.env)` reads the per-stream output cap `QUANTA_TB_STREAM_CAP`; unset/≤0 ⇒ the fixed 8K default (byte-identical). `resolveStreamCap` is PURE (takes the env bag), so the raw `process.env` is only its call-boundary argument. Same env-at-call-boundary posture as runner/diff-ops.ts; mirrored (path-scoped) in the @/tool slice-boundary envAllowFiles.",
       // jun-09 long-tail (§4.3/§1.6/§2.5/P16/ci-bot wiring) — injection-first DI
       // boundaries + one env-propagation, same posture as the entries above.
       "host/runtime/side-agent-fork-port.ts":
@@ -346,6 +352,8 @@ const RULES: readonly Rule[] = [
         "Bench token-budget composition — reads QUANTA_BENCH_PATCH_GEN_BUDGET / SWEEP_PATCH_GEN_BUDGET + QUANTA_BENCH_TOKEN_BUDGET_DIR at boot (raw extracted then parsed via NaN-safe asPositiveInt on a separate line). Same bench-bootstrap posture as apps/bench/index.ts.",
       "host/mcp-composition.ts":
         "P4 (jul-11) surface-shared MCP composition (moved from apps/cli/internal/mcp.ts — now @/host so the web daemon shares it): surface composition root reading QUANTA_MCP_AUTORESTART gate + resolveQuantaHome(process.env) + pickMcpNegotiator(process.env) + `envSource = process.env` DI fallbacks at launch; the assembled MCP ports downstream stay env-free. Re-exported by apps/cli/internal/mcp.ts.",
+      "host/runtime/persistence.ts":
+        "Injection-first (W4-b): `process.env` is ONLY the default for the injected `envSource` param of createSessionPersistence (tests inject a fake env view); the QUANTA_SESSION_EVENT_LOG_DIR gate is read off that param, never a module-level process.env. Same `envSource = process.env` DI-fallback posture as host/mcp-composition.ts.",
       "apps/cli/internal/argv.ts":
         "God-module split of apps/cli/internal.ts (ADR-0024) — pure process.argv/process.env CLI flag accessors (QUANTA_STATE_PATH / QUANTA_RESUME / QUANTA_OBSERVE_DIR / QUANTA_LSP_TOOLS / QUANTA_AST_GREP), re-exported from ../internal so importers keep resolving from ./internal. Same CLI-bootstrap posture as apps/cli/internal.ts.",
       "apps/cli/internal/shell-snapshot.ts":
@@ -358,6 +366,18 @@ const RULES: readonly Rule[] = [
         "God-module split of apps/web-daemon/server.ts — setupFollowerApproval reads QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS at boot. Same composition-root posture as apps/web-daemon/server.ts.",
       "apps/web-daemon/server/persistence.ts":
         "God-module split of apps/web-daemon/server.ts — setupThreadPersistence reads the QUANTA_WEB_DB gate at boot. Same composition-root posture as apps/web-daemon/persistence-sqlite.ts.",
+      "sdk/embed.ts":
+        "Injection-first: `process.env` is ONLY the default for the injected `opts.env` param of the public `createAnalysisAgent` SDK factory (`env?: NodeJS.ProcessEnv`, documented DI seam); the resolved `env` is threaded into `resolveLlm(opts, env)`/`assembleAgentConfig(req, env)` which read provider keys off the PARAM, never a module-level read. Tests/consumers pass a fake env. Same composition-root DI-fallback posture as apps/cli/login-cmd.ts.",
+      "apps/bench/lane-progress-renderer.ts":
+        "Bench-surface DEFAULT-OFF opt-in gate read at the renderer composition root — `startLaneProgressRenderer` (called ONCE at apps/bench/run-main.ts, already allowlisted) reads `QUANTA_BENCH_LANE_PROGRESS`; unset/falsy ⇒ returns a no-op immediately (byte-identical). Same bench-only opt-in surface-gate posture as apps/bench/eval/driver.ts; the `nowMs` clock is separately injected.",
+      "apps/bench/trajectory-debug-sink.ts":
+        "Injection-first: `process.env` is ONLY the default for the injected `env` param of `isTrajectoryDebugEnabled` (`env: Record<string,string|undefined> = process.env`); the QUANTA_BENCH_RECORD_TRAJECTORY / _TRAJECTORY_DEBUG debug-tier gate is read off that param (`env.X`), never module-level. Tests pass a fake env. Same DI-boundary posture as runner/batch/eval/run-health.ts.",
+      "apps/bench/run-main-helpers.ts":
+        "Bench local-run composition helpers extracted verbatim from apps/bench/run-main.ts (already allowlisted) — `resolveObserve` resolves the observe root from `--observe-dir` / QUANTA_OBSERVE_DIR and `datasetFamily` resolves the family from `--dataset-family` / QUANTA_SWEBENCH_DATASET_FAMILY (via resolveDatasetFamily, itself allowlisted); both are launch-time reads called once at run setup, downstream gets resolved values. Same bench-bootstrap posture as apps/bench/run-main.ts.",
+      "apps/terminal/brain-mode.ts":
+        "Box-side process ENTRY shim (`import.meta.main` runMain, `/* c8 ignore */` — verified on the box): the pure `runTerminalBrain` core takes ALL env-gates off an injected `env` param (resolveMaxTurnsFromEnv/resolveOracleLoopRounds/verify-gate read `env.X`). runMain binds `process.env` ONCE at launch — threads `env: process.env` (ENV PROPAGATION so the pure core reads the verify-gate here, not ambient), resolves maxTurns, and does launch-time provider selection (`pickProvider(process.env)` / `tryCreateLLM(…, process.env)`, provider = a launch-time decision). Same composition-root posture as apps/agent/index.ts.",
+      "apps/cli/rewind-tool-cmd.ts":
+        "DIAGNOSTIC surface read — the `/rewind-tool` command's NOT-WIRED branch calls the PURE reporter `missingPerToolCheckpointGates(process.env)` (which reads gate presence off its injected `env` param; the hellgate passes a fake env) to REPORT which of the two wiring gates is missing (D-6 UUX-6-17). Display-only; the actual feature is gated upstream by `ctx.perToolCheckpoint` being wired, never by this read. Same diagnostic-reporter posture as apps/cli/slash-commands-capabilities.ts.",
     },
   },
   {
@@ -366,10 +386,8 @@ const RULES: readonly Rule[] = [
     why: "Use `node:crypto.randomBytes`/`randomUUID` — Math.random's collision space is too small under parallel runs.",
     allowlist: {
       "agent/retry.ts": "documented non-security jitter; centralized helper, no cross-use",
-      "runner/orchestrate/side-chat.ts":
-        "non-security side-chat nonce for in-process turn correlation — not used for collision resistance.",
       "host/runtime/internal/context-binding.ts":
-        "mintSideConversationSessionId — non-security side-conversation id for in-process turn correlation; identical posture to runner/orchestrate/side-chat.ts, not used for collision resistance.",
+        "mintSideConversationSessionId — non-security side-conversation id for in-process turn correlation, not used for collision resistance.",
       "host/runtime/internal/context-binding/side-conversation.ts":
         "God-module split of context-binding.ts — the SAME `mintSideConversationSessionId` relocated verbatim; non-security side-conversation id for in-process turn correlation, not used for collision resistance.",
     },
@@ -383,6 +401,12 @@ const RULES: readonly Rule[] = [
         "FALSE POSITIVE — the `catch {}` is INSIDE a template-string of generated cell-bootstrap JS (runs in the WASM cell, not TS control flow here); `delete globalThis.__cmDispatch` is best-effort fencing in that emitted code.",
       "stream/adapters/jsonl-recorder.ts":
         "explicit best-effort recording of a degraded line — the file already documents the fallthrough",
+      "llm/replay/jsonl-store.ts":
+        "`appendTail = run.catch(() => {})` swallows a rejection on the CHAIN TAIL only so one failed append cannot poison the serialized append chain — the documented inline comment notes the awaited `run` still surfaces the error to the caller. Same tail-swallow posture as stream/adapters/jsonl-recorder.ts.",
+      "apps/cli/mcp-config-rmw.ts":
+        "`await unlink(tmp).catch(() => {})` is best-effort tmp cleanup on a FAILED atomic write/rename — the primary io error is returned immediately afterward, so a cleanup failure is non-fatal and must never mask it (documented inline). Same failed-rename tmp-cleanup posture as memory/dream/team-write-target.ts.",
+      "apps/bench/trajectory.ts":
+        "`writeFile(metaPath, …).catch(() => {})` is a fire-and-forget run-meta sidecar write — a meta write failure must never crash the bench run (documented inline); the trajectory itself is recorded on a separate path. Same best-effort posture as apps/bench/otel-trace-sink.ts.",
       "llm/stream-timeout.ts":
         "jun-26 SE-audit: `void nextPromise.catch(() => {})` swallows the ABANDONED upstream promise's late settle on a timeout (4-line comment above explains it) — without it the orphaned rejection becomes an unhandledRejection that can crash the process; the timeout error is surfaced separately.",
       "session/store.ts": "ENOENT-style file delete cleanup; absence is the success state",
@@ -506,6 +530,10 @@ const RULES: readonly Rule[] = [
         "Plugin-lifecycle restart-window default (60s) — documented inline; matches platform supervisor convention for restart-budget windows.",
       "apps/cli/idle-monitor.ts":
         "Idle minutes→ms conversion (`n * 60_000`) — surface helper, not a wall-clock policy literal.",
+      "apps/cli/repl/session-loop.ts":
+        "Goal-pill elapsed ms→minutes conversion (`Math.floor(view.elapsedMs / 60_000)`) used only to build a minute-resolution dedup KEY for the surface chip — display unit conversion, not a wall-clock policy literal. Same posture as apps/cli/idle-monitor.ts / status-pills.ts.",
+      "apps/cli/status-pills.ts":
+        "`formatElapsed` ms→minutes conversion (`Math.floor(ms / 60_000)`) for the surface goal chip's `2h 7m` display — surface unit conversion, not a wall-clock policy literal. Same posture as apps/cli/idle-monitor.ts.",
       "apps/cli/web-cmd.ts":
         "Web-fetch abort timer default (60s) at CLI sub-command boundary — surface composition root.",
       "migration/persistence.ts":
@@ -616,6 +644,14 @@ const RULES: readonly Rule[] = [
         "INFRA TIMING (RFC jun-17): `Date.now()` in `ensurePyrightFileReady` is the language-server warm-up READINESS-POLL deadline (when to stop polling a cold pyright for an import resolve). Pure infra timing — never reaches model-facing/persisted/replayed output; the budget/retry are injectable for tests via `__setPyrightWarmupTimingForTest`. Same posture as agent/loop/control-poll.ts.",
       "agent/lsp-workspace-pool.ts":
         "INFRA TIMING (RFC jun-17 warm-backend): `Date.now()`/`elapsed()` measure the LSP grounding-receipt warm-up probe duration (`startedAt`/`elapsed`) for telemetry on the receipt — pure infra timing, never reaches model-facing/persisted/replayed output. Same posture as agent/lsp-bridge.ts.",
+      "agent/lsp-bridge/warm-pool.ts":
+        "INFRA TIMING (RFC jun-17, god-module split of agent/lsp-bridge.ts): `Date.now()` in `ensurePyrightFileReady` is the language-server warm-up READINESS-POLL deadline (`deadline`/`while (Date.now() < deadline)`) — when to stop polling a cold pyright for an import resolve. Pure infra timing against a REAL server clock; never reaches model-facing/persisted/replayed output. The budget/retry are injectable for tests via `pyrightWarmupTimingForTest` (`__setPyrightWarmupTimingForTest`). Same posture as agent/lsp-bridge.ts.",
+      "agent/loop/stream-consume.ts":
+        "INFRA TIMING (stream stall-detection): the 3 `Date.now()` samples in `teeUsage` (`startedAt`/`lastEventAt` + the final sample) measure REAL wall-clock gaps in the LIVE provider stream to infer a silent degrade — a fake clock cannot measure a real stream's silence. The pure/deterministic decision function `inferDegradeNotice(config, sawEvent, lastEventAt, startedAt, now)` is already injected (all timing is params); the emitted notice text uses the CONFIG thresholds (`policy.idleMs`/`policy.totalMs`), not the raw samples, so the emit is deterministic given a degrade. Never reaches persisted/replayed output. Same infra-timing posture as agent/loop/control-poll.ts.",
+      "agent/observation/providers/lsp-enrich/provider.ts":
+        "INFRA TIMING (jul-6 S3 lsp-enrich): `Date.now()` in `harvestAll` is the per-provider wall-clock time-budget deadline (`deadline = Date.now() + budget.maxMillis`; loop-break `Date.now() >= deadline`) bounding a real I/O loop against a real language server so a cold server can't stall the pre-prompt enrichment. Pure infra timing; the harvested owners/contracts are the output, the deadline only bounds WHEN to stop. Never reaches persisted/replayed output. Same warm-backend infra-timing posture as agent/lsp-workspace-pool.ts.",
+      "agent/prompt-reminders.ts":
+        "INJECTED CLOCK (default-factory fallback): `todayDateLine(now?: () => number)` implements the sanctioned `(now ?? Date.now)()` pattern — the model-facing today's-date line is deterministic when the caller passes `now` (the sole caller threads `input.now`; replay/tests pin it). The literal `Date.now`/`new Date` is ONLY the default fallback. Same injected-clock-with-default-fallback posture as agent/prompt.ts / agent/run-ledger/store.ts.",
     },
   },
   {

@@ -1,4 +1,4 @@
-import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import { type LLMPort, retryDispositionForKind, type StreamEvent, type StreamInput } from "@/llm"
 import { LLMError } from "@/shared"
 import type { LlmSurfaceId, LlmTransportId } from "@/shared/llm-route-types"
 import type { ErrorClassifier, RetryRouter } from "./error-routing"
@@ -138,49 +138,29 @@ const PTL_MARKERS = [
   "too many tokens",
 ] as const
 
-/** {@link LLMErrorKind} values (from `@/shared`, the boundary classifier) that
- *  unambiguously map to "transient, safe to retry". */
-const RETRYABLE_KINDS: ReadonlySet<string> = new Set([
-  "overloaded",
-  "rate_limit",
-  "server_error",
-  "network",
-])
-
-/** {@link LLMErrorKind} values that unambiguously map to "never retry".
- *  `not_implemented` is here because a stub adapter throws identically every
- *  call — same-provider retry is pure waste. (It IS fallback-eligible: see
- *  `FALLBACK_KINDS` in `src/llm/fallback.ts`, which lets the chain advance to
- *  the next provider instead.) */
-const FATAL_KINDS: ReadonlySet<string> = new Set([
-  "auth",
-  "bad_request",
-  "not_found",
-  "not_implemented",
-  "stream_corrupt",
-  "aborted",
-  // ADR-0328: by the time `invalid_image` reaches the in-loop retry/
-  // fallback policy, the adapter-side `withImageSanitizationRetry` wrap
-  // has already attempted sanitize-and-retry. Further same-provider retry
-  // (or provider fallback) would re-submit the same poisoned bytes — the
-  // wrap, not this loop, owns recovery. Same FATAL policy as `bad_request`.
-  "invalid_image",
-])
-
 /** True iff `e` looks like a transient LLM failure worth retrying. Only
  *  {@link LLMError} is ever retryable; unknown error types are treated fatal.
  *
- *  Branches on the boundary-assigned `.kind` discriminator first: when the
- *  classifier (`LLMError.fromSdkError`) tagged a definitive kind, that decides
- *  it without re-sniffing the message. Only when `.kind` is `"unknown"` (no
- *  structured signal was available — e.g. a bare `new LLMError(msg)`) do we
- *  fall back to the legacy message-marker scan, preserving prior behavior
- *  byte-for-byte for that path. */
+ *  DOF-30 single authority: the kind-level retry verdict is DERIVED from the
+ *  one `codexSpecRoute` table via {@link retryDispositionForKind} — this file
+ *  no longer carries its own `RETRYABLE_KINDS`/`FATAL_KINDS` sets (removed; the
+ *  table + `decorator-policy.ts` is the sole source of truth). The derivation
+ *  is proven byte-identical to the removed sets for all 18 kinds
+ *  (tests/unit/retry-decorator-policy-hellgate.test.ts).
+ *
+ *  Branches on the boundary-assigned `.kind` discriminator first: a
+ *  `"retry"`/`"no_retry"` disposition decides without re-sniffing the message.
+ *  A `"consult_markers"` disposition (the kinds the table has no decisive
+ *  same-provider retry verdict for — `unknown` and the six Codex-spec kinds
+ *  that legacy `isRetryable` also marker-scanned) falls back to the legacy
+ *  message-marker scan, preserving prior behavior byte-for-byte. */
 export const isRetryable = (e: unknown): boolean => {
   if (!(e instanceof LLMError)) return false
-  if (RETRYABLE_KINDS.has(e.kind)) return true
-  if (FATAL_KINDS.has(e.kind)) return false
-  // e.kind === "unknown": no boundary classification — fall back to markers.
+  const disposition = retryDispositionForKind(e.kind)
+  if (disposition === "retry") return true
+  if (disposition === "no_retry") return false
+  // "consult_markers": no decisive table verdict — fall back to markers
+  // (byte-identical to the pre-dedup `RETRYABLE_KINDS`/`FATAL_KINDS` miss path).
   const msg = e.message.toLowerCase()
   if (FATAL_MARKERS.some((m) => msg.includes(m))) return false
   return RETRYABLE_MARKERS.some((m) => msg.includes(m))

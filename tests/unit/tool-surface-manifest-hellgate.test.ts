@@ -354,11 +354,6 @@ describe("tool-surface manifest — manifest→CATALOG completeness gate (root-c
     ["QUANTA_COVERAGE_TOOL", "coverage_check tool gate — pre-existing, no feature yaml yet"],
     ["QUANTA_DEBUG_TOOLS", "debug tool group gate — pre-existing, no feature yaml yet"],
     [
-      "QUANTA_ENABLE_STRUCTURED_PATCH",
-      "apply_patch_structured gate — pre-existing, no feature yaml yet",
-    ],
-    ["QUANTA_OBJECTIVE_TOOLS", "objective tool group gate — pre-existing, no feature yaml yet"],
-    [
       "QUANTA_SHADOW",
       "shadow-workspace checkpoint/rewind tool gate (shadowOdb) — pre-existing, no feature yaml yet (distinct from the catalogued QUANTA_SHADOW_VERIFY knob)",
     ],

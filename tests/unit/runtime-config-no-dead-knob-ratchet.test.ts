@@ -3,7 +3,7 @@
  *
  * THREAT MODEL. A `RuntimeConfig` gate field (`readonly <name>: T` in
  * `runtime-config/types.ts` + `types-extra.ts`) is PARSED from env in a
- * `runtime-config.ts` loadFromEnv slice, is documented, is knob-registered … and
+ * `runtime-config.ts` parser slice, is documented, is knob-registered … and
  * has ZERO live consumer. The parsed value flows nowhere: no `runtimeConfig().X`
  * read, no populator that hands it to the live subsystem. The knob LOOKS wired
  * (env→config) but is inert (config→∅). This is exactly how `maxConsecutiveFailures`
@@ -27,19 +27,12 @@
  * in `src/` (no `readonly <name>` / `<name>?:` / `<name>:` line outside the
  * runtime-config sources). For a distinctive name, `\b<field>\b` uniquely
  * identifies the RuntimeConfig field's usages, so ZERO non-parse/non-type/non-test
- * matches ⇒ genuinely dead. A NON-distinctive (homonym) name goes in
- * SKIP_NON_DISTINCTIVE — the ratchet HONESTLY declines to judge it rather than
- * emit a brittle assertion. (Measured on the current tree: 121 of 175 fields are
- * distinctive; the 54 skipped are homonyms with other types' fields.)
+ * matches ⇒ genuinely dead. A NON-distinctive (homonym) name needs an exact
+ * owner-seam assertion rather than a misleading bare-name match.
  *
- * TWO INVARIANTS:
- *   (A) FORWARD ratchet — every DISTINCTIVE field with 0 consumers FAILS unless it
- *       is in FORWARD_SEAM_ALLOWLIST (carrying WHY it is still dead + the wiring
- *       target). A NEW distinctive dead knob trips this.
- *   (B) REVERSE-DRIFT guard — every FORWARD_SEAM_ALLOWLIST entry is asserted STILL
- *       dead. If a consumer appeared, FAIL with "now wired, remove from allowlist".
- *       This closes the `mcpSampling`-JSDoc-stale class (a "no consumers" note that
- *       rots into a lie after the field gets wired).
+ * INVARIANT: every DISTINCTIVE field needs a live production consumer. Known
+ * homonyms are asserted at their concrete owner seams. There is no dead-field
+ * allowlist: incomplete wiring must fail the gate rather than become a stale note.
  */
 
 import { describe, expect, test } from "bun:test"
@@ -95,6 +88,29 @@ const PROD_SOURCES: { path: string; text: string }[] = PROD_FILES.map((path) => 
   text: readFileSync(path, "utf8"),
 }))
 
+// Index once: the old checker re-ran a full-tree regex scan for every config
+// field, which made this guard intermittently exceed Bun's 5s per-test budget
+// under concurrent CI. These indexes preserve the exact word/declaration
+// predicates while making each field lookup O(1).
+const DECLARED_FOREIGN_FIELDS = new Set<string>()
+const WORD_CONSUMER_FILES = new Map<string, string[]>()
+for (const source of PROD_SOURCES) {
+  for (const match of source.text.matchAll(
+    /(?:readonly\s+([a-zA-Z][a-zA-Z0-9]*)\b|^\s*([a-zA-Z][a-zA-Z0-9]*)\??\s*:\s)/gm,
+  )) {
+    DECLARED_FOREIGN_FIELDS.add(match[1] ?? match[2] ?? "")
+  }
+  const words = new Set<string>()
+  for (const match of source.text.matchAll(/\b([a-zA-Z][a-zA-Z0-9]*)\b/g)) {
+    words.add(match[1] as string)
+  }
+  for (const word of words) {
+    const paths = WORD_CONSUMER_FILES.get(word)
+    if (paths === undefined) WORD_CONSUMER_FILES.set(word, [source.path])
+    else paths.push(source.path)
+  }
+}
+
 /** Extract `readonly <name>` field names from the two runtime-config type files. */
 function extractFields(): string[] {
   const names = new Set<string>()
@@ -111,124 +127,35 @@ function extractFields(): string[] {
  *  (`readonly name` / `name?:` / `name:` at start-of-property). Used as the
  *  homonym signal: such a name cannot be judged by a bare `\b<name>\b` grep. */
 function isHomonym(field: string): boolean {
-  const decl = new RegExp(`(?:readonly\\s+${field}\\b|^\\s*${field}\\??\\s*:\\s)`, "m")
-  return PROD_SOURCES.some((s) => decl.test(s.text))
+  return DECLARED_FOREIGN_FIELDS.has(field)
 }
 
 /** Count production files that reference `\b<field>\b` (any usage). For a
  *  DISTINCTIVE field this is the true live-consumer count. */
 function consumerFiles(field: string): string[] {
-  const re = new RegExp(`\\b${field}\\b`)
-  return PROD_SOURCES.filter((s) => re.test(s.text)).map((s) => s.path)
+  return WORD_CONSUMER_FILES.get(field) ?? []
 }
 
 const ALL_FIELDS = extractFields()
-
-// ── FORWARD_SEAM_ALLOWLIST ────────────────────────────────────────────────────
-// Distinctive fields that ARE parsed-but-dead ON PURPOSE (forward seam): the env
-// →config half shipped, the config→subsystem half is a named follow-up. Each entry
-// is asserted STILL dead by the reverse-drift guard below.
-//
-// category:
-//   "genuinely-dead"        — the populator that hands the parsed value to the
-//                             live subsystem is ABSENT; the whole feature is inert.
-//   "redundant-parallel-read" — the FEATURE is live, but via a DIRECT
-//                             `gateOn(env, "QUANTA_X")` read elsewhere; the
-//                             RuntimeConfig FIELD is dead-weight and should be
-//                             DELETED (a `/config set` can't reach the direct read
-//                             anyway). Kept here (not deleted) because these are
-//                             security/host-assembly configs owned by other workers.
-type SeamEntry = {
-  category: "genuinely-dead" | "redundant-parallel-read"
-  reason: string
-  target: string
-}
-
-const FORWARD_SEAM_ALLOWLIST: Record<string, SeamEntry> = {
-  // ── jun-6/jun-7 exfil + TLS-MITM rail: parsed, gated, byte-identical-default,
-  //    but the parsed RuntimeConfig value never flows to the live NetworkProxy —
-  //    no populator maps runtimeConfig().<field> onto NetworkProxyConfig.  ───────
-  secretEgressMaxBody: {
-    category: "genuinely-dead",
-    reason:
-      "jun-6 exfil-rail (B) buffered-body byte cap: parsed from QUANTA_SECRET_EGRESS_MAX_BODY " +
-      "but no populator hands it to NetworkProxyConfig.secretEgress — the live proxy reads its " +
-      "own SecretEgressConfig, never runtimeConfig().secretEgressMaxBody. Populator not wired.",
-    target: "RFC jun-6 exfil-rail — wire runtimeConfig()→NetworkProxyConfig.secretEgress populator",
-  },
-  exfilScoutingK: {
-    category: "genuinely-dead",
-    reason:
-      "jun-6 exfil-rail (c) configurable threshold K: parsed from QUANTA_EXFIL_SCOUTING_K but " +
-      "no consumer reads runtimeConfig().exfilScoutingK — the detector (gated by the sibling " +
-      "`exfilScouting`, which IS consumed in admissibility-gate/gates.ts) has no K feed, so it " +
-      "stays inert even when armed. Threshold-consumer not wired.",
-    target: "RFC jun-6 exfil-rail — feed K into the exfil-scouting detector",
-  },
-  tlsMitm: {
-    category: "genuinely-dead",
-    reason:
-      "jun-7 TLS-MITM master switch: parsed via tlsMitmAuthorized(env) but no consumer reads " +
-      "runtimeConfig().tlsMitm — the live CONNECT path (mitm-gate.ts / loopback-proxy) is not " +
-      "driven off this field, so it stays a raw tunnel regardless. Populator absent.",
-    target: "RFC jun-7 TLS-MITM — wire runtimeConfig().tlsMitm into the CONNECT interceptor",
-  },
-  tlsMitmOnFailure: {
-    category: "genuinely-dead",
-    reason:
-      "jun-7 TLS-MITM fail-closed policy: parsed from QUANTA_TLS_MITM_ON_FAILURE but never read " +
-      "(runtimeConfig().tlsMitmOnFailure has 0 consumers); rides along dead with the tlsMitm " +
-      "master switch above. Populator absent.",
-    target: "RFC jun-7 TLS-MITM — consume alongside tlsMitm in the CONNECT interceptor",
-  },
-
-  // ── redundant-parallel-read: FEATURE live via direct env read; FIELD dead. ────
-  capabilityLayer: {
-    category: "redundant-parallel-read",
-    reason:
-      "Capability layer IS live, gated by a DIRECT gateOnStrict(env,'QUANTA_CAPABILITY_LAYER') " +
-      "read in @/capability/resolve + bootstrap-session; runtimeConfig().capabilityLayer has 0 " +
-      "consumers. The FIELD is dead-weight (a /config set can't reach the direct read). DELETE " +
-      "the field (security/bootstrap config owned by another worker).",
-    target:
-      "delete-ticket: drop RuntimeConfig.capabilityLayer (direct QUANTA_CAPABILITY_LAYER read is SSOT)",
-  },
-  sideAgent: {
-    category: "redundant-parallel-read",
-    reason:
-      "Side-agent daemons ARE live, gated by a DIRECT gateOn(env,'QUANTA_SIDE_AGENT') read in " +
-      "host/runtime/agent-config-assembler; runtimeConfig().sideAgent has 0 consumers (the " +
-      "distinct field `sideAgentProcess` IS consumed — different field). FIELD is dead-weight.",
-    target: "delete-ticket: drop RuntimeConfig.sideAgent (direct QUANTA_SIDE_AGENT read is SSOT)",
-  },
-  subagentResume: {
-    category: "redundant-parallel-read",
-    reason:
-      "ADR-0159 work-resume IS live, gated by a DIRECT gateOn(args.envSource,'QUANTA_SUBAGENT_RESUME') " +
-      "read in runner/session-execution-plane; runtimeConfig().subagentResume has 0 consumers — " +
-      "the types.ts JSDoc itself says the wiring reads the env 'directly (not via this)'. Dead-weight.",
-    target:
-      "delete-ticket: drop RuntimeConfig.subagentResume (direct QUANTA_SUBAGENT_RESUME read is SSOT)",
-  },
-}
 
 // ── SKIP_NON_DISTINCTIVE ──────────────────────────────────────────────────────
 // Honest self-limit: fields whose names are HOMONYMS with fields on OTHER types,
 // so a `\b<name>\b` grep cannot tell a RuntimeConfig-field usage from the other
 // type's usage. The ratchet DECLINES to judge these (a false "alive" here would
 // silently mask a dead knob). This set is DISCOVERED dynamically (isHomonym), not
-// hardcoded; the two entries below are documented because they are DEAD-but-masked
-// RuntimeConfig fields the grep would wrongly call alive.
-const SKIP_NON_DISTINCTIVE_NOTES: Record<string, string> = {
-  secretEgress:
-    "HOMONYM with NetworkProxyConfig.secretEgress + mitm.ts. runtimeConfig().secretEgress has 0 " +
-    "consumers (genuinely dead, same jun-6 rail as secretEgressMaxBody) but `\\bsecretEgress\\b` " +
-    "matches this.config.secretEgress in loopback-proxy — grep can't judge it. Track with the rail.",
-  writeBudget:
-    "HOMONYM with AgentConfig/ToolContext.writeBudget. runtimeConfig().writeBudget has 0 consumers " +
-    "(redundant-parallel-read: feature live via direct gateOn(env,'QUANTA_WRITE_BUDGET') in the " +
-    "assembler) but `\\bwriteBudget\\b` matches ctx.writeBudget everywhere — grep can't judge it.",
-}
+// hardcoded. The two known RuntimeConfig homonyms get owner-specific assertions
+// below; a bare identifier scan would otherwise confuse them with proxy/context
+// fields and claim a consumer that is not actually reading RuntimeConfig.
+const HOMONYM_OWNER_READS = {
+  secretEgress: {
+    path: join(SRC, "runner/knobs/knobs/network-proxy.ts"),
+    pattern: /config\.secretEgress\b/,
+  },
+  writeBudget: {
+    path: join(SRC, "host/runtime/security-rails-wire.ts"),
+    pattern: /config\.writeBudget\b/,
+  },
+} as const
 
 // Partition once.
 const DISTINCTIVE: string[] = []
@@ -258,17 +185,17 @@ describe("runtime-config no-dead-knob ratchet", () => {
     // and a name that unambiguously IS consumed (a real distinctive live field)
     // must NOT be flagged — control against a vacuous "everything is dead" checker.
     const liveControl = DISTINCTIVE.find(
-      (f) => !(f in FORWARD_SEAM_ALLOWLIST) && consumerFiles(f).length > 0,
+      (f) => consumerFiles(f).length > 0,
     )
     expect(liveControl).toBeDefined()
     expect(consumerFiles(liveControl as string).length).toBeGreaterThan(0)
   })
 
   // ── (A) FORWARD ratchet: no NEW distinctive dead knob. ────────────────────────
-  test("no distinctive RuntimeConfig field is parsed-but-dead (unless allowlisted)", () => {
+  test("no distinctive RuntimeConfig field is parsed-but-dead", () => {
     const offenders: string[] = []
     for (const field of DISTINCTIVE) {
-      if (consumerFiles(field).length === 0 && !(field in FORWARD_SEAM_ALLOWLIST)) {
+      if (consumerFiles(field).length === 0) {
         offenders.push(field)
       }
     }
@@ -276,38 +203,16 @@ describe("runtime-config no-dead-knob ratchet", () => {
       offenders,
       `Distinctive RuntimeConfig field(s) parsed in runtime-config.ts but with ZERO live consumer ` +
         `(no \\b<field>\\b reference in any non-test, non-parse, non-type production .ts). Either ` +
-        `wire a consumer, delete the field, or add it to FORWARD_SEAM_ALLOWLIST with an honest ` +
-        `reason + wiring target: ${offenders.join(", ")}`,
+        `wire a consumer or delete the field: ${offenders.join(", ")}`,
     ).toEqual([])
   })
 
-  // ── (B) REVERSE-DRIFT guard: every allowlisted field is STILL dead. ───────────
-  test("reverse-drift: every FORWARD_SEAM_ALLOWLIST field is still dead (0 consumers)", () => {
-    const nowWired: string[] = []
-    for (const field of Object.keys(FORWARD_SEAM_ALLOWLIST)) {
-      // the allowlist may only hold DISTINCTIVE fields — a homonym here would be
-      // unjudgeable and mask drift.
-      expect(DISTINCTIVE, `allowlist entry '${field}' must be distinctive`).toContain(field)
-      if (consumerFiles(field).length > 0) nowWired.push(field)
-    }
-    expect(
-      nowWired,
-      `Field(s) in FORWARD_SEAM_ALLOWLIST now HAVE a live consumer — the forward seam closed. ` +
-        `Remove them from the allowlist (the reason/target is now stale, the mcpSampling-JSDoc-rot ` +
-        `class): ${nowWired.join(", ")}`,
-    ).toEqual([])
-  })
-
-  // ── allowlist hygiene: every entry carries a real reason + target. ────────────
-  test("every allowlist entry carries an honest reason + wiring target", () => {
-    for (const [field, e] of Object.entries(FORWARD_SEAM_ALLOWLIST)) {
-      expect(e.reason.length, `${field}.reason too thin`).toBeGreaterThan(40)
-      expect(e.target.length, `${field}.target too thin`).toBeGreaterThan(10)
-      expect(["genuinely-dead", "redundant-parallel-read"]).toContain(e.category)
-    }
-    // documented skip notes must be for actual homonyms.
-    for (const field of Object.keys(SKIP_NON_DISTINCTIVE_NOTES)) {
-      expect(HOMONYMS, `documented skip '${field}' must be a homonym`).toContain(field)
+  test("known homonyms read RuntimeConfig at their owning seams", () => {
+    for (const [field, owner] of Object.entries(HOMONYM_OWNER_READS)) {
+      expect(HOMONYMS, `${field} must remain a genuine homonym`).toContain(field)
+      expect(readFileSync(owner.path, "utf8"), `${field} must read its RuntimeConfig field`).toMatch(
+        owner.pattern,
+      )
     }
   })
 })

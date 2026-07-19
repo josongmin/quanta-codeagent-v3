@@ -107,7 +107,9 @@ export const renderActionDiff = async (
       case "edit":
         return renderEdit(action.input, { maxBytes })
       case "apply_patch":
-        return renderApplyPatch(action.input, { maxLines })
+        return renderApplyPatch(action.input, { maxLines }, "apply_patch")
+      case "apply_patch_structured":
+        return renderApplyPatch(action.input, { maxLines }, "apply_patch_structured")
       case "scripted_replace":
         return await renderScriptedReplace(action.input, { maxBytes, maxLines, reader, diffHunks })
       default:
@@ -172,7 +174,11 @@ const renderEdit = (input: unknown, caps: { maxBytes: number }): string | undefi
   return lines.join("\n")
 }
 
-const renderApplyPatch = (input: unknown, caps: { maxLines: number }): string | undefined => {
+const renderApplyPatch = (
+  input: unknown,
+  caps: { maxLines: number },
+  toolName: "apply_patch" | "apply_patch_structured",
+): string | undefined => {
   const i = asRecord(input)
   if (!i) return undefined
   const patch = asString(i.patch)
@@ -182,7 +188,7 @@ const renderApplyPatch = (input: unknown, caps: { maxLines: number }): string | 
   // file directive lines (`*** Update File: …`) in dim cyan so the user
   // can see what files are touched at a glance.
   const raw = patch.split("\n")
-  const lines: string[] = [dim(cyan("── apply_patch (V4A) ──"))]
+  const lines: string[] = [dim(cyan(`── ${toolName} (V4A) ──`))]
   for (const l of raw) {
     if (l.startsWith("*** ")) lines.push(dim(cyan(l)))
     else if (l.startsWith("+")) lines.push(green(l))

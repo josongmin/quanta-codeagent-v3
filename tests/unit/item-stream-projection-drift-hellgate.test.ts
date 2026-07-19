@@ -25,17 +25,9 @@ import type { SessionEvent } from "@/protocol/session"
 import type { ItemStreamCore } from "@/shared"
 import type { AgentEvent } from "@/stream"
 import { ItemStreamProjector } from "@/stream"
+import { capabilitiesFor } from "../support/session-fixtures"
 
-const manifest = {
-  approvals: "operator" as const,
-  tools: true,
-  memory: false,
-  artifacts: true,
-  subagents: false,
-  automation: false,
-  shellSnapshot: false,
-  transport: "inproc" as const,
-}
+const manifest = capabilitiesFor({ approvals: "operator", tools: true, artifacts: true })
 
 // A representative turn interior: reasoning run → bash command run → edit patch
 // run → boundary flush. Exercises every itemType + both phases + accumulation.

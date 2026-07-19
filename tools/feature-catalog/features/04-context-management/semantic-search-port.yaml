@@ -1,5 +1,5 @@
 id: semantic-search-port
-title: Semantic-search port — embedding-based retrieval seam (Cline-style)
+title: Semantic-search embedder seam — deterministic headless Embedder (Cline-style)
 section: 4
 subsystem: Semantic search (ADR-0254, ADR-0093 retrieval 확장)
 order: 254
@@ -20,39 +20,33 @@ surface_integration:
   method: audited
   verified: "2026-06-09"
   evidence:
-    cli: "runs in the interactive CLI — 6/6 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph (createHeadlessEmbedder consumed by src/runner/assemble/pipeline.ts)"
     web: "pure internal slice primitive (ui_surfaces n-a), no consumer wires it, no UI affordance"
 purpose: |
   Cline / Cursor `CLIENT_SIDE_TOOL_V2_SEMANTIC_SEARCH_FULL` 패턴 흡수의 slice
-  primitive — 워크스페이스 코퍼스를 in-memory index로 묶고 쿼리 임베딩 대비
-  cosine similarity로 top-k 검색. quanta는 `grep`/`glob`/`lsp_nav` 같은
-  lexical retrieval과 ADR-0159 hybrid-query 펀넬은 이미 갖췄지만,
-  embedding-based 본체 (consumer)는 비어 있었다. 이번 라운드는 closed
-  `SemanticIndex` port + 별도 `Embedder` 주입 심 + in-memory cosine adapter +
-  결정론적 headless embedder + 15-case hellgate 까지만. 실 embedding model
-  (OpenAI / Voyage / Cohere) integration, persistence, hybrid (lexical +
-  semantic blend)는 deliberate hold.
+  primitive. quanta는 `grep`/`glob`/`lsp_nav` 같은 lexical retrieval과
+  ADR-0159 hybrid-query 펀넬은 이미 갖췄고, embedding-based 본체는 별도
+  파이프라인(@/retrieval/pipeline)의 vector-in `SemanticIndex`로 산다.
 
-  핵심 모양:
-    - `SemanticIndex { index(docs), query(text, k), clear(), size() }` — 모든
-      I/O 경로 메서드 `Result<…, SearchError>` (no-throw across port)
+  이 슬라이스는 그 파이프라인이 소비하는 결정론적 headless `Embedder`만
+  남긴다. 초기 라운드에 있던 text-in `SemanticIndex` port + in-memory cosine
+  adapter는 @/retrieval/pipeline의 live vector-in `SemanticIndex`와 **증명된
+  중복**(zero consumer)이라 제거됐다 (proven-duplicate cleanup, ADR-0254 정정).
+  실 embedding model (OpenAI / Voyage / Cohere) integration은 sibling feature
+  `semantic-index-real-embedder`(ADR-0392)가 담당한다.
+
+  핵심 모양(잔존):
     - `Embedder { embed(text): Promise<Result<EmbeddingVector, EmbedError>>;
-      dim(): number }` — SemanticIndex와 **분리된** 주입 심 (HTTP/I/O 경계 ≠
-      pure math)
-    - `SearchError = empty-text | invalid-k | embed-failed | dim-mismatch`
-      (closed discriminated union)
-    - in-memory adapter: Map + cosine + deterministic tie-break (score desc,
-      id asc)
+      dim(): number }` — HTTP/I/O 경계를 격리한 주입 심
+    - `EmbedError = empty-text | embed-failed` (closed discriminated union)
     - headless-embedder: Bernstein hash → Mulberry32 PRNG → L2-normalized
       fixed-dim vector (same text ⇒ byte-identical vector)
-    - default-OFF byte-identical: 어떤 src/ consumer도 자동 wire 하지 않음
-      (RFC §1.2)
+    - default-OFF byte-identical: 유일 src/ consumer는
+      `src/runner/assemble/pipeline.ts` (createHeadlessEmbedder)
 evidence:
   code:
     - src/retrieval/semantic/types.ts
     - src/retrieval/semantic/embed-port.ts
-    - src/retrieval/semantic/port.ts
-    - src/retrieval/semantic/in-memory-index.ts
     - src/retrieval/semantic/headless-embedder.ts
     - src/retrieval/semantic/index.ts
   adrs: [254, 93]
@@ -64,26 +58,30 @@ evidence:
 knobs: []
 deliberate_hold:
   reason: |
-    - 실 embedding adapter (OpenAI / Voyage / Cohere via ADR-0159 EmbeddingPort
-      composition) — 이번 라운드는 deterministic headless stub 만
-    - persistence (~/.quanta/semantic/{sessionId}.bin 같은 on-disk format) —
-      현재는 restart 시 index 소실; 사용량이 정당화되면 sibling ADR로 분리 착륙
-    - hybrid (lexical + semantic blend) — ADR-0159 runHybridQuery에 이 슬라이스가
-      embeddingSource로 wired 된 다음 라운드
-    - HNSW / IVF approximate-NN index — O(N) 선형 스캔이 MVP scale에서는 충분;
-      코퍼스 크기가 정당화되면 별도 ADR
+    - 실 embedding adapter (OpenAI / Voyage / Cohere) — 이 슬라이스는
+      deterministic headless stub 만; 실 provider는 sibling
+      `semantic-index-real-embedder`(ADR-0392) 담당
+    - persistence / hybrid blend / HNSW·IVF ANN index — 전부 pipeline 쪽
+      (@/retrieval/pipeline + @/retrieval/engines) 책임으로 이동, 이 슬라이스는
+      embedder primitive만 유지
     - tool wiring (semantic_search 같은 새 도구 surface) — primitive만 먼저 안전
       착륙, wiring은 후속
+  promotion_path: |
+    Reduced to the live embedder primitive. The only consumer is
+    `src/runner/assemble/pipeline.ts` (`createHeadlessEmbedder`), which feeds
+    the pipeline's vector-in `SemanticIndex` (`@/retrieval/pipeline`). The dead
+    text-in `SemanticIndex` port + in-memory cosine adapter that once lived here
+    were removed as a proven duplicate (zero consumers) of that live port.
+    Promotion of live semantic retrieval is owned by
+    `semantic-index-real-embedder` (ADR-0392, search-index-backend.ts); this
+    entry stays at L2 as the deterministic-embedder seam.
 notes: |
-  Sibling 시 import 방향: src/retrieval/semantic/ → @/shared (Result/ok/err) 만.
-  다른 슬라이스 / 다른 retrieval 파일 역참조 없음. 기존 src/retrieval/{embedders,
-  commit-embedder, hybrid-query, index}.ts 는 이 라운드에서 unchanged. 슬라이스
-  primitive 안전 착륙 후 hybrid-query.embeddingSource 와이어가 다음 단계.
-
-  Cosine 정확도는 hellgate에서 수학적으로 검증 (단순 순서가 아니라 ~1e-9 tolerance
-  로 수치 동등) — refactor가 수식을 재유도하다가 normalisation을 빠뜨리는 회귀를
-  봉합한다.
+  Import 방향: src/retrieval/semantic/ → @/shared (Result/ok/err) 만. 다른
+  슬라이스 역참조 없음. 이 슬라이스는 embedder primitive만 남았다 — text-in
+  `SemanticIndex` port(port.ts) + in-memory cosine adapter(in-memory-index.ts)는
+  @/retrieval/pipeline의 live vector-in `SemanticIndex`와 증명된 중복이라
+  제거됐다(zero consumer; proven-duplicate cleanup).
 
   Headless embedder는 hash-based — 의미상 유사한 텍스트가 가까운 벡터가 된다는
-  보장이 **없다**. 의미 유사성 신호가 필요한 테스트는 fake Embedder를 직접 손으로
-  깔아 cosine 값을 통제한다 (HELL-SS-05가 정확히 그 패턴).
+  보장이 **없다** (deterministic stub). 출력은 L2-normalised라 cosine이 dim과
+  무관하게 [-1, 1]에 머문다; hellgate가 normalisation 회귀를 봉합한다.

@@ -17,10 +17,20 @@ import {
 
 const ctx = (): ToolContext => ({ cwd: "/repo", signal: new AbortController().signal })
 
-const run = async (tool: Tool, input: unknown): Promise<{ ok: boolean; output: string }> => {
-  let last = { ok: false, output: "no result" }
+const run = async (
+  tool: Tool,
+  input: unknown,
+): Promise<{ ok: boolean; output: string; reason?: string }> => {
+  let last: { ok: boolean; output: string; reason?: string } = { ok: false, output: "no result" }
   for await (const ev of tool.execute(input as never, ctx()) as AsyncIterable<ToolEvent>) {
-    if (ev.type === "result") last = { ok: ev.result.ok, output: ev.result.output }
+    if (ev.type === "result") {
+      const f = ev.result.ok ? undefined : ev.result.failure
+      last = {
+        ok: ev.result.ok,
+        output: ev.result.output,
+        ...(f !== undefined && "reason" in f ? { reason: f.reason as string } : {}),
+      }
+    }
   }
   return last
 }
@@ -36,14 +46,17 @@ const fakeRegistry = (opts?: {
   cap?: number
 }): SideAgentDaemonPort & {
   _findings: SideAgentFindingView[]
+  _spawnCalls: number
 } => {
   const snaps: SideAgentSnapshotView[] = []
   const findings: SideAgentFindingView[] = []
   let n = 0
   const cap = opts?.cap ?? 99
-  return {
+  const self = {
     _findings: findings,
+    _spawnCalls: 0,
     spawn(spec: SideAgentSpecView): string {
+      self._spawnCalls += 1
       if (snaps.length >= cap) throw new Error("cap-exceeded: max concurrent daemons")
       n += 1
       const id = `sa-${n}`
@@ -68,6 +81,7 @@ const fakeRegistry = (opts?: {
       return true
     },
   }
+  return self
 }
 
 const spawnInput = {
@@ -76,6 +90,56 @@ const spawnInput = {
   max_wakes: 10,
   max_turns_per_wake: 3,
 }
+
+describe("side_agent_spawn — depth authority (§4 defense-in-depth: a leaf cannot mint daemons)", () => {
+  test("admitChild()===false DENIES creation AND registry.spawn is NEVER invoked (typed depth_exceeded)", async () => {
+    const reg = fakeRegistry()
+    const denied = sideAgentTools(reg, () => false)
+    const res = await run(byName(denied, "side_agent_spawn"), spawnInput)
+    expect(res.ok).toBe(false)
+    // Typed rejection reason — a mutation that returned ok:false with a different
+    // reason (e.g. swallowed the gate into bad_input) goes RED here.
+    expect(res.reason).toBe("depth_exceeded")
+    expect(res.output.toLowerCase()).toContain("depth")
+    // REAL EFFECT (not just the message / not just an empty list render): the
+    // registry's `spawn` was never even entered. If the gate were dropped, the
+    // guarded early-return vanishes and spawn is called ⇒ this flips RED.
+    expect(reg._spawnCalls).toBe(0)
+    const listed = await run(byName(denied, "side_agent_list"), {})
+    expect(listed.output).toContain("No background")
+  })
+
+  test("admitChild()===true spawns exactly once AND the daemon is registered (paired control)", async () => {
+    const reg = fakeRegistry()
+    const allowed = sideAgentTools(reg, () => true)
+    const res = await run(byName(allowed, "side_agent_spawn"), spawnInput)
+    expect(res.ok).toBe(true)
+    // Paired-control real effect: the SAME registry, only the predicate flipped,
+    // now DID create — spawn entered once and list reflects the live daemon. This
+    // proves the deny above is driven by the predicate, not by a broken registry.
+    expect(reg._spawnCalls).toBe(1)
+    const listed = await run(byName(allowed, "side_agent_list"), {})
+    expect(listed.output).toContain("sa-1")
+  })
+
+  test("admitChild is consulted PER call (a later deny still blocks after an earlier allow)", async () => {
+    // A stateful predicate: admit the first spawn, deny the second. Proves the gate
+    // is evaluated on every execute (not cached / not read once at build time) —
+    // a mutation that hoisted the check to build-time would let the 2nd through.
+    const reg = fakeRegistry()
+    let calls = 0
+    const tools = sideAgentTools(reg, () => {
+      calls += 1
+      return calls === 1
+    })
+    const first = await run(byName(tools, "side_agent_spawn"), spawnInput)
+    const second = await run(byName(tools, "side_agent_spawn"), spawnInput)
+    expect(first.ok).toBe(true)
+    expect(second.ok).toBe(false)
+    expect(second.reason).toBe("depth_exceeded")
+    expect(reg._spawnCalls).toBe(1) // only the admitted call reached the registry
+  })
+})
 
 describe("side-agent tools — spawn/list/stop/findings", () => {
   test("spawn registers a daemon → list shows it; stop by id", async () => {

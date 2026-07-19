@@ -48,7 +48,16 @@ const drive = async (
 
 describe("(a) bash timeout ⇒ failure.mode: 'timeout'", () => {
   test("sleep over deadline → ok:false, failure.timeout with timeoutMs", async () => {
-    const r = await drive(bashTool, { command: "sleep 5", timeout_ms: 30 })
+    // `timeout_behavior:"kill"` exercises the legacy SIGTERM-on-deadline path.
+    // The auto-background default is now `"background"` (parsers.ts) which would
+    // DETACH the still-running child into the bg registry (ok:true) instead of
+    // killing it; the per-call `"kill"` override restores kill-on-deadline so
+    // the deadline yields ok:false + failure.mode:"timeout".
+    const r = await drive(bashTool, {
+      command: "sleep 5",
+      timeout_ms: 30,
+      timeout_behavior: "kill",
+    })
     expect(r.ok).toBe(false)
     expect(r.failure?.mode).toBe("timeout")
     if (r.failure?.mode === "timeout") {

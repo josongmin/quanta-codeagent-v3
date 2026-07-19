@@ -18,6 +18,7 @@
  * them out. Unit-tested directly with synthetic events — no browser needed.
  */
 
+import { sliceWholeChars } from "@/shared"
 import type { NetworkEntry } from "../types"
 
 export interface NetworkBuffer {
@@ -118,7 +119,7 @@ export const buildNetworkEntry = (method: string, params: unknown): NetworkEntry
       return {
         ...out,
         ...(status !== undefined ? { status } : {}),
-        ...(typeof mime === "string" ? { mime: mime.slice(0, MIME_CAP) } : {}),
+        ...(typeof mime === "string" ? { mime: sliceWholeChars(mime, MIME_CAP) } : {}),
       }
     }
     case "Network.loadingFinished": {

@@ -6,11 +6,25 @@ import { join } from "node:path"
 import type { GroundingPayload } from "@/../src/apps/eval/storage"
 import { ResultStore } from "@/../src/apps/eval/storage"
 
-const runEval = (...args: string[]) =>
-  spawnSync(process.execPath, ["run", "src/apps/eval/index.ts", ...args], {
+/** The eval CLI imports the full harness even for argument validation. Bound
+ * each hermetic child so a contended full-suite worker cannot leave a blocking
+ * `spawnSync` child alive indefinitely; callers receive a diagnostic instead of
+ * an opaque `status === null`. */
+const EVAL_CLI_CHILD_TIMEOUT_MS = 30_000
+const runEval = (...args: string[]) => {
+  const out = spawnSync(process.execPath, ["run", "src/apps/eval/index.ts", ...args], {
     cwd: "/Users/songmin/quanta-codeagent-v3",
     encoding: "utf8",
+    timeout: EVAL_CLI_CHILD_TIMEOUT_MS,
+    killSignal: "SIGKILL",
   })
+  if (out.error !== undefined) {
+    throw new Error(
+      `eval CLI child failed for ${args.join(" ") || "--help"}: ${out.error.message}\n${out.stderr}`,
+    )
+  }
+  return out
+}
 
 const payload = (over: Partial<GroundingPayload> = {}): GroundingPayload => {
   const actual = over.actual ?? {
@@ -77,7 +91,7 @@ describe("eval grounding CLI", () => {
     expect(out.stdout).toContain(
       "grounding promote-replay --draft PATH --gold-json PATH --corpus replay_critical|replay_nightly --out PATH",
     )
-  })
+  }, EVAL_CLI_CHILD_TIMEOUT_MS)
 
   test("grounding requires a valid subcommand", () => {
     const out = runEval("grounding")
@@ -85,7 +99,7 @@ describe("eval grounding CLI", () => {
     expect(out.stderr).toContain(
       "eval grounding: subcommand must be one of: run, preflight, report, baseline, gate, compare, regress, scaffold-replay, promote-replay",
     )
-  })
+  }, EVAL_CLI_CHILD_TIMEOUT_MS)
 
   test("grounding run rejects invalid suites and report/gate validate required args", () => {
     const badSuite = runEval("grounding", "run", "--suite", "bogus")
@@ -170,16 +184,16 @@ describe("eval grounding CLI", () => {
     )
     expect(badReplayCorpus.status).toBe(1)
     expect(badReplayCorpus.stderr).toContain("--corpus must be replay_critical or replay_nightly")
-    // Each `runEval` cold-spawns `bun run src/apps/eval/index.ts` (~13s app load);
-    // this test fires several, so the 5s default test timeout is structurally too
-    // tight (flaky timeout, not a logic failure). Generous bound for the subprocess.
-  }, 60_000)
+    // Each assertion cold-spawns the full eval harness. Under a contended unit
+    // run, the aggregate can exceed 60s despite every child staying within its
+    // own 30s kill cap; retain all validation cases with a total-test budget.
+  }, 180_000)
 
   test("grounding run rejects invalid concurrency", () => {
     const out = runEval("grounding", "run", "--suite", "canary", "--concurrency", "0")
     expect(out.status).toBe(1)
     expect(out.stderr).toContain("invalid --concurrency 0")
-  })
+  }, EVAL_CLI_CHILD_TIMEOUT_MS)
 
   test("grounding CLI honors --store-dir and writes structured artifacts", async () => {
     const root = mkdtempSync(join(tmpdir(), "grounding-cli-store-"))

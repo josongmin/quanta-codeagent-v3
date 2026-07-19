@@ -114,10 +114,20 @@ const renderResult = (result: AppshotResult): string => {
 
 /** Map the loop outcome to a ToolResult. `pass`/`exhausted` are reported as
  *  `ok:true` (the loop COMPLETED — exhaustion is a real, surfaced verdict, not a
- *  tool failure); `failed` (an effect error: Chrome down, jail escape, abort) is
- *  `ok:false` with a typed failure so the model can react. */
+ *  tool failure); `failed` (an effect error: Chrome down, jail escape, abort) AND
+ *  `refused` (a fail-closed pre-flight/contract refusal: browser/judge
+ *  unavailable, or an unverified pass) are BOTH `ok:false` with a typed failure so
+ *  the model can never read a refusal/failure as a passing verdict. A refusal is
+ *  `mode:"rejected"` (nothing was attempted-and-broke), a failure `mode:"error"`. */
 const toToolResult = (result: AppshotResult): ToolResult => {
   const output = renderResult(result)
+  if (result.outcome === "refused") {
+    const e = result.error
+    return err(output, {
+      mode: "rejected",
+      reason: e !== undefined ? e.kind : "appshot_refused",
+    })
+  }
   if (result.outcome === "failed") {
     const e = result.error
     return err(output, {

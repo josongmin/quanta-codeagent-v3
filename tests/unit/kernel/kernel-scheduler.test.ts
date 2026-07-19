@@ -6,17 +6,9 @@ import {
   InMemorySessionEventLog,
 } from "@/kernel/session"
 import type { Message } from "@/llm"
+import { capabilitiesFor } from "../../support/session-fixtures"
 
-const manifest = {
-  approvals: "operator" as const,
-  tools: true,
-  memory: false,
-  artifacts: true,
-  subagents: false,
-  automation: false,
-  shellSnapshot: false,
-  transport: "inproc" as const,
-}
+const manifest = capabilitiesFor({ approvals: "operator", tools: true, artifacts: true })
 
 const makeOutcome = (reason: AgentOutcome["reason"]) =>
   ({

@@ -26,7 +26,7 @@
 export type { AgentMeta } from "./agent-meta"
 export { AgentMetaRegistry } from "./agent-meta"
 export type { AgentToolOptions } from "./agent-tool"
-export { createAgentTool } from "./agent-tool"
+export { createAgentTool, ownersForRegistry, ROOT_LINEAGE } from "./agent-tool"
 export { createSubagent6Tools, type Subagent6ToolSet } from "./agent-tools-6"
 export {
   type AgentTypeClass,
@@ -55,6 +55,9 @@ export {
 } from "./handlers-6"
 export {
   createIntrospectTools,
+  type DeliveryOutcomeMirror,
+  type DeliveryPort,
+  type DeliveryRequestMirror,
   type FollowupTaskInput,
   FollowupTaskInputSchema,
   type FollowupTaskOutput,
@@ -92,7 +95,7 @@ export {
 } from "./tools-6"
 export type { GateWaitResult, GateWakeResult } from "./turn-gate"
 export { SubagentTurnGate } from "./turn-gate"
-export type { WakeOutcome, Waker } from "./turn-wake"
+export type { ControlEndpoint, WakeOutcome, Waker } from "./turn-wake"
 export { TurnWakeRegistry } from "./turn-wake"
 export type {
   SubagentRequest,

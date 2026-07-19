@@ -346,6 +346,104 @@ const detectedToGlobRule = (d: DetectedRule): GlobRule | undefined => {
   }
 }
 
+// ─── Fail-closed diagnostics — no silent partial drop ───────────────────
+//
+// PARTIAL-WIRE HAZARD (DOF-40): when the detector is enabled but a repo
+// contains vendor rule files the detector could NOT ingest, those files
+// must NOT vanish invisibly. Two silent-drop surfaces existed pre-hardening:
+//
+//   1. `DetectionResult.errors` — per-file parse failures the detector
+//      accumulates precisely so "the consumer can surface them in
+//      diagnostics" (port.ts DetectorError JSDoc). The old loader did
+//      `detected = result.rules` and discarded `errors` entirely.
+//   2. Compose-time drops — a `DetectedRule` that `detectedToGlobRule`
+//      rejects (empty body / no-glob non-always), a rule filtered out by
+//      the `vendors` subset, or a rule truncated by the `MAX_RULE_FILES`
+//      cap. All previously dropped with zero signal.
+//
+// Rather than swallow, we surface EVERY unconsumed item through an optional
+// `onUnconsumed` sink. A wiring host that opts in either consumes the sink
+// (visible) or explicitly passes none — but the drop is never invisible to
+// the loader's own contract. Default-OFF is unaffected: the sink only fires
+// on the enabled arm, and the OFF arm returns byte-identical legacy output
+// without ever constructing a diagnostic.
+
+/** One reason a detected/candidate vendor rule did not reach the prompt.
+ *  Closed union so a host switch stays exhaustive as reasons are added. */
+export type VendorRuleUnconsumedReason =
+  | "parse_error" // detector could not ingest the file (DetectionResult.errors)
+  | "empty_or_no_trigger" // detectedToGlobRule rejected (no body / no glob & not always-apply)
+  | "vendor_filtered" // excluded by the `vendors` subset filter
+  | "max_files_cap" // dropped because MAX_RULE_FILES was already reached
+  | "collision_lost" // same sourcePath already claimed by a higher-priority rule
+
+/** A single unconsumed vendor rule — surfaced so the partial state is
+ *  explicit, never a silent swallow. `message` is present only for
+ *  `parse_error` (carries the detector's human-readable diagnostic). */
+export interface VendorRuleUnconsumed {
+  readonly vendor: VendorId
+  readonly sourcePath: string
+  readonly reason: VendorRuleUnconsumedReason
+  readonly message?: string
+}
+
+/** Sink for {@link VendorRuleUnconsumed}. Invoked ONCE per unconsumed item
+ *  before the composed result returns. MUST NOT throw (the loader guards,
+ *  but a well-behaved host keeps the sink side-effect-free). */
+export type VendorRuleUnconsumedSink = (item: VendorRuleUnconsumed) => void
+
+/** Slot value in the compose map: chosen priority + rule + (for a DETECTED
+ *  occupant) its vendor. `vendor === undefined` ⇒ a legacy/native rule holds
+ *  the slot, which is never surfaced as a swallowed vendor drop when evicted. */
+type ComposeSlot = { priority: number; rule: GlobRule; vendor?: VendorId }
+
+/** Decide the fate of ONE detected rule against the running `byPath` map,
+ *  mutating the map on an insert/displace and calling `report` for every
+ *  drop. Extracted from {@link composeGlobRulesWithDetected} so the
+ *  DOF-40 fail-closed branching does not blow the compose function's
+ *  cognitive-complexity budget. Every non-insert outcome reports exactly
+ *  one {@link VendorRuleUnconsumed} — there is no silent path. */
+const placeDetectedRule = (
+  d: DetectedRule,
+  byPath: Map<string, ComposeSlot>,
+  priorityOf: Readonly<Record<VendorId, number>>,
+  allowed: ReadonlySet<VendorId> | undefined,
+  report: (item: VendorRuleUnconsumed) => void,
+): void => {
+  if (byPath.size >= MAX_RULE_FILES) {
+    report({ vendor: d.vendor, sourcePath: d.sourcePath, reason: "max_files_cap" })
+    return
+  }
+  if (allowed !== undefined && !allowed.has(d.vendor)) {
+    report({ vendor: d.vendor, sourcePath: d.sourcePath, reason: "vendor_filtered" })
+    return
+  }
+  const g = detectedToGlobRule(d)
+  if (g === undefined) {
+    report({ vendor: d.vendor, sourcePath: d.sourcePath, reason: "empty_or_no_trigger" })
+    return
+  }
+  const pri = priorityOf[d.vendor]
+  const existing = byPath.get(g.sourcePath)
+  if (existing === undefined) {
+    byPath.set(g.sourcePath, { priority: pri, rule: g, vendor: d.vendor })
+    return
+  }
+  // Lower index wins; on a tie KEEP the first writer (legacy sat there first,
+  // so a user's native config stays authoritative — vendor-table posture).
+  if (pri >= existing.priority) {
+    report({ vendor: d.vendor, sourcePath: d.sourcePath, reason: "collision_lost" })
+    return
+  }
+  // The incoming detected rule DISPLACES the occupant. If that occupant was a
+  // DETECTED vendor rule (not legacy/native), it is now dropped — surface it
+  // so the eviction is never silent (R1 audit).
+  if (existing.vendor !== undefined) {
+    report({ vendor: existing.vendor, sourcePath: g.sourcePath, reason: "collision_lost" })
+  }
+  byPath.set(g.sourcePath, { priority: pri, rule: g, vendor: d.vendor })
+}
+
 /** Compose `legacyRules` (from `loadGlobRules`) with `detected` (from
  *  `VendorDetectorPort.detectAll`). Deduplication is by absolute
  *  `sourcePath`; on collision the vendor with the LOWER priority index
@@ -368,14 +466,29 @@ export const composeGlobRulesWithDetected = (
     readonly vendors?: ReadonlyArray<VendorId>
     /** Per-call priority override; ABSENT ⇒ canonical order. */
     readonly priority?: ReadonlyArray<VendorId>
+    /** Fail-closed diagnostic sink (DOF-40). ABSENT ⇒ no reporting, but the
+     *  returned GlobRule[] is byte-identical either way — the sink observes
+     *  drops, it never changes the composition. */
+    readonly onUnconsumed?: VendorRuleUnconsumedSink
   },
 ): GlobRule[] => {
   const priorityOf = buildPriorityOf(opts?.priority)
   const allowed: ReadonlySet<VendorId> | undefined =
     opts?.vendors !== undefined ? new Set<VendorId>(opts.vendors) : undefined
+  // No-throw sink wrapper — a diagnostic must never derail rule loading.
+  const report = (item: VendorRuleUnconsumed): void => {
+    if (opts?.onUnconsumed === undefined) return
+    try {
+      opts.onUnconsumed(item)
+    } catch {
+      /* fail-closed: a broken sink cannot break the loader */
+    }
+  }
   // Keyed by absolute sourcePath. Each entry carries the chosen vendor's
-  // priority + the resulting GlobRule.
-  const byPath = new Map<string, { priority: number; rule: GlobRule }>()
+  // priority + the resulting GlobRule + which vendor the DETECTED entry came
+  // from (undefined ⇒ the slot currently holds a legacy/native rule; legacy
+  // is not a "vendor drop" to surface when displaced).
+  const byPath = new Map<string, ComposeSlot>()
   // Legacy rules first — they are quanta-equivalent for precedence.
   const legacyPriority = priorityOf.quanta
   for (const r of legacyRules) {
@@ -383,24 +496,11 @@ export const composeGlobRulesWithDetected = (
   }
   // Detector rules second; collision-resolve by priority. We honour
   // `MAX_RULE_FILES` here too — composition cannot blow the per-turn
-  // selector's O(N) cost.
+  // selector's O(N) cost. Every rule that does NOT make it into the
+  // result is surfaced via `report` so the drop is explicit (see
+  // {@link placeDetectedRule} for the per-rule decision + reporting).
   for (const d of detected) {
-    if (byPath.size >= MAX_RULE_FILES) break
-    if (allowed !== undefined && !allowed.has(d.vendor)) continue
-    const g = detectedToGlobRule(d)
-    if (g === undefined) continue
-    const pri = priorityOf[d.vendor]
-    const existing = byPath.get(g.sourcePath)
-    if (existing === undefined) {
-      byPath.set(g.sourcePath, { priority: pri, rule: g })
-      continue
-    }
-    // Lower index wins; if equal, KEEP the first writer (legacy already
-    // sat there, so legacy wins on ties — matches the "user's native
-    // config is authoritative" posture from the vendor table doc).
-    if (pri < existing.priority) {
-      byPath.set(g.sourcePath, { priority: pri, rule: g })
-    }
+    placeDetectedRule(d, byPath, priorityOf, allowed, report)
   }
   // Stable sort: priority asc, then sourcePath asc.
   const out = Array.from(byPath.values())
@@ -420,6 +520,14 @@ export interface LoadGlobRulesWithVendorsOpts {
   readonly detector?: VendorDetectorPort
   readonly vendors?: ReadonlyArray<VendorId>
   readonly priority?: ReadonlyArray<VendorId>
+  /** Fail-closed diagnostic sink (DOF-40). When the enabled arm drops any
+   *  candidate vendor rule — a detector parse `error`, a compose-time
+   *  filter/collision/cap — the item is reported here BEFORE returning.
+   *  ABSENT ⇒ no reporting; the returned GlobRule[] is byte-identical
+   *  regardless. The sink exists so a partially-wired host never silently
+   *  swallows vendor rules: the drop is either observed or explicitly
+   *  un-observed by choosing to omit the sink. */
+  readonly onUnconsumed?: VendorRuleUnconsumedSink
 }
 
 /** OPT-IN composer for ADR-0205 multi-vendor rule detection. Returns
@@ -427,7 +535,13 @@ export interface LoadGlobRulesWithVendorsOpts {
  *  `opts?.vendorDetectorEnabled !== true` (or when the optional detector
  *  throws — the no-throw contract is enforced here). When enabled and
  *  the detector returns rules, the legacy + detected sets are deduped
- *  by sourcePath using {@link composeGlobRulesWithDetected}. */
+ *  by sourcePath using {@link composeGlobRulesWithDetected}.
+ *
+ *  DOF-40 fail-closed: `DetectionResult.errors` (per-file parse failures)
+ *  and every compose-time drop are surfaced through `opts.onUnconsumed`.
+ *  The old loader discarded `result.errors` with `detected = result.rules`,
+ *  so a repo whose `.cursor/rules/*.mdc` failed to parse lost those rules
+ *  with zero visibility. Now the drop is never silent. */
 export const loadGlobRulesWithVendors = async (
   cwd: string,
   opts?: LoadGlobRulesWithVendorsOpts,
@@ -438,19 +552,41 @@ export const loadGlobRulesWithVendors = async (
     return legacy
   }
   const detector = opts.detector ?? createDefaultVendorDetector()
+  // No-throw sink wrapper — a diagnostic must never derail session start.
+  const report = (item: VendorRuleUnconsumed): void => {
+    if (opts.onUnconsumed === undefined) return
+    try {
+      opts.onUnconsumed(item)
+    } catch {
+      /* fail-closed: a broken sink cannot break the loader */
+    }
+  }
   // No-throw: a buggy detector cannot derail session start. We catch
   // EVERY failure and fall back to the legacy output (the user-facing
   // surface is "auto-detect best-effort"; rule-load failures show up
   // via the detector's `DetectorError` list, not via session crash).
   let detected: ReadonlyArray<DetectedRule>
+  let detectorErrors: ReadonlyArray<{ vendor: VendorId; sourcePath: string; message: string }>
   try {
     const result = await detector.detectAll({ cwd })
     detected = result.rules
+    detectorErrors = result.errors
   } catch {
     return legacy
+  }
+  // DOF-40: surface the detector's own per-file parse failures. These were
+  // silently dropped by the pre-hardening `detected = result.rules` line.
+  for (const e of detectorErrors) {
+    report({
+      vendor: e.vendor,
+      sourcePath: e.sourcePath,
+      reason: "parse_error",
+      message: e.message,
+    })
   }
   return composeGlobRulesWithDetected(legacy, detected, {
     ...(opts.vendors !== undefined ? { vendors: opts.vendors } : {}),
     ...(opts.priority !== undefined ? { priority: opts.priority } : {}),
+    onUnconsumed: report,
   })
 }

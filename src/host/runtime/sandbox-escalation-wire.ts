@@ -46,7 +46,7 @@ import {
 import type { AgentConfig } from "@/agent/types"
 import type { PermissionStore, PostDenialAction, ToolAction } from "@/permission"
 import { classifySandboxDenial } from "@/runtime/os-sandbox"
-import { runtimeConfig } from "@/shared"
+import type { RuntimeConfig } from "@/shared"
 import {
   __setBashSandboxEscalationHandler,
   type BashSandboxEscalationHandler,
@@ -193,8 +193,11 @@ const buildHandler = (
  * `QUANTA_SANDBOX_ESCALATION_MAX`. Knob-OFF ⇒ no-op; idempotent (the assembler
  * is the single caller).
  */
-export const maybeWireBashSandboxEscalation = (cfg: AgentConfig): void => {
-  if (!runtimeConfig().sandboxEscalation) {
+export const maybeWireBashSandboxEscalation = (
+  cfg: AgentConfig,
+  config: Pick<RuntimeConfig, "sandboxEscalation" | "sandboxEscalationMax">,
+): void => {
+  if (!config.sandboxEscalation) {
     // Default-OFF: ensure no stale handler from a prior session lingers.
     __setBashSandboxEscalationHandler(undefined)
     return
@@ -206,6 +209,6 @@ export const maybeWireBashSandboxEscalation = (cfg: AgentConfig): void => {
     __setBashSandboxEscalationHandler(undefined)
     return
   }
-  const cap = createSandboxEscalationCap(runtimeConfig().sandboxEscalationMax)
+  const cap = createSandboxEscalationCap(config.sandboxEscalationMax)
   __setBashSandboxEscalationHandler(buildHandler(store, cap, cfg.onConfirm))
 }

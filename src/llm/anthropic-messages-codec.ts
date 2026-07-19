@@ -1,5 +1,10 @@
 import type Anthropic from "@anthropic-ai/sdk"
 import { LLMError } from "@/shared/errors"
+import {
+  type ResponseFormat,
+  toAnthropicForcedTool,
+  validateResponseFormat,
+} from "./structured-output"
 import type {
   CacheTtl,
   ContentBlock,
@@ -190,6 +195,50 @@ export const normalizeAnthropicServiceTier = (
   return undefined
 }
 
+/** The Anthropic wire fragment for a schema-forced response: the single tool
+ *  whose `input_schema` IS the json schema, plus the `tool_choice` that FORCES
+ *  the model to call it. This is Anthropic's documented equivalent of OpenAI's
+ *  `response_format` (Anthropic Messages has no `response_format` knob — see
+ *  {@link RESPONSE_FORMAT_ANTHROPIC_NOTE}). */
+export interface AnthropicForcedFormat {
+  readonly tool: Anthropic.Tool
+  readonly toolChoice: Anthropic.MessageCreateParams["tool_choice"]
+}
+
+/**
+ * ADR-0469 — resolve `StreamInput.responseFormat` to the Anthropic forced-tool
+ * wire fragment (PROVIDER PARITY with the OpenAI native `response_format`).
+ * Absent ⇒ `undefined` so the caller omits every key (byte-identical
+ * default-OFF). Present ⇒ the request fragment is FIRST validated
+ * ({@link validateResponseFormat}: name charset/length + non-object schema) and
+ * an invalid fragment THROWS a typed {@link LLMError} at request construction
+ * rather than reaching the provider as an opaque 400 or being silently accepted.
+ *
+ * Pure; no I/O. Delegates the actual shape to the leaf builder
+ * {@link toAnthropicForcedTool} so the strategy lives in exactly one place.
+ */
+export const resolveAnthropicResponseFormat = (
+  responseFormat: StreamInput["responseFormat"],
+): AnthropicForcedFormat | undefined => {
+  if (responseFormat === undefined) return undefined
+  const format = responseFormat as ResponseFormat
+  const validated = validateResponseFormat(format)
+  if (!validated.ok) {
+    throw new LLMError(
+      `invalid responseFormat for Anthropic forced-tool: ${validated.error.reason}`,
+    )
+  }
+  const forced = toAnthropicForcedTool(validated.value)
+  return {
+    tool: {
+      name: forced.tool.name,
+      description: forced.tool.description,
+      input_schema: forced.tool.input_schema as Anthropic.Tool.InputSchema,
+    },
+    toolChoice: { type: "tool", name: forced.toolChoice.name },
+  }
+}
+
 export const buildAnthropicMessagesRequest = (
   model: string,
   maxTokens: number,
@@ -197,8 +246,17 @@ export const buildAnthropicMessagesRequest = (
   cacheTtl: CacheTtl = "5m",
   serviceTier?: string,
 ): Anthropic.MessageCreateParamsStreaming => {
+  // ADR-0469 provider parity — a schema-forced response is expressed on
+  // Anthropic as a single FORCED tool (input_schema = json schema, tool_choice
+  // pinned to it). When present it OVERRIDES the caller's tool surface for this
+  // request (the forced tool is the only one, its choice supersedes
+  // `input.toolChoice`) — that is the whole point of a structured-output
+  // request. Absent ⇒ `undefined`, so every branch below falls through to the
+  // caller's own tools/tool_choice and the wire is byte-identical.
+  const forced = resolveAnthropicResponseFormat(input.responseFormat)
+  const effectiveTools = forced ? [forced.tool] : undefined
   const toolNames = input.tools.map((t) => t.name)
-  const toolChoice = toAnthropicToolChoice(input.toolChoice, toolNames)
+  const toolChoice = forced ? forced.toolChoice : toAnthropicToolChoice(input.toolChoice, toolNames)
   const tier = normalizeAnthropicServiceTier(serviceTier)
   // Anthropic REJECTS `temperature` != 1 whenever extended thinking is active
   // (`{type:"enabled"|"adaptive"}`) — HTTP 400 "temperature may only be set to 1
@@ -225,11 +283,18 @@ export const buildAnthropicMessagesRequest = (
     // in-house style as the raw-SSE `as unknown as` narrow in `anthropic.ts`.
     ...(input.thinking ? { thinking: input.thinking as Anthropic.ThinkingConfigParam } : {}),
     messages: cacheConversationPrefix(toAnthropicMessages(input.messages), cacheTtl),
-    tools: input.tools.map((t) => ({
-      name: t.name,
-      description: t.description,
-      input_schema: t.input_schema as Anthropic.Tool.InputSchema,
-    })),
+    // ADR-0469 — when a schema-forced response is requested, the SINGLE forced
+    // tool (whose input_schema IS the json schema) replaces the caller's tool
+    // list; otherwise the caller's tools pass through unchanged (byte-identical
+    // default-OFF: `forced` is undefined ⇒ `effectiveTools` is undefined ⇒ this
+    // maps the caller's `input.tools` exactly as before).
+    tools:
+      effectiveTools ??
+      input.tools.map((t) => ({
+        name: t.name,
+        description: t.description,
+        input_schema: t.input_schema as Anthropic.Tool.InputSchema,
+      })),
     ...(toolChoice !== undefined ? { tool_choice: toolChoice } : {}),
     // Per-call sampling temperature (repair-breadth fanout). Present ⇒ spread
     // Anthropic's `temperature` field; absent (or thinking active, see above) ⇒

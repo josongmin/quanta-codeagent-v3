@@ -1,3 +1,16 @@
+export type { CommandBuildDeps, CommandBuilderClock } from "./builders"
+export {
+  buildApprovalRespond,
+  buildIdentitySet,
+  buildInputAppend,
+  buildPermissionSet,
+  buildToolProfileSet,
+  buildTranscriptReplace,
+  buildTurnCancel,
+  buildTurnRun,
+  commandMeta,
+  continuationCommandIdForApproval,
+} from "./builders"
 export type { CapabilityExpectation, CapabilityManifest } from "./capabilities"
 export { normalizeCapabilityManifest } from "./capabilities"
 export {
@@ -29,6 +42,7 @@ export {
   SessionClosedError,
   SessionProtocolError,
   SessionProtocolValidationError,
+  SessionProtocolVersionError,
   SessionRevisionConflictError,
 } from "./errors"
 export type {
@@ -91,7 +105,9 @@ export type {
   PendingApprovalView,
   SessionSnapshotLite,
   SessionStateView,
+  SessionTokenUsageView,
 } from "./snapshot"
+export type { CommandReceipt, SessionVerbSurface } from "./verb-surface"
 export {
   isSessionProtocolVersion,
   SESSION_PROTOCOL_VERSION,

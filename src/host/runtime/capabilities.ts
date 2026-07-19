@@ -10,6 +10,9 @@ export interface DerivedRuntimeCapabilitiesInput {
   readonly automation: boolean
   readonly shellSnapshot: boolean
   readonly transport?: CapabilityManifest["transport"]
+  /** ADR-0540 W1-B — optional (composition-root opt-in, web-daemon only today);
+   *  absent ⇒ `false` via the normalize fallback (byte-identical elsewhere). */
+  readonly serverAutoContinues?: boolean
 }
 
 const freezeCapabilityManifest = (manifest: CapabilityManifest): CapabilityManifest =>
@@ -32,6 +35,9 @@ export const deriveCapabilityManifest = (
       automation: input.automation,
       shellSnapshot: input.shellSnapshot,
       transport: input.transport ?? "inproc",
+      ...(input.serverAutoContinues !== undefined
+        ? { serverAutoContinues: input.serverAutoContinues }
+        : {}),
     }),
   )
 

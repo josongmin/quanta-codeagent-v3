@@ -262,7 +262,15 @@ describe("buildToolInputSeam", () => {
     expect(() => seam.available("u1", {})).not.toThrow()
   })
 
-  test("callback errors are swallowed (defensive)", () => {
+  test("callback errors PROPAGATE from the inner seam to the outer fireToolInput swallow (ALBB-20 #8)", () => {
+    // NEW CONTRACT (ALBB-20 #8, src/agent/tool-input-streaming.ts): the inner
+    // seam NO LONGER swallows a throwing per-tool callback. The DOUBLE-swallow
+    // (inner + outer) made a faulty callback invisible at both layers, so the
+    // inner catch was removed — the throw now PROPAGATES to the OUTER
+    // `fireToolInput` seam (streaming-dispatch.ts), which swallows it once and
+    // emits a single `logger.warn`. The outer swallow is covered by
+    // block B's "handler errors are swallowed" test; here we pin the inner
+    // half: the callback throw is NOT swallowed in place.
     const reg = new ToolRegistry([
       buildTool("a", {
         onInputStart: () => {
@@ -271,7 +279,16 @@ describe("buildToolInputSeam", () => {
       }) as Tool,
     ])
     const seam = buildToolInputSeam(reg)
-    expect(() => seam.start("u1", "a")).not.toThrow()
+    expect(() => seam.start("u1", "a")).toThrow("boom")
+    // Bookkeeping ran BEFORE the throwing callback (docstring invariant): the
+    // id→name entry is live, so a subsequent `delta` for a NON-throwing tool
+    // still routes — the throw did not corrupt the leak-guard/dedup state.
+    const log: string[] = []
+    const reg2 = new ToolRegistry([buildTool("b", { onInputDelta: (d) => log.push(d) }) as Tool])
+    const seam2 = buildToolInputSeam(reg2)
+    seam2.start("u2", "b")
+    seam2.delta("u2", "routed")
+    expect(log).toEqual(["routed"])
   })
 
   test("memory: id→name mapping is cleared on available", () => {

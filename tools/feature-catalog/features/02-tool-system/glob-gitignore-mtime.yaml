@@ -11,7 +11,8 @@ modes: [n-a]
 configurable: integrated
 owners: ["@songmin"]
 labels: [surface:cli, security-touched]
-depends_on: [glob-tool]
+depends_on: []
+supersedes: [glob-tool]
 surface_integration:
   cli: full
   web: full

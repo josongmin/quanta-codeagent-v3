@@ -28,8 +28,16 @@ describe("apps bench driver shared verify-select adapters", () => {
     expect(SHARED_DRIVER_SRC).toContain('from "../repo-regression-discovery-adapter"')
   })
 
-  test("apps driver routes repair llm evidence through the bench-local repair facade", () => {
-    expect(APP_DRIVER_SRC).toContain('from "./repair/llm-evidence"')
-    expect(APP_DRIVER_SRC).not.toContain('from "@/runner/batch/eval/repair/llm-evidence"')
+  test("apps driver records repair llm evidence via the runner evidence-packet module", () => {
+    // 80753c687 rewired the app driver's `recordLlmEvidencePacket` import: it no
+    // longer goes through the bench-local `./repair/llm-evidence` re-export shim
+    // (which still exists but is now unused by the driver) — it imports the packet
+    // recorder DIRECTLY from the runner SSOT `@/runner/batch/eval/llm-evidence-packet`
+    // (driver.ts:97-101). The packet IS still recorded (driver.ts:1535, 1675),
+    // just via the runner module, so the invariant "app driver records evidence
+    // through the shared runner surface" is unchanged by the import move.
+    expect(APP_DRIVER_SRC).toContain('from "@/runner/batch/eval/llm-evidence-packet"')
+    expect(APP_DRIVER_SRC).toContain("recordLlmEvidencePacket")
+    expect(APP_DRIVER_SRC).not.toContain('from "./repair/llm-evidence"')
   })
 })

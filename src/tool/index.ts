@@ -13,6 +13,7 @@ import { createCommunicateUpdateTool } from "./communicate-update"
 import { containerExecTool, containerWriteFileTool } from "./container-exec"
 import { coverageCheckTool } from "./coverage_check"
 import { makeDebugInspectTool } from "./debug/tool"
+import { makeNodeReplTool } from "./node-repl"
 import type { DefaultToolPorts } from "./default-tool-ports"
 import { diagnosticsTool, nullDiagnosticsProvider } from "./diagnostics"
 // ADR-0142: register document/structured-data read tools into the default
@@ -74,6 +75,7 @@ export {
   APPSHOT_MIN_ITER,
   type AppSpec,
   type AppshotArtifactSink,
+  type AppshotAvailability,
   type AppshotPort,
   type AppshotRequest,
   type AppshotResult,
@@ -82,6 +84,8 @@ export {
   appshotVerifyInputSchema,
   appshotVerifyTool,
   clampIter as appshotClampIter,
+  isRealJudgePass,
+  judgeVerdict,
   makeJailedScaffold,
   renderScaffoldHtml,
   runAppshotLoop,
@@ -537,6 +541,7 @@ export {
   ptyTools,
   type TmuxExec,
 } from "./pty"
+export type { ReadOutlineParserPort } from "./read"
 export { ToolRegistry } from "./registry"
 export { requestPlanExitTool } from "./request-plan-exit"
 export { requestUserInputTool } from "./request-user-input"
@@ -763,6 +768,9 @@ const CONDITIONAL_REGISTRATIONS: readonly ConditionalRegistration[] = [
     p.notebookEdit === true ? [makeNotebookEditTool(p.fs ?? defaultFileSystemPort) as Tool] : [],
   // W5 (DAP) — debug_inspect (high-risk: runs the program under a debug adapter).
   (p) => (p.debugTools === true ? [makeDebugInspectTool() as Tool] : []),
+  // ADR-0249 — node_repl (high-risk: arbitrary Node code in a persistent kernel).
+  // Registered ONLY when the host wires the stateful NodeReplKernel port.
+  (p) => (p.nodeRepl !== undefined ? [makeNodeReplTool(p.nodeRepl) as Tool] : []),
   // Epic-2 — run_tests structured test-runner (high-risk: runs project test code).
   (p) =>
     p.testRunner === true ? [makeRunTestsTool({ fs: p.fs ?? defaultFileSystemPort }) as Tool] : [],
@@ -821,7 +829,9 @@ export const buildDefaultTools = (ports: DefaultToolPorts = {}): Tool[] => {
 }
 
 const buildBaseDefaultTools = (ports: DefaultToolPorts): Tool[] => [
-  (ports.fs !== undefined ? makeReadTool(ports.fs) : readTool) as Tool,
+  (ports.fs !== undefined || ports.readOutlineParser !== undefined
+    ? makeReadTool(ports.fs ?? defaultFileSystemPort, ports.readOutlineParser)
+    : readTool) as Tool,
   (ports.fs !== undefined ? makeWriteTool(ports.fs) : writeTool) as Tool,
   (ports.fs !== undefined ? makeEditTool(ports.fs) : editTool) as Tool,
   // Phase 4: `scripted_replace` is registered by default — the LLM only routes

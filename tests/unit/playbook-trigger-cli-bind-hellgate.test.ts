@@ -1,8 +1,8 @@
 /**
  * Hellgate — playbookTrigger CLI auto-bind opt-in (ADR-0293).
  *
- * 13 cases pinning the env/flag precedence, default-OFF allocation, no-throw
- * contract, sink isolation, and surface seam attach/detach round-trip.
+ * Cases pinning the env/flag precedence, default-OFF allocation, no-throw
+ * contract, disk registry dispatch, sink isolation, and surface lifecycle.
  *
  *  - HELL-PT-01  env absent + flag absent ⇒ NOOP handle (isActive false)
  *  - HELL-PT-02  env "on" + flag absent ⇒ active handle
@@ -20,10 +20,14 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { PlaybookPlanQueueSink } from "@/skill/playbook"
+import {
+  createMemoryWatcher,
+  type PlaybookFollowUpInput,
+  type PlaybookPlanQueueSink,
+} from "@/skill/playbook"
 import { createPlaybookTriggerSurfaceSeam } from "../../src/apps/cli/repl/playbook-trigger-surface-seam"
 import {
   maybeStartPlaybookTriggerWire,
@@ -270,5 +274,66 @@ describe("ADR-0293 — playbookTrigger CLI auto-bind", () => {
     expect(h1).toBe(h2)
     expect(h1.isActive()).toBe(false)
     expect(Object.isFrozen(h1)).toBe(true)
+  })
+
+  test("DOF-14 — default-OFF does not read the root or allocate a watcher", () => {
+    let rootReads = 0
+    let watcherAllocations = 0
+    const h = maybeStartPlaybookTriggerWire({
+      env: {},
+      threadId: "off",
+      planQueueSink: okSink,
+      get registryRoot() {
+        rootReads += 1
+        return "/must/not/be/read"
+      },
+      watcherFactory: () => {
+        watcherAllocations += 1
+        return createMemoryWatcher()
+      },
+    })
+    expect(h.isActive()).toBe(false)
+    expect(rootReads).toBe(0)
+    expect(watcherAllocations).toBe(0)
+  })
+
+  test("DOF-14 — disk playbook registers watcher and enqueues on fire", () => {
+    const dir = mkTmpDir()
+    const watcher = createMemoryWatcher(() => 1_000)
+    const enqueued: PlaybookFollowUpInput[] = []
+    writeFileSync(
+      join(dir, "fix-types.md"),
+      [
+        "---",
+        "name: fix-types",
+        "trigger:",
+        "  comment-marker: QUANTA!",
+        '  watch-glob: "**/*.ts"',
+        "---",
+        "Fix the marked type error.",
+      ].join("\n"),
+    )
+
+    try {
+      const h = maybeStartPlaybookTriggerWire({
+        env: { QUANTA_PLAYBOOK_TRIGGER: "on" },
+        threadId: "dof-14",
+        planQueueSink: {
+          enqueue: (input) => {
+            enqueued.push(input)
+            return { ok: true }
+          },
+        },
+        registryRoot: dir,
+        watcherFactory: () => watcher,
+      })
+
+      expect(watcher.active()).toBe(1)
+      expect(watcher.fire("src/probe.ts", "// QUANTA!\n")).toBe(true)
+      expect(enqueued.map((entry) => entry.text)).toEqual(["/play fix-types"])
+      h.stop()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })

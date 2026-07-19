@@ -90,7 +90,7 @@ describe("extractGradeBreakdowns — the regression-vs-didn't-fix signal", () =>
     expect(extractGradeBreakdowns({ resolved_ids: ["a", "b"] }).size).toBe(0)
   })
 
-  test("malformed inputs ⇒ empty (never throws)", () => {
+  test("malformed inputs fail closed (never throws)", () => {
     expect(extractGradeBreakdowns(null).size).toBe(0)
     expect(extractGradeBreakdowns("nope").size).toBe(0)
     expect(extractGradeBreakdowns({ x: { tests_status: 7 } }).size).toBe(0)
@@ -100,6 +100,23 @@ describe("extractGradeBreakdowns — the regression-vs-didn't-fix signal", () =>
       passToPassFailed: 0,
       passToPassTotal: 0,
     })
+  })
+
+  test("structurally valid empty partitions are clean; malformed absence is not", () => {
+    const validEmpty = extractGradeBreakdowns({
+      x: {
+        tests_status: {
+          FAIL_TO_PASS: { success: [], failure: [] },
+          PASS_TO_PASS: { success: [], failure: [] },
+        },
+      },
+    }).get("x")
+    expect(validEmpty?.resolved).toBe(true)
+
+    const missingPassToPass = extractGradeBreakdowns({
+      x: { tests_status: { FAIL_TO_PASS: { success: [], failure: [] } } },
+    }).get("x")
+    expect(missingPassToPass?.resolved).toBe(false)
   })
 })
 

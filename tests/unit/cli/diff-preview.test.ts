@@ -20,8 +20,8 @@ import { setColorPolicy, stripAnsi } from "../../../src/ui/ui-helpers"
  *     touches the real filesystem — covers the "missing file" path
  *     without race-prone tempdir mgmt.
  *
- * Coverage matrix matches the four supported tools (write/edit/apply_patch/
- * scripted_replace) plus the graceful-fallback paths (missing input keys,
+ * Coverage matrix matches the supported tools (write/edit/apply_patch/
+ * apply_patch_structured/scripted_replace) plus the graceful-fallback paths (missing input keys,
  * binary content, oversize, read-failure, unsupported tool, ENV knobs).
  */
 
@@ -124,6 +124,20 @@ describe("renderActionDiff — apply_patch", () => {
     expect(plain).toContain("*** Update File: /x/f.ts")
     expect(plain).toContain("-old")
     expect(plain).toContain("+new")
+  })
+
+  test("structured sibling renders the same V4A body under its own tool label", async () => {
+    const patch = [
+      "*** Begin Patch",
+      "*** Add File: /x/new.ts",
+      "+export const value = 1",
+      "*** End Patch",
+    ].join("\n")
+    const out = await renderActionDiff(action("apply_patch_structured", { patch }))
+    const plain = stripAnsi(mustRender(out))
+    expect(plain).toContain("apply_patch_structured (V4A)")
+    expect(plain).toContain("*** Add File: /x/new.ts")
+    expect(plain).toContain("+export const value = 1")
   })
 })
 
@@ -456,10 +470,9 @@ describe("QUANTA_DIFF_HUNKS=1 — @@ headers wired through renderActionDiff", ()
     const before = oldLines.join("\n")
     const after = newLines.join("\n")
 
-    const out = await renderActionDiff(
-      action("write", { path: "/x/f.ts", content: after }),
-      { readFile: async () => before },
-    )
+    const out = await renderActionDiff(action("write", { path: "/x/f.ts", content: after }), {
+      readFile: async () => before,
+    })
     const plain = stripAnsi(mustRender(out))
     // Hunk headers must be present — this is the gate assertion.
     expect(plain).toContain("@@")
@@ -472,10 +485,9 @@ describe("QUANTA_DIFF_HUNKS=1 — @@ headers wired through renderActionDiff", ()
     const before = "a\nb\nc"
     const after = "a\nB\nc"
 
-    const out = await renderActionDiff(
-      action("write", { path: "/x/f.ts", content: after }),
-      { readFile: async () => before },
-    )
+    const out = await renderActionDiff(action("write", { path: "/x/f.ts", content: after }), {
+      readFile: async () => before,
+    })
     const plain = stripAnsi(mustRender(out))
     expect(plain).not.toContain("@@")
   })

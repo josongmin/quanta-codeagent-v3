@@ -34,6 +34,10 @@ export const createTurnStreamPort = (args: {
   /** T01 — when true, a fresh per-turn item-stream projector forwards `item.*`
    *  carriers to `onEvent` alongside the 1:1 bridge. Default-OFF byte-identical. */
   readonly itemStream?: boolean
+  /** Ticket 04 — when true, the 1:1 bridge ALSO carries the full model-visible
+   *  tool args/result (production gate; per-peer strip happens downstream in the
+   *  ipc bridge). Default-OFF byte-identical. */
+  readonly fullFidelity?: boolean
 }): {
   readonly stream: AgentConfig["stream"]
   readonly getLastErrorMessage: () => string | undefined
@@ -52,7 +56,9 @@ export const createTurnStreamPort = (args: {
         // (mirrors wireAgentStateTap in src/agent/optional-ports.ts).
         args.baseStream.emit(event)
         try {
-          const sessionEvent = toSessionHostTurnEvent(event)
+          const sessionEvent = toSessionHostTurnEvent(event, {
+            ...(args.fullFidelity === true ? { fullFidelity: true } : {}),
+          })
           if (sessionEvent !== undefined) args.onEvent?.(sessionEvent)
           // T01 — fan the item cores derived from THIS event onto the session wire.
           // Emitted AFTER the 1:1 bridge event so e.g. a tool's `tool.invoked`
@@ -132,6 +138,7 @@ export const runRuntimeTurn = async (args: {
     baseStream: args.base.stream,
     ...(args.onEvent !== undefined ? { onEvent: args.onEvent } : {}),
     ...(args.base.itemStream === true ? { itemStream: true } : {}),
+    ...(args.base.fullFidelity === true ? { fullFidelity: true } : {}),
   })
   try {
     const content: ContentBlock[] = [{ type: "text", text: args.prompt }, ...(args.images ?? [])]

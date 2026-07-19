@@ -144,23 +144,31 @@ describe("B. defaultOsSandbox.spawn — runtime dispatch", () => {
     expect(r.degradeReason).toBeUndefined()
   })
 
-  test("HELL-B10: darwin + sandbox-exec missing → degraded passthrough", async () => {
-    const { spawner, calls } = makeSpawner()
+  test("HELL-B10: darwin + sandbox-exec missing → FAIL-CLOSED refusal, spawner NEVER called (DOF-40)", async () => {
+    const { spawner, calls } = makeSpawner({ exitCode: 0, stdout: "RAN-UNSANDBOXED", stderr: "" })
     const sb = defaultOsSandbox({ spawner, platform: "darwin", which: whichNone })
     const r = await sb.spawn({ command: ["x"], cwd: "/ws" }, POLICY_WW)
-    expect((calls[0] as SpawnCall).argv).toEqual(["x"])
+    // LOAD-BEARING: command REFUSED, not run unsandboxed.
+    expect(calls.length).toBe(0)
+    expect(r.exitCode).toBe(126)
+    expect(r.stdout).toBe("")
     expect(r.sandboxApplied).toBe(false)
     expect(r.degradeReason).toBe("sandbox-exec-missing")
+    expect(r.stderr.includes("REFUSED")).toBe(true)
   })
 
-  test("HELL-B11: linux + bwrap missing → Phase 2 degraded passthrough", async () => {
-    // whichOk only resolves sandbox-exec; bwrap is not found → degrade.
-    const { spawner, calls } = makeSpawner()
+  test("HELL-B11: linux + bwrap missing → FAIL-CLOSED refusal, spawner NEVER called (DOF-40)", async () => {
+    // whichOk only resolves sandbox-exec; bwrap is not found → REFUSE (was degrade).
+    const { spawner, calls } = makeSpawner({ exitCode: 0, stdout: "RAN-UNSANDBOXED", stderr: "" })
     const sb = defaultOsSandbox({ spawner, platform: "linux", which: whichOk })
     const r = await sb.spawn({ command: ["x"], cwd: "/ws" }, POLICY_WW)
-    expect((calls[0] as SpawnCall).argv).toEqual(["x"])
+    // LOAD-BEARING: the sandbox could not be enforced, so the command NEVER ran.
+    expect(calls.length).toBe(0)
+    expect(r.exitCode).toBe(126)
+    expect(r.stdout).toBe("")
+    expect(r.stdout.includes("RAN-UNSANDBOXED")).toBe(false)
     expect(r.sandboxApplied).toBe(false)
-    expect((r.degradeReason as string).startsWith("linux-bwrap-missing")).toBe(true)
+    expect(r.degradeReason).toBe("linux-bwrap-missing")
   })
 
   test("HELL-B12: spawner throws → exitCode 127 + stderr describes failure", async () => {

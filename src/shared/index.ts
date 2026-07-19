@@ -18,6 +18,14 @@ export {
 export { assertNever } from "./assert-never"
 export { byteCompare } from "./byte-compare"
 export { chunkBatches } from "./chunk"
+export type { ActivationPolicy, DeliveryMode } from "./delivery-mode"
+export {
+  ALL_ACTIVATION_POLICIES,
+  ALL_DELIVERY_MODES,
+  isDeliveryMode,
+  parseActivationPolicy,
+  parseDeliveryMode,
+} from "./delivery-mode"
 export {
   gateDisabled,
   gateDisabledStrict,
@@ -43,6 +51,13 @@ export {
 } from "./errors"
 export type { ExecutionSurface } from "./execution-surface"
 export { EXECUTION_SURFACES } from "./execution-surface"
+export type { FullFidelityField } from "./full-fidelity"
+export {
+  capFullFidelityField,
+  FULL_FIDELITY_FLAG,
+  FULL_FIDELITY_MAX_CHARS,
+  fullFidelityEnabled,
+} from "./full-fidelity"
 export { isRecord } from "./is-record"
 export type {
   ItemStreamCompleted,
@@ -63,12 +78,14 @@ export {
 } from "./item-stream"
 export {
   __resetKnobOverrides,
+  filterSessionForbidden,
   getKnobOverride,
   isSessionForbidden,
   knobOverrideCount,
   knobOverrides,
   knobOverridesVersion,
   SESSION_FORBIDDEN_KNOBS,
+  sessionSafeKnobOverrides,
   setKnobOverride,
 } from "./knob-overrides"
 export { currentLane, laneContext } from "./lane-context"
@@ -125,6 +142,7 @@ export {
   parseBool,
   ratelimitNoticeWanted,
   runtimeConfig,
+  runtimeConfigFromEnv,
   SWEBENCH_CACHE_LEVELS,
 } from "./runtime-config"
 export type { ShellExecEvent, ShellExecObserver } from "./shell-exec-types"

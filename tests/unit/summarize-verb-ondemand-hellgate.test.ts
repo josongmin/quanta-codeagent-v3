@@ -5,6 +5,7 @@ import { compactNowOnDemand } from "@/agent/loop/compaction-wire"
 import { pollConversationAction } from "@/agent/loop/control-poll"
 import type { ActiveTurnState } from "@/agent/steering"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
+import type { AgentEvent } from "@/stream"
 
 // §11.5 / ticket-07 — the `summarize` conversation-action verb was decided but a
 // NO-OP (control-poll fell through to conversation_action_noop) + compaction had
@@ -115,6 +116,15 @@ describe("compactNowOnDemand", () => {
     const did = await compactNowOnDemand(cfg(true), wm as never)
     expect(did).toBe(true)
     expect(wm.snapshot().length).toBeLessThan(before)
+  })
+
+  test("successful manual compaction emits CLI-visible recovery without archive/history wiring", async () => {
+    const wm = fakeWm(manyTurns())
+    const events: AgentEvent[] = []
+    const stream = { emit: (event: AgentEvent): void => void events.push(event) }
+    const did = await compactNowOnDemand({ ...cfg(true), stream }, wm as never)
+    expect(did).toBe(true)
+    expect(events).toContainEqual({ type: "recovery", reason: "compact", detail: "manual" })
   })
 
   test("DEFAULT-OFF: no compaction config ⇒ no-op (false, wm unchanged)", async () => {

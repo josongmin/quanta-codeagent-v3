@@ -10,6 +10,7 @@ import {
   SESSION_PROTOCOL_VERSION,
   SessionProtocolValidationError,
 } from "@/protocol/session"
+import { makeSnapshotLite } from "../../support/session-fixtures"
 
 describe("@/protocol/session codec", () => {
   test("round-trips commands with envelope metadata", () => {
@@ -31,6 +32,56 @@ describe("@/protocol/session codec", () => {
       text: "ping",
       images: [{ type: "image", data: "Zm9v", mediaType: "image/png" }],
     })
+  })
+
+  test("B-MED-7: round-trips a turn.run's ADDITIVE causedByApprovalId (daemon continuation stamp)", () => {
+    const raw = encodeSessionCommand({
+      sessionId: "s1",
+      commandId: "approval-continuation:ap-9",
+      issuedAt: "2026-05-26T00:00:03.000Z",
+      type: "turn.run",
+      causedByApprovalId: "ap-9",
+    })
+    expect(decodeSessionCommand(raw)).toEqual({
+      sessionId: "s1",
+      commandId: "approval-continuation:ap-9",
+      issuedAt: "2026-05-26T00:00:03.000Z",
+      type: "turn.run",
+      causedByApprovalId: "ap-9",
+    })
+  })
+
+  test("B-MED-7: a bare turn.run stays byte-identical (no causedByApprovalId key)", () => {
+    const decoded = decodeSessionCommand(
+      encodeSessionCommand({
+        sessionId: "s1",
+        commandId: "c-bare",
+        issuedAt: "2026-05-26T00:00:04.000Z",
+        type: "turn.run",
+      }),
+    )
+    expect(decoded).toEqual({
+      sessionId: "s1",
+      commandId: "c-bare",
+      issuedAt: "2026-05-26T00:00:04.000Z",
+      type: "turn.run",
+    })
+    expect("causedByApprovalId" in decoded).toBe(false)
+  })
+
+  test("B-MED-7: rejects a turn.run whose causedByApprovalId is a mistyped scalar (fail-closed)", () => {
+    const raw = JSON.stringify({
+      version: SESSION_PROTOCOL_VERSION,
+      kind: "command",
+      payload: {
+        sessionId: "s1",
+        commandId: "c-bad",
+        issuedAt: "2026-05-26T00:00:05.000Z",
+        type: "turn.run",
+        causedByApprovalId: 42,
+      },
+    })
+    expect(() => decodeSessionCommand(raw)).toThrow(SessionProtocolValidationError)
   })
 
   test("round-trips transcript replace commands", () => {
@@ -225,29 +276,13 @@ describe("@/protocol/session codec", () => {
     expect(() => decodeSessionEvent(raw)).toThrow(SessionProtocolValidationError)
   })
 
-  const validSnapshot = (): SessionSnapshotLite => ({
-    sessionId: "s1",
-    revision: 4,
-    seq: 2,
-    state: {
-      status: "idle",
-      draftInput: "",
-      permissionMode: "default",
-      messageCount: 0,
-    },
-    capabilities: {
-      approvals: "none",
-      tools: true,
-      memory: true,
-      artifacts: true,
-      subagents: false,
-      automation: false,
-      shellSnapshot: false,
-      transport: "inproc",
-    },
-    pendingApproval: null,
-    openArtifacts: [],
-  })
+  const validSnapshot = (): SessionSnapshotLite =>
+    makeSnapshotLite({
+      sessionId: "s1",
+      revision: 4,
+      seq: 2,
+      capabilities: { tools: true, memory: true, artifacts: true },
+    })
 
   test("round-trips snapshots with nullable pendingApproval", () => {
     const raw = encodeSessionSnapshot(validSnapshot())

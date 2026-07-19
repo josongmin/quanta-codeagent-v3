@@ -49,9 +49,9 @@ export const defaultVerifyCheckpointBridge = (
       // ALBB-21 — keep the no-throw contract but leave ONE greppable
       // breadcrumb so a swallowed anchor-advance failure is diagnosable
       // (previously the catch was empty: a silently un-advanced verified
-      // anchor with no trace of WHY). `debug` level keeps it out of the
-      // default operator stream while remaining discoverable.
-      logger.debug("verify-checkpoint-bridge: markVerified failed (anchor not advanced)", {
+      // anchor with no trace of WHY). This is a warning: reporting a turn as
+      // verified while its rollback anchor did not advance is operator-visible.
+      logger.warn("verify-checkpoint-bridge: markVerified failed (anchor not advanced)", {
         workspace,
         error: errMessage(e),
       })

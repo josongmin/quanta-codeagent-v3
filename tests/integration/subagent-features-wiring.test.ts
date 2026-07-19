@@ -1,12 +1,34 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import { z } from "zod"
 import type { AgentConfig, AgentOutcome } from "@/agent"
 import { createSubagentRunner } from "@/agent"
 import { buildSessionFeatures } from "@/agent/features"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import { __resetRuntimeConfig } from "@/shared"
 import type { SubagentRequest, TaskRegistry as TaskRegistryType } from "@/subagent"
 import type { Tool, ToolEvent } from "@/tool"
 import { defaultTools, ToolRegistry } from "@/tool"
+
+/**
+ * rev.4 MIN-CAP (RFC jul-13 §4.3) — spawn-tool EXPOSURE is now depth-gated at the
+ * single `projectSpawnTools` seam: a tool block only survives when
+ * `canExposeSpawnTools(config.depth ?? 0, effectiveCap(config.subagent?.maxDepth))`,
+ * where `effectiveCap = min(operator policy = runtimeConfig().maxDescendantDepth
+ * [default 1], requested)`. The `buildChildConfig`-produced children in the
+ * toolFilter block below carry `depth: 1` (childDepthOf(root)); under the DEFAULT
+ * policy 1 that makes them leaves that lose the `agent` spawn vector — so exercising
+ * "a depth-1 child WITH config.subagent CAN still expose `agent`" needs the SAME
+ * policy headroom the pre-rev.4 default provided. Those tests RAISE the operator
+ * policy to their `subagent.maxDepth` via `QUANTA_MAX_DESCENDANT_DEPTH`
+ * (`min(3,3)=3`), exactly as the sibling `subagent-fork-e2e` / nesting suites do.
+ * runtimeConfig() is first-access-frozen, so we set the env then
+ * `__resetRuntimeConfig()` before the assertion; `afterEach` restores it.
+ */
+const withPolicyCap = (value: string | undefined): void => {
+  if (value === undefined) delete process.env.QUANTA_MAX_DESCENDANT_DEPTH
+  else process.env.QUANTA_MAX_DESCENDANT_DEPTH = value
+  __resetRuntimeConfig()
+}
 
 /**
  * Integration tests for `buildSessionFeatures` subagent wiring. Closes the
@@ -167,19 +189,29 @@ describe("buildChildConfig — toolFilter interaction with the agent tool", () =
   // ONLY. The child's `agent`/`task_output`/`task_stop` tools come from the
   // child's OWN `buildSessionFeatures` invocation, gated purely on
   // `config.subagent` being present in the CHILD (which `buildChildConfig`
-  // propagates from the parent unconditionally). So:
+  // propagates from the parent unconditionally) AND — since rev.4 — on the
+  // child still having spawn DEPTH HEADROOM under the min-cap policy. So:
   //
   //   - toolFilter excluding "agent": the child's *inherited* registry has
-  //     `agent` filtered out, but if `config.subagent` is still propagated,
-  //     the child's `buildSessionFeatures` re-registers `agent` anyway.
+  //     `agent` filtered out, but if `config.subagent` is still propagated
+  //     AND the effective cap admits this depth, the child's
+  //     `buildSessionFeatures` re-registers `agent` anyway.
   //   - toolFilter including "agent": same outcome — `agent` is registered
   //     via `buildSessionFeatures`, not preserved from the parent.
   //
-  // What the subagent-runner does today: it ALWAYS propagates `subagent`. So
-  // a child can spawn grandchildren irrespective of toolFilter (until
-  // maxDepth bounds it). The tests below pin this behavior.
+  // What the subagent-runner does today: it ALWAYS propagates `subagent`. So a
+  // child can spawn grandchildren irrespective of toolFilter — provided the
+  // operator policy leaves depth headroom (rev.4 `projectSpawnTools`; the
+  // DEFAULT policy 1 makes a depth-1 child a leaf). The tests below RAISE the
+  // policy to the requested `maxDepth` so the depth gate is open, isolating the
+  // invariant they actually pin: `config.subagent` presence (not `toolFilter`)
+  // is what controls the child's spawn menu.
+  afterEach(() => withPolicyCap(undefined))
 
   test("child config carries the parent's subagent block regardless of toolFilter", async () => {
+    // Policy headroom = requested maxDepth ⇒ min(3,3)=3; a depth-1 child is
+    // admitted, so the ONLY variable under test is config.subagent presence.
+    withPolicyCap("3")
     const parent = baseCfg({
       subagent: { maxDepth: 3 },
       registry: new ToolRegistry([fakeTool("read"), fakeTool("agent"), fakeTool("write")]),
@@ -199,8 +231,13 @@ describe("buildChildConfig — toolFilter interaction with the agent tool", () =
         .sort(),
     ).toEqual(["read"])
     // But config.subagent is propagated ⇒ a buildSessionFeatures call on this
-    // child would re-add `agent`. Pin that.
-    expect(childA.subagent).toEqual({ maxDepth: 3 })
+    // child would re-add `agent`. Pin the propagated cap. (`.maxDepth` not the
+    // whole object: `buildSessionFeatures` writes a live `taskRegistry` back onto
+    // the SHARED `subagent` object — child.subagent === parent.subagent by
+    // reference, features.ts write-back — so `toEqual({maxDepth})` would be
+    // brittle to that byte-identical default-OFF mutation. The cap IS the
+    // propagation invariant.)
+    expect(childA.subagent?.maxDepth).toBe(3)
     const fA = await buildSessionFeatures(childA)
     expect(fA.extraTools.find((t) => t.name === "agent")).toBeDefined()
 
@@ -214,7 +251,7 @@ describe("buildChildConfig — toolFilter interaction with the agent tool", () =
         .map((s) => s.name)
         .sort(),
     ).toEqual(["agent", "read"])
-    expect(childB.subagent).toEqual({ maxDepth: 3 })
+    expect(childB.subagent?.maxDepth).toBe(3) // cap propagated (see childA note)
     const fB = await buildSessionFeatures(childB)
     expect(fB.extraTools.find((t) => t.name === "agent")).toBeDefined()
   })
@@ -224,6 +261,10 @@ describe("buildChildConfig — toolFilter interaction with the agent tool", () =
     // and the runner doesn't expose that knob (subagent always propagates).
     // So we directly construct a child without `subagent` to prove the gate:
     // a child without `subagent` ⇒ no `agent` tool ⇒ cannot spawn.
+    // Policy headroom = requested maxDepth (2) ⇒ min(2,2)=2 admits the depth-1
+    // child, so the sole variable under test stays `config.subagent` presence
+    // (NOT the rev.4 depth cap, which this test is not exercising).
+    withPolicyCap("2")
     const parent = baseCfg({
       subagent: { maxDepth: 2 },
       registry: new ToolRegistry([fakeTool("read"), fakeTool("agent")]),

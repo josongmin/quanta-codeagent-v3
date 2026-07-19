@@ -32,7 +32,9 @@ describe("slash state SSOT hellgate", () => {
     const config = read("src/runner/assemble/config.ts")
     expect(config).toContain("system: d.systemSource?.get() ?? d.system")
     expect(config).toContain('activeName: () => state.get() ?? state.defaultName ?? "write"')
-    expect(config).toContain('activeMode: () => state.get() ?? state.defaultMode ?? "default"')
+    expect(config).toContain(
+      'activeMode: () => state.getPromptMode() ?? state.defaultMode ?? "default"',
+    )
     expect(config).toContain("...(d.focusChain !== undefined ? { focusChain: d.focusChain } : {})")
   })
 })

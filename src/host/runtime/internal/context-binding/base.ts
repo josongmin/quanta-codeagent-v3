@@ -11,7 +11,7 @@ import type {
 import { buildSharedExecutionPlaneRuntimeAugments } from "@/runner/session-execution-plane"
 import { buildSessionMemoryAutoWires } from "@/runner/session-memory-auto"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
-import { itemStreamEnabled } from "@/shared"
+import { fullFidelityEnabled, itemStreamEnabled } from "@/shared"
 import { automationUpdateTool, ToolRegistry } from "@/tool"
 import { deriveCapabilityManifest } from "../../capabilities"
 import { installCliMentionInjector } from "../mention-wire"
@@ -52,7 +52,14 @@ export const wireRuntimePorts = (
   const wired = sanitizeRuntimeBase(wireOptionalAgentPorts(base, env))
   // T01 — resolve QUANTA_ITEM_STREAM here (env in scope) and stamp it onto the
   // base so the per-turn stream port can mint a projector without re-reading env.
-  return itemStreamEnabled(env) ? sanitizeRuntimeBase({ ...wired, itemStream: true }) : wired
+  const withItemStream = itemStreamEnabled(env)
+    ? sanitizeRuntimeBase({ ...wired, itemStream: true })
+    : wired
+  // Ticket 04 — resolve QUANTA_SESSION_FULL_FIDELITY at the SAME boundary and stamp
+  // it so the per-turn bridge carries the full tool payload (default-OFF absent).
+  return fullFidelityEnabled(env)
+    ? sanitizeRuntimeBase({ ...withItemStream, fullFidelity: true })
+    : withItemStream
 }
 
 export const buildCapabilityManifest = (base: RuntimeBase): CapabilityManifest =>
@@ -74,7 +81,16 @@ export const buildCapabilityManifest = (base: RuntimeBase): CapabilityManifest =
       base.subagentBackground !== undefined,
     automation: base.automationEngine !== undefined,
     shellSnapshot: base.shellSnapshot !== undefined,
-    transport: "inproc",
+    // jul-16 GAP-3 — the transport stamp is composition-injected (presence-only
+    // seam, mirrors `serverAutoContinues` below). The connect stdio door stamps
+    // `"stdio"`; the web daemon `"websocket"`; absent ⇒ `"inproc"` (an
+    // in-process embedder), byte-identical to the pre-seam hardcode.
+    transport: base.sessionTransport ?? "inproc",
+    // ADR-0540 W1-B — the `server-auto-continues` marker. Presence-only seam:
+    // the composition root (web-daemon, gate ON) stamps `serverAutoContinues`
+    // on the base; every other surface leaves it absent ⇒ false (the normalize
+    // fallback), byte-identical to the pre-marker manifest.
+    serverAutoContinues: base.serverAutoContinues === true,
   })
 
 const toToolProfileConfig = (state: ToolProfileSessionState | undefined): Partial<AgentConfig> =>
@@ -114,6 +130,12 @@ const buildTurnAssemblerDeps = (args: {
     // `approvalProtocol`).
     artifactRegistry: _artifactRegistry,
     artifactPreviewResolver: _artifactPreviewResolver,
+    // ADR-0540 W1-B — capability-manifest concern only (the `server-auto-
+    // continues` marker); never a per-turn agent field (mirrors the A2 strip).
+    serverAutoContinues: _serverAutoContinues,
+    // jul-16 GAP-3 — capability-manifest concern only (the transport stamp);
+    // never a per-turn agent field (mirrors the W1-B strip above).
+    sessionTransport: _sessionTransport,
     systemSource,
     messages: _baseMessages,
     signal: _baseSignal,
@@ -158,6 +180,10 @@ export const buildAgentConfigFromBase = (args: {
     // buildTurnAssemblerDeps).
     artifactRegistry: _artifactRegistry,
     artifactPreviewResolver: _artifactPreviewResolver,
+    // ADR-0540 W1-B — manifest-only marker, stripped (see buildTurnAssemblerDeps).
+    serverAutoContinues: _serverAutoContinues,
+    // jul-16 GAP-3 — manifest-only transport stamp, stripped (see buildTurnAssemblerDeps).
+    sessionTransport: _sessionTransport,
     systemSource,
     toolProfileState,
     identityModeState,
@@ -277,6 +303,11 @@ const buildBootstrapBaseShape = (
       args.includeSearchPipeline === true ? args.boot.tooling.searchPipeline : undefined,
     ),
     ...whenDefined("approvalProtocol", args.overlay?.approvalProtocol),
+    // jul-16 GAP-3 — carry the composition-declared wire transport onto the base
+    // so `buildCapabilityManifest` stamps `capabilities.transport` (presence-only
+    // seam, mirrors `serverAutoContinues`). Absent ⇒ omitted ⇒ `"inproc"`
+    // fallback (byte-identical to the pre-seam hardcode).
+    ...whenDefined("sessionTransport", args.overlay?.sessionTransport),
     ...whenDefined("planExitPort", args.overlay?.planExitPort),
     ...whenDefined("userInputPort", args.overlay?.userInputPort),
     ...whenDefined("backgroundConsentPort", args.overlay?.backgroundConsentPort),
@@ -301,6 +332,12 @@ const buildBootstrapBaseShape = (
     // per-turn AgentConfig carries `trustScope` and the gate consults durable
     // grants. Absent ⇒ omitted (default-OFF, byte-identical).
     ...whenDefined("trustScope", args.overlay?.trustScope),
+    // SECURITY-RAIL (a) — lift the per-session write-budget onto the base so the
+    // per-turn dispatch binds the current turn onto `ToolContext.writeBudget`
+    // (the (N+1)th untrusted write is rejected). The interactive CLI's
+    // `wireSecurityRails` mints this behind `QUANTA_WRITE_BUDGET`. Absent ⇒
+    // omitted (default-OFF, byte-identical: no counter).
+    ...whenDefined("writeBudget", args.overlay?.writeBudget),
     // F2 (round-2) — lift the host-wired named-agent resolver onto the base so
     // the per-turn `assembleAgentConfig` spread carries it to the SubagentRunner.
     ...whenDefined("namedAgentResolver", args.overlay?.namedAgentResolver),
@@ -418,7 +455,6 @@ const buildOptionalSnapshotFields = (
   ...whenDefined("memorySummaryMd", base.memorySummaryMd),
   ...whenDefined("stage1OutputsStore", base.stage1OutputsStore),
   ...whenDefined("memoryConsolidator", base.memoryConsolidator),
-  ...whenDefined("granularRegistry", base.granularRegistry),
   ...whenDefined("onPromptAssembled", base.onPromptAssembled),
   ...whenDefined("workingState", base.workingState),
   ...whenDefined("onWorkingStateReady", base.onWorkingStateReady),
@@ -440,6 +476,11 @@ const buildOptionalSnapshotFields = (
   // `/goal` (Codex parity) — surface the objective store so the per-turn base
   // carries it into `maybeWireObjective` (mirrors `browserNet`).
   ...whenDefined("objective", base.objective),
+  // §9.6 `/presets` — surface the role→model resolver so the compose PASS_THROUGH
+  // patch round-trips it onto the base, whence `buildAgentConfigFromBase` spreads
+  // it onto `AgentConfig.roleModelResolver` (mirrors `objective`). Absent ⇒ omitted
+  // ⇒ optional-ports defaults the SSOT resolver (caller-fallback verbatim).
+  ...whenDefined("roleModelResolver", base.roleModelResolver),
 })
 
 export const buildSnapshot = (base: RuntimeBase): RuntimeContextSnapshot => ({

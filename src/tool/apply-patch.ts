@@ -40,17 +40,20 @@ import {
   type ApplyResult,
   applyPatch,
   isUnifiedDiff,
-  type Patch,
-  type PatchFileSystemPort,
   parsePatch,
   unifiedDiffToV4A,
   // biome-ignore lint/style/noRestrictedImports: @/patch is reachable by @/tool/apply-patch per the documented ADR slice carve-out.
 } from "@/patch"
 import { errMessage } from "@/shared"
 import { FsJailError, resolveJailed } from "@/storage"
-import { recordFreshBaseline } from "./_shared/fresh-hash"
+import { writeBudgetEvent } from "./_shared/exfil-rail-guards"
 import { classifyFastApplyError, failingTargetPath } from "./apply-patch-fallback-wire"
-import { guardWrite } from "./stale-read-guard"
+import {
+  type GuardedPatchFileSystemPort,
+  guardPatchTargets,
+  guardStalePatchTargets,
+  refreshPatchBaselines,
+} from "./patch-mutation-safety"
 import type {
   EditToolContext,
   FastApplyFallbackSeam,
@@ -177,7 +180,7 @@ const defaultNodeFs: NodeFsLike = {
  * re-resolves through `resolveJailed` immediately before the syscall, so a
  * swap between check and use forces another `realpath`.
  */
-export class FsJailFileSystemPort implements PatchFileSystemPort {
+export class FsJailFileSystemPort implements GuardedPatchFileSystemPort {
   private readonly jailRoot: string
   private readonly fs: NodeFsLike
 
@@ -351,113 +354,6 @@ const schema = z.object({
 type Input = z.infer<typeof schema>
 
 /**
- * ADR-0091 git-write-protection for `apply_patch`. A V4A patch is a multi-file
- * workspace mutation, so EVERY target path the patch would create / overwrite /
- * delete / move-to is a potential code-execution / policy-escape vector exactly
- * as for `write`/`edit`/`scripted_replace`. The parser yields a typed op union;
- * we scan its targets:
- *
- *   - `add`    → `op.path`              (file created — `*** Add File:`)
- *   - `delete` → `op.path`              (file removed — `*** Delete File:`)
- *   - `update` → `op.path` (+ `moveTo`) (file edited — `*** Update File:`,
- *                                         and the rename DESTINATION when
- *                                         `*** Move to:` is present)
- *
- * The `moveTo` destination MUST be guarded independently: a patch could update
- * a benign file and rename it ONTO `.git/hooks/pre-commit`. Returns the FIRST
- * guarded target's denial `ToolEvent` (deterministic — ops in patch order),
- * mirroring `gitWriteGuardDeny`'s single source of truth so the model-facing
- * `output` and typed `permission_denied` failure are byte-identical to the
- * write/edit/scripted_replace path. Returns `null` when the guard is unwired
- * (DEFAULT-OFF) or no target is an escape vector — the apply proceeds normally.
- */
-function guardPatchTargets(patch: Patch, guard: GitWriteGuard | undefined): ToolEvent | null {
-  if (guard === undefined) return null
-  for (const op of patch.ops) {
-    const targets =
-      op.kind === "update" && op.moveTo !== undefined ? [op.path, op.moveTo] : [op.path]
-    for (const target of targets) {
-      const reason = guard(target)
-      if (reason != null) {
-        return {
-          type: "result",
-          result: {
-            ok: false,
-            output: `git-escape-vector denial: cannot apply_patch to ${target} (${reason}); use a different path`,
-            failure: { mode: "permission_denied", path: target },
-          },
-        }
-      }
-    }
-  }
-  return null
-}
-
-/**
- * ADR-0474 stale-read-guard parity for `apply_patch` — mirrors `edit`'s
- * `editPreCommitDeny` (`src/tool/edit/index.ts`). `edit` blocks a write whose
- * target was externally modified since the model last read it; `apply_patch` had
- * NO such TOCTOU guard, so a V4A patch landed on bytes that drifted since the
- * read (or only the anchor broke). This closes that gap by consulting the SAME
- * `guardWrite(ctx.readFileState, path, mtimeMs)` the edit tool uses.
- *
- * Scope (which ops are staleness-checked) mirrors edit's "read-before-write" on
- * an EXISTING target:
- *
- *   - `update` → `op.path` (the file being edited; also the rename SOURCE when
- *                `moveTo` is present — the SOURCE is the file the model read).
- *   - `delete` → `op.path` (the file being removed — the model read it to
- *                decide it was obsolete).
- *
- * NOT checked (no prior-read baseline exists / target must not yet exist):
- *   - `add`     → `op.path`   (a brand-new file has no read-time baseline; the
- *                              guard's `unread ⇒ allow` posture covers it).
- *   - `update`'s `moveTo` DESTINATION (a move destination must NOT exist; it has
- *                              no read-time baseline either).
- *
- * HARD-STOP / no partial apply: the FIRST stale target (ops scanned in patch
- * order — deterministic) returns the typed `rejected` / `stale_read` ToolEvent
- * and the caller NEVER reaches `applyPatch`, so ZERO files are written. The
- * model-facing `output` is the verbatim `StaleReadError.message` (the same
- * "re-read first" guidance `edit` surfaces), and the typed failure shape
- * (`{ mode: "rejected", reason: "stale_read" }`) is byte-identical to `edit`'s.
- *
- * DEFAULT-OFF / byte-identical: returns `null` immediately when
- * `ctx.readFileState` is undefined (the host did not opt into the guard — see
- * `staleReadGuardEnabled`), so the apply path is byte-identical to today.
- * Path identity: `statTarget` resolves through the ONE jail and returns the
- * canonical absolute path, and `guardWrite` is called against THAT — the same
- * absolute path the `read` tool records, so the byte-for-byte comparison agrees.
- */
-async function guardStaleTargets(
-  patch: Patch,
-  port: FsJailFileSystemPort,
-  ctx: EditToolContext | undefined,
-): Promise<ToolEvent | null> {
-  const state = ctx?.readFileState
-  if (state === undefined) return null
-  for (const op of patch.ops) {
-    if (op.kind !== "update" && op.kind !== "delete") continue
-    const stat = await port.statTarget(op.path)
-    // Absent on disk (or no mtime baseline) ⇒ no prior-read staleness to assert;
-    // the applier surfaces its own typed error for a missing update/delete target.
-    if (!stat.exists) continue
-    const guard = guardWrite(state, stat.resolvedPath, stat.mtimeMs)
-    if (!guard.ok) {
-      return {
-        type: "result",
-        result: {
-          ok: false,
-          output: guard.error.message,
-          failure: { mode: "rejected", reason: "stale_read" },
-        },
-      }
-    }
-  }
-  return null
-}
-
-/**
  * Format an `ApplyResult` into a deterministic single-string summary the
  * dispatch seam surfaces back to the model. The order is stable:
  * added → updated → moved → deleted. Empty categories are omitted.
@@ -471,44 +367,6 @@ function formatApplyResult(r: ApplyResult): string {
   }
   if (r.filesDeleted.length > 0) parts.push(`deleted: ${r.filesDeleted.join(", ")}`)
   return parts.length === 0 ? "apply_patch: no-op patch" : parts.join("; ")
-}
-
-/**
- * jul-13 edit-fresh-hash — multi-file stale-read baseline refresh for apply_patch.
- * A successful patch mutates N files and advances each one's mtime; without this,
- * the DEFAULT-ON mtime guard would veto a chained (no-re-read) `edit` to a patched
- * file with `stale_read` (the patch left `ctx.readFileState` at the pre-patch
- * mtime) — the same defeat cured for edit/write/scripted_replace, now per touched
- * file. Re-stats each ADDED/UPDATED/MOVED-to file POST-commit (deleted files are
- * moot) and records the new mtime via the SHARED {@link recordFreshBaseline}
- * chokepoint under `statTarget`'s canonical resolvedPath (byte-identical to the
- * path the read tool / a later edit's guardWrite keys on). Gated once ⇒ ZERO stats
- * when off (byte-identical). Best-effort per file: the patch is already committed.
- *
- * NOTE (deliberate scope): apply_patch does NOT emit a fresh-hash manifest (unlike
- * the single-flat-file tools). Their post-write bytes are already in memory
- * (`planned.next`/`input.content`/`r.next`) so the digest is FREE; apply_patch does
- * not retain per-file content (the atomic temp+rename commit discards it), so
- * hashing every touched file would require N re-reads — defeating the feature's
- * zero-standing-cost invariant. The correctness refresh below has no such cost
- * (a stat, not a read), so it ships; emission is intentionally out of scope.
- */
-const refreshApplyBaselines = async (
-  port: FsJailFileSystemPort,
-  ctx: EditToolContext,
-  r: ApplyResult,
-): Promise<void> => {
-  if (ctx.editFreshHash !== true || ctx.readFileState === undefined) return
-  const touched = [...r.filesAdded, ...r.filesUpdated, ...r.filesMoved.map(([, to]) => to)]
-  for (const p of touched) {
-    try {
-      const s = await port.statTarget(p)
-      if (s.exists) recordFreshBaseline(ctx, s.resolvedPath, s.mtimeMs)
-    } catch {
-      // Post-commit best-effort per file: a stat failure leaves that file's
-      // baseline at its pre-patch value (the model re-reads it if needed).
-    }
-  }
 }
 
 /**
@@ -536,6 +394,7 @@ async function guardedParseAndApply(
   port: FsJailFileSystemPort,
   guard: GitWriteGuard | undefined,
   ctx?: EditToolContext,
+  enforceWriteBudget = true,
 ): Promise<{ deny: ToolEvent } | { result: ApplyResult }> {
   // Auto-convert standard unified diff (--- a/file / +++ b/file format) to V4A.
   // Models frequently produce unified diff; without this, parsePatch throws on a
@@ -543,7 +402,7 @@ async function guardedParseAndApply(
   const normalizedPatch = isUnifiedDiff(patchText) ? unifiedDiffToV4A(patchText) : patchText
   const patch = parsePatch(normalizedPatch)
   // Guard EVERY target BEFORE any filesystem mutation (hard-stop posture).
-  const guardDeny = guardPatchTargets(patch, guard)
+  const guardDeny = guardPatchTargets(patch, guard, "apply_patch")
   if (guardDeny) return { deny: guardDeny }
   // ADR-0474 stale-read-guard parity — block the patch if ANY existing target
   // drifted since the model last read it, BEFORE any write (hard-stop, no partial
@@ -551,8 +410,16 @@ async function guardedParseAndApply(
   // path below is byte-identical to today. This runs AFTER the git-guard and
   // BEFORE the critical-section commit — both pre-flight denies precede any FS
   // mutation, so a denied patch is NEVER a partial write.
-  const staleDeny = await guardStaleTargets(patch, port, ctx)
+  const staleDeny = await guardStalePatchTargets(patch, port, ctx)
   if (staleDeny) return { deny: staleDeny }
+  // A V4A patch is one user-visible mutating tool call, even if it has several
+  // file operations. Check exactly once after all preflight guards and before
+  // the atomic apply. The fast-apply rescue retry passes false so one original
+  // request cannot consume the turn budget twice.
+  if (enforceWriteBudget) {
+    const budgetDeny = ctx ? writeBudgetEvent(ctx) : null
+    if (budgetDeny) return { deny: budgetDeny }
+  }
   // applyPatch throws PatchApplyError / PatchAnchorNotFoundError on apply
   // failure — propagate. FsJailFileSystemPort throws FsJailViolationError
   // on boundary breach — propagate. `PATCH_TRACE` injects the OTel binding.
@@ -636,7 +503,7 @@ async function tryFastApplyFallback(
   try {
     // [F6] the retry commit is ALSO a multi-file FS mutation ⇒ same critical
     // section as the primary apply (parity; default-OFF when the seam is unwired).
-    const applied = await guardedParseAndApply(attempt.newPatch, port, guard, ctx)
+    const applied = await guardedParseAndApply(attempt.newPatch, port, guard, ctx, false)
     // A git-escape deny OR a stale-read deny on the re-emit is a non-rescue: the
     // model cannot slip a guarded/stale target through the fallback ⇒ surface the
     // ORIGINAL error (caller re-throws), never the retry's.
@@ -690,7 +557,11 @@ export const applyPatchTool: Tool<Input> = {
         yield applied.deny
         return
       }
-      await refreshApplyBaselines(port, ctx, applied.result)
+      await refreshPatchBaselines(port, ctx, [
+        ...applied.result.filesAdded,
+        ...applied.result.filesUpdated,
+        ...applied.result.filesMoved.map(([, to]) => to),
+      ])
       yield { type: "result", result: { ok: true, output: formatApplyResult(applied.result) } }
       return
     }
@@ -705,7 +576,11 @@ export const applyPatchTool: Tool<Input> = {
         yield applied.deny
         return
       }
-      await refreshApplyBaselines(port, ctx, applied.result)
+      await refreshPatchBaselines(port, ctx, [
+        ...applied.result.filesAdded,
+        ...applied.result.filesUpdated,
+        ...applied.result.filesMoved.map(([, to]) => to),
+      ])
       yield { type: "result", result: { ok: true, output: formatApplyResult(applied.result) } }
     } catch (err) {
       const rescued = await tryFastApplyFallback(
@@ -722,7 +597,11 @@ export const applyPatchTool: Tool<Input> = {
         rescued.modelUsed !== undefined
           ? ` (recovered via fast-apply fallback, model ${rescued.modelUsed})`
           : " (recovered via fast-apply fallback)"
-      await refreshApplyBaselines(port, ctx, rescued.result)
+      await refreshPatchBaselines(port, ctx, [
+        ...rescued.result.filesAdded,
+        ...rescued.result.filesUpdated,
+        ...rescued.result.filesMoved.map(([, to]) => to),
+      ])
       yield {
         type: "result",
         result: { ok: true, output: `${formatApplyResult(rescued.result)}${note}` },

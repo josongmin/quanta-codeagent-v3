@@ -1,0 +1,64 @@
+id: 0541-sdk-transport-door
+title: connect() + SessionHandle — transport-unified public SDK door (ws/stdio)
+section: 9
+subsystem: Public SDK session door (docs/plans/jul-16-transport-unified-sdk ticket 01)
+order: 541
+maturity: L3
+status: new
+ui_surfaces: [n-a]
+monitoring: n-a
+modes: [n-a]
+configurable: static
+owners: ["@songmin"]
+labels: ["surface:sdk", "plan:jul-16-transport-unified-sdk"]
+depends_on: [0540-inline-approval-resolver]
+surface_integration:
+  cli: full
+  web: na
+  method: audited
+  verified: "2026-07-17"
+  evidence:
+    cli: "CLI attach consumes the hoisted attach-flow (handshake byte-identical move, 64 attach tests unmodified green) — the same flow connect() rides"
+    web: "not a browser surface — external consumers reach the web-daemon over the same session.v1 wire the browser uses; no frontend change"
+purpose: |
+  The single public seam for external consumers to ride the session.v1 wire:
+  `connect({transport: transports.ws(...) | transports.stdio(...)})` returns a
+  SessionHandle — SessionVerbSurface<CommandReceipt> (8 verbs via the hoisted
+  @/protocol/session/builders SSOT) + subscribe/snapshot(cache+freshness)/
+  lastSeq/onConnectionState/onCommandRejected/awaitTurnEnd. Parity with
+  RuntimeSession (=SessionVerbSurface<SessionDispatchResult>) is a COMPILE
+  fact via permanent type pins (positive value-flow + negative
+  @ts-expect-error), and a conformance oracle (real RuntimeSession via
+  toSessionHandle vs wire handle) asserts byte-equal event streams under a
+  sealed 3-class normalization contract with a negative paired-control.
+  awaitTurnEnd uses succession correlation (explicit re-issue report +
+  marker-ON adoption arm) — every correlation loss is a TYPED rejection,
+  never a hang (adversarial audit killed 3 execution-confirmed hangs:
+  resumeFromSeq descoped to ticket 05, parked-approval turn.cancel →
+  approval_voided, begin() orphaning → superseded). onApproval reuses the
+  ApprovalDecisionResult SSOT (no 4th decision type), throw→deny fail-safe.
+  stdio transport owns child lifecycle (SIGTERM→SIGKILL escalation, stderr
+  tail, zombie reap, NO env auto-injection). External consumption proven
+  from OUTSIDE the repo (file: dep + tsc --noEmit exit 0) — honest caveat:
+  shim-conditional until jul-4 P8 ships .d.ts (USAGE §9). In-process door
+  stays createAnalysisAgent (session factory deliberately NOT exported —
+  public-surface pin asserts toSessionHandle/loopback absence).
+evidence:
+  code:
+    - src/sdk/connect.ts
+    - src/ipc/session/handle.ts
+    - src/ipc/session/attach-flow.ts
+    - src/protocol/session/verb-surface.ts
+    - src/protocol/session/builders.ts
+    - src/sdk/runtime/handle-adapter.ts
+    - src/ipc/session/transports/stdio-spawn.ts
+  adrs: ["docs/plans/jul-16-transport-unified-sdk/00-MASTER-PLAN.md", "docs/plans/jul-16-transport-unified-sdk/USAGE-sdk-door.md"]
+  tests:
+    unit:
+      - tests/unit/ipc/session-handle.test.ts
+      - tests/unit/ipc/session-attach-flow.test.ts
+      - tests/unit/ipc/session-handle-conformance.test.ts
+      - tests/unit/sdk/connect.test.ts
+      - tests/unit/protocol/session-builders.test.ts
+    integration:
+      - tests/integration/sdk-connect-session-handle-e2e.test.ts

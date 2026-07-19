@@ -350,7 +350,7 @@ const checkConflictFreedom = (
       const foeAtom = byVariant.get(foe)
       // conflict is scoped to the SAME channel per ADR §1.
       if (foeAtom !== undefined && foeAtom.channel !== a.channel) continue
-      const key = [a.variantId, foe].sort().join(" ")
+      const key = [a.variantId, foe].sort().join("\x00")
       if (seenPairs.has(key)) continue
       seenPairs.add(key)
       violations.push({

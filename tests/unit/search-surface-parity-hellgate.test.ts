@@ -20,7 +20,7 @@ import { SIDE_CONVERSATION_TOOL_NAMES } from "../../src/agent/side-conversation/
 import { classify } from "../../src/apps/bench/corpus/failure-classifier"
 import type { InstanceResult } from "../../src/apps/bench/types"
 import { observeFunnel } from "../../src/apps/probe/funnel"
-import { SIDE_CHAT_DEFAULT_READ_ONLY } from "../../src/runner/orchestrate"
+import { SIDE_CONVERSATION_DEFAULT_TOOLS } from "../../src/host/runtime/internal/context-binding/side-conversation"
 import { parseFrontmatter, systemSkillsDir } from "../../src/skill"
 import {
   createAgentTool,
@@ -101,7 +101,7 @@ describe("HELL-search-surface parity", () => {
 
   test("delegated read-only surfaces retain search_codebase", () => {
     expect(SIDE_CONVERSATION_TOOL_NAMES).toContain("search_codebase")
-    expect(SIDE_CHAT_DEFAULT_READ_ONLY).toContain("search_codebase")
+    expect(SIDE_CONVERSATION_DEFAULT_TOOLS).toContain("search_codebase")
   })
 
   test("subagent read/review defaults retain search_codebase", async () => {

@@ -30,8 +30,31 @@ export type WakeOutcome = "woke" | "queued" | "no-receiver"
  *  stop the current task and handle the message immediately. */
 export type Waker = (reason: string) => WakeOutcome
 
+/**
+ * WS2 (RFC jul-18 §4.2) — the typed per-child control endpoint registered
+ * alongside the legacy waker. This registry only STORES + hands back the
+ * endpoint; it never owns/constructs it (the `@/agent` runner builds the
+ * endpoint over the child's private gate + `activeTurnRef` and passes it here),
+ * so the registry stays a pure PURE slice leaf with no `@/agent` dependency.
+ * Structurally mirrors `SubagentControlEndpoint`
+ * (`@/agent/subagent-delivery/ports`) — duck-typed so this slice never imports
+ * `@/agent`. WS3 rewires `followup_task` onto {@link endpointFor}; WS5 removes
+ * the legacy waker map and renames {@link registerEndpoint} → `register`.
+ */
+export interface ControlEndpoint {
+  readonly mailboxLabel: string
+  wake(): WakeOutcome
+  interrupt(): string
+  steer(submission: unknown): string
+  currentTurnId(): string | undefined
+}
+
 export class TurnWakeRegistry {
   private readonly wakers = new Map<string, Waker>()
+  /** WS2 — task id → typed control endpoint (the superset of the waker map).
+   *  Registered by the runner alongside a derived legacy waker under the SAME
+   *  last-writer guard so a stale disposer never clobbers a replacement. */
+  private readonly endpoints = new Map<string, ControlEndpoint>()
   /** `agentId` (the registry TASK id `followup_task` targets) → that child's
    *  MAILBOX label (`root/N`). The two id namespaces are disjoint: a child is
    *  registered here under its task id but reads its inbox under its mailbox
@@ -57,6 +80,59 @@ export class TurnWakeRegistry {
         this.labels.delete(agentId)
       }
     }
+  }
+
+  /**
+   * WS2 (RFC jul-18 §4.2) — register the typed control {@link ControlEndpoint}
+   * for `taskId`. This is the SUPERSET of {@link register}: it stores the
+   * endpoint AND derives a legacy waker (`endpoint.wake()` ignores the reason
+   * for a followup; an `"interrupt"` reason routes to `endpoint.interrupt()`)
+   * so the existing `followup_task` path keeps working byte-identically until
+   * WS3 rewires it onto {@link endpointFor}. Records the endpoint's
+   * `mailboxLabel` under the SAME id.
+   *
+   * Returns a disposer the runner MUST call when the child loop ends. Like
+   * {@link register}, the disposer is LAST-WRITER-SAFE: it only removes the
+   * endpoint/waker/label when they are STILL this registration's — a re-register
+   * for the same id (a newer loop owning the child) is never clobbered by the
+   * older disposer.
+   */
+  registerEndpoint(taskId: string, endpoint: ControlEndpoint): () => void {
+    this.endpoints.set(taskId, endpoint)
+    this.labels.set(taskId, endpoint.mailboxLabel)
+    // Derive the legacy waker so `followup_task` (pre-WS3) still triggers turns.
+    // `"interrupt"` routes to the typed interrupt (which aborts the in-flight
+    // turn); any other reason is a plain wake. The legacy waker returns the same
+    // {@link WakeOutcome} the old gate-backed waker did.
+    const waker: Waker = (reason: string): WakeOutcome => {
+      if (reason === "interrupt") {
+        const outcome = endpoint.interrupt()
+        // Map the typed interrupt outcome back onto the legacy WakeOutcome the
+        // `followup_task` handler expects: an idle wake is "woke"; a busy/repeat
+        // interrupt records a pending resume ⇒ "queued"; an unarmed gate has no
+        // live turn to trigger ⇒ "queued" (a turn WILL run once the loop parks).
+        return outcome === "woke_idle" ? "woke" : "queued"
+      }
+      return endpoint.wake()
+    }
+    this.wakers.set(taskId, waker)
+    return () => {
+      // Guard EACH map on its own identity so a stale disposer cannot remove a
+      // replacement registration (last-writer-safe, mirroring {@link register}).
+      if (this.endpoints.get(taskId) === endpoint) {
+        this.endpoints.delete(taskId)
+        this.labels.delete(taskId)
+      }
+      if (this.wakers.get(taskId) === waker) this.wakers.delete(taskId)
+    }
+  }
+
+  /** WS2 — the typed control endpoint bound to `taskId`, or `undefined` when
+   *  none is registered (the child never wired one, or its disposer already
+   *  ran). WS3's delivery controller reads this to issue typed wake/interrupt/
+   *  steer commands. */
+  endpointFor(taskId: string): ControlEndpoint | undefined {
+    return this.endpoints.get(taskId)
   }
 
   /** The mailbox label bound to `agentId` (its registry task id), or `undefined`

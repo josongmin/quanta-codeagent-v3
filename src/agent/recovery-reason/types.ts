@@ -90,6 +90,17 @@ export const isRecoveryReason = (v: unknown): v is RecoveryReason =>
  *   compactor cannot derive a meaningful next step (one-giant-turn case).
  * - `compactedAt`: epoch-ms timestamp of the compaction event. Captured via
  *   the injected `now` clock so deterministic tests stay reproducible.
+ * - `attributedTurnId?`: DOF-40 — the turn id this compaction belongs to,
+ *   STAMPED synchronously into the provenance at emit time by the compactor.
+ *   A `post_compact` subscriber (or Objective wire) attributes the event to
+ *   THIS turn from the stamp on the payload, NOT from ambient "current turn"
+ *   state read late. That makes attribution deterministic even when the async
+ *   handler resolves after the loop already advanced to turn N+1 (the
+ *   attribution race this field closes). Omitted when the caller did not stamp
+ *   a turn (legacy path) ⇒ exactOptional byte-identical.
+ * - `attributedThreadId?`: DOF-40 — the thread/session id, stamped at the same
+ *   synchronous point for the same reason (a late Objective handler keys off
+ *   the payload, not a since-changed ambient session). Omitted when unstamped.
  */
 export interface RecoveryProvenance {
   readonly reason: RecoveryReason
@@ -100,4 +111,6 @@ export interface RecoveryProvenance {
   readonly summaryRef?: string
   readonly resumeStep?: string
   readonly compactedAt: number
+  readonly attributedTurnId?: string
+  readonly attributedThreadId?: string
 }

@@ -38,16 +38,19 @@
  * the turn payload's `approvalRequest` barrier — NO timing assertions.
  */
 import { afterEach, describe, expect, test } from "bun:test"
-import { buildInteractiveTurnAssembler } from "@/apps/web-daemon/runtime-factory"
+import { z } from "zod"
 import type { ConfirmDecision } from "@/agent/confirm-decision"
+import { buildInteractiveTurnAssembler } from "@/apps/web-daemon/runtime-factory"
+import { setupApprovalContinuation } from "@/apps/web-daemon/server/approval-continuation"
+import type { SessionTransport, SessionTransportMessage } from "@/ipc/session"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext, ToolAction } from "@/permission"
-import type { PendingApprovalView, SessionEvent } from "@/protocol/session"
+import type { PendingApprovalView, SessionCommand, SessionEvent } from "@/protocol/session"
+import { continuationCommandIdForApproval } from "@/protocol/session"
 import { driveSessionTurn } from "@/runner/orchestrate"
 import { createRuntimeFromAgentConfigBase, type RuntimeSession } from "@/sdk/runtime"
 import { StdoutStream } from "@/stream"
 import { type Tool, type ToolEvent, ToolRegistry } from "@/tool"
-import { z } from "zod"
 
 /** Scripted LLM: each `stream()` call serves the next script. Turn 1 calls the
  *  mutating tool (⇒ gate ⇒ approval). The continuation turn re-runs the SAME
@@ -114,6 +117,10 @@ const buildWebRuntime = async (args: {
   readonly registry: ToolRegistry
   readonly permission: PermissionContext
   readonly surfaceOnConfirm?: (action: ToolAction) => Promise<boolean | ConfirmDecision>
+  /** ADR-0540 W1-B — mirror of the daemon composition's gate-ON base flag
+   *  (`runtime-factory.ts` sets it when `QUANTA_INLINE_APPROVAL_RESOLVER` is
+   *  on): stamps the `serverAutoContinues` capability bit on the manifest. */
+  readonly serverAutoContinues?: true
 }) => {
   const abort = new AbortController()
   // The surface onConfirm is normally the live TTY/web prompt; here it should
@@ -142,6 +149,7 @@ const buildWebRuntime = async (args: {
     // The throw-based mid-turn approval is LIVE only when the confirmSlot is
     // present — the web/CLI comp-root rail.
     approvalProtocol: { confirmSlot },
+    ...(args.serverAutoContinues === true ? { serverAutoContinues: true } : {}),
   }
   const { runtime } = await createRuntimeFromAgentConfigBase({
     base: base as Parameters<typeof createRuntimeFromAgentConfigBase>[0]["base"],
@@ -343,5 +351,404 @@ describe("approval.respond mid-turn → turn.run continuation (web-daemon e2e)",
     })
     expect(result.outcome.reason).toBe("completed")
     expect(resolverCalls).toBe(0)
+  })
+})
+
+/* ------------------------------------------------------------------------- */
+/* ADR-0540 W1-B — daemon-owned post-approval continuation                    */
+/* ------------------------------------------------------------------------- */
+
+/** In-memory duplex SessionTransport pair (mirrors the conformance harness in
+ *  `tests/unit/ipc/session-transport.test.ts`): `client.send` delivers to the
+ *  server handlers AND AWAITS them — so awaiting a command send observes the
+ *  full bridge dispatch of that command (deterministic sequencing, no sleeps). */
+const createTransportPair = (): { client: SessionTransport; server: SessionTransport } => {
+  const clientHandlers = new Set<(m: SessionTransportMessage) => void | Promise<void>>()
+  const serverHandlers = new Set<(m: SessionTransportMessage) => void | Promise<void>>()
+  const build = (
+    local: Set<(m: SessionTransportMessage) => void | Promise<void>>,
+    remote: Set<(m: SessionTransportMessage) => void | Promise<void>>,
+  ): SessionTransport => ({
+    async send(message) {
+      for (const handler of [...remote]) await handler(message)
+    },
+    onMessage(handler) {
+      local.add(handler)
+      return () => {
+        local.delete(handler)
+      }
+    },
+    async close() {
+      local.clear()
+    },
+  })
+  return {
+    client: build(clientHandlers, serverHandlers),
+    server: build(serverHandlers, clientHandlers),
+  }
+}
+
+/** Client-side frame tap with a BOUNDED wait (the bound is a failure diagnostic,
+ *  not a timing assertion — every sequencing claim rides the dispatch queue). */
+const tapTransport = (transport: SessionTransport) => {
+  const messages: SessionTransportMessage[] = []
+  let notify: Array<() => void> = []
+  transport.onMessage((m) => {
+    messages.push(m)
+    const waiters = notify
+    notify = []
+    for (const wake of waiters) wake()
+  })
+  const waitUntil = async <T>(
+    pick: (msgs: readonly SessionTransportMessage[]) => T | undefined,
+    label: string,
+  ): Promise<T> => {
+    const deadline = Date.now() + 10_000
+    for (;;) {
+      const hit = pick(messages)
+      if (hit !== undefined) return hit
+      if (Date.now() > deadline) {
+        const seen = messages
+          .map((m) => (m.kind === "event" ? `event:${m.event.type}` : m.kind))
+          .join(", ")
+        throw new Error(`timed out waiting for ${label}; frames seen: [${seen}]`)
+      }
+      await new Promise<void>((resolve) => {
+        notify.push(resolve)
+        setTimeout(resolve, 25)
+      })
+    }
+  }
+  const eventsOfType = (type: SessionEvent["type"]): SessionEvent[] =>
+    messages.flatMap((m) => (m.kind === "event" && m.event.type === type ? [m.event] : []))
+  return { messages, waitUntil, eventsOfType }
+}
+
+/** Wire-shaped client commands (fresh commandId per frame, like the browser). */
+const frame = (command: SessionCommand): SessionTransportMessage => ({ kind: "command", command })
+const clientCommand = (
+  sessionId: string,
+  type: "turn.run" | "turn.cancel",
+): SessionCommand & { commandId: string } => ({
+  sessionId,
+  commandId: crypto.randomUUID(),
+  issuedAt: new Date().toISOString(),
+  type,
+})
+
+/** Boot the web-daemon-shaped runtime + a wire client, with the W1-B
+ *  continuation wiring installed under the given env (the daemon comp seam). */
+const bootWireHarness = async (args: {
+  readonly counts: { n: number }
+  readonly env: Record<string, string | undefined>
+  readonly serverAutoContinues?: true
+}) => {
+  const runtime = await buildWebRuntime({
+    llm: new ScriptedLLM([callTool("t1"), callTool("t1b"), endText]),
+    registry: new ToolRegistry([mutatingTool(args.counts)]),
+    permission: liveProxy("default"),
+    ...(args.serverAutoContinues === true ? { serverAutoContinues: true as const } : {}),
+  })
+  const session: RuntimeSession = await runtime.createSession({
+    cwd: "/tmp/quanta-web-approval-mid-turn",
+    permissionMode: "default",
+  })
+  const continuation = setupApprovalContinuation(session, args.env)
+  const pair = createTransportPair()
+  const tap = tapTransport(pair.client)
+  await session.attachSessionTransport(pair.server)
+  // Complete the connect handshake so commands are accepted and live events
+  // fan out to this peer (the bridge gates both on `peer.connected`).
+  await pair.client.send({ kind: "connect", sessionId: session.sessionId })
+  const teardown = async (): Promise<void> => {
+    continuation.unsub?.()
+    await session.close()
+    await runtime.close()
+  }
+  const sendCommand = async (command: SessionCommand): Promise<void> => {
+    await pair.client.send(frame(command))
+  }
+  const startApprovalTurn = async (): Promise<{ approvalId: string; sentIds: string[] }> => {
+    const sentIds: string[] = []
+    const now = new Date().toISOString()
+    const append: SessionCommand = {
+      sessionId: session.sessionId,
+      commandId: crypto.randomUUID(),
+      issuedAt: now,
+      type: "input.append",
+      text: "do the dangerous thing",
+    }
+    sentIds.push(append.commandId)
+    await sendCommand(append)
+    const run = clientCommand(session.sessionId, "turn.run")
+    sentIds.push(run.commandId)
+    await sendCommand(run)
+    const requested = await tap.waitUntil(
+      (msgs) =>
+        msgs.find(
+          (m): m is SessionTransportMessage & { kind: "event" } =>
+            m.kind === "event" && m.event.type === "approval.requested",
+        ),
+      "approval.requested",
+    )
+    const approvalId = (requested.event as SessionEvent & { type: "approval.requested" }).approval
+      .approvalId
+    return { approvalId, sentIds }
+  }
+  const respond = async (approvalId: string, decision: "approve" | "deny"): Promise<string> => {
+    const command: SessionCommand = {
+      sessionId: session.sessionId,
+      commandId: crypto.randomUUID(),
+      issuedAt: new Date().toISOString(),
+      type: "approval.respond",
+      approvalId,
+      decision,
+    }
+    await sendCommand(command)
+    return command.commandId
+  }
+  /** Deterministic quiescence probe: a benign command CHAINS BEHIND anything the
+   *  daemon may have enqueued on the same dispatch tail — once its state echo
+   *  arrives, every earlier continuation (if any) has already started+settled. */
+  const probeQuiescent = async (): Promise<void> => {
+    const probe: SessionCommand = {
+      sessionId: session.sessionId,
+      commandId: crypto.randomUUID(),
+      issuedAt: new Date().toISOString(),
+      type: "session.permission.set",
+      mode: "default",
+    }
+    await sendCommand(probe)
+    await tap.waitUntil(
+      (msgs) =>
+        msgs.find(
+          (m) =>
+            m.kind === "event" &&
+            m.event.type === "session.state.updated" &&
+            m.event.causedByCommandId === probe.commandId,
+        ),
+      "quiescence probe state echo",
+    )
+  }
+  return {
+    runtime,
+    session,
+    tap,
+    teardown,
+    sendCommand,
+    startApprovalTurn,
+    respond,
+    probeQuiescent,
+  }
+}
+
+describe("ADR-0540 W1-B: daemon-owned continuation (web leak sealed server-side)", () => {
+  test("gate ON: approve WITHOUT any client turn.run re-issue — the DAEMON re-issues, the tool dispatches, the turn completes", async () => {
+    const counts = { n: 0 }
+    const harness = await bootWireHarness({
+      counts,
+      env: { QUANTA_INLINE_APPROVAL_RESOLVER: "1" },
+      serverAutoContinues: true,
+    })
+    cleanup = harness.teardown
+
+    const { approvalId, sentIds } = await harness.startApprovalTurn()
+    expect(counts.n).toBe(0) // suspended on the gate — not yet dispatched
+
+    // The ONLY client action: answer the approval. No follow-up turn.run frame.
+    const respondId = await harness.respond(approvalId, "approve")
+    sentIds.push(respondId)
+
+    // The daemon-owned continuation must complete the turn.
+    await harness.tap.waitUntil(
+      (msgs) => msgs.find((m) => m.kind === "event" && m.event.type === "turn.completed"),
+      "turn.completed via daemon re-issue",
+    )
+    expect(counts.n).toBe(1)
+
+    // The continuation `turn.run` was DAEMON-MINTED: the second `turn.started`
+    // is caused by a commandId this client never sent.
+    const started = harness.tap.eventsOfType("turn.started")
+    expect(started.length).toBe(2)
+    const continuationCause = started[1]?.causedByCommandId
+    expect(continuationCause).toBeDefined()
+    expect(sentIds).not.toContain(continuationCause)
+
+    // B-MED-7 — the daemon minted the continuation's commandId DETERMINISTICALLY
+    // from the originating approvalId (`continuationCommandIdForApproval`), so a
+    // marker-aware wire client can PREDICT it from the `approval.resolved` event
+    // alone and adopt EXACTLY this turn (never a foreign peer's interleaved
+    // turn.started — the multi-peer 승인 입양 정확화 fix). This is the load-bearing
+    // daemon wire the correlator's precise-adoption arm keys on.
+    expect(continuationCause).toBe(continuationCommandIdForApproval(approvalId))
+
+    // The resolution reached the wire exactly once.
+    expect(harness.tap.eventsOfType("approval.resolved").length).toBe(1)
+  })
+
+  test("gate ON: capability manifest declares serverAutoContinues=true (wire snapshot carrier + in-proc session.created)", async () => {
+    const counts = { n: 0 }
+    const harness = await bootWireHarness({
+      counts,
+      env: { QUANTA_INLINE_APPROVAL_RESOLVER: "1" },
+      serverAutoContinues: true,
+    })
+    cleanup = harness.teardown
+
+    // The connect handshake replied with a snapshot — the marker rides it.
+    // The snapshot is the SOLE wire carrier of the manifest (see the ticket
+    // docs/tickets/jul-16-session-created-tail-filter-drop.md, fixed as B:
+    // the per-attach `session.created` is an in-proc notification only and
+    // is never published to the transport bridge).
+    const snapshot = await harness.tap.waitUntil(
+      (msgs) =>
+        msgs.find(
+          (m): m is SessionTransportMessage & { kind: "snapshot" } => m.kind === "snapshot",
+        ),
+      "connect snapshot",
+    )
+    expect(snapshot.snapshot.capabilities.serverAutoContinues).toBe(true)
+
+    // And the per-attach session.created IN-PROC notification carries the
+    // SAME manifest (captured via `session.subscribe`, NOT the wire tap).
+    const created: SessionEvent[] = []
+    const unsub = harness.session.subscribe((event) => {
+      if (event.type === "session.created") created.push(event)
+    })
+    const pair2 = createTransportPair()
+    const connected = await harness.session.attachSessionTransport(pair2.client)
+    unsub()
+    await connected.close()
+    const createdEvent = created[0]
+    if (createdEvent?.type !== "session.created") throw new Error("expected session.created")
+    expect(createdEvent.capabilityManifest.serverAutoContinues).toBe(true)
+
+    // POSITIVE wire-absence pin: no `session.created` frame ever reached this
+    // client's wire — not from its own attach (pre-fix: tail-filter +
+    // handshake-gate drop) and not from the second attach above (pre-fix:
+    // dup-seq noise fan-out to already-connected peers — removed by fix B).
+    expect(harness.tap.eventsOfType("session.created").length).toBe(0)
+  })
+
+  test("gate OFF (explicit): respond alone does NOT auto-continue — tool stays uninvoked, manifest declares false", async () => {
+    const counts = { n: 0 }
+    const harness = await bootWireHarness({ counts, env: {} })
+    cleanup = harness.teardown
+
+    const snapshot = await harness.tap.waitUntil(
+      (msgs) =>
+        msgs.find(
+          (m): m is SessionTransportMessage & { kind: "snapshot" } => m.kind === "snapshot",
+        ),
+      "connect snapshot",
+    )
+    // OFF ⇒ the additive marker normalizes to false (never undefined/true).
+    expect(snapshot.snapshot.capabilities.serverAutoContinues).toBe(false)
+
+    const { approvalId } = await harness.startApprovalTurn()
+    await harness.respond(approvalId, "approve")
+
+    // Deterministic (queue-ordered) proof of NO daemon continuation: a probe
+    // command chains behind any would-be re-issue; when its echo arrives, no
+    // second turn has started and the tool remains uninvoked. (The legacy
+    // client re-issue path is what continues this flow — untouched here.)
+    await harness.probeQuiescent()
+    expect(counts.n).toBe(0)
+    expect(harness.tap.eventsOfType("turn.started").length).toBe(1)
+    expect(harness.tap.eventsOfType("turn.completed").length).toBe(0)
+  })
+
+  test("gate ON: deny settles idle — tool stays uninvoked, no second turn (result pin: a re-issue is unobservable here because deny clears the draft, so it could only reject empty_turn_input)", async () => {
+    const counts = { n: 0 }
+    const harness = await bootWireHarness({
+      counts,
+      env: { QUANTA_INLINE_APPROVAL_RESOLVER: "1" },
+      serverAutoContinues: true,
+    })
+    cleanup = harness.teardown
+
+    const { approvalId } = await harness.startApprovalTurn()
+    await harness.respond(approvalId, "deny")
+
+    await harness.probeQuiescent()
+    // No continuation was enqueued: one turn.started (the original), no second.
+    expect(harness.tap.eventsOfType("turn.started").length).toBe(1)
+    expect(counts.n).toBe(0)
+    const snap = await harness.session.snapshot()
+    expect(snap.state.status).toBe("idle")
+    expect(snap.pendingApproval).toBeNull()
+  })
+
+  test("gate ON pin (old-client protection): a duplicate bare turn.run after approve is BENIGN — exactly one execution, duplicate rejected empty_turn_input", async () => {
+    // 2c investigation, pinned: the kernel reducer requires draft input for
+    // `turn.run` (`empty_turn_input` otherwise) and the dispatch tail serializes
+    // transport commands — so a non-marker-aware client that ALSO re-issues after
+    // approve produces NO double tool run and NO double LLM turn. The duplicate
+    // dispatches only after the daemon-continued turn completed (draft consumed)
+    // and is deterministically rejected. No absorb layer is needed.
+    const counts = { n: 0 }
+    const harness = await bootWireHarness({
+      counts,
+      env: { QUANTA_INLINE_APPROVAL_RESOLVER: "1" },
+      serverAutoContinues: true,
+    })
+    cleanup = harness.teardown
+
+    const { approvalId } = await harness.startApprovalTurn()
+    await harness.respond(approvalId, "approve")
+    // Old-client behavior: re-issue a bare turn.run right after the respond.
+    // Queue order is deterministic: respond → daemon turn.run → this duplicate.
+    const dup = clientCommand(harness.session.sessionId, "turn.run")
+    await harness.sendCommand(dup)
+
+    await harness.probeQuiescent()
+    // Exactly ONE execution and one completed continuation turn.
+    expect(counts.n).toBe(1)
+    expect(harness.tap.eventsOfType("turn.started").length).toBe(2)
+    expect(harness.tap.eventsOfType("turn.completed").length).toBe(1)
+    // The continuation that ran was the DAEMON's, not the duplicate: the
+    // duplicate chained BEHIND the daemon re-issue on the dispatch tail, found
+    // the draft consumed, and was rejected (`empty_turn_input`) — never started.
+    const started = harness.tap.eventsOfType("turn.started")
+    expect(started[1]?.causedByCommandId).toBeDefined()
+    expect(started[1]?.causedByCommandId).not.toBe(dup.commandId)
+    // The duplicate produced no third turn and the session settled idle.
+    const snap = await harness.session.snapshot()
+    expect(snap.state.status).toBe("idle")
+    expect(snap.state.draftInput).toBe("")
+  })
+
+  test("gate ON (audit M-1): a DIRECT in-proc respond (no wire, no enqueue) still lands the continuation — enqueue chains behind the in-flight dispatch", async () => {
+    // The adversarial audit proved the trap: a NON-queued respond still holds
+    // the single-writer lease when the subscriber's enqueued continuation was
+    // chained onto an EMPTY tail — without the engine's `activeDispatch` wait
+    // the continuation starts inside the respond's own await window, rejects
+    // `single_writer_lease_held`, and the approved tool is NEVER dispatched
+    // (silent warn). This pins the deterministic fix.
+    const counts = { n: 0 }
+    const harness = await bootWireHarness({
+      counts,
+      env: { QUANTA_INLINE_APPROVAL_RESOLVER: "1" },
+      serverAutoContinues: true,
+    })
+    cleanup = harness.teardown
+
+    const { approvalId, sentIds } = await harness.startApprovalTurn()
+    expect(counts.n).toBe(0)
+
+    // DIRECT in-proc respond via the session verb — bypasses the transport
+    // queue entirely (the exact M-1 producer class: future in-proc callers).
+    await harness.session.approval.respond(approvalId, "approve")
+
+    await harness.tap.waitUntil(
+      (msgs) => msgs.find((m) => m.kind === "event" && m.event.type === "turn.completed"),
+      "turn.completed via daemon re-issue after a DIRECT respond",
+    )
+    expect(counts.n).toBe(1)
+    // Daemon-minted continuation: caused by a commandId this client never sent.
+    const started = harness.tap.eventsOfType("turn.started")
+    expect(started.length).toBe(2)
+    expect(started[1]?.causedByCommandId).toBeDefined()
+    expect(sentIds).not.toContain(started[1]?.causedByCommandId)
   })
 })

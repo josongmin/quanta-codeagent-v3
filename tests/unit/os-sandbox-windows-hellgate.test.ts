@@ -318,7 +318,7 @@ describe("B. nativeWindowsOsSandbox — native boundary (fake binding DI)", () =
 /* ================================================================== */
 
 describe("C. defaultOsSandbox — win32 selection (platform override)", () => {
-  test("HELL-C23: win32 + no helper → degraded passthrough, actionable degradeReason", async () => {
+  test("HELL-C23: win32 + no helper + REQUESTED sandbox → FAIL-CLOSED refusal, spawner NEVER called (DOF-40)", async () => {
     const { spawner, calls } = makeSpawner({ exitCode: 0, stdout: "pt", stderr: "" })
     const cfg: DefaultOsSandboxConfig = {
       platform: "win32",
@@ -326,24 +326,29 @@ describe("C. defaultOsSandbox — win32 selection (platform override)", () => {
       spawner,
     }
     const r = await defaultOsSandbox(cfg).spawn({ command: ["cmd"], cwd: "C:\\ws" }, POLICY_WW)
+    // LOAD-BEARING: a requested sandbox that can't be enforced REFUSES the spawn.
+    expect(calls).toHaveLength(0)
+    expect(r.exitCode).toBe(126)
+    expect(r.stdout).toBe("")
     expect(r.sandboxApplied).toBe(false)
-    expect(r.degradeReason).toContain("win32-sandbox-helper-missing")
-    expect(r.degradeReason).toContain("quanta-win-sandbox.exe")
-    expect(calls).toHaveLength(1)
+    expect(r.degradeReason).toBe("win32-sandbox-helper-missing")
+    expect(r.stderr).toContain("REFUSED")
+    expect(r.stderr).toContain("quanta-win-sandbox.exe")
   })
 
-  test("HELL-C24: win32 + no helper → BYTE-IDENTICAL to fake-spawner result", async () => {
-    const { spawner } = makeSpawner({ exitCode: 42, stdout: "OUT", stderr: "ERR" })
+  test("HELL-C24: win32 + no helper → command REFUSED, sentinel result NEVER surfaces (DOF-40)", async () => {
+    const { spawner, calls } = makeSpawner({ exitCode: 42, stdout: "OUT", stderr: "ERR" })
     const cfg: DefaultOsSandboxConfig = {
       platform: "win32",
       windows: { bindingLoader: loaderMissing },
       spawner,
     }
     const r = await defaultOsSandbox(cfg).spawn({ command: ["cmd"], cwd: "C:\\ws" }, POLICY_RO)
-    // exit/out/err pass through unchanged — only sandboxApplied/degradeReason are meta.
-    expect(r.exitCode).toBe(42)
-    expect(r.stdout).toBe("OUT")
-    expect(r.stderr).toBe("ERR")
+    // NOT a silent unsandboxed run: the fake spawner's 42/OUT/ERR never leak out.
+    expect(calls).toHaveLength(0)
+    expect(r.exitCode).toBe(126)
+    expect(r.stdout).toBe("")
+    expect(r.stdout.includes("OUT")).toBe(false)
     expect(r.sandboxApplied).toBe(false)
   })
 

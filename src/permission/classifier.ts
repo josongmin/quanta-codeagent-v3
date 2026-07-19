@@ -284,10 +284,25 @@ export const mergeOverlayCategory = (
   return out
 }
 
+/** Collapse every line-breaking character to a single space. Rule prefixes are
+ *  single-line command-prefix DATA — an embedded newline / unicode line
+ *  separator is never legitimate. Without this, an untrusted (project/repo)
+ *  layer rule whose prefix contains `"\n\n### ALLOW …"` would render a FORGED
+ *  markdown section into the classifier prompt, defeating the "repo cannot
+ *  loosen the AFK boundary" fence (the category slot check is bypassed because
+ *  the forged header lands in the joined body, not the guarded slot). Stripping
+ *  line breaks makes any `#`/`###` land INLINE on the rule's own line — inert
+ *  markdown, not a section header. Trusted (user/managed) rules are single-line
+ *  too, so this loses no legitimate content. */
+const sanitizeRuleLine = (line: string): string =>
+  line.replace(/[\r\n\t\v\f\u0085\u2028\u2029]+/g, " ")
+
 /** Render a merged category list to the slot body. Empty ⇒ the literal
- *  `(none)` so the prompt section is well-formed but carries no rules. */
+ *  `(none)` so the prompt section is well-formed but carries no rules. Each
+ *  line is sanitized so untrusted rule text cannot inject a forged prompt
+ *  section (see {@link sanitizeRuleLine}). */
 const renderSlot = (lines: readonly string[]): string =>
-  lines.length === 0 ? "(none)" : lines.join("\n")
+  lines.length === 0 ? "(none)" : lines.map(sanitizeRuleLine).join("\n")
 
 /**
  * Layer an {@link AutoModeOverlay} onto a base classifier prompt. When

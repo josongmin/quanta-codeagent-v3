@@ -2,6 +2,7 @@ import { z } from "zod"
 import { errMessage } from "@/shared"
 import { defaultFileSystemPort, type FileSystemPort, FsJailError } from "@/storage"
 import { freshHashNote, refreshStaleReadBaseline } from "./_shared/fresh-hash"
+import { writeBudgetDeny } from "./_shared/exfil-rail-guards"
 import { gitWriteGuardDeny } from "./git-write-guard-result"
 import { guardWrite } from "./stale-read-guard"
 import type { EditToolContext, Tool, ToolEvent, ToolFailure, ToolResult } from "./types"
@@ -394,6 +395,14 @@ export const makeScriptedReplaceTool = (
       const staleDeny = await staleReplaceGuard(fs, ctx, target)
       if (staleDeny) {
         yield { type: "result", result: staleDeny }
+        return
+      }
+      // Per-turn exfil write budget: this is the same pre-commit position as
+      // write/edit. A denied replacement has completed all read/planning work
+      // but must never enter the atomic commit window.
+      const budgetDeny = writeBudgetDeny(ctx)
+      if (budgetDeny) {
+        yield { type: "result", result: budgetDeny }
         return
       }
       // ADR-0398 ATOMIC commit — temp+fsync+rename via the port (crash-safe,

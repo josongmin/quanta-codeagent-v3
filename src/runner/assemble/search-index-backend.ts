@@ -116,7 +116,12 @@ export const hashEmbed = (text: string, dim = 64): readonly number[] => {
 const PERSIST_TABLE = "search_index_vss"
 const MANIFEST_TABLE = "search_index_chunk_manifest"
 const HASH_EMBED_DIM = 64
-const HASH_EMBED_MODEL_TAG = "legacy:hash-embed"
+/** Provider label of the NON-SEMANTIC 64-dim hash-BoW placeholder embedder — the
+ *  out-of-box default when `QUANTA_INDEX=on` but no embedding provider/key is set.
+ *  Exported so the pipeline can surface a one-shot operator warning (the hash
+ *  placeholder is otherwise a SILENT degradation: `search_codebase` advertises a
+ *  semantic capability it does not have). */
+export const HASH_EMBED_MODEL_TAG = "legacy:hash-embed"
 const HASH_EMBED_CAPS: EmbedderCapabilities = {
   dim: HASH_EMBED_DIM,
   maxInputBytes: Number.MAX_SAFE_INTEGER,

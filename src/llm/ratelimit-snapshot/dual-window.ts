@@ -11,10 +11,10 @@
  * This is DISTINCT from the existing `parse.ts` single-window family, which
  * reads the Anthropic/OpenAI `remaining`/`reset` shape. Codex reports
  * USED-PERCENT against a fixed window, NOT a remaining count — so the model and
- * the proactive policy differ, and the two live side-by-side. Where `parse.ts`
- * is request-scoped (last-write-wins on one logical route), this layer
- * ACCUMULATES per ACCOUNT: a 2nd request on the same account refines the same
- * bucket; different accounts keep separate buckets ({@link createAccountRateLimitStore}).
+ * the proactive policy differ, and the two live side-by-side. `parse.ts` is
+ * request-scoped (last-write-wins on one logical route); this module provides
+ * the request-scoped dual-window parse (`parseDualWindowSnapshot`) consumed live
+ * by the loop's BudgetMeter feed.
  *
  * Constraints (project rules — identical posture to `parse.ts`):
  *   - NO invented number: a field is populated ONLY when the provider sent a
@@ -139,30 +139,8 @@ export const parseDualWindowSnapshot = (
   }
 }
 
-/**
- * Per-ACCOUNT dual-window store (last-write-wins per account key). Pure
- * in-memory container — NO clock inside (the snapshot carries `observedAt`). An
- * `undefined` observation is a NO-OP, so an unrecognized response does NOT
- * clobber the last good bucket. Keyed by an opaque account id (the composition
- * root supplies it — typically the credential/account fingerprint), so two
- * accounts accumulate independently while a 2nd request on the SAME account
- * refines the SAME bucket.
- */
-export interface AccountRateLimitStore {
-  /** Record the latest snapshot for `account`. `undefined` ⇒ no-op. */
-  observe(account: string, snapshot: DualWindowSnapshot | undefined): void
-  /** The latest snapshot for `account`, or `undefined` if none seen. */
-  current(account: string): DualWindowSnapshot | undefined
-}
-
-export const createAccountRateLimitStore = (): AccountRateLimitStore => {
-  const byAccount = new Map<string, DualWindowSnapshot>()
-  return {
-    observe(account, snapshot) {
-      if (snapshot !== undefined) byAccount.set(account, snapshot)
-    },
-    current(account) {
-      return byAccount.get(account)
-    },
-  }
-}
+// jul-19 — the per-account `AccountRateLimitStore` (observe/current) was a
+// PROVEN-DEAD half of this slice: `parseDualWindowSnapshot` is live-consumed
+// (stream-consume.ts:199 → BudgetMeter) but nothing ever accumulated per-account
+// history. Removed as a proven-dead export; the live single-snapshot parse path
+// (above) is untouched.

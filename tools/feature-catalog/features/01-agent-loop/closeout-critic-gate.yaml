@@ -38,12 +38,18 @@ purpose: |
 evidence:
   code:
     - src/agent/closeout-critic.ts
+    - src/agent/loop/closeout-critic-wire.ts
     - src/agent/loop/recovery-executor.ts
+    - src/agent/optional-ports.ts
     - src/runner/knobs/knobs/closeout-critic.ts
   adrs: []
   tests:
-    unit: [tests/unit/agent/closeout-critic.test.ts, tests/unit/agent/closeout-critic-hellgate.test.ts]
-    integration: []
+    unit:
+      - tests/unit/agent/closeout-critic.test.ts
+      - tests/unit/agent/closeout-critic-hellgate.test.ts
+      - tests/unit/agent/optional-ports-wire.test.ts
+    integration:
+      - tests/integration/closeout-critic-reopen-e2e.test.ts
     contract: []
 knobs: [closeout-critic]
 deliberate_hold: null

@@ -1,17 +1,18 @@
 import type { AgentConfig } from "@/agent"
 import { isIdentityMode } from "@/agent/identity"
+import { isToolProfileName } from "@/agent/tool-profile"
 import type {
   SessionHost,
   SessionHostSideConversationArgs,
   SessionHostSideConversationResult,
 } from "@/kernel/session"
-import { isToolProfileName } from "@/agent/tool-profile"
 import { isPermissionMode } from "@/permission"
 import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "@/sdk/runtime/base"
 import { createSingleSessionRuntimeHost } from "../builder"
 import type { RuntimeSessionConfig } from "../types"
 import {
   type ApprovalProtocolDeps,
+  cancelPendingApprovals,
   resolveApprovalDecision,
   runOnConfirm,
   runWithProtocol,
@@ -122,6 +123,7 @@ export const createRuntimeApprovalProtocolController = (base: RuntimeBase) => {
         readonly selectedHunks?: readonly string[]
       },
     ): Promise<void> => resolveApprovalDecision(deps, approvalId, decision, opts),
+    close: (): void => cancelPendingApprovals(deps),
     /** Test seam — never call in production. Exposes the live lease ledger so
      *  hellgates can assert turn-scoping without reaching into the closure. */
     onConfirm,
@@ -202,6 +204,7 @@ const createRuntimeSessionHost = (args: {
     if (shutdownComplete) return
     shutdownComplete = true
     closed = true
+    approvalProtocol.close()
     // Last-close-wins: siblings minted from the same facade still hold the
     // shared resources below — defer the teardown to whichever closes last.
     args.fleet.live -= 1
@@ -315,9 +318,6 @@ const createRuntimeSessionHost = (args: {
     ): Promise<SessionHostSideConversationResult> =>
       await startSideConversation({
         base,
-        ...(args.state.turnAssembler !== undefined
-          ? { turnAssembler: args.state.turnAssembler }
-          : {}),
         question: sideArgs.question,
         messages: sideArgs.messages,
         signal: sideArgs.signal,

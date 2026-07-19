@@ -37,7 +37,6 @@ export interface RuntimeAgentConfigAugments {
   shellSnapshot?: unknown
   sessionEffort?: unknown
   decisionEmitter?: unknown
-  granularRegistry?: unknown
   /** Track A2 — composition-root named-permission-profile wire. When the
    *  operator selects a profile via `QUANTA_PERMISSION_PROFILE` / the
    *  `--permission-profile <name>` flag, the composition root constructs a
@@ -60,6 +59,23 @@ export interface RuntimeAgentConfigAugments {
    *  it as `ArtifactPreviewResolver`. A future IPC handler reads it off the base to
    *  serve jailed preview bytes. Absent ⇒ no preview channel (byte-identical). */
   artifactPreviewResolver?: unknown
+  /** ADR-0540 W1-B — composition-root declaration that THIS surface's daemon
+   *  owns the post-approval continuation (it re-issues `turn.run` server-side
+   *  after an `approve`). Read by `buildCapabilityManifest` to stamp the
+   *  `serverAutoContinues` capability marker clients gate their re-issue on.
+   *  Set ONLY by the web-daemon composition under
+   *  `QUANTA_INLINE_APPROVAL_RESOLVER`; absent ⇒ marker false (byte-identical
+   *  on every other surface). */
+  serverAutoContinues?: boolean
+  /** jul-16 GAP-3 (02 serve --stdio) — composition-root declaration of THIS
+   *  surface's wire transport, stamped onto `capabilities.transport`. Same
+   *  presence-only seam as {@link serverAutoContinues}: the comp root sets
+   *  `"stdio"` (connect stdio door) / `"websocket"` (web daemon); absent ⇒
+   *  `buildCapabilityManifest` falls back to the `"inproc"` default (an
+   *  in-process embedder), byte-identical to the pre-seam hardcode. Typed
+   *  `"inproc" | "stdio" | "websocket"` — the `CapabilityManifest.transport`
+   *  union. */
+  sessionTransport?: "inproc" | "stdio" | "websocket"
 }
 
 export type RuntimeAgentConfigBase = Omit<AgentConfig, "modePolicy" | "budgetMeter"> &

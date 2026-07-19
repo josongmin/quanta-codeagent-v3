@@ -110,6 +110,9 @@ const runtimeFactory = async ({ host }: CreateRuntimeOptions): Promise<RuntimeFa
             }
             return { revision: 2, seq: 2, events: [], turn: result }
           },
+          // S1 (jul-16 ticket 01) — RuntimeSession gained the `turn.cancel`
+          // verb; the bench fake satisfies the surface with an inert stub.
+          cancel: async () => ({ revision: 0, seq: 0, events: [] }),
         },
         identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
         permission: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
@@ -122,6 +125,9 @@ const runtimeFactory = async ({ host }: CreateRuntimeOptions): Promise<RuntimeFa
             events: [],
             transcript: { messages: [] },
           }),
+          // Pre-existing CI-only tsc red (bun test does not typecheck): the fake
+          // never grew the P1 Phase-0 `messages()` read — inert empty read here.
+          messages: () => [],
         },
         side: {
           start: async () => {

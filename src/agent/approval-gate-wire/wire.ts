@@ -32,6 +32,17 @@ import type {
 
 const isString = (v: unknown): v is string => typeof v === "string"
 
+/** A deferred runtime approval has already been accepted by the kernel-facing
+ * protocol. It is not a resolver failure or a deny: preserve it as pending
+ * under the approval id the kernel will later send to `approval.respond`. */
+const kernelApprovalIdOf = (error: unknown): string | undefined => {
+  if (error === null || typeof error !== "object") return undefined
+  const candidate = error as { name?: unknown; approval?: { approvalId?: unknown } }
+  if (candidate.name !== "RuntimeApprovalRequiredError") return undefined
+  const approvalId = candidate.approval?.approvalId
+  return isString(approvalId) && approvalId.length > 0 ? approvalId : undefined
+}
+
 /** Normalize a resolver return into a `{ decision, modifiedAction? }` tuple.
  *  A bare string is treated as a decision; an object form forwards
  *  `modifiedAction` only when the decision is "modify" — defensive, mirrors
@@ -73,10 +84,15 @@ const safeSettle = (
 }
 
 /** Best-effort SM.request — returns the minted id, or "" on failure. */
-const safeRequest = (deps: ApprovalGateDeps, req: ApprovalGateRequest): string => {
+const safeRequest = (
+  deps: ApprovalGateDeps,
+  req: ApprovalGateRequest,
+  kernelApprovalId?: string,
+): string => {
   if (deps.approvalSM === undefined) return ""
   try {
     const built = deps.approvalSM.request({
+      ...(kernelApprovalId !== undefined ? { id: kernelApprovalId } : {}),
       threadId: req.threadId,
       kind: req.kind,
       reason: req.reason,
@@ -110,28 +126,32 @@ export const createApprovalGate = (deps: ApprovalGateDeps): ApprovalGatePort => 
     req: ApprovalGateRequest,
     resolver: ApprovalGateResolver,
   ): Promise<ApprovalGateResolution> => {
-    // 1. Request the approval up front (NO-THROW boundary). Empty id ⇒ legacy
-    //    mode (SM absent or SM.request threw) — settle is then a no-op below.
-    const approvalId = safeRequest(deps, req)
-
-    // 2. Invoke the resolver. Resolver throws PROPAGATE — but only after we
-    //    best-effort settle("deny") so the approval record is closed out.
+    // Invoke the resolver before minting local attribution. A deferred runtime
+    // resolver throws its kernel approval id; minting after that preserves one
+    // canonical record instead of creating then falsely denying a local id.
     let raw: ApprovalGateResolverReturn
     try {
       raw = await resolver(req)
     } catch (err) {
+      const kernelApprovalId = kernelApprovalIdOf(err)
+      if (kernelApprovalId !== undefined) {
+        safeRequest(deps, req, kernelApprovalId)
+        throw err
+      }
+      const approvalId = safeRequest(deps, req)
       safeSettle(deps, approvalId, "deny")
       throw err
     }
 
-    // 3. Normalize + settle. SM coerces unknown decisions to "deny" itself;
+    const approvalId = safeRequest(deps, req)
+    // Normalize + settle. SM coerces unknown decisions to "deny" itself;
     //    the gate's RETURN preserves the raw decision so callers see what the
     //    resolver actually said. Reasoning: the gate's job is attribution, not
     //    decision policing.
     const { decision, modifiedAction } = normalizeResolverReturn(raw)
     safeSettle(deps, approvalId, decision, modifiedAction)
 
-    // 4. Surface the resolver's stated decision verbatim. For unknown enum
+    // Surface the resolver's stated decision verbatim. For unknown enum
     //    values the caller still sees the malformed value as-typed; the SM
     //    record's coerced value is observable via `sm.get(approvalId)`.
     return buildResolution(approvalId, decision, modifiedAction)

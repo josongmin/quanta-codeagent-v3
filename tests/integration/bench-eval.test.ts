@@ -12,7 +12,11 @@ import { mkdir, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadCorpus, writeSyntheticRealCorpus } from "../../src/apps/bench/corpus/loader"
-import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "../../src/apps/bench/dry-run"
+import {
+  buildDatasetDryRunPlan,
+  buildDryRunPlan,
+  formatDryRunPlan,
+} from "../../src/apps/bench/dry-run"
 import {
   evaluateWithPythonSwebench,
   isPythonSwebenchAvailable,
@@ -180,6 +184,23 @@ describe("bench-eval: python swebench seam (hermetic)", () => {
     }
     const r = await evaluateWithPythonSwebench(mkInstance(), "diff --git a b", { spawn })
     expect(r.resolved).toBe(false)
+  })
+
+  test("malformed per-instance status cannot upgrade an unresolved harness verdict", async () => {
+    const spawn: Spawn = async (argv, cwd) => {
+      if (argv.includes("import swebench")) return { code: 0, stdout: "", stderr: "" }
+      await Bun.write(
+        join(cwd, "report.json"),
+        JSON.stringify({
+          "demo__demo-1": { resolved: false, tests_status: {} },
+        }),
+      )
+      return { code: 0, stdout: "graded", stderr: "" }
+    }
+
+    const r = await evaluateWithPythonSwebench(mkInstance(), "diff --git a b", { spawn })
+    expect(r.resolved).toBe(false)
+    expect(r.breakdown?.resolved).toBe(false)
   })
 
   test("defaults --dataset_name to SWE-bench Verified when opts.datasetName unset", async () => {

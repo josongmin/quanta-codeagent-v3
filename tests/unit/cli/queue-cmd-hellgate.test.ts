@@ -227,6 +227,33 @@ describe("/queue retry · edit · delete · send-now", () => {
     expect(err.join("")).toContain("send-now sink not wired")
   })
 
+  test("DOF-40: send-now in the timing window (sink retryable) ⇒ exit 1 + 'not ready' + entry KEPT", async () => {
+    // The REPL sink returns {ok:false, retryable:true} until the loop installs
+    // its downstream target. The store maps that to `send-not-ready` and keeps
+    // the entry — the CLI must surface an explicit "try again", not a silent
+    // success or a swallowed drop.
+    const windowSink: SendNowSink = {
+      inject: () => ({ ok: false, reason: "send target not installed yet", retryable: true }),
+    }
+    const store = seed(windowSink)
+    const id1 = store.enqueue({
+      threadId: "t1",
+      text: "steer",
+      source: "user_keystroke",
+      pausedReason: "tool_in_flight",
+      arrivedDuringTurn: 0,
+      urgent: false,
+      metadata: {},
+    }).id
+    const { ctx, err } = captureCtx({ store })
+    const code = await runSlashCommand(`/queue send-now ${id1}`, ctx)
+    expect(code).toBe(1)
+    expect(err.join("")).toContain("not ready")
+    expect(err.join("")).toContain("entry kept")
+    // FAIL-CLOSED: the entry survives so the operator can retry.
+    expect(store.findEntry(id1)?.text).toBe("steer")
+  })
+
   test("send-now with wired sink ⇒ ok + sink called", async () => {
     const cap = captureSink()
     const store = seed(cap.sink)

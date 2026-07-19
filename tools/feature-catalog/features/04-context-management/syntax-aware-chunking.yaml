@@ -43,8 +43,11 @@ purpose: |
       `(no outline: …)` note) on unsupported languages / parse errors. Gated
       by `QUANTA_READ_OUTLINE`.
 
-  The `CodeParserPort` is closed + NO-THROW (unknown ext / parse error ⇒ a
-  typed `{ok:false}` outcome ⇒ the caller falls back). Lazy WASM: the runtime
+  The retrieval-owned `CodeParserPort` remains closed + NO-THROW. The read tool
+  consumes a narrower tool-local `ReadOutlineParserPort`; the runner composition
+  root injects the real tree-sitter parser only when `QUANTA_READ_OUTLINE=1`, so
+  `@/tool` does not cross-import `@/retrieval`. Unknown ext / parse error yields
+  a typed fallback and visible line-range degrade. Lazy WASM: the runtime
   inits once + a grammar loads once per language on first parse; a default-OFF
   session constructs NO parser and loads NO WASM. Determinism: pinned grammar
   bytes + a deterministic pre-order traversal + source-order emission; no
@@ -52,27 +55,28 @@ purpose: |
   zero real WASM); one integration test exercises the real `web-tree-sitter`
   runtime and asserts the NO-THROW typed-outcome contract.
 
-  WASM DEP NOTE: the feature adds `web-tree-sitter` + `tree-sitter-wasms`
-  (~1 MB runtime + grammars, loaded on demand only when a knob is ON). The
-  currently-pinned grammar package (`tree-sitter-wasms@0.1.13`, tree-sitter
-  ~0.20 ABI) is NOT load-compatible with the pinned runtime
-  (`web-tree-sitter@0.26.9`, LANGUAGE_VERSION 15) — the grammars are rejected
-  by the runtime's dylink check, so `parse()` returns the typed degrade and
-  the feature falls back to line-window / line-range (the designed safety
-  net). A grammar set built against tree-sitter >=0.25 activates the AST path
-  automatically (the code branch is already present). No-overclaim: AST-aligned
-  chunking is LIVE only once a compatible grammar set is installed.
+  WASM DEP NOTE (jul-18 truth-fix): the feature adds `web-tree-sitter@0.26.9`
+  + `@vscode/tree-sitter-wasm@0.3.1` (~1 MB runtime + grammars, loaded on
+  demand only when a knob is ON). The prior pin (`tree-sitter-wasms@0.1.13`,
+  ~0.20 ABI) that the runtime's dylink check rejected has been MIGRATED OUT:
+  `tree-sitter.ts:40` now resolves grammars from `@vscode/tree-sitter-wasm/wasm`
+  and the grammar `.wasm` files ship under that package (python/rust/go/
+  typescript/javascript verified present + load with `hasError=false`). The
+  AST path is LIVE when a knob is ON; the line-window degrade remains the
+  NO-THROW safety net for unsupported languages / genuine parse errors only.
 evidence:
   code:
     - src/retrieval/code-parser/types.ts
     - src/retrieval/code-parser/lang-table.ts
     - src/retrieval/code-parser/tree-sitter.ts
     - src/retrieval/code-parser/index.ts
+    - src/tool/read/parser-port.ts
     - src/retrieval/indexer/chunker-syntactic.ts
     - src/retrieval/indexer/default-scanner.ts
     - src/retrieval/indexer/types.ts
     - src/tool/read/outline.ts
     - src/tool/read/index.ts
+    - src/runner/assemble/tooling.ts
     - src/shared/runtime-config.ts
     - src/runner/knobs/knobs/read-outline.ts
   adrs: ["docs/plans/jun-6-syntax-aware-chunking.md", 277]
@@ -83,6 +87,7 @@ evidence:
       - tests/unit/read-outline-tool-wire-hellgate.test.ts
     integration:
       - tests/integration/syntax-chunk-real-wasm-code-parser.test.ts
+      - tests/integration/read-outline-production-wire.test.ts
     contract: []
 knobs:
   - name: QUANTA_SYNTAX_CHUNK
@@ -93,13 +98,13 @@ knobs:
     purpose: 'strict `=== "1"` — `read outline:true` returns the collapsed view (else line-range fallback)'
   - name: QUANTA_TREE_SITTER_DIR
     default: 'undefined'
-    purpose: 'grammar `.wasm` dir override; absent ⇒ resolve `tree-sitter-wasms/out`'
+    purpose: 'grammar `.wasm` dir override; absent ⇒ resolve `@vscode/tree-sitter-wasm/wasm`'
 notes: |
   Placed under `src/retrieval/code-parser/` (a sub-slice of @/retrieval, which
   already loads vendor SDKs as direct node modules) so it inherits the
   `@/shared`-only fence with no new tsconfig alias / biome fence churn. The
-  read tool imports the `CodeParserPort` TYPE from @/retrieval (permitted —
-  not in the @/tool import block-list). `DeclNode.kind` reuses the LSP
+  runner composition root adapts `CodeParserPort` to the tool-local outline
+  port; the read slice does not import @/retrieval. `DeclNode.kind` reuses the LSP
   `SymbolKind` vocabulary so a future outline-backed-by-LSP swap is clean.
   Complementary to `lsp_document_symbol` (that spawns an external server;
   this is self-contained + offline + deterministic).

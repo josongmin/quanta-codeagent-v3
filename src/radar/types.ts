@@ -28,7 +28,23 @@ import { QuantaError } from "@/shared"
  *    would be valuable (e.g. "consider running `bun test tests/unit`
  *    after the patch lands").
  */
-export type CardKind = "suggestion" | "warning" | "next-step"
+export type CardKind = "suggestion" | "warning" | "next-step" | "bug-fix"
+
+/** A ranked, review-only bug-fix hypothesis captured from a diagnostic flow. */
+export interface BugFixHypothesis {
+  readonly cause: string
+  readonly fix: string
+  readonly confidence: "high" | "medium" | "low"
+}
+
+/** Structured metadata retained on a `kind:"bug-fix"` lifecycle card. */
+export interface BugFixProposalMetadata {
+  readonly errorSummary: string
+  readonly file: string
+  readonly line: number
+  readonly hypothesisRanked: ReadonlyArray<BugFixHypothesis>
+  readonly verifyRail?: string
+}
 
 /**
  * Lifecycle of a card in the queue.
@@ -65,6 +81,9 @@ export interface RadarCard {
   readonly createdAtMs: number
   readonly status: CardStatus
   readonly engagementCount: number
+  /** Present only for a typed `kind:"bug-fix"` card. Adapters clone and
+   * deeply freeze this payload before retaining it. */
+  readonly bugFix?: BugFixProposalMetadata
 }
 
 /**
@@ -79,6 +98,9 @@ export interface ProposeOpts {
   readonly description: string
   readonly sessionId?: string
   readonly createdAtMs: number
+  /** Required by the producer of a `kind:"bug-fix"` card. Kept optional at
+   * this leaf port for backwards-compatible generic heuristic producers. */
+  readonly bugFix?: BugFixProposalMetadata
 }
 
 /**

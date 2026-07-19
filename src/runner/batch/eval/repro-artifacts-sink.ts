@@ -26,6 +26,8 @@
  * deterministic: `sourceHashOf` is a content hash (no clock/random).
  */
 
+import { sliceTailWholeChars } from "@/shared"
+
 /** Tail bound for persisted stdout/stderr — full dumps would blow up disk across
  *  breadth × samples × rounds candidates on a full bench run (past `/tmp`
  *  evaporation). Mirrors the validator's 2000-char tail policy. */
@@ -79,7 +81,7 @@ export const sourceHashOf = (source: string): string => {
 }
 
 export const boundReproArtifactTail = (s: string): string =>
-  s.length > REPRO_ARTIFACT_TAIL_BOUND ? s.slice(-REPRO_ARTIFACT_TAIL_BOUND) : s
+  s.length > REPRO_ARTIFACT_TAIL_BOUND ? sliceTailWholeChars(s, REPRO_ARTIFACT_TAIL_BOUND) : s
 
 /** Path-segment hardening: the artifact directory is built from `instanceId`,
  *  which for a non-swebench / custom corpus is NOT guaranteed `/`- or `..`-free.

@@ -18,49 +18,20 @@ import {
   SessionRevisionConflictError,
   type SessionSnapshotLite,
 } from "@/protocol/session"
+import { capabilitiesFor, makeSnapshotLite } from "../../support/session-fixtures"
 
-const CAPABILITIES = {
-  approvals: "operator" as const,
+const CAPABILITIES = capabilitiesFor({
+  approvals: "operator",
   tools: true,
-  memory: false,
   artifacts: true,
-  subagents: false,
-  automation: false,
-  shellSnapshot: false,
-  transport: "stdio" as const,
-}
+  transport: "stdio",
+})
 
-const makeSnapshot = (overrides: Partial<SessionSnapshotLite> = {}): SessionSnapshotLite => {
-  const base: SessionSnapshotLite = {
-    sessionId: "session-1",
-    revision: 1,
-    seq: 1,
-    state: {
-      status: "idle",
-      draftInput: "",
-      permissionMode: "default",
-      messageCount: 0,
-    },
-    capabilities: CAPABILITIES,
-    pendingApproval: null,
-    openArtifacts: [],
-  }
-  return {
-    ...base,
+const makeSnapshot = (overrides: Partial<SessionSnapshotLite> = {}): SessionSnapshotLite =>
+  makeSnapshotLite({
     ...overrides,
-    state: {
-      ...base.state,
-      ...(overrides.state ?? {}),
-    },
-    capabilities: {
-      ...CAPABILITIES,
-      ...(overrides.capabilities ?? {}),
-    },
-    pendingApproval:
-      overrides.pendingApproval === undefined ? base.pendingApproval : overrides.pendingApproval,
-    openArtifacts: overrides.openArtifacts ?? base.openArtifacts,
-  }
-}
+    capabilities: { ...CAPABILITIES, ...(overrides.capabilities ?? {}) },
+  })
 
 const makeStateUpdatedEvent = (
   overrides: Partial<Extract<SessionEvent, { type: "session.state.updated" }>> = {},

@@ -73,7 +73,6 @@ import { TaskRegistry } from "@/subagent"
 import { buildDefaultTools, type Tool, ToolRegistry } from "@/tool"
 import { askUserTool } from "@/tool/ask-user"
 import { type AgentStateSourceHandle, createAgentStateSource } from "./agent-state-source"
-import { createSubagentSource, type SubagentSourceHandle } from "./subagent-source"
 import {
   type CanvasArtifactSourceHandle,
   createCanvasArtifactSource,
@@ -89,6 +88,8 @@ import type {
   MemoryReadoutEntry,
   WebReadoutSources,
 } from "./readout"
+import { WEB_INLINE_APPROVAL_GATE } from "./server/approval-continuation"
+import { createSubagentSource, type SubagentSourceHandle } from "./subagent-source"
 import { createWebAskUserPort } from "./web-ask-user-port"
 import {
   createWebControlRequestPort,
@@ -809,6 +810,25 @@ const buildAgentConfigBase = async ({
           activeTurnRef: follower.surface.activeTurnRef,
         }
       : {}),
+    // ADR-0540 W1-B — declare the `server-auto-continues` capability marker iff
+    // the daemon actually owns the continuation (the SAME gate arms the
+    // `setupApprovalContinuation` re-issue in `server.ts`). Clients that see the
+    // marker skip their post-approval `turn.run` re-issue. Gate OFF ⇒ this base
+    // SLOT is omitted and the manifest normalizes to `false` — the FLOW is the
+    // legacy client-owned continuation, unchanged. NOTE (audit M-3): the wire
+    // manifest itself always CARRIES the field (`false` when OFF) because
+    // `CapabilityManifest` made it required — flow-identical, not byte-identical
+    // on the wire (same precedent as every other required capability bit).
+    ...(gateOn(env, WEB_INLINE_APPROVAL_GATE) ? { serverAutoContinues: true } : {}),
+    // jul-16 GAP-3 — the web daemon speaks session.v1 over WebSocket, so stamp
+    // the HONEST transport here (was the base's `"inproc"` default lie — every
+    // web session reported an in-process transport). Presence-only seam
+    // (mirrors `serverAutoContinues`); completes the 3-way "다름이 정답" with the
+    // stdio door (`"stdio"`) and an in-process embedder (`"inproc"`). No
+    // production consumer branches on the value today (verified by grep of the
+    // in-repo surfaces; the web bundle lives out-of-repo), so this is a
+    // truth-fix, not a behavior change.
+    sessionTransport: "websocket",
     ...observabilitySlots(observability),
   }
   return base

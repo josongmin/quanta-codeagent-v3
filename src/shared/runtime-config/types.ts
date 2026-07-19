@@ -59,19 +59,18 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  (byte-identical). Also read by the slice's own `skillMcpDepsEnabled`. */
   readonly skillMcpDeps: boolean
   /** ADR-0470 B1 follow-up inbound MCP sampling gate (`QUANTA_MCP_SAMPLING`).
-   *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). SEAM (validated, not yet composed at the root):
-   *  the handler builder (`host/runtime/mcp-sampling-handler.ts`
-   *  `buildSamplingWiring`) and the `McpClient` `samplingHandler` acceptance slot
-   *  both exist and are unit-tested, but NO production code reads this field to
-   *  pass `opts.sampling` + a `samplingHandler` to the client yet. Until that
-   *  composition lands, this field has zero production consumers and is a no-op.
-   *  Intended end state (advertise-iff-able): when ON *and* an LLM + a consent
-   *  prompter are assembled at the composition root, the MCP client advertises
-   *  `sampling` AND is wired with an `@/llm`-backed handler (HITL consent on
-   *  every request); the advertisement and the handler always move together.
-   *  Default false ⇒ sampling is NOT advertised and the headless rejecter
-   *  declines (`no-handler`) — byte-identical (and currently byte-identical even
-   *  when ON, because the field is unread). */
+   *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). LIVE consumer:
+   *  `host/mcp-composition.ts` (`resolveMcpInboundWiring`, ~L623) reads this
+   *  field and passes it to `buildSamplingWiring(runtimeConfig().mcpSampling,
+   *  samplingDeps)`, whose `advertise` flag + answering handler flow to the MCP
+   *  inbound negotiator / sampling handler (advertise-iff-able).
+   *  Advertise-iff-able: sampling is ON only when this field is set AND an LLM
+   *  AND an interactive consent prompter are assembled at the composition root (a
+   *  remote server must never silently spend inference unattended); the
+   *  advertisement and the `@/llm`-backed HITL handler always move together.
+   *  Default false ⇒ `buildSamplingWiring` returns OFF, sampling is NOT
+   *  advertised, and the headless rejecter declines (`no-handler`) —
+   *  byte-identical. A live consumer exists when ON (given LLM + consent). */
   readonly mcpSampling: boolean
   /** delta-token-accounting (RFC jun-6) incremental context-estimate gate
    *  (`QUANTA_DELTA_TOKEN_COUNT`). Strict opt-in (`=== "1"`). When ON, the loop
@@ -163,6 +162,13 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  under a DAP adapter, stop at first breakpoint, report stack + variables) is
    *  appended — high-risk (executes the program), always-confirm tier. */
   readonly debugTools: boolean
+  /** ADR-0249 `node_repl` persistent-kernel tool gate (`QUANTA_NODE_REPL`).
+   *  Strict opt-in (`gateOn` vocab; #24). Default false ⇒ host wires NO
+   *  `DefaultToolPorts.nodeRepl`, tool not registered (byte-identical menu).
+   *  When true, `node_repl` (evaluate code in a persistent `node -i` subprocess
+   *  whose bindings survive across calls) is appended — high-risk (arbitrary
+   *  Node code, full host access), always-confirm tier. */
+  readonly nodeRepl: boolean
   /** Epic-2 `run_tests` structured test-runner gate (`QUANTA_TEST_RUNNER`).
    *  Opt-in (`gateOn` vocab `1`/`on`/`true`/`yes`; #24). Default false ⇒ host sets NO
    *  `DefaultToolPorts.testRunner`, tool not registered (byte-identical). When
@@ -366,6 +372,16 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  root wires a jailed writer (under the user/repo skills dir) and registers
    *  the tool so the model can scaffold + validate + install a new skill. */
   readonly skillCreator: boolean
+  /** ADR-0252 — Windsurf-style `{{ name }}` template-literal substitution in the
+   *  skill body (`QUANTA_SKILL_TEMPLATE_VARS`). Opt-in (`gateOn` vocab
+   *  `1`/`on`/`true`/`yes`; #24). Default false ⇒ the `Skill` tool body is NOT
+   *  scanned for `{{ name }}` (byte-identical — a literal `{{ x }}` in a body is
+   *  emitted verbatim exactly as today). When ON, a body's `{{ name }}` refs are
+   *  resolved against a context parsed from the caller's `key=value` `args`
+   *  tokens via `createDefaultTemplateExpander`; an unknown variable surfaces the
+   *  expander's typed short-circuit (no guess / silent-drop). Runs ALONGSIDE the
+   *  `$ARGUMENTS`/`$N` positional interpolation (ADR-0252 sibling contract). */
+  readonly skillTemplateVars: boolean
   /** C6 — structured deny-reason surfacing (`QUANTA_DENY_REASON`). Opt-in
    *  (the `gateOn` truthy vocab (#24)). Default false ⇒ the `ToolFailure.permission_denied` envelope
    *  omits `denyReason`, the model-facing deny `content` carries no
@@ -711,6 +727,23 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  `tree-sitter-wasms/out` dir. A packaging step that relocates the grammars
    *  sets this. Only read when a parser is constructed (default-OFF ⇒ unread). */
   readonly treeSitterDir: string | undefined
+  /** Web-daemon thread-history DB directory override (`QUANTA_WEB_DB_DIR`).
+   *  Absent ⇒ `undefined` ⇒ the persistence root resolves `~/.quanta/web-daemon`
+   *  at the consumer (byte-identical to the prior raw-read fallback). Routed
+   *  through runtimeConfig() so a `/config set` reaches it and the read is
+   *  testable without mutating the real environment (ADR-0503 P4 read-routing). */
+  readonly webDbDir: string | undefined
+  /** Session-resource-registry SQLite backend path (`QUANTA_SESSION_REGISTRY_SQLITE_PATH`,
+   *  ADR-0367). Absent/empty ⇒ `undefined` ⇒ the registry falls through to the
+   *  disk / in-memory backend (byte-identical to the prior raw-read chain). The
+   *  consumer keeps the non-empty-length guard + NO-THROW fallback. Routed through
+   *  runtimeConfig() (ADR-0503 P4) — same precedence chain as every other knob. */
+  readonly sessionRegistrySqlitePath: string | undefined
+  /** Session-resource-registry disk-JSONL backend directory
+   *  (`QUANTA_SESSION_REGISTRY_DISK_DIR`, ADR-0351). Absent/empty ⇒ `undefined` ⇒
+   *  the registry falls through to in-memory (byte-identical). Routed through
+   *  runtimeConfig() (ADR-0503 P4). */
+  readonly sessionRegistryDiskDir: string | undefined
   /** FS jail disable flag (`QUANTA_FS_JAIL=off`). Default false (jail ON). */
   readonly fsJailDisabled: boolean
   /** ADR-0062 cap-as-instruction dispatch enforcement (`QUANTA_CAP_ENFORCE=1`).

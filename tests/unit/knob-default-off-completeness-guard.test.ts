@@ -14,10 +14,12 @@
 // THE GUARD (two mechanisms, both auto-discovering):
 //
 //  1. STATIC SOURCE-SCAN. We read `src/shared/runtime-config.ts` and regex-
-//     enumerate every `env["QUANTA_*"]` the `loadFromEnv` body consumes. That IS
-//     the knob set — a new knob is discovered the moment it is added to source,
-//     no hand-list to forget. (We deliberately scan the source TEXT, not reflect
-//     on a private symbol, because `loadFromEnv` is module-private AND the file
+//     enumerate every `env["QUANTA_*"]` the `runtimeConfigFromEnv` composer +
+//     its per-domain `parse*Slice(env)` sub-parsers consume (the slices live in
+//     the SAME file, between the composer and `let cached`). That IS the knob
+//     set — a new knob is discovered the moment it is added to source, no
+//     hand-list to forget. (We deliberately scan the source TEXT, not reflect on
+//     a private symbol, because the slice readers are module-private AND the file
 //     is frequently dirty under in-flight edits — a text scan never fights an
 //     editor.)
 //
@@ -38,7 +40,7 @@
 // COVERAGE CROSS-CHECK. Every discovered knob is covered iff (a) its default is
 // falsy (auto-proven above) OR (b) it is in the non-falsy allowlist with its
 // expected default matching the live default. There is NO third "uncovered"
-// bucket by construction — so a knob read by `loadFromEnv` can never escape the
+// bucket by construction — so a knob read by `runtimeConfigFromEnv` can never escape the
 // default-off proof. We additionally surface (informational) which knobs ALSO
 // appear in the legacy hand-curated batteries, to keep those batteries honest.
 //
@@ -58,22 +60,35 @@ const REPO_ROOT = join(import.meta.dir, "../..")
 const RUNTIME_CONFIG_SRC = join(REPO_ROOT, "src/shared/runtime-config.ts")
 
 // ---------------------------------------------------------------------------
-// Mechanism 1 — STATIC SOURCE-SCAN: enumerate every QUANTA_* knob loadFromEnv
-// consumes, straight from the source text. Auto-discovers new knobs.
+// Mechanism 1 — STATIC SOURCE-SCAN: enumerate every QUANTA_* knob the
+// runtimeConfigFromEnv composer + its parse*Slice sub-parsers consume, straight
+// from the source text. Auto-discovers new knobs.
 // ---------------------------------------------------------------------------
 
-/** Slice the `loadFromEnv` function body out of the source text so we only count
- *  env reads that actually feed the frozen config (not a doc-comment mention). */
+/** Slice the `runtimeConfigFromEnv` composer + its per-domain `parse*Slice`
+ *  sub-parsers out of the source text so we only count env reads that actually
+ *  feed the frozen config (not a doc-comment mention).
+ *
+ *  d1f25e7d7 split the god-function `loadFromEnv` → the exported composer
+ *  `runtimeConfigFromEnv` (which spreads `parse{Compaction,Capability,ToolSurface,
+ *  SessionBench,Security,ConfigTail}Slice(env)`). The `env["QUANTA_*"]` reads did
+ *  NOT leave runtime-config.ts — the slice functions are declared BETWEEN the
+ *  composer and `let cached`, so the same anchor window still spans every read
+ *  (the composer's own doc-comment says as much). Only the START anchor changes;
+ *  the low-level value coercers now in `runtime-config/parsers.ts` (parseBool /
+ *  parseLogLevel / …) hold NO `env[...]` reads, so there is nothing to chase
+ *  there — the slices pass raw `env["QUANTA_*"]` values INTO those coercers. */
 const loadFromEnvBody = (src: string): string => {
-  const start = src.indexOf("const loadFromEnv =")
-  if (start < 0) throw new Error("loadFromEnv not found in runtime-config source")
-  // The body ends at the next top-level `let cached` declaration.
+  const start = src.indexOf("export const runtimeConfigFromEnv =")
+  if (start < 0) throw new Error("runtimeConfigFromEnv not found in runtime-config source")
+  // The body ends at the next top-level `let cached` declaration (below the last
+  // slice) — the slices sit inside this window, so all their reads are counted.
   const end = src.indexOf("\nlet cached", start)
-  if (end < 0) throw new Error("end of loadFromEnv not found")
+  if (end < 0) throw new Error("end of runtimeConfigFromEnv slices not found")
   return src.slice(start, end)
 }
 
-/** Every `env["QUANTA_*"]` the loadFromEnv body reads, de-duplicated + sorted. */
+/** Every `env["QUANTA_*"]` the runtimeConfigFromEnv slice window reads, de-duplicated + sorted. */
 const discoverKnobs = (src: string): readonly string[] => {
   const body = loadFromEnvBody(src)
   const found = new Set<string>()
@@ -357,8 +372,8 @@ describe("knob default-off completeness guard (auto-discovery)", () => {
     // count so a reviewer can eyeball it against the QUANTA_* count in source.
     expect(DISCOVERED_KNOBS.length).toBeGreaterThan(100)
     // Independent recount of QUANTA_* env reads across the WHOLE file (a superset
-    // of the loadFromEnv body) must not be SMALLER than what we discovered — if
-    // it were, our body-slice missed reads.
+    // of the runtimeConfigFromEnv slice window) must not be SMALLER than what we
+    // discovered — if it were, our body-slice missed reads.
     const wholeFile = new Set<string>()
     for (const m of RUNTIME_CONFIG_TEXT.matchAll(
       /env\[\s*[`"](QUANTA_[A-Z0-9_]+)[`"]|env\.(QUANTA_[A-Z0-9_]+)|gate(?:On|Disabled)(?:Strict)?\(env,\s*"(QUANTA_[A-Z0-9_]+)"/g,
@@ -373,7 +388,9 @@ describe("knob default-off completeness guard (auto-discovery)", () => {
     }
     expect(DISCOVERED_KNOBS.length).toBe(wholeFile.size)
     // biome-ignore lint/suspicious/noConsole: the spec requires PRINTING the enumerated knob count
-    console.log(`[knob-guard] discovered ${DISCOVERED_KNOBS.length} QUANTA_* knobs in loadFromEnv`)
+    console.log(
+      `[knob-guard] discovered ${DISCOVERED_KNOBS.length} QUANTA_* knobs in runtimeConfigFromEnv`,
+    )
   })
 
   test("every knob maps to exactly the OFF value at default (or is allowlisted)", () => {
@@ -490,7 +507,7 @@ describe("knob default-off completeness guard — red-on-injection", () => {
 
   test("source-scan picks up a synthetically-injected env read", () => {
     const fakeSrc = `
-const loadFromEnv = (env) => {
+export const runtimeConfigFromEnv = (env) => {
   return Object.freeze({
     real: env["QUANTA_REAL"] === "1",
     danger: env["QUANTA_FAKE_DANGER"] === "1",

@@ -47,13 +47,64 @@ export interface ScaffoldResult {
 }
 
 /** A verify verdict — does the rendered screenshot satisfy the spec? `pass`
- *  ends the loop early; `notes` is fed back as the next iteration's feedback. */
+ *  ends the loop early; `notes` is fed back as the next iteration's feedback.
+ *
+ *  FAIL-CLOSED PROVENANCE (RFC §6, [[no-heuristics-only-validated]]): a `pass`
+ *  is honored by the loop ONLY when the verdict is BRANDED by {@link judgeVerdict}
+ *  — the sole constructor a real LLM-judge adapter may use. A plain object literal
+ *  `{ pass: true, notes }` (a stub, a fabricated pass, an unavailable-judge
+ *  placeholder) carries NO brand ⇒ the loop DOWN-GRADES it to a fail-closed
+ *  refusal (`unverified_pass`) rather than claiming success. `pass: false` needs
+ *  no brand (a fail can never be a false success). The brand is a module-private
+ *  symbol, so it can NOT be forged from outside this leaf. */
 export interface VerifyVerdict {
   readonly pass: boolean
   /** Model-visible critique text. Threaded back as scaffold feedback when
    *  `pass` is false; surfaced to the user as the final verdict when the loop
    *  ends (pass OR cap). */
   readonly notes: string
+  /** Present + `true` iff minted by {@link judgeVerdict} (a REAL judge result).
+   *  Absent on any plain literal. The loop reads this via {@link isRealJudgePass}
+   *  — never trusts a bare `pass` field for the early-exit decision. */
+  readonly [JUDGE_BRAND]?: true
+}
+
+/** Module-private brand key — un-forgeable from outside this file (a unique
+ *  symbol, not a string). A verdict object can only carry it by going through
+ *  {@link judgeVerdict}. */
+const JUDGE_BRAND: unique symbol = Symbol("appshot.realJudgeVerdict")
+
+/**
+ * The ONLY constructor a real LLM-judge adapter may use to mint a verdict the
+ * loop will honor as a genuine PASS. Stamps the un-forgeable {@link JUDGE_BRAND}.
+ * A `pass: false` still brands (harmless) so the adapter has one code path.
+ *
+ * Production (`appshot-port-wire.ts#parseVerdict`) MUST return `judgeVerdict(...)`
+ * — a bare `{ pass, notes }` from a stub/unavailable judge is refused by the loop.
+ */
+export const judgeVerdict = (pass: boolean, notes: string): VerifyVerdict => ({
+  pass,
+  notes,
+  [JUDGE_BRAND]: true,
+})
+
+/** True iff `v` is a REAL-judge PASS — branded by {@link judgeVerdict} AND
+ *  `pass`. An unbranded `pass: true` (fabricated / stub / unavailable placeholder)
+ *  returns FALSE, so the loop never early-exits on a verdict no real judge
+ *  produced. This is the fail-closed gate: "a pass requires a real judge". */
+export const isRealJudgePass = (v: VerifyVerdict): boolean =>
+  v.pass === true && v[JUDGE_BRAND] === true
+
+/** Which effect arrows a port can actually service. The composition root only
+ *  mints a fully-wired port (browser + judge both live) — but a partially-wired
+ *  or degraded port declares its gaps HERE so the loop returns a TYPED refusal
+ *  BEFORE running any effect, rather than crashing into a runtime `*_failed`
+ *  (which would conflate "structurally unavailable" with "failed at call time"). */
+export interface AppshotAvailability {
+  /** The render+screenshot arrows (the CDP browser) are live. */
+  readonly browser: boolean
+  /** The verify arrow (the LLM-judge) is live. */
+  readonly judge: boolean
 }
 
 /**
@@ -61,6 +112,13 @@ export interface VerifyVerdict {
  * adapter MAY throw; the loop boundary catches it. Methods honor the signal.
  */
 export interface AppshotPort {
+  /** OPTIONAL fail-closed pre-flight: report which arrows are live. Absent ⇒ the
+   *  loop assumes a fully-wired port (backward-compatible: the production wire
+   *  always has both, since the composition root only wires when browser AND
+   *  judge exist). When present and reporting `browser: false` or `judge: false`,
+   *  the loop refuses with a typed `browser_unavailable` / `judge_unavailable`
+   *  outcome — NO effects, NO fabricated pass. */
+  availability?(): AppshotAvailability
   /** Write an app scaffold for `spec` into `outDir` (jailed). Returns the entry
    *  URL + on-disk path. A path-escape in the spec MUST be rejected by the
    *  adapter (it writes through the FS-jail chokepoint). */

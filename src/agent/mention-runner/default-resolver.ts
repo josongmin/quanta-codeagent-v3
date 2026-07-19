@@ -18,6 +18,15 @@
  *                 as `@file`); `QUANTA_MENTION_FOLDER` (default-ON).
  *   - `@git`    — (§10.3) available when a `git` context provider is injected
  *                 (the runner backs it with `runShell`); `QUANTA_MENTION_GIT`.
+ *   - `plugin://` / `@@app` — (ADR-0336) available when a `PluginRegistryPort`
+ *                 (real `discoverPlugins` scan) and/or `AppCatalogPort` (real
+ *                 `loadWorkspaceAppCatalog` merge) is injected AND the
+ *                 `QUANTA_MENTION_APP_PLUGIN` knob is ON. Unlike the other
+ *                 knobs this one is DEFAULT-OFF: unset ⇒ the injected ports are
+ *                 NOT passed to the composite, so both resolve `null`
+ *                 (byte-identical to the pre-wire path). A miss against a
+ *                 present registry/catalog returns the resolver's typed `null`,
+ *                 never a fabricated stub (NO heuristic fallback).
  *
  * GRACEFUL OMIT: a kind whose dep is absent (no symbol ports / no registry)
  * is simply NOT attached, so that kind resolves to `null` — byte-identical to
@@ -34,6 +43,7 @@
  * `QUANTA_MENTION_SYMBOL_TIMEOUT_MS`.
  */
 
+import type { AppCatalogPort } from "@/agent/app-catalog"
 import {
   createSymbolResolver,
   type MentionResolverPort,
@@ -50,7 +60,8 @@ import {
   type GitResolverOptions,
   type SkillRegistryReadOnly,
 } from "@/agent/plugin-app-resolver"
-import { parseEnvFlag } from "@/shared"
+import type { PluginRegistryPort } from "@/agent/plugin-discovery"
+import { gateOn, parseEnvFlag } from "@/shared"
 
 /** Env subset the builder reads. A plain bag so callers can pass
  *  `process.env` OR a hermetic record (tests / non-Node hosts). */
@@ -71,6 +82,17 @@ export interface BuildDefaultMentionResolverOptions {
   /** §10.3 — injected git-context provider for `@git`. Omit ⇒ `@git`
    *  resolves null (graceful omit; byte-identical to the legacy path). */
   readonly git?: GitContextProvider
+  /** ADR-0336 — injected plugin registry for `plugin://`. Built by the host
+   *  composition root from the ALREADY-LIVE `discoverPlugins` scan (the
+   *  `.codex-plugin/plugin.json` layout under `<cwd>/.quanta/plugins`). Omit
+   *  ⇒ `plugin://` resolves null. Only flows to the composite when the
+   *  default-OFF `QUANTA_MENTION_APP_PLUGIN` knob is ON (see `pluginDep`). */
+  readonly plugins?: PluginRegistryPort
+  /** ADR-0336 — injected app catalog for `@@app`. Built by the host
+   *  composition root from `loadWorkspaceAppCatalog` merged over
+   *  `DEFAULT_APP_CATALOG`. Omit ⇒ `@@app` resolves null. Only flows to the
+   *  composite when `QUANTA_MENTION_APP_PLUGIN` is ON (see `appDep`). */
+  readonly apps?: AppCatalogPort
 }
 
 /** A knob is ON unless explicitly disabled. Delegates to the canonical
@@ -145,6 +167,36 @@ const folderDeps = (
   }
 }
 
+/** ADR-0336 — the `plugin://` + `@@app` resolution knob. Unlike the other
+ *  `QUANTA_MENTION_*` knobs (default-ON kill-switches read via `parseEnvFlag`),
+ *  this one is a DEFAULT-OFF OPT-IN gate, so it routes through the canonical
+ *  `gateOn` SSOT (ADR-0503 bool-vocab): ON only for an explicit truthy token
+ *  (`1`/`on`/`true`/`yes`); unset / empty (`QUANTA_MENTION_APP_PLUGIN=`) / a
+ *  falsy token / anything unrecognized ⇒ OFF. `gateOn` (NOT `parseEnvFlag`,
+ *  whose legacy `""`→true quirk would spuriously arm the gate) is what
+ *  preserves the byte-identical opt-in guarantee: with the knob absent neither
+ *  `plugins` nor `apps` flows to the composite, so `plugin://` / `@@app`
+ *  resolve `null` — identical to the pre-wire path even when a surface injects
+ *  the ports. */
+const isAppPluginOn = (env: MentionEnv): boolean => gateOn(env, "QUANTA_MENTION_APP_PLUGIN")
+
+/** Build the `plugin://` registry slot when the app/plugin knob is ON AND a
+ *  registry is injected. Gate OFF or no registry ⇒ undefined (graceful omit /
+ *  byte-identical). The injected registry is the real `discoverPlugins`-backed
+ *  port; a miss returns the resolver's typed `null`, never a stub. */
+const pluginDep = (opts: BuildDefaultMentionResolverOptions): PluginRegistryPort | undefined => {
+  if (!isAppPluginOn(opts.env)) return undefined
+  return opts.plugins
+}
+
+/** Build the `@@app` catalog slot when the app/plugin knob is ON AND a catalog
+ *  is injected. Gate OFF or no catalog ⇒ undefined (graceful omit /
+ *  byte-identical). The injected catalog is the real workspace-merged port. */
+const appDep = (opts: BuildDefaultMentionResolverOptions): AppCatalogPort | undefined => {
+  if (!isAppPluginOn(opts.env)) return undefined
+  return opts.apps
+}
+
 /** §10.3 — build the `@git` deps slot when the knob is ON AND a provider is
  *  injected. No provider ⇒ undefined (graceful omit). */
 const gitDep = (opts: BuildDefaultMentionResolverOptions): GitResolverOptions | undefined => {
@@ -172,11 +224,15 @@ export const buildDefaultMentionResolver = (
   const skills = skillDep(opts)
   const folders = folderDeps(opts)
   const git = gitDep(opts)
+  const plugins = pluginDep(opts)
+  const apps = appDep(opts)
   return createCompositeMentionResolver({
     ...(files !== undefined ? { files } : {}),
     ...(symbol !== undefined ? { symbol } : {}),
     ...(skills !== undefined ? { skills } : {}),
     ...(folders !== undefined ? { folders } : {}),
     ...(git !== undefined ? { git } : {}),
+    ...(plugins !== undefined ? { plugins } : {}),
+    ...(apps !== undefined ? { apps } : {}),
   })
 }

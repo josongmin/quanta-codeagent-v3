@@ -157,8 +157,12 @@ const createFileMcpTokenStore = (dir: string): TokenStorePort => {
         const o = parsed as Record<string, unknown>
         if (typeof o.accessToken !== "string" || typeof o.tokenType !== "string") return undefined
         return o as unknown as TokenRecord
-      } catch {
+      } catch (e) {
         // Absent / unreadable / malformed ⇒ treat as "no token" (re-auth path).
+        logger.warn("mcp OAuth token read failed; treating token as absent", {
+          error: errMessage(e),
+          id,
+        })
         return undefined
       }
     },
@@ -173,8 +177,9 @@ const createFileMcpTokenStore = (dir: string): TokenStorePort => {
     async delete(id: string): Promise<void> {
       try {
         await unlink(fileFor(id))
-      } catch {
+      } catch (e) {
         // Idempotent — an absent file is fine.
+        logger.warn("mcp OAuth token delete failed", { error: errMessage(e), id })
       }
     },
   }
@@ -227,8 +232,11 @@ const runMcpBrowserFlow = async (input: {
     const opener =
       process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open"
     spawnChild(opener, [url.toString()], { stdio: "ignore", detached: true }).unref()
-  } catch {
+  } catch (e) {
     // Opener unavailable ⇒ the receiver's printed URL is the fallback.
+    logger.warn("mcp OAuth browser opener unavailable; use the printed URL", {
+      error: errMessage(e),
+    })
   }
   const result = await handle.received
   return { code: result.code, verifier, redirectUri: handle.redirectUri }
@@ -245,7 +253,8 @@ const mcpIssuerResolver =
     if (server?.oauth !== true || server.url === undefined) return undefined
     try {
       return new URL(server.url).origin
-    } catch {
+    } catch (e) {
+      logger.warn("mcp OAuth server URL is malformed", { error: errMessage(e), serverName })
       return undefined
     }
   }
@@ -419,7 +428,8 @@ export const resolveMcpLaunchPolicy = async (
     let realCwd: string
     try {
       realCwd = await realpath(process.cwd())
-    } catch {
+    } catch (e) {
+      logger.warn("mcp trust cwd realpath failed; using unresolved cwd", { error: errMessage(e) })
       realCwd = process.cwd()
     }
     const userConfigDir = quantaHomeDir()
@@ -434,7 +444,11 @@ export const resolveMcpLaunchPolicy = async (
           return typeof parsed === "object" && parsed !== null
             ? (parsed as Record<string, TrustRecord>)
             : undefined
-        } catch {
+        } catch (e) {
+          logger.warn("mcp trust store read failed; treating grants as absent", {
+            error: errMessage(e),
+            path: trustFile,
+          })
           return undefined
         }
       },
@@ -457,9 +471,13 @@ export const resolveMcpLaunchPolicy = async (
       read: async (p: string) => {
         try {
           return await readFile(p, "utf8")
-        } catch {
+        } catch (e) {
           // ENOENT/EACCES/… ⇒ layer absent (fail-soft, same posture as the
           // hooks path's fsReadText).
+          logger.warn("mcp settings layer read failed; treating layer as absent", {
+            error: errMessage(e),
+            path: p,
+          })
           return undefined
         }
       },

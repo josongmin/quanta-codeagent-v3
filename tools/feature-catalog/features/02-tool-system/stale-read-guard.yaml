@@ -10,7 +10,7 @@ monitoring: n-a
 modes: [interactive, headless]
 configurable: partial
 owners: ["@songmin"]
-labels: ["absorbed:claude", "absorbed:codex", "surface:cli", "tier:core", "default-off"]
+labels: ["absorbed:claude", "absorbed:codex", "surface:cli", "tier:core", "default-on", "inverse-kill-switch"]
 depends_on: [tool, storage]
 surface_integration:
   cli: full
@@ -36,15 +36,15 @@ purpose: |
   checkFresh → fresh|stale|unread), the pure guardWrite (Result<void,StaleReadError>),
   the pure staleAfterBash(state, command, changed[]) → stale path list (requires
   BOTH a marker match AND a forward mtime move — a read-only command like
-  `git status` never warns), the strict gate staleReadGuardEnabled (env
-  QUANTA_STALE_READ_GUARD === "1", reads INJECTED env), and renderStaleReminder
+  `git status` never warns), the strict gate staleReadGuardEnabled (exact env
+  `QUANTA_STALE_READ_GUARD=off` disables, reads INJECTED env), and renderStaleReminder
   (embedUntrusted-defanged, "" for empty list). The real mtime is INJECTED by the
   host as a plain number (port inversion — FileSystemPort at integration; the
   slice never imports @/storage), so it is unit-testable with hand-fed mtimes.
   Closed signals only: forward mtime move = stale, backward = restore/skew (fresh),
   unread = no baseline (allowed); strict > comparison, no tolerance window.
-  NO-THROW throughout. DEFAULT-OFF: flag unset ⇒ the host records no read mtimes,
-  runs no write-time check, runs no post-bash detector ⇒ byte-identical to today.
+  NO-THROW throughout. DEFAULT-ON safety posture: unset keeps protection active;
+  only exact `QUANTA_STALE_READ_GUARD=off` disables it.
 evidence:
   code:
     - src/tool/stale-read-guard/types.ts
@@ -71,8 +71,8 @@ evidence:
     contract: []
 knobs:
   - name: QUANTA_STALE_READ_GUARD
-    default: 'unset (OFF)'
-    purpose: 'exactly "1" opts a deployment in; any other value (incl "0"/"on"/"true") keeps it OFF. Unset ⇒ host records no read mtimes, runs no write-time guardWrite check, runs no post-bash staleAfterBash detector (byte-identical to today). Reads INJECTED env, never process.env.'
+    default: 'unset (ON); exact "off" disables'
+    purpose: 'DEFAULT-ON safety kill-switch. Only exact "off" disables; unset and stray falsy tokens keep TOCTOU protection active. Reads injected env, never process.env.'
 deliberate_hold: null
 notes: |
   LANDED: all five integration points are wired. The assembler mints the

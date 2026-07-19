@@ -97,12 +97,29 @@ export interface EnqueueResult {
  *   - `invalid-text`  — `edit` only. The new text is empty / whitespace-only
  *                       (after `.trim()`), or exceeds {@link MAX_FOLLOWUP_TEXT_BYTES}.
  *                       Symmetric with future enqueue-side validation.
- *   - `send-not-possible` — `sendNow` only. No {@link SendNowSink} was wired
- *                       at construction time, OR the sink threw / returned a
- *                       falsy ok flag. `sendNow` NEVER throws — it converts
- *                       sink errors to `send-not-possible` so the caller has
- *                       one channel for "I can't deliver this right now". */
-export type QueueMutateError = "not-found" | "already-active" | "invalid-text" | "send-not-possible"
+ *   - `send-not-possible` — `sendNow` only. A TERMINAL delivery failure: no
+ *                       {@link SendNowSink} was wired at construction time, OR
+ *                       the sink threw, OR the sink returned `{ok:false}`
+ *                       WITHOUT `retryable:true`. The entry is REMOVED (the
+ *                       caller can re-enqueue if intent demands). `sendNow`
+ *                       NEVER throws — it converts sink throws to this.
+ *   - `send-not-ready`— `sendNow` only. A TRANSIENT delivery failure: the sink
+ *                       is wired but its downstream target is not installed YET
+ *                       (the first-turn composition-root timing WINDOW — the
+ *                       REPL `sendNowSink` closure exists at store-construction
+ *                       but the loop-owned `ExternalPromptQueue` target is
+ *                       late-bound). FAIL-CLOSED: the entry is KEPT IN THE QUEUE
+ *                       (NOT removed) so a `/queue send-now` fired inside the
+ *                       window is never a silent drop — the caller gets an
+ *                       explicit "not ready, try again" and the entry survives
+ *                       for the retry. The sink signals this by returning
+ *                       `{ok:false, reason, retryable:true}`. */
+export type QueueMutateError =
+  | "not-found"
+  | "already-active"
+  | "invalid-text"
+  | "send-not-possible"
+  | "send-not-ready"
 
 /** Max byte length for a single follow-up text (post-`edit`). 64 KiB is the
  *  same ceiling Codex applies to keystroke buffers and roughly 16k tokens
@@ -122,12 +139,25 @@ export const MAX_FOLLOWUP_TEXT_BYTES = 64 * 1024
  *    - MUST return `{ok:true}` on a successful enqueue into the next-turn
  *      sink, `{ok:false, reason}` if the sink itself cannot accept.
  *    - MUST NOT throw — `sendNow` catches throws and converts them, but
- *      well-behaved sinks return `{ok:false}` instead. */
+ *      well-behaved sinks return `{ok:false}` instead.
+ *    - TIMING WINDOW: when the sink is wired but its downstream target is not
+ *      installed YET (the composition-root late-bind window), the sink MUST
+ *      return `{ok:false, reason, retryable:true}` so the store maps it to the
+ *      TRANSIENT `send-not-ready` error and KEEPS the entry (fail-closed — a
+ *      send-now fired in the window is never a silent drop). A permanent
+ *      rejection (downstream full / closed) omits `retryable` (or sets it
+ *      false) ⇒ TERMINAL `send-not-possible` ⇒ the entry is removed. */
 export interface SendNowSink {
   /** Submit `text` for inclusion in the NEXT LLM turn. Synchronous —
    *  the store has already done all bookkeeping by the time this is
-   *  called, so the sink just needs to record the message. */
-  inject(input: SendNowInjection): { ok: true } | { ok: false; reason: string }
+   *  called, so the sink just needs to record the message.
+   *
+   *  `retryable:true` on a rejection signals the TRANSIENT timing window
+   *  (target not installed yet) — the store maps it to `send-not-ready`
+   *  and PRESERVES the entry. Omitted / false ⇒ TERMINAL rejection. */
+  inject(
+    input: SendNowInjection,
+  ): { ok: true } | { ok: false; reason: string; retryable?: boolean }
 }
 
 /** Payload handed to {@link SendNowSink.inject}. Carries enough envelope
