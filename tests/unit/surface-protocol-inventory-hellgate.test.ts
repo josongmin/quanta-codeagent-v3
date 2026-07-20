@@ -28,8 +28,9 @@ describe("surface-protocol inventory hellgate", () => {
     // (`subagent_spawn` / `subagent_status`) for the `/agents --tree` CLI + web
     // Sub-Agents panel (later waves), consumed off the `@/protocol/subagent`
     // projection seam. Transient render-only (recorder skips them).
-    // Side-agent peer delivery adds `peer_message` to the wire inventory.
-    expect(AGENT_EVENT_TYPES.length).toBe(40)
+    // Side-agent peer delivery adds `peer_message`; targeted steer adds the
+    // correlated `subagent_delivery` admission/finalization lifecycle.
+    expect(AGENT_EVENT_TYPES.length).toBe(41)
     // T01 — +3 additive session.v1 item events (item.started/delta/completed).
     // ALBB-04 — +1 dedicated cancel terminal (turn.aborted).
     // UUX-1-12 (jul-10) — +4 additive observability events (tool.progress /

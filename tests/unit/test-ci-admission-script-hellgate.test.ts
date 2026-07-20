@@ -24,4 +24,11 @@ describe("test:ci admission gate", () => {
     expect(script).toContain("--timeout=15000")
     expect(script).toContain("--parallel=1")
   })
+
+  test("serializes every shared-process test entrypoint", () => {
+    const serialScripts = ["test", "test:unit", "test:fast", "test:integration", "test:shard", "test:contract", "test:ci", "test:cov", "test:watch"]
+    for (const name of serialScripts) {
+      expect(packageJson.scripts?.[name], name).toContain("--parallel=1")
+    }
+  })
 })

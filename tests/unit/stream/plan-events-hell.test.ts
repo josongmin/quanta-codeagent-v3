@@ -628,6 +628,8 @@ describe("Exhaustive AgentEvent switch covers the 6 new variants (drift gate)", 
         return "assistant_thinking"
       case "peer_message":
         return "peer_message"
+      case "subagent_delivery":
+        return "subagent_delivery"
       case "budget_breach":
         return "budget_breach"
       default: {

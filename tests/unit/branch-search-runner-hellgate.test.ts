@@ -3,18 +3,13 @@
  * candidate could recursively fan out), and depth denial is typed rather than
  * throwing into the proposal loop.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 const children: Array<Record<string, unknown>> = []
 
-mock.module("@/agent/loop", () => ({
-  runAgent: async (child: Record<string, unknown>) => {
-    children.push(child)
-    return { reason: "completed", messages: [], turns: 2 }
-  },
-}))
-
-const { bindBranchRunCandidate } = await import("@/agent/branch-search-runner")
+const { __setBranchRunAgentForTest, bindBranchRunCandidate } = await import(
+  "@/agent/branch-search-runner"
+)
 const { __resetRuntimeConfig } = await import("@/shared/runtime-config")
 
 let savedEnv: NodeJS.ProcessEnv
@@ -22,9 +17,14 @@ let savedEnv: NodeJS.ProcessEnv
 beforeEach(() => {
   savedEnv = { ...process.env }
   children.length = 0
+  __setBranchRunAgentForTest((async (child: Record<string, unknown>) => {
+    children.push(child)
+    return { reason: "completed", messages: [], turns: 2 }
+  }) as never)
   __resetRuntimeConfig()
 })
 afterEach(() => {
+  __setBranchRunAgentForTest(null)
   process.env = savedEnv
   __resetRuntimeConfig()
 })

@@ -348,6 +348,72 @@ describe("WS4 finalization port (RFC §3.3, §4.3)", () => {
     if (forD3[0]?.kind === "degraded") expect(forD3[0].reason).toBe("same_turn_budget_exhausted")
   })
 
+  test("mailbox throw ⇒ no exception escapes and one terminal failed receipt is emitted", () => {
+    const store = makeSteerRetentionStore()
+    const receipts: SubagentDeliveryReceipt[] = []
+    const finalization = createSubagentSteerFinalization({
+      store,
+      mailbox: {
+        send: () => {
+          throw new Error("mailbox unavailable")
+        },
+      },
+      onReceipt: (r) => receipts.push(r),
+    })
+    store.retain("d-mailbox-fail", { from: "peer", to: "root/0", body: "must not vanish" })
+
+    expect(() => finalization.finalizeFallback("d-mailbox-fail", "action_queue_full")).not.toThrow()
+    expect(receipts).toHaveLength(1)
+    expect(receipts[0]).toMatchObject({
+      deliveryId: "d-mailbox-fail",
+      kind: "failed",
+      reason: "mailbox_error",
+    })
+    expect(store.size()).toBe(0)
+  })
+
+  test("throwing receipt sink never changes delivery or escapes into the child loop", () => {
+    const store = makeSteerRetentionStore()
+    const mailbox = spyMailbox()
+    const finalization = createSubagentSteerFinalization({
+      store,
+      mailbox: mailbox.port,
+      onReceipt: () => {
+        throw new Error("sink unavailable")
+      },
+    })
+    store.retain("d-sink-fail", { from: "peer", to: "root/0", body: "fallback" })
+
+    expect(() => finalization.finalizeFallback("d-sink-fail", "action_queue_full")).not.toThrow()
+    expect(mailbox.sent).toHaveLength(1)
+    expect(store.size()).toBe(0)
+  })
+
+  test("re-entrant mailbox adapter cannot claim the same fallback twice", () => {
+    const store = makeSteerRetentionStore()
+    const receipts: SubagentDeliveryReceipt[] = []
+    let sends = 0
+    let finalization: ReturnType<typeof createSubagentSteerFinalization>
+    finalization = createSubagentSteerFinalization({
+      store,
+      mailbox: {
+        send: () => {
+          sends += 1
+          finalization.finalizeFallback("d-reentrant", "action_queue_full")
+          return { id: "msg-reentrant" }
+        },
+      },
+      onReceipt: (r) => receipts.push(r),
+    })
+    store.retain("d-reentrant", { from: "peer", to: "root/0", body: "once" })
+
+    finalization.finalizeFallback("d-reentrant", "action_queue_full")
+
+    expect(sends).toBe(1)
+    expect(receipts).toHaveLength(1)
+    expect(store.size()).toBe(0)
+  })
+
   test("finalizeCancelled ⇒ exactly one cancelled receipt, NO mailbox send", () => {
     const { store, mailbox, receipts, finalization } = setup()
     store.retain("d4", { from: "peer", to: "root/0", body: "b" })

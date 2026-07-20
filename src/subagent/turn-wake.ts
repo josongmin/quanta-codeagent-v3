@@ -31,15 +31,15 @@ export type WakeOutcome = "woke" | "queued" | "no-receiver"
 export type Waker = (reason: string) => WakeOutcome
 
 /**
- * WS2 (RFC jul-18 §4.2) — the typed per-child control endpoint registered
- * alongside the legacy waker. This registry only STORES + hands back the
+ * WS2 (RFC jul-18 §4.2) — the typed per-child control endpoint registered as
+ * the canonical registration variant. This registry only STORES + hands back the
  * endpoint; it never owns/constructs it (the `@/agent` runner builds the
  * endpoint over the child's private gate + `activeTurnRef` and passes it here),
  * so the registry stays a pure PURE slice leaf with no `@/agent` dependency.
  * Structurally mirrors `SubagentControlEndpoint`
  * (`@/agent/subagent-delivery/ports`) — duck-typed so this slice never imports
- * `@/agent`. WS3 rewires `followup_task` onto {@link endpointFor}; WS5 removes
- * the legacy waker map and renames {@link registerEndpoint} → `register`.
+ * `@/agent`. The legacy waker API is retained as an adapter variant, not as a
+ * parallel registry: one task id always has exactly one atomic registration.
  */
 export interface ControlEndpoint {
   readonly mailboxLabel: string
@@ -49,18 +49,15 @@ export interface ControlEndpoint {
   currentTurnId(): string | undefined
 }
 
+type ControlRegistration =
+  | { readonly kind: "legacy"; readonly waker: Waker; readonly mailboxLabel?: string }
+  | { readonly kind: "endpoint"; readonly endpoint: ControlEndpoint }
+
 export class TurnWakeRegistry {
-  private readonly wakers = new Map<string, Waker>()
-  /** WS2 — task id → typed control endpoint (the superset of the waker map).
-   *  Registered by the runner alongside a derived legacy waker under the SAME
-   *  last-writer guard so a stale disposer never clobbers a replacement. */
-  private readonly endpoints = new Map<string, ControlEndpoint>()
-  /** `agentId` (the registry TASK id `followup_task` targets) → that child's
-   *  MAILBOX label (`root/N`). The two id namespaces are disjoint: a child is
-   *  registered here under its task id but reads its inbox under its mailbox
-   *  label, so `followup_task`'s mailbox delivery MUST translate task id →
-   *  label or the message goes to a phantom address (jun-07 BUG#4 fix). */
-  private readonly labels = new Map<string, string>()
+  /** Single authority cell per task. Endpoint, label, and wake behavior cannot
+   *  be replaced independently, so mixed legacy/typed registration cannot form
+   *  a split-brain view. */
+  private readonly registrations = new Map<string, ControlRegistration>()
 
   /** Register a persistent waker for `agentId`. Returns a disposer the runner
    *  MUST call when the child loop terminates (so a wake on a dead agent
@@ -69,27 +66,23 @@ export class TurnWakeRegistry {
    *  the child). `label` (when given) is the child's mailbox label, recorded so
    *  {@link labelOf} can translate this task id to its inbox address. */
   register(agentId: string, waker: Waker, label?: string): () => void {
-    this.wakers.set(agentId, waker)
-    if (label !== undefined) this.labels.set(agentId, label)
+    const registration: ControlRegistration = {
+      kind: "legacy",
+      waker,
+      ...(label !== undefined ? { mailboxLabel: label } : {}),
+    }
+    this.registrations.set(agentId, registration)
     return () => {
-      // Only delete if it is still OUR waker (a re-register may have replaced
-      // it; the older disposer must not clobber the newer entry). The label is
-      // dropped under the SAME guard so a re-registered child keeps its label.
-      if (this.wakers.get(agentId) === waker) {
-        this.wakers.delete(agentId)
-        this.labels.delete(agentId)
-      }
+      if (this.registrations.get(agentId) === registration) this.registrations.delete(agentId)
     }
   }
 
   /**
    * WS2 (RFC jul-18 §4.2) — register the typed control {@link ControlEndpoint}
    * for `taskId`. This is the SUPERSET of {@link register}: it stores the
-   * endpoint AND derives a legacy waker (`endpoint.wake()` ignores the reason
-   * for a followup; an `"interrupt"` reason routes to `endpoint.interrupt()`)
-   * so the existing `followup_task` path keeps working byte-identically until
-   * WS3 rewires it onto {@link endpointFor}. Records the endpoint's
-   * `mailboxLabel` under the SAME id.
+   * endpoint as the whole registration. The legacy {@link wake} adapter derives
+   * its behavior from that same cell (`endpoint.wake()` for followup;
+   * `endpoint.interrupt()` for interrupt), so there is no second waker authority.
    *
    * Returns a disposer the runner MUST call when the child loop ends. Like
    * {@link register}, the disposer is LAST-WRITER-SAFE: it only removes the
@@ -98,32 +91,10 @@ export class TurnWakeRegistry {
    * older disposer.
    */
   registerEndpoint(taskId: string, endpoint: ControlEndpoint): () => void {
-    this.endpoints.set(taskId, endpoint)
-    this.labels.set(taskId, endpoint.mailboxLabel)
-    // Derive the legacy waker so `followup_task` (pre-WS3) still triggers turns.
-    // `"interrupt"` routes to the typed interrupt (which aborts the in-flight
-    // turn); any other reason is a plain wake. The legacy waker returns the same
-    // {@link WakeOutcome} the old gate-backed waker did.
-    const waker: Waker = (reason: string): WakeOutcome => {
-      if (reason === "interrupt") {
-        const outcome = endpoint.interrupt()
-        // Map the typed interrupt outcome back onto the legacy WakeOutcome the
-        // `followup_task` handler expects: an idle wake is "woke"; a busy/repeat
-        // interrupt records a pending resume ⇒ "queued"; an unarmed gate has no
-        // live turn to trigger ⇒ "queued" (a turn WILL run once the loop parks).
-        return outcome === "woke_idle" ? "woke" : "queued"
-      }
-      return endpoint.wake()
-    }
-    this.wakers.set(taskId, waker)
+    const registration: ControlRegistration = { kind: "endpoint", endpoint }
+    this.registrations.set(taskId, registration)
     return () => {
-      // Guard EACH map on its own identity so a stale disposer cannot remove a
-      // replacement registration (last-writer-safe, mirroring {@link register}).
-      if (this.endpoints.get(taskId) === endpoint) {
-        this.endpoints.delete(taskId)
-        this.labels.delete(taskId)
-      }
-      if (this.wakers.get(taskId) === waker) this.wakers.delete(taskId)
+      if (this.registrations.get(taskId) === registration) this.registrations.delete(taskId)
     }
   }
 
@@ -132,28 +103,34 @@ export class TurnWakeRegistry {
    *  ran). WS3's delivery controller reads this to issue typed wake/interrupt/
    *  steer commands. */
   endpointFor(taskId: string): ControlEndpoint | undefined {
-    return this.endpoints.get(taskId)
+    const registration = this.registrations.get(taskId)
+    return registration?.kind === "endpoint" ? registration.endpoint : undefined
   }
 
   /** The mailbox label bound to `agentId` (its registry task id), or `undefined`
    *  when none was recorded — `followup_task` resolves the delivery address with
    *  this so a message reaches the child's real inbox (`root/N`), not its task id. */
   labelOf(agentId: string): string | undefined {
-    return this.labels.get(agentId)
+    const registration = this.registrations.get(agentId)
+    return registration?.kind === "endpoint"
+      ? registration.endpoint.mailboxLabel
+      : registration?.mailboxLabel
   }
 
   has(agentId: string): boolean {
-    return this.wakers.has(agentId)
+    return this.registrations.has(agentId)
   }
 
   /** Wake `agentId`. Returns the waker's outcome, or `"no-receiver"` when no
    *  waker is registered. A throwing waker is treated as `"no-receiver"` (the
    *  trigger could not be honored) — the handler still reports delivery. */
   wake(agentId: string, reason: string): WakeOutcome {
-    const waker = this.wakers.get(agentId)
-    if (waker === undefined) return "no-receiver"
+    const registration = this.registrations.get(agentId)
+    if (registration === undefined) return "no-receiver"
     try {
-      return waker(reason)
+      if (registration.kind === "legacy") return registration.waker(reason)
+      if (reason !== "interrupt") return registration.endpoint.wake()
+      return registration.endpoint.interrupt() === "woke_idle" ? "woke" : "queued"
     } catch {
       return "no-receiver"
     }

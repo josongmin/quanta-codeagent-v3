@@ -366,7 +366,7 @@ describe("end-to-end — followup_task(interrupt) aborts a busy child mid-turn",
     await childP
   })
 
-  test("no-waker honest-degrade unchanged (interrupt against a child with no live waker)", () => {
+  test("missing-control honest-degrade (interrupt against a child with no live endpoint)", () => {
     const wake = new TurnWakeRegistry()
     const reg = new TaskRegistry()
     reg.register({ id: "child-NW", description: "child" })
@@ -375,8 +375,10 @@ describe("end-to-end — followup_task(interrupt) aborts a busy child mid-turn",
       { agentId: "child-NW", message: "hi", mode: "interrupt" },
       followupDeps(reg, mailbox, wake),
     )
-    expect(out.kind).toBe("error")
-    if (out.kind === "error") expect(out.cause).toBe("no_waker")
+    expect(out.kind).toBe("success")
+    if (out.kind === "success" && out.status === "degraded") {
+      expect(out.reason).toBe("control_unavailable")
+    }
     expect(mailbox.sent.length).toBe(1) // delivered despite no live trigger
   })
 })

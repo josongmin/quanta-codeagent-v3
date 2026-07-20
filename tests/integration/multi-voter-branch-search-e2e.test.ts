@@ -58,7 +58,7 @@
  *   default-OFF path.)
  */
 
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -71,15 +71,9 @@ import { withTimeout } from "./_harness"
 // through the REAL spawn-depth authority. Faking it keeps the fork cheap while
 // leaving the voter fold + selection entirely real.
 const forkedChildren: Array<Record<string, unknown>> = []
-mock.module("@/agent/loop", () => ({
-  runAgent: async (child: Record<string, unknown>) => {
-    forkedChildren.push(child)
-    return { reason: "completed", messages: [], turns: 3 }
-  },
-}))
-
-// Import AFTER the mock so the runner binds the faked `runAgent`.
-const { buildBranchSearchTool } = await import("@/agent/branch-search-runner")
+const { __setBranchRunAgentForTest, buildBranchSearchTool } = await import(
+  "@/agent/branch-search-runner"
+)
 
 // ── A claim-aware scripted voter LLM. ──────────────────────────────────────────
 // The voter verifier builds each candidate's claim as
@@ -122,7 +116,12 @@ beforeEach(() => {
   // A trivial source file so the copy is non-empty (realistic tree).
   writeFileSync(join(srcDir, "index.ts"), "export const x = 1\n")
   forkedChildren.length = 0
+  __setBranchRunAgentForTest((async (child: Record<string, unknown>) => {
+    forkedChildren.push(child)
+    return { reason: "completed", messages: [], turns: 3 }
+  }) as never)
 })
+afterEach(() => __setBranchRunAgentForTest(null))
 afterAll(() => {
   for (const d of madeDirs) {
     try {

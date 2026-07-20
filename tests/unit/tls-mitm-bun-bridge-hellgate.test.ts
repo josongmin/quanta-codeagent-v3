@@ -58,7 +58,10 @@ const egress = (over: Partial<SecretEgressConfig> = {}): SecretEgressConfig => (
   ...over,
 })
 
-const mitmConfig = (over: Partial<SecretEgressConfig> = {}): MitmConfig => ({
+const mitmConfig = (
+  over: Partial<SecretEgressConfig> = {},
+  handshakeTimeoutMs = 5_000,
+): MitmConfig => ({
   certAuthority: new MitmCertAuthority({
     keyPairSource: nodeKeyPairSource,
     serialSource: serial,
@@ -67,7 +70,12 @@ const mitmConfig = (over: Partial<SecretEgressConfig> = {}): MitmConfig => ({
   }),
   secretEgress: egress(over),
   onFailure: "deny",
-  handshakeTimeoutMs: 1_000,
+  // Production gives the one-shot Bun TLS terminator 15s. This rail drives
+  // real loopback sockets after a long serial suite, where a 1s scheduler
+  // budget can turn a healthy bridge into a spurious fail-closed status 0.
+  // Keep the hostile-channel tests bounded separately if they need a short
+  // watchdog assertion.
+  handshakeTimeoutMs,
 })
 
 const startOrigin = async (
@@ -97,6 +105,12 @@ const httpsThroughProxy = (
   body: string,
 ): Promise<{ status: number; body: string }> =>
   new Promise((resolve) => {
+    let settled = false
+    const finish = (result: { status: number; body: string }): void => {
+      if (settled) return
+      settled = true
+      resolve(result)
+    }
     const ctrl = netConnect(proxyPort, "127.0.0.1", () => {
       ctrl.write(`CONNECT ${HOST}:443 HTTP/1.1\r\nHost: ${HOST}:443\r\n\r\n`)
     })
@@ -106,7 +120,7 @@ const httpsThroughProxy = (
       if (!connBuf.includes("\r\n\r\n")) return
       ctrl.removeListener("data", onConnect)
       if (!connBuf.startsWith("HTTP/1.1 200")) {
-        resolve({ status: Number(connBuf.match(/HTTP\/1\.1 (\d{3})/)?.[1] ?? 0), body: "" })
+        finish({ status: Number(connBuf.match(/HTTP\/1\.1 (\d{3})/)?.[1] ?? 0), body: "" })
         ctrl.destroy()
         return
       }
@@ -121,16 +135,18 @@ const httpsThroughProxy = (
         resp += d
       })
       tls.on("end", () => {
-        resolve({ status: Number(resp.match(/^HTTP\/1\.1 (\d{3})/)?.[1] ?? 0), body: resp })
+        finish({ status: Number(resp.match(/^HTTP\/1\.1 (\d{3})/)?.[1] ?? 0), body: resp })
         ctrl.destroy()
       })
-      tls.on("error", () => {
-        resolve({ status: 0, body: "" })
+      tls.on("error", (error: Error) => {
+        // Keep the transport diagnostic in the failed assertion. A status-0
+        // result is not an accepted outcome for the positive bridge rails.
+        finish({ status: 0, body: `tls error: ${String(error)}` })
         ctrl.destroy()
       })
     }
     ctrl.on("data", onConnect)
-    ctrl.on("error", () => resolve({ status: 0, body: "" }))
+    ctrl.on("error", (error) => finish({ status: 0, body: `connect error: ${String(error)}` }))
   })
 
 // (1) only runs where the bridge is the active mechanism (Bun) — that is the
@@ -258,7 +274,7 @@ describe("HELLGATE — fail-closed on a hostile channel (DI-injected, all runtim
   const driveDeny = async (opener: OpenMitmChannel): Promise<void> => {
     const received: string[] = []
     const { server, port: originPort } = await startOrigin(received)
-    const mitm = mitmConfig({ declared: [DECLARED] })
+    const mitm = mitmConfig({ declared: [DECLARED] }, 1_000)
     const dial: DialTarget = () => ({ host: "127.0.0.1", port: originPort })
     const proxy = new LoopbackEgressProxy(
       { enabled: true, allowlist: [HOST], secretEgress: mitm.secretEgress, mitm },

@@ -96,6 +96,8 @@ export class ItemStreamProjector {
       // `peerMessage` item (started+completed), the SAME shape as subagent_cancel.
       case "peer_message":
         return this.onPeerMessage(ev)
+      case "subagent_delivery":
+        return this.onSubagentDelivery(ev)
       case "turn_start":
       case "done":
         return this.closeAll()
@@ -236,6 +238,20 @@ export class ItemStreamProjector {
   private onPeerMessage(ev: Extract<AgentEvent, { type: "peer_message" }>): ItemStreamCore[] {
     const itemId = `item-peer-${ev.from}-${ev.sentAt}-${this.index}`
     const text = `${ev.from}→${ev.to} [${ev.kind}] ${ev.body}`
+    return [
+      { phase: "started", itemId, itemType: "peerMessage", index: this.index++ },
+      { phase: "completed", itemId, itemType: "peerMessage", text },
+    ]
+  }
+
+  private onSubagentDelivery(
+    ev: Extract<AgentEvent, { type: "subagent_delivery" }>,
+  ): ItemStreamCore[] {
+    const itemId = `item-delivery-${ev.deliveryId}-${ev.phase}`
+    const text =
+      ev.phase === "admitted"
+        ? `steer ${ev.deliveryId} accepted for ${ev.targetTaskId} turn ${ev.targetTurnId}`
+        : `steer ${ev.deliveryId} finalized ${ev.status}${"reason" in ev ? ` (${ev.reason})` : ""}`
     return [
       { phase: "started", itemId, itemType: "peerMessage", index: this.index++ },
       { phase: "completed", itemId, itemType: "peerMessage", text },

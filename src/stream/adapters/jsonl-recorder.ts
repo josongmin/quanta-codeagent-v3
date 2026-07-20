@@ -4,6 +4,7 @@ import type { Producer, RunContext, TrajectoryKind } from "@/shared"
 import { assertNever, errMessage, logger, makeEvent, toError } from "@/shared"
 import type { StreamPort } from "../ports"
 import type { AgentEvent } from "../types"
+import { communicationDataOf, isCommunicationDataEvent } from "./jsonl-recorder-communication-data"
 import {
   llmRequestData,
   recoveryData,
@@ -590,6 +591,7 @@ const KIND_MAP: Record<RecordedEventType, TrajectoryKind> = {
   // memory, so the trajectory is the only guaranteed record. `reason:"peer_message"`
   // in `dataOf` keeps it greppable; the body is already redacted at the emit boundary.
   peer_message: "recovery",
+  subagent_delivery: "recovery",
   error: "error",
   usage: "llm_usage",
   done: "session_end",
@@ -667,6 +669,7 @@ type ControlDataEvent = Extract<
       | "knobs_applied"
       | "progress_update"
       | "peer_message"
+      | "subagent_delivery"
       | "done"
   }
 >
@@ -674,17 +677,12 @@ type ControlDataEvent = Extract<
 type FinalDataEvent = Extract<
   ControlDataEvent,
   {
-    type:
-      | "turn_diff_updated"
-      | "decision"
-      | "knobs_applied"
-      | "progress_update"
-      | "peer_message"
-      | "done"
+    type: "turn_diff_updated" | "decision" | "knobs_applied" | "progress_update" | "done"
   }
 >
 
 const controlDataOf = (e: ControlDataEvent): Record<string, unknown> => {
+  if (isCommunicationDataEvent(e)) return communicationDataOf(e)
   switch (e.type) {
     case "response_queued":
       return controlOpQueuedData(e)
@@ -747,30 +745,12 @@ const finalDataOf = (e: FinalDataEvent): Record<string, unknown> => {
         ...(e.completedSubtitle !== undefined ? { completedSubtitle: e.completedSubtitle } : {}),
         ...(e.turn !== undefined ? { turn: e.turn } : {}),
       }
-    case "peer_message":
-      return peerMessageData(e)
     case "done":
       return { reason: e.reason, turns: e.turns }
     default:
       return assertNever(e, "AgentEvent")
   }
 }
-
-/** Durable peer/side-agent message payload. The body was already sanitized at
- *  the emit boundary; recorder redaction still applies on top. */
-const peerMessageData = (
-  e: Extract<AgentEvent, { type: "peer_message" }>,
-): Record<string, unknown> => ({
-  reason: "peer_message",
-  from: e.from,
-  to: e.to,
-  messageKind: e.kind,
-  body: e.body,
-  provenance: e.provenance.source,
-  ...(e.provenance.source === "side-agent" ? { daemonId: e.provenance.daemonId } : {}),
-  ...(e.correlationId !== undefined ? { correlationId: e.correlationId } : {}),
-  sentAt: e.sentAt,
-})
 
 /** Debug/developer-mode (Track A, 2026-05-25): gate-decision payload.
  *  Mirrors `EventDecisionSchema` in `@/session/envelope` on the trajectory

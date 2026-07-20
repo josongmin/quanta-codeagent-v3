@@ -11,17 +11,16 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import {
-  ITEM_DELTA_KIND_BY_ITEM_TYPE,
-  type ItemStreamItemType,
-} from "@/shared"
+import { ITEM_DELTA_KIND_BY_ITEM_TYPE, type ItemStreamItemType } from "@/shared"
 import type { AgentEvent } from "@/stream"
 import { ItemStreamProjector, StdoutStream } from "@/stream"
 
 const DIM = "\x1b[2m"
 const RESET = "\x1b[0m"
 
-const peerEvent = (over: Partial<Extract<AgentEvent, { type: "peer_message" }>> = {}): AgentEvent => ({
+const peerEvent = (
+  over: Partial<Extract<AgentEvent, { type: "peer_message" }>> = {},
+): AgentEvent => ({
   type: "peer_message",
   from: "root/1",
   to: "root",
@@ -57,6 +56,40 @@ describe("W2-2 — item-stream projector folds peer_message onto an atomic peerM
   test("a non-peer event does NOT produce a peerMessage item (no false positive)", () => {
     const cores = new ItemStreamProjector().project({ type: "turn_start", turn: 1 })
     expect(cores.every((c) => c.itemType !== "peerMessage")).toBe(true)
+  })
+})
+
+describe("subagent_delivery lifecycle projection", () => {
+  test("admission projects as pending and finalization as a correlated terminal item", () => {
+    const p = new ItemStreamProjector()
+    const admitted = p.project({
+      type: "subagent_delivery",
+      phase: "admitted",
+      deliveryId: "del-7",
+      requestedMode: "steer",
+      status: "accepted",
+      targetTaskId: "task-7",
+      targetTurnId: "turn-7",
+    })
+    const finalized = p.project({
+      type: "subagent_delivery",
+      phase: "finalized",
+      deliveryId: "del-7",
+      requestedMode: "steer",
+      status: "degraded",
+      effectiveMode: "queue",
+      reason: "action_queue_full",
+      messageId: "msg-7",
+    })
+
+    expect(admitted[1]).toMatchObject({
+      phase: "completed",
+      text: "steer del-7 accepted for task-7 turn turn-7",
+    })
+    expect(finalized[1]).toMatchObject({
+      phase: "completed",
+      text: "steer del-7 finalized degraded (action_queue_full)",
+    })
   })
 })
 
@@ -112,6 +145,22 @@ describe("W2-3 — stdout renders peer_message as a labeled, collapsed bubble", 
     expect(text).toContain("please review")
     expect(text).toContain(DIM)
     expect(text).toContain(RESET)
+  })
+
+  test("subagent delivery renders the correlated lifecycle without claiming admission success", () => {
+    const stream = new StdoutStream()
+    stream.emit({
+      type: "subagent_delivery",
+      phase: "admitted",
+      deliveryId: "del-render",
+      requestedMode: "steer",
+      status: "accepted",
+      targetTaskId: "task-render",
+      targetTurnId: "turn-render",
+    })
+    const text = out()
+    expect(text).toContain("steer delivery del-render accepted")
+    expect(text).not.toContain("applied")
   })
 
   test("side-agent provenance ⇒ 'side agent finding' label with the daemon id", () => {

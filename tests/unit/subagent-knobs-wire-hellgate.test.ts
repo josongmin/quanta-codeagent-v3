@@ -174,13 +174,13 @@ describe("subagent tool knobs — composition-root wire (ADR-0436/0437)", () => 
     unregister()
   })
 
-  test("followup_task with NO live waker honestly degrades to no_waker", () => {
+  test("followup_task with NO live endpoint honestly degrades to control_unavailable", () => {
     const wired = wireOptionalAgentPorts(baseConfig(), { QUANTA_SUBAGENT_FOLLOWUP: "on" })
     const registry = new TaskRegistry()
     const childId = registry.newId()
     registry.register({ id: childId, description: "child" })
     // No control ENDPOINT registered into the wired registry ⇒ the ensure-turn
-    // wake has no live receiver ⇒ honest no_waker degrade (surfaced as error).
+    // no endpoint ⇒ honest control_unavailable degraded delivery.
     const wake = wired.subagentTurnWake as NonNullable<AgentConfig["subagentTurnWake"]>
     const control = wake as unknown as SubagentControlRegistry
     const out = handleFollowupTask(
@@ -203,8 +203,10 @@ describe("subagent tool knobs — composition-root wire (ADR-0436/0437)", () => 
         callerLabel: "parent",
       },
     )
-    expect(out.kind).toBe("error")
-    if (out.kind === "error") expect(out.cause).toBe("no_waker")
+    expect(out.kind).toBe("success")
+    if (out.kind === "success" && out.status === "degraded") {
+      expect(out.reason).toBe("control_unavailable")
+    }
   })
 
   // ── caller-override-precedence (ADR-0332) ──────────────────────────────────

@@ -145,6 +145,7 @@ export const TIMELINE_FORMATTED_AGENT_EVENT_TYPES = [
   // user-facing notice, so it gets a FORMATTED row (from→to [kind]), same posture
   // as subagent_cancel.
   "peer_message",
+  "subagent_delivery",
   "plan_created",
   "plan_updated",
   "plan_snapshot",
@@ -232,6 +233,8 @@ const renderBody = (event: AgentEvent): string => {
     subagent_cancel: (event) => `subagent_cancel ${event.subagentId} ${event.outcome}`,
     peer_message: (event) =>
       `peer_message ${event.provenance.source === "side-agent" ? `finding ${event.provenance.daemonId}` : `${event.from}→${event.to} [${event.kind}]`}`,
+    subagent_delivery: (event) =>
+      `subagent_delivery ${event.deliveryId} ${event.phase}:${event.status}`,
     plan_created: (event) => `plan_created ${event.plan.name}`,
     plan_updated: (event) => `plan_updated v${event.version}`,
     plan_snapshot: (event) => `plan_snapshot ${event.plan.name}`,
