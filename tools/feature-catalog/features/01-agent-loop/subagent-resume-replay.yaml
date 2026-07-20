@@ -34,7 +34,9 @@ evidence:
     - src/agent/subagent-resume/resumer.ts
     - src/agent/subagent-resume/policy.ts
     - src/tool/subagent-bg/fork.ts
-  adrs: []
+  adrs:
+    - docs/decisions/0159-subagent-work-resume.md
+    - docs/decisions/0175-subagent-tool-history-replay.md
   tests:
     unit:
       - tests/unit/runner/subagent-resume-wire.test.ts

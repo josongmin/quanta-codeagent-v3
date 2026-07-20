@@ -25,6 +25,7 @@ import {
   type AttestEventSink,
   type AttestRequest,
   type AttestResult,
+  attestationScopeFor,
   type PolicyTable,
   type StsToken,
 } from "./types"
@@ -43,6 +44,10 @@ export interface DefaultAttestorOpts {
   readonly clock?: () => number
   /** 9-event stream subscriber. Default no-op (default-OFF). */
   readonly onEvent?: AttestEventSink
+  /** Maximum accepted age of a remote preflight request. Default 5 minutes. */
+  readonly maxRequestAgeMs?: number
+  /** Maximum accepted future clock skew for a remote preflight. Default 30s. */
+  readonly maxFutureSkewMs?: number
 }
 
 /** Minimum entropy-bearing HMAC key material. SHA-256's 256-bit output is the
@@ -54,6 +59,8 @@ const MIN_SECRET_BYTES = 32
 // credential convention; long enough for typical preflight→action latency,
 // short enough to bound exposure on accidental leak.
 const DEFAULT_STS_TOKEN_TTL_MS = 300_000
+const DEFAULT_MAX_REQUEST_AGE_MS = 300_000
+const DEFAULT_MAX_FUTURE_SKEW_MS = 30_000
 
 const requireSecret = (secret: string | undefined): string => {
   if (secret === undefined || secret.trim().length === 0) {
@@ -70,6 +77,34 @@ const requireSecret = (secret: string | undefined): string => {
   }
   return secret
 }
+
+const requireNonNegativeMs = (value: number, label: string): number => {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new AttestError(
+      `bridge attestor ${label} must be a finite non-negative millisecond value`,
+      "misconfigured",
+    )
+  }
+  return value
+}
+
+const isFreshRequest = (
+  requestedAt: number,
+  now: number,
+  maxRequestAgeMs: number,
+  maxFutureSkewMs: number,
+): boolean =>
+  Number.isFinite(requestedAt) &&
+  requestedAt >= now - maxRequestAgeMs &&
+  requestedAt <= now + maxFutureSkewMs
+
+const isWellFormedRequest = (req: AttestRequest): boolean =>
+  typeof req.agentId === "string" &&
+  req.agentId.length > 0 &&
+  typeof req.action === "string" &&
+  req.action.length > 0 &&
+  typeof req.resource === "string" &&
+  req.resource.length > 0
 
 /** Build the canonical signing payload — kept centralised so mint + verify
  *  hash identical bytes. */
@@ -144,6 +179,14 @@ export const defaultAttestor = (opts: DefaultAttestorOpts = {}): BridgeAttestor 
   const policyTable: PolicyTable = opts.policyTable ?? {}
   const clock = opts.clock ?? Date.now
   const onEvent: AttestEventSink = opts.onEvent ?? (() => {})
+  const maxRequestAgeMs = requireNonNegativeMs(
+    opts.maxRequestAgeMs ?? DEFAULT_MAX_REQUEST_AGE_MS,
+    "maxRequestAgeMs",
+  )
+  const maxFutureSkewMs = requireNonNegativeMs(
+    opts.maxFutureSkewMs ?? DEFAULT_MAX_FUTURE_SKEW_MS,
+    "maxFutureSkewMs",
+  )
   const revoked = new Set<string>()
 
   const emit = (ev: AttestEvent): void => {
@@ -187,10 +230,10 @@ export const defaultAttestor = (opts: DefaultAttestorOpts = {}): BridgeAttestor 
     return reason !== undefined ? { kind: "prompt-user", reason } : { kind: "prompt-user" }
   }
 
-  /** Handle an `allow` verdict — mints a 5-minute STS token by default; caller
-   *  can `mintToken` separately if a different TTL is needed. */
+  /** Handle an `allow` verdict — mints the sole public issuance path's
+   *  canonical 5-minute STS token. */
   const handleAllow = async (requestId: string, req: AttestRequest): Promise<AttestResult> => {
-    const scope = `${req.action}:${req.resource}`
+    const scope = attestationScopeFor(req)
     const stsToken = await mintTokenInternal(scope, DEFAULT_STS_TOKEN_TTL_MS, requestId)
     emit({ kind: "preflight-granted", requestId, at: clock(), scope })
     emit({ kind: "attest-audit", requestId, at: clock(), summary: `allow: ${scope}` })
@@ -202,6 +245,10 @@ export const defaultAttestor = (opts: DefaultAttestorOpts = {}): BridgeAttestor 
     const at = clock()
     emit({ kind: "preflight-requested", requestId, at, action: req.action })
     try {
+      if (!isWellFormedRequest(req)) return handleDeny(requestId, "invalid preflight request")
+      if (!isFreshRequest(req.requestedAt, at, maxRequestAgeMs, maxFutureSkewMs)) {
+        return handleDeny(requestId, "preflight request timestamp outside allowed freshness window")
+      }
       const verdict = policyTable[req.action] ?? { kind: "prompt-user" as const }
       if (verdict.kind === "deny") return handleDeny(requestId, verdict.reason)
       if (verdict.kind === "prompt-user") return handlePromptUser(requestId, verdict.reason)
@@ -212,11 +259,6 @@ export const defaultAttestor = (opts: DefaultAttestorOpts = {}): BridgeAttestor 
       emit({ kind: "attest-audit", requestId, at: clock(), summary: `error: ${error}` })
       return { kind: "deny", reason: `preflight failed: ${error}` }
     }
-  }
-
-  const mintToken = async (scope: string, ttlMs: number): Promise<StsToken> => {
-    const requestId = nextRequestId(clock)
-    return mintTokenInternal(scope, ttlMs, requestId)
   }
 
   const verify = async (token: string, scope: string): Promise<boolean> => {
@@ -255,5 +297,5 @@ export const defaultAttestor = (opts: DefaultAttestorOpts = {}): BridgeAttestor 
     }
   }
 
-  return { preflight, mintToken, verify, revoke }
+  return { preflight, verify, revoke }
 }

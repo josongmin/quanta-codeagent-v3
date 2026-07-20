@@ -30,7 +30,7 @@ class AbortAwareLLM implements LLMPort {
     yield { type: "text_delta", delta: "partial" }
     await new Promise<void>((resolve) => {
       if (input.signal?.aborted) resolve()
-      else input.signal?.addEventListener("abort", resolve, { once: true })
+      else input.signal?.addEventListener("abort", () => resolve(), { once: true })
     })
     // A provider can still yield one final event while unwinding. The live
     // cancellation wrapper must not pass it into normal turn assembly.

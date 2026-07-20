@@ -361,7 +361,7 @@ describe("3-path byte-identity proof", () => {
     const hint = await prepareIssueHint(mkInstance(issue), "/tmp/sb", "agentless", {
       llm: new StubLLM(),
       issueHintExpectedActual: false,
-      fileTree: async () => result.files,
+      fileTree: async () => [...result.files],
       localize: async () => result,
       renderObservations: false,
       // lspPrefetch intentionally UNSET (defaults on) — must still be byte-identical.

@@ -135,9 +135,8 @@ describe("R2 fallback == table (all 18) — isFallbackTrigger is exactly fallbac
 
   test("the fallback set is EXACTLY {overloaded, server_error, network, not_implemented}", () => {
     const fallbackKinds = ALL_KINDS.filter((k) => isFallbackKind(k)).sort()
-    expect(fallbackKinds).toEqual(
-      ["network", "not_implemented", "overloaded", "server_error"].sort(),
-    )
+    const expected: LLMErrorKind[] = ["network", "not_implemented", "overloaded", "server_error"]
+    expect(fallbackKinds).toEqual(expected.sort())
   })
 })
 

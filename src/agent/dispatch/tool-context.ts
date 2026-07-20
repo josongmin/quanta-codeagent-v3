@@ -76,6 +76,82 @@ const mailboxLabels = (
   ...(config.mailboxParentId !== undefined ? { parentAgentLabel: config.mailboxParentId } : {}),
 })
 
+const buildSessionSeams = (args: {
+  config: AgentConfig
+  workingState: WorkingStateHandle | undefined
+  requestPlanExit: ToolContext["requestPlanExit"]
+  enterPlanMode: ToolContext["enterPlanMode"]
+  reviewerAgent: ToolContext["reviewerAgent"]
+}): Partial<ToolContext> => {
+  const { config, workingState, requestPlanExit, enterPlanMode, reviewerAgent } = args
+  const shellSnapshot = config.shellSnapshotSession?.currentSeam()
+  return {
+    ...(workingState !== undefined ? { workingState } : {}),
+    ...(requestPlanExit !== undefined ? { requestPlanExit } : {}),
+    ...(enterPlanMode !== undefined ? { enterPlanMode } : {}),
+    ...(reviewerAgent !== undefined ? { reviewerAgent } : {}),
+    ...(config.onShellEvent !== undefined ? { onShellEvent: config.onShellEvent } : {}),
+    ...(config.planStore !== undefined
+      ? { planMutator: planStoreToMutator(config.planStore) }
+      : {}),
+    ...(config.userInputPort !== undefined ? { requestUserInput: config.userInputPort } : {}),
+    ...(config.backgroundConsentPort !== undefined
+      ? { requestBackgroundConsent: config.backgroundConsentPort }
+      : {}),
+    ...(shellSnapshot !== undefined ? { shellSnapshot } : {}),
+    ...(config.sessionConfigPort !== undefined ? { sessionConfig: config.sessionConfigPort } : {}),
+    ...(config.readFileState !== undefined ? { readFileState: config.readFileState } : {}),
+  }
+}
+
+const buildEditSeams = (config: AgentConfig): Partial<ToolContext> => ({
+  ...(config.fastApplyFallback !== undefined
+    ? { fastApplyFallback: config.fastApplyFallback }
+    : {}),
+  ...(config.fastApplyMerge !== undefined ? { fastApplyMerge: config.fastApplyMerge } : {}),
+  ...(config.fastApplyMergeReview !== undefined
+    ? { fastApplyMergeReview: config.fastApplyMergeReview }
+    : {}),
+  ...(runtimeConfig().editAutoFuzzy ? { autoEscalateFuzzy: true } : {}),
+  ...(runtimeConfig().editFreshHash ? { editFreshHash: true } : {}),
+})
+
+const buildObserverSeams = (config: AgentConfig, toolCallId: string): Partial<ToolContext> => ({
+  ...(config.proxyEnv !== undefined ? { proxyEnv: config.proxyEnv } : {}),
+  ...(config.localEnv !== undefined ? { localEnv: config.localEnv } : {}),
+  ...(config.onToolDiff !== undefined ? { toolDiff: config.onToolDiff, toolCallId } : {}),
+  ...(config.vcsEventSink !== undefined ? { vcsEventSink: config.vcsEventSink } : {}),
+  ...(config.progressSink !== undefined ? { progressSink: config.progressSink } : {}),
+  ...(config.fileHistory !== undefined ? { fileHistory: config.fileHistory } : {}),
+})
+
+const buildCodeAndWorkspaceSeams = (
+  config: AgentConfig,
+  toolCallId: string,
+): Partial<ToolContext> => {
+  const budget = config.writeBudget
+  const max = runtimeConfig().writeBudgetMax
+  const activeWorktree = config.activeWorktreeSlot?.current()
+  return {
+    ...(config.codeCellDispatchFactory !== undefined
+      ? { codeCellDispatch: config.codeCellDispatchFactory(toolCallId) }
+      : {}),
+    ...(config.codeCellSurfaceTools !== undefined
+      ? { codeCellSurface: config.codeCellSurfaceTools() }
+      : {}),
+    ...(runtimeConfig().globWriteGuard ? { globWriteGuard: true } : {}),
+    ...(budget !== undefined && max !== undefined
+      ? { writeBudget: bindWriteBudgetTurn(budget, config.run?.turn ?? 0, max) }
+      : {}),
+    ...(config.activeWorktreeSlot !== undefined
+      ? {
+          worktreeSlot: config.activeWorktreeSlot,
+          ...(activeWorktree !== undefined ? { activeWorktree } : {}),
+        }
+      : {}),
+  }
+}
+
 export const buildToolContext = (args: {
   config: AgentConfig
   workingState: WorkingStateHandle | undefined
@@ -109,143 +185,9 @@ export const buildToolContext = (args: {
     // tools fall back to the depth-derived label (byte-identical). Extracted to
     // a helper so this builder stays under the biome cognitive-complexity cap.
     ...mailboxLabels(config),
-    ...(workingState !== undefined ? { workingState } : {}),
-    ...(requestPlanExit !== undefined ? { requestPlanExit } : {}),
-    ...(enterPlanMode !== undefined ? { enterPlanMode } : {}),
-    ...(reviewerAgent !== undefined ? { reviewerAgent } : {}),
-    ...(config.onShellEvent !== undefined ? { onShellEvent: config.onShellEvent } : {}),
-    ...(config.planStore !== undefined
-      ? { planMutator: planStoreToMutator(config.planStore) }
-      : {}),
-    ...(config.userInputPort !== undefined ? { requestUserInput: config.userInputPort } : {}),
-    // ADR-0296 PROMPT mode — map the host consent port onto the ctx requester
-    // the bash tool consults at the deadline. ABSENT ⇒ ctx field absent ⇒
-    // `prompt` degrades to plain `background` (byte-identical default).
-    ...(config.backgroundConsentPort !== undefined
-      ? { requestBackgroundConsent: config.backgroundConsentPort }
-      : {}),
-    ...((): { shellSnapshot?: import("@/tool").ShellSnapshotRestoreSeam } => {
-      const seam = config.shellSnapshotSession?.currentSeam()
-      return seam !== undefined ? { shellSnapshot: seam } : {}
-    })(),
-    ...(config.sessionConfigPort !== undefined ? { sessionConfig: config.sessionConfigPort } : {}),
-    // ADR-0474 — thread the per-session stale-read-guard state so `read` records
-    // mtimes and `write`/`edit` block stale mutations. ABSENT ⇒ no tracking
-    // (byte-identical default-OFF).
-    ...(config.readFileState !== undefined ? { readFileState: config.readFileState } : {}),
-    // ADR-0421 wire-finish — thread the fast-apply fallback port from
-    // AgentConfig into the ToolContext so `apply_patch` actually receives it.
-    // ABSENT ⇒ ctx field absent ⇒ apply_patch byte-identical (default-OFF).
-    ...(config.fastApplyFallback !== undefined
-      ? { fastApplyFallback: config.fastApplyFallback }
-      : {}),
-    // jun-7-misc 06 (ADR ≥0497) wire-finish — thread the model-based fast-apply
-    // MERGE port from AgentConfig into the ToolContext so the `edit` tool's
-    // merge rung actually receives it. ABSENT ⇒ ctx field absent ⇒ edit ladder
-    // byte-identical (default-OFF).
-    ...(config.fastApplyMerge !== undefined ? { fastApplyMerge: config.fastApplyMerge } : {}),
-    // jun-26 edit-escalate — surface the auto-escalate-fuzzy flag so the `edit`
-    // tool runs the whitespace-tolerant fuzzy ladder on an exact MISS even without
-    // an explicit `fuzzy:true`. Gated by QUANTA_EDIT_AUTO_FUZZY. OFF (default) ⇒
-    // flag omitted ⇒ edit ladder byte-identical (fuzzy only on input.fuzzy).
-    ...(runtimeConfig().editAutoFuzzy ? { autoEscalateFuzzy: true } : {}),
-    // jul-13 edit-fresh-hash — surface the flag so a SUCCESSFUL edit/write/
-    // scripted_replace/apply_patch/notebook_edit refreshes the stale-read baseline
-    // (+ the single-flat-file tools append the post-write sha256), letting the model
-    // chain a next same-file edit without a re-read. DEFAULT-ON (`!gateDisabledStrict`,
-    // off only for the literal `off`) ⇒ flag surfaced by default; `=off` ⇒ omitted ⇒
-    // byte-identical legacy.
-    ...(runtimeConfig().editFreshHash ? { editFreshHash: true } : {}),
-    // ADR-0428 jun-02 wire — surface the LIVE proxy-env (bound loopback address)
-    // so shell-class tools inject HTTP(S)_PROXY into the child spawn. ABSENT ⇒
-    // omitted ⇒ `withProxyEnv` returns the same base env (byte-identical legacy).
-    ...(config.proxyEnv !== undefined ? { proxyEnv: config.proxyEnv } : {}),
-    // ADR-0455 — surface the DECLARED local-environment selection so shell-class
-    // tools compose its vars / PATH-prepends over the scrubbed child env
-    // (allowlist still governs). ABSENT (no config file / no env selected) ⇒
-    // omitted ⇒ `applyLocalEnv` returns the same base env (byte-identical legacy).
-    ...(config.localEnv !== undefined ? { localEnv: config.localEnv } : {}),
-    // ADR-0440 wire-finish — surface the tool-diff capture sink + the current
-    // call id so a file-mutating tool can feed its before/after to the canvas
-    // emitter. ABSENT (gate OFF / non-canvas caller) ⇒ both fields omitted ⇒ no
-    // tool captures anything, byte-identical legacy path.
-    ...(config.onToolDiff !== undefined ? { toolDiff: config.onToolDiff, toolCallId } : {}),
-    // H6 (jun-3-misc §3) — surface the passive-VCS event sink so the bash tool's
-    // post-exec hook (`maybeEmitPassiveVcs`, gated by QUANTA_PASSIVE_VCS) can
-    // forward a classified `VcsEvent` onto the host adapter (which emits a
-    // `recovery` AgentEvent on the existing stream). ABSENT (knob off / non-
-    // wiring host) ⇒ omitted ⇒ the hook resolves its noop and the bash post-exec
-    // path is byte-identical (default-OFF). The producer `PassiveVcsEventSink` is
-    // structurally assignable to the ctx-side `VcsEventSink` mirror.
-    ...(config.vcsEventSink !== undefined ? { vcsEventSink: config.vcsEventSink } : {}),
-    // C2 (jun-4-communicate-update.md) — surface the structured-progress sink so
-    // the `communicate_update` tool can forward its typed mirror to the host
-    // adapter (which emits a render-only `progress_update` AgentEvent on the
-    // existing stream). ABSENT (knob off / non-wiring host) ⇒ omitted ⇒ the
-    // tool's `?.emit` is a no-op and the dispatch path is byte-identical
-    // (default-OFF). The `@/agent` config-side `ProgressSink` is the same
-    // structural `@/tool` mirror.
-    ...(config.progressSink !== undefined ? { progressSink: config.progressSink } : {}),
-    // file_history_rewind — surface the per-file snapshot capture sink so the
-    // write/edit tools record each new file version into the session history
-    // store the `file_history_rewind` tool reads. ABSENT (QUANTA_FILE_HISTORY
-    // off / non-wiring host) ⇒ omitted ⇒ `captureFileHistory` is a no-op and the
-    // mutating path is byte-identical (default-OFF). The `@/agent` config-side
-    // `FileHistorySink` is the same structural `@/tool` mirror.
-    ...(config.fileHistory !== undefined ? { fileHistory: config.fileHistory } : {}),
-    // code-mode (RFC jun-6-code-mode) — surface a per-cell dispatch port for the
-    // `code_cell` tool, built by the factory keyed off THIS tool-call id so the
-    // synthesized in-cell call ids (`cell_<callId>_<seq>`) are deterministic +
-    // unique. The factory routes every in-cell call through the REAL dispatchTool
-    // (structural no-bypass, §6.1). ABSENT (gate OFF / non-wiring host) ⇒ omitted
-    // ⇒ the tool yields a typed not_wired failure, byte-identical default-OFF.
-    ...(config.codeCellDispatchFactory !== undefined
-      ? { codeCellDispatch: config.codeCellDispatchFactory(toolCallId) }
-      : {}),
-    // code-mode (RFC jun-6-code-mode, Phase 2) — surface the agent's ACTUAL
-    // registered tool names so the `code_cell` cell binds `tools.<name>` for the
-    // FULL surface (each STILL re-gated through the port above). The thunk reads
-    // the LIVE registry at dispatch time. ABSENT (gate OFF / non-wiring host) ⇒
-    // omitted ⇒ `@/codemode` falls back to the Phase-1 3-tool surface,
-    // byte-identical default-OFF.
-    ...(config.codeCellSurfaceTools !== undefined
-      ? { codeCellSurface: config.codeCellSurfaceTools() }
-      : {}),
-    // jun-6 exfil-rail (b) — thread the glob-in-write-path guard ENABLEMENT
-    // (the predicate itself is a pure leaf the write/edit tools own). Default-OFF
-    // (`QUANTA_GLOB_WRITE_GUARD` unset) ⇒ the flag is omitted ⇒ write/edit accept
-    // a glob path as a literal filename, byte-identical.
-    ...(runtimeConfig().globWriteGuard ? { globWriteGuard: true } : {}),
-    // jun-6 exfil-rail (a) — surface a TURN-BOUND write-budget port so write/edit
-    // tally each mutation against the per-turn counter (the host minted the
-    // session-long `SessionWriteBudget`; we bind the current turn so the count
-    // resets at each turn boundary). ABSENT (knob off / no cap / non-wiring host)
-    // ⇒ omitted ⇒ no counter, byte-identical (default-OFF).
-    ...((): { writeBudget: NonNullable<ToolContext["writeBudget"]> } | Record<string, never> => {
-      const budget = config.writeBudget
-      const max = runtimeConfig().writeBudgetMax
-      if (budget === undefined || max === undefined) return {}
-      return { writeBudget: bindWriteBudgetTurn(budget, config.run?.turn ?? 0, max) }
-    })(),
-    // ticket-11 (P8 git-worktree agent tools) — thread BOTH worktree seams from
-    // the session-scoped slot. `worktreeSlot` is the mutable handle the
-    // enter/exit/status tools read+mutate; `activeWorktree` is the slot's CURRENT
-    // value, surfaced for the bash/edit relative-cwd override (the edit-fence).
-    // ABSENT (gate OFF / non-wiring host) ⇒ both omitted ⇒ the worktree tools
-    // yield a typed not_wired failure (and are not registered anyway) AND bash/edit
-    // cwd is `ctx.cwd` exactly as today (byte-identical default-OFF). The current
-    // value is projected here so a worktree entered in an earlier turn is visible
-    // to bash/edit in this turn.
-    ...(config.activeWorktreeSlot !== undefined
-      ? {
-          worktreeSlot: config.activeWorktreeSlot,
-          ...(():
-            | { activeWorktree: NonNullable<ToolContext["activeWorktree"]> }
-            | Record<string, never> => {
-            const cur = config.activeWorktreeSlot.current()
-            return cur !== undefined ? { activeWorktree: cur } : {}
-          })(),
-        }
-      : {}),
+    ...buildSessionSeams({ config, workingState, requestPlanExit, enterPlanMode, reviewerAgent }),
+    ...buildEditSeams(config),
+    ...buildObserverSeams(config, toolCallId),
+    ...buildCodeAndWorkspaceSeams(config, toolCallId),
   }
 }

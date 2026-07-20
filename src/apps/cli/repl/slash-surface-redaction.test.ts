@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, test } from "bun:test"
 import type { TaskRecord } from "@/subagent"
 import { toAgentFleetRow } from "./slash-surface"
 
@@ -22,24 +22,24 @@ const rec = (over: Partial<TaskRecord>): TaskRecord => ({
 })
 
 describe("toAgentFleetRow — secret redaction (CLI /agents no-leak)", () => {
-  it("scrubs a secret in the description", () => {
+  test("scrubs a secret in the description", () => {
     const row = toAgentFleetRow(rec({ description: `investigate ${SECRET} now` }))
     expect(row.description).not.toContain(SECRET)
   })
 
-  it("scrubs a secret in the final response text", () => {
+  test("scrubs a secret in the final response text", () => {
     const row = toAgentFleetRow(
       rec({ result: { ok: true, finalText: `found key ${SECRET}`, turns: 3 } }),
     )
     expect(row.result?.finalText).not.toContain(SECRET)
   })
 
-  it("scrubs a secret in the error message", () => {
+  test("scrubs a secret in the error message", () => {
     const row = toAgentFleetRow(rec({ status: "failed", error: `boom ${SECRET}` }))
     expect(row.error).not.toContain(SECRET)
   })
 
-  it("leaves benign text untouched (non-vacuous — not scrubbing everything)", () => {
+  test("leaves benign text untouched (non-vacuous — not scrubbing everything)", () => {
     const row = toAgentFleetRow(rec({ description: "refactor the parser module" }))
     expect(row.description).toBe("refactor the parser module")
   })

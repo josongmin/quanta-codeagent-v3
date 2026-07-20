@@ -6,7 +6,7 @@
 - **Related ADRs**: ADR-0158 (conversation-checkpoint LRU — provides local rollback surface that pairs with remote attestation), ADR-0166 (subagent conversation seed replay — establishes the `kind/result-shape` envelope contract this slice mirrors for STS scope), ADR-0050 (trust-scope registry — local-grant cousin to the remote-grant `prompt-user` arm), ADR-0078 (security module barrel — sibling slice plane).
 - **References**:
   - `src/security/bridge-attest/types.ts` (closed AttestRequest / AttestResult / StsToken / AttestError shapes + 9-event union)
-  - `src/security/bridge-attest/port.ts` (BridgeAttestor port — preflight / mintToken / verify / revoke)
+  - `src/security/bridge-attest/port.ts` (BridgeAttestor port — preflight / verify / revoke)
   - `src/security/bridge-attest/default-attestor.ts` (local-policy-table HMAC-SHA256 adapter)
   - `src/security/bridge-attest/headless-stub.ts` (deny-all stub for headless / CI)
   - `src/security/bridge-attest/index.ts` (barrel — opt-in re-exports only)
@@ -28,7 +28,6 @@ A leaf slice under `src/security/bridge-attest/` with:
 ```ts
 interface BridgeAttestor {
   preflight(req: AttestRequest): Promise<AttestResult>
-  mintToken(scope: string, ttlMs: number): Promise<StsToken>
   verify(token: string, scope: string): Promise<boolean>
   revoke(token: string): Promise<void>
 }
@@ -45,7 +44,12 @@ interface BridgeAttestor {
   `AttestError("misconfigured")`; the adapter never substitutes a known test key.
 - `expiresAt` is absolute epoch-ms; verify rejects when `Date.now() > expiresAt` (clock injected for testability via `clock?: () => number`).
 - `nonce` is 16 bytes of `randomBytes` — guarantees collision-free tokens even at identical (scope, expiresAt).
-- Scope is opaque string (caller convention: `"tool:<name>:action:<id>"`).
+- Scope is canonical `JSON.stringify([agentId, action, resource])`; this binds
+  a token to one agent/action/resource triple without delimiter collisions.
+  Consumers reconstruct the expected scope with `attestationScopeFor`.
+- `requestedAt` is enforced before policy lookup: default max age is 5 minutes
+  and default future skew is 30 seconds. Stale, future, non-finite, or malformed
+  requests deny without minting a token.
 
 ### C. 9-event stream
 
@@ -57,41 +61,45 @@ Pure in-process implementation: policy-table `Record<action, "allow" | "deny" | 
 
 ### E. Headless stub
 
-`headlessStubAttestor()` returns `{ kind: "deny", reason: "headless: no remote attestor" }` from `preflight`, `mintToken` throws `AttestError("headless")`. Lets CI / batch modes load the barrel without a real bridge configured.
+`headlessStubAttestor()` returns `{ kind: "deny", reason: "headless: no remote attestor" }` from `preflight` and never verifies a token. Lets CI / batch modes load the barrel without a real bridge configured.
 
 ## Hellgate
 
-`tests/unit/security/bridge-attest-hellgate.test.ts` — 15 adversarial cases:
+`tests/unit/security/bridge-attest-hellgate.test.ts` — 17 adversarial cases:
 
 1. `preflight allow` → returns `kind:"allow"` + non-empty stsToken
 2. `preflight deny` → returns `kind:"deny"` + non-empty reason
 3. `preflight prompt-user` → returns `kind:"prompt-user"`, no token leak
-4. `mintToken + verify valid` → roundtrip true
+4. policy-approved `preflight + verify valid` → roundtrip true; no public mint bypass
 5. `verify expired` → false (ttl elapsed via injected clock)
 6. `verify tampered` → flipped byte fails MAC
 7. `revoke` → subsequent verify returns false
-8. `ttl 0ms` → token already expired on mint
+8. canonical-TTL token expires after its bounded lifetime
 9. `scope mismatch` → verify("tok", "other-scope") false
 10. 9-event stream emitted in correct order across full preflight→mint→use→expire→revoke flow
 11. default-OFF: barrel import alone produces no side effects (byte-identical state)
 12. AttestResult 3-arm exhaustive: removing one arm in test fixture is a TS error
-13. 1000 tokens minted at identical (scope, expiresAt) all distinct (nonce collision-free)
+13. 1000 allow-preflights at identical time issue distinct tokens (nonce collision-free)
 14. missing, blank, or under-32-byte signing secret fails closed at construction
 15. `preflight-error` arm: throwing inner policy table surfaces as `{kind:"deny", reason}` + emits `preflight-error` event (NO-THROW public surface)
+16. stale/future/non-finite request timestamps deny before policy lookup or token mint
+17. canonical scope binds agent/action/resource and rejects a cross-agent scope
 
 ## Configurable knobs
 
-- `defaultAttestor({ secret?, policyTable?, clock?, onEvent? })` — policy, clock, and event sink have documented defaults; construction requires `secret`.
+- `defaultAttestor({ secret?, policyTable?, clock?, onEvent?, maxRequestAgeMs?, maxFutureSkewMs? })` — policy, clock, event sink, and bounded freshness settings have documented defaults; construction requires `secret`.
 - `secret` has no default: missing, blank, or under-32-UTF-8-byte material is rejected before a token can be minted.
-- `policyTable` default `{}` (every action → `"prompt-user"`).
+- `policyTable` default `{}` (every action → `"prompt-user"`). An allow preflight is the only token-issuance capability; callers cannot mint arbitrary scopes or TTLs.
 - `clock` default `Date.now`.
 - `onEvent` default no-op (default-OFF — no consumer wired in dispatch/loop).
+- `maxRequestAgeMs` default `300_000`; finite non-negative maximum request age.
+- `maxFutureSkewMs` default `30_000`; finite non-negative maximum future clock skew.
 
 ## Default-OFF invariants
 
 - Nothing under `src/agent/`, `src/permission/`, `src/scheduler/`, `src/runtime/` imports this slice. Confirmed by absence from those slice barrels.
 - `import { defaultAttestor } from "@/security/bridge-attest"` alone produces no `onEvent` calls, no token mints, no policy lookups.
-- Headless mode loads the barrel via `headlessStubAttestor` which deny-all's `preflight` and throws on `mintToken` — fail-closed by construction.
+- Headless mode loads the barrel via `headlessStubAttestor`, which deny-all's `preflight` and verifies no token — fail-closed by construction.
 
 ## Consequences
 
@@ -104,5 +112,6 @@ Pure in-process implementation: policy-table `Record<action, "allow" | "deny" | 
 - Network protocol (gRPC / WebSocket / Tauri IPC channel) — out of scope. This slice produces tokens; transport is the caller's choice.
 - JWT / JWKS / asymmetric signing — current HMAC is symmetric for round-trip simplicity. Migration to asymmetric is a future ADR.
 - OS-keyring secret backend — `secret` is currently a constructor opt. Keyring integration mirrors ADR-0050's deferred OS-keyring path.
-- Cross-process token cache — single-process only; multi-process replay protection is future work.
-- Request freshness / replay policy — `requestedAt` remains part of the port but this local adapter has no caller-defined skew budget or nonce ledger, so a future consumer must bind and enforce that contract before promotion.
+- Cross-process token cache — single-process only; multi-process replay and
+  revocation storage are future work. The local adapter already enforces bounded
+  request freshness before policy lookup.

@@ -165,6 +165,11 @@ async function verifyImpl(jwt: string, deps: VerifyDeps): Promise<VerifyResult> 
 
   const jwk = set.keys.find((k) => k.kid === kid)
   if (!jwk) return fail("unknown-kid")
+  // A matching `kid` alone is not authority to use a key for this signature.
+  // Bind the header algorithm to the JWK declaration, reject keys explicitly
+  // marked for encryption/non-verification, and require the matching key
+  // family before handing untrusted metadata to Web Crypto.
+  if (!jwkPermitsSignatureVerification(jwk, alg)) return fail("signature-invalid")
 
   if (typeof payload.exp === "number") {
     const nowSec = Math.floor(deps.clock() / 1000)
@@ -182,6 +187,15 @@ async function verifyImpl(jwt: string, deps: VerifyDeps): Promise<VerifyResult> 
 
 function fail(reason: VerifyFailureReason): VerifyResult {
   return { ok: false, reason }
+}
+
+const jwkPermitsSignatureVerification = (jwk: JsonWebKey, alg: "RS256" | "ES256"): boolean => {
+  if (jwk.alg !== undefined && jwk.alg !== alg) return false
+  if (jwk.use !== undefined && jwk.use !== "sig") return false
+  if (jwk.key_ops !== undefined) {
+    if (!Array.isArray(jwk.key_ops) || !jwk.key_ops.includes("verify")) return false
+  }
+  return alg === "RS256" ? jwk.kty === "RSA" : jwk.kty === "EC" && jwk.crv === "P-256"
 }
 
 interface DecodedJwt {

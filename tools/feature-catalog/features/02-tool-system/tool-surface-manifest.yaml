@@ -38,6 +38,7 @@ purpose: |
 evidence:
   code:
     - src/tool/surface/manifest.ts
+    - src/apps/cli/cli-seeded-gates.ts
   adrs: []
   tests:
     unit:

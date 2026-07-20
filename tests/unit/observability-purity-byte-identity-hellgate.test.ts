@@ -40,16 +40,16 @@ import type { AgentEvent, StreamPort } from "@/stream"
 const TURN: readonly AgentEvent[] = [
   { type: "assistant_thinking", delta: "let me " },
   { type: "assistant_thinking", delta: "think" },
-  { type: "tool_call", id: "t1", name: "bash" },
-  { type: "tool_progress", id: "t1", message: "running" },
+  { type: "tool_call", id: "t1", name: "bash", input: { command: "true" } },
+  { type: "tool_progress", id: "t1", name: "bash", message: "running" },
   { type: "tool_result", id: "t1" } as AgentEvent,
   { type: "plan_created", plan: { id: "p1", name: "n", version: 1, todos: [] } } as AgentEvent,
   {
     type: "plan_updated",
-    delta: { kind: "todo_status_changed", todoId: "x", fromStatus: "pending", toStatus: "done" },
+    delta: { kind: "todo_status_changed", todoId: "x", fromStatus: "pending", toStatus: "completed" },
     version: 2,
   } as AgentEvent,
-  { type: "assistant_text", text: "here is the answer" } as AgentEvent,
+  { type: "assistant_text", delta: "here is the answer" },
   { type: "done" } as AgentEvent,
 ]
 

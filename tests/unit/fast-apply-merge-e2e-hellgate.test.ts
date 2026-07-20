@@ -152,6 +152,15 @@ const ctxOf = (over: Partial<ToolContext> = {}): ToolContext => ({
   ...over,
 })
 
+/** Production-shaped merge context: capability present, review authority absent. */
+const ctxWithoutMergeReview = (
+  over: Omit<Partial<ToolContext>, "fastApplyMergeReview"> = {},
+): ToolContext => ({
+  cwd: "/",
+  signal: new AbortController().signal,
+  ...over,
+})
+
 const run = async (
   tool: {
     execute: (i: never, c: ToolContext) => AsyncIterable<{ type: string; result?: ToolResult }>
@@ -298,7 +307,7 @@ describe("jun-7-misc 06 fast-apply MERGE rung E2E hellgate (REAL runner + REAL e
     const res = await run(
       makeEditTool(fs),
       { path: "app.ts", old_string: "const  beta  =  1", new_string: "const beta = 42" },
-      ctxOf({ fastApplyMerge: port, fastApplyMergeReview: undefined }),
+      ctxWithoutMergeReview({ fastApplyMerge: port }),
     )
 
     expect(res.ok).toBe(false)

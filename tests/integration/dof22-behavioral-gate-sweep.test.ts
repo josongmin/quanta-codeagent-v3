@@ -322,11 +322,13 @@ describe("DOF-22 rail-1 sweep — UNREACHABLE gates (vacuity PROOF, not a verdic
       expect(Object.keys(on).sort()).toEqual(Object.keys(off).sort())
       // The gate's would-be config slots are untouched by the wire (they live on
       // runtimeConfig/an assembler env, not here).
-      expect((on as Record<string, unknown>).capEnforce).toBe(
-        (off as Record<string, unknown>).capEnforce,
+      const onSlots = on as unknown as Record<string, unknown>
+      const offSlots = off as unknown as Record<string, unknown>
+      expect(onSlots.capEnforce).toBe(
+        offSlots.capEnforce,
       )
-      expect((on as Record<string, unknown>).capEnforcer).toBe(
-        (off as Record<string, unknown>).capEnforcer,
+      expect(onSlots.capEnforcer).toBe(
+        offSlots.capEnforcer,
       )
     }
     // POSITIVE CONTROL — the SAME seam DOES mutate a slot for a REACHABLE key, so

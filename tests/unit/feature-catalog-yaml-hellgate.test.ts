@@ -4,13 +4,10 @@
 //
 // Two rot classes this ratchet locks out:
 //
-//  (A) DUPLICATE MAPPING KEYS.  The in-house mini-YAML parser
-//      (tools/feature-catalog/yaml.ts) is last-key-wins: `obj[key] = value`
-//      silently overwrites. Several YAMLs declared `unit:` (or
-//      `integration:` / `contract:`) TWICE inside one `tests:` block, so the
-//      FIRST — often the fuller, authoritative — list was silently dropped at
-//      parse time with zero diagnostic. A raw-text scan (below) catches this
-//      class the parser is blind to.
+//  (A) DUPLICATE MAPPING KEYS. The compact parser's last-key-wins behavior
+//      would silently overwrite the first value, so `loadFeatures` now first
+//      requires standard YAML with unique keys. The raw-text scan below keeps
+//      a pinpointed regression signal for duplicated test evidence keys.
 //
 //  (B) STALE EVIDENCE PATHS.  Every evidence.code + evidence.tests.* citation
 //      must resolve to a real file on disk (mirrors `fc validate --strict`).
@@ -44,9 +41,8 @@ interface DupKeyHit {
 
 /**
  * Raw-text scan for a mapping key declared twice at the SAME indentation.
- * The mini-YAML parser can't see this (it overwrites), so we scan bytes.
- * A "same indent, same key" repeat inside a file is a duplicate-mapping-key
- * bug: YAML 1.2 forbids duplicate keys and our parser silently coalesces them.
+ * Standard-YAML validation rejects any duplicate first; this supplements that
+ * gate with a focused message for the test-evidence lists most prone to drift.
  */
 function isDupSensitive(key: string): boolean {
   return DUP_SENSITIVE_KEYS.includes(key as (typeof DUP_SENSITIVE_KEYS)[number])

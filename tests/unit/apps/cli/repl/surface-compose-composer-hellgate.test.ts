@@ -6,7 +6,7 @@ import type { RuntimeSideConversationResult } from "@/sdk/runtime"
 import { makeFakeSessionSetup } from "../_cli-fakes"
 
 const sideResult: RuntimeSideConversationResult = {
-  outcome: { messages: [] },
+  outcome: { reason: "completed", turns: 1, messages: [] },
   answerText: "side answer",
   inputTokens: 0,
   outputTokens: 0,
@@ -42,8 +42,10 @@ describe("REPL surface composer — live composition root", () => {
 
   test("enabled root shares the same conversation checkpoint wire and mode store", () => {
     const { wires } = compose({ QUANTA_CHECKPOINT_CONV: "on", QUANTA_MODE_CYCLE: "1" })
-    expect(wires.convCheckpointWire).not.toBeNull()
-    expect(wires.convCheckpointSlot?.wire).toBe(wires.convCheckpointWire)
+    const convCheckpointWire = wires.convCheckpointWire
+    expect(convCheckpointWire).not.toBeNull()
+    if (convCheckpointWire === null) throw new Error("checkpoint wire should be enabled")
+    expect(wires.convCheckpointSlot?.wire).toBe(convCheckpointWire)
     expect(wires.modeCycleStore).toBeDefined()
     expect(wires.slashCtx.composerEdit).toBeDefined()
     expect(wires.slashCtx.textInbox).toBe(wires.textInbox)

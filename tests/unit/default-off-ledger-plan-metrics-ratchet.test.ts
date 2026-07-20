@@ -27,6 +27,7 @@ interface LedgerPlanMetrics {
   readonly percent: string
   readonly measureFirst: number
   readonly enableNow: number
+  readonly repairFirst: number
   readonly hold: number
   readonly dormant: number
 }
@@ -43,6 +44,7 @@ const metricsOf = async (): Promise<LedgerPlanMetrics> => {
     percent: ((wired / rows) * 100).toFixed(1),
     measureFirst: count((row) => row.decision === "measure-first"),
     enableNow: count((row) => row.decision === "enable-now"),
+    repairFirst: count((row) => row.decision === "repair-first"),
     hold: count((row) => row.decision === "hold"),
     dormant: count((row) => row.reachability !== "wired"),
   }
@@ -53,13 +55,13 @@ const summaryNeedles = (
 ): Record<(typeof PLAN_PATHS)[number], readonly string[]> => ({
   "docs/plans/jul-16-default-off-sota-plus-plus/00-index.md": [
     `Closure **${metrics.wired}/${metrics.rows} wired = ${metrics.percent}%**`,
-    `decisions {measure-first ${metrics.measureFirst}, enable-now ${metrics.enableNow}, repair-first 0, hold ${metrics.hold}}`,
+    `decisions {measure-first ${metrics.measureFirst}, enable-now ${metrics.enableNow}, repair-first ${metrics.repairFirst}, hold ${metrics.hold}}`,
     `closure **${metrics.wired}/${metrics.rows} wired (${metrics.percent}%)**`,
-    `The ${metrics.dormant} dormant rows`,
+    `The ${metrics.dormant} non-wired rows`,
   ],
   "docs/plans/jul-16-default-off-sota-plus-plus/backlog-ab-and-held.md": [
     `eligible ${metrics.rows}행, **wired ${metrics.wired}/${metrics.rows} = ${metrics.percent}%**`,
-    `decisions: measure-first ${metrics.measureFirst} · **enable-now ${metrics.enableNow}** · repair-first 0 · hold ${metrics.hold}.`,
+    `decisions: measure-first ${metrics.measureFirst} · **enable-now ${metrics.enableNow}** · repair-first ${metrics.repairFirst} · hold ${metrics.hold}.`,
   ],
   "docs/plans/jul-16-default-off-sota-plus-plus/sota-plus-plus-execution-plan.md": [
     `**${metrics.wired}/${metrics.rows} wired (${metrics.percent}%)**`,

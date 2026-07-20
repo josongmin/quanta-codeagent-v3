@@ -21,6 +21,7 @@ export {
   type AttestEventSink,
   type AttestRequest,
   type AttestResult,
+  attestationScopeFor,
   type PolicyTable,
   type PolicyVerdict,
   type StsToken,

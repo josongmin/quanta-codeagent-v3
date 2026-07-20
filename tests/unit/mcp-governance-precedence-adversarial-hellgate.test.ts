@@ -163,7 +163,7 @@ describe("governance — allowManagedMcpServersOnly lockdown overrides trusted r
       true,
     )
     // user grant survives; the repo's inert lockdown does not suppress it.
-    expect(policy.enabledServers.sort()).toEqual(["evil", "fs"])
+    expect([...policy.enabledServers].sort()).toEqual(["evil", "fs"])
   })
 })
 
@@ -180,7 +180,7 @@ describe("governance — precedence union across all four layers", () => {
       },
       true,
     )
-    expect(policy.enabledServers.sort()).toEqual(["l", "m", "p", "u"])
+    expect([...policy.enabledServers].sort()).toEqual(["l", "m", "p", "u"])
   })
 
   test("untrusted ⇒ only machine-owned (managed+user) grants survive the union", () => {
@@ -193,7 +193,7 @@ describe("governance — precedence union across all four layers", () => {
       },
       false,
     )
-    expect(policy.enabledServers.sort()).toEqual(["m", "u"])
+    expect([...policy.enabledServers].sort()).toEqual(["m", "u"])
   })
 })
 
@@ -228,8 +228,8 @@ describe("governance — filterMcpServersByPolicy boundary semantics", () => {
   test("original order + references preserved for kept servers", () => {
     const servers = [{ name: "a", tag: 1 }, { name: "b", tag: 2 }, { name: "c", tag: 3 }]
     const res = filterMcpServersByPolicy(servers, { enabledServers: [], deniedServers: ["b"] })
-    expect(res.kept).toEqual([servers[0], servers[2]])
-    expect(res.kept[0]).toBe(servers[0]) // same reference, not a copy
+    expect(res.kept).toEqual([servers[0]!, servers[2]!])
+    expect(res.kept[0]).toBe(servers[0]!) // same reference, not a copy
   })
 
   test("filter is pure — never throws on empty server list", () => {

@@ -96,9 +96,11 @@ index.ts             — barrel.
 - Expiry check: when payload `exp` (seconds since epoch) is present it is
   compared against the injectable `clock()` (defaults to `Date.now()`). This
   low-level primitive intentionally does not require `exp`, `nbf`, issuer, or
-  audience and does not evaluate JWK `use`/`key_ops`; therefore a caller MUST
-  place a tenant-specific authentication-policy wrapper in front of any allow
-  decision. The bare verifier is not promotion-ready identity authorization.
+  audience. It binds header alg to JWK `alg`, rejects explicit non-`sig` /
+  non-`verify` JWK declarations, and validates the RSA-vs-P-256 key family;
+  therefore a caller MUST place a tenant-specific authentication-policy wrapper
+  in front of any allow decision. The bare verifier is not promotion-ready
+  identity authorization.
 
 ### Plane discipline
 
@@ -123,9 +125,9 @@ and ADR-0168 PII redaction.
 - **Realtime auth wire.** The realtime / SSE auth path will consume this
   verifier when surface auth is added; not in this ADR.
 - **Authentication policy wrapper.** A production consumer must own the
-  expected issuer/audience, mandatory `exp` and `nbf` policy, permitted
-  algorithms, and JWK `use`/`key_ops` checks before it treats a valid signature
-  as identity.
+  expected issuer/audience and mandatory `exp` / `nbf` policy before it treats
+  a valid signature as identity. The verifier itself already enforces
+  header/JWK algorithm and declared signature-use consistency.
 
 ## Negative invariants
 

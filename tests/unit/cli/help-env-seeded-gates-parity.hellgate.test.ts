@@ -1,3 +1,4 @@
+// source-grep allowed: asserts the CLI composition root consumes the canonical seed union.
 /**
  * HELLGATE — WS-E.2 (jul-10, UUX-1-09 / UUX-6-26): CLI-seeded gate ⟷ /help
  * ENV-table parity.

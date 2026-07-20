@@ -125,7 +125,7 @@ describe("apply_patch_structured wire — gate", () => {
     expect(tool.isReadOnly()).toBe(false)
     expect(tool.isConcurrencySafe({ patch: "" } as never)).toBe(false)
     expect(tool.hitlTier?.({} as never)).toBe("pre-approval-ok")
-    expect(tool.interruptBehavior?.({} as never)).toBe("block")
+    expect(tool.interruptBehavior?.()).toBe("block")
     expect(typeof tool.execute).toBe("function")
     // appended AFTER the byte-identical base set
     expect(tools[tools.length - 1]?.name).toBe(TOOL_NAME)

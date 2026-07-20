@@ -33,6 +33,7 @@ purpose: |
 evidence:
   code:
     - src/stream/adapters/jsonl-recorder.ts
+    - src/stream/adapters/jsonl-recorder-event-data.ts
     - src/stream/adapters/tee.ts
     - src/stream/adapters/jsonl-retention.ts
     - src/apps/cli/internal.ts

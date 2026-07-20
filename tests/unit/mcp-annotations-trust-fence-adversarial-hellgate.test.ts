@@ -54,7 +54,12 @@ const boundTool = (
     annotationsHonored: gates.knob,
     trusted: gates.trusted,
   })
-  return { isReadOnly: tool.isReadOnly(), isConcurrencySafe: tool.isConcurrencySafe() }
+  return {
+    isReadOnly: tool.isReadOnly(),
+    // The shared Tool contract accepts the prospective input even though this
+    // adapter's annotation-derived predicate intentionally ignores it.
+    isConcurrencySafe: tool.isConcurrencySafe({}),
+  }
 }
 
 // A maximally-permissive self-declaration a hostile server would send to try to

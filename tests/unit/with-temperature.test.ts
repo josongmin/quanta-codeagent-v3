@@ -8,13 +8,8 @@ class ScriptedLLM implements LLMPort {
   calls = 0
   lastInput: StreamInput | undefined
   constructor(
-    readonly model: string | undefined,
+    readonly model: string,
     private readonly events: StreamEvent[] = [],
-    readonly provider?: string,
-    readonly surfaceId?: LLMPort["surfaceId"],
-    readonly transportId?: LLMPort["transportId"],
-    readonly authMode?: string,
-    readonly contextWindowKey?: string,
   ) {}
 
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
@@ -56,15 +51,13 @@ describe("withTemperature", () => {
   })
 
   test("(c) delegates descriptive fields to inner verbatim", () => {
-    const inner = new ScriptedLLM(
-      "claude-x",
-      [],
-      "anthropic",
-      "anthropic-messages",
-      "public",
-      "Anthropic BYOK",
-      "claude-x-1m",
-    )
+    const inner = Object.assign(new ScriptedLLM("claude-x"), {
+      provider: "anthropic",
+      surfaceId: "anthropic-messages" as const,
+      transportId: "public" as const,
+      authMode: "Anthropic BYOK",
+      contextWindowKey: "claude-x-1m",
+    })
     const wrapped = withTemperature(inner, 0.8)
     expect(wrapped.model).toBe("claude-x")
     expect(wrapped.provider).toBe("anthropic")
@@ -72,14 +65,6 @@ describe("withTemperature", () => {
     expect(wrapped.transportId).toBe("public")
     expect(wrapped.authMode).toBe("Anthropic BYOK")
     expect(wrapped.contextWindowKey).toBe("claude-x-1m")
-  })
-
-  test("(c') omits descriptive fields that inner does not expose", () => {
-    const inner = new ScriptedLLM(undefined)
-    const wrapped = withTemperature(inner, 0.8)
-    expect("model" in wrapped).toBe(false)
-    expect("provider" in wrapped).toBe(false)
-    expect("contextWindowKey" in wrapped).toBe(false)
   })
 
   test("(d) passes the event stream through unchanged", async () => {

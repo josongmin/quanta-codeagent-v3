@@ -27,6 +27,7 @@ describe("HELLGATE P1 Phase 2 — swap live session onto a thread", () => {
   test("persisted thread: replaces transcript + repoints the persist id", async () => {
     const replaced: (readonly Message[])[] = []
     let active: string | null = null
+    const activeThreadId = (): string | null => active
     const out = await hydrateThreadIntoLiveSession("t-abc", {
       loadThread: async (id) => (id === "t-abc" ? { meta: meta("t-abc"), messages: msgs } : undefined),
       replaceTranscript: async (m) => void replaced.push(m),
@@ -34,7 +35,7 @@ describe("HELLGATE P1 Phase 2 — swap live session onto a thread", () => {
     })
     expect(out).toEqual({ kind: "hydrated", threadId: "t-abc", count: 1 })
     expect(replaced).toEqual([msgs])
-    expect(active).toBe("t-abc")
+    expect(activeThreadId()).toBe("t-abc")
   })
 
   test("unknown thread: clean no-op (no replace, no repoint)", async () => {

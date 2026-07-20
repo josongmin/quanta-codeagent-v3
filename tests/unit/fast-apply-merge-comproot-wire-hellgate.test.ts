@@ -29,6 +29,8 @@
 
 import { afterEach, describe, expect, test } from "bun:test"
 import { type AgentConfig, wireOptionalAgentPorts } from "@/agent"
+import { buildToolContext } from "@/agent/dispatch/tool-context"
+import { resolveCollaborationMode } from "@/agent/mode"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { __resetRuntimeConfig } from "@/shared"
@@ -131,8 +133,31 @@ describe("jun-7-misc 06 fast-apply MERGE composition-root WIRE hellgate", () => 
     expect("fastApplyMergeReview" in wired).toBe(false)
   })
 
-  // NOTE: the dispatch-layer THREADING (config.fastApplyMerge → ctx.fastApplyMerge
-  // via the conditional spread at `dispatch.ts`) is a pure forward and is proven
+  test("WIRE-02b: an explicit host reviewer reaches the real ToolContext unchanged", () => {
+    const sink: { ctx?: ToolContext } = {}
+    const reviewer = { approve: async () => true }
+    const base = {
+      ...makeBase(sink),
+      fastApplyMergeReview: reviewer,
+    } as unknown as AgentConfig
+    const config = wireWith(
+      { QUANTA_FAST_APPLY_MERGE: "1", QUANTA_FAST_APPLY_MODEL: APPLY_MODEL },
+      base,
+    )
+
+    const ctx = buildToolContext({
+      config,
+      workingState: undefined,
+      collabMode: resolveCollaborationMode({ planMode: false }),
+      toolCallId: "fast-apply-review-wire",
+    })
+
+    expect(ctx.fastApplyMerge).toBeDefined()
+    expect(ctx.fastApplyMergeReview).toBe(reviewer)
+  })
+
+  // NOTE: the ToolContext THREADING (config.fastApplyMerge → ctx.fastApplyMerge
+  // via the conditional spread in `tool-context.ts`) is a pure forward and is proven
   // end-to-end by `fast-apply-merge-e2e-hellgate.test.ts`, which drives the REAL
   // edit tool through a real `dispatchTool` and asserts the merge port reaches the
   // tool. A minimal hand-cast `AgentConfig` cannot build a full `ToolContext`, so

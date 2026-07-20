@@ -686,15 +686,15 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: fast-apply-merge
-    gate_owner: [QUANTA_FAST_APPLY_MERGE, QUANTA_FAST_APPLY_MODEL]
-    activation: env/config
+    gate_owner: [QUANTA_FAST_APPLY_MERGE, QUANTA_FAST_APPLY_MODEL, FastApplyMergeReviewSeam DI]
+    activation: port-present
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: mutating
     decision: hold
-    owner_seam: src/agent/fast-apply-fallback/merge-runner.ts
-    rollback: 두 게이트 모두 미설정
+    owner_seam: src/agent/dispatch/tool-context.ts
+    rollback: 두 env gate 모두 미설정 또는 FastApplyMergeReviewSeam 미주입
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: fast-apply-wire

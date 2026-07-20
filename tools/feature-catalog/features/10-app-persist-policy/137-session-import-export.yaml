@@ -31,7 +31,7 @@ evidence:
   code:
     - src/session/import-export.ts
     - src/session/import-export-fs.ts
-  adrs: [157]
+  adrs: [157, "docs/decisions/0170-session-export-v2.md"]
   tests:
     unit:
       - tests/unit/session-import-export-hellgate.test.ts

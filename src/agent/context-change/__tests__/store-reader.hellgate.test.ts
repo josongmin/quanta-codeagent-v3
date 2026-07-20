@@ -89,6 +89,7 @@ describe("SP-31 context-event store reader", () => {
       reason: "context_limit" as const,
       tokensBefore: 100,
       tokensAfter: 50,
+      messagesRemoved: 3,
       at: 17,
     }
     store.append(compaction)

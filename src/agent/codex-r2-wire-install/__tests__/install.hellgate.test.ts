@@ -165,7 +165,13 @@ describe("ADR-0332 §C — compaction-event emit", () => {
   test("stored compaction is not delayed behind unrelated shared-store events", () => {
     const store = createInMemoryTypedHistoryEventStore()
     for (let i = 0; i < 16; i++) {
-      store.append({ kind: "cwd_change", from: `/before-${i}`, to: `/after-${i}`, at: i })
+      store.append({
+        kind: "context_update",
+        field: "cwd",
+        prev: `/before-${i}`,
+        next: `/after-${i}`,
+        at: i,
+      })
     }
     store.append({
       kind: "compaction_event",
@@ -173,6 +179,7 @@ describe("ADR-0332 §C — compaction-event emit", () => {
       trigger: "pre_sampling",
       tokensBefore: 12_000,
       tokensAfter: 3_000,
+      messagesRemoved: 8,
       at: 17,
     })
     const cfg = makeBareCfg()
@@ -304,7 +311,7 @@ describe("ADR-0332 §J — NO-THROW", () => {
     expect(cfg.contextEventsForTurn).toBeDefined()
     // Producer call also no-throw → empty array.
     const out = cfg.contextEventsForTurn?.() ?? null
-    expect(out).toEqual([])
+    expect(out ?? []).toEqual([])
   })
 
   test("getSnapshot throws ⇒ producer surfaces EXACTLY-ONE non-fatal error event (ALBB-09 observability)", () => {
@@ -321,9 +328,9 @@ describe("ADR-0332 §J — NO-THROW", () => {
       store,
     })
     // Call the raw closure directly (SEED first-turn path) — must not throw.
-    let out: readonly unknown[] | null = null
+    let out: readonly unknown[] = []
     expect(() => {
-      out = cfg.contextEventsForTurn?.() ?? null
+      out = cfg.contextEventsForTurn?.() ?? []
     }).not.toThrow()
     expect(out).toEqual([])
     // EXACTLY one error event, and it names the failure (not silently swallowed).

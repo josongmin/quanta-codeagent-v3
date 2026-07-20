@@ -56,7 +56,7 @@ Generated from `tools/feature-catalog/default-off-ledger.yaml` after the source 
 | env-probe | measure-first | wired | wire | wire | none | composition/wire covered; no execution receipt |
 | external-editor-compose | enable-now | wired | wire | wire | none | composition/wire covered; no execution receipt |
 | fast-apply-fallback | hold | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
-| fast-apply-merge | hold | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
+| fast-apply-merge | hold | wired | unit | unit | none | host-provided reviewer is threaded to ToolContext; env/model alone remains fail-closed |
 | fast-apply-wire | enable-now | wired | wire | wire | none | composition/wire covered; no execution receipt |
 | fault-evidence-knob | measure-first | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | flock-operations-telemetry | enable-now | wired | unit | unit | none | unit-only ON proof; promotion proof missing |

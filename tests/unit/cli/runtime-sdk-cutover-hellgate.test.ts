@@ -42,6 +42,7 @@ const importedModules = (file: string, source: string): readonly string[] => {
       ts.isCallExpression(node) &&
       node.expression.kind === ts.SyntaxKind.ImportKeyword &&
       node.arguments.length === 1 &&
+      node.arguments[0] !== undefined &&
       ts.isStringLiteral(node.arguments[0])
     ) {
       modules.push(node.arguments[0].text)

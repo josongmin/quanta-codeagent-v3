@@ -2,10 +2,10 @@
 
 > 레저·소스·테스트를 대조한 백로그다. 기능별 **역할 / 왜 default-ON 안 했나 / 코드위치**는 레저 ID와 대조한다. 경쟁사 비교는 별도 출처 상태를 명시하며, 인용 없는 항목은 roadmap 근거로 쓰지 않는다.
 >
-> **Closure 현황 (2026-07-19 source re-audit)**: eligible 172행, **wired 163/172 = 94.8%**, runtime CLI seed 30, unknown-surface 0, unknown-value 0, checker error 0. `compaction-event-emit`와 `context-change-injection`은 normal host에 항상 조립되는 production wire라 default-off denominator에서 제외했다.
+> **Closure 현황 (2026-07-19 source re-audit)**: eligible 172행, **wired 163/172 = 94.8%**, runtime CLI seed 30, unknown-surface 0, unknown-value 0, checker error 0. `compaction-event-emit`와 `context-change-injection`은 normal host에 항상 조립되는 production wire라 default-off denominator에서 제외했다. `fast-apply-merge`는 명시적 host `FastApplyMergeReviewSeam`을 `ToolContext`까지 전달한다; env/model만으로는 계속 fail-closed다.
 > decisions: measure-first 67 · **enable-now 68** · repair-first 0 · hold 37.
 >
-> **남은 9행의 성격**: 4개는 실제 외부 계약/credential 또는 image policy가 먼저 필요하고, 3개는 producer-only여서 수명 소유자가 없으며, 1개는 기존 inline 구현의 중복 포트, 1개는 실행 loop producer가 없는 transport seam이다. 가짜 consumer를 만들지 않는 한 이들은 `wired`가 될 수 없다. measure-first 67행은 행동/비용을 바꿔 **efficacy A/B(operator 결정)**가 선행돼야 기본값을 바꿀 수 있다.
+> **남은 9행의 성격**: 4개는 실제 외부 계약/credential 또는 image policy가 먼저 필요하고, 3개는 producer-only여서 수명 소유자가 없으며, 1개는 기존 inline 구현의 중복 포트, 1개는 실행 loop producer가 없는 transport seam이다. 가짜 consumer 또는 자동승인을 만들지 않는 한 이들은 `wired`가 될 수 없다. measure-first 67행은 행동/비용을 바꿔 **efficacy A/B(operator 결정)**가 선행돼야 기본값을 바꿀 수 있다.
 
 ### 2026-07-19 구조 재감사 — 레저 정정과 실제 잔여 blocker
 
@@ -159,7 +159,7 @@ hold는 "기본 활성화 보류" 결정이며 미배선과 동의어가 아니�
 | feature_id | 역할 | 현황 | 왜 HELD | 코드위치 |
 |---|---|---|---|---|
 | fast-apply-fallback | V4A apply 실패 시 side-conversation 모델로 1회 fast-apply 재시도 | **wired(env-gated)** ⚠️레저 activation stale | `QUANTA_FAST_APPLY` 시 end-to-end; default-OFF | `apply-patch.ts:626` |
-| fast-apply-merge | `{original,editSketch}`를 apply-model에 보내 머지 파일 추출 | **hold, producer wired** | env/model만으로는 활성화 불가: complete before/after를 승인하는 `FastApplyMergeReviewSeam`이 없으면 provider dispatch 전에 mismatch로 fail-closed. ToolDiffSink는 post-write 관측이라 승인 권한이 아니다. | `src/tool/edit/index.ts` |
+| fast-apply-merge | `{original,editSketch}`를 apply-model에 보내 머지 파일 추출 | **hold, wired(host review required)** | env/model은 merge port만 만든다. host가 명시적으로 준 complete before/after `FastApplyMergeReviewSeam`은 `ToolContext`까지 전달된다. 그 seam이 없으면 provider dispatch 전에 mismatch로 fail-closed. ToolDiffSink는 post-write 관측이라 승인 권한이 아니다. | `src/agent/dispatch/tool-context.ts` |
 | force-background | queued 백그라운드 서브에이전트를 즉시/FIFO-head 승격 | wired(env-gated) | `QUANTA_FORCE_BACKGROUND`+admission queue 필요 | `src/agent/subagent-background.ts:172` |
 | per-tool-checkpoint-granularity | 도구별 granular 체크포인트 정책(개별 record/rewind) | **wired(env-gated)** ⚠️레저 stale | `QUANTA_PER_TOOL_RECORD`+shadowOdb, default-OFF | `src/agent/per-tool-checkpoint/index.ts:34` |
 | identity-mid-session-prompt-rebuild | `/identity` 스왑 후 다음 턴 system prompt 리빌드 클로저 | consumer-only(forward-seam) | 라이브는 인라인 `buildPromptFromIdentityMode` 사용, 이 포트 caller 없음 | `src/apps/cli/repl/system-prompt-rebuilder.ts:57` |

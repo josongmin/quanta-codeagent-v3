@@ -26,8 +26,9 @@ surface_integration:
 purpose: |
   Closed-port leaf slice for remote permission preflight + short-lived STS
   token issuance. Absorbs Claude Desktop's `onBridgePermissionPreflight` round
-  + 9 lifecycle events into a typed `BridgeAttestor` port with 4 methods
-  (preflight / mintToken / verify / revoke).
+  + 9 lifecycle events into a typed `BridgeAttestor` port with 3 methods
+  (preflight / verify / revoke). Token issuance is reachable only through an
+  allow preflight; callers cannot mint arbitrary scope/TTL tokens.
 
   3-arm `AttestResult` discriminated union (`allow` / `deny` / `prompt-user`)
   is the secure-by-default surface — adding a 4th arm without exhaustive-switch
@@ -35,7 +36,11 @@ purpose: |
 
   Token format: `base64url(HMAC-SHA256(secret, "${scope}|${expiresAt}|${nonce}"))`
   with 16-byte random nonce for collision-free minting at identical
-  (scope, expiresAt).
+  (scope, expiresAt). Scope is canonical `JSON.stringify([agentId, action,
+  resource])`, preventing cross-agent token reuse and delimiter collisions.
+  `requestedAt` is enforced before policy lookup (default 5 minute age / 30s
+  future-skew bounds); stale, future, malformed, or empty requests deny before
+  token mint.
 
   Default-OFF: nothing in dispatch/loop/agent wires this today. The caller
   (a future MCP `bridge_attest_preflight` tool, a Tauri sidecar bridge wrapper,
@@ -77,6 +82,14 @@ knobs:
     where: defaultAttestor constructor opt
     default: "no-op (default-OFF)"
     purpose: 9-event stream subscriber (preflight-requested/-granted/-denied/token-minted/-used/-expired/-revoked/preflight-error/attest-audit)
+  - name: maxRequestAgeMs
+    where: defaultAttestor constructor opt
+    default: "300_000"
+    purpose: Maximum accepted preflight request age; stale/non-finite timestamps deny before policy lookup or token mint
+  - name: maxFutureSkewMs
+    where: defaultAttestor constructor opt
+    default: "30_000"
+    purpose: Maximum accepted future timestamp skew; excessive future requests deny before policy lookup or token mint
   - name: DEFAULT_STS_TOKEN_TTL_MS
     where: module-scope constant in src/security/bridge-attest/default-attestor.ts
     default: "300_000 (5 minutes)"
@@ -85,16 +98,17 @@ knobs:
       short-lived credential convention — long enough for typical
       preflight→action latency, short enough to bound exposure on accidental
       leak. NOT an opt-in knob (intentionally compile-time, not runtime-tunable)
-      because each `allow` arm mints with a single canonical TTL; callers needing
-      a different lifetime use `mintToken(scope, ttlMs)` directly.
+      because each `allow` arm mints with a single canonical TTL. Arbitrary
+      caller-selected TTLs would bypass the preflight authority boundary.
 deliberate_hold:
   reason: |
     Network protocol (gRPC / WebSocket / Tauri IPC channel) is out of scope —
     this slice produces tokens; transport is the caller's choice. JWT / JWKS /
     asymmetric signing migration is a future ADR; current HMAC is symmetric for
     round-trip simplicity. OS-keyring secret backend mirrors ADR-0050's deferred
-    OS-keyring path. Cross-process token cache, caller-defined request-freshness
-    policy, and multi-process replay protection are future work.
+    OS-keyring path. Cross-process token cache and multi-process replay/revocation
+    protection are future work; the local adapter already enforces bounded
+    request freshness before policy lookup.
   promotion_path: |
     L4 = first real caller wires the port (a Tauri sidecar bridge wrapper, an
     org-policy proxy, or an MCP `bridge_attest_preflight` tool) + the 9-event

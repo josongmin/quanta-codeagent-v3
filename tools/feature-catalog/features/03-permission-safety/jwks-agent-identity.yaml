@@ -34,10 +34,11 @@ purpose: |
   scheduler/realtime 전부 미주입.
 
   This is a signature-verification primitive, not an authentication policy:
-  it does not require `exp`, validate issuer/audience/not-before claims, or
-  enforce JWK `use`/`key_ops` consistency. A future production consumer must
-  own those tenant-specific constraints before an allow decision can depend on
-  this result.
+  it does not require `exp` or validate issuer/audience/not-before claims. It
+  does bind header alg to JWK alg, signature use/key_ops, and RSA-vs-P-256 key
+  family consistency. A future production consumer must own the remaining
+  tenant-specific constraints before an allow decision can depend on this
+  result.
 evidence:
   code:
     - src/security/jwks-identity/types.ts
@@ -59,8 +60,8 @@ deliberate_hold:
     결정 필요), Cloud Tasks callback 통합, realtime/SSE auth wire 는 후속
     슬라이스. 본 ADR 은 consumer 반쪽 (외부 발급 token 검증) 만 ship.
   promotion_path: |
-    1) issuer, audience, required exp/nbf, permitted algorithm, and JWK
-       use/key_ops contract를 가진 auth-policy wrapper를 먼저 만든다.
+    1) issuer, audience, required exp/nbf contract를 가진 auth-policy wrapper를
+       먼저 만든다 (algorithm/JWK signature-use consistency는 verifier가 강제).
     2) agent-task registrar 가 그 wrapper를 주입받아 외부 dispatcher 응답
        토큰 검증 후 follow-up enqueue (composition-root opt-in).
     3) Realtime/SSE 경로가 connection-auth 단계에서 같은 wrapper를 호출.

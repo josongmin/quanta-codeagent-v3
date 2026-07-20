@@ -72,6 +72,12 @@ purpose: |
 evidence:
   code:
     - src/apps/cli/repl/surface-compose.ts
+    - src/apps/cli/repl/surface-compose/composer.ts
+    - src/apps/cli/repl/surface-compose/core-state.ts
+    - src/apps/cli/repl/surface-compose/dispatch-compose.ts
+    - src/apps/cli/repl/surface-compose/mutable-wires.ts
+    - src/apps/cli/repl/surface-compose/runtime-compose.ts
+    - src/apps/cli/repl/surface-compose/slash-context-compose.ts
     - src/apps/cli/repl/session-loop.ts
     - src/apps/cli/repl/prompt-pipeline.ts
     - src/apps/cli/repl.ts

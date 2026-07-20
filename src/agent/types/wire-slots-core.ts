@@ -368,6 +368,14 @@ export interface WireSlotsCoreConfig {
    */
   fastApplyMerge?: FastApplyPort
   /**
+   * Host-owned review authority for a whole-file fast-apply merge. The dispatch
+   * seam forwards this exact port to `ToolContext.fastApplyMergeReview`; it is
+   * never inferred from a diff observer or environment variable. Missing,
+   * rejecting, or throwing review remains a fail-closed typed mismatch before
+   * provider dispatch and before any write.
+   */
+  fastApplyMergeReview?: import("@/tool").FastApplyMergeReviewSeam
+  /**
    * Session-scoped role→model override carrier (ADR-0256). Surfaces that need a
    * live executor/default model resolver thread the SAME resolver instance here
    * so helper wires (for example fast-apply fallback) do not mint private

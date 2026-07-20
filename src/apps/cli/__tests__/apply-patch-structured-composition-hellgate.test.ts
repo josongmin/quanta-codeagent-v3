@@ -5,7 +5,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test"
-import { logger } from "@/shared"
+import { log } from "@/observability"
 import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import { buildTooling } from "../internal"
 
@@ -20,7 +20,7 @@ afterEach(() => {
   __resetRuntimeConfig()
 })
 
-const buildCliRegistry = () => buildTooling([], [], [], [], [], logger).registry
+const buildCliRegistry = () => buildTooling([], [], [], [], [], log).registry
 const hasStructuredPatch = (): boolean =>
   buildCliRegistry()
     .all()

@@ -86,8 +86,12 @@ describe("golden-frame parity (brain ⇄ hands wire contract)", () => {
       }),
     )
     const port = containerExecOverIpc(duplex)
-    await port.exec(execReq.exec.command) // first call → id 0, matching the golden frame
-    expect(JSON.parse(written[0])).toEqual(execReq.frame)
+    const command = execReq.exec.command
+    if (command === undefined) throw new Error("golden exec request has no command")
+    await port.exec(command) // first call → id 0, matching the golden frame
+    const firstFrame = written[0]
+    if (firstFrame === undefined) throw new Error("bridge did not write an exec frame")
+    expect(JSON.parse(firstFrame)).toEqual(execReq.frame)
   })
 
   test("brain PRODUCES the golden cancel frame on abort, then settles on the terminal error", async () => {
@@ -98,7 +102,9 @@ describe("golden-frame parity (brain ⇄ hands wire contract)", () => {
     // When the brain writes the cancel frame, the hands reply with the terminal error frame
     // (the cross-end cancel contract) — so the pending call settles instead of hanging.
     const { duplex, written } = scripted((w) => {
-      const last = JSON.parse(w[w.length - 1])
+      const lastFrame = w[w.length - 1]
+      if (lastFrame === undefined) return undefined
+      const last = JSON.parse(lastFrame)
       return last.type === "cancel" ? JSON.stringify(errCase.frame) : undefined
     })
     const port = containerExecOverIpc(duplex)

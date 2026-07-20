@@ -122,11 +122,11 @@ describe("ticker — re-entrancy: single permit serializes overlapping ticks", (
     // is acquired BEFORE `await resume` and released in a `finally` AFTER, so
     // an unresolved resume keeps the single permit held across ticks.
     let resumeCalls = 0
-    let releaseSlow: (() => void) | null = null
+    const pendingReleases: Array<() => void> = []
     const resume = (): Promise<void> => {
       resumeCalls += 1
       return new Promise<void>((res) => {
-        releaseSlow = res
+        pendingReleases.push(res)
       })
     }
 
@@ -150,26 +150,28 @@ describe("ticker — re-entrancy: single permit serializes overlapping ticks", (
     expect(resumeCalls).toBe(1)
 
     // Now let tick 1's resume resolve — the `finally` releases the permit.
-    expect(releaseSlow).not.toBeNull()
-    releaseSlow?.()
+    const firstRelease = pendingReleases.shift()
+    if (firstRelease === undefined) throw new Error("first slow resume was not armed")
+    firstRelease()
     await Promise.resolve()
     await Promise.resolve()
     await Promise.resolve()
 
     // A LATER tick can now launch again (permit free). This proves the guard
     // SERIALIZED (not permanently blocked) the overlapping ticks.
-    let secondResolved = false
     // Swap in a fast resume for the re-launch by holding a fresh promise that
     // resolves immediately.
-    releaseSlow = null
     await timer.fire()
     // The re-launch used the SAME `resume` closure; it bumps the counter and
     // hands back a new held promise — resolve it so the test leaves nothing
     // pending.
     expect(resumeCalls).toBe(2)
-    releaseSlow?.()
-    secondResolved = true
-    expect(secondResolved).toBe(true)
+    // The async ticker invokes `resume` after this scope is constructed; widen
+    // the statically empty-array control-flow view to its declared callback
+    // contract before checking the runtime hand-off.
+    const secondRelease: (() => void) | undefined = pendingReleases.shift()
+    if (secondRelease === undefined) throw new Error("second slow resume was not armed")
+    secondRelease()
   })
 
   test("PAIRED CONTROL: with a FAST resume, two sequential ticks launch twice", async () => {

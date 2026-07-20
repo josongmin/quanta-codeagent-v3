@@ -188,7 +188,6 @@ export const createStubRuntimeFactory = (
           revision: snapshot.revision,
           seq: snapshot.seq,
           events: [started, requested, updated],
-          approvalRequest: approval,
         }
       }
 

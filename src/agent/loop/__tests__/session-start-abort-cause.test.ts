@@ -115,13 +115,26 @@ describe("session-START abort cause attribution (HELLGATE)", () => {
       planStore,
       planSnapshotStore: {
         load: async () => ({
-          version: 3,
-          name: "restored",
-          overview: "should never restore on interrupt",
-          isProject: false,
-          phases: [],
-          todos: [{ id: "t1", content: "blocked", done: false, order: 0 }],
-          updatedAt: 1,
+          schema: "plan-v1",
+          plan: {
+            version: 3,
+            name: "restored",
+            overview: "should never restore on interrupt",
+            isProject: false,
+            phases: [],
+            todos: {
+              t1: {
+                id: "t1",
+                content: "blocked",
+                status: "pending",
+                createdAt: 1,
+                updatedAt: 1,
+                dependencies: [],
+              },
+            },
+            createdAt: 1,
+            updatedAt: 1,
+          },
         }),
         save: async () => {},
       },

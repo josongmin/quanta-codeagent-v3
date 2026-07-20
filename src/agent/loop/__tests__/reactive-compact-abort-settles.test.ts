@@ -69,7 +69,10 @@ const summarizerLlm = (
         // armed stream signal is derived from) WITHOUT aborting the LIFETIME
         // signal — so the summarizer throws an AbortError while `controller`
         // (the lifetime signal) stays live.
-        throw new AbortError("interrupt")
+        // `AbortReasonKind` represents transport cancellation, not the higher
+        // level gate cause; the interrupted gate still tears down the stream as
+        // an ordinary abort.
+        throw new AbortError("abort", "interrupt")
       }
       throw new Error("transient-summarizer-boom")
       // biome-ignore lint/correctness/noUnreachable: generator shape only.

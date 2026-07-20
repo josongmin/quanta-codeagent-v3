@@ -37,7 +37,7 @@ import {
 } from "@/ipc/session"
 import type { SessionEvent } from "@/protocol/session"
 import { SessionProtocolVersionError } from "@/protocol/session"
-import { type ConnectOptions, connect, type SessionTransportSpec, transports } from "@/sdk"
+import { connect, type SessionTransportSpec, transports } from "@/sdk"
 import { makeSnapshot, makeStateUpdatedEvent } from "../ipc/session-transport-conformance-fixtures"
 
 /** Scripted transport + spec: reacts to outbound frames, can die on command. */
@@ -187,7 +187,7 @@ describe("connect() — composition contracts", () => {
     await handle.close()
   })
 
-  test("UNSUPPORTED pin (jul-16 audit KILL): resume is NOT part of this door — no ConnectOptions.resumeFromSeq, bare handshake connect frames", async () => {
+  test("default connect remains resume-free — handshake connect frames are bare", async () => {
     // WHY (both attackers repro'd the hang): the handshake's `ready` settles
     // only on a SNAPSHOT frame, but the bridge answers a servable cursor with
     // events-only — ZERO frames at cursor==tip (`planSessionReplay`), the
@@ -196,10 +196,6 @@ describe("connect() — composition contracts", () => {
     // structural forever-pending promise. Door-level resume is ticket 05's
     // (raw client's resume watcher); see USAGE-sdk-door.md §10.
     const wire = makeScriptedSpec(handshakeScript())
-    // Type-level pin (CI tests-typecheck): the option is GONE.
-    // @ts-expect-error — resumeFromSeq was removed from ConnectOptions (descope; excess-property TS2353)
-    const rejectedShape: ConnectOptions = { transport: wire.spec, resumeFromSeq: 7 }
-    void rejectedShape
     const handle = await connect({ transport: wire.spec })
     const connects = wire.sent.filter(
       (m): m is Extract<SessionTransportMessage, { kind: "connect" }> => m.kind === "connect",

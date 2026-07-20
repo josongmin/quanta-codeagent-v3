@@ -26,7 +26,7 @@ const entrypointFileNames = (): ReadonlyArray<readonly [string, string]> => {
   const out: Array<[string, string]> = []
   for (const name of readdirSync(UNIT_DIR)) {
     const m = ENTRYPOINT_RE.exec(name)
-    if (m) out.push([m[1], name])
+    if (m) out.push([m[1]!, name])
   }
   return out
 }

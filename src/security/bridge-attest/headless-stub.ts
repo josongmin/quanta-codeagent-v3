@@ -5,7 +5,6 @@
  * bridge wired:
  *
  *   - `preflight` → `{ kind: "deny", reason: "headless: no remote attestor" }`
- *   - `mintToken` → throws `AttestError("headless")`
  *   - `verify`    → always false (no tokens were ever minted via this stub)
  *   - `revoke`    → no-op (idempotent / nothing to revoke)
  *
@@ -14,7 +13,7 @@
  * (never accidentally `allow`).
  */
 import type { BridgeAttestor } from "./port"
-import { AttestError, type AttestRequest, type AttestResult, type StsToken } from "./types"
+import type { AttestRequest, AttestResult } from "./types"
 
 const HEADLESS_REASON = "headless: no remote attestor"
 
@@ -25,9 +24,6 @@ const HEADLESS_REASON = "headless: no remote attestor"
 export const headlessStubAttestor = (): BridgeAttestor => ({
   async preflight(_req: AttestRequest): Promise<AttestResult> {
     return { kind: "deny", reason: HEADLESS_REASON }
-  },
-  async mintToken(_scope: string, _ttlMs: number): Promise<StsToken> {
-    throw new AttestError(HEADLESS_REASON, "headless")
   },
   async verify(_token: string, _scope: string): Promise<boolean> {
     return false

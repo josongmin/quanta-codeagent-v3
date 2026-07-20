@@ -64,13 +64,15 @@ const reminderText = (seen: Message[][]): string =>
     .map((b) => b.text)
     .join("\n")
 
-/** Config WITHOUT `system` so the loop assembles the REAL dynamic reminder tail. */
+/** Empty base system keeps the real dynamic reminder assembly while satisfying
+ * the required AgentConfig contract. */
 const directiveConfig = (llm: MessageCapturingLLM): AgentConfig => ({
   llm,
   registry: new ToolRegistry(defaultTools),
   stream: new RecordingStream(),
   permission: { mode: "acceptEdits" } as AgentConfig["permission"],
   messages: [{ role: "user", content: [{ type: "text", text: "go" }] }],
+  system: "",
   cwd: "/tmp",
   maxTurns: 3,
   signal: new AbortController().signal,

@@ -29,19 +29,21 @@ describe("DOF-00 default-off authority ledger hellgate", () => {
     expect(report.errors).toEqual([])
   })
 
-  test("missing row and duplicate feature id are rejected", { timeout: 15_000 }, async () => {
+  test("missing row and duplicate feature id are rejected", async () => {
     const ledger = await loadDefaultOffLedger(LEDGER_PATH)
     const missing = clone(ledger)
     const removed = missing.rows.shift()
-    expect(removed).toBeDefined()
+    if (removed === undefined) throw new Error("fixture ledger must contain a row")
     expect((await checkDefaultOffLedger(missing, { catalogDir: CATALOG_DIR })).errors).toContain(
-      `missing eligible row: ${removed?.feature_id}`,
+      `missing eligible row: ${removed.feature_id}`,
     )
 
     const duplicate = clone(ledger)
-    duplicate.rows.push(structuredClone(duplicate.rows[0]))
+    const first = duplicate.rows[0]
+    if (first === undefined) throw new Error("fixture ledger must contain a row")
+    duplicate.rows.push(structuredClone(first))
     expect((await checkDefaultOffLedger(duplicate, { catalogDir: CATALOG_DIR })).errors).toContain(
-      `duplicate feature_id: ${duplicate.rows[0]?.feature_id}`,
+      `duplicate feature_id: ${first.feature_id}`,
     )
   })
 

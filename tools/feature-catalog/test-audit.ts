@@ -23,7 +23,7 @@
  * is in `collectTestFiles` so this module remains deterministic and easy to
  * unit-test.
  */
-import { readdir, readFile, stat } from "node:fs/promises"
+import { readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { basename, join, relative, resolve } from "node:path"
 
 // ---------------------------------------------------------------------------
@@ -47,6 +47,19 @@ export interface TestAuditReport {
   readonly rules: readonly RuleReport[]
   readonly totalTests: number
   readonly totalViolations: number
+}
+
+/** Review-visible snapshot of pre-existing static audit debt. `--strict`
+ * rejects a fingerprint not listed here; removals produce a tighten notice
+ * rather than being silently retained forever. */
+export interface TestAuditBaseline {
+  readonly version: 1
+  readonly violations: readonly string[]
+}
+
+export interface TestAuditBaselineComparison {
+  readonly newViolations: readonly string[]
+  readonly resolvedViolations: readonly string[]
 }
 
 /** Pre-read test file: relative path + raw contents. Splitting walking from
@@ -197,6 +210,7 @@ const R3_META_FILENAME_PATTERNS = [
 // `// source-grep allowed` escape hatch R5 uses — an authored signal that the
 // file deliberately does not import src/. Two synonyms accepted.
 const R3_OPT_IN_RE = /\/\/\s*(?:architecture-test|meta-test)\b/
+const TEST_AUDIT_META_RE = /\/\/\s*test-audit meta\b/
 
 function isR3MetaExempt(path: string, text: string): boolean {
   if (R3_META_PATH_RE.test(path)) return true
@@ -205,6 +219,7 @@ function isR3MetaExempt(path: string, text: string): boolean {
     if (lowerName.includes(pat)) return true
   }
   if (R3_OPT_IN_RE.test(text)) return true
+  if (TEST_AUDIT_META_RE.test(text)) return true
   return false
 }
 
@@ -341,6 +356,7 @@ const CLEANUP_ASSERT_RE =
 export function checkR8Cleanup(ts: readonly TestFile[]): Violation[] {
   const violations: Violation[] = []
   for (const f of ts) {
+    if (TEST_AUDIT_META_RE.test(f.text)) continue
     const blocks = extractTestBlocks(f.text)
     for (const b of blocks) {
       if (!CLEANUP_TITLE_RE.test(b.title)) continue
@@ -370,6 +386,7 @@ const CANCEL_ASSERT_RE =
 export function checkR9Cancellation(ts: readonly TestFile[]): Violation[] {
   const violations: Violation[] = []
   for (const f of ts) {
+    if (TEST_AUDIT_META_RE.test(f.text)) continue
     const blocks = extractTestBlocks(f.text)
     for (const b of blocks) {
       if (!CANCEL_TITLE_RE.test(b.title)) continue
@@ -400,6 +417,7 @@ const ENV_ASSERT_RE =
 export function checkR10EnvIsolation(ts: readonly TestFile[]): Violation[] {
   const violations: Violation[] = []
   for (const f of ts) {
+    if (TEST_AUDIT_META_RE.test(f.text)) continue
     const blocks = extractTestBlocks(f.text)
     for (const b of blocks) {
       if (!ENV_TITLE_RE.test(b.title)) continue
@@ -511,6 +529,58 @@ export function runAllRules(input: {
   reports.sort((a, b) => ruleOrder(a.rule) - ruleOrder(b.rule))
   const totalViolations = reports.reduce((acc, r) => acc + r.violations.length, 0)
   return { rules: reports, totalTests: ts.length + js.length, totalViolations }
+}
+
+export function testAuditViolationFingerprint(rule: string, violation: Violation): string {
+  return [rule, violation.file, String(violation.line), violation.message].join("\t")
+}
+
+export function snapshotTestAuditBaseline(report: TestAuditReport): TestAuditBaseline {
+  const violations = report.rules
+    .flatMap((rule) =>
+      rule.violations.map((violation) => testAuditViolationFingerprint(rule.rule, violation)),
+    )
+    .sort()
+  return { version: 1, violations }
+}
+
+export function compareTestAuditBaseline(
+  report: TestAuditReport,
+  baseline: TestAuditBaseline,
+): TestAuditBaselineComparison {
+  const current = new Set(snapshotTestAuditBaseline(report).violations)
+  const recorded = new Set(baseline.violations)
+  return {
+    newViolations: [...current].filter((fingerprint) => !recorded.has(fingerprint)).sort(),
+    resolvedViolations: [...recorded].filter((fingerprint) => !current.has(fingerprint)).sort(),
+  }
+}
+
+export async function loadTestAuditBaseline(path: string): Promise<TestAuditBaseline> {
+  try {
+    const parsed: unknown = JSON.parse(await readFile(path, "utf8"))
+    if (!parsed || typeof parsed !== "object") return { version: 1, violations: [] }
+    const candidate = parsed as { version?: unknown; violations?: unknown }
+    if (
+      candidate.version !== 1 ||
+      !Array.isArray(candidate.violations) ||
+      candidate.violations.some((violation) => typeof violation !== "string")
+    ) {
+      return { version: 1, violations: [] }
+    }
+    return { version: 1, violations: [...new Set(candidate.violations)].sort() }
+  } catch {
+    return { version: 1, violations: [] }
+  }
+}
+
+export async function saveTestAuditBaseline(
+  report: TestAuditReport,
+  path: string,
+): Promise<TestAuditBaseline> {
+  const baseline = snapshotTestAuditBaseline(report)
+  await writeFile(path, `${JSON.stringify(baseline, null, 2)}\n`)
+  return baseline
 }
 
 function ruleOrder(r: string): number {

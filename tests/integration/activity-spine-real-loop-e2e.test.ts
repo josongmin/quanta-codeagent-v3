@@ -248,7 +248,7 @@ describe("Activity Spine — REAL loop-emitted subagent lifecycle folds into the
     // populated by the real loop and `ctx.agents()` still returns the real rows —
     // but the producer that folds them into the spine is broken.
     const neuteredFold: typeof fleetToActivity = () => []
-    const { ctx: deadCtx } = activityCtx(registry, neuteredFold)
+    const { ctx: deadCtx } = activityCtx(registry)
     const dead = renderFold(deadCtx, neuteredFold)
 
     // With the fold neutered the spawned node vanishes from the materialized tree.

@@ -1,9 +1,12 @@
 # ADR-0188: Bug-fix proposal queue (debug-trace automated bug-fix loop, Phase 1)
 
-- **Status**: Accepted
+- **Status**: Superseded (2026-07-19; the described source, tests, and feature
+  entry no longer exist; ADR-0231 is the live proposal-queue implementation)
 - **Date**: 2026-05-25
 - **Related ADRs**: ADR-0181 (debug/blame skills trio — `debug-trace` is the producer that calls `capture()` into this queue), ADR-0124 / ADR-0177 (conversation-checkpoint store + LRU swap — sibling capture-and-list primitive shape this slice mirrors), ADR-0118 (shadow ODB — the Phase 2 rollback anchor that auto-apply will hook into)
-- **References**: `src/agent/debug-trace-autofix.ts`, `tests/unit/agent-debug-trace-autofix-hellgate.test.ts`, `tools/feature-catalog/features/06-tier1/bug-fix-proposal-queue.yaml`
+- **Superseded by**: ADR-0231 (`radar-cards-proposal-queue`), which is the live
+  gated proposal-queue surface. Historical references below describe a removed
+  implementation and must not be treated as current evidence.
 
 ## Research grounding
 

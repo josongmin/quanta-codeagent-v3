@@ -33,7 +33,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { decideOnStreamError, freshRecovery, type RecoveryAction } from "@/agent/loop"
+import { decideOnStreamError, freshRecovery } from "@/agent/loop"
+import type { RecoveryAction } from "@/agent/recovery"
 import { codexSpecRoute } from "@/llm"
 import { LLMError, type LLMErrorKind } from "@/shared"
 

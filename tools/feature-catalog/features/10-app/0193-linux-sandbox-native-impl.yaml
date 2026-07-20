@@ -43,6 +43,8 @@ evidence:
     - crates/linux-sandbox-native/src/seccomp.rs
     - src/runtime/os-sandbox/landlock-native.ts
   adrs:
+    - docs/decisions/0175-linux-sandbox-native.md
+    - docs/decisions/0184-linux-sandbox-native-impl.md
     - docs/decisions/0193-linux-sandbox-native-impl.md
   tests:
     unit:

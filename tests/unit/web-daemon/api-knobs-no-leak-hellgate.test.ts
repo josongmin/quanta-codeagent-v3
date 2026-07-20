@@ -1,3 +1,4 @@
+// source-grep allowed: pins that the live HTTP route calls the redaction helper.
 /**
  * GET /api/knobs NO-LEAK RATCHET (ADR-0503 P3 security lock, jun-7 re-audit).
  *

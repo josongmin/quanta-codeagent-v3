@@ -114,6 +114,16 @@ const ctxOf = (over: Partial<ToolContext> = {}): ToolContext => ({
   ...over,
 })
 
+/** Deliberately omit the reviewer rather than assigning `undefined`: this is
+ * the production-shaped context whose merge capability must fail closed. */
+const ctxWithoutMergeReview = (
+  over: Omit<Partial<ToolContext>, "fastApplyMergeReview"> = {},
+): ToolContext => ({
+  cwd: "/",
+  signal: new AbortController().signal,
+  ...over,
+})
+
 const run = async (
   tool: {
     execute: (i: never, c: ToolContext) => AsyncIterable<{ type: string; result?: ToolResult }>
@@ -165,7 +175,7 @@ describe("jun-7-misc 06 edit fast-apply MERGE rung hellgate", () => {
     const res = await run(
       tool,
       { path: "a.ts", old_string: "beta-typo", new_string: "BETA" },
-      ctxOf({ fastApplyMerge: merge.seam, fastApplyMergeReview: undefined }),
+      ctxWithoutMergeReview({ fastApplyMerge: merge.seam }),
     )
     expect(res.ok).toBe(false)
     expect(merge.calls).toHaveLength(0)

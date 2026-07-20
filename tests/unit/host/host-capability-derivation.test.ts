@@ -294,6 +294,7 @@ describe("host runtime capability derivation", () => {
     })
       .createRuntimeHost({
         boot: {
+          mode: "default",
           refreshSystemPrompt: () => {
             refreshCalls.count += 1
           },
@@ -327,6 +328,7 @@ describe("host runtime capability derivation", () => {
     })
       .createRuntimeHost({
         boot: {
+          mode: "default",
           refreshSystemPrompt: () => {
             refreshCalls.count += 1
           },
@@ -360,6 +362,7 @@ describe("host runtime capability derivation", () => {
     })
       .createRuntimeHost({
         boot: {
+          mode: "default",
           refreshSystemPrompt: () => {
             refreshCalls.count += 1
           },
@@ -393,6 +396,7 @@ describe("host runtime capability derivation", () => {
     })
       .createRuntimeHost({
         boot: {
+          mode: "default",
           refreshSystemPrompt: () => undefined,
           toolProfileState,
         },
@@ -422,6 +426,7 @@ describe("host runtime capability derivation", () => {
     })
       .createRuntimeHost({
         boot: {
+          mode: "default",
           refreshSystemPrompt: () => undefined,
           toolProfileState,
         },

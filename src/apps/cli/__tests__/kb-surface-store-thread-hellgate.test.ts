@@ -39,7 +39,7 @@ import type { AgentConfig } from "@/agent"
 import { dispatchTool } from "@/agent/dispatch"
 import type { ToolUseBlock } from "@/llm"
 import type { PermissionContext } from "@/permission"
-import { logger } from "@/shared"
+import { log } from "@/observability"
 import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import { createProjectsKbStore, type ProjectsKbStore } from "@/tool"
 import { buildTooling } from "../internal"
@@ -79,7 +79,7 @@ afterEach(() => {
 
 /** Build the REPL tool registry the way `bootstrap-session` does — the SAME
  *  `buildTooling` the interactive surface calls, with empty opt-in tool arrays. */
-const buildReplTooling = () => buildTooling([], [], [], [], [], logger)
+const buildReplTooling = () => buildTooling([], [], [], [], [], log)
 
 const call = (name: string, input: unknown): ToolUseBlock => ({
   type: "tool_use",

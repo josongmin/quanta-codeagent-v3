@@ -28,15 +28,18 @@ index. Bug-bash CI slice:
 
 ### Artifact-purge policy
 
-Only `.test.ts` sources are tracked. Any `.test.js` under `tests/` is a stale
-TypeScript-emit artifact (root-cause: legacy build step / worktree pollution)
-and causes double execution at test time. Enforcement is two-layer:
+Only TypeScript source is authoritative. Any `.test.js` under `tests/` or
+untracked `.js` mirror under `src/` is a stale TypeScript-emit artifact
+(root-cause: legacy build step / worktree pollution). The latter is especially
+dangerous because Bun resolves an extensionless import to the colocated `.js`
+first, silently testing stale production code. Enforcement is two-layer:
 
 1. Every test script (`test`, `test:unit`, `test:fast`, …) is prefixed with
-   `bun run test:clean-js` which `find tests -name '*.test.js' -delete`s
-   before the run. Manual cleanup: `bun run test:clean-js`.
-2. `tests/meta/no-test-js-artifacts-hellgate.test.ts` walks the tree and fails
-   CI if any `.test.js` survives.
+   `bun run test:clean-js`, which removes test artifacts and source mirrors
+   before the run. `bun test <path>` is covered by the earlier
+   `preload-clean-source-js.ts` preload. Manual cleanup: `bun run test:clean-js`.
+2. `tests/meta/no-test-js-artifacts-hellgate.test.ts` walks the test tree and
+   fails CI if any `.test.js` survives.
 
 `bun test` (and `npm test`) covers **unit + integration only** — the
 deterministic gate. Contract and eval are explicitly separated to keep the

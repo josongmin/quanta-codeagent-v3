@@ -32,7 +32,7 @@ evidence:
     - src/agent/dispatch.ts
     - src/observability/otel-span-export.ts
     - src/agent/session-resources.ts
-  adrs: [74, 539]
+  adrs: [74, 539, "docs/decisions/0186-distributed-tracing.md"]
   tests:
     unit:
       - tests/unit/observability/spans.test.ts
