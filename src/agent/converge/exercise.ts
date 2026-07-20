@@ -1,7 +1,7 @@
 /**
  * `@/apps/terminal/verify-gate/exercise` — the L0 "did the deliverable RUN AND get OBSERVED?" layer.
  *
- * The dominant Terminal-Bench failure (~70%) is "fake green": the agent claims done but never ran
+ * A dominant terminal-task failure is "fake green": the agent claims done but never ran
  * its deliverable end-to-end. This layer answers, fail-closed, "does the trajectory contain a tool
  * interaction that RUNS the produced deliverable and OBSERVES its output?" — as opposed to
  * install/build/probe/scaffolding. It ALSO owns the two result predicates every other classifier
@@ -64,7 +64,7 @@ const isExerciseSegment = (segment: string): boolean => {
   //    test-runner `-m pytest`).
   if (INTERPRETERS.has(base)) {
     if (args.includes("-c")) return false // inline snippet / probe, not a run of a produced file
-    const mIdx = args.findIndex((a) => a === "-m")
+    const mIdx = args.indexOf("-m")
     if (mIdx >= 0) {
       const mod = (args[mIdx + 1] ?? "").toLowerCase()
       if (TEST_RUNNERS.has(mod)) return false // `python -m pytest` = running the suite, not the deliverable
