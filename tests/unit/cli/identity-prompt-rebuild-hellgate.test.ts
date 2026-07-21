@@ -39,12 +39,12 @@ import {
   type ModeVariantKey,
   type SystemPromptVariantRegistry,
 } from "@/agent/system-prompt"
-import { buildIdentityModeAdapter } from "../../../src/apps/cli/repl/ctx-adapters/identity-mode-adapter"
 import {
   createSystemPromptRebuilder,
   createSystemSource,
   SYSTEM_PROMPT_REBUILD_FALLBACK_PREFIX,
-} from "../../../src/apps/cli/repl/system-prompt-rebuilder"
+} from "@/runner/assemble"
+import { buildIdentityModeAdapter } from "../../../src/apps/cli/repl/ctx-adapters/identity-mode-adapter"
 
 const fakeRegistry: SystemPromptVariantRegistry = {
   variantFor: (mode) => ({ mode, identity: [`identity-for-${mode}`] }),

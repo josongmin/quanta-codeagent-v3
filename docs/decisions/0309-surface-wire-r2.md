@@ -7,6 +7,15 @@
 
 ## Context
 
+### 2026-07-20 implementation addendum
+
+ADR-0302's identity rebuild wire no longer lives in the CLI composition root.
+The former CLI-local factory was removed and the canonical
+`createSystemPromptRebuilder` now belongs to `src/runner/assemble/session-state.ts`.
+`bootstrap-session.ts` owns the shared `SystemSource` update; the CLI adapter only
+invokes the injected `onIdentityModeChange` callback. The Wire 1 pseudocode and
+import inventory below are the 2026-05 design snapshot, not a current source map.
+
 Prior tracks landed the ADAPTERS / PORTS but the REPL surface composition hadn't wired them end-to-end:
 
 * **ADR-0302 (Identity)** — built `SystemPromptRebuilderPort` + `SystemSource` closure-cell + extended `buildIdentityModeAdapter` with optional `onChange?(mode)` arg, but explicitly deferred the surface wire per slice-fence policy. Today `/identity set foo` swaps the active mode cell but the next turn still sees the stale system prompt captured at bootstrap.
@@ -130,7 +139,7 @@ Covered adversarial paths: onChange-throws-swallowed, registry-record-throws-swa
 
 ## Plane-clean
 
-* `surface-compose.ts` imports add: `node:fs/promises`, `@/agent/checkpoint/granular-registry`, `@/agent/system-prompt#buildSystemPromptForMode`, `@/tool#ToolRegistry`, `./per-tool-snapshot-recorder`, `./system-prompt-rebuilder`. NO new cross-slice deps.
+* Historical 2026-05 inventory: `surface-compose.ts` imports add: `node:fs/promises`, `@/agent/checkpoint/granular-registry`, `@/agent/system-prompt#buildSystemPromptForMode`, `@/tool#ToolRegistry`, `./per-tool-snapshot-recorder`, `./system-prompt-rebuilder`. The final item was superseded by the runner-owned factory above. NO new cross-slice deps.
 * `per-tool-snapshot-recorder.ts` imports ONLY `@/agent/checkpoint/granular-registry` (port), `@/llm` (Message type), `@/tool` (Tool / ToolContext / ToolEvent types). NO `@/storage`, no `node:fs` (the reader port is injected).
 * `runner/assemble/config.ts` adds `GranularRegistryPort` import and one optional field on `SessionDeps`. The existing presence-spread pattern handles default-OFF.
 

@@ -69,7 +69,7 @@ Generated from `tools/feature-catalog/default-off-ledger.yaml` after the source 
 | github-pr-from-pr-cli | hold | wired | wire | wire | none | composition/wire covered; no execution receipt |
 | github-webhook-host-scaffold | enable-now | wired | real-loop | wire | none | real-loop covered; no execution receipt |
 | guardian-per-action-assessment | enable-now | wired | real-loop | unit | none | real-loop covered; no execution receipt |
-| identity-mid-session-prompt-rebuild | hold | consumer-only | unit | unit | none | dormant/unconsumed; no promotion proof |
+| identity-mid-session-prompt-rebuild | hold | wired | real-loop | unit | none | runner-owned factory consumed by host bootstrap; CLI two-turn e2e covered |
 | image-gen | measure-first | wired | wire | wire | none | composition/wire covered; no execution receipt |
 | infertooltier-secure-by-default-fallback | enable-now | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | issue-hint-expected-actual-opt-in | measure-first | wired | unit | unit | none | unit-only ON proof; promotion proof missing |

@@ -842,15 +842,15 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: identity-mid-session-prompt-rebuild
-    gate_owner: [onChange callback DI]
-    activation: unwired
+    gate_owner: [SessionBootstrapResult.refreshSystemPrompt, onIdentityModeChange]
+    activation: port-present
     effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
-    reachability: consumer-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
-    owner_seam: src/apps/cli/repl/system-prompt-rebuilder.ts
-    rollback: onChange 미주입(state-only swap)
+    owner_seam: src/host/bootstrap/bootstrap-session.ts
+    rollback: onIdentityModeChange 미주입 또는 /identity 미호출
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: image-gen

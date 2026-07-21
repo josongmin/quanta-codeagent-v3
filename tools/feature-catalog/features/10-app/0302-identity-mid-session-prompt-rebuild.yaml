@@ -1,7 +1,7 @@
 id: identity-mid-session-prompt-rebuild
 title: ADR-0302 — /identity mid-session system-prompt rebuild (closes ADR-0291 last-mile)
 section: 10
-subsystem: REPL surface composition
+subsystem: Runner-owned session prompt state + REPL surface composition
 order: 72
 maturity: L2
 status: new
@@ -20,9 +20,9 @@ surface_integration:
   cli: full
   web: missing
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-20"
   evidence:
-    cli: "runs in the interactive CLI — 1/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
+    cli: "interactive CLI /identity adapter mutates the host-bootstrap runner-owned SystemSource; real two-turn e2e verifies the next LLM input."
     web: "CLI-only /identity slash seam; mode_changed event is dropped at context-binding.ts default arm (B1) and the slash itself is a SlashPalette stub (B2) — no browser affordance."
 purpose: |
   ADR-0291 wired ctx.identity = {get,set,list}. Today set("plan")
@@ -46,41 +46,33 @@ purpose: |
         Adapter swallows callback throws so /identity never regresses
         to a 1-exit just because the rebuilder hiccupped.
 
-  Default-OFF byte-identical: absent onChange + absent rebuilder ⇒
-  behavior identical to ADR-0291 (state-only swap, stale prompt).
-
-  WIRE LANDED (2026-07): the live surface composition wires the mid-session
-  rebuild via the inline `buildPromptFromIdentityMode` path, NOT the
-  `createSystemPromptRebuilder` port. `surface-compose.ts:802` binds
-  `onIdentityModeChange → setup.refreshSystemPrompt`; that seam
-  (`bootstrap-session.ts:226`) calls `systemSource.set(buildPromptFromIdentityMode())`,
-  which fresh-reads the live `identityModeState.get()` (bootstrap-session.ts:201)
-  so /identity mid-session refreshes the cached prefix. The
-  `createSystemPromptRebuilder` port here is an unwired forward-seam (unit-tested
-  only, no production caller — see the FORWARD-SEAM marker in
-  system-prompt-rebuilder.ts).
+  WIRE LANDED (2026-07-20): runner assembly now owns both SystemSource and
+  createSystemPromptRebuilder. Host bootstrap constructs the rebuilder with the
+  live identity-mode state and persists `rebuilder.rebuild()` into SystemSource;
+  the CLI slash surface only invokes the host-owned refresh callback. This removes
+  the former inline duplicate and makes the factory's no-throw fallback contract
+  the production authority.
 evidence:
   code:
-    - src/apps/cli/repl/system-prompt-rebuilder.ts
+    - src/runner/assemble/session-state.ts
+    - src/host/bootstrap/bootstrap-session.ts
     - src/apps/cli/repl/ctx-adapters/identity-mode-adapter.ts
   adrs:
     - docs/decisions/0302-identity-mid-session-prompt-rebuild.md
   tests:
     unit:
       - tests/unit/cli/identity-prompt-rebuild-hellgate.test.ts
-    integration: []
+    integration:
+      - tests/integration/identity-mid-session-prompt-rebuild-e2e.test.ts
     contract: []
 knobs: []
 deliberate_hold: null
 notes: |
   15 hellgate cases / 45 expects / 0 fail. tsc 0, biome 0.
 
-  Live wire landed via the inline path (see purpose): surface-compose.ts:802
-  binds onIdentityModeChange → refreshSystemPrompt (bootstrap-session.ts:226),
-  which mutates the shared `systemSource` cell that the per-turn assembler reads
-  on the next turn — no loop/runner contract shape change. The
-  createSystemPromptRebuilder / SystemSource port pair in this slice is the
-  unwired forward-seam substrate (unit-tested only).
+  The canonical owner-wire hellgate mutation-proves that bootstrap calls the
+  runner factory and writes `systemSource.set(rebuilder.rebuild())`; the real
+  two-turn e2e proves the next LLM input changes after `/identity set audit`.
 
   No new closed enums or error codes; the typed fallback prefix
   ("(prompt rebuild failed: ") is a stable test target, not a public

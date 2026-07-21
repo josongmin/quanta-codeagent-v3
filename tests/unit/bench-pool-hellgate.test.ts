@@ -82,11 +82,13 @@ for (const path of [
   "/tmp/a.jsonl",
   "/tmp/b.jsonl",
 ]) {
-  const id = path.split("/").at(-1)?.replace(/\.jsonl$/, "") ?? "fixture"
+  const id =
+    path
+      .split("/")
+      .at(-1)
+      ?.replace(/\.jsonl$/, "") ?? "fixture"
   writeDatasetJsonlAtPath(path, [{ instance_id: `fixture__${id}`, patch: TS_FIX_PATCH }])
 }
-
-const DEFAULT_SINGLE_BOX_GUARD_DIR = join(allocTempDir("bench-pool-single-box-root-"), "guard")
 
 const allocTokenBudgetDir = (): string => allocTempDir("bench-pool-budget-")
 const RUN_EXIT_OK = ok("0\n==XQ-RUN-EXIT-XQ==\n")
@@ -188,12 +190,20 @@ const poolCfg = (spawn: SpawnFn, over: Record<string, unknown> = {}) => ({
   preset: "agentless-v2",
   model: "gpt-5.4",
   concurrency: 8,
-  singleBoxGuardDir: DEFAULT_SINGLE_BOX_GUARD_DIR,
+  singleBoxGuardDir: join(allocTempDir("bench-pool-single-box-root-"), "guard"),
   tokenBudgetDir: allocTokenBudgetDir(),
   tokenBudgetWaitMs: 5_000,
   tokenBudgetPollMs: 10,
   authJsonProvider: () => FULL_AUTH,
   ...over,
+})
+
+describe("pool fixture isolation", () => {
+  test("independent pool configs never share the default single-box guard", () => {
+    const first = poolCfg(mockSpawn({}).fn)
+    const second = poolCfg(mockSpawn({}).fn)
+    expect(first.singleBoxGuardDir).not.toBe(second.singleBoxGuardDir)
+  })
 })
 
 const CHUNKS: PoolChunk[] = [

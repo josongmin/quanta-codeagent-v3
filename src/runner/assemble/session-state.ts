@@ -2,11 +2,44 @@ import type { IdentityMode } from "@/agent/identity"
 import type { ModeVariantKey, SystemPromptVariantRegistry } from "@/agent/system-prompt"
 import type { ToolProfileName, ToolProfileResolver } from "@/agent/tool-profile"
 import type { PermissionMode } from "@/permission"
+import { errMessage } from "@/shared"
 
 export interface SystemSource {
   get(): string
   set(next: string): void
 }
+
+/** Pure rebuild port for a mutable session system prompt. The mode reader is
+ * deliberately live: a slash surface updates the same session cell before the
+ * next turn reads SystemSource.get(). */
+export interface SystemPromptRebuilderPort {
+  rebuild(): string
+}
+
+export interface CreateSystemPromptRebuilderArgs {
+  readonly mode: () => IdentityMode | undefined
+  readonly cwd: string
+  readonly baseBuilder: (mode: IdentityMode | undefined, cwd: string) => string
+}
+
+export const SYSTEM_PROMPT_REBUILD_FALLBACK_PREFIX = "(prompt rebuild failed: "
+
+const formatSystemPromptRebuildFallback = (reason: string): string =>
+  `${SYSTEM_PROMPT_REBUILD_FALLBACK_PREFIX}${reason.replace(/[\r\n]+/g, " ")})`
+
+/** The runner owns the mutable session state and this no-throw recompute
+ * contract. Host composition supplies prompt policy through baseBuilder. */
+export const createSystemPromptRebuilder = (
+  args: CreateSystemPromptRebuilderArgs,
+): SystemPromptRebuilderPort => ({
+  rebuild: (): string => {
+    try {
+      return args.baseBuilder(args.mode(), args.cwd)
+    } catch (error) {
+      return formatSystemPromptRebuildFallback(errMessage(error))
+    }
+  },
+})
 
 export interface ToolProfileSessionState {
   readonly resolver: ToolProfileResolver
@@ -96,8 +129,7 @@ export const createIdentityModeSessionState = (args: {
       ? { perTurnReminderEnabled: args.perTurnReminderEnabled }
       : {}),
     get: (): IdentityMode => current,
-    getPromptMode: (): ModeVariantKey =>
-      current === "onboarding" ? args.defaultMode : current,
+    getPromptMode: (): ModeVariantKey => (current === "onboarding" ? args.defaultMode : current),
     set: (next: IdentityMode): void => {
       current = next
     },
