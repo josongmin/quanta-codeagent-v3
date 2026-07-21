@@ -1,0 +1,57 @@
+version: 1
+feature_id: skill-discover
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/discover.ts:discoverSkills
+entrypoints:
+  - src/apps/cli/repl/skills-surface.ts:buildSkillsSurface
+  - src/apps/web-daemon/runtime-factory.ts:buildReadoutSources
+  - src/agent/tier1/skill.ts:buildSkillBlock
+activation:
+  - A configured skills.dir causes the CLI, daemon readout, or Tier1 skill block to enumerate that directory; bundled system skills use the same discoverSkills seam.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/skill/discover.ts:discoverSkills
+  - src/skill/skill-size.ts:checkSkillSize
+consumer:
+  - src/apps/cli/repl/skills-surface.ts:buildSkillsSurface
+  - src/apps/web-daemon/runtime-factory.ts:buildReadoutSources
+  - src/agent/tier1/skill.ts:buildSkillBlock
+reachable: yes
+surface_findings:
+  - CLI and Tier1 composition load configured user directories and merge bundled system skills; daemon readout uses the same loader for its skills source.
+  - Discovery continues across individual bad files and distinguishes stat failure from too-large rejection before frontmatter parsing.
+  - Behavior is resource/configuration-dependent rather than an unconditional default tool registration.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill-discover-errors.test.ts tests/unit/skill-discover-size-cap.test.ts tests/unit/skill.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Error isolation, frontmatter shaping, deterministic enumeration, and size-cap behavior passed in the focused rail.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "discoverSkills\\(" src/apps/cli/repl/skills-surface.ts src/apps/web-daemon/runtime-factory.ts src/agent/tier1/skill.ts src/skill/system-skills/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI, daemon readout, Tier1 builder, and bundled-system loading each name the same discovery seam.
+  - kind: test
+    command: bun test tests/unit/skill-discover-errors.test.ts tests/unit/skill-discover-size-cap.test.ts tests/unit/skill.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Discovery's malformed-file continuation, size guard, ordering, and parsed values passed in the 183-test combined run.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch15
+review_state: approved
+reviewer: codex/cross-review-wave1

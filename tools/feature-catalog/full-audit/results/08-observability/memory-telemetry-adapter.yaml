@@ -1,0 +1,48 @@
+version: 1
+feature_id: memory-telemetry-adapter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/memory-telemetry.ts:buildMemoryTelemetry
+entrypoints: []
+activation:
+  - No production composition root builds this adapter and passes it to memory phase or recall operations.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/observability/memory-telemetry.ts:buildMemoryTelemetry
+consumer: []
+reachable: no
+surface_findings:
+  - The catalog itself records no call site; adapter contract and no-leak behavior are isolated but production emission is absent.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-telemetry-port-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Adapter key coverage, no-leak, default-off, and resilient sink rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: seam-only
+blocker: Missing production telemetry adapter construction and memory-port injection.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'buildMemoryTelemetry' src --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Only definition and barrel export exist.
+  - kind: test
+    command: bun test tests/unit/memory-telemetry-port-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Isolated adapter contract passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

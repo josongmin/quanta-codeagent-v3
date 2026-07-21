@@ -1,0 +1,45 @@
+version: 1
+feature_id: lsp-pyright-adapter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/lsp/adapters/pyright.ts:PyrightAdapter
+entrypoints:
+  - src/lsp-bridge.ts
+activation:
+  - Python extension routing selects the adapter when its server executable is available.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: resource
+producer:
+  - src/lsp/adapters/pyright.ts:PyrightAdapter
+consumer:
+  - src/lsp-bridge.ts
+reachable: yes
+surface_findings:
+  - Adapter inherits tested base behavior; server binary availability is a deployment resource condition.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/contract/lsp-pyright.test.ts tests/unit/lsp-nav-rpc.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Adapter contract and base navigation rails passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: conditional
+blocker: Requires external Pyright language server binary.
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/contract/lsp-pyright.test.ts tests/unit/lsp-nav-rpc.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Pyright adapter contract and inherited owner rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

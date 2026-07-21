@@ -1,0 +1,56 @@
+version: 1
+feature_id: prompt-template-sota-plus-plus
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt.ts:buildSystemPrompt
+entrypoints:
+  - src/apps/cli/repl.ts:bootstrapSession
+  - src/host/bootstrap/bootstrap-session.ts:buildSessionStatePorts
+activation:
+  - Every interactive CLI session builds its static system prompt through buildSystemPrompt.
+  - ADR-0067 strengthening atoms are unconditional prompt-body content, including the default persona.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/prompt-body.ts:BODY_AFTER_PERSONA_INTERNAL_VOCABULARY
+  - src/agent/prompt-body.ts:verification and production-conduct atoms
+  - src/agent/prompt.ts:buildSystemPrompt
+consumer:
+  - src/host/bootstrap/bootstrap-session.ts:createSystemSource
+  - src/agent/loop/stream-consume.ts:StreamInput.system
+reachable: yes
+surface_findings:
+  - The CLI bootstrap supplies the built static prompt to the live AgentConfig; this is not an isolated prompt helper.
+  - Prompt-system tests pin all four ADR-0067 sections and their composition with each persona.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/prompt-system.test.ts tests/unit/prompt-sections-hellgate.test.ts tests/unit/prompt-rules-snapshot.test.ts tests/unit/prompt-escape-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The focused prompt rails passed, including all four ADR-0067 section assertions, fixed placement, composition with personas, and byte-stability.
+failure_posture: na
+security_posture: conditional
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildSystemPrompt\(|pickPersona' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli src/host/bootstrap src/agent/prompt.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI REPL supplies pickPersona to bootstrap, which constructs the static prompt via buildSystemPrompt for the live session.
+  - kind: test
+    command: bun test tests/unit/prompt-system.test.ts tests/unit/prompt-sections-hellgate.test.ts tests/unit/prompt-rules-snapshot.test.ts tests/unit/prompt-escape-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected prompt evidence was part of the 283-pass, 0-fail focused audit rail.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-prompt
+review_state: approved
+reviewer: codex/cross-review-wave1

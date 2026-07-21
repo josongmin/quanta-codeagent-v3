@@ -1,0 +1,40 @@
+version: 1
+feature_id: shared-test-harness
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "tests/integration/_harness.ts"
+entrypoints: ["test imports"]
+activation: ["Tests import shared doubles and builders."]
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer: ["tests/integration/_harness.ts"]
+consumer: ["unit and integration test suites"]
+reachable: no
+surface_findings: ["Test-only shared double infrastructure has no runtime surface."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: source
+  command: "rg -n 'ScriptedLLM|RecordingStream|withTimeout' tests"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Shared harness symbols have broad test-only consumption."
+failure_posture: na
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: "Test infrastructure only."
+disposition: hold
+receipts:
+  - kind: source
+    command: "rg -n 'ScriptedLLM|RecordingStream|withTimeout' tests"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Test-only consumer search confirms scope."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

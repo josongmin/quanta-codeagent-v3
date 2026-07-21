@@ -1,0 +1,61 @@
+version: 1
+feature_id: ai-session-title
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/apps/cli/internal.ts:buildAutoTitlePort"
+entrypoints:
+  - "src/apps/cli/repl.ts:sessionSetupDeps.buildAutoTitlePort"
+  - "src/host/bootstrap/bootstrap-session.ts:bootstrapSession"
+  - "src/agent/loop/session-lifecycle.ts:runSessionStartSequence"
+activation:
+  - "QUANTA_SESSION_AUTO_TITLE=true"
+  - "QUANTA_SESSION_TITLE_MODEL=<cheap model id>"
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/runner/session-ops/auto-title.ts:createAutoTitlePort"
+  - "src/apps/cli/internal.ts:buildSummarizerLlmCore cheap-model construction"
+consumer:
+  - "src/host/bootstrap/bootstrap-session.ts passes the built port into bootstrap output"
+  - "src/agent/loop/session-lifecycle.ts fires maybeTitle once for an opening user prompt"
+reachable: yes
+surface_findings:
+  - "The CLI root builds no port unless both gate and cheap model resolve, so the first-turn branch remains absent by default."
+  - "The production writer is renameSession and the re-read adapter is loadSessionById; manual names win over an in-flight generated title."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/ai-title-byok-reachability-hellgate.test.ts tests/unit/auto-session-title-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Knob-off and model-absent controls build no port and leave the loop title branch dead."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/ai-session-title-core-hellgate.test.ts tests/unit/auto-session-title-hellgate.test.ts tests/unit/ai-title-byok-reachability-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The reachable CLI composition test builds a cheap port, runs the real renameSession adapter, and preserves a human rename."
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'buildAutoTitlePort|autoTitlePort|maybeTitle|QUANTA_SESSION_AUTO_TITLE|QUANTA_SESSION_TITLE_MODEL' src/apps/cli src/host src/agent/loop src/runner"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The optional port crosses CLI setup, session bootstrap, context binding, and the live first-turn lifecycle."
+  - kind: test
+    command: "bun test tests/unit/ai-session-title-core-hellgate.test.ts tests/unit/auto-session-title-hellgate.test.ts tests/unit/ai-title-byok-reachability-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "All selected sanitization, nonblocking, no-clobber, loop once-only, and real composition reachability rails passed with zero failures."
+audited_at: "2026-07-19"
+auditor: codex/p1-resilience-tier1
+review_state: approved
+reviewer: codex/cross-review-wave1

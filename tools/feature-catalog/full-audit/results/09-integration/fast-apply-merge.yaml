@@ -1,0 +1,62 @@
+version: 1
+feature_id: fast-apply-merge
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/optional-ports.ts:wireFastApplyMerge
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+  - src/agent/dispatch/tool-context.ts:buildToolContext
+  - src/tool/edit/index.ts:tryFastApplyMerge
+activation:
+  - QUANTA_FAST_APPLY_MERGE=1 plus a non-empty QUANTA_FAST_APPLY_MODEL builds the merge port at the composition root.
+  - An unmatched edit without line_ranges or replace_all consumes ToolContext.fastApplyMerge before returning the typed mismatch.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/fast-apply-fallback/merge-runner.ts:createFastApplyMerge
+  - src/agent/optional-ports.ts:wireFastApplyMerge
+consumer:
+  - src/agent/dispatch/tool-context.ts:buildToolContext
+  - src/tool/edit/index.ts:tryFastApplyMerge
+reachable: yes
+surface_findings:
+  - The live optional-port root builds the merge port under the strict gate and operator-selected model, then buildToolContext projects it to the edit tool.
+  - The edit ladder consumes the port only after deterministic matching misses and routes accepted results through the ordinary gated commit and diff sink.
+  - The catalog notes still describe composition-root wiring as a deferred follow-up, but the snapshot has that wire and focused ON/OFF proof.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/fast-apply-merge-comproot-wire-hellgate.test.ts tests/unit/fast-apply-merge-e2e-hellgate.test.ts tests/unit/edit-fast-apply-merge-rung-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset or loose gate leaves the original config object and edit mismatch path unchanged with zero dispatch or write.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/fast-apply-merge-runner-hellgate.test.ts tests/unit/fast-apply-merge-comproot-wire-hellgate.test.ts tests/unit/fast-apply-merge-e2e-hellgate.test.ts tests/unit/edit-fast-apply-merge-rung-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The real runner and edit tool accept a valid merged file via gated commit, reject structural and scoped hazards, and preserve the diff-sink backstop.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: The feature notes claim composition-root wiring remains a follow-up, but wireFastApplyMerge and ToolContext projection are live in the frozen snapshot.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'wireFastApplyMerge|QUANTA_FAST_APPLY_MERGE|QUANTA_FAST_APPLY_MODEL|fastApplyMerge|tryFastApplyMerge' src/agent/optional-ports.ts src/agent/dispatch/tool-context.ts src/tool/edit/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Strict gate, model requirement, concrete producer, dispatch projection, and edit consumer are present in one live chain.
+  - kind: test
+    command: bun test tests/unit/fast-apply-merge-runner-hellgate.test.ts tests/unit/fast-apply-merge-comproot-wire-hellgate.test.ts tests/unit/fast-apply-merge-e2e-hellgate.test.ts tests/unit/edit-fast-apply-merge-rung-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Fifty focused assertions passed, including real merge application, gate-off identity, and fail-closed rejection cases.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-fastapply
+review_state: approved
+reviewer: codex/cross-review-wave1

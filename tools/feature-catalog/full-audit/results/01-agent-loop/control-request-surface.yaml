@@ -1,0 +1,56 @@
+version: 1
+feature_id: control-request-surface
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/control-request/types.ts:planControlRequest
+entrypoints:
+  - src/apps/web-daemon/runtime-factory.ts:web control-request port
+  - src/agent/loop/control-poll.ts:turn-top drain
+activation:
+  - Enable QUANTA_CONTROL_REQUEST in a web-daemon or IDE session and send a supported controlRequest frame.
+effective_defaults:
+  cli: off
+  web: off
+  bench: na
+  headless: na
+  daemon: off
+producer:
+  - src/agent/control-request/types.ts:planControlRequest
+  - src/agent/control-request/apply.ts:drainControlRequests
+consumer:
+  - src/agent/loop/control-poll.ts
+  - src/apps/web-daemon/runtime-factory.ts
+  - src/apps/web-daemon/control-request-frame.ts
+reachable: yes
+surface_findings:
+  - CLI has no control-request port; web daemon conditionally creates one and turn-top polling drains it into live effects.
+  - Unknown model and permission values become typed rejected effects and leave live cells unchanged.
+  - Queue is bounded with latest-wins behavior, and malformed or non-control frames fall through instead of crashing the bridge.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/web-daemon/control-request-server-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent control ports retain ordinary frame forwarding.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/control-request-hellgate.test.ts tests/unit/control-request-apply-hellgate.test.ts tests/unit/agent/control-request-drain-wire-hellgate.test.ts tests/unit/apps/web-daemon/control-request-wire-hellgate.test.ts tests/unit/apps/web-daemon/control-request-server-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Planning, bounded drain, fail-closed allowlists, server frame routing, and live permission-cell mutation passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: The sole runtime surface is web/IDE and is default-off behind QUANTA_CONTROL_REQUEST; CLI remains unwired.
+disposition: hold
+receipts:
+  - kind: test
+    command: bun test tests/unit/control-request-hellgate.test.ts tests/unit/control-request-apply-hellgate.test.ts tests/unit/agent/control-request-drain-wire-hellgate.test.ts tests/unit/apps/web-daemon/control-request-wire-hellgate.test.ts tests/unit/apps/web-daemon/control-request-server-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused control-request rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,56 @@
+version: 1
+feature_id: worktree-fork-primitive
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/worktree-fork.ts:createPersistentWorktree
+entrypoints:
+  - src/runner/session-ops/index.ts:cmdFork
+  - src/runner/session-ops/index.ts:cmdDelete
+activation:
+  - Run session fork <id> --worktree from a session whose cwd is a Git repository.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/runtime/worktree-fork.ts:createPersistentWorktree
+  - src/runtime/worktree-fork.ts:removeWorktree
+consumer:
+  - src/runner/session-ops/index.ts:cmdFork
+  - src/runner/session-ops/index.ts:cmdDelete
+  - src/tool/worktree/index.ts:worktree tool
+reachable: yes
+surface_findings:
+  - The session fork command creates the persistent tree before writing the forked session and rolls it back if persistence fails.
+  - Session delete derives only the constrained .quanta/worktrees segment and attempts best-effort removal before deleting the session record.
+  - Branch, ref, and identifier sanitizers run before shell interpolation; non-Git roots and failed git adds are surfaced as typed errors.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/worktree-fork.test.ts tests/unit/session-security-regression.test.ts tests/unit/cli-session-commands.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real Git create/remove, idempotency, safe ref and branch handling, and session command behavior passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'createPersistentWorktree|removeWorktree|cmdFork|cmdDelete|safeBranch|safeRef' src/runtime/worktree-fork.ts src/runner/session-ops/index.ts src/tool/worktree/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI session fork and deletion consume the sanitized runtime primitive; the tool surface also consumes it.
+  - kind: test
+    command: bun test tests/unit/worktree-fork.test.ts tests/unit/session-security-regression.test.ts tests/unit/cli-session-commands.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused worktree and session security rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

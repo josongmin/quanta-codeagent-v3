@@ -1,0 +1,56 @@
+version: 1
+feature_id: replay-cmd-session-rewind
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/replay-cmd.ts:replayCmd
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/repl.ts:runRepl
+  - src/apps/cli/slash/registry-surface.ts:SURFACE_SLASH_COMMANDS
+activation:
+  - The interactive CLI always composes replay state; /replay resolves a persisted session id and paints its records in file order.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/replay-cmd.ts:runReplayCmd
+  - src/apps/cli/repl/surface-compose/wire-builders.ts:buildReplaySlashState
+consumer:
+  - src/apps/cli/replay-cmd.ts:replayCmd
+  - src/apps/cli/repl/surface-compose/slash-context-compose.ts:buildSurfaceSlashContext
+reachable: yes
+surface_findings:
+  - The interactive REPL composes replay state and registers the command; stored session records are the required resource.
+  - Missing state degrades with the documented not-wired exit 0 path; missing session ids and malformed flags fail loudly.
+  - Rendering preserves file-order filtering, redacts secret-shaped values, and emits an operator warning when malformed session rows were skipped.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/replay-cmd-hellgate.test.ts tests/unit/cli/wire-tir-hellgate.test.ts tests/unit/slash-commands.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The focused rail covers registration, absent wiring, deterministic frames, turn and tool filters, pacing, parsing, redaction, and large streaming input.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'replayCmd|buildReplaySlashState|ctx.replay' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/replay-cmd.ts src/apps/cli/repl/surface-compose src/apps/cli/slash/registry-surface.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The snapshot registers replayCmd and the surface composer provides its resolver and session iterator.
+  - kind: test
+    command: bun test tests/unit/cli/replay-cmd-hellgate.test.ts tests/unit/cli/wire-tir-hellgate.test.ts tests/unit/slash-commands.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Replay owner rails passed within the 205-test focused run.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

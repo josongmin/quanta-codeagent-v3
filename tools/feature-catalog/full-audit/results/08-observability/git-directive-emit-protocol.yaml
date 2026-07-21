@@ -1,0 +1,54 @@
+version: 1
+feature_id: git-directive-emit-protocol
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop-helpers.ts:buildGitDirectiveEmit plus src/agent/turn-closeout.ts:flushTurnObservability
+entrypoints:
+  - src/runner/assemble/interactive-knobs.ts wires QUANTA_GIT_DIRECTIVE_EMIT to AgentConfig.gitDirectiveEmit
+  - src/agent/loop/session-bootstrap.ts constructs the collector
+activation:
+  - QUANTA_GIT_DIRECTIVE_EMIT=1 or on enables a stdout collector; stderr selects stderr.
+  - A production tool registry must also receive that same collector to record directives before closeout flushes it.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/git/_directive-publish.ts:publishGitDirective
+  - src/git/directive-emit/turn-collector.ts:buildGitDirectiveCollector
+consumer:
+  - src/agent/turn-closeout.ts:flushTurnObservability calls collector.flush
+reachable: no
+surface_findings:
+  - The live config path constructs and flushes a collector when the env gate is ON.
+  - No production composition root passes gitDirectiveCollector to git stage/push/PR factories, and gitTools has no collector option.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git-directive-emit-hellgate.test.ts tests/unit/git-directive-turn-collector-hellgate.test.ts tests/unit/agent/turn-closeout-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 75 protocol, collector, and closeout cases pass, including phase rejection, FIFO drain, and exactly-once closeout; the collector is injected in the closeout rail.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: The collector reaches loop closeout but no live registry passes it to the mutating git/gh tool factories, leaving the flush buffer empty on production paths.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg -n --glob 'src/**' 'gitDirectiveCollector' src/tool src/apps src/host src/runner src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Collector references end at session bootstrap and closeout; tool definitions accept it but no production composition root supplies it.
+  - kind: test
+    command: bun test tests/unit/git-directive-emit-hellgate.test.ts tests/unit/git-directive-turn-collector-hellgate.test.ts tests/unit/agent/turn-closeout-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 75 phase, collector lifecycle, and turn-closeout cases pass.
+audited_at: "2026-07-19"
+auditor: codex/p1-observability-b
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,52 @@
+version: 1
+feature_id: exfil-scouting-detector
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/network-proxy/scouting.ts:detectScouting
+entrypoints: [src/runtime/network-proxy/loopback-proxy.ts, src/agent/admissibility-gate/gates.ts]
+activation: [QUANTA_EXFIL_SCOUTING=1, QUANTA_EXFIL_SCOUTING_K positive, network proxy and auto-mode rule overlay where applicable]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/runtime/network-proxy/loopback-proxy.ts]
+consumer: [src/runtime/network-proxy/loopback-proxy.ts:latestScoutingSignal, src/agent/admissibility-gate/gates.ts]
+reachable: yes
+surface_findings:
+  - "Proxy computes a latest signal only when its threshold is wired; agent taxonomy line is composed only inside the rules-store overlay branch."
+  - "Signal remains advisory and its host-binding surface is absent, so it cannot independently deny or visibly alert an operator."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/exfil-scouting-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Strict gate off and invalid or missing K leave detector inert and prompt byte-identical.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/exfil-scouting-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Distinct denied hosts meet threshold, retries and allowlisted hosts do not, and taxonomy append is tested.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: conditional
+blocker: "Operational alerting/action is not wired: latestScoutingSignal remains proxy-local and taxonomy injection requires the separate auto-mode rules-store overlay path."
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'latestScoutingSignal|detectScouting|withExfilScoutingTaxonomy|exfilScoutingThreshold' src/runtime/network-proxy src/agent/admissibility-gate/gates.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Detector is reached by proxy config, but its result has no host binding and taxonomy needs a separate overlay branch.
+  - kind: test
+    command: bun test tests/unit/exfil-scouting-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Threshold and false-positive discipline rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

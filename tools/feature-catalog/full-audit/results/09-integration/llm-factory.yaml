@@ -1,0 +1,45 @@
+version: 1
+feature_id: llm-factory
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/factory.ts:createLLM
+entrypoints:
+  - src/apps/cli/internal.ts
+activation:
+  - Application composition creates the configured provider through the shared factory.
+effective_defaults:
+  cli: on
+  web: resource
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/llm/factory.ts:createLLM
+consumer:
+  - src/apps/cli/internal.ts
+reachable: yes
+surface_findings:
+  - Provider construction, model selection, timing, and retry-model helpers have focused unit coverage.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/model-swap-retry.test.ts tests/unit/openai.test.ts tests/unit/anthropic.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Factory provider and model-swap rails passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/model-swap-retry.test.ts tests/unit/openai.test.ts tests/unit/anthropic.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: LLM factory rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

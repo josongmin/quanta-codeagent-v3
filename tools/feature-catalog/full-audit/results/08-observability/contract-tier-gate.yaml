@@ -1,0 +1,40 @@
+version: 1
+feature_id: contract-tier-gate
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "tests/contract/_guard.ts:requireContract"
+entrypoints: ["contract test module load"]
+activation: ["REQUIRE_CONTRACT=1 upgrades unavailable external dependencies from skip to failure."]
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer: ["tests/contract/_guard.ts"]
+consumer: ["Docker and LSP contract tests"]
+reachable: no
+surface_findings: ["This is test-tier infrastructure with intentional local skip and CI fail semantics, not a runtime capability."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: source
+  command: "rg -n 'requireContract|REQUIRE_CONTRACT' tests/contract"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Guard is consumed by Docker and LSP contract sources."
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: "Test infrastructure only."
+disposition: hold
+receipts:
+  - kind: source
+    command: "rg -n 'requireContract|REQUIRE_CONTRACT' tests/contract"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Contract test scope confirmed."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

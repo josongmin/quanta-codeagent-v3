@@ -1,0 +1,57 @@
+version: 1
+feature_id: agent-config-assembler
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+entrypoints:
+  - src/apps/agent/assemble.ts:assembleAgentConfig
+  - src/apps/cli/mcp-server-setup.ts:setupMcpServer
+  - src/apps/web-daemon/runtime-factory.ts:interactive runtime factory
+activation:
+  - Run an agent-app mode or a CLI MCP-server path that constructs an AssembleRequest.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+consumer:
+  - src/apps/agent/assemble.ts:surface shim
+  - src/apps/agent/mode-presets/interactive.ts:interactive preset
+  - src/apps/cli/mcp-server-setup.ts:headless MCP setup
+  - src/apps/web-daemon/runtime-factory.ts:interactive web runtime
+reachable: yes
+surface_findings:
+  - The host assembler is shared by app-agent presets, CLI MCP-server setup, SDK embedding, and the web daemon; it constructs ModePolicy and BudgetMeter for every AssembleRequest.
+  - AssembleRequest requires mode and has no modePolicy option, so the catalog statement that callers pass modePolicy undefined to bypass the whole layer is not implementable.
+  - Optional capability slots remain individually environment-gated and caller-override-safe, but the core policy and meter are always constructed.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/agent/assemble.test.ts tests/unit/assemble.test.ts tests/unit/apps/agent/run.test.ts tests/unit/apps/agent/anti-regression-invariants.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All six presets, dial clamping, base preservation, lifecycle outcomes, and the 72-cell lever matrix passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: Catalog default-OFF and byte-identical bypass claim is false for the current required-mode AssembleRequest contract.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'interface AssembleRequest|mode: RunMode|modePolicy: policy|new BudgetMeterCtor|assembleAgentConfig\\(' src/host/runtime/agent-config-assembler.ts src/apps/agent src/apps/cli/mcp-server-setup.ts src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The required mode request, unconditional core assembly, and multiple live consumers are present; no modePolicy request field exists.
+  - kind: test
+    command: bun test tests/unit/apps/agent/assemble.test.ts tests/unit/assemble.test.ts tests/unit/apps/agent/run.test.ts tests/unit/apps/agent/anti-regression-invariants.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused assembler and invariant rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

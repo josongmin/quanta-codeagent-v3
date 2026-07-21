@@ -1,0 +1,61 @@
+version: 1
+feature_id: repro-test-mwe-vote
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/bench/eval/driver.ts:runRepairPhase
+entrypoints:
+  - src/apps/bench/run-main.ts:runMain
+  - src/apps/bench/eval/driver.ts:runInstance
+activation:
+  - QUANTA_BENCH_REPRO_VOTE=1
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/agent/verification-plan/extract-issue-repro.ts:extractIssueReproSeed
+  - src/runner/batch/eval/repair/repro-vote.ts:makeReproVoteValidate
+consumer:
+  - src/runner/batch/eval/driver/repro-test-prep.ts:prepareReproTestDetailed
+  - src/apps/bench/eval/driver.ts:runRepairPhase
+  - src/apps/bench/eval/driver.ts:attachAndPersistReproVoteOutcomes
+reachable: yes
+surface_findings:
+  - Issue MWE extraction is seed-only and must pass base-red validation before it can influence an oracle.
+  - With the vote knob on, the live repair validator is replaced by the K-of-N repro validator; empty, failed, and tied inputs fail closed.
+  - Vote outcomes are drained per instance and persisted as an additive diagnostic artifact when an artifact root is present.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/repro-vote-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: With QUANTA_BENCH_REPRO_VOTE unset, buildReproVoteValidate returns the fallback function by identity.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/extract-issue-repro.test.ts tests/unit/repro-vote.test.ts tests/unit/repro-vote-validate.test.ts tests/unit/repro-vote-wiring-hellgate.test.ts tests/unit/repro-vote-outcome-default-sink.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed, covering seed extraction, resolved and unresolved majority paths, failure-closed ties and execution errors, live gate wiring, and outcome recording.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'extractIssueReproSeed|buildReproVoteValidate|attachAndPersistReproVoteOutcomes' src/runner/batch/eval/driver src/apps/bench/eval/driver.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live bench path seeds repro generation, wraps repair validation when opted in, and attaches per-instance outcomes before return.
+  - kind: test
+    command: bun test tests/unit/extract-issue-repro.test.ts tests/unit/repro-vote.test.ts tests/unit/repro-vote-validate.test.ts tests/unit/repro-vote-wiring-hellgate.test.ts tests/unit/repro-vote-outcome-seam.test.ts tests/unit/repro-vote-outcome-default-sink.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused unit rails passed, including default-OFF identity and all five vote outcome classes.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-bench-controls
+review_state: approved
+reviewer: codex/cross-review-wave1

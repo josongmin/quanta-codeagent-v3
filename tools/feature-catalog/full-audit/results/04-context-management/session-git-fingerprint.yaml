@@ -1,0 +1,45 @@
+version: 1
+feature_id: session-git-fingerprint
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/orchestrate/resume-fsm.ts:resolveResume
+entrypoints: [src/apps/cli/repl.ts:runRepl, src/host/bootstrap/bootstrap-session.ts:bootstrapSession]
+activation: [Every CLI fresh-session mint invokes the default wireSessionGitFingerprint callback., Git probing is best effort; non-git or failed probes preserve session startup with absent fields.]
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: na
+  headless: off
+  daemon: unknown
+producer: [src/session/git-fingerprint.ts:captureGitFingerprint, src/agent/git-observability/session-fingerprint.ts:wireSessionGitFingerprint]
+consumer: [src/runner/orchestrate/resume-fsm.ts:resolveResume, src/session/store.ts:saveSessionById]
+reachable: yes
+surface_findings: ["Both --new-session and automatic fresh-mint branches capture the fingerprint before persistence.", "The catalog CLI-full claim is supported by the production resume state machine; path and existing-id resume retain existing metadata instead of recapturing it."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git-fingerprint-hellgate.test.ts tests/unit/git-observability-wiring-hellgate.test.ts tests/unit/resume-fsm-git-fingerprint-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Full, detached, local-only, failure, auto-mint, new-session, and persistent-store fingerprint behavior passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'captureFingerprint|wireSessionGitFingerprint|saveSessionById' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/runner/orchestrate/resume-fsm.ts src/apps/cli/repl.ts src/host/bootstrap
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI boot path uses resolveResume, whose fresh-mint branches invoke the real fingerprint wire before saveSessionById.
+  - kind: test
+    command: bun test tests/unit/git-fingerprint-hellgate.test.ts tests/unit/git-observability-wiring-hellgate.test.ts tests/unit/resume-fsm-git-fingerprint-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The selected capture, wrapper, and production-resume wire rails passed in the focused audit commands.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch4
+review_state: approved
+reviewer: codex/cross-review-wave1

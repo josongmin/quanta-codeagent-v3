@@ -1,5 +1,11 @@
 import type { LoadedFeature } from "../schema"
-import type { AuditPriority, AuditRecord, AuditSnapshot, AuditSnapshotEntry } from "./schema"
+import type {
+  AuditInputDigests,
+  AuditPriority,
+  AuditRecord,
+  AuditSnapshot,
+  AuditSnapshotEntry,
+} from "./schema"
 
 export interface SnapshotInputs {
   readonly features: readonly LoadedFeature[]
@@ -7,6 +13,7 @@ export interface SnapshotInputs {
   readonly reachabilityGrandfatheredIds: ReadonlySet<string>
   readonly snapshotHead: string
   readonly createdAt: string
+  readonly inputDigests: AuditInputDigests
 }
 
 export interface AuditValidationReport {
@@ -46,9 +53,10 @@ export const buildAuditSnapshot = (inputs: SnapshotInputs): AuditSnapshot => {
   const priorityCounts: Record<AuditPriority, number> = { P0: 0, P1: 0, P2: 0, P3: 0 }
   for (const entry of entries) priorityCounts[entry.priority] += 1
   return {
-    version: 1,
+    version: 2,
     snapshot_head: inputs.snapshotHead,
     created_at: inputs.createdAt,
+    input_digests: inputs.inputDigests,
     catalog_total: entries.length,
     priority_counts: priorityCounts,
     entries,
@@ -74,6 +82,17 @@ const validateCoverage = (
   return snapshotIds
 }
 
+const validateInputDigests = (
+  snapshot: AuditSnapshot,
+  currentInputDigests: AuditInputDigests,
+  errors: string[],
+): void => {
+  for (const key of ["catalog_yaml", "default_off_ledger", "baseline"] as const) {
+    if (snapshot.input_digests[key] !== currentInputDigests[key])
+      errors.push(`audit snapshot input digest mismatch: ${key}`)
+  }
+}
+
 const validateRecord = (
   record: AuditRecord,
   snapshot: AuditSnapshot,
@@ -96,10 +115,12 @@ export const validateAuditState = (
   snapshot: AuditSnapshot,
   records: readonly AuditRecord[],
   currentFeatureIds: ReadonlySet<string>,
+  currentInputDigests: AuditInputDigests,
 ): AuditValidationReport => {
   const errors: string[] = []
   const warnings: string[] = []
   const snapshotIds = validateCoverage(snapshot, currentFeatureIds, errors)
+  validateInputDigests(snapshot, currentInputDigests, errors)
   const recordIds = new Set<string>()
 
   for (const record of records) {

@@ -1,0 +1,64 @@
+version: 1
+feature_id: mode-variant-registry
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/system-prompt/default-builder.ts:buildSystemPromptForMode
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:resolveIdentitySystemPrompt
+  - src/host/bootstrap/bootstrap-session.ts prompt construction
+activation:
+  - Host composition constructs the default registry and passes it into mode-aware prompt construction for identity-mode and in-session mode transitions.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/system-prompt/default-builder.ts:defaultModeVariantRegistry
+  - src/agent/system-prompt/default-builder.ts:buildSystemPromptForMode
+consumer:
+  - src/host/runtime/agent-arg-builder.ts:resolveIdentitySystemPrompt
+  - src/host/bootstrap/bootstrap-session.ts
+reachable: yes
+surface_findings:
+  - The registry changes prompt identity rather than adding a standalone UI element.
+  - CLI identity selection and in-session identity rebuild both consume the live registry seam.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/system-prompt-mode-variant-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: HELL-MV-10 proves the unselected legacy prompt path remains byte-identical.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/system-prompt-mode-variant-hellgate.test.ts tests/integration/identity-mid-session-prompt-rebuild-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Combined focused audit rail passed; all six registry variants render and a real two-turn session rebuilds its prompt after identity change.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildSystemPromptForMode\(|defaultModeVariantRegistry\(' src/host src/apps src/runner
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime host assembly and bootstrap use the mode-variant registry and builder.
+  - kind: test
+    command: bun test tests/unit/system-prompt-mode-variant-hellgate.test.ts tests/integration/identity-mid-session-prompt-rebuild-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Combined focused audit rail passed; e2e verifies the second turn receives the changed mode prefix and a red-on-injection control discriminates the rail.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 0 L3+ feature reachability exceptions.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-core
+review_state: approved
+reviewer: codex/cross-review-wave1

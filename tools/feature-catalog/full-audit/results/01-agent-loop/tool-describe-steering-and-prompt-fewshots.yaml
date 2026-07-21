@@ -1,0 +1,62 @@
+version: 1
+feature_id: tool-describe-steering-and-prompt-fewshots
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/bash/index.ts:bashTool description and src/agent/prompt-body.ts:BODY_AFTER_PERSONA_TOOL_ROUTING
+entrypoints:
+  - src/agent/prompt.ts:buildSystemPrompt
+  - src/host/bootstrap/bootstrap-session.ts:createSystemSource
+  - src/agent/features.ts:buildSessionFeatures
+activation:
+  - Every standard agent session builds the static system prompt and registers the bash, edit, and write tool descriptions.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/bash/index.ts:bashTool
+  - src/tool/edit/index.ts:editTool
+  - src/tool/write/index.ts:writeTool
+  - src/agent/prompt-body.ts:BODY_AFTER_PERSONA_TOOL_ROUTING
+consumer:
+  - src/agent/prompt.ts:buildSystemPrompt
+  - src/agent/dispatch.ts:ToolRegistry tool-spec rendering
+reachable: yes
+surface_findings:
+  - Bash, edit, and write descriptions contain the claimed routing and negative-use guidance, and the rendered prompt places the avoidance anchor after Tool routing.
+  - The catalog claims two prompt few-shot examples, but the current source and hellgate intentionally retain exactly one avoidance example; its resolution names the positive read/grep/edit route inline.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool-steering-and-prompt-examples-hellgate.test.ts tests/unit/prompt-rules-snapshot.test.ts tests/unit/prompt-system.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused prompt and tool-description rails passed, including required steering phrases, placement, and 50-call byte stability; the rail explicitly asserts one example, not two.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'single shell command|cat/sed/awk|Do NOT use edit|Do NOT use write|Routing examples|<example>' src/tool/bash/index.ts src/tool/edit/index.ts src/tool/write/index.ts src/agent/prompt-body.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Live tool descriptions and prompt atom contain the steering content; exactly one opening example tag exists in the prompt body.
+  - kind: test
+    command: bun test tests/unit/tool-steering-and-prompt-examples-hellgate.test.ts tests/unit/prompt-rules-snapshot.test.ts tests/unit/prompt-system.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The selected rails passed with 0 failures; the ADR-0410 rail proves the source's one-example contract and prompt byte stability.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Reachability reports no L3-or-higher feature exception.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-subagent
+review_state: approved
+reviewer: codex/cross-review-wave1

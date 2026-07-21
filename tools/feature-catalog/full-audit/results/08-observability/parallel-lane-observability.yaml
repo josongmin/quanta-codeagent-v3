@@ -1,0 +1,46 @@
+version: 1
+feature_id: parallel-lane-observability
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/runner/batch/eval/lane-progress.ts:laneProgress"
+entrypoints: ["src/apps/bench/lane-progress-renderer.ts"]
+activation: ["Bench TTY subscribes to the bus; QUANTA_BENCH_LANE_PROGRESS disables the panel."]
+effective_defaults:
+  cli: na
+  web: na
+  bench: on
+  headless: na
+  daemon: na
+producer: ["lane progress bus", "AsyncLocalStorage lane context"]
+consumer: ["bench TTY renderer", "recording-lane LLM decorator"]
+reachable: yes
+surface_findings:
+  - "Unsubscribed buses are no-op, TTY receives a coordinated panel, and non-TTY receives labelled logs."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/lane-progress-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "No subscriber leaves emit inert."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/lane-progress-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Bus, port, TTY, non-TTY, and cleanup rails pass."
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: "bun test tests/unit/lane-progress-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 60-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

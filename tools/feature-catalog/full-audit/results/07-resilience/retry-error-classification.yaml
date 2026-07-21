@@ -1,0 +1,52 @@
+version: 1
+feature_id: retry-error-classification
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/retry.ts:classifyLLMError
+entrypoints:
+  - src/agent/retry.ts
+  - src/agent/loop.ts
+activation:
+  - Retry classification executes on streamed model failures and routes fatal, retryable, and prompt-too-large outcomes into the turn recovery policy.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/retry.ts:classifyLLMError
+consumer:
+  - src/agent/loop.ts
+  - src/llm/adapters/openai.ts
+reachable: yes
+surface_findings:
+  - Typed LLMError kinds and documented transport markers feed bounded retry and compaction decisions.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/retry.test.ts tests/unit/recovery-hellgate.test.ts tests/unit/fallback.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Retry classification, caps, and fallback interaction rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'classifyLLMError|RETRYABLE|FATAL|prompt too long' src/agent/retry.ts src/agent/loop.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Retry classification is consumed by the live recovery path.
+  - kind: test
+    command: bun test tests/unit/retry.test.ts tests/unit/recovery-hellgate.test.ts tests/unit/fallback.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused retry policy rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

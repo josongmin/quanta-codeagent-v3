@@ -1,0 +1,57 @@
+version: 1
+feature_id: request-user-input-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/tier1/user-input.ts:buildUserInputBlock"
+entrypoints:
+  - "src/apps/cli/repl/runtime-context-compose.ts:composeInteractiveRuntimeContext"
+  - "src/apps/web-daemon/runtime-factory.ts:createWebDaemonRuntime"
+activation:
+  - "Interactive CLI always constructs createCliUserInputPort for its session context."
+  - "Web daemon constructs the port when QUANTA_WEB_AGENT_STATE is enabled."
+effective_defaults:
+  cli: on
+  web: resource
+  bench: unknown
+  headless: unknown
+  daemon: resource
+producer:
+  - "src/tool/request-user-input.ts:requestUserInputTool"
+  - "src/apps/cli/repl/session-host-ports.ts:createCliUserInputPort"
+  - "src/apps/web-daemon/web-user-input-port.ts:createWebUserInputPort"
+consumer:
+  - "src/agent/features.ts:buildSessionFeatures"
+  - "src/apps/cli/repl/runtime-context-compose.ts:composeRuntimeBootstrapContext"
+  - "src/apps/web-daemon/runtime-factory.ts:AgentConfig userInputPort overlay"
+reachable: yes
+surface_findings:
+  - "CLI composes a live prompt port and the real loop returns answer or typed cancellation."
+  - "Contrary to the catalog's web:missing statement, the web daemon wires request_user_input through QUANTA_WEB_AGENT_STATE, publishes plan.input.requested, and resolves planInputAnswer frames."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/tool/request-user-input-hell.test.ts tests/integration/request-user-input-e2e.test.ts tests/unit/apps/cli/session-host-ports.test.ts tests/integration/web-user-input-port-e2e.test.ts tests/unit/web-user-input-port-lifecycle-hellgate.test.ts src/apps/web-daemon/web-user-input-port.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The selected rails passed: loop answer/cancel/no-port behavior, CLI prompt outcomes, web request-answer lifecycle, disconnect cleanup, and wire projection."
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: "Catalog surface_integration incorrectly says web is missing; it must describe QUANTA_WEB_AGENT_STATE-gated daemon support."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg -n 'createCliUserInputPort|userInputPort|createWebUserInputPort|planInputAnswer' src/apps/cli/repl src/apps/web-daemon src/agent/tier1/user-input.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "CLI and web daemon both construct and thread a concrete userInputPort to the feature builder; the web handler resolves inbound answer frames."
+  - kind: test
+    command: "bun test tests/unit/tool/request-user-input-hell.test.ts tests/integration/request-user-input-e2e.test.ts tests/unit/apps/cli/session-host-ports.test.ts tests/integration/web-user-input-port-e2e.test.ts tests/unit/web-user-input-port-lifecycle-hellgate.test.ts src/apps/web-daemon/web-user-input-port.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "201 selected checks passed across tool, CLI, and web user-input rails."
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch3
+review_state: approved
+reviewer: codex/cross-review-wave1

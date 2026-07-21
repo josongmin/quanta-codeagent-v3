@@ -1,0 +1,67 @@
+version: 1
+feature_id: side-conversation-seam
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/internal/context-binding/side-conversation.ts:startSideConversation
+entrypoints:
+  - src/apps/cli/side-cmd.ts:sideCmd
+  - src/apps/cli/repl/session-loop.ts registers RuntimeSession.side.start
+  - src/sdk/runtime/session.ts:RuntimeSession.side.start
+activation:
+  - CLI /side is registered; an active runtime session registers its side starter.
+  - The historical src/agent/side-conversation seam is only selected by QUANTA_FAST_APPLY for fast-apply fallback.
+effective_defaults:
+  cli: on
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/runtime/internal/context-binding/side-conversation.ts:startSideConversation
+  - src/agent/side-conversation/run.ts:runSideConversation
+consumer:
+  - src/apps/cli/side-cmd.ts:sideCmd through RuntimeSession.side.start
+  - src/host/runtime/internal/context-binding.ts:startSideConversation host binding
+  - src/agent/optional-ports.ts fast-apply fallback adapter (conditional legacy seam)
+reachable: yes
+surface_findings:
+  - CLI /side is live through RuntimeSession and the host runtime's isolated runAgent configuration.
+  - The catalog incorrectly names dispatchSideConversation as the public CLI/UI seam and attributes its prompt and tool invariants to the live CLI route.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/side-cmd.test.ts tests/unit/apps/cli/side-conv-port-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 26 pass, 0 fail; absent runtime starter returns the explicit not-wired exit-2 posture.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/host/runtime-side-conversation-isolation-hellgate.test.ts tests/unit/cli/side-cmd.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 23 pass, 0 fail; /side forwards to its runtime port and the host route builds an isolated read-only registry without parent mutable stores.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog owner and purpose describe the superseded dispatchSideConversation CLI route; the current CLI route is RuntimeSession plus host context binding.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'registerSideConversationStart|session.side.start|startSideConversation' src/apps/cli src/sdk src/host/runtime
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: session-loop registers session.side.start; SDK delegates to SessionHost; context binding runs the isolated side conversation.
+  - kind: test
+    command: bun test tests/unit/host/runtime-side-conversation-isolation-hellgate.test.ts tests/unit/cli/side-cmd.test.ts tests/unit/apps/cli/side-conv-port-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 42 pass, 0 fail; covers CLI port forwarding, not-wired failure posture, and real host isolation.
+  - kind: source
+    command: rg -n 'dispatchSideConversation' src/agent/optional-ports.ts src/agent/side-conversation src/apps/cli src/host/runtime
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: dispatcher is consumed by optional-ports fast-apply adapter, not the current CLI side command path.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-side
+review_state: approved
+reviewer: codex/cross-review-wave1

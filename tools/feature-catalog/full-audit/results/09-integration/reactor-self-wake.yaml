@@ -1,0 +1,58 @@
+version: 1
+feature_id: reactor-self-wake
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/reactor/self-wake.ts:injectSimulatedTurn
+entrypoints:
+  - src/apps/cli/repl/session-loop.ts:reactorBridge onTrigger
+activation:
+  - QUANTA_PROACTIVE_REACTOR=1 and a session id start the CLI reactor bridge
+  - A delivered proactive trigger passes flag, quiet-window, outcome, and eligibility guards
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/reactor/self-wake.ts:injectSimulatedTurn
+  - src/apps/cli/reactor-watch-bridge.ts:deliverReactorWatchEnvelope
+consumer:
+  - src/apps/cli/repl/session-loop.ts:enqueueWithHeartbeat
+reachable: yes
+surface_findings:
+  - The CLI starts a session-scoped socket bridge only under the strict env gate and routes received triggers into the real enqueue path.
+  - Default OFF does not read the clock or agent loop; successful wake messages receive the deterministic evidence suffix.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/reactor-self-wake.test.ts tests/integration/reactor-babysit-end-to-end.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset or non-1 gate values enqueue nothing and preserve the no-clock/no-loop off path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/reactor-self-wake.test.ts tests/integration/reactor-babysit-end-to-end.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: A CI trigger passes through self-wake into the agent loop with its audit suffix; guard and abort paths are covered.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'injectSimulatedTurn|REACTOR_ENV_FLAG|startReactorWatchBridge' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/reactor src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The interactive session loop starts the bridge and consumes the self-wake producer through the real enqueue callback.
+  - kind: test
+    command: bun test tests/unit/reactor-self-wake.test.ts tests/integration/reactor-babysit-end-to-end.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused guard, suffix, abort, and CI-trigger-to-loop rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

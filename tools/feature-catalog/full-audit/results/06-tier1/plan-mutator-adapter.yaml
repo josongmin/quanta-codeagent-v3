@@ -1,0 +1,60 @@
+version: 1
+feature_id: plan-mutator-adapter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/dispatch/tool-context.ts:buildToolContext
+entrypoints:
+  - src/apps/cli/repl/factories/plan-store.ts:buildPlanStoreOrUndefined
+  - src/agent/tier1/plan-mutation.ts:buildPlanMutationBlock
+  - src/agent/dispatch/tool-context.ts:buildToolContext
+activation:
+  - The interactive CLI creates a PlanStore by default unless QUANTA_PLAN_STORE disables it.
+  - The session builder registers plan tools and the dispatch context adapts that same store on every tool call.
+effective_defaults:
+  cli: on
+  web: off
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/plan/mutator-adapter.ts:planStoreToMutator
+consumer:
+  - src/agent/dispatch/tool-context.ts:buildToolContext
+  - src/tool/plan/create-plan.ts:createPlanTool
+reachable: yes
+surface_findings:
+  - The adapter is not an orphan: buildToolContext installs planMutator when AgentConfig.planStore is present.
+  - CLI default configuration supplies that store, and buildPlanMutationBlock exposes the five matching structured plan tools.
+off_identity_proof:
+  kind: source
+  command: rg -n 'config.planStore === undefined|planStoreToMutator' src/agent/tier1/plan-mutation.ts src/agent/dispatch/tool-context.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Omitting the optional store omits both plan tools and the dispatch mutator seam.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/plan/mutations-hell.test.ts tests/unit/tool/plan/plan-tools-hell.test.ts tests/integration/plan-mode-x-tool-registry-cross.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Mutation invariants, adapter error mapping, and cross-feature plan registry rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'planStoreToMutator\(|buildPlanMutationBlock|buildPlanStoreOrUndefined' src/agent src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI producer, feature registration, and per-dispatch adapter consumer form a live path.
+  - kind: test
+    command: bun test tests/unit/agent/plan/mutations-hell.test.ts tests/unit/tool/plan/plan-tools-hell.test.ts tests/integration/plan-mode-x-tool-registry-cross.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused plan adapter rails passed within the 216-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch17
+review_state: approved
+reviewer: codex/cross-review-wave1

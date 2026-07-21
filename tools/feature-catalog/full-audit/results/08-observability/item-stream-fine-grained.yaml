@@ -1,0 +1,62 @@
+version: 1
+feature_id: item-stream-fine-grained
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/stream/item-stream-projector.ts:ItemStreamProjector
+entrypoints:
+  - src/host/runtime/internal/context-binding/turn-runner.ts:createTurnStreamPort
+  - src/agent/optional-ports.ts:wireItemStreamTap
+activation:
+  - QUANTA_ITEM_STREAM=1
+  - The web agent-state plane additionally requires its configured onAgentState sink.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/stream/item-stream-projector.ts:ItemStreamProjector.project
+  - src/shared/item-stream.ts:itemStreamEnabled
+consumer:
+  - src/host/runtime/internal/context-binding/turn-runner.ts:createTurnStreamPort emits session item.stream carriers
+  - src/agent/optional-ports.ts:wireItemStreamTap emits agent-state item_stream observations
+  - src/apps/cli/attach/render.ts renders session item events
+reachable: yes
+surface_findings:
+  - "The runtime context binding resolves the env gate once and constructs a per-turn session projector."
+  - "The optional-port decorator constructs a separate projector for the web agent-state sink; its drift rail asserts byte-identical item cores across planes."
+  - "Both planes preserve the original event verbatim and the off gate constructs neither projector nor wrapper."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/item-stream-session-wire-hellgate.test.ts tests/unit/item-stream-tap-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent gate emits only legacy bridge events and leaves the web stream unwrapped, including the no-sink control.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/item-stream-projector-hellgate.test.ts tests/unit/item-stream-projection-drift-hellgate.test.ts tests/unit/item-stream-session-wire-hellgate.test.ts tests/unit/item-stream-tap-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 35 focused cases pass for item lifecycle projection, session and web wiring, terminal flushing, causal order, and dual-plane core equivalence.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n -g '*.ts' 'ItemStreamProjector|createTurnStreamPort|wireItemStreamTap|itemStreamEnabled|QUANTA_ITEM_STREAM' src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The shared gate reaches the runtime session projector and optional web decorator; the CLI attach renderer consumes the session wire events.
+  - kind: test
+    command: bun test tests/unit/item-stream-projector-hellgate.test.ts tests/unit/item-stream-projection-drift-hellgate.test.ts tests/unit/item-stream-session-wire-hellgate.test.ts tests/unit/item-stream-tap-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 35 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-llm-core
+review_state: approved
+reviewer: codex/cross-review-wave1

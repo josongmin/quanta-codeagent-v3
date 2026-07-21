@@ -1,0 +1,58 @@
+version: 1
+feature_id: adversarial-multi-voter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/branch-search-runner.ts:buildVoterVerifierForTask
+entrypoints:
+  - src/runner/knobs/knobs/multi-voter.ts:applyMultiVoter
+  - src/agent/branch-search-runner.ts:buildBranchSearchTool
+activation:
+  - QUANTA_MULTI_VOTER parses voters or voters:quorum and requires the branch-search knob.
+  - The resolved voterQuorum config causes branch-search to build one verifier per task.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/runner/knobs/knobs/multi-voter.ts merges voterQuorum into branchSearch.
+consumer:
+  - src/agent/branch-search-runner.ts passes voterQuorumVerifier into the live branch-search tool only when configured.
+reachable: yes
+surface_findings:
+  - The feature is CLI-reachable through branch-search; it has no rendered web affordance.
+  - Throwing or unparseable voters count as refute; default ties and zero voters fail closed.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/multi-voter-hellgate.test.ts tests/unit/multi-voter-quorum-boundary-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The absent-knob scoring path is byte-identical and contains no voter signal.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/multi-voter-hellgate.test.ts tests/unit/multi-voter-quorum-boundary-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Quorum boundaries, fail-closed adversarial cases, verifier composition, and an end-to-end winner flip passed.
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "voterQuorum|voterQuorumVerifier|applyMultiVoter" src/agent/branch-search-runner.ts src/runner/knobs/knobs/multi-voter.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Knob projection and the task-verifier binder are connected by the branch-search config.
+  - kind: test
+    command: bun test tests/unit/multi-voter-hellgate.test.ts tests/unit/multi-voter-quorum-boundary-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 38 focused tests passed, including strict-majority, explicit quorum, throws, and scoring composition.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

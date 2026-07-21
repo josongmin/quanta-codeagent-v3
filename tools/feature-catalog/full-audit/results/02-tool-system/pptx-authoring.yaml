@@ -1,0 +1,61 @@
+version: 1
+feature_id: pptx-authoring
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+activation:
+  - QUANTA_OFFICE_AUTHORING is enabled in runtimeConfig
+  - buildGatedToolPorts sets DefaultToolPorts.officeAuthoring=true
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/document/authoring/pptx.ts:buildPptx
+  - src/tool/document/authoring/pptx-write.ts:makePptxWriteTool
+  - src/tool/document/pptx-read.ts:pptxReadTool
+consumer:
+  - src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+  - src/tool/index.ts:buildDefaultTools
+reachable: yes
+surface_findings:
+  - "The officeAuthoring root port registers pptx_write together with xlsx_write and docx_write while pptx_read remains a base read-only tool."
+  - "The real tools round-trip a generated deck from on-disk PPTX write to PresentationML read."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/pptx-roundtrip-e2e-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts tests/unit/session-knobs-default-off-byte-identity-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Gate-off omits pptx_write while retaining the base pptx_read reader."
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/pptx-authoring-hellgate.test.ts tests/unit/pptx-roundtrip-e2e-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The serializer produced valid PresentationML and the real tool registry wrote and read a deck with title and body content."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'officeAuthoring: gateOn|cfg.officeAuthoring|makePptxWriteTool|pptxReadTool' src/shared/runtime-config.ts src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/tool/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The shared office gate reaches the PPTX write factory and the base reader is separately exported."
+  - kind: test
+    command: bun test tests/unit/pptx-authoring-hellgate.test.ts tests/unit/pptx-roundtrip-e2e-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts tests/unit/session-knobs-default-off-byte-identity-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Selected PresentationML serializer writer reader default-off and composition-root rails passed."
+audited_at: "2026-07-19"
+auditor: codex/p1-tools-surface
+review_state: approved
+reviewer: codex/cross-review-wave1

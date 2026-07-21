@@ -1,0 +1,57 @@
+version: 1
+feature_id: auto-background-stuck-detector
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/auto-background/propose-handler.ts:defaultProposeHandler
+entrypoints:
+  - src/agent/dispatch.ts:executeWithStuckTracking
+  - src/runner/session-execution-plane.ts:buildSharedExecutionPlaneRuntimeAugments
+activation:
+  - A subagent-enabled execution plane constructs detector and proposer, but a surface must poll proposer.shouldPropose and render an accept or dismiss affordance; no snapshot production surface does so.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/auto-background/default-tracker.ts:defaultStuckDetector
+consumer:
+  - src/agent/dispatch.ts:tickToolStart and tickToolEnd
+reachable: no
+surface_findings:
+  - Dispatch does start and end tracking and the execution plane constructs a proposer with a fork-on-accept callback.
+  - No non-test source calls isStuck or shouldPropose, so no current CLI or web loop can surface the two-second proposal or invoke accept from user input.
+off_identity_proof:
+  kind: source
+  command: rg -n 'shouldPropose\(|isStuck\(' src --glob '!src/agent/auto-background/**' --glob '!**/__tests__/**' --glob '!tests/**'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No production proposal-poll consumer exists outside the auto-background slice; tracker mutation has no surface effect.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/auto-background-stuck-detector-hellgate.test.ts tests/integration/auto-background-onaccept-fork-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Detector and manually-driven proposer behavior, once semantics, cleanup, and fork callback contract passed in isolated rails.
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: The automatic UX claim is not live because no production surface polls the proposer or binds proposal actions to UI input.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'shouldPropose\(|isStuck\(' src --glob '!src/agent/auto-background/**' --glob '!**/__tests__/**' --glob '!tests/**'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The producer-consumer search found no proposal consumer.
+  - kind: test
+    command: bun test tests/unit/auto-background-stuck-detector-hellgate.test.ts tests/integration/auto-background-onaccept-fork-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Owner-local rails pass but do not establish a user-visible proposal loop.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

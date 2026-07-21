@@ -1,0 +1,50 @@
+version: 1
+feature_id: wiring
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/tier1/skill.ts:buildSkillBlock changedPaths inventory branch"
+entrypoints: ["src/apps/cli/internal.ts:buildSkillsConfig", "src/apps/web-daemon/runtime-factory.ts:buildSurfaceCapabilityBlocks"]
+activation: ["AgentConfig.skills is present", "AgentConfig.skills.changedPaths is nonempty"]
+effective_defaults:
+  cli: on
+  web: on
+  bench: off
+  headless: on
+  daemon: on
+producer: ["src/agent/tier1/skill.ts:skillsActivatedFor builds the narrowed inventory"]
+consumer: ["src/agent/loop/session-bootstrap.ts copies features.activeSkills into TurnSession", "src/agent/loop/context-assembler.ts supplies activeSkills to buildTurnContext"]
+reachable: yes
+surface_findings: ["The CLI and web-daemon assemble skills by default; a changed-path list narrows only the prompt suggestion inventory.", "The invocable Skill tool always receives the full discovery result, so filtering suggestions does not remove authority."]
+off_identity_proof:
+  kind: test
+  command: "bun test tests/integration/skill-paths-activation-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Unset and empty changedPaths retain the full inventory."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/skill-trigger-rules.test.ts tests/integration/skill-paths-activation-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "13 tests pass: TypeScript and Python path matches narrow suggestions while unconditional skills and full Skill authority remain available."
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'changedPaths|skillsActivatedFor|activeSkills' src/agent/tier1/skill.ts src/agent/loop/session-bootstrap.ts src/agent/loop/context-assembler.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Path selection is produced once, transported through the live session, and rendered per turn."
+  - kind: test
+    command: "bun test tests/unit/skill-trigger-rules.test.ts tests/integration/skill-paths-activation-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "All 13 focused path activation and prompt inventory tests passed."
+audited_at: "2026-07-19"
+auditor: "codex/p2-tier1-batch13"
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,65 @@
+version: 1
+feature_id: brief-mode
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/context-assembler.ts:assembleTurnContext
+entrypoints:
+  - src/host/bootstrap/bootstrap-session.ts:createBriefStore
+  - src/host/runtime/internal/context-binding/base.ts:sessionBrief
+  - src/apps/cli/repl/surface-compose/slash-context-compose.ts:brief context
+activation:
+  - QUANTA_BRIEF truthy value seeds the session posture
+  - /brief mutates the shared brief store
+  - set_brief control operation mutates the same store for the next turn
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/brief.ts:createBriefStore
+  - src/apps/cli/repl/surface-compose/slash-context-compose.ts:brief.set
+  - src/agent/control-op-handler.ts:applyBriefTransition
+consumer:
+  - src/host/runtime/internal/context-binding/base.ts:sessionBrief
+  - src/agent/loop/context-assembler.ts:assembleTurnContext
+  - src/agent/prompt-body.ts:BRIEF_NOTICE
+reachable: yes
+surface_findings:
+  - The live CLI slash and set_brief operation converge on the bootstrap-owned store consumed on the next loop turn.
+  - OFF leaves the dynamic tail and static prompt prefix unchanged; ON splices only the dynamic brief directive.
+  - The catalog's statement that CLI /brief is a B2 prefill stub is obsolete in the frozen source.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/brief-mode-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Omitted or false brief exactly equals the frozen legacy dynamic tail and never alters the static prefix.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/brief-mode-hellgate.test.ts tests/unit/slash-commands.test.ts tests/unit/agent/submission-set-mode-hell.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: ON inserts BRIEF_NOTICE, set_brief changes the next build, and the command/control-operation unions remain registered.
+failure_posture: na
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: "The catalog web evidence says CLI /brief is a B2 prefill stub and set_brief has no bridged path; the frozen source wires the shared brief store through bootstrap, slash composition, control handling, and context assembly."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n 'QUANTA_BRIEF|createBriefStore|sessionBrief|briefStore|set_brief|BRIEF_NOTICE' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host src/apps/cli src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The store is boot-seeded, mutated by both CLI and control operation paths, and read by context assembly to insert the dynamic directive.
+  - kind: test
+    command: bun test tests/unit/brief-mode-hellgate.test.ts tests/unit/slash-commands.test.ts tests/unit/agent/submission-set-mode-hell.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 72 focused tests passed for ON/OFF prompt behavior, correctness-reporting floor, store mutation, and closed control-op registration.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

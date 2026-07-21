@@ -1,0 +1,60 @@
+version: 1
+feature_id: cli-retry-with-cmd
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/retry-with.ts:retryWithCmd
+entrypoints:
+  - src/apps/cli/slash/registry-session.ts:SESSION_SLASH_COMMANDS
+  - src/apps/cli/repl/surface-compose/dispatch-compose.ts:buildSurfaceDispatchWire
+activation:
+  - Set QUANTA_RETRY_MODELS to one or more alternate model ids, complete a streamed turn, then run /retry-with or /retry-with MODEL in an interactive session.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/retry-with.ts:retryWithCmd
+  - src/apps/cli/repl/surface-compose/wire-builders.ts:buildRetryCandidates
+consumer:
+  - src/apps/cli/slash/registry-session.ts:SESSION_SLASH_COMMANDS
+  - src/apps/cli/repl/surface-compose/dispatch.ts:buildSurfaceDispatch
+reachable: yes
+surface_findings:
+  - The session registry always exposes the command, but the REPL omits its retry slot until QUANTA_RETRY_MODELS resolves candidates and a stream input exists.
+  - The off path prints a concrete activation hint and leaves transcript state unchanged.
+  - A successful swap removes the latest assistant message and forwards the replacement stream, including stream_reset, to the live surface consumer.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli-retry-with.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent or empty candidate state returns the activation hint without transcript mutation.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli-retry-with.test.ts tests/integration/model-swap-retry-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Parser, registered dispatch, alternate resolution, reset propagation, cancellation, error behavior, and a real loop model-swap rerun passed.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'retryWithCmd|RetryWithSessionState|buildRetryCandidates|QUANTA_RETRY_MODELS|lastStreamInput' src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Session registry, environment candidate construction, current-stream capture, and conditional slash projection form the live route.
+  - kind: test
+    command: bun test tests/unit/cli-retry-with.test.ts tests/integration/model-swap-retry-real-loop-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused retry rails passed within the 118-pass 11-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

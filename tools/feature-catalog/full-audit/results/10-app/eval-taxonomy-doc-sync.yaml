@@ -1,0 +1,40 @@
+version: 1
+feature_id: eval-taxonomy-doc-sync
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/taxonomy/doc-sync.ts:renderTaxonomyMarkdown
+entrypoints:
+  - src/apps/eval/taxonomy/doc-sync.ts
+activation:
+  - A future eval CLI or maintenance script imports renderTaxonomyMarkdown and writes its result to the taxonomy documentation.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/eval/taxonomy/doc-sync.ts:renderTaxonomyMarkdown
+consumer: []
+reachable: no
+surface_findings:
+  - The renderer is a pure implementation over TAXONOMY with markdown cell escaping.
+  - No eval CLI, package script, tool, or documentation generation consumer imports or invokes the renderer in the snapshot.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: unknown
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: Manual-trigger status is undocumented as an executable invocation; there is no production caller or test rail for renderTaxonomyMarkdown.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'renderTaxonomyMarkdown|doc-sync' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/eval tools package.json
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: References outside taxonomy comments and the renderer implementation are absent.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

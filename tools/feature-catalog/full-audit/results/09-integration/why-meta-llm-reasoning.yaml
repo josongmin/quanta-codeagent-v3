@@ -1,0 +1,55 @@
+version: 1
+feature_id: why-meta-llm-reasoning
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/why-cmd.ts:whyCmd
+entrypoints:
+  - src/apps/cli/slash/registry-session.ts:SESSION_SLASH_COMMANDS
+  - src/apps/cli/repl/slash-surface.ts:buildSlashContext
+activation:
+  - Interactive CLI REPL has its required session, model, and LLM state and invokes /why with a tool-call id or last.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/why-cmd.ts:runWhyCmd
+  - src/apps/cli/why-cmd.ts:whyCmd
+consumer:
+  - src/apps/cli/slash/registry-session.ts:SESSION_SLASH_COMMANDS
+  - src/apps/cli/repl/slash-surface.ts:why slash context
+reachable: yes
+surface_findings:
+  - The interactive REPL always supplies the why state and registers the slash command in the session registry.
+  - Non-wired surfaces return a no-op informational response; malformed LLM JSON renders a bounded fallback panel and LLM failure returns an exit status.
+  - Prompt construction caps prior messages and applies the shared value redactor before the meta-LLM request.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/why-cmd-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Target resolution, single meta-call parsing, fallback rendering, token accounting, context cap, and secret-shape redaction passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'whyCmd|WhySlashState|why: \{ sessionId, llm, model \}' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The session slash registry registers whyCmd and the REPL slash context supplies the required live state.
+  - kind: test
+    command: bun test tests/unit/cli/why-cmd-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All focused /why behavior, degradation, privacy, and output rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

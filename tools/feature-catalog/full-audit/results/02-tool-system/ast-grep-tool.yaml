@@ -1,0 +1,64 @@
+version: 1
+feature_id: ast-grep-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/apps/cli/internal.ts:buildCliFeatures astGrepTools registration"
+entrypoints:
+  - src/apps/cli/index.ts
+  - "src/apps/cli/internal.ts:buildCliFeatures"
+activation:
+  - QUANTA_AST_GREP canonical gate enabled
+  - ast-grep executable available on PATH for successful search
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/tool/ast-grep/index.ts:astGrepTool"
+consumer:
+  - "src/apps/cli/internal.ts:buildCliFeatures"
+  - "src/host/bootstrap/bootstrap-session.ts:buildTooling"
+reachable: conditional
+surface_findings:
+  - "The CLI feature builder appends ast_grep only when astGrepEnabled returns true, then bootstrap passes that array into the live tooling builder."
+  - "The tool fails typed when the external binary is absent; this audit host has no ast-grep executable, so successful structural-search execution is unproven."
+off_identity_proof:
+  kind: source
+  command: "rg -n 'astGrepEnabled|astGrepTools|ast_grep' src/apps/cli/internal.ts src/host/bootstrap/bootstrap-session.ts src/tool/surface/manifest.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The enabled conditional is the sole CLI registration path and its false branch contributes an empty array."
+on_efficacy_proof:
+  kind: external
+  command: "bun test tests/unit/ast-grep-e2e-hellgate.test.ts tests/unit/ast-grep-scenarios.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: blocked
+  evidence: "The binary-absent controls passed, but all live ast-grep pattern, cap, path, and language cases were skipped because ast-grep is unavailable on PATH."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: proof-gap
+blocker: "No ast-grep executable is installed on this audit host, leaving the successful external CLI search path without a live receipt."
+disposition: hold
+receipts:
+  - kind: source
+    command: "rg -n 'astGrepEnabled|astGrepTools|ast_grep' src/apps/cli/internal.ts src/host/bootstrap/bootstrap-session.ts src/tool/surface/manifest.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Gate-to-feature-to-bootstrap registration is present, while ast_grep remains outside the base menu."
+  - kind: test
+    command: "bun test tests/unit/ast-grep-tool-hellgate.test.ts tests/unit/ast-grep-bugs-hellgate.test.ts tests/unit/ast-grep-scenarios.test.ts tests/unit/ast-grep-e2e-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Schema, gate, jail, bounded stdout, retryable probe, and binary-absent typed-result rails passed."
+  - kind: external
+    command: "command -v ast-grep"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: blocked
+    evidence: "No executable was found; live-success tests explicitly skipped their external assertions."
+audited_at: "2026-07-19"
+auditor: codex/p1-tools-exec
+review_state: approved
+reviewer: codex/cross-review-wave1

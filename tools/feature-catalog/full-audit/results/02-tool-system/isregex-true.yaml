@@ -1,0 +1,59 @@
+version: 1
+feature_id: isregex-true
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/scripted-replace.ts:applyScriptedReplace
+entrypoints:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+activation:
+  - Invoke scripted_replace with isRegex=true.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/scripted-replace.ts:applyScriptedReplace
+consumer:
+  - src/tool/scripted-replace.ts:scriptedReplaceTool.execute
+  - src/tool/index.ts:buildBaseDefaultTools
+reachable: yes
+surface_findings:
+  - "scripted_replace is always registered in the default tool registry; isRegex only changes its per-call parser branch."
+  - "Regex mode retains FS jail, atomic write, stale-read guard, replacement cap, and typed rejected/not_found failures."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/scripted-replace.test.ts tests/unit/edit-fresh-hash-write-scripted-parity-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 49 pass, 0 fail; regex capture replacement, ReDoS refusal, atomic filesystem commit, stale-read failure, and fresh-hash parity pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'isRegex|applyScriptedReplace|scriptedReplaceTool|buildBaseDefaultTools' src/tool/scripted-replace.ts src/tool/index.ts src/runner/assemble/tooling.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The per-call isRegex branch is live in scriptedReplaceTool and the tool is included in all default registries.
+  - kind: test
+    command: bun test tests/unit/scripted-replace.test.ts tests/unit/edit-fresh-hash-write-scripted-parity-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 49 pass, 0 fail.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception is reported for isregex-true.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-git
+review_state: approved
+reviewer: codex/cross-review-wave1

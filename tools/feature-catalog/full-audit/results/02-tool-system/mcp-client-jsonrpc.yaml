@@ -1,0 +1,50 @@
+version: 1
+feature_id: mcp-client-jsonrpc
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/mcp/client.ts:McpClient and src/mcp/jsonrpc.ts:LineReader
+entrypoints: [src/apps/cli/internal.ts:loadFeatures, src/agent/mcp-bridge.ts:loadMcpTools]
+activation: [A configured MCP server is loaded by the CLI feature builder, which starts McpClient, lists tools, and bridges them into the agent registry.]
+effective_defaults:
+  cli: resource
+  web: unknown
+  bench: unknown
+  headless: resource
+  daemon: unknown
+producer: [src/mcp/jsonrpc.ts:LineReader, src/mcp/client.ts:McpClient, src/mcp/client/result-folding.ts:foldToolResult]
+consumer: [src/agent/mcp-bridge.ts:loadMcpTools, src/apps/cli/internal.ts:loadMcpToolsOrEmpty]
+reachable: yes
+surface_findings: ["The CLI reads configured MCP servers, constructs McpClient, runs initialize and tools/list, then adapts live tools into the agent registry.", "Line framing validates JSON-RPC 2.0 envelopes, client lifecycle rejects invalid/not-running calls, and callTool caps returned text before it can enter model context."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mcp-client-errors.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Empty command, pre-start/post-stop calls, and unavailable stdin are rejected or cleaned up without a live MCP server.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp-jsonrpc.test.ts tests/unit/mcp-client-errors.test.ts tests/integration/mcp-client.test.ts tests/integration/mcp-bridge.test.ts tests/integration/mcp-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 43 focused codec, mock-server, bridge, and real-agent-loop cases passed for handshake, pagination, call results, truncation, malformed frames, process exits, timeout, and concurrent calls.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'class McpClient|LineReader|MAX_RESULT_CHARS|loadMcpTools|loadMcpToolsOrEmpty|new McpClient' src/mcp src/agent/mcp-bridge.ts src/apps/cli/internal.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Framing and client owners feed a concrete CLI configuration-to-bridge-to-registry path.
+  - kind: test
+    command: bun test tests/unit/mcp-jsonrpc.test.ts tests/unit/mcp-client-errors.test.ts tests/integration/mcp-client.test.ts tests/integration/mcp-bridge.test.ts tests/integration/mcp-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 43 pass, 0 fail; the bridge reaches a real agent transcript and adversarial framing/lifecycle paths remain typed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-registry
+review_state: approved
+reviewer: codex/cross-review-wave1

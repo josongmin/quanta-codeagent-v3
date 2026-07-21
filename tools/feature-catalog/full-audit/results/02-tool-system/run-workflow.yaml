@@ -1,0 +1,62 @@
+version: 1
+feature_id: run-workflow
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/tier1/subagent.ts:workflowTools"
+entrypoints:
+  - src/apps/cli/index.ts
+  - "src/apps/cli/internal.ts:buildSubagentConfig"
+activation:
+  - QUANTA_WORKFLOW canonical gate enabled
+  - QUANTA_SUBAGENT is not disabled
+  - subagent runner is assembled
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/workflow/compile.ts:compileWorkflowSpec"
+  - "src/workflow/executor.ts:runWorkflow"
+  - "src/tool/workflow/run-workflow-tool.ts:createRunWorkflowTool"
+consumer:
+  - "src/agent/tier1/subagent.ts:workflowTools"
+  - "src/agent/workflow-agent-adapter.ts:subagentRunnerToAgentRunPort"
+reachable: yes
+surface_findings:
+  - "CLI config computes enableWorkflow from the workflow gate and parent subagent state, then the tier-1 block supplies the live runner adapter."
+  - "The engine has bounded concurrency, max-agent, abort, budget, duplicate-id, structured-output, and failure-isolation rails."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/workflow/run-workflow-wiring-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Absent or false enableWorkflow produces no run_workflow tool; a disabled parent subagent produces no block."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/workflow/run-workflow-tool-hellgate.test.ts tests/unit/workflow/run-workflow-wiring-hellgate.test.ts tests/unit/workflow/workflow-engine-hellgate.test.ts tests/unit/workflow/workflow-e2e-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Compilation, real tier-1 registration, sequential and parallel execution, fan-out, bounded loop, backstops, and multi-phase end-to-end workflows passed."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'enableWorkflow|createRunWorkflowTool|subagentRunnerToAgentRunPort' src/apps/cli/internal.ts src/agent/tier1/subagent.ts src/agent/workflow-agent-adapter.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The CLI gate reaches the tier-1 owner, which adapts the assembled runner into the workflow engine port."
+  - kind: test
+    command: "bun test tests/unit/workflow/run-workflow-tool-hellgate.test.ts tests/unit/workflow/run-workflow-wiring-hellgate.test.ts tests/unit/workflow/workflow-engine-hellgate.test.ts tests/unit/workflow/workflow-e2e-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The selected 31 workflow rails passed with bounded concurrency, abort, budget, and failure-isolation controls."
+audited_at: "2026-07-19"
+auditor: codex/p1-tools-exec
+review_state: approved
+reviewer: codex/cross-review-wave1

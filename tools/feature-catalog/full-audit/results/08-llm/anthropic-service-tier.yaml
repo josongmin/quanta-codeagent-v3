@@ -1,0 +1,50 @@
+version: 1
+feature_id: anthropic-service-tier
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/factory.ts:resolveServiceTier
+entrypoints:
+  - src/llm/adapters/anthropic.ts
+activation:
+  - QUANTA_FAST or QUANTA_SERVICE_TIER resolves at the factory and is sent only for Anthropic requests.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/factory.ts:resolveServiceTier
+consumer:
+  - src/llm/anthropic-messages-codec.ts
+reachable: yes
+surface_findings:
+  - Off path omits service_tier; priority and fast normalize to auto, standard to standard_only, and garbage is dropped.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/anthropic-service-tier-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent setting omits the request key.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/anthropic-service-tier-hellgate.test.ts tests/unit/service-tier-factory-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Factory and codec normalization rails passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/anthropic-service-tier-hellgate.test.ts tests/unit/service-tier-factory-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Service-tier rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,49 @@
+version: 1
+feature_id: slash-web-paste-edit
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/web-cmd.ts and paste-cmd.ts
+entrypoints:
+  - src/apps/cli/slash-commands.ts:slash registry
+activation:
+  - Invoke /web, /paste, /edit-plan, or /edit-message in an interactive REPL with the required optional port.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/web-cmd.ts
+  - src/apps/cli/paste-cmd.ts
+  - src/apps/cli/edit-plan-cmd.ts
+  - src/apps/cli/edit-message-cmd.ts
+consumer:
+  - src/apps/cli/slash-commands.ts:BUILTINS
+reachable: yes
+surface_findings:
+  - Commands are registered and gracefully fall back when their optional inbox or editor ports are absent.
+  - Catalog's explicit hold says PlanEditPort/ComposerEditPort lack a concrete REPL wiring, so full edit capability remains conditional.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/web-cmd-hellgate.test.ts tests/unit/cli/paste-cmd-hellgate.test.ts tests/unit/cli/edit-plan-cmd-hellgate.test.ts tests/unit/cli/edit-message-cmd-hellgate.test.ts tests/unit/slash-commands.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: URL/SSRF, clipboard, inbox, editor, dry no-op, and unwired fallbacks passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: "Edit-plan and edit-message require optional ports with no concrete REPL-side wiring per the catalog's explicit hold."
+disposition: hold
+receipts:
+  - kind: test
+    command: bun test tests/unit/cli/web-cmd-hellgate.test.ts tests/unit/cli/paste-cmd-hellgate.test.ts tests/unit/cli/edit-plan-cmd-hellgate.test.ts tests/unit/cli/edit-message-cmd-hellgate.test.ts tests/unit/slash-commands.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused slash UX rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

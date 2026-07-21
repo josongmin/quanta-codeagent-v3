@@ -1,0 +1,57 @@
+version: 1
+feature_id: memory-distill-redaction-fence
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/memory-distill.ts:distillSession
+entrypoints:
+  - src/agent/session-resources.ts:buildPersistDeps
+  - src/agent/memory.ts:distillRecords
+  - src/agent/loop/session-lifecycle.ts:maybePersistSession
+activation:
+  - Secret redaction is default-on when AgentConfig.redaction is absent.
+  - The session lifecycle builds persist dependencies for a configured store and passes redactionEnabled, whitelist, and onRedactionHits to distillSession.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: unknown
+  headless: resource
+  daemon: unknown
+producer:
+  - src/agent/memory-distill.ts:distillSession
+  - src/security/redaction.ts:redactSecrets
+consumer:
+  - src/agent/memory.ts:distillRecords
+  - src/agent/session-resources.ts:buildPersistDeps
+reachable: yes
+surface_findings:
+  - distillSession redacts the serialized transcript before constructing the LLM prompt and reports hits through the supplied aggregate callback.
+  - normalizeRedactionConfig makes an absent redaction block enabled; disabling requires a non-empty acknowledgedRisk and deliberately permits raw input.
+  - The focused integration rail captures the real distill LLM input and proves a secret is absent while the memory_distill rollup is recorded.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-distill.test.ts tests/integration/redaction-three-application-points.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused unit and integration rails passed; the integration rail observes the LLM-facing distill transcript after the normal agent lifecycle.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'distillSession|redactionDisabled|onRedactionHits|normalizeRedactionConfig' src/agent/memory-distill.ts src/agent/memory.ts src/agent/session-resources.ts src/agent/loop/session-bootstrap.ts src/security/redaction-config.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live persistence path uses the default-on normalized redaction state and forwards both hit aggregation and the explicit acknowledged-risk opt-out.
+  - kind: test
+    command: bun test tests/unit/memory-distill.test.ts tests/integration/redaction-three-application-points.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 18 focused tests passed, including direct LLM-input capture for the memory_distill application point.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch10
+review_state: approved
+reviewer: codex/cross-review-wave1

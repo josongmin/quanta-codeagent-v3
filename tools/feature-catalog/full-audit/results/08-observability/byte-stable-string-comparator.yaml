@@ -1,0 +1,53 @@
+version: 1
+feature_id: byte-stable-string-comparator
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/byte-compare.ts:byteCompare
+entrypoints:
+  - src/apps/cli/help-render.ts:command ordering
+  - src/runner/session-ops/list-tui.ts:session ordering
+activation:
+  - Static shared utility invoked directly by deterministic sort tie-breakers.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/shared/byte-compare.ts performs native code-point ordering without locale collation.
+consumer:
+  - src/apps/cli/help-render.ts uses byteCompare when sorting command names.
+  - src/runner/batch/corpus/loader.ts and src/tool/file-tree-summary/index.ts use it in replay-visible ordering.
+reachable: yes
+surface_findings:
+  - The primitive has broad production use across CLI, batch, tool, retrieval, and coordinator ordering paths.
+  - The source-level no-sketchy scanner contains the ban against localeCompare but is currently red for ten unrelated pre-existing findings.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/coordination/team-dag-hellgate.test.ts tests/unit/file-tree-summary-rank.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Deterministic ready, blocked, and directory-order tie-break rails pass against byte-order baselines.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'byteCompare(' 9a12f7a -- src/apps/cli src/runner src/tool src/retrieval
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Multiple live sorting consumers route through the locale-independent comparator.
+  - kind: test
+    command: bun test tests/unit/coordination/team-dag-hellgate.test.ts tests/unit/file-tree-summary-rank.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused deterministic ordering rail passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

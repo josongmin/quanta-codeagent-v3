@@ -1,0 +1,45 @@
+version: 1
+feature_id: lsp-clangd-adapter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/lsp/adapters/clangd.ts:ClangdAdapter
+entrypoints:
+  - src/agent/lsp-bridge.ts
+activation:
+  - C-family extension routing selects clangd.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: resource
+producer:
+  - src/lsp/adapters/clangd.ts:ClangdAdapter
+consumer:
+  - src/agent/lsp-bridge.ts
+reachable: yes
+surface_findings:
+  - Real clangd static evidence succeeds against a compiled C++ failure fixture.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/lsp-bridge-probe.test.ts tests/unit/tool/evidence/runtime-cpp-real-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Registry and real clangd evidence rails passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/lsp-bridge-probe.test.ts tests/unit/tool/evidence/runtime-cpp-real-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Clangd adapter rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

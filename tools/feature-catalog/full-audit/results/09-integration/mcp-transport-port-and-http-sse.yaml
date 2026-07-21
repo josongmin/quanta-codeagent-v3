@@ -1,0 +1,63 @@
+version: 1
+feature_id: mcp-transport-port-and-http-sse
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/mcp/client/transport-factory.ts:defaultTransportFor
+entrypoints:
+  - src/mcp/client.ts:McpClient
+  - src/host/mcp-composition.ts:loadMcpTools composition
+  - src/agent/skill-mcp-wire.ts:createSkillMcpLauncherPort
+activation:
+  - Configured MCP servers use stdio by default; a server url selects the HTTP-SSE transport.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/mcp/transports/port.ts:McpTransport
+  - src/mcp/transports/stdio.ts:StdioMcpTransport
+  - src/mcp/transports/http-sse.ts:HttpSseMcpTransport
+consumer:
+  - src/mcp/client.ts:McpClient
+  - src/host/mcp-composition.ts:MCP host composition
+  - src/agent/skill-mcp-wire.ts:skill MCP HTTP launcher
+reachable: yes
+surface_findings:
+  - McpClient selects StdioMcpTransport without url and HttpSseMcpTransport when config.url is supplied.
+  - The client request core consumes the transport port rather than carrier-specific I/O.
+  - SSE pump death, malformed payloads, and unsupported JSON-RPC envelopes are surfaced or rejected without silently retaining pending calls.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mcp/transport-port-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No transport option selects the byte-identical stdio carrier; HTTP-SSE requires config.url.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp/transport-port-hellgate.test.ts tests/unit/mcp/http-sse-pump-death-hellgate.test.ts src/mcp/transports/__tests__/http-sse-resumption-hellgate.test.ts src/mcp/transports/__tests__/t12-http-sse-lifecycle-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Stdio and HTTP-SSE selection, request round-trips, session headers, pump death, close behavior, and SSE cursor resumption passed.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'McpTransport|HttpSseMcpTransport|StdioMcpTransport|defaultTransportFor' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/mcp src/host src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Transport selection is in McpClient and is consumed by host and skill MCP composition paths.
+  - kind: test
+    command: bun test tests/unit/mcp/transport-port-hellgate.test.ts tests/unit/mcp/http-sse-pump-death-hellgate.test.ts src/mcp/transports/__tests__/http-sse-resumption-hellgate.test.ts src/mcp/transports/__tests__/t12-http-sse-lifecycle-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused carrier selection, protocol, lifecycle, pump-death, and resumption rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

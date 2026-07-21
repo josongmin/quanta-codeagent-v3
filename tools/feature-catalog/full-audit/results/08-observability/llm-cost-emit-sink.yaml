@@ -1,0 +1,54 @@
+version: 1
+feature_id: llm-cost-emit-sink
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/llm-cost-emit.ts:buildLlmCostMetricsSink
+entrypoints: []
+activation:
+  - No production AgentConfig workMetricsSink composition injects the exported sink.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/observability/llm-cost-emit.ts:emitLlmCostToOtel
+  - src/observability/llm-cost-emit.ts:buildLlmCostMetricsSink
+consumer: []
+reachable: no
+surface_findings:
+  - Cost and token emission behavior is covered in isolation, but no source consumer plugs the factory into AgentConfig.workMetricsSink.
+off_identity_proof:
+  kind: source
+  command: rg -n 'buildLlmCostMetricsSink|emitLlmCostToOtel' src --glob '*.ts'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Searches find only the defining module and barrel exports.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm-cost-emit-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Isolated cost emission, sanitization, unknown-model, and numeric guard rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: seam-only
+blocker: Missing AgentConfig workMetricsSink composition consumer.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'buildLlmCostMetricsSink|emitLlmCostToOtel|workMetricsSink' src --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Factory and emitter are exported but not installed in a production configuration.
+  - kind: test
+    command: bun test tests/unit/llm-cost-emit-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Isolated sink rail passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

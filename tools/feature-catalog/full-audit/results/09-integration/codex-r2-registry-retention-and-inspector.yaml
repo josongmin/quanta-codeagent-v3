@@ -1,0 +1,61 @@
+version: 1
+feature_id: codex-r2-registry-retention-and-inspector
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/session-resource-registry/global.ts:getGlobalSessionResourceRegistry
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:agent configuration composition
+  - src/apps/cli/session-registry-cmd.ts:/session-registry stats
+activation:
+  - Registry composition occurs when a session resource is requested; durable backend selection is environment-controlled.
+  - Use /session-registry stats in the interactive CLI for inspection.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/session-resource-registry/global.ts:getGlobalSessionResourceRegistry
+  - src/agent/session-resource-registry/auto-sweep.ts:startAutoSweep
+  - src/agent/session-resource-registry/inspector.ts:inspectSessionRegistry
+consumer:
+  - src/host/runtime/agent-config-assembler.ts:getGlobalSessionResourceRegistry
+  - src/apps/cli/session-registry-cmd.ts:slash command
+reachable: yes
+surface_findings:
+  - Agent config assembly consumes the singleton registry; its first construction starts the no-op-or-periodic retention sweep.
+  - The CLI registers /session-registry stats and routes it to the inspector; no web inspector render is present, as the catalog discloses.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/session-registry-env-swap-hellgate.test.ts tests/unit/auto-sweep-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset durable-backend environment yields in-memory registry and a no-op sweep handle.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/session-registry-env-swap-hellgate.test.ts tests/unit/auto-sweep-hellgate.test.ts src/agent/session-resource-registry/__tests__/inspector.hellgate.test.ts tests/unit/session-registry-slash.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Backend priority and fallback, sweeping, readonly inspection, and slash dispatch rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'getGlobalSessionResourceRegistry|startAutoSweep|session-registry' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host/runtime src/apps/cli src/agent/session-resource-registry
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime assembly uses the singleton, global initialization starts sweep, and CLI registers the inspector slash command.
+  - kind: test
+    command: bun test tests/unit/session-registry-env-swap-hellgate.test.ts tests/unit/auto-sweep-hellgate.test.ts src/agent/session-resource-registry/__tests__/inspector.hellgate.test.ts tests/unit/session-registry-slash.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused durable registry, retention, inspector, and slash rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

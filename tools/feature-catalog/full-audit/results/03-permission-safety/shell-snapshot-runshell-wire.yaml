@@ -1,0 +1,50 @@
+version: 1
+feature_id: shell-snapshot-runshell-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/shell-snapshot-session.ts:buildShellSnapshotSession"
+entrypoints: [src/apps/cli/index.ts]
+activation: ["QUANTA_SHELL_SNAPSHOT=1", "--shell-snapshot"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: ["src/apps/cli/internal/shell-snapshot.ts:buildShellSnapshotConfig", "src/agent/shell-snapshot-session.ts:buildShellSnapshotSession"]
+consumer: ["src/agent/dispatch/tool-context.ts:buildToolContext", "src/tool/bash/index.ts:runShellWithEscalation", "src/runtime/shell.ts:runShell"]
+reachable: yes
+surface_findings: ["The CLI opt-in builds a snapshot port, the loop captures once per turn, dispatch projects its restore seam to bash, and runShell sources it before wrappers and spawn.", "This supersedes the catalog hold claim that the runShell wire has zero production callers; the current frozen source has the full AgentConfig-to-bash path."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/shell-snapshot-runshell-wire-hellgate.test.ts tests/unit/runtime/shell-snapshot-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: A01 and HELL-SS-WIRE-01 prove absent configuration leaves bash unsourced and byte-identical.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/shell-snapshot-runshell-wire-hellgate.test.ts tests/unit/runtime/shell-snapshot-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 23 tests pass, including loop-to-real-bash marker restoration, same-turn behavior, capture failure fallback, and runtime source ordering.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'shellSnapshot|buildShellSnapshotSession|currentSeam|runShell\(' src/apps/cli src/agent src/tool/bash/index.ts src/runtime/shell.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The opt-in config, per-turn capture, ToolContext projection, bash forwarding, and runShell restore fold are all concrete production links.
+  - kind: test
+    command: bun test tests/integration/shell-snapshot-runshell-wire-hellgate.test.ts tests/unit/runtime/shell-snapshot-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 23 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-security-sandbox
+review_state: approved
+reviewer: codex/cross-review-wave1

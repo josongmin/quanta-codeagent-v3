@@ -1,0 +1,57 @@
+version: 1
+feature_id: migration-content-dedup-fingerprint
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/session-import-handler.ts:persistAllSessions
+entrypoints:
+  - src/apps/cli/session-import-handler.ts:CLI session import handler
+  - src/migration/importer.ts:stageSessionCompletion
+activation:
+  - Run the CLI session import for a supported external provider; source transcript hashes are written as successful per-session log rows and consulted on later imports.
+effective_defaults:
+  cli: on
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - SHA-256 of imported transcript source bytes
+consumer:
+  - persisted import-log item rows and session persistence dedup query
+reachable: yes
+surface_findings:
+  - The importer fingerprints each transcript, and the CLI persist loop consults wasAlreadyImported before writing then appends itemKind and contentHash after success.
+  - A second import skips matching successful session rows, while different kinds, hashes, and failed rows do not suppress a write; credential paths and symlinks are refused before byte reads.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/migration-import-persistence-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent source is a no-op with the session store untouched; the normal import path does not bypass its explicit user command surface.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/migration-import-persistence-e2e-hellgate.test.ts tests/unit/migration-config-translators.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed resumable persistence, second-run duplicate skipping, kind/hash/ok matching, credential-read refusal, and malformed transcript recovery.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'contentSha256|wasAlreadyImported|recordPersistedRow|persistAllSessions' src/migration/importer.ts src/migration/dedup.ts src/apps/cli/session-import-handler.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Hash production, pre-persist query, and post-success import-log record form a complete CLI path.
+  - kind: test
+    command: bun test tests/unit/migration-import-persistence-e2e-hellgate.test.ts tests/unit/migration-config-translators.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All focused persistence, dedup, and hash-query rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,46 @@
+version: 1
+feature_id: anthropic-beta-and-skill-size-cap
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/adapters/anthropic.ts:AnthropicAdapter
+entrypoints:
+  - src/skill/discover.ts
+activation:
+  - Anthropic configuration forwards non-empty beta headers and skill discovery rejects over-cap files.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/llm/adapters/anthropic.ts
+  - src/skill/skill-size.ts
+consumer:
+  - src/skill/discover.ts
+reachable: yes
+surface_findings:
+  - Empty beta headers are byte-identical and oversize skill files are skipped rather than loaded.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill-size.test.ts tests/unit/anthropic.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Beta header and skill size rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/skill-size.test.ts tests/unit/anthropic.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Beta and size-cap rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

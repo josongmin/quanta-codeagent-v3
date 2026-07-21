@@ -1,0 +1,50 @@
+version: 1
+feature_id: git-read-trio
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/git/{diff,status,blame}.ts tool factories over GitRunner
+entrypoints: [src/tool/git/index.ts:gitTools, src/apps/cli/internal.ts:loadFeatures]
+activation: [QUANTA_GIT_TOOLS=1 causes the CLI feature builder to append gitTools to the live registry.]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/tool/git/diff.ts:gitDiffTool, src/tool/git/status.ts:gitStatusTool, src/tool/git/blame.ts:gitBlameTool]
+consumer: [src/tool/git/index.ts:gitTools, src/apps/cli/internal.ts:gitToolList]
+reachable: conditional
+surface_findings: ["All three factories are real read-only tools using injectable GitRunner, typed spawn and git failures, bounded diff output, and leading-dash revision rejection.", "The normal CLI registry appends gitTools only behind QUANTA_GIT_TOOLS; web-daemon constructs only buildDefaultTools and has no gitTools consumer, so catalog cli:web full is stale."]
+off_identity_proof:
+  kind: source
+  command: rg -n 'gitToolsEnabled|gitToolList|gitTools\(' src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/web-daemon/runtime-factory.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The false gate contributes an empty CLI array, while the daemon registry does not invoke gitTools.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git-tools.test.ts tests/unit/git-tools-hellgate.test.ts tests/integration/git-tools.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 64 focused unit, real-git integration, empty-repository, detached-HEAD, argv-injection, cap, and typed-error cases passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog must state QUANTA_GIT_TOOLS-gated CLI availability and remove web:full until a web composition root consumes gitTools.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'gitDiffTool|gitStatusTool|gitBlameTool|gitTools\(|gitToolsEnabled|buildDaemonToolRegistry' src/tool/git src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Producer factories, the gated CLI consumer, and the absent daemon consumer are all explicit.
+  - kind: test
+    command: bun test tests/unit/git-tools.test.ts tests/unit/git-tools-hellgate.test.ts tests/integration/git-tools.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 64 pass, 0 fail, including real git status, diff, and blame calls.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-registry
+review_state: approved
+reviewer: codex/cross-review-wave1

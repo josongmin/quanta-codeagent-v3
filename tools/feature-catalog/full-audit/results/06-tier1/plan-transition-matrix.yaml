@@ -1,0 +1,55 @@
+version: 1
+feature_id: plan-transition-matrix
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/plan/mutations.ts:applyPatch
+entrypoints:
+  - src/apps/cli/repl/factories/plan-store.ts:buildPlanStoreOrUndefined
+  - src/agent/plan/mutations.ts:updateTodos
+activation:
+  - CLI creates an in-memory plan store unless QUANTA_PLAN_STORE explicitly disables it.
+  - Every status-bearing TodoPatch reaches applyPatch and is rejected before mutation when the closed transition predicate denies it.
+effective_defaults:
+  cli: on
+  web: off
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/plan/transitions.ts:TRANSITION_MATRIX
+  - src/agent/plan/transitions.ts:isValidTransition
+consumer:
+  - src/agent/plan/mutations.ts:applyPatch
+  - src/agent/plan/state.ts:PlanStore
+reachable: yes
+surface_findings:
+  - The default CLI plan store makes structured plan mutation available without a collaboration-mode opt-in.
+  - Status validation is in the owning mutation path, not merely exposed as a pure helper.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/plan/transitions-hell.test.ts tests/unit/agent/plan/mutations-hell.test.ts tests/integration/plan-mode-x-tool-registry-cross.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 83 exhaustive matrix, mutation-denial, and cross-feature plan rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildPlanStoreOrUndefined|isValidTransition|invalid_status_transition' src/apps/cli src/agent/plan
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Default CLI composition supplies the store and mutations invoke the transition predicate before committing a patch.
+  - kind: test
+    command: bun test tests/unit/agent/plan/transitions-hell.test.ts tests/unit/agent/plan/mutations-hell.test.ts tests/integration/plan-mode-x-tool-registry-cross.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Exhaustive 5 by 5 table, terminal-state denial, mutation error, and integrated registry rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch16
+review_state: approved
+reviewer: codex/cross-review-wave1

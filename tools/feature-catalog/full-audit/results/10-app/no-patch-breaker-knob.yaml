@@ -1,0 +1,55 @@
+version: 1
+feature_id: no-patch-breaker-knob
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/eval/no-patch-breaker-adapter.ts:wireNoPatchBreaker
+entrypoints:
+  - src/apps/bench/run-main.ts:runMain
+  - src/apps/bench/eval/driver.ts:runInstance
+activation:
+  - QUANTA_BENCH_NO_PATCH_BREAKER=1
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/agent/no-patch-breaker/index.ts:decideNoPatch
+  - src/runner/batch/eval/no-patch-breaker-adapter.ts:attachNoPatchBreaker
+consumer:
+  - src/runner/batch/eval/driver/config-build.ts:buildConfig
+  - src/runner/batch/eval/driver/result-assembly.ts:agentPhaseError
+reachable: yes
+surface_findings:
+  - The live bench config attaches a hook when no-patch-breaker is on and terminal assembly emits no_patch_exhausted for zero-edit exhausted runs.
+  - The hook injects an advisory commit-now prompt; it cannot force an edit or a best-edit commit.
+  - The catalog's force-commit wording overstates the actual advisory prompt behavior, while its exhausted-verdict portion is live.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts tests/unit/runner/no-patch-breaker-driver.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset posture leaves noPatchBreaker false and buildConfig hook-free.
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: The catalog says force best-edit commit; the production hook only supplies a non-imperative prompt and records an exhausted error later.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'wireNoPatchBreaker|commitNowMessage|noPatchExhaustedErrorOf' src/runner/batch/eval/driver/config-build.ts src/runner/batch/eval/no-patch-breaker-adapter.ts src/runner/batch/eval/driver/result-assembly.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Config composition wires an injected prompt and result assembly reports exhaustion, with no mechanism that applies or commits a patch.
+  - kind: test
+    command: bun test tests/unit/no-patch-breaker.test.ts tests/unit/runner/no-patch-breaker-driver.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused rails passed and explicitly prove the injection lets the model decide rather than enforcing a commit.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-bench-controls
+review_state: approved
+reviewer: codex/cross-review-wave1

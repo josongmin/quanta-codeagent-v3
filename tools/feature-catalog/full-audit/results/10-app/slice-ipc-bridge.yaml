@@ -1,0 +1,52 @@
+version: 1
+feature_id: slice-ipc-bridge
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/ipc/event-bridge.ts:createEventBridge
+entrypoints:
+  - src/ipc/index.ts
+activation:
+  - A future surface injects a BridgeTransport and invokes the EventBridge or PortableSessionV1 export and import APIs.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/ipc/event-bridge.ts:createEventBridge
+  - src/ipc/session-export.ts:exportSession
+  - src/ipc/session-import.ts:importPortableSession
+consumer: []
+reachable: no
+surface_findings:
+  - The cataloged EventBridge and PortableSessionV1 modules are complete and tested but production source has no consumer of createEventBridge or the portable export/import APIs.
+  - Current CLI, web-daemon, and SDK consumers import the distinct src/ipc/session transport surface rather than this cataloged EventBridge and portable-session slice.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/ipc-slice-boundary.test.ts tests/unit/ipc/event-bridge.test.ts tests/unit/ipc/session-export-import.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Slice boundary, event round-trip, transport framing, and portable session serialization rails passed under test callers.
+failure_posture: unknown
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production surface imports and invokes the cataloged EventBridge or PortableSessionV1 APIs.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'createEventBridge|exportSession|importPortableSession' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps src/sdk src/ipc
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Executable references are confined to implementation and test-facing IPC modules; surface consumers use src/ipc/session instead.
+  - kind: test
+    command: bun test tests/unit/ipc-slice-boundary.test.ts tests/unit/ipc/event-bridge.test.ts tests/unit/ipc/session-export-import.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused IPC slice rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

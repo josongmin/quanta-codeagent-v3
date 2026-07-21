@@ -1,0 +1,53 @@
+version: 1
+feature_id: vscode-chatsessions-surface
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: surfaces/vscode/src/provider.ts:registerQuantaChatSessions
+entrypoints:
+  - surfaces/vscode/package.json:main
+  - surfaces/vscode/src/provider.ts:registerQuantaChatSessions
+activation:
+  - A VS Code extension host would need to load dist/extension.js and call registerQuantaChatSessions with a real session.v1 createSession factory.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - surfaces/vscode/src/chat-session-adapter.ts:ChatSessionRegistry
+  - surfaces/vscode/src/provider.ts:registerQuantaChatSessions
+consumer: []
+reachable: no
+surface_findings:
+  - The manifest declares main as dist/extension.js, but the surface has no extension activation module, dist artifact, or in-tree consumer of registerQuantaChatSessions.
+  - The pure session.v1 projection and package metadata are present, but no production VS Code host can construct the injected createSession factory or register the provider.
+  - The focused adapter test proves protocol projection, not extension-host activation or proposed-API compatibility.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/surfaces/vscode/chat-session-adapter-hellgate.test.ts tests/unit/surfaces/vscode/core-no-vscode-leak-ratchet.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Core contains no VS Code import or proposed API symbol; absent extension activation means no editor host work can occur.
+on_efficacy_proof: null
+failure_posture: unknown
+security_posture: na
+observability: na
+verdict: not-activatable
+blocker: The extension package declares dist/extension.js but supplies neither an activate() module nor a caller for registerQuantaChatSessions; the required session factory is also unwired.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'registerQuantaChatSessions|activate\\(|extension\\.js|chatSessionsProvider' surfaces/vscode src tests
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The only registerQuantaChatSessions definition is provider.ts; package.json points at a nonexistent dist/extension.js and no activation caller exists.
+  - kind: test
+    command: bun test tests/unit/surfaces/vscode/chat-session-adapter-hellgate.test.ts tests/unit/surfaces/vscode/core-no-vscode-leak-ratchet.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Eleven focused adapter and core-boundary assertions passed, but none execute a packaged extension host.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-fastapply
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,70 @@
+version: 1
+feature_id: surface-composition-wire-r1
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/surface-compose/composer.ts:composeSurfaceWires
+entrypoints:
+  - src/apps/cli/index.ts:main
+  - src/apps/cli/repl.ts:runRepl
+  - src/apps/cli/repl/session-loop.ts:runSessionLoop
+activation:
+  - QUANTA_CHECKPOINT_CONV creates the turn-end checkpoint wire and /rewind-conv slot.
+  - QUANTA_TOOL_PROFILE, QUANTA_IDENTITY_MODE, and QUANTA_FOCUS_CHAIN_EVERY selectively add their slash adapters.
+  - The session IO, composer, fork checkpoint, and text inbox adapters are composed without these knobs.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/repl/surface-compose/mutable-wires.ts:buildMutableSurfaceWires
+  - src/apps/cli/repl/surface-compose/slash-context-compose.ts:buildSurfaceSlashContext
+  - src/apps/cli/repl/session-loop.ts:recordTurnSnapshot
+consumer:
+  - src/apps/cli/repl/surface-compose/dispatch.ts:buildSurfaceDispatch
+  - src/apps/cli/repl/prompt-pipeline.ts:composePromptPipeline
+  - src/apps/cli/repl/session-loop.ts:runSessionLoop
+reachable: yes
+surface_findings:
+  - composeSurfaceWires reaches the interactive CLI through runRepl, passes the augmented slash context to dispatch, and session-loop consumes the checkpoint and playbook handles.
+  - The frozen composition root always constructs sessionIo, composer, textInbox, and conversation-store adapters; only selected wire families are knob/resource conditional.
+  - The YAML and ledger state that all four knobs absent is a byte-identical default-OFF projection, but the mandatory adapter families remain live. The all-feature default-OFF framing is therefore false.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/repl-surface-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: The optional checkpoint and selected slots are absent with gates off, but the same rail proves textInbox, composer, fork-session, and sessionIo are always composed.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/repl-surface-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 20 composition cases prove checkpoint recording, adapters, slash projection, playbook attach-detach, prompt inbox drain, and default optional-slot behavior.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: The catalog treats the composed bundle as wholly default-OFF even though several production adapters in the bundle are unconditional.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'composeSurfaceWires|buildSurfaceDispatch|recordTurn\(|maybeStartPlaybookTriggerWire|createTextInbox|sessionIo' src/apps/cli/repl
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The source links composition to dispatch, turn-end recording, playbook lifecycle, text inbox, and session IO consumers.
+  - kind: test
+    command: bun test tests/unit/cli/repl-surface-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All 20 R1 composition cases passed, including both optional-gate controls and always-wired adapter cases.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3-plus feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-session
+review_state: approved
+reviewer: codex/cross-review-wave1

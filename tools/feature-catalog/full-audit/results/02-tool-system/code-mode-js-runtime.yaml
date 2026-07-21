@@ -1,0 +1,61 @@
+version: 1
+feature_id: code-mode-js-runtime
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/optional-ports.ts:wireCodeCellDispatch"
+entrypoints:
+  - src/apps/cli/index.ts
+  - "src/agent/optional-ports.ts"
+activation:
+  - QUANTA_CODE_MODE strictly set to 1
+  - DefaultToolPorts.codeMode enabled
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/codemode/runtime.ts:runCodeCell"
+  - "src/agent/codemode-wire.ts:buildCodeCellDispatchPort"
+consumer:
+  - "src/agent/optional-ports.ts:wireCodeCellDispatch"
+  - "src/agent/dispatch.ts:buildToolContext"
+  - "src/tool/codemode-tool.ts:codeCellTool"
+reachable: yes
+surface_findings:
+  - "The same strict gate wires both code_cell registration and the per-cell dispatch factory."
+  - "Every in-cell call traverses dispatchTool, preserving approval and hard-deny checks; the isolate has no host process, filesystem, or network surface."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/code-mode-default-off-hellgate.test.ts tests/unit/code-mode-phase2-wire.test.ts tests/unit/prompt-directives-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Unset code-mode leaves the tool, factory, surface thunk, directive tail, and lazy WASM import absent."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/code-mode-hellgate.test.ts tests/unit/code-mode-phase2-full-surface.test.ts tests/unit/code-mode-phase2-wire.test.ts tests/integration/code-mode-real-quickjs-wire-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Real QuickJS plus live dispatch integration proves gated calls, hard-deny, limits, redaction, timeout, abort, and full registered surface behavior."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'QUANTA_CODE_MODE|codeCellDispatchFactory|codeCellSurfaceTools' src/agent/optional-ports.ts src/agent/dispatch.ts src/tool/index.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The strict gate, live registry surface thunk, and ToolContext dispatch handoff occur on the production path."
+  - kind: test
+    command: "bun test tests/unit/code-mode-hellgate.test.ts tests/unit/code-mode-default-off-hellgate.test.ts tests/unit/code-mode-phase2-full-surface.test.ts tests/unit/code-mode-phase2-wire.test.ts tests/integration/code-mode-real-quickjs-wire-hellgate.test.ts tests/unit/prompt-directives-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The selected rails passed, including a real QuickJS dispatch call and paired default-off controls."
+audited_at: "2026-07-19"
+auditor: codex/p1-tools-exec
+review_state: approved
+reviewer: codex/cross-review-wave1

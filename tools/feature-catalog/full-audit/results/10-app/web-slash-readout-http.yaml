@@ -1,0 +1,53 @@
+version: 1
+feature_id: web-slash-readout-http
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/web-daemon/readout.ts:resolveReadout
+entrypoints:
+  - src/apps/web-daemon/server.ts
+  - apps/web-frontend/src/components/slash-readout.ts
+activation:
+  - An authenticated GET /readout/:name request renders a snapshot or source-backed readout outside the WS write lease.
+effective_defaults:
+  cli: na
+  web: resource
+  bench: na
+  headless: na
+  daemon: resource
+producer:
+  - src/apps/web-daemon/readout.ts:resolveReadout
+consumer:
+  - src/apps/web-daemon/server.ts
+  - apps/web-frontend/src/components/slash-readout.ts
+reachable: yes
+surface_findings:
+  - The HTTP route reads snapshot state without acquiring the turn writer lease, so /state remains available during an active turn.
+  - Absent or throwing optional source accessors return a wired:false explanatory payload rather than an error; unknown names alone return 404.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/readout-http-route-web-daemon-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real HTTP proof covers auth, live snapshot, mid-turn lease freedom, optional sources, cost fold, and unknown-name 404.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'resolveReadout|renderReadout|/readout|WebReadoutSources' src/apps/web-daemon/readout.ts src/apps/web-daemon/server.ts apps/web-frontend/src/components/slash-readout.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Pure renderer, server HTTP route, optional read sources, and frontend consumer are present.
+  - kind: test
+    command: bun test tests/integration/readout-http-route-web-daemon-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Seven real HTTP route scenarios passed in the focused batch.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

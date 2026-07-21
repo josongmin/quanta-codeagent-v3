@@ -1,0 +1,57 @@
+version: 1
+feature_id: eval-trajectory-meta-source
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/trajectory/source.ts:loadSession
+entrypoints:
+  - src/apps/eval/trajectory/classifier.ts:classifyTrajectories
+  - src/apps/eval/trajectory/replay.ts:replayFixture
+  - src/apps/eval/index.ts:trajectory subcommands
+activation:
+  - Run an eval trajectory classify, replay, or freeze operation with JSONL fixture input.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/eval/trajectory/source.ts:loadSession
+  - src/apps/eval/trajectory/freeze.ts:freezeFixture
+consumer:
+  - src/apps/eval/trajectory/classifier.ts
+  - src/apps/eval/trajectory/replay.ts
+  - src/apps/eval/index.ts
+reachable: yes
+surface_findings:
+  - Loader preserves missing versus malformed sidecar metadata and never infers a prompt from the JSONL body.
+  - Bad JSONL lines are counted and logged while valid events remain sortable and usable.
+  - Freeze refuses a source without sidecar metadata unless an explicit prompt supplies replacement metadata.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-meta-sidecar.test.ts tests/unit/eval-freeze.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Sidecar roundtrip, missing/malformed handling, safe freeze refusal, and inline-prompt promotion passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'loadSession|readMetaResult|freezeFixture|classifyTrajectories|replayFixture' src/apps/eval/trajectory src/apps/eval/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Fixture I/O is consumed by classifier, replay, freeze, and their eval CLI routing.
+  - kind: test
+    command: bun test tests/unit/eval-meta-sidecar.test.ts tests/unit/eval-freeze.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused sidecar and freeze rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

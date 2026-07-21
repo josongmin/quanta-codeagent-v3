@@ -1,0 +1,59 @@
+version: 1
+feature_id: quantasubagent-maxdepth
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal.ts:buildSubagentConfig
+entrypoints:
+  - src/agent/tier1/subagent.ts:buildSubagentBlock
+  - src/agent/spawn-depth.ts:effectiveCap
+activation:
+  - QUANTA_SUBAGENT is default-enabled in CLI; QUANTA_SUBAGENT_MAX_DEPTH may lower the active operator depth policy.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/apps/cli/internal.ts:buildSubagentConfig
+consumer:
+  - src/agent/tier1/subagent.ts:buildSubagentBlock
+  - src/agent/subagent-runner.ts:createSubagentRunner
+reachable: yes
+surface_findings:
+  - CLI defaults the parent subagent capability and its six-tool companions on; QUANTA_SUBAGENT=0 is the explicit kill switch.
+  - QUANTA_SUBAGENT_MAX_DEPTH is not an independent raiseable cap: effectiveCap clamps it to QUANTA_MAX_DESCENDANT_DEPTH, whose default is one.
+  - Focused rails prove env/config cap parity, typed denial, and cleanup through the shared registry.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/subagent-features-wiring.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Omitting config.subagent leaves the feature composer without subagent tools.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-config-knobs-hellgate.test.ts tests/unit/subagent-nesting-effective-cap-ssot-hellgate.test.ts tests/integration/subagent-features-wiring.test.ts tests/integration/subagent-cleanup-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Knob, effective-cap, feature wire, and cleanup rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: The catalog describes QUANTA_SUBAGENT as default-OFF and max depth as its primary cap, but CLI defaults it on and the authoritative QUANTA_MAX_DESCENDANT_DEPTH policy clamps the legacy knob.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'QUANTA_SUBAGENT|QUANTA_SUBAGENT_MAX_DEPTH|QUANTA_MAX_DESCENDANT_DEPTH|effectiveCap' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/internal.ts src/agent/spawn-depth.ts src/agent/tier1/subagent.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI defaults subagent on and the common min-cap clamps the per-config depth value.
+  - kind: test
+    command: bun test tests/unit/subagent-config-knobs-hellgate.test.ts tests/unit/subagent-nesting-effective-cap-ssot-hellgate.test.ts tests/integration/subagent-features-wiring.test.ts tests/integration/subagent-cleanup-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused config and lifecycle rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

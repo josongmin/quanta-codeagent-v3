@@ -1,0 +1,60 @@
+version: 1
+feature_id: notify-presence-suppression
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/notify/osc-adapter.ts:createOscNotificationPort
+entrypoints:
+  - src/apps/cli/repl.ts:createRepl
+  - src/apps/cli/repl/factories/notify-and-warning.ts:createNotifyAndWarning
+activation:
+  - QUANTA_NOTIFY_PRESENCE accepts 1, on, true, or yes and only then attaches the composition-root presence probe to the OSC notification adapter.
+  - The active CLI probe is derived from the idle-monitor SSOT and suppression is evaluated separately for each push.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/repl.ts:createRepl
+  - src/apps/cli/repl/factories/notify-and-warning.ts:createNotifyAndWarning
+consumer:
+  - src/apps/cli/notify/osc-adapter.ts:createOscNotificationPort
+reachable: yes
+surface_findings:
+  - The interactive CLI composition root supplies the live idle-derived presence probe to the notify factory.
+  - The factory attaches that probe only behind the explicit environment gate, and the OSC adapter suppresses both completion and idle pushes when the user is present.
+  - Missing or throwing probes fail open toward notification; an absent or falsy gate constructs the legacy always-notify port.
+off_identity_proof:
+  kind: test
+  command: bun test src/apps/cli/repl/factories/__tests__/notify-presence-wire.hellgate.test.ts src/apps/cli/notify/__tests__/push-presence.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset and falsy gates keep a present user notified, matching legacy behavior exactly.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/apps/cli/repl/factories/__tests__/notify-presence-wire.hellgate.test.ts src/apps/cli/notify/__tests__/push-presence.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: A present user suppresses turn-complete and idle OSC pushes; idle users receive them and the real IdleMonitor boundary is exercised.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "QUANTA_NOTIFY_PRESENCE|isUserPresent|createOscNotificationPort" src/apps/cli/repl.ts src/apps/cli/repl/factories/notify-and-warning.ts src/apps/cli/notify/osc-adapter.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI root, gated factory, and OSC adapter create one continuous live producer-to-consumer chain.
+  - kind: test
+    command: bun test src/apps/cli/repl/factories/__tests__/notify-presence-wire.hellgate.test.ts src/apps/cli/notify/__tests__/push-presence.hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected focused rails passed as part of the 174-pass, 0-fail audit run.
+audited_at: "2026-07-19"
+auditor: codex/p1-observability-a
+review_state: approved
+reviewer: codex/cross-review-wave1

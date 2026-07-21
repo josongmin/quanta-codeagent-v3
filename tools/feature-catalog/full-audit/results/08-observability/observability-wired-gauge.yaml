@@ -1,0 +1,53 @@
+version: 1
+feature_id: observability-wired-gauge
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/metrics/observability-helper.ts:withFullObservability
+entrypoints: []
+activation:
+  - A caller must invoke withFullObservability with emitWiredGauge true.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/observability/metrics/observability-helper.ts:withFullObservability
+consumer: []
+reachable: no
+surface_findings:
+  - Gauge behavior is accurate under explicit opt-in, but no production call site invokes the helper.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability-metrics-wired-gauge-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent flag emits no gauge.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-metrics-wired-gauge-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit flag emits all seven truthful slice gauges and isolates per-gauge failure.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: Missing production withFullObservability caller.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'withFullObservability' src --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Source search finds the defining helper but no production composition consumer.
+  - kind: test
+    command: bun test tests/unit/observability-metrics-wired-gauge-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Gauge default-off and enabled rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

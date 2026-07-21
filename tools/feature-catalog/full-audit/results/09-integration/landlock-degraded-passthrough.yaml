@@ -1,0 +1,57 @@
+version: 1
+feature_id: landlock-degraded-passthrough
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/sandbox-wire.ts:buildCliOsSandbox and wrapLinuxShellArgv
+entrypoints:
+  - src/apps/cli/sandbox-wire.ts:installCliSandbox
+  - src/runtime/os-sandbox/default.ts:defaultOsSandbox
+activation:
+  - Set QUANTA_SANDBOX to a restrictive profile in the CLI; Linux probes bwrap then landlock-cli before wrapping each shell argv.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - CLI Linux sandbox backend probe and wrapped shell argv
+consumer:
+  - runtime shell spawn through installed ShellSandboxSlot
+reachable: conditional
+surface_findings:
+  - The old phase-1 Landlock stub is superseded: available Linux hosts use bwrap or landlock-cli, while defaultOsSandbox refuses an unavailable requested sandbox without invoking the spawner.
+  - The live CLI wrapper still returns the original argv with sandboxApplied false when neither Linux backend exists; this is a typed fail-open degradation, unlike defaultOsSandbox's fail-closed path.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/os-sandbox-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset, default, off, and invalid QUANTA_SANDBOX values leave the CLI slot absent and preserve passthrough behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/os-sandbox-hellgate.test.ts tests/unit/os-sandbox-linux-hellgate.test.ts tests/unit/cli/os-sandbox-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed bwrap and landlock-cli argv routing, backend detection, partial-network warning, CLI no-backend typed passthrough, and default-port fail-closed refusal.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: The catalog describes unconditional phase-1 landlock-not-implemented passthrough and its note claims the live port is fail-closed, but current code has backend-dependent behavior and the active CLI wrapper remains fail-open when Linux backends are absent.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'wrapLinuxShellArgv|linux-bwrap-missing|defaultOsSandbox|sandboxUnavailableRefusal' src/apps/cli/sandbox-wire.ts src/runtime/os-sandbox/default.ts src/runtime/os-sandbox/linux.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI and default-port Linux fallback semantics differ and are both live source paths.
+  - kind: test
+    command: bun test tests/unit/os-sandbox-hellgate.test.ts tests/unit/os-sandbox-linux-hellgate.test.ts tests/unit/cli/os-sandbox-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All focused sandbox routing, fallback, and refusal rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

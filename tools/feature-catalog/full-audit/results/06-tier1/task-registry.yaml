@@ -1,0 +1,58 @@
+version: 1
+feature_id: task-registry
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/subagent/registry.ts:TaskRegistry
+entrypoints:
+  - src/apps/cli/internal.ts:buildSubagentConfig
+  - src/agent/tier1/subagent.ts:buildSubagentBlock
+activation:
+  - Interactive CLI enables subagents when QUANTA_SUBAGENT is unset and constructs one shared registry for the agent, task output, task stop, and six-tool routes.
+  - QUANTA_SUBAGENT=0 removes the config block and the tool surface.
+effective_defaults:
+  cli: on
+  web: resource
+  bench: off
+  headless: resource
+  daemon: resource
+producer:
+  - src/subagent/registry.ts:TaskRegistry
+consumer:
+  - src/agent/tier1/subagent.ts:buildSubagentBlock
+  - src/apps/cli/repl/surface-compose/turn-sinks.ts
+reachable: yes
+surface_findings:
+  - Registry ownership tokens, cancellation signals, settled-only LRU, and lifecycle cleanup are consumed on the live subagent path.
+off_identity_proof:
+  kind: source
+  command: rg 'QUANTA_SUBAGENT|enabled.*true' src/apps/cli/internal.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit false disables the subagent block while unset is CLI on.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/task-registry.test.ts tests/unit/task-registry-lru.test.ts tests/unit/subagent-6-tools-hellgate.test.ts tests/integration/subagent-cancellation-e2e.test.ts tests/integration/subagent-cleanup-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Registry capability, cancellation, LRU, and cleanup rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'TaskRegistry|taskRegistry|buildSubagentBlock' src/apps/cli src/agent src/subagent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: One shared registry reaches CLI configuration, agent tools, and lifecycle display.
+  - kind: test
+    command: bun test tests/unit/task-registry.test.ts tests/unit/task-registry-lru.test.ts tests/unit/subagent-6-tools-hellgate.test.ts tests/integration/subagent-cancellation-e2e.test.ts tests/integration/subagent-cleanup-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused registry rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

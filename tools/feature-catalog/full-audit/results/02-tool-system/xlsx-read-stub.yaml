@@ -1,0 +1,55 @@
+version: 1
+feature_id: xlsx-read-stub
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/document/xlsx-read.ts:parseXlsx and xlsxReadTool
+entrypoints:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+activation:
+  - "xlsx_read is always registered as a base read-only tool; office authoring only gates writers."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/document/xlsx-read.ts:parseXlsx
+  - src/tool/document/xlsx-read.ts:xlsxReadTool
+  - src/tool/document/authoring/zip-store.ts:unzip
+consumer:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+reachable: yes
+surface_findings:
+  - "The former stub is a pure-TS OOXML reader with STORED and DEFLATE ZIP support, shared strings, XML unescaping, selected-sheet rendering, and jail-wrapped file access."
+  - "Round-trip rails prove xlsx_write to xlsx_read across multiple sheets and real-world-shaped DEFLATE archives; malicious ZIP and mega-column guards return typed failure or bounded output."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/xlsx-docx-read-hellgate.test.ts tests/unit/xlsx-docx-read-roundtrip-e2e-hellgate.test.ts tests/unit/document-tools-defaults-registration-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Pure parse, real DEFLATE, malformed input, jail, default registration, and writer-reader round-trip rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "parseXlsx|xlsxReadTool|inflateRawSync|buildBaseDefaultTools|buildDaemonToolRegistry" src/tool/document/xlsx-read.ts src/tool/document/authoring/zip-store.ts src/tool/index.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The pure parser, archive implementation, and base-registry consumers are live.
+  - kind: test
+    command: bun test tests/unit/xlsx-docx-read-hellgate.test.ts tests/unit/xlsx-docx-read-roundtrip-e2e-hellgate.test.ts tests/unit/document-tools-defaults-registration-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 23 focused reader and round-trip tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch7
+review_state: approved
+reviewer: codex/cross-review-wave1

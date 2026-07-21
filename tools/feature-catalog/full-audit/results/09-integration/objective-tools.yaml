@@ -1,0 +1,59 @@
+version: 1
+feature_id: objective-tools
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/features.ts:buildSessionFeatures
+entrypoints:
+  - src/agent/tier1/objective.ts:buildObjectiveBlock
+  - src/agent/features.ts:buildSessionFeatures
+  - src/host/runtime/agent-config-assembler.ts:maybeWireObjective
+activation:
+  - A populated AgentConfig.objective slot causes the feature builder to register objective_set, objective_update, and objective_get.
+  - Shared host assembly only constructs the slot when QUANTA_OBJECTIVE_TOOLS is enabled; CLI runtime composition can supply its own store.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - buildObjectiveBlock binds the three tool definitions to the supplied ObjectivePort.
+consumer:
+  - buildSessionFeatures appends the block to extraTools, and host/runtime can construct the slot from the env gate.
+reachable: yes
+surface_findings:
+  - Slot absence preserves a structurally identical tool registry; a supplied store registers all three tools with the same port identity.
+  - The catalog's claimed default is ambiguous: shared host assembly is opt-in, while CLI runtime composition may provide its own store.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/objective-tools-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: An absent objective slot registers no objective tools.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/objective-tools-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Three tools register against one port and cover schema, all mutation variants, readback, and no-throw paths.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "buildObjectiveBlock|objectiveTools|maybeWireObjective|objective: core.objectiveStore" src/agent src/host/runtime src/apps/cli/repl
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Feature construction consumes the port and both host gate and CLI runtime composition can supply it.
+  - kind: test
+    command: bun test tests/unit/objective-tools-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 30 focused objective tool tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

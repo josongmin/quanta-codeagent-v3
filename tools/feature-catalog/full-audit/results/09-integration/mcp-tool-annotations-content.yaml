@@ -1,0 +1,68 @@
+version: 1
+feature_id: mcp-tool-annotations-content
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/mcp-composition.ts:buildMcpLoadOpts
+entrypoints:
+  - src/apps/cli/internal.ts:loadFeatures
+  - src/apps/web-daemon/runtime-factory.ts:createWebDaemonRuntime
+activation:
+  - An MCP server is configured and loaded through host MCP composition.
+  - ToolAnnotations elevation additionally requires QUANTA_MCP_TOOL_ANNOTATIONS and McpServerConfig.trusted=true.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/mcp/client/result-folding.ts:sanitizeAnnotations
+  - src/mcp/client/result-folding.ts:extractMedia
+  - src/agent/mcp-bridge.ts:mcpToolToTool
+consumer:
+  - src/host/mcp-composition.ts:buildMcpLoadOpts
+  - src/host/mcp-composition.ts:loadMcpToolsOrEmpty
+  - src/agent/mcp-bridge.ts:loadMcpTools
+reachable: yes
+surface_findings:
+  - CLI and web-daemon composition both assemble loadMcpTools options through buildMcpLoadOpts; the runtime gate supplies annotationsHonored only when enabled.
+  - Annotation predicates require both the global gate and a trusted server, so hostile, untrusted, malformed, or gate-off inputs retain conservative read-only and concurrency classifications.
+  - Image and resource blocks are decoded through media validation and attached to native result fields; over-cap, spoofed, malformed, and unsupported content is surfaced honestly or skipped without crashing.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mcp-tool-annotations-wire.test.ts tests/unit/mcp/tool-annotations-ssot-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset, false, and garbage values omit annotationsHonored and retain conservative bridge predicates.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp/tool-annotations-parse-hellgate.test.ts tests/unit/agent/mcp-bridge-annotations-hellgate.test.ts tests/unit/mcp-annotations-trust-fence-adversarial-hellgate.test.ts tests/unit/mcp-tool-annotations-wire.test.ts tests/unit/mcp/tool-annotations-case-variant-ssot.test.ts tests/unit/mcp/tool-annotations-ssot-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 74 focused cases passed across composition vocabulary, trust fencing, parser poison resistance, image and resource media validation, and text-only identity.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'mcpToolAnnotations|annotationsHonored|buildMcpLoadOpts|loadMcpToolsOrEmpty|sanitizeAnnotations|extractMedia' src/host/mcp-composition.ts src/apps/cli/internal.ts src/apps/web-daemon/runtime-factory.ts src/agent/mcp-bridge.ts src/mcp
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Both production host surfaces build the gate-bearing MCP load options, and the bridge consumes the sanitized annotations and folded media.
+  - kind: test
+    command: bun test tests/unit/mcp/tool-annotations-parse-hellgate.test.ts tests/unit/agent/mcp-bridge-annotations-hellgate.test.ts tests/unit/mcp-annotations-trust-fence-adversarial-hellgate.test.ts tests/unit/mcp-tool-annotations-wire.test.ts tests/unit/mcp/tool-annotations-case-variant-ssot.test.ts tests/unit/mcp/tool-annotations-ssot-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 74 pass, 0 fail.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3 feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-persistence
+review_state: approved
+reviewer: codex/cross-review-wave1

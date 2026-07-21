@@ -1,0 +1,54 @@
+version: 1
+feature_id: quantabenchtimeoutms
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/bench/run-main.ts:runMain
+entrypoints:
+  - src/apps/bench/run-main.ts:runMain
+  - src/apps/agent/mode-presets/batch.ts:runBatchMode
+activation:
+  - Set QUANTA_BENCH_TIMEOUT_MS to a positive integer before running the bench or batch agent surface.
+effective_defaults:
+  cli: na
+  web: na
+  bench: resource
+  headless: na
+  daemon: na
+producer:
+  - src/shared/runtime-config.ts:runtimeConfig
+consumer:
+  - src/apps/bench/run-main.ts:runMain
+  - src/apps/agent/mode-presets/batch.ts:runBatchMode
+reachable: yes
+surface_findings:
+  - The shared parser produces benchTimeoutMs and bench runMain selects it over the 20-minute default before passing it to dataset and custom-corpus execution.
+  - Batch mode also uses the same parsed value as its per-instance wall-clock cap.
+  - The catalog's interactive CLI full-surface claim and src/apps/bench/index.ts-only evidence are stale; this is bench and batch configuration, not an interactive CLI feature.
+off_identity_proof:
+  kind: source
+  command: git grep -n -E 'benchTimeoutMs|DEFAULT_BENCH_TIMEOUT_MS' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/bench/run-main.ts src/apps/agent/mode-presets/batch.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: An unset value selects the unchanged bench and batch defaults.
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: The cited next-action-cap test does not import the runtime parser or either timeout consumer; no focused execution rail proves override parsing and propagation.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'QUANTA_BENCH_TIMEOUT_MS|benchTimeoutMs|DEFAULT_BENCH_TIMEOUT_MS' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/shared/runtime-config.ts src/apps/bench/run-main.ts src/apps/agent/mode-presets/batch.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The runtime-config value reaches the real bench and batch timeout consumers.
+  - kind: test
+    command: bun test tests/unit/next-action-cap-enforce.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Catalog-cited test passed but covers next-action cap enforcement rather than this timeout knob.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

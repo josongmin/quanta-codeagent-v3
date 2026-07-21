@@ -1,0 +1,66 @@
+version: 1
+feature_id: session-prewarm-ttfm
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/session-bootstrap.ts:maybeRunSessionPrewarm
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+  - src/agent/loop/entry.ts:runAgent
+activation:
+  - QUANTA_PREWARM=1 projects resolvePrewarmSlot into AgentConfig.prewarm.
+  - createRunAgentContext invokes maybeRunSessionPrewarm once for an enabled session.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/prewarm.ts:prewarmLlm
+  - src/agent/startup-prewarm.ts:runSessionPrewarm
+consumer:
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+  - src/agent/loop/stream-consume.ts:streamConsume marks first dispatch
+reachable: yes
+surface_findings:
+  - "The gate reaches session bootstrap and the TTFM marker is consumed immediately before the first LLM stream dispatch."
+  - "Stock OpenAI and Anthropic adapters expose no prewarm method, so enabled stock sessions record TTFM and a skipped warm outcome but do not pre-open a connection."
+  - "Bootstrap awaits prewarmLlm without a deadline; a future adapter whose prewarm never settles blocks session creation despite the catalog's never-block-first-turn claim."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent-startup-prewarm-hellgate.test.ts tests/unit/agent-prewarm-loop-wire-hellgate.test.ts tests/unit/agent-metrics.test.ts tests/unit/apps/agent/prewarm-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: With QUANTA_PREWARM absent the config slot, warm call, clock read, TTFM marker, and startup metrics are all absent.
+on_efficacy_proof:
+  kind: runtime
+  command: bun -e 'import { runSessionPrewarm } from "./src/agent/startup-prewarm.ts"; const llm = { stream: async function* () {}, prewarm: () => new Promise(() => {}) }; const state = await Promise.race([runSessionPrewarm({ llm, recorder: undefined, now: Date.now }).then(() => "settled"), new Promise((resolve) => setTimeout(() => resolve("timed-out"), 100))]); console.log(state)'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: A never-settling prewarm remains pending beyond 100ms because session bootstrap awaits it without a timeout or supplied abort signal.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: conditional
+blocker: Stock adapters do not implement LlmPrewarmPort.prewarm, and an enabled future adapter can indefinitely block session startup because prewarm has no timeout or bootstrap abort signal.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'resolvePrewarmSlot|maybeRunSessionPrewarm|markFirstDispatch|prewarm' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host src/agent src/llm
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Env projection reaches session bootstrap and first LLM dispatch; no concrete stock adapter provides prewarm.
+  - kind: test
+    command: bun test tests/unit/agent-startup-prewarm-hellgate.test.ts tests/unit/agent-prewarm-loop-wire-hellgate.test.ts tests/unit/agent-metrics.test.ts tests/unit/apps/agent/prewarm-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 35 prewarm-focused cases pass within the 89-case combined rail, covering OFF identity, synthetic warm outcomes, TTFM metrics, and composition-root projection.
+  - kind: runtime
+    command: bun -e 'import { runSessionPrewarm } from "./src/agent/startup-prewarm.ts"; const llm = { stream: async function* () {}, prewarm: () => new Promise(() => {}) }; const state = await Promise.race([runSessionPrewarm({ llm, recorder: undefined, now: Date.now }).then(() => "settled"), new Promise((resolve) => setTimeout(() => resolve("timed-out"), 100))]); console.log(state)'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: The injected hung prewarm prints timed-out after 100ms, proving the unresolved startup-blocking path.
+audited_at: "2026-07-19"
+auditor: codex/p1-llm-core
+review_state: approved
+reviewer: codex/cross-review-wave1

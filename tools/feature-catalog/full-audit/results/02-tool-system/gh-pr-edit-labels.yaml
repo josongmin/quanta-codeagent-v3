@@ -1,0 +1,57 @@
+version: 1
+feature_id: gh-pr-edit-labels
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/agent/mode-presets/ci-bot.ts:buildCiBotWiring
+entrypoints: [src/apps/agent/mode-presets/ci-bot.ts:runMode, src/tool/gh/index.ts:ghTools]
+activation: [ci-bot mode with QUANTA_CI_BOT_GH_WRITE=1]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/tool/gh/pr-edit-labels.ts:ghPrEditLabelsTool]
+consumer: [src/tool/gh/index.ts:ghTools, src/apps/agent/mode-presets/ci-bot.ts:buildCiBotWiring]
+reachable: yes
+surface_findings:
+  - The tool builds separate argv entries for every label and rejects empty or dash-leading values before invoking the runner.
+  - It is production-reachable only through the ci-bot write gate; the interactive CLI composes gitTools, not ghTools, so the catalog's full CLI and web claims are stale.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/b3456-feature-seams-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: B4-OFF proves gh_pr_edit_labels is absent from the ci-bot registry when QUANTA_CI_BOT_GH_WRITE is unset.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/gh-pr-edit-labels-hellgate.test.ts tests/unit/b3456-feature-seams-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All selected cases passed across argv exactness, injection rejection, failure envelopes, and the ci-bot gate-on registration proof.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: The catalog asserts full CLI and web integration, but the frozen production composition exposes this mutating tool only in ci-bot mode with QUANTA_CI_BOT_GH_WRITE=1.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'ghPrEditLabelsTool|gh_pr_edit_labels|QUANTA_CI_BOT_GH_WRITE|gitToolList|ghTools\(' src/tool/gh/pr-edit-labels.ts src/tool/gh/index.ts src/apps/agent/mode-presets/ci-bot.ts src/apps/cli/internal.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The producer is registered by ghTools and reaches the ci-bot registry only on the write gate; CLI construction contains gitTools only.
+  - kind: test
+    command: bun test tests/unit/gh-pr-edit-labels-hellgate.test.ts tests/unit/b3456-feature-seams-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All selected cases passed with 0 failures.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Strict reachability reported no L3-or-higher unreachable or dead-API feature claims.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-pr
+review_state: approved
+reviewer: codex/cross-review-wave1

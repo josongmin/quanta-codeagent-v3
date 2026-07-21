@@ -1,0 +1,55 @@
+version: 1
+feature_id: thin-client-dispatch
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/thin-client-route.ts:resolveThinClientRoute
+entrypoints:
+  - src/skill/discover.ts
+activation:
+  - A future web or IDE command dispatcher invokes resolveThinClientRoute for a descriptor carrying thin-client-dispatch metadata.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/shared/thin-client-route.ts:resolveThinClientRoute
+consumer: []
+reachable: no
+surface_findings:
+  - Skill discovery parses thin-client-dispatch metadata, but no CLI, web, IDE, or daemon command dispatcher calls the route resolver.
+  - The pure resolver and gate behavior are covered under test only.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/thin-client-dispatch-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default-off inputs resolve every route to local.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/thin-client-dispatch-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Thick and thin surface routing, truthy gate parsing, and invalid-tag degradation rails passed.
+failure_posture: fail-closed
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production dispatch surface consumes resolveThinClientRoute.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'resolveThinClientRoute\(|parseThinClientRoute\(' 9a12f7a855640a8be1e4654472766bbc445696ea -- src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production usage is limited to metadata parsing; routing has no consumer.
+  - kind: test
+    command: bun test tests/unit/thin-client-dispatch-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused routing rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,45 @@
+version: 1
+feature_id: git-runner-cancellation-signal
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/storage/git-runner/runner.ts:defaultGitRunner.run
+entrypoints: [src/tool/git/_shared.ts:safeRun, src/agent/loop-helpers.ts:buildTurnDiffSession]
+activation: ["CLI git tools require QUANTA_GIT_TOOLS; defaultGitRunner is also used only when the default-off git observability session is enabled."]
+effective_defaults:
+  cli: off
+  web: off
+  bench: unknown
+  headless: unknown
+  daemon: off
+producer: [src/storage/git-runner/runner.ts:defaultGitRunner, src/storage/git-runner/types.ts:GitRunner.run]
+consumer: [src/tool/git/_shared.ts:safeRun, src/agent/loop-helpers.ts:buildTurnDiffSession, src/apps/cli/internal.ts:gitToolList]
+reachable: conditional
+surface_findings: ["The runner adds an AbortSignal listener that kills the child, detects pre-abort, and removes the listener in finally; safeRun propagates the signal to git tools.", "The catalog's cli full and configurable n-a presentation omits both QUANTA_GIT_TOOLS and default-off git observability activation conditions.", "The selected git rails exercise runner availability and tool behavior but do not execute or assert the runner AbortSignal kill and listener-cleanup contract."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git-tools.test.ts tests/unit/git-tools-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Existing selected rails passed but contain no runner cancellation or listener-cleanup assertion.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog must state gated activation; add a focused runner abort rail before claiming cancellation efficacy is independently proven.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "signal\.aborted|addEventListener\(\"abort\"|removeEventListener\(\"abort\"|runner\.run\(args, cwd, signal\)|gitToolsEnabled|gitObservability" src/storage/git-runner/runner.ts src/storage/git-runner/types.ts src/tool/git/_shared.ts src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/agent/loop-helpers.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Live propagation and cleanup exist, while CLI tool exposure and observability use are gated.
+  - kind: test
+    command: bun test tests/unit/git-tools.test.ts tests/unit/git-tools-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected existing git rails pass but no named test asserts cancel kill, pre-abort, or listener cleanup.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch4
+review_state: approved
+reviewer: codex/cross-review-wave1

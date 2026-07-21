@@ -1,0 +1,64 @@
+version: 1
+feature_id: subagent-model-override
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/subagent-runner-overrides.ts:resolveChildLlm and resolveChildEffort
+entrypoints:
+  - src/apps/cli/repl/runtime-context-compose.ts:composeCliRuntimeContext
+  - src/apps/agent/index.ts:main
+  - src/agent/subagent-runner.ts:createSubagentRunner
+activation:
+  - A parent agent emits agent tool model, role, or effort for a child spawn.
+  - Explicit model and role-resolved model identifiers must be present in the parent modelCandidates list.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/subagent/agent-tool.ts:agentSchema and buildRequest
+  - src/agent/subagent-runner-overrides.ts:resolveChildLlm
+  - src/agent/subagent-runner-overrides.ts:resolveChildEffort
+consumer:
+  - src/agent/subagent-runner-child-config.ts:buildChildBase
+  - src/agent/subagent-runner-child-config.ts:buildChildInheritedConfig
+  - src/agent/loop.ts:child AgentConfig sessionEffort
+reachable: yes
+surface_findings:
+  - The agent tool passes the optional model, role, and effort fields to the live child request; child construction selects the candidate LLM port and optional session-effort thunk.
+  - Explicit model overrides win over role resolution; missing or non-candidate requested models abort before a child loop starts.
+  - Omitted fields retain the parent LLM reference and omit sessionEffort, preserving the default path.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-model-override-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 16 focused cases passed for schema forwarding, explicit and role override precedence, effort propagation, unknown-model fail-close, and absent-field identity behavior.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'model: z|role: z|effort: z|resolveChildLlm|resolveChildEffort|UnknownSubagentModelError|sessionEffort' src/subagent/agent-tool.ts src/agent/subagent-runner-overrides.ts src/agent/subagent-runner-child-config.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Input-schema producer, candidate lookup, typed fail-close, and child-config consumers form one continuous spawn path.
+  - kind: test
+    command: bun test tests/unit/subagent-model-override-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 16 pass, 0 fail; tests capture the child config and prove exact candidate-port identity, precedence, denial, and default inheritance.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Reachability reports no L3-or-higher feature exception.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-subagent
+review_state: approved
+reviewer: codex/cross-review-wave1

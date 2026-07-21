@@ -1,0 +1,66 @@
+version: 1
+feature_id: plan-mode-dispatch-block
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/dispatch.ts:dispatchToolInner
+entrypoints:
+  - src/host/runtime/internal/context-binding/base.ts:planMode AgentConfig base
+  - src/agent/mode.ts:resolveCollaborationMode
+  - src/agent/dispatch.ts:checkDispatchAllowed
+activation:
+  - AgentConfig planMode, mode=plan, or explicit collaborationMode=plan
+  - A developer-channel mode=plan directive may transition the collaboration state
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/mode.ts:resolveCollaborationMode
+  - src/agent/mode.ts:applyDeveloperModeTransition
+consumer:
+  - src/agent/dispatch.ts:dispatchToolInner
+  - src/agent/dispatch-seam-guard.ts:checkDispatchAllowed
+reachable: yes
+surface_findings:
+  - "CLI: plan posture is assembled into AgentConfig and the dispatch seam evaluates every non-read-only call before execution."
+  - "Web: no independently audited browser verb enters plan posture, consistent with the catalog's missing web surface."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mode-plan-block.test.ts tests/unit/plan-mode-dispatch-block-hellgate.test.ts tests/integration/plan-mode-dispatch-hell-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default mode and absent plan configuration allow mutating tools unchanged.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mode-plan-block.test.ts tests/unit/plan-mode-dispatch-block-hellgate.test.ts tests/integration/plan-mode-dispatch-hell-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real runAgent dispatch denies mutating tools, preserves read-only tools, and blocks unknown non-read-only names fail-closed.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'checkDispatchAllowed|resolveCollaborationMode|isReadOnly|mode-blocked' src/agent src/host src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The mode projection reaches dispatchToolInner after registry membership and before execute, with an explicit read-only fast path.
+  - kind: test
+    command: bun test tests/unit/mode-plan-block.test.ts tests/unit/plan-mode-dispatch-block-hellgate.test.ts tests/integration/plan-mode-dispatch-hell-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 766 pass, 0 fail; table coverage, concurrent dispatch, developer transition, real loop denial, and default-mode controls pass.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception was reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-plan
+review_state: approved
+reviewer: codex/cross-review-wave1

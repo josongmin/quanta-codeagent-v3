@@ -1,0 +1,63 @@
+version: 1
+feature_id: tool-profile-preset
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/admissibility-gate/gates.ts:runToolProfileGate
+entrypoints:
+  - src/host/bootstrap/bootstrap-session.ts:resolveToolProfileState
+  - src/apps/cli/repl/session-loop.ts:runSessionLoop
+  - src/agent/dispatch.ts:dispatchToolInner
+activation:
+  - "CLI bootstrap creates a session-owned ToolProfileSessionState with write as the default profile or QUANTA_TOOL_PROFILE selection."
+  - "Each turn projects the live state to AgentConfig.toolProfile, and every dispatched tool call reads it in runToolProfileGate."
+effective_defaults:
+  cli: on
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/host/bootstrap/bootstrap-session.ts:resolveToolProfileState
+  - src/agent/tool-profile/resolver.ts:defaultToolProfileResolver
+consumer:
+  - src/runner/assemble/config.ts:buildPromptVariantSpreads
+  - src/agent/admissibility-gate/gates.ts:runToolProfileGate
+  - src/agent/dispatch.ts:dispatchToolInner
+reachable: yes
+surface_findings:
+  - "The CLI always creates a write profile state; write is neutral while ask, minimal, code-only, env selection, and slash changes use the same per-session authority."
+  - "The gate resolves the live name for every call, denies typed resolver failures, preserves HARD_DENY precedence, and routes confirm approval through pre_tool_use."
+  - "Other surfaces require their session/bootstrap composition to project ToolProfileSessionState, so they are resource-controlled rather than universally active."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/tool-profile-preset-hellgate.test.ts tests/unit/cli-argv-prompt.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The write preset is admissibility-neutral and absent CLI flags preserve positional prompt parsing."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/tool-profile-preset-hellgate.test.ts tests/unit/cli-argv-prompt.test.ts tests/integration/cli-tool-profile-argv-e2e.test.ts tests/integration/composition-root-wire-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "52 selected rails passed: four preset policies, strictest-wins composition, profile parser parity, slash registration, and shipping invalid-flag preflight."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'resolveToolProfileState|toolProfileState|toolProfile:|runToolProfileGate|defaultToolProfileResolver|composeToolProfile' src/host/bootstrap/bootstrap-session.ts src/apps/cli/repl/session-loop.ts src/runner/assemble/config.ts src/agent/admissibility-gate.ts src/agent/admissibility-gate/gates.ts src/host/runtime/agent-arg-builder.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Bootstrap creates the state, CLI turn setup forwards it, config projects the resolver, and the canonical admission gate consumes it before execution."
+  - kind: test
+    command: "bun test tests/unit/tool-profile-preset-hellgate.test.ts tests/unit/cli-argv-prompt.test.ts tests/integration/cli-tool-profile-argv-e2e.test.ts tests/integration/composition-root-wire-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "52 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch10
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,45 @@
+version: 1
+feature_id: lspport
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/lsp/adapters/base.ts:LspClient
+entrypoints:
+  - src/tool/lsp_nav/index.ts
+activation:
+  - LSP-backed navigation tools invoke the normalized port when a provider is configured.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: resource
+producer:
+  - src/lsp/adapters/base.ts:LspClient
+consumer:
+  - src/tool/lsp_nav/index.ts
+reachable: yes
+surface_findings:
+  - Navigation RPCs normalize unsupported capability to null and tool layer turns it into a graceful result.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/lsp-jsonrpc.test.ts tests/unit/lsp-nav-tools.test.ts tests/unit/lsp-nav-per-tool.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: RPC, registration, path-jail, and per-tool degradation rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/lsp-jsonrpc.test.ts tests/unit/lsp-nav-tools.test.ts tests/unit/lsp-nav-per-tool.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: LSP port rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

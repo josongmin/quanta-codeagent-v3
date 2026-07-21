@@ -1,0 +1,57 @@
+version: 1
+feature_id: shell-exec-otel-observer
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/shell-exec-otel.ts:buildShellOtelObserver
+entrypoints:
+  - src/apps/cli/repl.ts:cliComposeShellEvent
+activation:
+  - CLI session composition builds the observer only when a Metrics registry is supplied.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/observability/shell-exec-otel.ts:buildShellOtelObserver
+consumer:
+  - src/apps/cli/repl.ts:cliComposeShellEvent
+  - src/shared/shell-observer.ts:composeShellObservers
+reachable: yes
+surface_findings:
+  - The CLI composition root combines the optional OTel observer with the optional TTY painter and passes it into session setup.
+  - Start, stdout, stderr, exit, abort, and detached events each update dedicated counters; observer exceptions are isolated by the composer from shell execution semantics.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/shell-exec-otel-observer-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The no-observer rail preserves result behavior and emits no counters.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/shell-exec-observers-surface.test.ts tests/unit/shell-exec-otel-observer-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unit and real-child rails prove event fan-out and counters for normal, non-zero, abort, timeout, and detached runs.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildShellOtelObserver|cliComposeShellEvent|composeShellObservers' src/observability/shell-exec-otel.ts src/apps/cli/repl.ts src/shared
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The default-off metrics dependency reaches the CLI composition root and all ShellExecEvent variants have a counter arm.
+  - kind: test
+    command: bun test tests/unit/shell-exec-observers-surface.test.ts tests/unit/shell-exec-otel-observer-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Included in the focused 394-pass, 0-fail run.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch23
+review_state: approved
+reviewer: codex/cross-review-wave1

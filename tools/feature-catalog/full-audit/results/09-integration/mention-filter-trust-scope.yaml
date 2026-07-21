@@ -1,0 +1,54 @@
+version: 1
+feature_id: mention-filter-trust-scope
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/integrations/github/event-source-actions.ts:shouldEmit
+entrypoints:
+  - src/integrations/github/event-source-actions.ts:shouldEmit
+  - src/integrations/github/webhook-server.ts
+  - src/apps/cli/webhook-server-setup.ts:runWebhookServerCmd
+activation:
+  - GitHub Actions or webhook event sources pass normalized events through the injected mention filter.
+  - Webhook host additionally requires QUANTA_GITHUB_WEBHOOK=1 and a configured secret.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: resource
+producer:
+  - The matcher evaluates trust scope, bot and self-loop rejection, code exclusion, and trigger phrases.
+consumer:
+  - Actions and webhook event sources use the filter before emitting proactive triggers.
+reachable: yes
+surface_findings:
+  - The filter is a security gate on CI/webhook paths, not the interactive CLI command path.
+  - Webhook host refuses to bind unless its strict gate and secret are present.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/integrations/github/mention-filter.test.ts tests/unit/integrations/github/mention-filter-trust-scope-hellgate.test.ts tests/unit/integrations/github/mention-filter-fuzz-hellgate-r2.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Trust scope, bot/self-loop denial, markdown exclusion, boundary behavior, and adversarial fuzz rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "createMentionFilter|isAccepted|mention-filter" src/integrations/github/event-source-actions.ts src/integrations/github/webhook-server.ts src/apps/cli/webhook-server-setup.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Both Actions and webhook event pipelines consume the mention filter before trigger publication.
+  - kind: test
+    command: bun test tests/unit/integrations/github/mention-filter.test.ts tests/unit/integrations/github/mention-filter-trust-scope-hellgate.test.ts tests/unit/integrations/github/mention-filter-fuzz-hellgate-r2.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 57 focused policy and fuzz tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

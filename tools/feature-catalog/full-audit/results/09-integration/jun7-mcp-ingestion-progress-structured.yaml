@@ -1,0 +1,51 @@
+version: 1
+feature_id: jun7-mcp-ingestion-progress-structured
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/mcp-bridge.ts:streamMcpCall
+entrypoints:
+  - src/agent/mcp-bridge.ts:bindOptsFor
+activation: []
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/mcp/client.ts:per-call progress handler
+  - src/agent/mcp-bridge.ts:streamMcpCall
+consumer:
+  - src/agent/mcp-bridge.ts:bindOptsFor
+reachable: no
+surface_findings:
+  - Client and bridge support progress sinks and structured results at the owner seam.
+  - Production bindOptsFor supplies only annotationsHonored and trusted; it never supplies progress, and no frozen source consumes QUANTA_MCP_PROGRESS.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/mcp-bridge-progress-structured-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Owner-seam progress framing, structured content, malformed notification handling, and throwing-sink isolation passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: "The declared QUANTA_MCP_PROGRESS activation has no production consumer and production bind options do not forward progress, so live CLI progress is not activated."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'QUANTA_MCP_PROGRESS|progress:.*true|bindOptsFor' 9a12f7a855640a8be1e4654472766bbc445696ea -- src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: bindOptsFor constructs only annotation and trust fields; no runtime env consumer or production progress=true call exists.
+  - kind: test
+    command: bun test tests/unit/agent/mcp-bridge-progress-structured-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused MCP ingestion owner rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

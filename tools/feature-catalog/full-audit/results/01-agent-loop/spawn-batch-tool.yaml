@@ -1,0 +1,62 @@
+version: 1
+feature_id: spawn-batch-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/subagent-batch.ts:buildSubagentBatchBlock
+entrypoints:
+  - src/agent/features.ts:buildSessionFeatures
+  - src/apps/cli/internal.ts:buildSubagentConfig
+  - src/agent/optional-ports.ts:wireSubagentToolGates
+activation:
+  - AgentConfig.subagent.enableBatchSpawn=true
+  - QUANTA_SUBAGENT_BATCH controls non-CLI composition surfaces
+  - CLI seeds enableBatchSpawn when QUANTA_SUBAGENT is enabled
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/subagent-batch/batch.ts:subagentBatchTools
+  - src/agent/tier1/subagent-batch.ts:buildSubagentBatchBlock
+consumer:
+  - src/agent/features.ts:buildSessionFeatures
+  - src/tool/surface/gated-tools.ts:projectSpawnTools
+reachable: yes
+surface_findings:
+  - "The real agent loop registers spawn_batch and forks children when enableBatchSpawn is true; OFF removes the tool from the registry."
+  - "The catalog calls the feature triple default-off, but the CLI composition makes QUANTA_SUBAGENT_BATCH default true whenever the default-enabled subagent block is active."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/subagent-batch-hellgate.test.ts tests/integration/spawn-batch-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Omitted enableBatchSpawn returns no tool and the end-to-end control reaches Unknown tool without forking a child.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-batch-hellgate.test.ts tests/unit/subagent-batch-template.test.ts tests/unit/subagent-knobs-wire-hellgate.test.ts tests/integration/spawn-batch-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 39 batch-focused tests pass, including two real child loops, aggregation, partial-failure isolation, and env-to-registry wiring.
+failure_posture: fail-closed
+security_posture: conditional
+observability: verified
+verdict: stale-claim
+blocker: "The feature catalog's default-off label and triple-default-off purpose are false for the CLI: QUANTA_SUBAGENT and QUANTA_SUBAGENT_BATCH both resolve to true when unset."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_SUBAGENT_BATCH|enableBatchSpawn' src/apps/cli/internal.ts src/apps/cli/cli-knobs.ts src/agent/tier1/subagent-batch.ts src/agent/features.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI resolves the batch knob with nullish default true, passes enableBatchSpawn into subagent config, and the session feature builder registers the tool.
+  - kind: test
+    command: bun test tests/unit/subagent-batch-hellgate.test.ts tests/unit/subagent-batch-template.test.ts tests/unit/subagent-knobs-wire-hellgate.test.ts tests/integration/spawn-batch-real-loop-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 39 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-agentloop-subagent
+review_state: approved
+reviewer: codex/cross-review-wave1

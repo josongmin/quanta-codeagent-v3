@@ -1,0 +1,56 @@
+version: 1
+feature_id: codex-2-phase-consolidator
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/session-memory-auto.ts:buildSessionMemoryAutoWires
+entrypoints:
+  - src/apps/cli/repl/runtime-context-compose.ts:composeRuntimeBootstrapContext
+  - src/host/runtime/internal/context-binding/base.ts:extendBaseWithMemoryAuto
+activation:
+  - CLI always supplies the memory-auto composition input; assembleMemoryAuto defaults enabled unless QUANTA_MEMORY_AUTO is explicitly false.
+  - Successful sessions call the configured Phase-1 hook; session start invokes the Phase-2 auto-trigger and deferred work is drained before the SQLite handle closes.
+effective_defaults:
+  cli: on
+  web: off
+  bench: unknown
+  headless: off
+  daemon: off
+producer:
+  - src/memory/consolidate/phase1.ts:runPhase1
+  - src/memory/consolidate/phase2.ts:runPhase2
+consumer:
+  - src/agent/loop/entry.ts:runAgent
+  - src/runner/session-memory-auto.ts:prepareSessionStartMemory
+reachable: yes
+surface_findings:
+  - CLI composition creates a Stage1 SQLite store, Phase-1 LLM port, Phase-2 LLM port, atomic writer, deferred drain lane, and the live AgentConfig memoryConsolidator.
+  - The web daemon currently mints memory only for a readout and does not add base.memory or memory-auto composition; its catalog claim is correctly marked missing rather than active.
+  - Hook failures are reported as non-fatal outcomes and Phase-2 startup failures warn rather than derail a session.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-consolidate.test.ts tests/unit/memory/consolidate-store.test.ts tests/unit/memory/consolidate-writer.test.ts tests/unit/memory/consolidate-phase1.test.ts tests/unit/memory/consolidate-phase2.test.ts tests/unit/memory-consolidator-hook-hellgate.test.ts tests/integration/consolidate-phase2-end-to-end.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rail passed Phase-1 and Phase-2 storage, atomic writer, error, hook, and runAgent end-to-end coverage.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "buildSessionMemoryAutoWires|runSessionStartPhase2AutoTrigger|runMemoryConsolidatorHook|memoryAuto" src/runner/session-memory-auto.ts src/agent/loop/entry.ts src/apps/cli/repl/runtime-context-compose.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI composition, session-start Phase-2 trigger, and successful-session Phase-1 hook form one live chain.
+  - kind: test
+    command: bun test tests/unit/memory-consolidate.test.ts tests/unit/memory/consolidate-store.test.ts tests/unit/memory/consolidate-writer.test.ts tests/unit/memory/consolidate-phase1.test.ts tests/unit/memory/consolidate-phase2.test.ts tests/unit/memory-consolidator-hook-hellgate.test.ts tests/integration/consolidate-phase2-end-to-end.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Consolidation owner rails and end-to-end hook coverage passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch8
+review_state: approved
+reviewer: codex/cross-review-wave1

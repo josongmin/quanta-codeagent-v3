@@ -1,0 +1,50 @@
+version: 1
+feature_id: collect-evidence
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+entrypoints: [src/apps/cli/index.ts, src/host/runtime/agent-arg-builder/gated-tool-ports.ts]
+activation: ["runtime config QUANTA_EVIDENCE=1", "tool registry DefaultToolPorts.evidence with the live LSP static port"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/tool/evidence/tool.ts:makeCollectEvidenceTool, src/tool/evidence/builder.ts:buildEvidence]
+consumer: [src/host/runtime/agent-arg-builder/gated-tool-ports.ts, src/tool/index.ts]
+reachable: yes
+surface_findings: ["Host composition injects the production LSP-static port and the central registry exposes collect_evidence only when enabled."]
+off_identity_proof:
+  kind: source
+  command: rg -n "cfg.evidence|p.evidence !== undefined" src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/tool/index.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent gate produces no evidence port and no tool registration.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/evidence/builder-hellgate.test.ts tests/unit/tool/evidence/tool-and-git.test.ts tests/unit/tool/evidence/runtime-real-e2e.test.ts tests/unit/lsp-bridge-evidence-static-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Fusion, no-false-green, live debugpy/lldb/dlv runtime capture, and production LSP port abort/retry wiring passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "cfg.evidence|p.evidence !== undefined" src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/tool/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Gated host-to-registry handoff includes the LSP port.
+  - kind: test
+    command: bun test tests/unit/tool/evidence/builder-hellgate.test.ts tests/unit/tool/evidence/tool-and-git.test.ts tests/unit/tool/evidence/runtime-real-e2e.test.ts tests/unit/lsp-bridge-evidence-static-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 38 audit-selected rails passed; the separate optional rust-analyzer keystone e2e was intentionally unavailable and did not replace these receipts.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,55 @@
+version: 1
+feature_id: quantaskillsdir
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal.ts:buildSkillsConfig
+entrypoints:
+  - src/agent/tier1/skill.ts:buildSkillBlock
+  - src/agent/features.ts:buildSessionFeatures
+activation:
+  - Set QUANTA_SKILLS_DIR to a directory containing SKILL.md files; session startup discovers user skills and merges bundled system skills.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/apps/cli/internal.ts:buildSkillsConfig
+  - src/skill/discover.ts:discoverSkills
+consumer:
+  - src/agent/tier1/skill.ts:buildSkillBlock
+  - src/skill/skill-tool.ts:createSkillTool
+reachable: yes
+surface_findings:
+  - A configured directory is discovered once at session construction, merged with bundled skills, and exposed through the Skill and tool-search surfaces.
+  - System definitions overwrite user collisions by name, preventing a supplied directory from shadowing a bundled system skill.
+  - Bad or missing user directories degrade to an empty user set while the system-skill inventory remains available.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill.test.ts tests/unit/skill-frontmatter-parse.test.ts tests/unit/skill-discover-errors.test.ts tests/unit/skill-discover-size-cap.test.ts tests/integration/skill-paths-activation-e2e.test.ts tests/integration/skills-slash-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Disk discovery, precedence, parser, size-cap, path activation, slash listing, and reload rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'QUANTA_SKILLS_DIR|buildSkillsConfig|discoverSkills|buildSkillBlock|discoverSystemSkills' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/internal.ts src/agent/tier1/skill.ts src/skill
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI env value reaches discovery and the merged inventory is supplied to the skill tool.
+  - kind: test
+    command: bun test tests/unit/skill.test.ts tests/unit/skill-frontmatter-parse.test.ts tests/unit/skill-discover-errors.test.ts tests/unit/skill-discover-size-cap.test.ts tests/integration/skill-paths-activation-e2e.test.ts tests/integration/skills-slash-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused skills rails pass when the slash subprocess suite runs in its dedicated lane.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

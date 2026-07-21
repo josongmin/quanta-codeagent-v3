@@ -1,0 +1,48 @@
+version: 1
+feature_id: budget-ledger
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/budget.ts
+entrypoints:
+  - src/agent/features.ts:buildSessionFeatures
+  - src/agent/loop/emit-helpers.ts
+activation:
+  - The loop and tier1 builder consume an optional AgentConfig.budgetLedger.
+  - No production composition root constructs or injects a BudgetLedger, so budget_status and hard-breach stop behavior never activate in normal surfaces.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/budget-ledger.ts:BudgetLedger
+consumer:
+  - src/agent/tier1/budget.ts
+  - src/agent/loop/emit-helpers.ts
+reachable: no
+surface_findings:
+  - The typed primitive and loop consumption are implemented, but configuration has no ledger producer.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: na
+security_posture: verified
+observability: unknown
+verdict: seam-only
+blocker: No CLI, web, runner, or headless composition root constructs and injects AgentConfig.budgetLedger.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg 'budgetLedger|BudgetLedger|createBudgetStatusTool' src/apps src/runner src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Consumers are conditional on the slot and no production constructor supplies it.
+  - kind: test
+    command: bun test tests/unit/budget-ledger-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Unit contract passes but does not establish production activation.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

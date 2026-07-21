@@ -1,0 +1,48 @@
+version: 1
+feature_id: otel-sink
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/metrics/otel-sink.ts:otelMetricsSink
+entrypoints: []
+activation:
+  - Caller must supply a MeterProvider through dependency injection.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/observability/metrics/otel-sink.ts:otelMetricsSink
+consumer: []
+reachable: no
+surface_findings:
+  - Adapter and OTLP helper contracts pass under injected providers, but no production composition caller constructs this sink.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-metrics-otel-hellgate.test.ts tests/unit/observability-metrics-otlp-helper-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Isolated OTel mapping, failure swallowing, and injected OTLP construction passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: Missing production MeterProvider and MetricsRegistry sink composition.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'otelMetricsSink|otlpMetricSink' src --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Source search finds adapter definitions and exports but no production construction caller.
+  - kind: test
+    command: bun test tests/unit/observability-metrics-otel-hellgate.test.ts tests/unit/observability-metrics-otlp-helper-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Adapter contract rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

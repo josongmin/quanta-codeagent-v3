@@ -1,0 +1,59 @@
+version: 1
+feature_id: bench-eval-driver
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/bench/eval/driver.ts:runInstance
+entrypoints:
+  - src/apps/bench/cli.ts:run dispatch
+  - src/apps/bench/run-main.ts:resolveInstance
+activation:
+  - Run a selected bench instance with a corpus, model port, and sandbox-capable host.
+effective_defaults:
+  cli: na
+  web: na
+  bench: resource
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/bench/eval/driver.ts:runInstance
+consumer:
+  - src/apps/bench/run-main.ts:resolveInstance
+  - src/apps/bench/run-main.ts:runSwebenchTask
+reachable: yes
+surface_findings:
+  - The bench composition root invokes runInstance for the single-pass and Best-of-N paths.
+  - The driver returns a structured failed InstanceResult for agent, repository, and sandbox failures and finalizes sandbox cleanup.
+  - The sandbox rail scrubs dangerous inherited Node options and refuses cwd/write escapes.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/bench.test.ts tests/unit/bench/eval-decompose-shape.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real correct-edit and failed-edit agent paths, final verify ordering, failure cascade, cleanup, and result-shape rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'runInstance\(|runInstanceFailureResult|cleanupSandbox' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/bench/run-main.ts src/apps/bench/eval/driver.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The bench composition root calls the public driver; the driver has explicit failure-result and cleanup paths.
+  - kind: test
+    command: bun test tests/integration/bench.test.ts tests/unit/bench/eval-decompose-shape.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 31 real driver integration and public-shape tests passed.
+  - kind: test
+    command: bun test tests/unit/sandbox.test.ts tests/unit/eval-replay-verdict.test.ts tests/unit/eval-sandbox-escape.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Sandbox environment scrubbing, timeout, jail, escape, and verdict threshold rails passed in the 78-pass unit run.
+audited_at: "2026-07-20"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

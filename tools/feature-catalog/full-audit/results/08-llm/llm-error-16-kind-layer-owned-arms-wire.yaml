@@ -1,0 +1,53 @@
+version: 1
+feature_id: llm-error-16-kind-layer-owned-arms-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/retry/too-many-failed-attempts.ts:withFailureCounter
+entrypoints:
+  - src/llm/retry/too-many-failed-attempts.ts:withFailureCounter
+  - src/agent/per-tool-checkpoint/rollback-llm-error-bridge.ts:withRollbackLlmErrorEmit
+  - src/runtime/os-sandbox/llm-error-bridge.ts:withSandboxLlmErrorEmit
+activation:
+  - Each bridge requires an explicit caller to compose its default-OFF wrapper with enabled knobs.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - The three modules export typed-error wrappers for retry, rollback, and sandbox failure signals.
+consumer:
+  - No production consumer imports or calls withFailureCounter, withRollbackLlmErrorEmit, or withSandboxLlmErrorEmit.
+reachable: no
+surface_findings:
+  - The retry module explicitly documents that RetryingLLM and FallbackLLM do not compose the counter.
+  - The rollback arm has neither a live composition call nor a catalog-listed focused test; its typed conversion is only a helper surface.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/llm-retry-too-many-failed-attempts-hellgate.test.ts tests/unit/sandbox-error-emit-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Tested wrappers return their input port verbatim with their default-off knobs.
+on_efficacy_proof: null
+failure_posture: na
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No composition root installs any of the three wrappers, so their typed LLMError arms cannot reach the recovery router in a production run.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n "withFailureCounter|withRollbackLlmErrorEmit|withSandboxLlmErrorEmit" src --glob '!src/llm/retry/too-many-failed-attempts.ts' --glob '!src/agent/per-tool-checkpoint/rollback-llm-error-bridge.ts' --glob '!src/runtime/os-sandbox/llm-error-bridge.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Search found exports and comments only; it found no production composition call.
+  - kind: test
+    command: bun test tests/unit/llm-retry-too-many-failed-attempts-hellgate.test.ts tests/unit/sandbox-error-emit-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 32 wrapper semantics tests passed, but they do not establish production reachability.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

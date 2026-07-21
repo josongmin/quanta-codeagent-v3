@@ -1,0 +1,59 @@
+version: 1
+feature_id: web-daemon-surface
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/web-daemon/index.ts:main
+entrypoints:
+  - src/apps/web-daemon/index.ts:main
+  - src/apps/web-daemon/server.ts:startWebDaemon
+activation:
+  - bun run web:daemon starts the daemon with environment-derived bind, port, and auth settings.
+effective_defaults:
+  cli: off
+  web: off
+  bench: na
+  headless: na
+  daemon: resource
+producer:
+  - src/apps/web-daemon/runtime-factory.ts:buildProductionRuntimeFactory
+  - src/apps/web-daemon/server.ts:startWebDaemon
+consumer:
+  - src/apps/web-daemon/index.ts:main
+  - src/apps/web-daemon/ws-adapter.ts:createBunWebSocketAdapter
+reachable: yes
+surface_findings:
+  - main() now lazily loads buildProductionRuntimeFactory when no injected factory is supplied, then publishes a RuntimeSession through Bun.serve.
+  - Loopback is the default; unauthenticated wildcard binding is rejected before startup, and token checks protect upgrades while health remains deliberately public.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/web-daemon/auth.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default loopback and wildcard-without-token refusal are tested before listener startup.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/web-daemon/server.test.ts tests/unit/apps/web-daemon/ws-adapter.test.ts tests/unit/apps/web-daemon/auth.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: WS handshake, turns, health, replay, shutdown, adapter, and auth behavior pass against a real Bun listener.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: The catalog's deliberate hold says no production runtime factory is wired, but main() now imports buildProductionRuntimeFactory by default when no override is injected.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'buildProductionRuntimeFactory|runtimeFactory|startWebDaemon|assertSafeBindPolicy' src/apps/web-daemon/index.ts src/apps/web-daemon/runtime-factory.ts src/apps/web-daemon/server.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Default production composition, server, and bind policy connect in the live source path.
+  - kind: test
+    command: bun test tests/unit/apps/web-daemon/server.test.ts tests/unit/apps/web-daemon/ws-adapter.test.ts tests/unit/apps/web-daemon/auth.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused daemon proof is included in the 157-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

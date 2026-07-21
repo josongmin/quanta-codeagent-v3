@@ -1,0 +1,56 @@
+version: 1
+feature_id: inspect-cmd-toolcall-expand
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/inspect-cmd.ts:inspectCmd
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/repl.ts:runRepl
+  - src/apps/cli/slash/registry-surface.ts:SURFACE_SLASH_COMMANDS
+activation:
+  - The registered /inspect command projects records for the current session and paints matching tool-call groups.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/session/inspect-source.ts:findByToolCallId
+  - src/apps/cli/inspect-cmd.ts:runInspectCmd
+consumer:
+  - src/apps/cli/inspect-cmd.ts:inspectCmd
+  - src/apps/cli/repl/surface-compose/slash-context-compose.ts:buildSurfaceSlashContext
+reachable: yes
+surface_findings:
+  - The interactive CLI registers /inspect and supplies its session id only for an active session.
+  - Projection and renderer match decisions, custom records, and co-turn tool records while redacting secret-shaped values.
+  - The feature's default-OFF claim is stale: absent inspect context produces no-active-session and exit 1, not a not-wired exit 0 response.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/inspect-cmd-hellgate.test.ts tests/unit/cli/wire-tir-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Matching, ordering, error paths, secret redaction, registry presence, and active-session wiring passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: The catalog says an absent inspect context returns a not-wired exit 0 response, but inspectCmd delegates missing context to runInspectCmd which returns no-active-session with exit 1.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'inspectCmd|ctx.inspect|no active session' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/inspect-cmd.ts src/apps/cli/repl/surface-compose src/apps/cli/slash/registry-surface.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The snapshot registers inspectCmd, conditionally composes its session context, and maps absent context to the no-active-session error.
+  - kind: test
+    command: bun test tests/unit/cli/inspect-cmd-hellgate.test.ts tests/unit/cli/wire-tir-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused rail confirms the exit-1 absent-context behavior and all projection/redaction cases.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,59 @@
+version: 1
+feature_id: glob-dp-matcher
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/activation.ts:matchesAnyGlob
+entrypoints:
+  - src/agent/glob-rules.ts:selectGlobRules
+  - src/skill/activation.ts:skillsActivatedFor
+activation:
+  - "A CLI-composed agent run carries changed paths with path-scoped skills or loaded glob rules."
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/skill/activation.ts:matchesAnyGlob
+consumer:
+  - src/agent/glob-rules.ts:selectGlobRules
+  - src/skill/activation.ts:skillsActivatedFor
+  - src/apps/cli/rule-indicator.ts:deriveRuleIndicator
+reachable: yes
+surface_findings:
+  - "The agent glob-rule selector imports the DP matcher and calls it for each changed path before prompt injection."
+  - "Path-scoped skill activation and the CLI rule indicator share the same matcher, so the hardened matcher is not test-only."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/round1-hardening.test.ts tests/unit/round2-hardening.test.ts tests/unit/round4-hardening.test.ts tests/unit/glob-rules-hellgate.test.ts tests/integration/skill-paths-activation-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Focused rails passed hard caps, differential oracle corpus, glob-rule composition, and path-scoped skill e2e activation."
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'matchesAnyGlob' src/agent/glob-rules.ts src/skill/activation.ts src/apps/cli/rule-indicator.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Live rule selection, skill filtering, and CLI indicator consumers all invoke the owner function."
+  - kind: test
+    command: "bun test tests/unit/round1-hardening.test.ts tests/unit/round2-hardening.test.ts tests/unit/round4-hardening.test.ts tests/unit/glob-rules-hellgate.test.ts tests/integration/skill-paths-activation-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The selected audit run was green; oversized or over-budget inputs no-match rather than hang, while legitimate live activation remains functional."
+  - kind: source
+    command: "bun fc reachability"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "No L3+ feature reachability exception was reported."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch5
+review_state: approved
+reviewer: codex/cross-review-wave1

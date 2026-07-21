@@ -1,0 +1,57 @@
+version: 1
+feature_id: llm-distill
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/session-lifecycle.ts:persistFinalMessages
+entrypoints:
+  - src/agent/loop/session-lifecycle.ts:persistFinalMessages
+  - src/agent/loop/entry.ts:runAgent
+activation:
+  - On session finalization with a configured persistent store, persistFinalMessages invokes persistSession with the assembled LLM and memory settings.
+  - An available LLM with memory.distill not false runs distillSession; any LLM, parse, or persistence failure degrades to final-text heuristic or no persisted record without failing the agent session.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/memory-distill.ts:distillSession
+  - src/agent/memory.ts:persistSession
+  - src/agent/memory-consolidator-hook.ts:runMemoryConsolidatorHook
+consumer:
+  - src/agent/loop/session-lifecycle.ts:persistFinalMessages
+  - src/agent/loop/entry.ts:runAgent
+reachable: yes
+surface_findings:
+  - The normal session-finalization path persists memory through distill, embed, duplicate arbitration, and eviction when a store is configured.
+  - The separate Stage-1 consolidator route is also invoked after successful runAgent completion when configured, and can defer its long LLM rollout until host resource drain.
+  - "Both distill paths are defensive: provider/parse failures retain session success and fall back or report a non-fatal outcome."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-distill.test.ts tests/unit/memory-consolidate.test.ts tests/unit/memory-consolidator-hook-hellgate.test.ts tests/unit/memory-distill-redaction-hellgate.test.ts tests/unit/memory-phase2-wire-hellgate.test.ts tests/unit/memory-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused memory rail passed, including runAgent session-end e2e, LLM and heuristic fallback, persistence, consolidation, and redaction paths.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "persistFinalMessages|persistSession\(|distillSession|runMemoryConsolidatorHook" src/agent/loop src/agent/memory.ts src/agent/memory-distill.ts src/agent/memory-consolidator-hook.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Session lifecycle reaches the persistent distill pipeline, while the successful-run path reaches the configured Stage-1 consolidator hook.
+  - kind: test
+    command: bun test tests/unit/memory-distill.test.ts tests/unit/memory-consolidate.test.ts tests/unit/memory-consolidator-hook-hellgate.test.ts tests/unit/memory-distill-redaction-hellgate.test.ts tests/unit/memory-phase2-wire-hellgate.test.ts tests/unit/memory-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused lifecycle, fallback, redaction, dedup, and e2e consolidator rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-memory-batch6
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,64 @@
+version: 1
+feature_id: agent-dispatch-core
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/dispatch.ts:dispatchTool
+entrypoints:
+  - src/agent/loop/stream-consume.ts streamed tool-call path
+  - src/apps/cli/mcp-server-setup.ts MCP tools/call dispatch binding
+activation:
+  - Every dispatched tool call runs through dispatchTool, which sequences plan-mode guard, preflight consultations, admissibility, execution, normalization, and post-tool hooks.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/dispatch.ts:dispatchTool
+  - src/agent/dispatch/execute.ts:execute
+consumer:
+  - src/agent/loop/stream-consume.ts dispatch port binding
+  - src/apps/cli/mcp-server-setup.ts tools/call binding
+reachable: yes
+surface_findings:
+  - The dispatch seam is a shared execution chokepoint; it is not a separately rendered UI feature.
+  - Optional preflight and observability ports remain presence-gated without removing the base dispatch path.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/dispatch.test.ts tests/unit/dispatch-shell-observer-forward.test.ts tests/unit/dispatch-wires-checkpoint-and-image-hellgate.test.ts tests/unit/admissibility-gate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused dispatch and admissibility rail passed within the 854-pass combined audit run.
+failure_posture: fail-loud
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'checkDispatchAllowed|runAdmissibilityGate|execute\(' src/agent/dispatch.ts src/agent/dispatch/execute.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: dispatchTool's live pipeline calls the seam guard, admissibility gate, and execution adapter.
+  - kind: source
+    command: rg -n 'dispatchTool' src/agent/loop src/apps/cli/mcp-server-setup.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Streamed loop and CLI MCP setup bind the real dispatch seam rather than bypassing it.
+  - kind: test
+    command: bun test tests/unit/dispatch.test.ts tests/unit/dispatch-shell-observer-forward.test.ts tests/unit/dispatch-wires-checkpoint-and-image-hellgate.test.ts tests/unit/admissibility-gate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Combined focused audit rail passed; it covers result shaping, observer forwarding, checkpoint/image wiring, and admissibility.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 0 L3+ feature reachability exceptions.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-core
+review_state: approved
+reviewer: codex/cross-review-wave1

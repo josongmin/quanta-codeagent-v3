@@ -1,0 +1,62 @@
+version: 1
+feature_id: git-budget
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/git/_budget.ts:withBudget and resolveGitBudget
+entrypoints:
+  - src/apps/cli/internal.ts
+  - src/tool/git/index.ts:gitTools
+  - src/apps/ci-bot.ts
+activation:
+  - Enable first-class git tools and set one or more QUANTA_GIT_BUDGET_* values.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/tool/git/_budget.ts:withBudget
+  - src/tool/git/_budget.ts:resolveGitBudget
+consumer:
+  - src/apps/cli/internal.ts
+  - src/apps/ci-bot.ts
+  - src/tool/git/index.ts:gitTools
+reachable: yes
+surface_findings:
+  - CLI and CI-bot composition resolve optional budget knobs and pass the resulting budget into gitTools; gitTools wraps only read-only walk tools.
+  - With no valid budget knobs, resolveGitBudget returns undefined and withBudget returns the original runner reference, preserving byte identity.
+  - The catalog's claim that no git tool imports or calls the helper is stale: gitTools now applies withBudget to its walked runner.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/git-env-and-budget-hellgate.test.ts tests/unit/b3456-feature-seams-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No knobs resolves undefined and preserves runner identity and default git-log behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git-env-and-budget-hellgate.test.ts tests/unit/b3456-feature-seams-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Deadline fusion, cleanup, commit cap, output cap, env parsing, composition-root wiring, and real git-log budget threading passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: The catalog still describes git budget as unwired scaffolding, but snapshot source wires it through CLI/CI composition and gitTools.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'resolveGitBudget|withBudget|budget: gitBudget' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/internal.ts src/apps/ci-bot.ts src/tool/git
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Composition roots resolve the budget and gitTools applies the wrapper to its read-only walk runner.
+  - kind: test
+    command: bun test tests/unit/git-env-and-budget-hellgate.test.ts tests/unit/b3456-feature-seams-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Budget helper and composition seam rails passed in the 197-pass focused bundle.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

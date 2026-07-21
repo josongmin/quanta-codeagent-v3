@@ -1,0 +1,51 @@
+version: 1
+feature_id: cli-help-discovery-render
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/help-render.ts:renderHelp
+entrypoints:
+  - src/apps/cli/slash-commands.ts:/help registration
+activation:
+  - Run /help or /help <command> in CLI/REPL.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/cli/help-render.ts:renderHelp
+consumer:
+  - src/apps/cli/slash-commands.ts:BUILTINS
+reachable: yes
+surface_findings:
+  - Live slash registry dispatches the dynamic help renderer and uses its category and env-table discovery surface.
+  - Virtual short-circuit commands remain maintained in a manual list outside BUILTINS, leaving catalog's documented drift hold.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/help-render-discovery-hellgate.test.ts tests/unit/cli/help-render.test.ts tests/unit/slash-commands.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Virtual image discovery, category ordering, env coverage, color identity, details, and dispatch rails passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: conditional
+blocker: "Virtual /exit, /quit, and /image commands remain outside the BUILTINS SSOT, the catalog's explicit drift hold."
+disposition: hold
+receipts:
+  - kind: source
+    command: git grep -n -E 'renderHelp|VIRTUAL_COMMANDS|runHelpRender' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Slash registry consumes help renderer; virtual commands use a distinct manual list.
+  - kind: test
+    command: bun test tests/unit/cli/help-render-discovery-hellgate.test.ts tests/unit/cli/help-render.test.ts tests/unit/slash-commands.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused help discovery rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

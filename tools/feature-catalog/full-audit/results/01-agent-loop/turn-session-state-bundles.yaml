@@ -1,0 +1,66 @@
+version: 1
+feature_id: turn-session-state-bundles
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/turn-context.ts:TurnSession and TurnState
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+  - src/agent/loop/turn-loop.ts:runTurn
+  - src/agent/loop/stream-consume.ts:streamConsume
+activation:
+  - Every runAgent invocation constructs a TurnSession and per-turn TurnState
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext turnStateSeed
+consumer:
+  - src/agent/loop/turn-loop.ts:runTurn
+  - src/agent/loop/stream-consume.ts:streamConsume
+  - src/agent/stream-callbacks.ts:createStreamDispatcher
+reachable: yes
+surface_findings:
+  - "CLI: session bootstrap constructs the bundles and the turn/stream paths consume them for every normal agent run."
+  - "Web: no independent UI affordance exists; this is an internal runtime refactor and catalog web-na is accurate."
+off_identity_proof:
+  kind: source
+  command: rg -n 'const session: TurnSession|turnStateSeed|session: TurnSession|state: TurnState' src/agent/loop src/agent/stream-callbacks.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Optional feature fields remain undefined when their source features are absent while the bundle replaces only parameter transport.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/metrics-tokens.test.ts tests/unit/subagent-runner.test.ts tests/integration/hitl-tier-dispatch-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Consumers of recorder, config propagation, and session dispatch passed through the real bundle-bearing paths.
+failure_posture: na
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'TurnSession|TurnState|createRunAgentContext|streamConsume' src/agent/loop src/agent/turn-context.ts src/agent/stream-callbacks.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Bootstrap owns construction and turn-loop, recovery, stream consumption, and callbacks use the typed bundles.
+  - kind: test
+    command: bun test tests/unit/agent/metrics-tokens.test.ts tests/unit/subagent-runner.test.ts tests/integration/hitl-tier-dispatch-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Session resource and consumer behavior passed with the bundle transport in production paths.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception was reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-context
+review_state: approved
+reviewer: codex/cross-review-wave1

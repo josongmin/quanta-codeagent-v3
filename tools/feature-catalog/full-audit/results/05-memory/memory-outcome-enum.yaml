@@ -1,0 +1,48 @@
+version: 1
+feature_id: memory-outcome-enum
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/memory/consolidate/types.ts:MemoryOutcome
+entrypoints:
+  - src/memory/consolidate/store.ts:Stage1Store
+activation:
+  - The SQLite adapter stores a supplied optional outcome and the Phase-2 promotion selector consumes it to exclude fail rows.
+  - Phase-1 production construction never supplies outcome or outcomeEvidence, leaving new rows undeclared.
+effective_defaults:
+  cli: unknown
+  web: na
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/memory/consolidate/types.ts:MEMORY_OUTCOMES
+consumer:
+  - src/memory/consolidate/store.ts:Stage1Store
+  - src/memory/consolidate/phase2-promotion.ts:selectForPhase2Promotion
+reachable: no
+surface_findings:
+  - The closed four-value type, SQLite migration, round-trip mapper, and fail-exclusion promotion consumer are implemented and tested.
+  - No production Phase-1 path assigns an outcome or evidence value, so ordinary session consolidation cannot exercise the enum or its promotion gate without an external/manual producer.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: No production producer populates Stage1Output.outcome or outcomeEvidence; the feature remains a persisted data-model and promotion seam.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n -e "outcomeEvidence" -e "isMemoryOutcome" -e "MEMORY_OUTCOMES" -e "\.outcome" src/memory/consolidate src/agent/memory-consolidator-hook.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: References resolve to the enum, adapter, and promotion consumer; Phase-1 hook assembly does not assign outcome fields.
+  - kind: test
+    command: bun test tests/unit/memory-outcome.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Enum membership, migration, round-trip, replacement, and fail-promotion exclusion tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch8
+review_state: approved
+reviewer: codex/cross-review-wave1

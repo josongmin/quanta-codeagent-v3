@@ -1,0 +1,62 @@
+version: 1
+feature_id: auto-mode-classifier
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/admissibility-gate/gates.ts:runModePolicy"
+entrypoints:
+  - "src/agent/loop/session-bootstrap.ts:buildSessionFeatures"
+  - "src/agent/dispatch.ts:dispatchToolInner"
+activation:
+  - "A session with permission.mode=auto constructs the stateful classifier and passes it to dispatch."
+  - "A non-read-only dispatched tool in auto mode reaches runModePolicy and evaluates through the classifier after HARD_DENY and read-only precedence."
+effective_defaults:
+  cli: off
+  web: unknown
+  bench: resource
+  headless: resource
+  daemon: unknown
+producer:
+  - "src/agent/tier1/auto-classifier.ts:buildClassifierBlock"
+  - "src/agent/auto-classifier.ts:createAutoClassifierPort"
+consumer:
+  - "src/agent/loop/session-bootstrap.ts:buildSessionFeatures"
+  - "src/agent/dispatch.ts:dispatchToolInner"
+  - "src/agent/admissibility-gate/gates.ts:runModePolicy"
+reachable: yes
+surface_findings:
+  - "The session feature builder creates an AutoModeClassifier only for permission.mode=auto; session bootstrap retains it and dispatch supplies it to the authoritative admissibility gate."
+  - "The live gate calls evaluateAuto only in auto mode with a classifier; HARD_DENY and read-only precedence execute first, so a model verdict cannot widen either boundary."
+  - "Interactive default mode does not activate the classifier; the headless and bench mode resources can select auto, hence their effective posture is resource-controlled."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/features.test.ts tests/unit/auto-mode-rules-gate-off-byte-identity-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The session feature rail proves non-auto modes omit the classifier, and the gate-off rail preserves the canonical prompt and no overlay/tracker wiring."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/auto-classifier.test.ts tests/unit/permission-classifier.test.ts tests/integration/auto-classifier-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Selected rail passed: parser and error fail-safe, stateful denial limits, actual allow/block dispatch, and HARD_DENY/read-only precedence."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'buildClassifierBlock|features.classifier|runAdmissibilityGate|permission.mode === \"auto\"|evaluateAuto' src/agent/tier1/auto-classifier.ts src/agent/loop/session-bootstrap.ts src/agent/dispatch.ts src/agent/admissibility-gate/gates.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Producer, session retention, dispatch handoff, and auto-only evaluation are all concrete production edges."
+  - kind: test
+    command: "bun test tests/unit/auto-classifier.test.ts tests/unit/permission-classifier.test.ts tests/unit/features.test.ts tests/unit/auto-mode-rules-gate-off-byte-identity-hellgate.test.ts tests/integration/auto-classifier-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Focused auto-mode audit rail passed in the selected 270-test and 84-test batches."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch8
+review_state: approved
+reviewer: codex/cross-review-wave1

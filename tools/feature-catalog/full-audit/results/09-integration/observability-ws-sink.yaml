@@ -1,0 +1,62 @@
+version: 1
+feature_id: observability-ws-sink
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/web-daemon/server/sinks.ts:attachObservabilitySink
+entrypoints:
+  - src/apps/web-daemon/index.ts:startWebDaemon
+  - src/apps/web-daemon/server/ws-handlers.ts:applySurfaceSubscription
+  - src/apps/web-daemon/server/ws-handlers.ts:close
+activation:
+  - QUANTA_OBSERVABILITY makes the daemon composition root supply observabilityPorts.
+  - A connected client with the observability surface subscribed mints one emitter for its socket; absent ports attach nothing.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/web-daemon/observability-emitter.ts:createObservabilityEmitter
+  - src/apps/web-daemon/server/sinks.ts:attachObservabilitySink
+consumer:
+  - src/apps/web-daemon/server/ws-handlers.ts:applySurfaceSubscription
+  - src/apps/web-daemon/server/ws-handlers.ts:close
+reachable: yes
+surface_findings:
+  - The daemon projects facade ports only when observability is enabled; subscription attaches a per-connection emitter and close stops it before socket eviction.
+  - The real served-WebSocket rail proves snapshot-first delivery, delta propagation, per-connection isolation, and no frames in the no-port default path.
+  - Send failures are swallowed so a dead socket does not block healthy peer emitters.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability-ws-sink-hellgate.test.ts tests/integration/agent-state-observability-ws-daemon-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Undefined ports produce no emitter and the real daemon emits no observability frames in the gate-off path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-ws-sink-hellgate.test.ts tests/integration/agent-state-observability-ws-daemon-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 19 focused cases passed for snapshot/delta encoding, detach, isolation, hostile sockets, and real daemon WebSocket delivery.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildObservabilityPorts|observabilityPorts|attachObservabilitySink|applySurfaceSubscription|data\.observability\?\.stop' src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Gate-bearing daemon composition, per-connection attachment, and disconnect teardown are all production consumers.
+  - kind: test
+    command: bun test tests/unit/observability-ws-sink-hellgate.test.ts tests/integration/agent-state-observability-ws-daemon-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 19 pass, 0 fail, 1 explicit red-on-injection test skipped.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-observability
+review_state: approved
+reviewer: codex/cross-review-wave1

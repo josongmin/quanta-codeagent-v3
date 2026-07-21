@@ -1,0 +1,63 @@
+version: 1
+feature_id: shell-output-delta-streaming
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/shell.ts:runShell
+entrypoints:
+  - src/apps/cli/repl.ts:cliComposeShellEvent
+  - src/agent/dispatch/tool-context.ts:buildToolContext
+activation:
+  - The interactive CLI supplies an observer when stdout is a TTY or metrics are enabled.
+  - Dispatch forwards AgentConfig.onShellEvent to ToolContext and bash forwards it to runShell.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/runtime/shell.ts:runShell
+  - src/tool/bash/index.ts:bashTool
+consumer:
+  - src/apps/cli/repl.ts:cliComposeShellEvent
+  - src/agent/dispatch/tool-context.ts:buildToolContext
+  - src/apps/cli/shell-stream-painter.ts:buildShellStreamPainter
+  - src/observability/shell-exec-otel.ts:buildShellOtelObserver
+reachable: yes
+surface_findings:
+  - runShell emits a closed start/stdout/stderr/exit-or-aborted stream only when an observer exists while returning the same buffered ShellResult.
+  - The CLI composes painter and OTel observers; dispatch preserves identity to bash and no observer produces no events.
+  - The catalog correctly marks web missing; serve-stdio explicitly composes no observer, so live delta output is an interactive CLI and injected-host capability rather than universal shell output.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/tool/shell-exec-events-byte-identical.test.ts tests/unit/dispatch-shell-observer-forward.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Observer absence emits no events and preserves the final ShellResult; absent AgentConfig.onShellEvent leaves ToolContext unset.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/shell-exec-events.test.ts tests/unit/tool/shell-exec-events-stderr.test.ts tests/unit/tool/shell-exec-events-abort.test.ts tests/unit/tool/shell-exec-events-byte-identical.test.ts tests/unit/dispatch-shell-observer-forward.test.ts tests/unit/shell-exec-observers-surface.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 31 selected cases passed for event order, stdout and stderr bytes, timeout and user aborts, forwarding, painter decoding, and OTel aggregation.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'onShellEvent|cliComposeShellEvent|buildShellStreamPainter|buildShellOtelObserver' src/runtime/shell.ts src/tool/bash/index.ts src/agent/dispatch/tool-context.ts src/apps/cli/repl.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime emission, bash forwarding, dispatch propagation, and interactive CLI observer composition form one complete owner path.
+  - kind: test
+    command: bun test tests/unit/tool/shell-exec-events.test.ts tests/unit/tool/shell-exec-events-stderr.test.ts tests/unit/tool/shell-exec-events-abort.test.ts tests/unit/tool/shell-exec-events-byte-identical.test.ts tests/unit/dispatch-shell-observer-forward.test.ts tests/unit/shell-exec-observers-surface.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 31 selected runtime, forwarding, and surface-observer cases passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-shadow
+review_state: approved
+reviewer: codex/cross-review-wave1

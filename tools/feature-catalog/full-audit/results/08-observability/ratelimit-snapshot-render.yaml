@@ -1,0 +1,59 @@
+version: 1
+feature_id: ratelimit-snapshot-render
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/factories/turn-indicator.ts:buildTurnIndicatorAndStream
+entrypoints:
+  - src/apps/cli/repl/cli-feature-config.ts:readCliFeatureConfig
+  - src/agent/loop/session-bootstrap.ts builds rate-limit capture when notice is wanted
+activation:
+  - QUANTA_RATELIMIT_NOTICE truthy enables capture and the CLI status-bar notice without proactive sleep.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/ratelimit-snapshot/notice.ts:snapshotToNotice
+  - src/agent/loop/session-bootstrap.ts:rateLimitProactive session state
+consumer:
+  - src/apps/cli/ratelimit-notice.ts:buildRatelimitNoticePort
+  - src/apps/cli/repl/factories/turn-indicator.ts:buildTurnIndicatorAndStream
+reachable: yes
+surface_findings:
+  - NOTICE-only builds header capture and emits a reached-window event but never sleeps.
+  - CLI tee paints only an empty rate-limit window; stdout deliberately remains silent.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/ratelimit-notice-wire-hellgate.test.ts tests/unit/delta-ratelimit-reachability-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: OFF cases preserve stream identity, omit header capture, emit no notice, and perform no delay.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/ratelimit-notice-hellgate.test.ts tests/unit/cli/ratelimit-notice-wire-hellgate.test.ts tests/unit/cli/ratelimit-notice-knob.test.ts tests/unit/stream/ratelimit-snapshot-stdout-ignore-hellgate.test.ts tests/unit/delta-ratelimit-reachability-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 37 cases prove gate parsing, reached-only render, tee isolation, stdout silence, real adapter header capture, and NOTICE-only loop reachability.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n --glob 'src/**' 'ratelimitNotice|buildRatelimitNoticePort|ratelimit_snapshot' src/apps/cli src/agent/loop src/llm
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The runtime gate creates snapshot capture, CLI config enables the tee, and the notice port renders the stream event into the status bar.
+  - kind: test
+    command: bun test tests/unit/cli/ratelimit-notice-hellgate.test.ts tests/unit/cli/ratelimit-notice-wire-hellgate.test.ts tests/unit/cli/ratelimit-notice-knob.test.ts tests/unit/stream/ratelimit-snapshot-stdout-ignore-hellgate.test.ts tests/unit/delta-ratelimit-reachability-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 37 focused cases pass.
+audited_at: "2026-07-19"
+auditor: codex/p1-observability-b
+review_state: approved
+reviewer: codex/cross-review-wave1

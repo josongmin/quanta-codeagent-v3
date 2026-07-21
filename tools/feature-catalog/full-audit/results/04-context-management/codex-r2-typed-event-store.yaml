@@ -1,0 +1,64 @@
+version: 1
+feature_id: codex-r2-typed-event-store
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/memory/typed-event/in-memory-store.ts:createInMemoryTypedHistoryEventStore"
+entrypoints:
+  - "src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2"
+  - "src/apps/agent/mode-presets/headless.ts:runMode"
+  - "src/apps/agent/mode-presets/daemon.ts:runMode"
+activation:
+  - "Assembler always supplies a session-registry or fresh in-memory store to installCodexR2Wires."
+  - "The recorded AgentConfig.typedEventStore slot does not exist as the live composition path."
+effective_defaults:
+  cli: on
+  web: on
+  bench: unknown
+  headless: on
+  daemon: on
+producer:
+  - "src/memory/typed-event/in-memory-store.ts:createInMemoryTypedHistoryEventStore"
+  - "src/agent/codex-r2-wire-install/install.ts:appendAllSafe"
+  - "src/agent/codex-r2-wire-install/install.ts:buildCompactionEventEmit"
+consumer:
+  - "src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2"
+  - "src/agent/session-resource-registry/in-memory-registry.ts:mintResources"
+  - "src/agent/codex-r2-wire-install/install.ts:buildContextEventsProducer"
+  - "src/agent/codex-r2-wire-install/install.ts:buildMentionInjector"
+reachable: yes
+surface_findings:
+  - "The default-off ledger records an unwired AgentConfig.typedEventStore slot, but the live assembler passes a concrete store positionally into installCodexR2Wires."
+  - "The store is session-scoped when sessionId is present and is used by context-change, mention, and compaction event producers."
+off_identity_proof:
+  kind: source
+  command: "rg createInMemoryTypedHistoryEventStore and installCodexR2Wires in src/host/runtime/agent-config-assembler.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: "The claimed CLI default-OFF posture is contradicted: the assembler constructs and passes the store without a feature gate."
+on_efficacy_proof:
+  kind: test
+  command: "bun test src/memory/typed-event/__tests__/in-memory-store.hellgate.test.ts src/memory/typed-event/__tests__/port-contract.test.ts tests/unit/composition-registry-wire-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Port semantics, all eight event variants, and same-session store-derived wire reuse pass."
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg createInMemoryTypedHistoryEventStore and installCodexR2Wires in src/host/runtime/agent-config-assembler.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "wireSessionResourcesAndCodexR2 supplies sessionResources.store or a fresh in-memory store to installCodexR2Wires."
+  - kind: test
+    command: "bun test src/memory/typed-event/__tests__/in-memory-store.hellgate.test.ts src/memory/typed-event/__tests__/port-contract.test.ts tests/unit/composition-registry-wire-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "All selected typed-store contract and composition reuse/off-path tests passed."
+audited_at: "2026-07-19"
+auditor: codex/p1-context-events
+review_state: approved
+reviewer: codex/cross-review-wave1

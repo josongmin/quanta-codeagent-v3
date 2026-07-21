@@ -1,0 +1,53 @@
+version: 1
+feature_id: working-memory-buffer
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/memory/working.ts:createWorkingMemory
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+activation:
+  - Every runAgent session creates WorkingMemory from its seed messages during session bootstrap.
+  - The loop appends turn results and can replace the same buffer after compaction; no persistence slot exists.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/memory/working.ts:createWorkingMemory
+consumer:
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+  - src/agent/loop/turn-loop.ts:runAgentTurnLoop
+reachable: yes
+surface_findings:
+  - The buffer is a universal in-process session primitive rather than an opt-in durable-memory capability.
+  - snapshot returns a copied array, replace defensively copies input, and tokenEstimate uses the documented JSON-character divide-by-four heuristic.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/working-loop.test.ts tests/unit/memory-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Loop rail passed seed, append, tool-result accumulation, and compaction replacement behavior through the real working-memory buffer.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "createWorkingMemory|wm\.append|wm\.replace" src/agent/loop/session-bootstrap.ts src/agent/loop src/memory/working.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Session bootstrap creates the buffer and the live loop owns its append and replacement lifecycle.
+  - kind: test
+    command: bun test tests/unit/working-loop.test.ts tests/unit/memory-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Buffer-to-loop integration tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch8
+review_state: approved
+reviewer: codex/cross-review-wave1

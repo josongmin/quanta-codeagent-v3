@@ -1,0 +1,57 @@
+version: 1
+feature_id: openai-responses-adapter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/adapters/openai-responses.ts:OpenAIResponsesAdapter
+entrypoints:
+  - src/llm/factory.ts:createAdapter
+activation:
+  - Select an OpenAI Responses provider route through the LLM factory.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/llm/adapters/openai-responses.ts:OpenAIResponsesAdapter
+  - src/llm/responses-continuation-store.ts:ResponsesContinuationStore
+consumer:
+  - src/llm/factory.ts constructs OpenAIResponsesAdapter for the responses provider route.
+reachable: yes
+surface_findings:
+  - Strict extension sends a delta-only input with previous_response_id; reasoning turns deliberately fall back to full input.
+  - A stale prior response clears the continuation and retries once; the wrapper injects a store only when no caller override exists.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/llm/openai-responses-adapter.test.ts tests/unit/llm/responses-continuation-store.test.ts tests/unit/llm/responses-continuation-wrapping.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent or disabled continuation preserves full-input behavior and existing caller store overrides.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm/openai-responses-adapter.test.ts tests/unit/llm/responses-continuation-store.test.ts tests/unit/llm/responses-continuation-wrapping.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Continuation extension, stale-response recovery, and factory-compatible wrapper rails passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'OpenAIResponsesAdapter|openai-responses' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/llm/factory.ts src/llm/adapters
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Factory imports and constructs the adapter on the production provider route.
+  - kind: test
+    command: bun test tests/unit/llm/openai-responses-adapter.test.ts tests/unit/llm/responses-continuation-store.test.ts tests/unit/llm/responses-continuation-wrapping.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused continuation and response-adapter rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

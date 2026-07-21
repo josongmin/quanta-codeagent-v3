@@ -1,0 +1,53 @@
+version: 1
+feature_id: verbatim
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/classifier.ts:AutoModeClassifier.evaluateAuto
+entrypoints:
+  - src/apps/cli/repl/runtime-context-compose.ts:createRuntimeContext
+  - src/agent/admissibility-gate/gates.ts:runModePolicy
+activation:
+  - Auto permission mode evaluates a non-readonly, non-HARD_DENY tool action with the CLI-provided classifier port.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/auto-classifier.ts:createAutoClassifierPort
+consumer:
+  - src/permission/classifier.ts:AutoModeClassifier.evaluateAuto
+  - src/apps/cli/repl/runtime-context-compose.ts boot.permission.classify
+reachable: yes
+surface_findings:
+  - CLI runtime composition supplies boot.permission.classify to the active permission context; auto mode reaches the two-stage classifier for non-readonly actions.
+  - Missing classifier and model/parse failures degrade to ask or fail-safe block, while HARD_DENY bypasses the classifier entirely.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission-classifier.test.ts tests/unit/auto-classifier.test.ts tests/integration/auto-classifier-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unit and end-to-end rails passed for allow, block, fallback, hard-deny precedence, and readonly bypass.
+failure_posture: degraded
+security_posture: conditional
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'createAutoClassifierPort|evaluateAuto|classify: boot.permission.classify' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent/auto-classifier.ts src/permission/classifier.ts src/apps/cli/repl/runtime-context-compose.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI composition supplies the classifier port to the policy consumer.
+  - kind: test
+    command: bun test tests/unit/permission-classifier.test.ts tests/unit/auto-classifier.test.ts tests/integration/auto-classifier-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused classifier rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

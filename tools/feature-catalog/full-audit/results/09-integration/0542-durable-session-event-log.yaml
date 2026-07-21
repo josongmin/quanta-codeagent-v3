@@ -1,0 +1,62 @@
+version: 1
+feature_id: 0542-durable-session-event-log
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/kernel/session/event-log-jsonl.ts:JsonlSessionEventLog
+entrypoints:
+  - src/host/runtime/persistence.ts:createSessionPersistence
+  - src/sdk/connect.ts:connect
+  - src/ipc/session/bridge.ts:planSessionReplay
+activation:
+  - QUANTA_SESSION_EVENT_LOG_DIR enables the JSONL persistence factory for a session runtime.
+  - A caller passes resumeFromSeq to connect() after restart to request replay.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: resource
+  daemon: resource
+producer:
+  - src/kernel/session/event-log-jsonl.ts:JsonlSessionEventLog
+  - src/host/runtime/persistence.ts:createSessionPersistence
+consumer:
+  - src/sdk/runtime/session.ts:createRuntimeSession
+  - src/ipc/session/bridge.ts:planSessionReplay
+  - src/sdk/connect.ts:connect
+reachable: yes
+surface_findings:
+  - The JSONL implementation handles restart sequence continuity, torn final records, locks, owner-only permissions, and loud mid-file corruption failures.
+  - The snapshot now has a door-level connect({resumeFromSeq}) restart crown test; the catalog's remaining door-level-resume follow-up is obsolete.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/sdk/runtime-event-log-resume.test.ts tests/unit/sdk/durable-resume-restart.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off composition uses InMemory, touches no disk, resets as historical behavior, and reports snapshot fallback.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/kernel/event-log-jsonl.test.ts tests/unit/ipc/session-transport-durable-replay.test.ts tests/unit/ipc/session-transport-client-resume.test.ts tests/unit/sdk/durable-resume-restart.test.ts tests/unit/sdk/runtime-event-log-resume.test.ts tests/unit/sdk/connect-resume-restart.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Restart replay from disk, dense merge checks, snapshot fallback, client outcome reporting, and public connect resume all pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: The feature text says door-level SDK resume still needs to catch up, but connect({resumeFromSeq}) is present and its restart crown test passes.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'JsonlSessionEventLog|createSessionPersistence|resumeFromSeq|planDurableReplay' src/kernel/session/event-log-jsonl.ts src/host/runtime/persistence.ts src/sdk/connect.ts src/ipc/session/bridge.ts src/ipc/session/client.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Persistence factory, durable replay planner, client cursor, and public SDK resume door are all live.
+  - kind: test
+    command: bun test tests/unit/kernel/event-log-jsonl.test.ts tests/unit/ipc/session-transport-durable-replay.test.ts tests/unit/ipc/session-transport-client-resume.test.ts tests/unit/sdk/durable-resume-restart.test.ts tests/unit/sdk/runtime-event-log-resume.test.ts tests/unit/sdk/connect-resume-restart.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused durable-replay proof is included in the 276-pass batch, including the public door restart crown.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

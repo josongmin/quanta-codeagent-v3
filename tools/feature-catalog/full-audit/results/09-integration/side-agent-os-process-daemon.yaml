@@ -1,0 +1,62 @@
+version: 1
+feature_id: side-agent-os-process-daemon
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-config-assembler.ts:maybeWireSideAgent
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/host/runtime/agent-config-assembler.ts:maybeWireSideAgent
+activation:
+  - QUANTA_SIDE_AGENT=1 mints the side-agent registry and its side_agent_* tool block.
+  - QUANTA_SIDE_AGENT_PROCESS=1 additionally selects createProcessSideAgentDaemonRegistry over the in-process backer.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/side-agent/process.ts:createSupervisedProcessDaemon
+  - src/side-agent/process-registry.ts:createProcessSideAgentDaemonRegistry
+  - src/host/runtime/side-agent-fork-port.ts:nodeProcessForkPort
+consumer:
+  - src/host/runtime/agent-config-assembler.ts:maybeWireSideAgent
+  - src/agent/side-agent-runner.ts:buildSideAgentBlock
+reachable: yes
+surface_findings:
+  - The host selects the real node child_process fork adapter only when both side-agent gates are enabled.
+  - The registry exposes the same daemon port consumed by side_agent_* tools; findings remain pull-readable through side_agent_findings.
+  - Real-fork tests prove IPC findings, crash respawn, LLM replay charter execution, and kill-mid-result filtering.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/side-agent-assembler-process-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: With QUANTA_SIDE_AGENT unset, PROCESS on leaves the daemon slot absent; PROCESS off retains the in-process backer.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/side-agent-process-supervisor-hellgate.test.ts tests/unit/side-agent-process-registry-hellgate.test.ts tests/unit/side-agent-assembler-process-wire-hellgate.test.ts tests/integration/side-agent-process-os-fork-e2e.test.ts tests/integration/side-agent-process-llm-charter-e2e.test.ts tests/integration/side-agent-ipc-kill-mid-result-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rail passed with real child-process fork, IPC, bounded respawn, replayed LLM charter, and malformed partial-frame rejection.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'config\.sideAgent|config\.sideAgentProcess|createProcessSideAgentDaemonRegistry|nodeProcessForkPort|sideAgentDaemons' src/host/runtime/agent-config-assembler.ts src/host/runtime/side-agent-fork-port.ts src/side-agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The guarded host composition selects the OS-process registry and concrete fork port, while the side-agent tool surface consumes the shared daemon slot.
+  - kind: test
+    command: bun test tests/unit/side-agent-process-supervisor-hellgate.test.ts tests/unit/side-agent-process-registry-hellgate.test.ts tests/unit/side-agent-assembler-process-wire-hellgate.test.ts tests/integration/side-agent-process-os-fork-e2e.test.ts tests/integration/side-agent-process-llm-charter-e2e.test.ts tests/integration/side-agent-ipc-kill-mid-result-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused process-supervisor and real-fork evidence completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-runtime
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,40 @@
+version: 1
+feature_id: cli-status-bar
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/status-bar.ts:createStatusBar
+entrypoints: [src/apps/cli/repl]
+activation: [Interactive TTY REPL status chrome]
+effective_defaults:
+  cli: on
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer: [REPL status text]
+consumer: [terminal DECSTBM row]
+reachable: yes
+surface_findings: [Status bar paints bounded visible-width terminal output and restores terminal state on teardown.]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/status-bar.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Status width and truncation rails passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: Catalog hold says no dedicated unit test, but status-bar.test.ts now exists and passes.
+disposition: fix-claim
+receipts:
+  - kind: test
+    command: bun test tests/unit/cli/status-bar.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused status bar rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

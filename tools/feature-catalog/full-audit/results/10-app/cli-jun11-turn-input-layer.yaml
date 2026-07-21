@@ -1,0 +1,69 @@
+version: 1
+feature_id: cli-jun11-turn-input-layer
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/factory.ts:createLLM
+entrypoints:
+  - src/apps/cli/index.ts:main
+  - src/apps/cli/repl/surface-compose/prompt-ux.ts:buildPromptUx
+  - src/llm/factory.ts:createLLM
+activation:
+  - QUANTA_LLM_REPLAY set to a JSONL cassette selects the deterministic LLM player.
+  - The raw interactive reader always supplies Ctrl+W and Ctrl+U operations when raw mode is active; they are not controlled by QUANTA_LLM_REPLAY.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/line-edit-ops.ts:deleteWordBefore
+  - src/apps/cli/line-edit-ops.ts:killToLineStart
+  - src/llm/factory.ts:createLLM
+consumer:
+  - src/apps/cli/raw-line-reader.ts:readLine
+  - src/apps/cli/repl/prompt-pipeline.ts:defaultPromptLineReader
+  - src/apps/cli/repl/session-loop.ts:runSessionLoop
+reachable: yes
+surface_findings:
+  - The replay branch is genuinely opt-in and the unset control takes the normal provider path.
+  - Ctrl+W and Ctrl+U are unconditional raw-reader behavior, so the feature as a whole is not wholly default-OFF even though the replay subfeature is.
+  - PTY rails exercise real terminal word editing and replayed thinking, mid-turn capture, completion, and cassette-exhaustion error rendering.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/llm/llm-replay-hook.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: The replay branch is inert when unset, but line-edit operations remain active in the normal interactive raw-reader path; no global OFF identity exists for this mixed feature.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/line-edit-ops.test.ts tests/unit/llm/llm-replay-hook.test.ts tests/e2e-pty/cli-input-layer-e2e.test.ts tests/e2e-pty/cli-turn-layer-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 22 focused unit and PTY cases passed, including raw terminal Ctrl+W/Ctrl+U and deterministic cassette-driven turn output.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: The default-OFF ledger collapses independent always-on raw line editing and opt-in replay into one off feature; only replay has an OFF state.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_LLM_REPLAY|createLLM|deleteWordBefore|killToLineStart|ctrl\+w|ctrl\+u' src/apps/cli src/llm/factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The factory only branches to replay under the environment value, while the raw reader independently consumes line-edit operations.
+  - kind: test
+    command: bun test tests/unit/cli/line-edit-ops.test.ts tests/unit/llm/llm-replay-hook.test.ts tests/e2e-pty/cli-input-layer-e2e.test.ts tests/e2e-pty/cli-turn-layer-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused unit and PTY rail passed line-edit, replay selection, interactive terminal editing, and replayed turn rendering cases.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3-plus feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-session
+review_state: approved
+reviewer: codex/cross-review-wave1

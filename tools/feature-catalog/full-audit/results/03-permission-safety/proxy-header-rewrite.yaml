@@ -1,0 +1,51 @@
+version: 1
+feature_id: proxy-header-rewrite
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/network-proxy/header-rules.ts:applyHeaderRules
+entrypoints:
+  - src/runtime/network-proxy/loopback-proxy.ts:plaintext and MITM forwarding
+activation:
+  - A host must inject headerRules into a gated network proxy config; no operator-facing rule-list loader exists.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/runtime/network-proxy/header-rules.ts
+consumer:
+  - src/runtime/network-proxy/loopback-proxy.ts
+reachable: yes
+surface_findings:
+  - Both forwarding paths call the transform after secret redaction; forbidden credential and framing injection is rejected without recording values.
+  - Production can reach only the no-rules identity arm because no environment or settings surface supplies a rule list.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/header-rules-hellgate.test.ts tests/integration/header-rewrite-proxy-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing rules retain input object identity and zero audit entries.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/header-rules-hellgate.test.ts tests/integration/header-rewrite-proxy-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Directly injected rules prove plain and TLS rewrite, redaction ordering, and forbidden injection refusal.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: No configuration producer populates headerRules in a live operator surface.
+disposition: hold
+receipts:
+  - kind: test
+    command: bun test tests/unit/header-rules-hellgate.test.ts tests/integration/header-rewrite-proxy-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused header rewrite rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

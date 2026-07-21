@@ -1,0 +1,55 @@
+version: 1
+feature_id: slash-permission-inspect
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/permission-explain.ts:permissionCmd
+entrypoints:
+  - src/apps/cli/slash/registry-app.ts:APP_SLASH_COMMANDS
+  - src/apps/cli/repl/surface-compose/dispatch-compose.ts:permissionInspectSlot
+activation:
+  - Run /permission, /permission explain TOOL, /permission list, or /permission tier TIER in the interactive CLI.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/permission/inspect.ts:inspectPermission
+  - src/apps/cli/permission-explain.ts:runPermissionRender
+consumer:
+  - src/apps/cli/slash/registry-app.ts:APP_SLASH_COMMANDS
+  - src/apps/cli/repl/surface-compose/dispatch-compose.ts:buildSurfaceDispatchWire
+reachable: yes
+surface_findings:
+  - The command is unconditionally registered and has a stateless rendering path when no live PermissionStore is supplied.
+  - A live REPL projects the actual permission store and thread id when session setup created one, so the same command can show current mode data.
+  - Hard-deny output intentionally exposes only rule names and descriptions, never raw regex patterns.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission/inspect.test.ts tests/unit/cli/permission-explain.test.ts tests/unit/cli/permission-explain-live-mode-hellgate.test.ts tests/unit/cli/permission-explain-override-tier-hellgate.test.ts tests/unit/slash-commands.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Five-axis ordering, live mode projection, override-tier rendering, registry dispatch, and regex non-disclosure rails passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'permissionCmd|permissionInspect|inspectPermission' src/apps/cli/slash/registry-app.ts src/apps/cli/repl/surface-compose src/apps/cli/permission-explain.ts src/permission/inspect.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Registry assembly calls the renderer, while the REPL conditionally upgrades it with the live store slot.
+  - kind: test
+    command: bun test tests/unit/permission/inspect.test.ts tests/unit/cli/permission-explain.test.ts tests/unit/cli/permission-explain-live-mode-hellgate.test.ts tests/unit/cli/permission-explain-override-tier-hellgate.test.ts tests/unit/slash-commands.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused permission inspector rails passed in the 294-case 15-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

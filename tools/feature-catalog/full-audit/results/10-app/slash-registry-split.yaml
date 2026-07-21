@@ -1,0 +1,55 @@
+version: 1
+feature_id: slash-registry-split
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/slash-commands.ts:BUILTINS
+entrypoints:
+  - src/apps/cli/repl.ts:runRepl
+  - src/apps/cli/slash-commands.ts:runSlashCommand
+activation:
+  - The interactive REPL dispatches a slash-prefixed command through the assembled BUILTINS table.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/slash/registry-surface.ts:SURFACE_SLASH_COMMANDS
+  - src/apps/cli/slash/registry-session.ts:SESSION_SLASH_COMMANDS
+  - src/apps/cli/slash/registry-app.ts:APP_SLASH_COMMANDS
+consumer:
+  - src/apps/cli/slash-commands.ts:BUILTINS
+  - src/apps/cli/slash-commands.ts:runSlashCommand
+reachable: yes
+surface_findings:
+  - The thin assembly preserves the public dispatcher, completer, descriptor, and slash predicate while composing all three registry layers.
+  - Help renders from the live assembled table, including session and app entries; split-specific tests prevent duplicates and layer leakage.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/slash-registry-split-hellgate.test.ts tests/unit/slash-commands.test.ts tests/unit/cli/help-render.test.ts tests/unit/cli/repl-extract-shape.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Layer counts/order, public entrypoints, command dispatch, completion, and live help inventory pass.
+failure_posture: fail-closed
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'BUILTINS|SURFACE_SLASH_COMMANDS|SESSION_SLASH_COMMANDS|APP_SLASH_COMMANDS|runSlashCommand' src/apps/cli/slash-commands.ts src/apps/cli/slash/registry-surface.ts src/apps/cli/slash/registry-session.ts src/apps/cli/slash/registry-app.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The three registry producers concatenate into the historic command surface.
+  - kind: test
+    command: bun test tests/unit/apps/cli/slash-registry-split-hellgate.test.ts tests/unit/slash-commands.test.ts tests/unit/cli/help-render.test.ts tests/unit/cli/repl-extract-shape.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused slash registry proof is included in the 193-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

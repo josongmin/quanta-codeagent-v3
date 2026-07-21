@@ -1,0 +1,62 @@
+version: 1
+feature_id: refusal-stop-reason
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/recovery-executor.ts:executeRecoveryAction and src/agent/loop/turn-outcome.ts:applyTurnAction
+entrypoints:
+  - src/agent/loop/entry.ts:runAgent
+  - src/apps/cli/repl/turn-runner.ts:runOneTurn
+activation:
+  - Provider stream must end with a refusal-class stop reason.
+  - Recovery decides typed refusal, seals the assistant message without orphan tool use, and turn outcome produces the terminal AgentOutcome.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/recovery.ts:decideOnAssembled
+  - src/agent/recovery.ts:extractRefusalRationale
+consumer:
+  - src/agent/loop/recovery-executor.ts:executeRecoveryAction
+  - src/agent/loop/turn-outcome.ts:applyTurnAction
+  - src/reactor/agent-outcome-adapter.ts:toReactorOutcome
+reachable: yes
+surface_findings:
+  - Refusal is prioritized before retry and tool dispatch; visible text becomes the typed rationale while thinking and orphan tool use are excluded.
+  - The loop emits reason refusal, StopCategory model.refusal, and terminal done output; reactor maps it to fail instead of collapsing it into a generic error.
+  - The web host may render the generic error/status path, but the typed core outcome remains available to all shared agent surfaces.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/refusal-handling.test.ts tests/integration/agent-refusal-e2e.test.ts tests/integration/refusal-multi-turn-carryover.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unit and real-loop cases prove typed rationale, no retry/tool dispatch, message carry-over, typed done event, and normal completion regression control.
+failure_posture: fail-loud
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'decideRefusal|extractRefusalRationale|action.do === "refusal"|refusalCategory|case "refusal"' src/agent src/reactor
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Provider refusal classification reaches the recovery executor, terminal outcome, stream reason, and reactor failure adapter.
+  - kind: test
+    command: bun test tests/unit/refusal-handling.test.ts tests/integration/agent-refusal-e2e.test.ts tests/integration/refusal-multi-turn-carryover.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 199-pass focused audit run includes typed-refusal real-loop scenarios, tombstoned tool-use control, multi-turn history, and non-refusal compatibility.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception is reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-cliux
+review_state: approved
+reviewer: codex/cross-review-wave1

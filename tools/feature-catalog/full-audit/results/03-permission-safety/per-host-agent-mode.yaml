@@ -1,0 +1,56 @@
+version: 1
+feature_id: per-host-agent-mode
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/policy.ts:evaluateStack
+entrypoints:
+  - src/agent/admissibility-gate/gates.ts:runPermissionStack
+activation:
+  - Requires AgentConfig.permissionStack.enabled=true and a sessionId.
+  - No production composition-root assignment to permissionStack was found.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/permission/per-host-mode.ts:resolveHostId
+  - src/permission/per-host-mode.ts:hostMutationVerdict
+  - src/permission/permission-store.ts:getHost
+consumer:
+  - src/permission/policy.ts:evaluateStack
+  - src/agent/admissibility-gate/gates.ts:runPermissionStack
+reachable: no
+surface_findings:
+  - The per-host typed verdict is correctly fail-closed for custom and read-only modes when evaluateStack runs.
+  - The only discovered enabling branch is AgentConfig.permissionStack.enabled; source search found its declaration and gate read but no production construction assignment.
+  - The integration rail injects enabled=true directly, so it proves the seam rather than a shipped CLI activation.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission-per-thread.test.ts tests/integration/permission-stack-gate-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused 116-pass audit rail includes per-host read-only denial and full-access allow precedence through the gate.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: seam-only
+blocker: No shipped composition-root path sets AgentConfig.permissionStack.enabled, so persisted host modes never reach the interactive gate without external programmatic configuration.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg "permissionStack" src --glob '!**/*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Found type declarations and the gate read only; no production object assignment enables the stack.
+  - kind: test
+    command: bun test tests/unit/permission-per-thread.test.ts tests/integration/permission-stack-gate-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused permission-store and gate integration rail passed with 116 tests and 0 failures in the combined audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch4
+review_state: approved
+reviewer: codex/cross-review-wave1

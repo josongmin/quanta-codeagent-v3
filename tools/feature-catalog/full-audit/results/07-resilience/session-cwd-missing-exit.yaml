@@ -1,0 +1,52 @@
+version: 1
+feature_id: session-cwd-missing-exit
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/session-io.ts:switchToSessionCwd
+entrypoints:
+  - src/apps/cli/repl.ts:resume session setup
+  - src/apps/cli/index.ts:top-level main catch
+activation:
+  - A resumed session whose recorded cwd differs from the launch cwd reaches switchToSessionCwd.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/session-io.ts detects a missing target with existsSync and throws SessionStartupError.
+consumer:
+  - src/apps/cli/index.ts catches SessionStartupError, prints its message, and exits with its typed code.
+reachable: yes
+surface_findings:
+  - Same-cwd resume is a no-op; changed existing cwd switches and logs a structured success event.
+  - The subprocess rail exercises a removed worktree on the actual CLI process boundary.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/session-io-startup-error.test.ts tests/integration/session-cli-subprocess.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unit coverage asserts the typed throw and subprocess T9 asserts exit 1 with Session cwd missing after the worktree is removed.
+failure_posture: fail-loud
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'switchToSessionCwd\|SessionStartupError\|session_cwd_missing' 9a12f7a -- src/apps/cli/session-io.ts src/apps/cli/repl.ts src/apps/cli/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Resume invokes the typed missing-cwd owner and the top-level CLI catch maps it to its exit code.
+  - kind: test
+    command: bun test tests/unit/cli/session-io-startup-error.test.ts tests/integration/session-cli-subprocess.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 14 pass and 0 fail, including actual removed-worktree resume T9.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

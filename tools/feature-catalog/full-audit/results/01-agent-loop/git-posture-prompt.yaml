@@ -1,0 +1,58 @@
+version: 1
+feature_id: git-posture-prompt
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt-body.ts:BODY_AFTER_PERSONA_GIT_POSTURE
+entrypoints:
+  - src/agent/prompt.ts:buildSystemPrompt
+  - src/agent/prompt.ts:compile
+activation:
+  - "Every standard system-prompt build includes the static git-posture atom."
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/prompt-body.ts:BODY_AFTER_PERSONA_GIT_POSTURE
+consumer:
+  - src/agent/prompt.ts:buildSystemPrompt
+  - src/agent/prompt-graph/atoms-body.ts:rendered prompt atom
+reachable: yes
+surface_findings:
+  - "The static prompt includes explicit consent requirements, read-only git allowances, destructive-form bans, and unrelated-work preservation instructions."
+  - "It is a model-instruction layer; runtime enforcement remains the separate permission-policy backstop documented by the catalog."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git-posture-prompt-hellgate.test.ts tests/unit/prompt-rules-snapshot.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Prompt construction retains all required git directives and is byte-stable across repeated builds."
+failure_posture: fail-closed
+security_posture: conditional
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'BODY_AFTER_PERSONA_GIT_POSTURE|Git posture|buildSystemPrompt|renderAtoms' src/agent/prompt-body.ts src/agent/prompt.ts src/agent/prompt-graph
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The literal policy atom is rendered by the standard prompt assembly path, not left as an unconsumed constant."
+  - kind: test
+    command: bun test tests/unit/git-posture-prompt-hellgate.test.ts tests/unit/prompt-rules-snapshot.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "25 focused prompt-policy and byte-stability cases passed."
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Strict reachability reported zero L3+ unreachable or dead-API feature claims."
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-compaction
+review_state: approved
+reviewer: codex/cross-review-wave1

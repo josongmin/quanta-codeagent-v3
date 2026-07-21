@@ -1,0 +1,58 @@
+version: 1
+feature_id: skill-md-frontmatter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/discover.ts:toSkill
+entrypoints:
+  - src/apps/cli/internal.ts:buildSkillsConfig
+  - src/agent/tier1/skill.ts:buildSkillBlock
+  - src/skill/discover.ts:discoverSkills
+activation:
+  - CLI enables skills by default and buildSkillBlock discovers bundled system skills plus a configured user directory.
+  - Production discovery uses the lenient parseFrontmatter path, not parseSkillMarkdown or the six-field strict schema.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: unknown
+  daemon: on
+producer:
+  - src/skill/skill-frontmatter.ts:parseSkillMarkdown
+  - src/skill/skill-vs-extension.ts:classify
+  - src/skill/skill-vs-extension.ts:assertAllowedTool
+consumer:
+  - src/skill/discover.ts:toSkill consumes lenient frontmatter only
+  - src/agent/loop/session-bootstrap.ts:buildSkillGate consumes discovery's allowlist map, not assertAllowedTool
+reachable: conditional
+surface_findings:
+  - Strict six-field parsing and category classification are tested library APIs but have no production discovery or dispatch caller.
+  - Runtime discovery preserves allowedTools and the loop enforces its derived allowlist through buildSkillGate, which is covered separately by tool-scoping.
+  - Malformed or incomplete user frontmatter can still load through the lenient parser with fallback description semantics.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill-frontmatter-parse.test.ts tests/unit/skill-vs-extension.test.ts tests/unit/skill-discover-errors.test.ts tests/integration/skill-md-fixtures.test.ts tests/integration/skill-frontmatter-hell-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 203 combined focused skill tests passed; strict parser and classifier behavior are proven only as library behavior.
+failure_posture: degraded
+security_posture: conditional
+observability: na
+verdict: stale-claim
+blocker: Catalog claims strict schema parser and assertAllowedTool dispatch enforcement on the CLI, but the production discovery path is lenient and the live gate does not call that assertion helper.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg 'parseFrontmatter|parseSkillMarkdown|assertAllowedTool|buildSkillGate' src/skill/discover.ts src/skill/skill-frontmatter.ts src/skill/skill-vs-extension.ts src/agent/tier1/skill.ts src/agent/loop/session-bootstrap.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Live discovery uses parseFrontmatter and live enforcement consumes the derived allowlist through buildSkillGate.
+  - kind: test
+    command: bun test tests/unit/skill-frontmatter-parse.test.ts tests/unit/skill-vs-extension.test.ts tests/unit/skill-discover-errors.test.ts tests/integration/skill-md-fixtures.test.ts tests/integration/skill-frontmatter-hell-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Strict parser and classifier rails passed, while discovery error rails demonstrate the lenient production behavior.
+audited_at: "2026-07-19"
+auditor: codex/p2_tier1_batch14
+review_state: approved
+reviewer: codex/cross-review-wave1

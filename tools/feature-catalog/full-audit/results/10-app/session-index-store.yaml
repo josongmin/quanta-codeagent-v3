@@ -1,0 +1,48 @@
+version: 1
+feature_id: session-index-store
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/session/index-store.ts:upsertMeta and removeFromIndex
+entrypoints:
+  - src/session/store.ts:save and delete lifecycle
+activation:
+  - Persist or remove a session through the session store.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/session/index-store.ts:upsertMeta
+  - src/session/index-store.ts:removeFromIndex
+consumer:
+  - src/session/store.ts:save session
+  - src/session/store.ts:delete session
+reachable: yes
+surface_findings:
+  - Session store imports and calls index upsert/remove on its live persistence path.
+  - Catalog lists git-observability rails rather than a direct index-store test; no frozen dedicated atomicity/mutex test was found.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: proof-gap
+blocker: "Production consumer exists, but the catalog's cited tests do not directly exercise index JSONL atomic upsert, removal, or mutex behavior and no owner-local rail is present."
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'upsertMeta|removeFromIndex|listSessions' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/session
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Session store is a production consumer of index-store operations.
+  - kind: test
+    command: rg --files tests/unit tests/integration | rg 'index-store'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: No focused index-store test file exists; catalog evidence points to unrelated git-observability rails.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

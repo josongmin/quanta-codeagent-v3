@@ -1,0 +1,56 @@
+version: 1
+feature_id: decision-emit-phase2-admissibility
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/runtime-context-compose.ts:composeRuntimeBootstrapContext
+entrypoints:
+  - src/apps/cli/index.ts CLI REPL session setup
+  - src/apps/cli/repl/runtime-context-compose.ts:composeRuntimeBootstrapContext
+activation:
+  - CLI composition unconditionally builds decisionEmitterFromStream(turnStream); a rule, hook, or permission gate outcome emits a decision event.
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/admissibility-gate/shared.ts:emitGateDecision
+  - src/stream/decision-emitter.ts:safeEmitDecision
+consumer:
+  - src/apps/cli/repl/runtime-context-compose.ts wires decisionEmitterFromStream(turnStream)
+  - src/stream/adapters/stdout.ts renders decision events
+  - src/stream/adapters/jsonl-recorder.ts persists decision events
+reachable: yes
+surface_findings:
+  - The Phase 2 rule, hook, and permission emit sites are reachable from CLI dispatch and their focused hellgate proves allow, deny, ask, sanitization, no-double-emit, and throw isolation.
+  - The catalog default-OFF claim is stale: the current CLI composition always sets decisionEmitter, rather than gating it on QUANTA_DEBUG.
+  - With the unconditionally wired main turn stream, stdout and JSONL have decision consumers; QUANTA_DEBUG only controls the extra debug tracer tee.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/decision-emit-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 21 focused cases cover all three gate families plus direct absent-emitter equivalence, sanitization, exact-once behavior, and poison-emitter isolation.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: The catalog says the composition root wires this only in developer mode and default-OFF preserves user-facing bytes, but the frozen CLI composition wires it unconditionally into the main stream.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'decisionEmitter: decisionEmitterFromStream|case "decision"|emitGateDecision|safeEmitDecision' src/apps/cli/repl/runtime-context-compose.ts src/stream/adapters/stdout.ts src/stream/adapters/jsonl-recorder.ts src/agent/admissibility-gate src/stream
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI composition, three gate emit paths, and two live stream consumers are joined; no QUANTA_DEBUG predicate guards the emitter assignment.
+  - kind: test
+    command: bun test tests/unit/agent/decision-emit-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 21 focused Phase 2 wire and behavior cases pass.
+audited_at: "2026-07-19"
+auditor: codex/p2-boundary-batch11
+review_state: approved
+reviewer: codex/cross-review-wave1

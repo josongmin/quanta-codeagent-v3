@@ -1,0 +1,61 @@
+version: 1
+feature_id: debug-blame-skills-trio
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/system-skills/{debug-trace,explain-stack-trace,blame-section} and src/agent/tier1/skill.ts:buildSkillBlock
+entrypoints:
+  - src/apps/cli/internal.ts:buildSkillsConfig
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+activation:
+  - Interactive CLI enables bundled system-skill discovery by default.
+  - Each workflow is selected through the generic Skill tool; no dedicated slash router currently consumes its exported trigger helper.
+effective_defaults:
+  cli: on
+  web: na
+  bench: off
+  headless: off
+  daemon: unknown
+producer:
+  - src/skill/system-skills/debug-trace/SKILL.md
+  - src/skill/system-skills/explain-stack-trace/SKILL.md
+  - src/skill/system-skills/blame-section/SKILL.md
+consumer:
+  - src/skill/system-skills/index.ts:discoverSystemSkills
+  - src/agent/tier1/skill.ts:buildSkillBlock
+reachable: yes
+surface_findings:
+  - All three skill records are bundled, discovered, and exposed through the same CLI-default Skill tool surface.
+  - Their trigger and find helpers remain valid router seams, but a separate slash-command consumer is not present and is not required for generic skill invocation.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/features.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Omitting skills keeps the generic Skill surface absent.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/system-skills-new-trio-hellgate.test.ts tests/unit/features.test.ts tests/integration/skill-progress-audit-discovery.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Trio frontmatter, discovery, trigger seams, and the shared live system-skill invocation path all passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'debug-trace|explain-stack-trace|blame-section|discoverSystemSkills|buildSkillBlock' src/skill/system-skills src/agent/tier1/skill.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The three bundled records feed the shared system discovery and feature builder rather than an unused private registry.
+  - kind: test
+    command: bun test tests/unit/system-skills-new-trio-hellgate.test.ts tests/unit/features.test.ts tests/integration/skill-progress-audit-discovery.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused trio contract and generic system-skill live rails passed.
+audited_at: '2026-07-19'
+auditor: codex/p2-tier1-batch19
+review_state: approved
+reviewer: codex/cross-review-wave1

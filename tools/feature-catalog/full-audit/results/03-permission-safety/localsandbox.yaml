@@ -1,0 +1,50 @@
+version: 1
+feature_id: localsandbox
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/runtime/sandbox.ts:LocalSandbox.run"
+entrypoints: []
+activation:
+  - "An application composition root must construct LocalSandbox and call run()."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/runtime/sandbox.ts:LocalSandbox"
+  - "src/runtime/sandbox.ts:scrubEnv"
+consumer: []
+reachable: no
+surface_findings:
+  - "LocalSandbox implements env scrubbing, cwd validation, output capping, timeout, and process-tree termination."
+  - "There is no production `new LocalSandbox` construction in this snapshot; the CLI instead installs the distinct OS-shell sandbox slot."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/sandbox.test.ts tests/unit/sandbox-buildargv.test.ts tests/unit/runtime/guarded-spawn.test.ts tests/unit/cli/os-sandbox-default-byte-identical-hellgate.test.ts tests/unit/cli/os-sandbox-wire-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "73 tests pass: LocalSandbox scrub, cap, timeout, and jail behavior plus separate CLI OS-sandbox OFF and wrapper rails."
+failure_posture: fail-closed
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: "No production composition root constructs LocalSandbox; CLI sandbox wiring uses src/apps/cli/sandbox-wire.ts and runtime os-sandbox instead."
+disposition: downgrade
+receipts:
+  - kind: source
+    command: "rg -n \"new LocalSandbox|LocalSandbox\\(\" src --glob '!**/*.test.ts'"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "No production LocalSandbox construction call exists."
+  - kind: test
+    command: "bun test tests/unit/sandbox.test.ts tests/unit/sandbox-buildargv.test.ts tests/unit/runtime/guarded-spawn.test.ts tests/unit/cli/os-sandbox-default-byte-identical-hellgate.test.ts tests/unit/cli/os-sandbox-wire-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "73 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch2
+review_state: approved
+reviewer: codex/cross-review-wave1

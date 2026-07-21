@@ -1,0 +1,47 @@
+version: 1
+feature_id: feature-catalog-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tools/feature-catalog/cli.ts
+entrypoints:
+  - bun fc
+  - bun fc:audit
+activation:
+  - Invoke catalog or full-audit CLI commands.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - tools/feature-catalog/cli.ts
+  - tools/feature-catalog/full-audit/cli.ts
+consumer: []
+reachable: no
+surface_findings:
+  - This standalone tooling owns YAML schema, rendering, audit, changed-file, and full-audit overlay operations.
+  - It is intentionally outside runtime surfaces; current full-audit validation exercises the same command path.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/feature-catalog-schema.test.ts tests/unit/feature-catalog-render.test.ts tests/unit/feature-catalog-audit.test.ts tests/unit/feature-catalog-lint.test.ts tests/unit/feature-catalog-yaml.test.ts tests/unit/feature-catalog-baseline.test.ts tests/unit/feature-catalog-check-changed.test.ts tests/unit/_arch/feature-catalog-full-audit.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Schema, render, audit, lint, YAML, baseline, changed gate, and full-audit architecture rails passed.
+failure_posture: fail-closed
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/feature-catalog-schema.test.ts tests/unit/feature-catalog-render.test.ts tests/unit/feature-catalog-audit.test.ts tests/unit/feature-catalog-lint.test.ts tests/unit/feature-catalog-yaml.test.ts tests/unit/feature-catalog-baseline.test.ts tests/unit/feature-catalog-check-changed.test.ts tests/unit/_arch/feature-catalog-full-audit.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused feature catalog tool rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

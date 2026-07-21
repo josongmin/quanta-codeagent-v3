@@ -1,0 +1,53 @@
+version: 1
+feature_id: edit-fresh-hash-on-success
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/_shared/fresh-hash.ts
+entrypoints: [src/agent/dispatch/tool-context.ts]
+activation: [QUANTA_EDIT_FRESH_HASH default-on, literal off disables]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: [src/tool/_shared/fresh-hash.ts:freshHashNote, src/tool/_shared/fresh-hash.ts:refreshStaleReadBaseline]
+consumer: [src/tool/edit/index.ts, src/tool/write/index.ts, src/tool/scripted-replace.ts, src/tool/apply-patch.ts]
+reachable: yes
+surface_findings:
+  - "Dispatch projects runtimeConfig editFreshHash into tool context; single-file mutators append post-write hashes while multi-file mutators refresh stale-read baselines."
+  - "Focused real-filesystem rails prove chained edits, cross-tool handoff, CRLF fidelity, and external-modification preservation."
+  - "The advertised completeness recurrence rail is currently red because it reports apply-patch.ts as uncovered."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/edit-fresh-hash-hellgate.test.ts tests/unit/edit-fresh-hash-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Literal off preserves legacy output and omits fresh baseline updates.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/edit-fresh-hash-hellgate.test.ts tests/unit/edit-fresh-hash-wire-hellgate.test.ts tests/unit/edit-fresh-hash-strategies-hellgate.test.ts tests/unit/edit-fresh-hash-chaos-hellgate.test.ts tests/unit/edit-fresh-hash-owner-unit.test.ts tests/unit/edit-fresh-hash-mtime-interaction-hellgate.test.ts tests/unit/edit-fresh-hash-write-scripted-parity-hellgate.test.ts tests/unit/edit-fresh-hash-apply-patch-hellgate.test.ts tests/unit/edit-fresh-hash-apply-patch-audit-hellgate.test.ts tests/unit/edit-fresh-hash-notebook-hellgate.test.ts tests/unit/edit-fresh-hash-file-history-hellgate.test.ts tests/unit/edit-fresh-hash-mutating-tool-completeness-ratchet.test.ts tests/unit/edit-fresh-hash-agent-loop-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: Functional rails pass, but completeness ratchet reports apply-patch.ts uncovered.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: proof-gap
+blocker: "tests/unit/edit-fresh-hash-mutating-tool-completeness-ratchet.test.ts is red: apply-patch.ts is not recognized as refreshing the stale-read baseline, so recurrence prevention is unproven."
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'editFreshHash|freshHashNote|refreshStaleReadBaseline|refreshApplyBaselines' src/agent/dispatch/tool-context.ts src/tool
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime context gate and mutator consumers are present.
+  - kind: test
+    command: bun test tests/unit/edit-fresh-hash-mutating-tool-completeness-ratchet.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: Anti-vacuum and stale-exempt checks pass, but apply-patch.ts is uncovered by the mandatory refresh scan.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,55 @@
+version: 1
+feature_id: token-store-atomic
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/auth/chatgpt-oauth/token-store.ts:writeToken
+entrypoints:
+  - src/apps/cli/login-cmd.ts:loginCmd
+  - src/llm/adapters/chatgpt-oauth.ts:ChatgptOAuthAdapter.resolveToken
+activation:
+  - CLI login writes a ChatGPT OAuth token.
+  - An expired ChatGPT OAuth token refresh persists a replacement when possible.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/auth/chatgpt-oauth/token-store.ts:writeToken
+  - src/auth/chatgpt-oauth/token-store.ts:readResolvedToken
+consumer:
+  - src/apps/cli/login-cmd.ts:loginCmd
+  - src/llm/adapters/chatgpt-oauth.ts:ChatgptOAuthAdapter.resolveToken
+reachable: yes
+surface_findings:
+  - writeToken writes a sibling temporary file, chmods it 0600 on POSIX, then renames it into place.
+  - Reads reject group or world readable records, and login plus adapter refresh are live callers.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/auth/token-store.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Round-trip, POSIX mode, loose-permission refusal, atomic no-tmp success, resolution, delete, and expiry cases pass.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'writeToken\(|readResolvedToken\(|chmod\(tmp, 0o600\)|rename\(tmp, path\)' src/auth/chatgpt-oauth/token-store.ts src/apps/cli/login-cmd.ts src/llm/adapters/chatgpt-oauth.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Atomic owner seam and the login and refresh consumers are all live.
+  - kind: test
+    command: bun test tests/unit/auth/token-store.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 17 focused token-store cases passed in the 93-pass resilience rail.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch23
+review_state: approved
+reviewer: codex/cross-review-wave1

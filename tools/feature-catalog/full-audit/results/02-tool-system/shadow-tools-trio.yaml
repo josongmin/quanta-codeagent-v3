@@ -1,0 +1,64 @@
+version: 1
+feature_id: shadow-tools-trio
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/shadow.ts:buildShadowBlock
+entrypoints:
+  - src/agent/features.ts:buildSessionFeatures
+  - src/apps/cli/repl/surface-compose/core-state.ts:buildSurfaceCoreState
+activation:
+  - QUANTA_SHADOW truthy creates defaultShadowOdb in the interactive CLI core state.
+  - buildSessionFeatures registers shadow_snapshots, shadow_rewind, and shadow_restore_partial only when AgentConfig.shadowOdb is present.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/shadow/index.ts:shadowTools
+  - src/tool/shadow/snapshots.ts:shadowSnapshotsTool
+  - src/tool/shadow/rewind.ts:shadowRewindTool
+  - src/tool/shadow/restore-partial.ts:shadowRestorePartialTool
+consumer:
+  - src/agent/tier1/shadow.ts:buildShadowBlock
+  - src/agent/features.ts:buildSessionFeatures
+  - src/apps/cli/repl/surface-compose/core-state.ts:buildSurfaceCoreState
+reachable: yes
+surface_findings:
+  - The interactive CLI produces the shadowOdb slot from QUANTA_SHADOW, and the session feature composer registers all three tools from that one slot.
+  - shadow_rewind and shadow_restore_partial are always-confirm mutators; shadow_snapshots is read-only. Owner rails cover typed errors, signal behavior, exact optional fields, and restore routing.
+  - The catalog's web:full assertion is unsupported by a web-daemon producer/registry consumer; generic tool event rendering is not registration of the shadow block.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/multi-plane-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Empty AgentConfig produces no extra tools, while a supplied fake shadowOdb registers exactly the three shadow tools.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/shadow-snapshots-hellgate.test.ts tests/unit/tool/shadow-rewind-hellgate.test.ts tests/unit/tool/shadow-rewind-extensions-hellgate.test.ts tests/integration/multi-plane-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 70 selected shadow and composition cases passed, including snapshot listing, always-confirm rewind, partial restore, verified-target error handling, and feature registration.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog surface integration must remove web:full or add an actual web composition root that creates shadowOdb and registers the tier-1 block.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'buildShadowBlock|shadowTools|shadowOdb|QUANTA_SHADOW|buildSessionFeatures' src/agent/features.ts src/agent/tier1/shadow.ts src/apps/cli/repl/surface-compose/core-state.ts src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI core-state mints the gated slot and session composition consumes it; no web-daemon shadow registration consumer was found.
+  - kind: test
+    command: bun test tests/unit/tool/shadow-snapshots-hellgate.test.ts tests/unit/tool/shadow-rewind-hellgate.test.ts tests/unit/tool/shadow-rewind-extensions-hellgate.test.ts tests/integration/multi-plane-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 70 selected shadow owner and composition rails passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-shadow
+review_state: approved
+reviewer: codex/cross-review-wave1

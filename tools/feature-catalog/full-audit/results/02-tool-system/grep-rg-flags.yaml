@@ -1,0 +1,59 @@
+version: 1
+feature_id: grep-rg-flags
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/grep/index.ts:buildGrepArgv
+entrypoints:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+activation:
+  - Invoke the always-registered grep tool with optional context, output_mode, i, multiline, or type fields.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/grep/index.ts:buildGrepArgv
+consumer:
+  - src/tool/grep/index.ts:grepTool.execute
+  - src/tool/index.ts:buildBaseDefaultTools
+reachable: yes
+surface_findings:
+  - "grep is part of the default tool registry for CLI, batch/headless presets, and web-daemon."
+  - "String type arguments are shell-quoted; integer context arguments are bounded and mode-incompatible contexts are dropped."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/grep.test.ts tests/unit/tool/grep-flags-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 22 pass, 0 fail; real rg behavior, context/output modes, argv injection resistance, DoS bounds, and default argv parity pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildGrepArgv|grepTool|buildDefaultTools' src/tool/grep/index.ts src/tool/index.ts src/runner/assemble/tooling.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The default registry constructs grepTool and all audited production composition roots consume that registry.
+  - kind: test
+    command: bun test tests/unit/grep.test.ts tests/unit/tool/grep-flags-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 22 pass, 0 fail.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception is reported for grep-rg-flags.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-git
+review_state: approved
+reviewer: codex/cross-review-wave1

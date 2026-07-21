@@ -1,0 +1,63 @@
+version: 1
+feature_id: effort-classifier
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/effort-classifier/store.ts:createEffortClassifier
+entrypoints:
+  - src/agent/optional-ports.ts:wireOptionalAgentPorts
+  - src/agent/loop/session-lifecycle.ts:prepareTurn
+  - src/agent/loop/stream-consume.ts:consumeStream
+activation:
+  - QUANTA_EFFORT_AUTO=on injects a session-scoped classifier when no caller supplied one.
+  - Prompt observations and failed tool dispatches accumulate a recommendation that is applied as the per-turn thinking floor.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/effort-classifier/store.ts:createEffortClassifier
+  - src/agent/effort-classifier/keyword-detector.ts:detectKeywordSignals
+consumer:
+  - src/agent/loop/context-assembler.ts:observeEffortClassifierPrompt
+  - src/agent/dispatch.ts:observeEffortClassifierToolFailure
+  - src/agent/loop/skill-gate.ts:applyEffortClassifierFloor
+reachable: yes
+surface_findings:
+  - The optional-port wire mints the classifier under QUANTA_EFFORT_AUTO and the loop observes prompts, tool failures, compaction, and recovery resets.
+  - stream-consume reads the recommendation through applyEffortClassifierFloor before invoking the LLM, so it changes effective per-turn thinking rather than remaining an inert advisory port.
+  - The catalog's advisory-only and future-consumer statements are stale; the feature is product-active under its existing gate.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/optional-ports-wire.test.ts tests/integration/effort-classifier-loop-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing classifier or disabled gate leaves an ultrathink prompt without a thinking field and preserves the legacy path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/effort-classifier-hellgate.test.ts tests/integration/effort-classifier-loop-hellgate.test.ts tests/integration/headless-bootstrap-optional-ports.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 22 focused cases passed for keyword and failure escalation, explicit-off precedence, real first-turn max thinking, and headless bootstrap activation.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: The catalog describes the classifier as advisory-only with a deferred consumer, but the live loop applies its recommendation to the LLM thinking floor.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_EFFORT_AUTO|createEffortClassifier|observeEffortClassifier|onToolFailure|applyEffortClassifierFloor' src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The env producer, prompt and tool-failure observers, and stream-time thinking consumer form one live loop path.
+  - kind: test
+    command: bun test tests/unit/effort-classifier-hellgate.test.ts tests/integration/effort-classifier-loop-hellgate.test.ts tests/integration/headless-bootstrap-optional-ports.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 22 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-observability
+review_state: approved
+reviewer: codex/cross-review-wave1

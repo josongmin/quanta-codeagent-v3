@@ -1,0 +1,68 @@
+version: 1
+feature_id: code-coverage
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/coverage_check.ts:coverageCheckTool
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/internal.ts:buildToolingFromCli
+activation:
+  - CLI seeds QUANTA_COVERAGE_TOOL on when unset and projects coverageCheck into DefaultToolPorts.
+  - An agent invokes the registered read-only coverage_check tool with a jailed V8 coverage JSON path.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/observability/coverage/v8-source.ts:defaultV8CoverageSource
+  - src/observability/coverage/reporter.ts:defaultCoverageReporter
+  - src/tool/coverage_check.ts:coverageCheckTool
+consumer:
+  - src/apps/cli/internal.ts:buildToolingFromCli
+  - src/tool/index.ts:buildDefaultTools
+  - src/agent/loop/entry.ts:runAgent
+reachable: yes
+surface_findings:
+  - CLI composition projects the gate into DefaultToolPorts, whose conditional registration adds coverage_check to the live tool menu.
+  - The tool performs V8 parsing, threshold evaluation, jail and symlink protection, and emits a terminal ToolResult for the agent loop.
+  - No dedicated web coverage panel exists; a web surface is not claimed as proven here.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/cli-feature-gate-seed-inheritance.hellgate.test.ts tests/unit/jun04-default-off-byte-identity-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit QUANTA_COVERAGE_TOOL=0 survives the real CLI seed loop into a child process, and an unported tool build has no coverage_check leak.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/coverage-source-hellgate.test.ts tests/unit/coverage-reporter-hellgate.test.ts tests/unit/tool/coverage-check-hellgate.test.ts tests/unit/code-mode-phase2-wire.test.ts tests/unit/wired-tools-dispatch-permission-r3-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 65 focused cases passed, including CLI-gated registration, V8 input parsing, weighted threshold verdicts, tool execution, jail/symlink rejection, and read-only dispatch in normal and plan modes.
+failure_posture: fail-loud
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'coverage_check|QUANTA_COVERAGE_TOOL|coverageCheck' src/apps/cli src/tool src/agent src/config
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI gate projection, conditional DefaultToolPorts registration, the tool owner, and agent-side tool consumption are all present in the frozen source.
+  - kind: test
+    command: bun test tests/unit/coverage-source-hellgate.test.ts tests/unit/coverage-reporter-hellgate.test.ts tests/unit/tool/coverage-check-hellgate.test.ts tests/unit/code-mode-phase2-wire.test.ts tests/unit/wired-tools-dispatch-permission-r3-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 65 focused coverage, registration, permission, and tool-execution cases passed with zero failures.
+  - kind: test
+    command: bun test tests/unit/cli/cli-feature-gate-seed-inheritance.hellgate.test.ts tests/unit/jun04-default-off-byte-identity-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 15 CLI-seed and unported-menu identity cases passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-bench
+review_state: approved
+reviewer: codex/cross-review-wave1

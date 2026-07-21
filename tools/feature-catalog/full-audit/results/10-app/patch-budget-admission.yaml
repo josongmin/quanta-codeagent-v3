@@ -1,0 +1,56 @@
+version: 1
+feature_id: patch-budget-admission
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/eval/driver/result-assembly.ts:attachClosureExtras
+entrypoints:
+  - src/apps/bench/run-main.ts:runMain
+  - src/apps/bench/eval/driver.ts:runInstance
+activation:
+  - QUANTA_BENCH_PATCH_BUDGET=1
+  - QUANTA_BENCH_PATCH_BUDGET_STRICT=1
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/agent/patch-budget/index.ts:analyzePatchBudget
+  - src/runner/batch/eval/patch-budget-admission.ts:buildPhasePatchBudget
+consumer:
+  - src/runner/batch/eval/driver/result-assembly.ts:attachClosureExtras
+  - src/apps/bench/eval/driver.ts:runInstance
+reachable: yes
+surface_findings:
+  - The bench driver computes and attaches patchBudget telemetry when either posture bit is enabled for a SWE-bench instance.
+  - The strict bit changes the structural budget computation, but no terminal submission path consumes withinBudget to reject an over-budget patch.
+  - The feature catalog says patch-budget-strict fail-closes submission; the focused parity test asserts the opposite, that strict remains telemetry-only.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset closure posture leaves patch-budget and patch-budget-strict false.
+on_efficacy_proof: null
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: The documented strict fail-closed submission behavior has no live consumer; current code records the structural verdict only.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'buildPhasePatchBudget|posture.patchBudget|patchBudgetStrict' src/runner/batch/eval/driver/result-assembly.ts src/runner/batch/eval/patch-budget-admission.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The sole live result-path consumer assigns extra.patchBudget and does not branch on withinBudget for terminal acceptance.
+  - kind: test
+    command: bun test tests/unit/patch-budget.test.ts tests/unit/bench-patch-budget-admission.test.ts tests/unit/runner/verify-select-driver-parity.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused unit and parity rails passed; the parity rail explicitly proves strict patch-budget remains telemetry-only rather than terminal discard.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-bench-controls
+review_state: approved
+reviewer: codex/cross-review-wave1

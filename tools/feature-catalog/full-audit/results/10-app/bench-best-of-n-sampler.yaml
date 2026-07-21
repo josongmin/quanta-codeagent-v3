@@ -1,0 +1,63 @@
+version: 1
+feature_id: bench-best-of-n-sampler
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/bench/sampler.ts:sampleBestOfN and patchVote
+entrypoints:
+  - src/apps/bench/cli.ts:run dispatch
+  - src/apps/bench/run-main.ts:resolveInstance
+activation:
+  - Run the bench app with --n greater than 1.
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer:
+  - src/apps/bench/sampler.ts:sampleBestOfN
+  - src/apps/bench/sampler.ts:patchVote
+consumer:
+  - src/apps/bench/run-main.ts:resolveInstance
+reachable: yes
+surface_findings:
+  - The normal n=1 bench path bypasses sampling; --n greater than 1 invokes bounded-concurrency sampling and then patch consensus for multiple passing attempts.
+  - Thrown individual attempts become negative-infinity scored results, so one failed trajectory does not abort the batch.
+off_identity_proof:
+  kind: source
+  command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/apps/bench/run-main.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: resolveInstance sends n less than or equal to 1 directly to runInstance without calling sampleBestOfN.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/sampler.test.ts tests/integration/bench.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unit selection and vote cases passed, and the integration rail proves an n=3 flaky-LLM run resolves through the real bench driver.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'sampleBestOfN|patchVote|n <= 1' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/bench/run-main.ts src/apps/bench/sampler.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: resolveInstance owns the n gate and calls sampler plus patchVote on the live multi-attempt path.
+  - kind: test
+    command: bun test tests/unit/sampler.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Nine deterministic score, tie, error, concurrency, and patch-vote cases passed.
+  - kind: test
+    command: bun test tests/integration/bench.test.ts tests/unit/bench/eval-decompose-shape.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Real runInstance integration included the Best-of-N n=3 flaky-provider success case; 31 tests passed.
+audited_at: "2026-07-20"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

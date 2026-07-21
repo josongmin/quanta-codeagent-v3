@@ -1,0 +1,48 @@
+version: 1
+feature_id: bash-output-cap-delegation
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/bash/index.ts:formatRunBody and buildBackgroundCompletedResult
+entrypoints: [src/tool/index.ts:buildBaseDefaultTools, src/tool/registry.ts:ToolRegistry.run, src/apps/web-daemon/runtime-factory.ts]
+activation: [bash is a base tool; every completed result is passed through ToolRegistry.run and its universal capToolOutput consumer.]
+effective_defaults:
+  cli: on
+  web: off
+  bench: unknown
+  headless: unknown
+  daemon: on
+producer: [src/tool/bash/index.ts:formatRunBody, src/tool/bash/index.ts:buildBackgroundCompletedResult]
+consumer: [src/tool/registry.ts:ToolRegistry.run, src/tool/output-spill.ts:capToolOutput]
+reachable: yes
+surface_findings:
+  - Completed foreground and background bash bodies are returned untruncated; only the in-flight placeholder keeps a bounded tail buffer.
+  - The universal registry consumer applies the configured head-plus-tail cap and spill behavior after bash output is produced.
+  - Catalog correctly states that the web preview cannot preserve the full tail, so web is not a supported end-user surface despite daemon-level tool availability.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/bash-output-cap-delegation-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 8 focused assertions passed for sub-cap identity, tail preservation, registry capping, spill delegation, and background completion.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'formatRunBody|buildBackgroundCompletedResult|MAX_BG_PLACEHOLDER_OUTPUT|capToolOutput' src/tool/bash/index.ts src/tool/registry.ts src/tool/output-spill.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Bash has no completed-result head slice, while ToolRegistry.run is the concrete universal head-plus-tail consumer.
+  - kind: test
+    command: bun test tests/unit/bash-output-cap-delegation-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 8 focused delegation and tail-survival rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch9
+review_state: approved
+reviewer: codex/cross-review-wave1

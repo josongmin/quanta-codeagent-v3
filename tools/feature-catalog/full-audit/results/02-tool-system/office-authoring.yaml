@@ -1,0 +1,62 @@
+version: 1
+feature_id: office-authoring
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+activation:
+  - QUANTA_OFFICE_AUTHORING is enabled in runtimeConfig
+  - buildGatedToolPorts sets DefaultToolPorts.officeAuthoring=true
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/document/authoring/xlsx.ts:buildXlsx
+  - src/tool/document/authoring/docx.ts:buildDocx
+  - src/tool/document/authoring/xlsx-write.ts:makeXlsxWriteTool
+  - src/tool/document/authoring/docx-write.ts:makeDocxWriteTool
+consumer:
+  - src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+  - src/tool/index.ts:buildDefaultTools
+reachable: yes
+surface_findings:
+  - "The production host turns the gate into the boolean officeAuthoring port and the central registry installs xlsx_write and docx_write only with that port."
+  - "The serializers use the shared jailed versioned write path and are exercised through the real composition-root dispatch."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/office-authoring-e2e-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts tests/unit/session-knobs-default-off-byte-identity-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Gate-off omits xlsx_write and docx_write from the baseline tool menu."
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/office-authoring-hellgate.test.ts tests/unit/office-authoring-e2e-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The root dispatch wrote a real XLSX while OOXML tests verified STORED ZIP CRC XML jail and versioning behavior."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'officeAuthoring: gateOn|cfg.officeAuthoring|p.officeAuthoring !== true' src/shared/runtime-config.ts src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/tool/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The explicit runtime gate maps to the host boolean port and the central registry."
+  - kind: test
+    command: bun test tests/unit/office-authoring-hellgate.test.ts tests/unit/office-authoring-e2e-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts tests/unit/session-knobs-default-off-byte-identity-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Selected OOXML serializer write jail versioning default-off and root-dispatch rails passed."
+audited_at: "2026-07-19"
+auditor: codex/p1-tools-surface
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,59 @@
+version: 1
+feature_id: shadow-odb-lru-cleanup
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/checkpoint-policy.ts:maybeCleanup
+entrypoints:
+  - src/apps/cli/repl/surface-compose/core-state.ts:buildSurfaceCoreState
+activation:
+  - Start the interactive CLI with QUANTA_SHADOW truthy and a checkpoint policy configured with the shadow cleanup cap.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/storage/shadow-odb/cleanup.ts:evictLru
+  - src/storage/shadow-odb/default.ts:ShadowOdb.cleanup
+consumer:
+  - src/agent/checkpoint-policy.ts:maybeCleanup
+  - src/apps/cli/repl/surface-compose/core-state.ts:defaultShadowOdb
+reachable: yes
+surface_findings:
+  - QUANTA_SHADOW absent leaves shadowOdb undefined in the interactive surface; the LRU path has no disk effect.
+  - A successful auto-anchor invokes cleanup asynchronously at most once per workspace and turn when cleanupMaxBytes is configured.
+  - Cleanup confines deletion to immediate snapshots children, rejects non-finite or negative caps, and continues past per-directory failures.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/runner-storage-leak-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The absent cleanup cap rail proves no cleanup call is made on the default-off path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/shadow-odb-hellgate.test.ts tests/unit/runner-storage-leak-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: LRU ordering, missing-root no-op, cap guards, port exposure, post-anchor wiring, per-turn throttle, and nonblocking behavior passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_SHADOW|defaultShadowOdb|maybeCleanup|cleanupMaxBytes|evictLru' src/apps/cli/repl/surface-compose/core-state.ts src/agent/checkpoint-policy.ts src/storage/shadow-odb
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI gate, checkpoint consumer, bounded eviction implementation, and default ShadowOdb port form one reachable path.
+  - kind: test
+    command: bun test tests/unit/shadow-odb-hellgate.test.ts tests/unit/runner-storage-leak-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused LRU and runtime-consumer rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

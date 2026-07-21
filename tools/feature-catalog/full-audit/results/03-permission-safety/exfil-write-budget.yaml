@@ -1,0 +1,52 @@
+version: 1
+feature_id: exfil-write-budget
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/_shared/write-budget.ts:createSessionWriteBudget
+entrypoints: [src/host/runtime/security-rails-wire.ts, src/agent/dispatch/tool-context.ts]
+activation: [QUANTA_WRITE_BUDGET=1, QUANTA_WRITE_BUDGET_MAX positive, untrusted envelope]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/host/runtime/security-rails-wire.ts]
+consumer: [src/agent/dispatch/tool-context.ts, src/tool/write/index.ts, src/tool/edit/index.ts, src/tool/apply-patch.ts]
+reachable: yes
+surface_findings:
+  - "Host wire mints a session-long budget only with strict gate plus valid cap; dispatch binds the current turn and mutators reject or confirm before commits."
+  - "Trusted turns and invalid/missing caps are intentionally inert, preventing a guessed global write ceiling."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/exfil-rails-write-budget.test.ts tests/unit/exfil-rails-write-budget-mutators-hellgate.test.ts tests/unit/exfil-rails-dispatch-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent slot, missing cap, gate-off, and trusted contexts remain unlimited.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/exfil-rails-write-budget.test.ts tests/unit/exfil-rails-write-budget-mutators-hellgate.test.ts tests/unit/exfil-rails-dispatch-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Turn reset, cap enforcement, multi-file mutator accounting, and host/dispatch wiring pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'writeBudget|SessionWriteBudget|bindWriteBudgetTurn|writeBudgetEvent' src/host/runtime src/agent/dispatch src/tool
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Host minting, per-turn binding, and pre-commit mutator consumers are present.
+  - kind: test
+    command: bun test tests/unit/exfil-rails-write-budget.test.ts tests/unit/exfil-rails-write-budget-mutators-hellgate.test.ts tests/unit/exfil-rails-dispatch-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused write-budget rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

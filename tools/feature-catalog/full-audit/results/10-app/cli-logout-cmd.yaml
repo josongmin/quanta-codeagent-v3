@@ -1,0 +1,60 @@
+version: 1
+feature_id: cli-logout-cmd
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/logout-cmd.ts:buildLogoutCmd
+entrypoints:
+  - src/apps/cli/slash/registry-surface.ts:buildSurfaceSlashCommands
+  - src/apps/web-daemon/server/fetch-handler.ts:POST /auth/logout
+activation:
+  - Run /logout in the interactive CLI, or POST /auth/logout to the web daemon.
+effective_defaults:
+  cli: on
+  web: on
+  bench: na
+  headless: na
+  daemon: on
+producer:
+  - src/apps/cli/logout-cmd.ts:buildLogoutCmd
+  - src/apps/web-daemon/auth-routes.ts:handleAuthLogout
+consumer:
+  - src/apps/cli/slash/registry-surface.ts:buildSurfaceSlashCommands
+  - src/apps/web-daemon/server/fetch-handler.ts:authRoutes.logout
+reachable: yes
+surface_findings:
+  - The CLI registry builds the slash command with the runtime OAuth revoke knob, and the web daemon independently dispatches POST /auth/logout.
+  - Both paths preserve externally managed Codex credentials rather than deleting them; absent Quanta credentials remain an idempotent success.
+  - QUANTA_OAUTH_REVOKE_ON_LOGOUT enables a best-effort RFC 7009 refresh-token revoke before local deletion; failures do not block deletion.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/token-revoke-on-logout-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Revoke-off makes zero network calls and preserves the local-delete-only output path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/login-status-cmd.test.ts tests/unit/cli/token-revoke-on-logout-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Idempotency, argument validation, Quanta deletion, Codex ownership protection, revoke ordering, and revoke-failure local cleanup rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: The catalog says logout does not call a remote revoke endpoint, but the registered CLI command conditionally invokes RFC 7009 revocation when QUANTA_OAUTH_REVOKE_ON_LOGOUT is enabled.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'buildLogoutCmd|oauthRevokeOnLogout|handleAuthLogout|/auth/logout|maybeRevoke' src/apps/cli src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI registry wiring, gated remote revocation, and daemon logout routing are all live.
+  - kind: test
+    command: bun test tests/unit/cli/login-status-cmd.test.ts tests/unit/cli/token-revoke-on-logout-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused logout rails passed within the 118-pass 11-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

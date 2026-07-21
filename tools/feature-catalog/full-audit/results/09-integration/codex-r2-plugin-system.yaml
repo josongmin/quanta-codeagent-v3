@@ -1,0 +1,68 @@
+version: 1
+feature_id: codex-r2-plugin-system
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+activation:
+  - A workspace contains .quanta/plugins entries for automatic plugin activation.
+  - QUANTA_MENTION_APP_PLUGIN enables plugin:// and @@app resolver dependencies.
+  - The advertised workspace app override would require a production caller of createWorkspaceAppCatalog, which is absent.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: off
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/plugin-activation-handler/auto-wire.ts:autoWirePluginActivation
+  - src/agent/plugin-mcp-launcher/launcher.ts:launchPluginMcpServers
+  - src/agent/app-catalog/workspace-catalog.ts:createWorkspaceAppCatalog
+consumer:
+  - src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+  - src/host/runtime/internal/mention-app-plugin-deps.ts:buildAppPluginMentionDeps
+reachable: no
+surface_findings:
+  - Automatic discovery, manifest parsing, MCP launch, skill union, and plugin/app mention ports are composed through the interactive assembler.
+  - The real mention host injects defaultAppCatalog, not createWorkspaceAppCatalog.
+  - createWorkspaceAppCatalog and loadWorkspaceAppCatalog have only their owner-local tests; a .quanta/apps.json override never reaches the shipped mention resolver.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/composition-activation-auto-wire-hellgate.test.ts src/host/runtime/internal/__tests__/mention-app-plugin-deps.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Empty plugin discovery leaves activation absent and QUANTA_MENTION_APP_PLUGIN off passes no plugin/app dependencies.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/agent/plugin-discovery/__tests__/parser.hellgate.test.ts src/agent/plugin-discovery/__tests__/discovery.hellgate.test.ts src/agent/plugin-discovery/__tests__/in-memory-registry.hellgate.test.ts src/agent/app-catalog/__tests__/loader.hellgate.test.ts src/agent/app-catalog/__tests__/merge.hellgate.test.ts src/agent/app-catalog/__tests__/workspace-catalog.hellgate.test.ts src/agent/app-catalog/__tests__/default-catalog.hellgate.test.ts src/agent/plugin-app-resolver/__tests__/plugin-resolver.hellgate.test.ts src/agent/plugin-app-resolver/__tests__/app-resolver.hellgate.test.ts src/agent/plugin-app-resolver/__tests__/composite-resolver.hellgate.test.ts src/agent/plugin-mcp-launcher/__tests__/launcher.hellgate.test.ts src/agent/plugin-mcp-launcher/__tests__/registry.hellgate.test.ts src/agent/plugin-skill-extension/__tests__/extender.hellgate.test.ts src/agent/plugin-skill-extension/__tests__/union.hellgate.test.ts tests/unit/composition-activation-auto-wire-hellgate.test.ts tests/unit/loop-adr-0346-activation-hook-hellgate.test.ts src/host/runtime/internal/__tests__/mention-app-plugin-deps.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Owner-local and composed activation rails pass, but their workspace app-catalog override proof remains unconsumed by production.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: seam-only
+blocker: createWorkspaceAppCatalog/loadWorkspaceAppCatalog has no production caller; the composed mention host always supplies defaultAppCatalog, so ADR-0342 workspace customization is dormant within this combined L3 feature.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg -n 'autoWirePluginActivation|buildAppPluginMentionDeps|defaultAppCatalog|createWorkspaceAppCatalog|loadWorkspaceAppCatalog' src/host src/agent --glob '!**/__tests__/**'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The assembler calls autoWirePluginActivation and the mention wire supplies defaultAppCatalog; workspace catalog construction has no production call site.
+  - kind: test
+    command: bun test src/agent/plugin-discovery/__tests__/parser.hellgate.test.ts src/agent/plugin-discovery/__tests__/discovery.hellgate.test.ts src/agent/plugin-discovery/__tests__/in-memory-registry.hellgate.test.ts src/agent/app-catalog/__tests__/loader.hellgate.test.ts src/agent/app-catalog/__tests__/merge.hellgate.test.ts src/agent/app-catalog/__tests__/workspace-catalog.hellgate.test.ts src/agent/app-catalog/__tests__/default-catalog.hellgate.test.ts src/agent/plugin-app-resolver/__tests__/plugin-resolver.hellgate.test.ts src/agent/plugin-app-resolver/__tests__/app-resolver.hellgate.test.ts src/agent/plugin-app-resolver/__tests__/composite-resolver.hellgate.test.ts src/agent/plugin-mcp-launcher/__tests__/launcher.hellgate.test.ts src/agent/plugin-mcp-launcher/__tests__/registry.hellgate.test.ts src/agent/plugin-skill-extension/__tests__/extender.hellgate.test.ts src/agent/plugin-skill-extension/__tests__/union.hellgate.test.ts tests/unit/composition-activation-auto-wire-hellgate.test.ts tests/unit/loop-adr-0346-activation-hook-hellgate.test.ts src/host/runtime/internal/__tests__/mention-app-plugin-deps.hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 168 owner rails and 26 composition/host-gate rails passed with no failures.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Module-level reachability does not prove the dormant workspace-catalog API is called; source-call inspection identifies the gap.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-team
+review_state: approved
+reviewer: codex/cross-review-wave1

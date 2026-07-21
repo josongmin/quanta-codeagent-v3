@@ -1,0 +1,50 @@
+version: 1
+feature_id: completion-notify
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/factories/notify-and-warning.ts:notification factory
+entrypoints:
+  - src/apps/cli/repl/session-loop.ts:turn and idle notifications
+activation:
+  - Run interactive TTY CLI with QUANTA_NOTIFY configured to bell or title.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - turn duration and idle state
+consumer:
+  - OSC terminal title and optional bell
+reachable: yes
+surface_findings:
+  - TTY and TERM gates build the notification port; slow turns and idle transitions use a sanitized OSC title with idempotent disposal.
+off_identity_proof:
+  kind: test
+  command: bun test src/apps/cli/notify/__tests__/notify-enabled.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Non-TTY, TERM dumb, unset, and invalid channels disable output.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/apps/cli/notify/__tests__/osc-adapter.hellgate.test.ts src/apps/cli/notify/__tests__/notify-enabled.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Slow-turn, idle, channel, sanitization, and disposal rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test src/apps/cli/notify/__tests__/osc-adapter.hellgate.test.ts src/apps/cli/notify/__tests__/notify-enabled.hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused notification rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

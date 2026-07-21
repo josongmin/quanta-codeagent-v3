@@ -1,0 +1,60 @@
+version: 1
+feature_id: tier1-skill-block
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/skill.ts:buildSkillBlock, composed by src/agent/features.ts:buildSessionFeatures
+entrypoints:
+  - src/apps/cli/internal.ts:buildSkillsConfig
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+activation:
+  - CLI defaults skills to enabled and supplies bundled-only skills: {} when no user directory is configured.
+  - QUANTA_SKILLS=0 removes the config block; bench registers skills only through its explicit opt-in knob.
+effective_defaults:
+  cli: on
+  web: na
+  bench: off
+  headless: off
+  daemon: unknown
+producer:
+  - src/agent/tier1/skill.ts:buildSkillBlock
+  - src/skill/index.ts:discoverSkills and discoverSystemSkills
+consumer:
+  - src/agent/features.ts:buildSessionFeatures
+  - src/agent/loop/context-assembler.ts:prepareTurnContext
+reachable: yes
+surface_findings:
+  - The builder merges user and system skills with system-wins collision handling, materializes Skill and ToolSearch, and projects allowlists, overrides, and filtered suggestion inventory into live session features.
+  - The low-level absent-config branch remains byte-identical, but the interactive CLI deliberately supplies skills by default; the catalog's component-level default-off wording is therefore not a claim that CLI defaults to off.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/features.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent skills yields no Skill or ToolSearch registration and preserves the empty feature result.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/features.test.ts tests/unit/skill-overrides.test.ts tests/unit/skill-trigger-rules.test.ts tests/integration/loop-skill-override.test.ts tests/integration/skill-paths-activation-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Bundled discovery, registration, override application, prompt inventory filtering, and retained invocation authority all passed in focused rails.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildSkillsConfig|buildSkillBlock|discoverSystemSkills|createSkillTool|skillsActivatedFor' src/apps/cli/internal.ts src/agent/tier1/skill.ts src/agent/features.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI configuration, feature composition, discovery, generic tool registration, and paths-filtered inventory are directly connected.
+  - kind: test
+    command: bun test tests/unit/features.test.ts tests/unit/skill-overrides.test.ts tests/unit/skill-trigger-rules.test.ts tests/integration/loop-skill-override.test.ts tests/integration/skill-paths-activation-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused registration, override, and paths-activation efficacy rails passed with no failures.
+audited_at: '2026-07-19'
+auditor: codex/p2-tier1-batch19
+review_state: approved
+reviewer: codex/cross-review-wave1

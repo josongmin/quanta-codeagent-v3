@@ -1,0 +1,57 @@
+version: 1
+feature_id: promise-race
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/scripted-replace.ts:applyScriptedReplace
+entrypoints:
+  - src/tool/index.ts:buildBaseDefaultTools
+activation:
+  - Invoke scripted_replace with isRegex=true; the removed Promise.race timeout has no activation path.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/scripted-replace.ts:isReDoSSuspicious
+  - src/tool/scripted-replace.ts:applyScriptedReplace
+consumer:
+  - src/tool/scripted-replace.ts:scriptedReplaceTool.execute
+reachable: yes
+surface_findings:
+  - "No owner code executes Promise.race for scripted_replace; the source explicitly documents its removal."
+  - "The live replacement defense is a 256-character cap plus static nested-quantifier and overlapping-alternation rejection, not a timeout."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/scripted-replace.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The owner-local test suite passed with 0 failures; known catastrophic patterns are refused before compilation and benign regexes complete through the synchronous live path.
+failure_posture: fail-closed
+security_posture: conditional
+observability: na
+verdict: stale-claim
+blocker: The feature title names Promise.race although the implementation intentionally removed that nonfunctional timeout mechanism.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'Promise.race|isReDoSSuspicious|MAX_PATTERN_LEN|applyScriptedReplaceBounded' src/tool/scripted-replace.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The owner contains only removal documentation for Promise.race and live static guards for regex execution.
+  - kind: test
+    command: bun test tests/unit/scripted-replace.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The owner-local test suite passed with 0 failures; static refusal and normal replacement behavior pass.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception is reported for promise-race.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-git
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,55 @@
+version: 1
+feature_id: probe-funnel-adherence
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/probe/funnel.ts:observeFunnel
+entrypoints:
+  - package.json:probe
+  - src/apps/probe/index.ts:main
+activation:
+  - Run bun run probe PATH --funnel against a trajectory JSONL or run directory.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/probe/funnel.ts:observeFunnel
+  - src/apps/probe/funnel.ts:renderFunnel
+consumer:
+  - src/apps/probe/index.ts:renderFunnelView
+  - src/apps/probe/index.ts:renderSingle
+reachable: no
+surface_findings:
+  - The standalone probe app parses --funnel and routes both multi-instance and single-trajectory paths to the pure funnel observer.
+  - The observer is deliberately non-authoritative: out-of-order stage calls do not count as compliance and partial or zero stages are rendered as non-defects.
+  - It has no interactive CLI, web, daemon, or agent-loop consumer; it is an offline diagnostic view.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/probe-funnel.test.ts tests/unit/probe.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Stage classification, monotonic ordering, hedged output, and probe CLI funnel rendering rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'funnel|observeFunnel|renderFunnel' src/apps/probe/index.ts src/apps/probe/funnel.ts package.json
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The probe command parser, both render paths, and pure analyzer are directly connected.
+  - kind: test
+    command: bun test tests/unit/probe-funnel.test.ts tests/unit/probe.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused funnel rails passed in the 294-case 15-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

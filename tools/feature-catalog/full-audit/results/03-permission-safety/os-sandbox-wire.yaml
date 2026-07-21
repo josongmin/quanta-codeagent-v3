@@ -1,0 +1,61 @@
+version: 1
+feature_id: os-sandbox-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/shell.ts:runShell
+entrypoints:
+  - src/apps/cli/index.ts:main
+  - src/apps/cli/sandbox-wire.ts:installCliSandbox
+activation:
+  - A CLI boot resolves an active QUANTA_SANDBOX profile and installs a ShellSandboxSlot.
+  - Each runShell invocation passes its argv through the installed slot before Bun.spawn.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/cli/sandbox-wire.ts:buildCliOsSandbox
+  - src/runtime/os-sandbox/wrap-argv.ts:wrapShellArgv
+consumer:
+  - src/apps/cli/index.ts:main
+  - src/runtime/shell.ts:runShell
+reachable: yes
+surface_findings:
+  - CLI main awaits installCliSandbox before the agent surface starts, and runShell reads the installed slot immediately before spawning bash.
+  - Unset, default, off, and empty QUANTA_SANDBOX leave the slot absent and preserve the legacy argv path.
+  - Restrictive read-only and workspace-write profiles refuse an unavailable or degraded wrapper before spawn; unsupported profiles intentionally remain an explicit passthrough/degrade posture.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/os-sandbox-default-byte-identical-hellgate.test.ts tests/unit/cli/os-sandbox-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default env permutations leave no slot installed and preserve legacy runShell exit and output behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/os-sandbox-wire-hellgate.test.ts tests/unit/os-sandbox-bubblewrap-hellgate.test.ts tests/unit/os-sandbox-fail-closed-adversarial-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Profile resolution, wrapper argv construction, Linux routing, and fail-closed restrictive-profile behavior passed.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "installCliSandbox|installShellSandbox|getShellSandbox|requiresFullSandboxEnforcement|bunScrubbedSpawner" src/apps/cli/index.ts src/apps/cli/sandbox-wire.ts src/runtime/shell.ts src/runtime/shell-sandbox-holder.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Boot installation and the pre-spawn enforcement path are joined at the live shell boundary.
+  - kind: test
+    command: bun test tests/unit/cli/os-sandbox-wire-hellgate.test.ts tests/unit/cli/os-sandbox-default-byte-identical-hellgate.test.ts tests/unit/os-sandbox-bubblewrap-hellgate.test.ts tests/unit/os-sandbox-fail-closed-adversarial-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused OS-sandbox rail passed in the 414-pass selected audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch1
+review_state: approved
+reviewer: codex/cross-review-wave1

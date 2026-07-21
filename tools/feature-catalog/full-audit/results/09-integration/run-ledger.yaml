@@ -1,0 +1,58 @@
+version: 1
+feature_id: run-ledger
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/observability-wire/wire.ts:resolveObservabilityWire
+entrypoints:
+  - src/agent/observability-wire/wire.ts:resolveObservabilityWire
+  - src/agent/run-ledger-attribution/subscriber.ts:createRunLedgerHookSubscriber
+  - src/apps/web-daemon/observability-emitter.ts
+activation:
+  - QUANTA_OBSERVABILITY=on creates the HookBus, RunLedgerPort, and post_tool_use attribution subscriber.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - Observability wire constructs the ledger and subscribes its attribution matcher to post_tool_use events.
+consumer:
+  - Web daemon observability emitter reads runLedger.list and the approval state machine shares the ledger for waiting state.
+reachable: yes
+surface_findings:
+  - The catalog's MODEL-ONLY claim is stale: enabled observability composition now creates the ledger, attributes shell/subagent/MCP events, and exports it to web observability.
+  - Gate-off preserves no ledger and no HookBus construction.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/run-ledger-attribution-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No-action/malformed events remain silent, and attribution is optional when no hook bus is supplied.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/run-ledger-hellgate.test.ts tests/unit/run-ledger-attribution-hellgate.test.ts tests/unit/run-ledger-attribution-banner-pin-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Ledger transitions, event matcher attribution, hook subscriber behavior, and actual tool banner compatibility passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "createRunLedger|createRunLedgerHookSubscriber|runLedger" src/agent/observability-wire src/host/runtime/agent-arg-builder/observability-wire.ts src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Enabled observability wiring constructs and subscribes the ledger, while web daemon consumes its list view.
+  - kind: test
+    command: bun test tests/unit/run-ledger-hellgate.test.ts tests/unit/run-ledger-attribution-hellgate.test.ts tests/unit/run-ledger-attribution-banner-pin-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 95 ledger, attribution, and banner compatibility tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

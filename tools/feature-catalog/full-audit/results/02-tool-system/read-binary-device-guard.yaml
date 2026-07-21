@@ -1,0 +1,48 @@
+version: 1
+feature_id: read-binary-device-guard
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/read/index.ts:resolveReadOutcome
+entrypoints: [src/tool/index.ts:buildBaseDefaultTools, src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildBaseRegistry, src/apps/web-daemon/runtime-factory.ts]
+activation: [read is a default base tool, so the guard runs unconditionally on every standard read execution.]
+effective_defaults:
+  cli: on
+  web: on
+  bench: unknown
+  headless: unknown
+  daemon: on
+producer: [src/storage/service.ts:defaultFileSystemPort.statFile, src/tool/read/index.ts:classifyDeviceFile, src/tool/read/index.ts:sniffHead]
+consumer: [src/tool/read/index.ts:resolveReadOutcome, src/tool/index.ts:buildBaseDefaultTools]
+reachable: yes
+surface_findings:
+  - The pipeline stats first, rejects FIFO and character or block devices before opening them, then bounds the byte sniff to 8 KiB.
+  - NUL-bearing unmarked binaries become typed binary_file rejections; BOM-identified UTF-16 takes the text path instead of a false binary rejection.
+  - read is registered by both agent and web daemon base registries, so the internal safety fence reaches normal tool executions.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/read-binary-device-guard-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 11 focused real-file assertions passed for FIFO and device refusal, NUL handling, bounded sniffing, symlink handling, size cap ordering, and text success.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'classifyDeviceFile|isFIFO|isCharacterDevice|isBlockDevice|sniffHead|binaryRejected|buildBaseDefaultTools' src/tool/read/index.ts src/storage/types.ts src/storage/service.ts src/tool/index.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Device classification precedes every byte read and normal base registries consume the guarded read tool.
+  - kind: test
+    command: bun test tests/unit/read-binary-device-guard-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 11 focused FIFO, device, binary, boundary, and ordinary-text rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch9
+review_state: approved
+reviewer: codex/cross-review-wave1

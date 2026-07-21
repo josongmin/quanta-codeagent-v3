@@ -1,0 +1,45 @@
+version: 1
+feature_id: sticky-model-per-mode
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/sticky-model/resolver.ts:stickyModelResolver
+entrypoints:
+  - src/apps/cli/repl.ts
+activation:
+  - Current CLI mode and explicit model override resolve through the sticky-store precedence path.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/sticky-model/fs-backed-store.ts:fsBackedStickyModelStore
+consumer:
+  - src/agent/sticky-model/resolver.ts:stickyModelResolver
+reachable: yes
+surface_findings:
+  - Store and precedence rails are live, but catalog notes claiming CLI wire is deferred are outdated given current loop and CLI-surface tests.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/sticky-model-store-hellgate.test.ts tests/unit/loop/sticky-model-precedence-hellgate.test.ts tests/unit/apps/cli/sticky-model-set-surface-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Store, loop precedence, and CLI set-surface rails passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: test
+    command: bun test tests/unit/sticky-model-store-hellgate.test.ts tests/unit/loop/sticky-model-precedence-hellgate.test.ts tests/unit/apps/cli/sticky-model-set-surface-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Current tests contradict the deferred-wire catalog note.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

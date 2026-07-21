@@ -1,0 +1,61 @@
+version: 1
+feature_id: image-downsample
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildGatedToolPorts and src/tool/image/read.ts:makeReadImageTool
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+  - src/apps/cli/mcp-server-setup.ts:runMcpServerCmd
+activation:
+  - "The host base registry injects the codec only on Darwin with QUANTA_IMAGE_DOWNSAMPLE enabled."
+  - "The interactive CLI and web-daemon default tool assemblers do not pass imageDownsample, so their read_image remains the rejection path."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/runtime/sips-image-downsample.ts:sipsImageDownsamplePort
+  - src/tool/image/downsample-plan.ts:planImageRead
+  - src/tool/image/read.ts:makeReadImageTool
+consumer:
+  - src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildGatedToolPorts
+  - src/tool/index.ts:buildDefaultTools
+reachable: conditional
+surface_findings:
+  - "The codec is a real macOS sips adapter: oversized input is resized, rechecked against the byte cap, and unable outcomes fall back to rejection."
+  - "The catalog's CLI full and all-mode presentation overstates the frozen composition: only the Darwin host-base path injects the port; interactive CLI and web do not."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/image-downsample-wire-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "A missing port rejects an over-cap image without calling a codec, preserving the default behavior."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/image-downsample-plan-hellgate.test.ts tests/unit/image-downsample-wire-hellgate.test.ts tests/unit/sips-image-downsample-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "15 plan, wire, and real macOS sips assertions passed; one non-Darwin skip is expected."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: "Catalog must describe the Darwin-only host-base composition and remove the claim that interactive CLI and all listed modes receive the codec."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg -n 'process.platform === \"darwin\"|QUANTA_IMAGE_DOWNSAMPLE|imageDownsample|buildDefaultTools' src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/runner/assemble/tooling.ts src/apps/web-daemon/runtime-factory.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Only the host gated-port builder injects the codec; runner and web default assemblers do not expose an imageDownsample slot."
+  - kind: test
+    command: "bun test tests/unit/image-downsample-plan-hellgate.test.ts tests/unit/image-downsample-wire-hellgate.test.ts tests/unit/sips-image-downsample-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Planning, default-off rejection, codec fallback, output-cap enforcement, and real sips resize rails passed."
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch8
+review_state: approved
+reviewer: codex/cross-review-wave1

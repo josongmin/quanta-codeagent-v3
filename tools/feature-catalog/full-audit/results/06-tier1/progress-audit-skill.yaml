@@ -1,0 +1,59 @@
+version: 1
+feature_id: progress-audit-skill
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/skill.ts:buildSkillBlock
+entrypoints:
+  - src/apps/cli/internal.ts:buildSkillsConfig
+  - src/agent/features.ts:buildSessionFeatures
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+activation:
+  - CLI and daemon enable skills by default unless QUANTA_SKILLS opts out.
+  - buildSkillBlock discovers bundled system skills, exposes progress-audit through Skill, and lets the active allowlist arm the session gate.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: unknown
+  daemon: on
+producer:
+  - src/skill/system-skills/progress-audit/SKILL.md
+  - src/skill/system-skills/progress-audit/index.ts:triggerProgressAudit
+  - src/skill/system-skills/index.ts:discoverSystemSkills
+consumer:
+  - src/agent/tier1/skill.ts:buildSkillBlock
+  - src/agent/loop/session-bootstrap.ts:buildSkillGate
+  - src/agent/stream-callbacks.ts:handleSkillScope
+reachable: yes
+surface_findings:
+  - Bundled discovery and system-wins collision resolution are live in the default CLI and daemon skill assembly.
+  - Invoking progress-audit activates the read-only allowlist and blocks a disallowed tool before dispatch.
+  - Phrase matching and the optional trigger helper are model or external-router driven, not a deterministic slash-router registration.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill-progress-audit.test.ts tests/unit/features.test.ts tests/unit/system-skills-new-bundle-hellgate.test.ts tests/integration/skill-progress-audit-discovery.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Bundled discovery, system collision precedence, trigger shape, and post-activation tool denial passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'buildSkillsConfig|discoverSystemSkills|progress-audit|buildSkillGate|handleSkillScope' src/apps/cli/internal.ts src/agent/tier1/skill.ts src/agent/loop/session-bootstrap.ts src/agent/stream-callbacks.ts src/skill/system-skills
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Default surface assembly discovers the bundled skill and routes its declared allowlist into live dispatch enforcement.
+  - kind: test
+    command: bun test tests/unit/skill-progress-audit.test.ts tests/unit/features.test.ts tests/unit/system-skills-new-bundle-hellgate.test.ts tests/integration/skill-progress-audit-discovery.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused discovery and tool-scope integration rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2_tier1_batch14
+review_state: approved
+reviewer: codex/cross-review-wave1

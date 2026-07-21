@@ -1,0 +1,56 @@
+version: 1
+feature_id: gh-pr-typed-ops
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/tool/gh/index.ts:ghTools"
+entrypoints:
+  - "src/apps/cli/internal.ts:assembleFeatures"
+  - "src/apps/agent/mode-presets/ci-bot.ts:buildCiBotTooling"
+activation:
+  - "Interactive CLI appends ghTools only when QUANTA_GIT_TOOLS is enabled."
+  - "CI-bot mode composes ghTools from its mode preset."
+effective_defaults:
+  cli: off
+  web: off
+  bench: unknown
+  headless: resource
+  daemon: off
+producer:
+  - "src/tool/gh/index.ts:ghPrReviewDiffTool"
+  - "src/tool/gh/index.ts:ghPrAutoMergeTool"
+  - "src/tool/gh/index.ts:ghPrCreateTool"
+consumer:
+  - "src/apps/cli/internal.ts:gitToolList"
+  - "src/apps/agent/mode-presets/ci-bot.ts:ghTools"
+reachable: yes
+surface_findings:
+  - "The CLI registers the operations only with QUANTA_GIT_TOOLS; the tool factory covers review diff, auto-merge, and draft PR creation."
+  - "No web-daemon composition root calls ghTools, contradicting the catalog's web:full claim."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/gh-pr-tools-hellgate.test.ts tests/unit/git-directive-stage-push-pr-hooks-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The focused rails cover argv construction, diff cap, schema cap, merge modes, draft behavior, and success-only PR directives."
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: "Catalog must remove web:full and describe CLI activation as QUANTA_GIT_TOOLS-gated."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg -n 'ghTools\\(|gitToolsEnabled\\(|ghPrReviewDiffTool|ghPrAutoMergeTool|ghPrCreateTool' src/apps/cli src/apps/agent src/apps/web-daemon src/tool/gh"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "CLI and CI-bot invoke ghTools; web-daemon has no ghTools consumer."
+  - kind: test
+    command: "bun test tests/unit/gh-pr-tools-hellgate.test.ts tests/unit/git-directive-stage-push-pr-hooks-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Focused gh typed-operation and directive rails passed."
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch3
+review_state: approved
+reviewer: codex/cross-review-wave1

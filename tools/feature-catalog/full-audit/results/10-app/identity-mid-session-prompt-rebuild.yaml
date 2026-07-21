@@ -1,0 +1,67 @@
+version: 1
+feature_id: identity-mid-session-prompt-rebuild
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/bootstrap/bootstrap-session.ts:refreshSystemPrompt
+entrypoints:
+  - src/apps/cli/index.ts:main
+  - src/apps/cli/repl.ts:runRepl
+  - src/apps/cli/repl/surface-compose/slash-context-compose.ts:buildSurfaceSlashContext
+activation:
+  - QUANTA_IDENTITY creates the session-owned identityModeState and systemSource.
+  - The live slash context supplies onIdentityModeChange only with that identity state; an accepted /identity change refreshes the shared system source before the next turn.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/host/bootstrap/bootstrap-session.ts:buildSessionStatePorts
+  - src/apps/cli/repl/ctx-adapters/identity-mode-adapter.ts:buildIdentityModeAdapter
+consumer:
+  - src/apps/cli/repl/surface-compose/slash-context-compose.ts:buildSurfaceSlashContext
+  - src/host/runtime/internal/context-binding/turn-runner.ts:runRuntimeTurn
+reachable: conditional
+surface_findings:
+  - The production path is bootstrap identityModeState to slash adapter onChange to refreshSystemPrompt to systemSource.set, followed by the fresh systemSource.get on the next runtime turn.
+  - createSystemPromptRebuilder remains explicitly marked FORWARD-SEAM and has no production caller; it is not the live implementation of the feature.
+  - The default-OFF ledger says activation is unwired and reachability is consumer-only, which contradicts the production chain and real two-turn integration rail.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/identity-prompt-rebuild-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Omitting onChange preserves the state-only adapter behavior, while rejected modes never invoke it.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/identity-mid-session-prompt-rebuild-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: A real bootstrap and two runtime turns prove /identity set audit changes only turn two system input; the refresh-noop paired injection retains the old prompt.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: The ledger's unwired and consumer-only default-OFF claim describes the unused forward seam, not the live bootstrap-to-next-turn refresh path.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'onIdentityModeChange|refreshSystemPrompt|identityModeState|systemSource' src/host/bootstrap src/apps/cli/repl src/host/runtime/internal/context-binding
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The source traces the session state, live slash callback, and fresh per-turn system read through the production entrypoint graph.
+  - kind: test
+    command: bun test tests/integration/identity-mid-session-prompt-rebuild-e2e.test.ts tests/unit/cli/identity-prompt-rebuild-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 18 factory, OFF-parity, true two-turn, and red-on-injection cases passed.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3-plus feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-session
+review_state: approved
+reviewer: codex/cross-review-wave1

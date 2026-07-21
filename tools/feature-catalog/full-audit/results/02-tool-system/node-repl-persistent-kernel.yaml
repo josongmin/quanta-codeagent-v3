@@ -1,0 +1,60 @@
+version: 1
+feature_id: node-repl-persistent-kernel
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/host/runtime/agent-arg-builder/gated-tool-ports.ts:nodeReplPortSlot"
+entrypoints:
+  - "src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildDefaultToolPorts"
+  - "src/tool/index.ts:CONDITIONAL_REGISTRATIONS"
+activation:
+  - "QUANTA_NODE_REPL=1 enables runtimeConfig().nodeRepl."
+  - "The composition root mints one kernel port and the default tool registry registers node_repl."
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - "src/runtime/node-repl/default-kernel.ts:createDefaultNodeReplKernel"
+  - "src/tool/node-repl/index.ts:makeNodeReplTool"
+consumer:
+  - "src/host/runtime/agent-arg-builder/gated-tool-ports.ts:nodeReplPortSlot"
+  - "src/tool/index.ts:CONDITIONAL_REGISTRATIONS"
+reachable: yes
+surface_findings:
+  - "The production composition root creates exactly one stateful kernel port per enabled session and the conditional registry exposes node_repl."
+  - "The tool is absent when the gate is unset and declares always-confirm because it executes arbitrary Node code."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/tool/node-repl-tool-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Gate-unset tests prove runtime config false, no default-menu tool, and unchanged remaining menu."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/runtime/node-repl-hellgate.test.ts tests/unit/tool/node-repl-tool-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "30 pass: real kernel contract, persistent variable reuse, isolation, state persistence, lifecycle, no-throw faults, and tool wiring."
+failure_posture: fail-loud
+security_posture: conditional
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'nodeReplPortSlot|createDefaultNodeReplKernel|makeNodeReplTool' src/host src/tool src/runtime"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Gate-controlled port construction reaches the conditional registry and the injected persistent-kernel tool."
+  - kind: test
+    command: "bun test tests/unit/runtime/node-repl-hellgate.test.ts tests/unit/tool/node-repl-tool-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "30 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p1-tools-runtime
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,56 @@
+version: 1
+feature_id: loop-trio-integration
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/session-bootstrap.ts:maybeStartAutomationTicker
+entrypoints:
+  - src/runner/session-execution-plane.ts:buildSubagentForkOnAccept
+  - src/agent/loop/turn-iteration.ts:identity reminder splice
+activation:
+  - Supply subagent background for accept-to-fork, a complete automation engine slot for ticker delivery, or an identity mode variant for architect/editor reminders.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/auto-background/fork-on-accept.ts:buildSubagentForkOnAccept
+  - src/agent/loop-helpers.ts:startAutomationEngineTicker
+  - src/agent/prompt-body.ts:identity notices
+consumer:
+  - background scheduler fork
+  - automation scheduler tick handler
+  - assembled working-memory reminder
+reachable: yes
+surface_findings:
+  - Accept invokes the background scheduler at most once and preserves a caller-supplied callback as the higher-priority override.
+  - The shared lifecycle ticker delivers due automations and tears down idempotently; identity notices are spliced only for opted-in variants and preserve an absent-slot no-op.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/automation-engine-tick-wire-hellgate.test.ts tests/integration/identity-per-turn-reminder-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing slots, handlers, invalid intervals, default mode, and absent identity configuration all leave the corresponding loop path inert.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/auto-background-onaccept-fork-wire-hellgate.test.ts tests/integration/automation-engine-tick-wire-hellgate.test.ts tests/integration/identity-per-turn-reminder-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Fork metadata, real scheduled fire delivery, timer lifecycle, and working-memory identity splices passed through the loop integrations.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/integration/auto-background-onaccept-fork-wire-hellgate.test.ts tests/integration/automation-engine-tick-wire-hellgate.test.ts tests/integration/identity-per-turn-reminder-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The three focused integration rails passed 45 fork, ticker, and prompt-splice assertions.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

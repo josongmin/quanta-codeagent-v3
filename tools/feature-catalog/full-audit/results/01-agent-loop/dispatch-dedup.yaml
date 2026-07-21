@@ -1,0 +1,65 @@
+version: 1
+feature_id: dispatch-dedup
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop-helpers.ts:attachDedupGate
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:runAgentInner calls attachDedupGate
+  - src/agent/dispatch.ts:runPreflightConsults calls consultDedupGate before execution
+activation:
+  - Active by default for every runAgent session; attachDedupGate creates DedupGate unless dedupGateConfig.disabled is true.
+  - QUANTA_DEDUP_ENV_PREFIXES_EXTRA only extends environment-command recognition.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/dispatch-dedup.ts:DedupGate
+consumer:
+  - src/agent/loop/session-bootstrap.ts:runAgentInner
+  - src/agent/dispatch/preflight-consults.ts:consultDedupGate
+  - src/agent/dispatch.ts:runPreflightConsults
+reachable: yes
+surface_findings:
+  - Session bootstrap constructs the gate by default and dispatch consults it before the tool executes.
+  - Catalog's default-off statement is false; absence of a caller-supplied gate selects the default gate instead of preserving an identity path.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/dispatch-dedup-shell-and-parallel-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 10 pass, 0 fail; legitimate same-turn parallel work remains unblocked and non-shell calls remain in the general regime.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/dispatch-dedup.test.ts tests/unit/dispatch-dedup-shell-and-parallel-hellgate.test.ts tests/unit/dispatch.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 79 pass, 0 fail; gate blocks repeat and environment spins, and the production dispatch seam threads registry shell extraction before execution.
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: Catalog purpose says the gate is default-off when absent, contradicting attachDedupGate's default construction in session bootstrap.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: sed -n '198,214p' src/agent/loop-helpers.ts; sed -n '168,176p' src/agent/loop/session-bootstrap.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: attachDedupGate creates a default gate unless explicitly disabled, and session bootstrap always calls it.
+  - kind: source
+    command: sed -n '306,390p' src/agent/dispatch.ts; sed -n '34,68p' src/agent/dispatch/preflight-consults.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: preflight consults dedup before downstream execution and returns a synthetic result when blocked.
+  - kind: test
+    command: bun test tests/unit/dispatch-dedup.test.ts tests/unit/dispatch-dedup-shell-and-parallel-hellgate.test.ts tests/unit/dispatch.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 79 pass, 0 fail; direct state machine and real dispatch seam both cover positive and negative behavior.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-side
+review_state: approved
+reviewer: codex/cross-review-wave1

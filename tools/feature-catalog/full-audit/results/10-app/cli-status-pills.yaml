@@ -1,0 +1,56 @@
+version: 1
+feature_id: cli-status-pills
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/status-pills.ts:createStatusPills
+entrypoints:
+  - src/apps/cli/repl/session-setup.ts:session pills
+activation:
+  - Run the interactive CLI on a TTY with pills not disabled by environment.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/status-pills.ts:createStatusPills
+consumer:
+  - src/apps/cli/repl/session-setup.ts:pills
+reachable: yes
+surface_findings:
+  - Session setup owns the live pill instance and passes updates through REPL chrome.
+  - Non-TTY and master/per-pill environment disables return an empty render by design.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/status-pills.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Non-TTY and environment-off paths render empty chrome.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/status-pills.test.ts tests/unit/status-pills-goal-chip-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Pill rendering, updates, TTY gates, and goal chip rails passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: conditional
+blocker: "Terminal chrome is live only on TTY surfaces and can be explicitly disabled."
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'createStatusPills|pills:' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/repl
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: REPL session setup consumes the status pill producer.
+  - kind: test
+    command: bun test tests/unit/cli/status-pills.test.ts tests/unit/status-pills-goal-chip-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused pill rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -14,7 +14,10 @@ bun fc:audit queue --section 3 --limit 25
 bun fc:audit start <feature-id>
 ```
 
-`snapshot.json` is frozen at the campaign authority HEAD. Do not regenerate it
+`snapshot.json` is frozen at the campaign authority HEAD. It pins SHA-256
+digests for every catalog YAML, the default-OFF ledger, and the baseline; `bun
+fc:audit validate` fails when any pinned input differs. `snapshot --head` also
+refuses a value other than the checked-out `HEAD`. Do not regenerate a snapshot
 to make a drift failure disappear. A new feature added during the campaign must
 be explicitly incorporated by the campaign coordinator.
 

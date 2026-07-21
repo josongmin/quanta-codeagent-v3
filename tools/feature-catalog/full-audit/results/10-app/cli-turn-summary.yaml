@@ -1,0 +1,58 @@
+version: 1
+feature_id: cli-turn-summary
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/factories/turn-summary.ts:buildTurnSummaryAndStream
+entrypoints:
+  - src/apps/cli/repl/session-setup.ts:turn-summary stream construction
+activation:
+  - Use the interactive CLI on a TTY with QUANTA_TURN_SUMMARY unset or truthy; set it false to restore the literal upstream stream.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/turn-summary.ts:createTurnSummary
+consumer:
+  - src/apps/cli/repl/factories/turn-summary.ts:buildTurnSummaryAndStream
+  - src/apps/cli/repl/session-setup.ts:turnSummary
+reachable: yes
+surface_findings:
+  - The live REPL constructs the collector and tees its AgentEvent stream only for the TTY-enabled path.
+  - Disabled or non-TTY operation returns the literal upstream stream and emits no summary bytes.
+  - Tee degradation is surfaced through an operator notice; the panel renders counts and citation identifiers rather than redacted values.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/turn-summary.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Non-TTY and explicit environment-off paths leave the collector inert and rendering empty.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/turn-summary.test.ts tests/unit/cli/agent-event-surface-inventory-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Event subset, tool/recovery/compaction/citation rows, TTY gating, and stream tee behavior passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildTurnSummaryAndStream|createTurnSummary|isTurnSummaryEnabled' src/apps/cli/repl src/apps/cli/turn-summary.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Session setup invokes the single summary factory with the typed TTY/environment feature configuration.
+  - kind: test
+    command: bun test tests/unit/cli/turn-summary.test.ts tests/unit/cli/agent-event-surface-inventory-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused turn-summary rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch24
+review_state: approved
+reviewer: codex/cross-review-wave1

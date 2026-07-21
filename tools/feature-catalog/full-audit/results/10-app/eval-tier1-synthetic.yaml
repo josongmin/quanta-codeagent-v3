@@ -1,0 +1,54 @@
+version: 1
+feature_id: eval-tier1-synthetic
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/synthetic/index.ts:runSynthetic and runner.ts:runScenario
+entrypoints:
+  - package.json:eval:synthetic
+  - src/apps/eval/index.ts:syntheticCommand
+activation:
+  - Run the separate eval app synthetic subcommand with a configured LLM provider and declared scenario fixture.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/eval/synthetic/index.ts:runSynthetic
+  - src/apps/eval/synthetic/runner.ts:runScenario
+  - src/apps/eval/synthetic/judge.ts:judgeScenario
+consumer:
+  - src/apps/eval/index.ts:syntheticCommand
+reachable: no
+surface_findings:
+  - Eval CLI invokes runSynthetic; the run path parses declared scenarios, runs the real agent, judges results, and records optional trajectory/meta artifacts.
+  - Per-scenario failures are recorded as structured eval outcomes rather than aborting the entire summary.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-generator-validation.test.ts tests/unit/eval-runner-token-cost.test.ts tests/integration/eval-additive-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Scenario validation plus real runScenario-to-store-to-report token/cost, degradation, and concurrent append rails passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'runSynthetic|runScenario|judgeScenario' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/eval/index.ts src/apps/eval/synthetic
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Eval synthetic command composes runner and judge through the standalone eval application.
+  - kind: test
+    command: bun test tests/unit/eval-runner-token-cost.test.ts tests/integration/eval-additive-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 16 token/cost and end-to-end persistence/reporting cases passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

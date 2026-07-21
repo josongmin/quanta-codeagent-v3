@@ -1,0 +1,45 @@
+version: 1
+feature_id: eval-five-tier
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/index.ts:main
+entrypoints:
+  - package.json:eval command
+activation:
+  - Run the separate eval application with a tier-specific request.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/eval:index
+consumer: []
+reachable: no
+surface_findings:
+  - Eval is a separate local/CI application, correctly cataloged as missing from interactive CLI and web.
+  - Its current implementation has six tiers although the stable feature id still says five.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-audit-matrix.test.ts tests/unit/eval-grounding-scorer-hellgate.test.ts tests/unit/eval-pairwise-judge.test.ts tests/unit/eval-replay-verdict.test.ts tests/unit/eval-freeze.test.ts tests/unit/eval-compare-adapters.test.ts tests/integration/eval-five-tier-compare-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Audit, grounding, pairwise, replay, freeze, adapter degradation, and compare e2e rails passed.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/eval-audit-matrix.test.ts tests/unit/eval-grounding-scorer-hellgate.test.ts tests/unit/eval-pairwise-judge.test.ts tests/unit/eval-replay-verdict.test.ts tests/unit/eval-freeze.test.ts tests/unit/eval-compare-adapters.test.ts tests/integration/eval-five-tier-compare-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Eval application rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,62 @@
+version: 1
+feature_id: fast-apply-fallback
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/optional-ports.ts:wireOptionalAgentPorts
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+  - src/agent/dispatch/tool-context.ts:buildToolContext
+  - src/tool/apply-patch.ts:tryFastApplyFallback
+activation:
+  - QUANTA_FAST_APPLY=on builds createFastApplyFallback when a model is available and threads it through AgentConfig and ToolContext.
+  - A recoverable V4A apply failure invokes the port once and retries one re-emitted patch.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/fast-apply-fallback/runner.ts:createFastApplyFallback
+  - src/agent/optional-ports.ts:wireOptionalAgentPorts
+consumer:
+  - src/agent/dispatch/tool-context.ts:buildToolContext
+  - src/tool/apply-patch.ts:tryFastApplyFallback
+reachable: yes
+surface_findings:
+  - The optional-port composition uses the live role resolver and side-conversation dispatch adapter to build the fallback only under QUANTA_FAST_APPLY.
+  - apply_patch reads ToolContext.fastApplyFallback only after a typed recoverable V4A failure and preserves the original error if rescue fails.
+  - The runtime integration rail exercises the real runtime, real apply_patch path, one fallback dispatch, and an OFF paired control.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/optional-ports-wire.test.ts tests/unit/apply-patch-fast-apply-wire-hellgate.test.ts tests/integration/runtime-fast-apply-fallback.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off omits the port, leaves an anchor failure unchanged, and makes zero side-conversation calls.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/fast-apply-fallback-hellgate.test.ts tests/unit/apply-patch-fast-apply-wire-hellgate.test.ts tests/unit/agent/optional-ports-wire.test.ts tests/integration/runtime-fast-apply-fallback.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Port contract, typed failure classification, one-retry behavior, no-throw containment, live runtime wire, and successful re-emitted patch application passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'createFastApplyFallback|QUANTA_FAST_APPLY|fastApplyFallback|tryFastApplyFallback' src/agent/optional-ports.ts src/agent/dispatch/tool-context.ts src/tool/apply-patch.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Composition, dispatch projection, and typed apply-patch consumer form one reachable production chain.
+  - kind: test
+    command: bun test tests/unit/fast-apply-fallback-hellgate.test.ts tests/unit/apply-patch-fast-apply-wire-hellgate.test.ts tests/unit/agent/optional-ports-wire.test.ts tests/integration/runtime-fast-apply-fallback.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Forty focused assertions passed with zero failures, including the real runtime ON/OFF pair.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-fastapply
+review_state: approved
+reviewer: codex/cross-review-wave1

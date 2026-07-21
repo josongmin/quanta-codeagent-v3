@@ -1,0 +1,66 @@
+version: 1
+feature_id: remote-runner
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/remote-cmd.ts:runRemoteCmd
+entrypoints:
+  - src/apps/cli/index.ts:main
+  - src/apps/cli/remote-cmd.ts:runRemoteCmd
+activation:
+  - quanta remote dispatches selectRemoteRunner(process.env,{}) for the explicit remote subcommand.
+  - QUANTA_REMOTE_RUNNER=headless and QUANTA_REMOTE_DEFAULT_IMAGE select the deterministic adapter; docker, lima, and apple-vz require their host seams.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/remote/runner/registry.ts:selectRemoteRunner
+  - src/remote/runner/headless-stub.ts:createHeadlessRunner
+consumer:
+  - src/apps/cli/index.ts:main
+  - src/apps/cli/remote-cmd.ts:runRemoteCmd
+reachable: yes
+surface_findings:
+  - The CLI performs a dedicated early remote route, injects the selected runner into runRemoteCmd, and exposes run/status/logs/cancel handlers.
+  - Live smoke succeeded with QUANTA_REMOTE_RUNNER=headless and QUANTA_REMOTE_DEFAULT_IMAGE=alpine, emitting a headless handle; gate-off exited 64 with remote-not-configured.
+  - The registry returns null for unset, none, unknown, or unavailable host adapters, preventing accidental subprocess execution on the default path.
+off_identity_proof:
+  kind: runtime
+  command: bun src/apps/cli/index.ts remote run 'audit-probe'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset QUANTA_REMOTE_RUNNER exited 64 and emitted remote-not-configured without starting a backend.
+on_efficacy_proof:
+  kind: runtime
+  command: QUANTA_REMOTE_RUNNER=headless QUANTA_REMOTE_DEFAULT_IMAGE=alpine bun src/apps/cli/index.ts remote run 'audit-probe'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: CLI selected the headless backend and emitted {"id":"headless-1","backend":"headless"} with exit 0.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'selectRemoteRunner|runRemoteCmd|QUANTA_REMOTE_RUNNER|remote-not-configured' src/apps/cli/index.ts src/apps/cli/remote-cmd.ts src/remote/runner
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI route, env-selected registry, explicit not-configured branch, and all remote command handlers are present.
+  - kind: test
+    command: bun test tests/unit/remote/runner-port-hellgate.test.ts tests/unit/remote/docker-adapter-hellgate.test.ts tests/unit/remote-slice-boundary.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Port contracts, default-off registry behavior, deterministic headless backend, docker failure handling, and slice isolation passed.
+  - kind: runtime
+    command: QUANTA_REMOTE_RUNNER=headless QUANTA_REMOTE_DEFAULT_IMAGE=alpine bun src/apps/cli/index.ts remote run 'audit-probe'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Real CLI runtime route selected headless and spawned a deterministic handle.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-fastapply
+review_state: approved
+reviewer: codex/cross-review-wave1

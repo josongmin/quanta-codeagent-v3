@@ -1,0 +1,63 @@
+version: 1
+feature_id: git-shared-discriminated-outcome
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/git/_shared.ts:safeRun and mutate
+entrypoints:
+  - src/apps/cli/internal.ts:resolveCliFeatures
+  - src/runner/assemble/tooling.ts:buildToolingCore
+activation:
+  - "CLI appends gitTools only when QUANTA_GIT_TOOLS is enabled; safeRun and mutate become reachable through that optional group."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/git/_shared.ts:safeRun
+  - src/tool/git/_shared.ts:mutate
+  - src/tool/git/_shared.ts:stderrReason
+consumer:
+  - src/tool/git/diff.ts:gitDiffTool
+  - src/tool/git/branch-switch.ts:gitBranchSwitchTool
+  - src/apps/cli/internal.ts:gitToolList
+  - src/runner/assemble/tooling.ts:buildToolingCore
+reachable: conditional
+surface_findings:
+  - "safeRun centralizes spawn-error normalization and signal forwarding; mutate adds non-zero-exit conversion for commit and branch-switch sequences."
+  - "Git tool call sites use both helpers, but the only product composition is CLI's QUANTA_GIT_TOOLS-gated gitToolList. Web-daemon has no gitTools consumer."
+  - "Catalog cli:full and configurable:static are stale because the production path is opt-in rather than default-on."
+off_identity_proof:
+  kind: source
+  command: rg -n 'gitToolsEnabled\(|QUANTA_GIT_TOOLS|gitToolList|buildDaemonToolRegistry' src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/web-daemon/runtime-factory.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Without the CLI gate gitToolList is empty, and daemon only builds default tools plus explicit extras."
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git-tools.test.ts tests/unit/git-tools-hellgate.test.ts tests/unit/git-env-and-budget-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "118 focused fake-runner and real-repository git rails passed, exercising spawn errors, typed failures, and multi-step mutation behavior."
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: "Catalog must state QUANTA_GIT_TOOLS-gated CLI reachability and remove default/full implications for non-CLI surfaces, or wire gitTools into those surfaces."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'safeRun\(|mutate\(|gitToolsEnabled\(|QUANTA_GIT_TOOLS|gitToolList|buildDaemonToolRegistry' src/tool/git src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/runner/assemble/tooling.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Git tools consume safeRun and mutate; only the CLI gate registers their group and web-daemon does not consume it."
+  - kind: test
+    command: bun test tests/unit/git-tools.test.ts tests/unit/git-tools-hellgate.test.ts tests/unit/git-env-and-budget-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "118 focused unit and real-git assertions passed."
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch5
+review_state: approved
+reviewer: codex/cross-review-wave1

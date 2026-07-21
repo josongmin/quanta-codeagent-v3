@@ -1,0 +1,60 @@
+version: 1
+feature_id: template-literal-windsurf
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/skill-tool.ts:createSkillTool
+entrypoints:
+  - src/agent/tier1/skill.ts:buildSkillBlock
+  - src/shared/runtime-config.ts:runtimeConfig
+activation:
+  - QUANTA_SKILL_TEMPLATE_VARS=on
+  - caller supplies Skill args containing key=value bindings
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/skill/playbook/template-literal/default-expander.ts:createDefaultTemplateExpander
+  - src/skill/skill-tool.ts:expandSkillTemplateVars
+consumer:
+  - src/skill/skill-tool.ts:createSkillTool
+  - src/agent/tier1/skill.ts:buildSkillBlock
+reachable: yes
+surface_findings:
+  - "The live Skill tool runs the named-variable pass before positional interpolation and short-circuits unknown variables as a typed tool result."
+  - "The catalog purpose says the playbook root barrel is unmodified and a host must directly import the expander, but the snapshot exports it from that barrel and wires it into createSkillTool."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/skill/skill-template-vars-hellgate.test.ts tests/unit/skill/playbook/template-literal-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off and no-args controls preserve literal {{ name }} bodies; the pre-existing !macro path remains unchanged.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill/playbook/template-literal-hellgate.test.ts tests/unit/skill/skill-template-vars-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 26 tests pass across the pure scanner and live Skill-tool wire, including typed unknown-variable short-circuit.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: "The purpose retains the former producer-only/direct-import description even though the current barrel export and Skill-tool consumer make the feature production-reachable."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'expandSkillTemplateVars|QUANTA_SKILL_TEMPLATE_VARS|template-literal' src/skill/skill-tool.ts src/skill/playbook/index.ts src/agent/tier1/skill.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The playbook barrel exports the expander and createSkillTool consumes it under the runtime gate through the production skill builder.
+  - kind: test
+    command: bun test tests/unit/skill/playbook/template-literal-hellgate.test.ts tests/unit/skill/skill-template-vars-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 26 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-agentloop-subagent
+review_state: approved
+reviewer: codex/cross-review-wave1

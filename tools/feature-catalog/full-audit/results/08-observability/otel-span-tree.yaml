@@ -1,0 +1,62 @@
+version: 1
+feature_id: otel-span-tree
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/spans.ts:startSpan and endSpan
+entrypoints:
+  - src/apps/cli/index.ts:installOtelSpanExportFromEnv
+  - src/agent/loop/entry.ts:session loop span
+  - src/agent/dispatch.ts:tool-call span
+activation:
+  - QUANTA_OTEL_ENDPOINT installs the exporter span sink at CLI boot.
+  - An already registered host sink may also activate the core four-stage span path.
+effective_defaults:
+  cli: off
+  web: unknown
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/observability/spans.ts owns no-op default, start and end callbacks, and sink fault isolation.
+  - src/agent/loop/entry.ts, turn-loop.ts, stream-consume.ts, and dispatch.ts open the four production span stages.
+consumer:
+  - src/observability/otel-span-export.ts translates closed spans into OTLP exporter records.
+  - src/apps/cli/index.ts installs and later tears down the env-configured exporter sink.
+reachable: yes
+surface_findings:
+  - With no sink, shared no-op spans preserve the hot path.
+  - The current CLI has a concrete env exporter installation rather than relying only on a hypothetical host wire.
+  - Four core stages are implemented; deeper ten-step subtrees remain explicitly out of scope.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability/spans.test.ts tests/unit/observability/otel-span-export-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No sink produces no span callbacks or POST, and the OFF env case leaves the sink absent.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability/spans.test.ts tests/unit/dispatch.test.ts tests/unit/observability/otel-span-export-wiring-hellgate.test.ts tests/integration/spans-e2e.test.ts tests/integration/spans-genai-active-context.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unit and integration rails prove stage emission, exporter POST, nested parent linkage, GenAI active context, and sink exception isolation.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'startSpan\|endSpan\|installOtelSpanExportFromEnv' 9a12f7a -- src/agent/loop src/agent/dispatch.ts src/apps/cli/index.ts src/observability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All four production span sites and the CLI exporter installation are reachable in the snapshot source.
+  - kind: test
+    command: bun test tests/unit/observability/spans.test.ts tests/unit/dispatch.test.ts tests/unit/observability/otel-span-export-wiring-hellgate.test.ts tests/integration/spans-e2e.test.ts tests/integration/spans-genai-active-context.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused span and exporter rail passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

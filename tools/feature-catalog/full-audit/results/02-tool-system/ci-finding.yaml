@@ -1,0 +1,52 @@
+version: 1
+feature_id: ci-finding
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/ci-finding/tool.ts:ciFindingTool
+entrypoints: [src/apps/agent/mode-presets/ci-bot.ts:buildCiBotWiring]
+activation: [QUANTA_CI_FINDING=1, ci-bot mode]
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer: [src/tool/ci-finding/store.ts:createCiFindingStore]
+consumer: [src/tool/gh/index.ts:ghTools, src/apps/agent/mode-presets/ci-bot.ts]
+reachable: yes
+surface_findings:
+  - "Only the ci-bot composition creates and passes a store; ghTools registers ci_finding only when that optional slot exists."
+  - "The in-memory bounded store never writes to filesystem, shell, git, or network and tool exceptions map to ok:false."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/ci-finding.test.ts tests/integration/longtail-new-tools-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent store leaves the gh tool registry byte-identical and gates-off ci-bot registers no tool.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/ci-finding.test.ts tests/integration/longtail-new-tools-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real registry record/get round-trip and ci-bot gated wiring pass.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'createCiFindingStore|ciFindingStore|ciFindingTool' src/apps/agent/mode-presets/ci-bot.ts src/tool/gh/index.ts src/tool/ci-finding
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Ci-bot gate, injected registry slot, and tool owner form the production route.
+  - kind: test
+    command: bun test tests/unit/ci-finding.test.ts tests/integration/longtail-new-tools-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Store, no-throw, default-off, and real ci-bot registry rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,57 @@
+version: 1
+feature_id: bench-live-trace-run-link
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/bench/otel.ts:bootBenchOtelExport
+entrypoints:
+  - src/apps/bench/cli.ts
+  - src/apps/bench/index.ts
+activation:
+  - Configure a live OTEL endpoint for a bench run.
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/apps/bench/otel.ts:bootBenchOtelExport
+consumer:
+  - bench CLI and index entrypoints attach run identity and trace deep links to live exports.
+reachable: yes
+surface_findings:
+  - A run id is automatically issued only with a configured endpoint, both bench entries boot OTEL export, and output includes a trace deep link.
+  - Run identity is carried as resource data rather than a span attribute and an explicit id remains unchanged.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/bench-otel-attach.test.ts tests/unit/bench-cli-dispatch.test.ts tests/integration/bench-live-trace-run-link-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Without an endpoint no run id is issued and normal bench identity remains unchanged.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/bench-otel-attach.test.ts tests/unit/otel-trace-sink.test.ts tests/unit/bench-cli-dispatch.test.ts tests/unit/full-remote-bench-env-forward.test.ts tests/unit/observability/vocabulary-migration.test.ts tests/integration/bench-live-trace-run-link-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Endpoint auto-issue, mixed sinks, deep links, explicit-id preservation, and red-on-injection coverage passed.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'bootBenchOtelExport|resolveBenchRunId|traceUrl' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/bench
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Bench entrypoints boot export and the OTEL owner computes run identity and trace link output.
+  - kind: test
+    command: bun test tests/unit/bench-otel-attach.test.ts tests/unit/otel-trace-sink.test.ts tests/unit/bench-cli-dispatch.test.ts tests/unit/full-remote-bench-env-forward.test.ts tests/unit/observability/vocabulary-migration.test.ts tests/integration/bench-live-trace-run-link-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused live bench trace rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

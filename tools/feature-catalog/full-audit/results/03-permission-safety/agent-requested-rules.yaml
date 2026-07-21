@@ -1,0 +1,61 @@
+version: 1
+feature_id: agent-requested-rules
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/fetch-rules-wire.ts:buildCliFetchRulesTool
+entrypoints:
+  - src/apps/cli/internal.ts:buildTooling
+  - src/tool/fetch-rules/fetch-rules.ts:fetchRulesTool
+activation:
+  - "QUANTA_FETCH_RULES truthy causes the interactive CLI tooling builder to register fetch_rules."
+  - "The first fetch_rules call lazily loads requestable rules for the workspace and ranks them by description overlap."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/glob-rules.ts:loadRequestableRules
+  - src/agent/agent-requested-rules.ts:matchRulesByDescription
+consumer:
+  - src/apps/cli/fetch-rules-wire.ts:fetchRulesPortForCwd
+  - src/apps/cli/internal.ts:buildTooling
+reachable: yes
+surface_findings:
+  - "The shipped interactive CLI builds the tool only behind QUANTA_FETCH_RULES; default tooling has no fetch_rules entry."
+  - "The wire caches the requestable index per cwd, catches loader errors as an empty result, and delegates ranking to the deterministic matcher."
+  - "No production web, headless, bench, or daemon composition was found for this CLI-specific wire."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/cli/fetch-rules-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The default-OFF registration control proves absent port and gate-off CLI build omit fetch_rules."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/agent-requested-rules-hellgate.test.ts tests/unit/cli/fetch-rules-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "15 selected matcher, loader, tool, error, registration, and enabled-CLI-wire tests passed."
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'QUANTA_FETCH_RULES|buildCliFetchRulesTool|fetchRulesPortForCwd|loadRequestableRules|matchRulesByDescription|fetchRulesTool' src/apps/cli/internal.ts src/apps/cli/fetch-rules-wire.ts src/agent/agent-requested-rules.ts src/agent/glob-rules.ts src/tool/fetch-rules/fetch-rules.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The real CLI tooling assembly owns the env gate and connects the lazy rule-loader plus matcher to the registered tool."
+  - kind: test
+    command: "bun test tests/unit/agent-requested-rules-hellgate.test.ts tests/unit/cli/fetch-rules-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "15 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch10
+review_state: approved
+reviewer: codex/cross-review-wave1

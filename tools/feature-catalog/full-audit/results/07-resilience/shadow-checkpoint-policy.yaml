@@ -1,0 +1,61 @@
+version: 1
+feature_id: shadow-checkpoint-policy
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/checkpoint-policy.ts:defaultCheckpointPolicy
+entrypoints:
+  - src/apps/cli/repl/surface-compose/core-state.ts:buildSurfaceCoreState
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts:buildRuntimeFacadeCompose
+  - src/agent/dispatch/execute.ts:executeToolCalls
+activation:
+  - QUANTA_SHADOW truthy creates the CLI ShadowOdb.
+  - The CLI composition root supplies shadowCheckpoint mode pre-destructive to dispatch.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/checkpoint-policy.ts:withAutoCheckpoint
+  - src/agent/checkpoint-wiring.ts:wireCheckpointedEffectChannel
+consumer:
+  - src/agent/dispatch/execute.ts:executeToolCalls
+reachable: yes
+surface_findings:
+  - QUANTA_SHADOW is the actual CLI activation gate; absent it leaves shadowOdb and shadowCheckpoint omitted.
+  - The active enum is off, pre-destructive, and per-mutating; the catalog's off/per_tool/turn_dedup/verify_success enum and claimed static configuration are obsolete.
+  - A registered failing anchor is swallowed before the inner tool executes, while the live dispatch consumer remains reachable when enabled.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/checkpoint-policy-hellgate.test.ts tests/unit/dispatch-wires-checkpoint-and-image-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Off mode and absent configuration preserve the inner channel without registerHead calls.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/checkpoint-policy-hellgate.test.ts tests/unit/dispatch-wires-checkpoint-and-image-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Enabled pre-destructive mode registers exactly once before the real inner execute path.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_SHADOW|shadowCheckpoint|pre-destructive|per-mutating|wireCheckpointedEffectChannel' src/apps/cli/repl/surface-compose src/agent/checkpoint-policy.ts src/agent/dispatch/execute.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI configuration projects the env-gated store and actual enum into the dispatch wrapper.
+  - kind: test
+    command: bun test tests/unit/checkpoint-policy-hellgate.test.ts tests/unit/dispatch-wires-checkpoint-and-image-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 26 policy and dispatch cases passed in the 93-pass resilience rail.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch23
+review_state: approved
+reviewer: codex/cross-review-wave1

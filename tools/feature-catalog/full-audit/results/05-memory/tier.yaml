@@ -1,0 +1,57 @@
+version: 1
+feature_id: tier
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/memory/ranking.ts:rankEntries
+entrypoints:
+  - src/agent/memory.ts:recallContext
+  - src/memory/in-memory-store.ts:InMemoryStore.recall
+  - src/memory/sqlite-store.ts:SqliteStore.recall
+activation:
+  - Tier is intrinsic to every normalized memory entry and ranking execution; a store-backed recall invokes it.
+  - recallTiers optionally hard-filters the same ranking path without disabling tier weighting for admitted rows.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: off
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/memory/types.ts:MemoryTier and normalizeEntry
+  - src/memory/ranking.ts:TIER_WEIGHT
+consumer:
+  - src/memory/ranking.ts:rankEntries computes the tier contribution.
+  - src/agent/memory.ts:recallContext consumes store-ranked entries in the prompt block.
+reachable: yes
+surface_findings:
+  - semantic receives a larger deterministic tier contribution than episodic when other signals tie.
+  - Query tier selection remains a hard filter, so a higher weighted disallowed row cannot leak into recall.
+  - Both in-memory and sqlite stores share the ranking primitive.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/ranking.test.ts tests/unit/memory-hellgate.test.ts tests/integration/agent-memory-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 77 focused tests passed, including semantic-over-episodic ordering, hard tier filters, and runAgent recall.
+failure_posture: na
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "TIER_WEIGHT|query.tiers|rankEntries|recallContext" src/memory/ranking.ts src/agent/memory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The ranking owner calculates tier weighting and recallContext consumes the ranked store output.
+  - kind: test
+    command: bun test tests/unit/ranking.test.ts tests/unit/memory-hellgate.test.ts tests/integration/agent-memory-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 77 focused tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch7
+review_state: approved
+reviewer: codex/cross-review-wave1

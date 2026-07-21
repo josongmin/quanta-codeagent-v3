@@ -1,0 +1,48 @@
+version: 1
+feature_id: tool-output-schema-factory
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/factory.ts:defineTool plus src/tool/registry.ts:ToolRegistry.run
+entrypoints: [src/agent/loop/stream-consume.ts:runSamplingScope, src/apps/cli/internal.ts:buildTooling]
+activation: ["defineTool is used by production tools; registry.run always owns output-schema and model-output processing; apply_patch_structured is the live CLI toModelOutput adopter."]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: [src/tool/factory.ts:defineTool, src/tool/factory.ts:enforceOutputSchema, src/tool/async-helper.ts:defineToolAsync]
+consumer: [src/tool/registry.ts:ToolRegistry.run, src/agent/loop/stream-consume.ts:runSamplingScope, src/tool/apply-patch-structured-tool.ts:makeApplyPatchStructuredTool]
+reachable: yes
+surface_findings:
+  - "The live registry applies output validation before toModelOutput, and the loop always wires the registry-bound streaming-input seam."
+  - "apply_patch_structured is a production toModelOutput adopter, with an explicit CLI-promotion integration rail."
+  - "No in-tree Tool declares outputSchema or onInput callbacks, and no registered tool uses defineToolAsync; those advertised capability arms remain exercised only by synthetic rails or external subagent contracts."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool-factory.test.ts tests/unit/tool-factory-l3-wire.test.ts tests/unit/tool-output-schema-hellgate.test.ts tests/unit/apply-patch-structured-tool-wire-hellgate.test.ts tests/integration/apply-patch-structured-cli-promotion-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Factory behavior, registry order, input seam, schema rejection, and the live CLI-promoted toModelOutput adopter passed.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: conditional
+blocker: The four-capability bundle is not uniformly production-active: outputSchema, deferred handles, and streaming-input callbacks have no registered in-tree Tool adopter at this snapshot.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'defineTool\(|enforceOutputSchema|toModelOutput|buildToolInputSeam|supportsDeferredResults|onInput(Start|Delta|Available)' src/tool/factory.ts src/tool/registry.ts src/tool/async-helper.ts src/tool/apply-patch-structured-tool.ts src/agent/loop/stream-consume.ts src/tool/types.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Factory and registry are live; source status documents the sole in-tree toModelOutput adopter and the absent in-tree adopters for the other optional arms.
+  - kind: test
+    command: bun test tests/unit/tool-factory.test.ts tests/unit/tool-factory-l3-wire.test.ts tests/unit/tool-output-schema-hellgate.test.ts tests/unit/apply-patch-structured-tool-wire-hellgate.test.ts tests/integration/apply-patch-structured-cli-promotion-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 101 selected factory, registry, seam, structured-patch, and real-FS promotion cases passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-mutating
+review_state: approved
+reviewer: codex/cross-review-wave1

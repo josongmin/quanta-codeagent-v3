@@ -1,0 +1,48 @@
+version: 1
+feature_id: jun7-search-codebase-scope
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/search-codebase/index.ts:searchCodebaseTool
+entrypoints: [src/apps/cli/internal.ts:buildTooling, src/runner/assemble/search-pipeline.ts:buildSearchPipelineFromEnv]
+activation: ["CLI buildTooling constructs a lexical search wire by default and appends searchWire.tool; scope is an optional input on that live tool."]
+effective_defaults:
+  cli: on
+  web: off
+  bench: unknown
+  headless: unknown
+  daemon: off
+producer: [src/tool/search-codebase/index.ts:searchCodebaseTool, src/tool/search-codebase/index.ts:normalizeScope]
+consumer: [src/runner/assemble/search-pipeline.ts:buildSearchPipelineFromEnv, src/apps/cli/internal.ts:buildTooling, src/runner/assemble/tooling.ts:buildToolingCore]
+reachable: yes
+surface_findings:
+  - "The live CLI registers search_codebase from a lexical default wire, widens only scoped candidate queries to MAX_K, filters on normalized relative paths, then slices back to k."
+  - "Absolute and traversal scopes fail before pipeline execution with typed invalid-config, so scope never resolves or touches a filesystem path."
+  - "The catalog's web:full claim is stale: buildDaemonToolRegistry creates only buildDefaultTools and has no search-pipeline wire or search_codebase registration."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/search-codebase-scope-hellgate.test.ts tests/unit/runner/t06-search-pipeline-dispose-hellgate.test.ts tests/integration/cli-export-assembly.test.ts tests/unit/search-surface-parity-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Scope identity/filter/jail rails, default lexical wire lifecycle, live CLI registration, and delegated-surface parity passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: Catalog must remove web:full or add a web composition root that builds and registers the search pipeline tool.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'searchCodebaseTool|normalizeScope|MAX_K|buildSearchPipelineFromEnv|searchWire|buildDaemonToolRegistry' src/tool/search-codebase/index.ts src/runner/assemble/search-pipeline.ts src/apps/cli/internal.ts src/runner/assemble/tooling.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Source proves the scoped CLI producer-to-registry chain and the absent daemon consumer.
+  - kind: test
+    command: bun test tests/unit/tool/search-codebase-scope-hellgate.test.ts tests/unit/runner/t06-search-pipeline-dispose-hellgate.test.ts tests/integration/cli-export-assembly.test.ts tests/unit/search-surface-parity-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 43 selected scope, wire, CLI assembly, and surface-parity cases passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-mutating
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,61 @@
+version: 1
+feature_id: decideverifyguard
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/verify-guard.ts:decideVerifyGuard
+entrypoints:
+  - src/agent/guards/verify-guard.ts:createVerifyGuard
+  - src/agent/loop/session-bootstrap.ts:bootstrapSession
+activation:
+  - AgentConfig.verifyGuard creates the per-session state and registers createVerifyGuard in the ordered guard chain.
+  - Each finish attempt is passed with the actual tool history to decideVerifyGuard; a blocking verdict produces recovery plus a re-entry message.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer:
+  - src/agent/verify-guard.ts:decideVerifyGuard
+consumer:
+  - src/agent/guards/verify-guard.ts:createVerifyGuard
+  - src/agent/guards/build.ts:buildGuardChain
+  - src/agent/loop/session-bootstrap.ts:bootstrapSession
+reachable: yes
+surface_findings:
+  - "The policy is pure but not orphaned: the adapter consumes its verdict during the production finish path."
+  - "Absent config is a true pass-through; enabled configuration blocks only according to mutation, verification, and trip-budget state."
+  - "mustPass and sticky-red are opt-in refinements; default presence-only behavior remains bounded and heuristic."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/env-knob-branches.test.ts tests/integration/verify-guard-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: CLI config omits verifyGuard when the env key is absent and the real loop does not call the guard path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/verify-guard-hellgate.test.ts tests/unit/verify-guard-must-pass-hellgate.test.ts tests/integration/verify-guard-e2e.test.ts tests/integration/verify-guard-hellgate-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The actual policy returns the expected block/pass decisions and real loop runs enforce those decisions after mutating tool use.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'decideVerifyGuard|createVerifyGuard|buildGuardChain|runGuardChain' src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Session bootstrap builds a chain containing the adapter, and that adapter delegates to the named pure policy at finish attempts.
+  - kind: test
+    command: bun test tests/unit/verify-guard-hellgate.test.ts tests/unit/verify-guard-must-pass-hellgate.test.ts tests/integration/verify-guard-e2e.test.ts tests/integration/verify-guard-hellgate-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 0 failures across pure-policy adversarial cases and loop-level enforcement cases.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-guard
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,57 @@
+version: 1
+feature_id: skill-creator-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/tier1/skill.ts:buildSkillBlock"
+entrypoints:
+  - "src/agent/features.ts:buildSessionFeatures"
+activation:
+  - "QUANTA_SKILL_CREATOR must be enabled and a writable user skill directory must exist."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/skill/skill-creator.ts:createSkillCreatorTool"
+  - "src/agent/tier1/skill.ts:buildJailedSkillWriter"
+consumer:
+  - "src/agent/tier1/skill.ts:buildSkillBlock"
+  - "src/agent/features.ts:buildSessionFeatures"
+reachable: yes
+surface_findings:
+  - "The tool is absent from the default menu. Gate-on registration routes writes through a jailed writer and validates the name before it becomes a path segment."
+off_identity_proof:
+  kind: test
+  command: "bun test src/skill/__tests__/skill-creator.hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Default-off tool metadata and absent-writer behavior pass."
+on_efficacy_proof:
+  kind: test
+  command: "bun test src/skill/__tests__/skill-creator.hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Scaffold, schema validation, jailed installation, and writer-failure arms pass."
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'QUANTA_SKILL_CREATOR|createSkillCreatorTool|buildJailedSkillWriter' src/agent/tier1/skill.ts src/shared/runtime-config.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Registration is gated by runtime config and requires a skill directory."
+  - kind: test
+    command: "bun test src/skill/__tests__/skill-creator.hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 502-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,65 @@
+version: 1
+feature_id: user-authored-playbook-frontmatter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/playbook/frontmatter-parser.ts:parsePlaybookFrontmatter and src/skill/playbook/validator.ts:evaluatePlaybookAction
+entrypoints:
+  - src/apps/cli/repl/playbook-trigger-wire.ts:maybeStartPlaybookTriggerWire
+activation:
+  - --playbook-trigger or its runtime knob starts the CLI watcher and disk registry; the procedure and forbidden-action semantics need an explicit host consumer.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/skill/playbook/frontmatter-parser.ts:parsePlaybookFrontmatter
+  - src/skill/playbook/validator.ts:evaluatePlaybookAction
+  - src/skill/playbook/inline-trigger-watcher.ts:createInlineTriggerWatcher
+consumer:
+  - src/skill/playbook/disk-registry.ts:createDiskPlaybookRegistry
+  - src/apps/cli/repl/playbook-trigger-wire.ts:maybeStartPlaybookTriggerWire
+reachable: yes
+surface_findings:
+  - The opt-in CLI watcher loads disk playbooks, so frontmatter parsing and trigger.watchGlob are production-reachable through the separately audited playbook-trigger binding.
+  - No production code outside the playbook leaf calls evaluatePlaybookAction, macro expansion, or procedure expansion; forbidden-actions therefore cannot deny a live tool call and procedure/success criteria do not reach the loop prompt.
+  - The catalog's CLI full claim overstates the shipped behavior: only parsing and inline-trigger dispatch are wired, not the four authoring semantics advertised in the feature purpose.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/playbook-frontmatter-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: HELL-PB-01 proves empty frontmatter follows the pre-ADR parser path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/playbook-frontmatter-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 16 leaf tests prove parse, validation, macro, and watcher behavior, but not a production enforcement consumer.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: conditional
+blocker: Wire evaluatePlaybookAction into the tool-permission/dispatch authority and project procedure, macros, and success criteria into the active playbook prompt/session path.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n "parsePlaybookFrontmatter\\(|evaluatePlaybookAction\\(|expandPlaybookMacros\\(" src --glob '!src/skill/playbook/**' --glob '!**/*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No non-leaf production call consumes the validator or macro/procedure execution functions.
+  - kind: source
+    command: rg -n "maybeStartPlaybookTriggerWire|createDiskPlaybookRegistry|playbookSeam.attach" src/apps/cli/repl src/skill/playbook
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The opt-in CLI session loop does reach the disk registry and watcher surface.
+  - kind: test
+    command: bun test tests/unit/playbook-frontmatter-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 16 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch21
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,45 @@
+version: 1
+feature_id: test-artifact-purge-hellgate
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: package.json:test:clean-js
+entrypoints:
+  - tests/meta/no-test-js-artifacts-hellgate.test.ts
+activation:
+  - Test scripts run the cleanup hook and CI meta-hellgate verifies no test JavaScript artifacts remain.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - package.json:test:clean-js
+consumer:
+  - tests/meta/no-test-js-artifacts-hellgate.test.ts
+reachable: no
+surface_findings:
+  - Repository currently contains zero test JavaScript artifacts and zero sibling artifact pairs.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/meta/no-test-js-artifacts-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Meta-hellgate confirms both absence invariants.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/meta/no-test-js-artifacts-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Artifact-hygiene hellgate passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

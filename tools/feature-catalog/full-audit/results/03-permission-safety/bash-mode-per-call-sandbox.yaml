@@ -1,0 +1,60 @@
+version: 1
+feature_id: bash-mode-per-call-sandbox
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/tool/bash/index.ts:bashExecute"
+entrypoints:
+  - src/apps/cli/index.ts
+  - "src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildBaseRegistry"
+activation:
+  - "A live bash tool call supplies mode=read."
+  - "The per-call OS sandbox port is available for the host platform."
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - "src/tool/bash/per-call-factory.ts:defaultPerCallSandbox"
+  - "src/runtime/shell.ts:runShell"
+consumer:
+  - "src/tool/bash/index.ts:bashExecute"
+  - "src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildBaseRegistry"
+reachable: yes
+surface_findings:
+  - "The normal registry includes the bash tool, and bashExecute turns only mode=read into a per-call wrapper."
+  - "Unset mode and mode=write stay on the legacy spawn path; unavailable sandbox hosts return a typed failure without an unsandboxed fallback."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/bash-mode-hellgate.test.ts tests/unit/agent/tool-failure-mode.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Default write-mode controls prove no wrapper is applied and the legacy shell behavior is preserved."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/bash-mode-hellgate.test.ts tests/unit/agent/tool-failure-mode.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "41 schema, Darwin wrapper, write and network denial, unavailable-port, fuzz, and typed failure cases pass."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n '(buildDefaultTools|makeBashTool|perCallWrap|mode: \"read\")' src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/tool/bash/index.ts src/runtime/shell.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The production registry owns bash and its read mode passes the wrapper to runShell."
+  - kind: test
+    command: "bun test tests/unit/bash-mode-hellgate.test.ts tests/unit/agent/tool-failure-mode.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "41 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p1-security-policy
+review_state: approved
+reviewer: codex/cross-review-wave1

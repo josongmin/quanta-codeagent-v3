@@ -1,0 +1,53 @@
+version: 1
+feature_id: permission-otel-emit-recorder
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/recorder.ts:setPermissionRecorder
+entrypoints: []
+activation:
+  - No production composition root calls setPermissionRecorder with an OTel mapping sink.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/permission/recorder.ts:setPermissionRecorder
+consumer: []
+reachable: no
+surface_findings:
+  - Decision-site helpers and redaction tests exist, but the exported recorder setter has no production registration caller.
+off_identity_proof:
+  kind: source
+  command: rg -n 'setPermissionRecorder' src --glob '*.ts'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Source search found only definition, exports, and documentation; no composition-root installation.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission-otel-emit-hellgate.test.ts tests/unit/permission-otel-global-default-emit-once-hellgate.test.ts tests/unit/observability/attrs.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Isolated recorder behavior, no-leak, and duplicate-emission rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: not-activatable
+blocker: Missing production recorder installation and OTel attribute mapping consumer.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'setPermissionRecorder|PermissionRecorder' src --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production caller registers the optional recorder.
+  - kind: test
+    command: bun test tests/unit/permission-otel-emit-hellgate.test.ts tests/unit/permission-otel-global-default-emit-once-hellgate.test.ts tests/unit/observability/attrs.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Isolated contract rail passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

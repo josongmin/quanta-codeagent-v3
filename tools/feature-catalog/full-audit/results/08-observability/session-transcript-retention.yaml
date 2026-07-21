@@ -1,0 +1,52 @@
+version: 1
+feature_id: session-transcript-retention
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/session-transcript-retention.ts:sweepSessionTranscripts
+entrypoints:
+  - src/apps/cli/session-registry-cmd.ts:cleanup --transcripts
+  - src/stream/adapters/jsonl-retention.ts:applyRetention
+activation:
+  - Set QUANTA_SESSION_TRANSCRIPT_MAX_BYTES and run /session-registry cleanup --transcripts; use --dry-run for a non-mutating report.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/session/store.ts:appendEnvelope
+consumer:
+  - src/apps/cli/session-transcript-retention.ts:retention sweep
+reachable: yes
+surface_findings:
+  - The CLI host enumerates session JSONL envelopes and applies a cumulative-byte window that retains newest rows and never deletes an entire session.
+  - Unset policy and plain cleanup skip transcript writes; busy or malformed siblings become per-file errors while the sweep continues.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/session-transcript-retention-hellgate.test.ts tests/unit/session-transcript-retention-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset knob and cleanup without --transcripts leave envelopes untouched, including when a cap is configured.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/session-transcript-retention-hellgate.test.ts tests/unit/session-transcript-retention-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Over-cap trim, newest preservation, exact reports, dry-run, no-throw locked envelopes, and command-line wiring passed.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/session-transcript-retention-hellgate.test.ts tests/unit/session-transcript-retention-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused retention command passed 16 sweep and CLI end-to-end rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

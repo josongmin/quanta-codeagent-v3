@@ -1,0 +1,56 @@
+version: 1
+feature_id: lsp-call-hierarchy
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/lsp_nav/index.ts:lspNavTools
+entrypoints:
+  - src/apps/cli/internal.ts:buildCliConfig
+  - src/agent/lsp-bridge/tools.ts:lspNavToolList
+activation:
+  - QUANTA_LSP_TOOLS=full registers the full nav list.
+  - With QUANTA_LSP_TOOLS unset, a discovered language-server binary registers all read-only nav tools, including both call-hierarchy tools.
+effective_defaults:
+  cli: resource
+  web: unknown
+  bench: resource
+  headless: resource
+  daemon: unknown
+producer:
+  - src/lsp/adapters/base.ts:LspClient.callHierarchy
+  - src/tool/lsp_nav/index.ts:lspNavTools
+consumer:
+  - src/agent/lsp-bridge/tools.ts:lspNavToolList
+  - src/apps/cli/internal.ts:buildCliConfig
+reachable: yes
+surface_findings:
+  - The production CLI assembly resolves LspNavMode from QUANTA_LSP_TOOLS and actual server availability, then appends the constructed nav tools to its registry.
+  - Both tools issue prepareCallHierarchy followed by the direction-specific RPC and preserve unsupported-null versus resolved-empty distinctions.
+  - The catalog's strict default-OFF claim is stale: unset QUANTA_LSP_TOOLS auto-registers read-only nav tools whenever a supported server binary is on PATH.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/lsp-call-hierarchy-tools-hellgate.test.ts tests/unit/lsp-call-hierarchy-adapter-hellgate.test.ts tests/unit/lsp-nav-per-tool.test.ts tests/unit/lsp-rename-bridge-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Tool registration, input normalization, two-hop incoming/outgoing RPC mapping, and per-tool behavior passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "resolveLspNavMode|selectLspNavTools|lsp_incoming_calls|lsp_outgoing_calls|callHierarchy" src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/agent/lsp-bridge src/tool/lsp_nav src/lsp/adapters/base.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI registration, both tool factories, and the two-hop adapter consumer chain are concrete.
+  - kind: test
+    command: bun test tests/unit/lsp-call-hierarchy-tools-hellgate.test.ts tests/unit/lsp-call-hierarchy-adapter-hellgate.test.ts tests/unit/lsp-nav-per-tool.test.ts tests/unit/lsp-rename-bridge-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused call-hierarchy rail passed in the 414-pass selected audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch1
+review_state: approved
+reviewer: codex/cross-review-wave1

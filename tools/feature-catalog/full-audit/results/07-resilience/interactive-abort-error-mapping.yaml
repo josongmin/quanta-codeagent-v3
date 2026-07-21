@@ -1,0 +1,52 @@
+version: 1
+feature_id: interactive-abort-error-mapping
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/agent/mode-presets/interactive.ts:runMode
+entrypoints:
+  - src/apps/agent/mode-presets/interactive.ts:runMode
+activation:
+  - The live interactive branch calls runInteractiveTerminal unless a test seam overrides runRepl.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/agent/mode-presets/interactive.ts catches AbortError or ABORT_ERR at the live REPL boundary.
+consumer:
+  - src/apps/agent/mode-presets/interactive.ts returns exitCode 130 to the interactive mode caller.
+reachable: yes
+surface_findings:
+  - The catch wraps the live REPL branch rather than the hermetic runAgent seam.
+  - exitCodeForOutcome separately handles structured outcomes on the seam branch.
+  - The focused test drives AbortError but does not execute the distinct ABORT_ERR condition.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/agent/mode-presets/interactive.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The live REPL delegate seam maps AbortError to exit code 130 and rethrows a non-abort failure.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: proof-gap
+blocker: The unit rail does not exercise the ABORT_ERR branch despite the catalog treating cross-runtime two-name matching as load-bearing.
+disposition: hold
+receipts:
+  - kind: source
+    command: git grep -n 'AbortError\|ABORT_ERR\|runRepl' 9a12f7a -- src/apps/agent/mode-presets/interactive.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live REPL try/catch checks both runtime abort representations and returns 130.
+  - kind: test
+    command: bun test tests/unit/apps/agent/mode-presets/interactive.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 8 pass and 0 fail; AbortError is covered but ABORT_ERR is absent from the test cases.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

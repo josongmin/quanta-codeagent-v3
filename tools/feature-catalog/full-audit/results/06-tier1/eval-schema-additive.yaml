@@ -1,0 +1,57 @@
+version: 1
+feature_id: eval-schema-additive
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/synthetic/index.ts:runSynthetic
+entrypoints:
+  - src/apps/eval/index.ts:main
+  - src/apps/eval/synthetic/index.ts:runSynthetic
+activation:
+  - The explicit eval synthetic command invokes runSynthetic and its ResultStore writes additive payload and run-summary fields.
+  - CapturingStream usage is folded into token and cost fields before report aggregation.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/eval/synthetic/runner.ts:runScenario
+  - src/apps/eval/storage/result-store.ts:ResultStore.finish
+  - src/apps/eval/report/coverage-matrix.ts:buildCoverageMatrix
+consumer:
+  - src/apps/eval/synthetic/index.ts:runSynthetic
+  - src/apps/eval/report/coverage-matrix.ts:buildCoverageMatrix
+  - src/apps/eval/report/markdown.ts:renderCoverageMarkdown
+reachable: yes
+surface_findings:
+  - This is an eval-command storage and reporting shape, not an interactive CLI feature.
+  - The synthetic run writes status and params, while token and cost values flow from scenario capture through the persisted payload into report rendering.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-schema-additive.test.ts tests/unit/eval-runner-token-cost.test.ts tests/integration/eval-additive-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 20 focused tests passed, including RunResult to ResultStore to coverage matrix to markdown and legacy no-usage behavior.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'runSynthetic|store.finish|TokenCostRollup|CapturingStream' src/apps/eval
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Eval command, scenario runner, store, matrix, and markdown own the complete additive data flow.
+  - kind: test
+    command: bun test tests/unit/eval-schema-additive.test.ts tests/unit/eval-runner-token-cost.test.ts tests/integration/eval-additive-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Additive round trips, known and unknown model cost handling, report aggregation, and concurrent append rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch16
+review_state: approved
+reviewer: codex/cross-review-wave1

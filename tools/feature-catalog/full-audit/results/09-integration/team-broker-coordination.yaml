@@ -1,0 +1,66 @@
+version: 1
+feature_id: team-broker-coordination
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/subagent-runner-child-config.ts:maybeWireCoordinationBroker
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/agent/subagent-runner.ts:createSubagentRunner
+activation:
+  - QUANTA_TEAM_BROKER is enabled.
+  - A spawned worker has a parent onConfirm authority and a soft mode-policy denial.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/coordination-broker-wire.ts:buildLeaderHitlBroker
+  - src/subagent/coordination/broker.ts:applyDecisionResponse
+consumer:
+  - src/agent/subagent-runner-child-config.ts:maybeWireCoordinationBroker
+  - src/agent/admissibility-gate.ts:runAdmissibilityGate
+reachable: yes
+surface_findings:
+  - The child-config production path installs the broker only under the runtime gate and a parent confirmation authority.
+  - Soft policy denials can be brokered, but hard denials return before escalation and approval still passes pre_tool_use enforcement.
+  - Missing broker, denied leader decision, and broker error retain a closed denial.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/coordination/team-broker-gate-escalation-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The no-broker control keeps the legacy soft-policy denial.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/coordination/team-broker-hellgate.test.ts tests/unit/coordination/team-broker-e2e-hellgate.test.ts tests/unit/coordination/team-broker-gate-escalation-hellgate.test.ts tests/unit/coordination/team-broker-composition-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 43 focused cases pass, including real leader authority, composition, forged-response rejection, hard-deny non-escalation, and fail-closed errors.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'teamBroker|maybeWireCoordinationBroker|buildLeaderHitlBroker|coordinationBroker|runModePolicy' src/agent/subagent-runner-child-config.ts src/agent/coordination-broker-wire.ts src/agent/admissibility-gate.ts src/shared/runtime-config.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live child construction injects the leader broker and the admissibility gate consumes it only after the hard-deny branch.
+  - kind: test
+    command: bun test tests/unit/coordination/team-broker-hellgate.test.ts tests/unit/coordination/team-broker-e2e-hellgate.test.ts tests/unit/coordination/team-broker-gate-escalation-hellgate.test.ts tests/unit/coordination/team-broker-composition-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 43 pass, 0 fail.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3 feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-team
+review_state: approved
+reviewer: codex/cross-review-wave1

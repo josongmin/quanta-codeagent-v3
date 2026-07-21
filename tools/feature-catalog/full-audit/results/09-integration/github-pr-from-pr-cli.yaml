@@ -1,0 +1,61 @@
+version: 1
+feature_id: github-pr-from-pr-cli
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/from-pr-cmd-runner.ts:runFromPrCmdMain
+entrypoints:
+  - src/apps/cli/from-pr-cmd-runner.ts:import.meta.main
+  - .github/workflows/quanta-pr-bot.yml.template:run quanta from-pr
+activation:
+  - GitHub Actions invokes bun run src/apps/cli/from-pr-cmd-runner.ts with QUANTA_GH_ACTIONS_TRIGGER=1.
+  - The runner constructs real env, filesystem, gh, clock, and redact adapters before calling runFromPrCmd.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/cli/from-pr-cmd.ts:runFromPrCmd
+  - src/apps/cli/from-pr-cmd-adapters.ts:createBunGhCliPort
+consumer:
+  - src/apps/cli/from-pr-cmd-runner.ts:runFromPrCmdMain
+  - .github/workflows/quanta-pr-bot.yml.template:run step
+reachable: conditional
+surface_findings:
+  - A functional standalone command exists and is reachable as an import.meta.main executable root, with a shipped workflow template as its intended installer.
+  - It is not registered as quanta from-pr in src/apps/cli/index.ts; therefore the catalog title's top-level sub-command reading and the interactive CLI surface remain unfulfilled.
+  - event-source=webhook and event-source=poll intentionally parse but return an explicit deferred no-op; only Actions is live.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/from-pr-cmd.test.ts tests/unit/apps/cli/from-pr-cmd-runner.test.ts tests/unit/integrations/github/cli-real-adapters-hellgate-r3.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: With QUANTA_GH_ACTIONS_TRIGGER unset, the runner exits 0 and runFromPrCmd emits env-off without reading or posting an event.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/from-pr-cmd.test.ts tests/unit/apps/cli/from-pr-cmd-runner.test.ts tests/unit/integrations/github/cli-real-adapters-hellgate-r3.test.ts tests/unit/integrations/github/redact-parity-hellgate-r3.test.ts tests/integration/integrations/github/github-actions-end-to-end.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The Actions runner loads context, redacts real secret-shaped body text, emits dry-run output or posts idempotently, and rejects malformed or untrusted inputs.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: The delivered executable is a standalone GitHub Actions runner, not a top-level interactive quanta from-pr dispatcher command; a consuming repository must also copy the workflow template.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'runFromPrCmdMain|import\.meta\.main|runFromPrCmd|createBunGhCliPort|from-pr' src/apps/cli/index.ts src/apps/cli/from-pr-cmd*.ts .github/workflows/quanta-pr-bot.yml.template
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The standalone runner and workflow consumer exist, while the top-level CLI dispatcher has no from-pr branch.
+  - kind: test
+    command: bun test tests/unit/apps/cli/from-pr-cmd.test.ts tests/unit/apps/cli/from-pr-cmd-runner.test.ts tests/unit/integrations/github/cli-real-adapters-hellgate-r3.test.ts tests/integration/integrations/github/github-actions-end-to-end.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused command, real-adapter, and event-to-comment tests completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-github
+review_state: approved
+reviewer: codex/cross-review-wave1

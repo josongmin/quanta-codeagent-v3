@@ -1,0 +1,55 @@
+version: 1
+feature_id: sqlite-persistent-store
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/store.ts:buildStoreCore
+entrypoints:
+  - src/apps/cli/internal.ts:buildStore
+  - src/apps/web-daemon/runtime-factory.ts:buildWebRuntimeCore
+activation:
+  - QUANTA_MEMORY=sqlite selects SqliteStore; QUANTA_MEMORY_PATH optionally overrides .quanta/memory.sqlite.
+  - Unset QUANTA_MEMORY selects volatile InMemoryStore; QUANTA_MEMORY=off disables the memory store.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/memory/adapters/sqlite.ts:SqliteStore
+consumer:
+  - src/runner/assemble/store.ts:buildStoreCore
+  - src/apps/cli/internal.ts:buildStore
+  - src/apps/web-daemon/runtime-factory.ts:buildWebRuntimeCore
+reachable: yes
+surface_findings:
+  - The canonical session factory creates SqliteStore only for the explicit sqlite kind; normal default-on memory remains volatile and writes no disk file.
+  - CLI and web-daemon both consume the factory result; the web surface exposes read-only memory readout while CLI wires the store into agent memory operations.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-adapters.test.ts tests/unit/sqlite-save-error.test.ts tests/integration/memory-sqlite.test.ts tests/integration/memory-default-on-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Adapter parity, save error wrapping, reopen persistence, sqlite opt-in, and factory-to-agent recall all passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "new SqliteStore|buildStoreCore|buildMemoryForSession" src/runner src/apps/cli src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Store assembly selects the SQLite adapter on explicit input and both CLI and web-daemon consume the session-factory store.
+  - kind: test
+    command: bun test tests/unit/memory-adapters.test.ts tests/unit/sqlite-save-error.test.ts tests/integration/memory-sqlite.test.ts tests/integration/memory-default-on-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused persistence and factory rails passed as part of the 141-pass audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch9
+review_state: approved
+reviewer: codex/cross-review-wave1

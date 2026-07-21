@@ -1,0 +1,55 @@
+version: 1
+feature_id: maxturns
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/turn-loop.ts:runAgentTurnLoop
+entrypoints:
+  - src/apps/cli/repl/session-runtime-config.ts:resolveSessionRuntimeConfig
+  - src/agent/loop/entry.ts:runAgentInner
+activation:
+  - CLI session runtime resolves QUANTA_MAX_TURNS into AgentConfig.maxTurns; the core loop enforces that finite bound and emits a typed max_turns completion category when exhausted.
+effective_defaults:
+  cli: on
+  web: on
+  bench: unknown
+  headless: unknown
+  daemon: on
+producer:
+  - src/apps/cli/repl/session-runtime-config.ts:resolveSessionRuntimeConfig
+  - src/apps/web-daemon/runtime-factory.ts:createRuntime
+consumer:
+  - src/agent/loop/turn-loop.ts:runAgentTurnLoop
+  - src/agent/stop-category.ts:completedCategory
+reachable: yes
+surface_findings:
+  - CLI runtime reads QUANTA_MAX_TURNS, while the web daemon constructs AgentConfig with its own fixed maxTurns value; core enforcement is therefore live in both environments even though browser mutation is absent.
+  - The bounded loop returns max_turns with the typed completed.max_turns category, and preserves a clean last-turn completion when a subagent wake is pending.
+  - The catalog code evidence is stale: src/agent/loop.ts only re-exports runAgent, while enforcement moved to turn-loop.ts.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent-submission-and-stop-category.test.ts tests/unit/loop-control-cutoff-fixes.test.ts tests/integration/agent-recovery-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 49 pass, 0 fail; rails prove max-turn stop categorization, tail reminder behavior, recovery accounting under maxTurns, and integrated real-loop exhaustion paths.
+failure_posture: fail-loud
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: Catalog source evidence must reference the actual turn-loop owner rather than the loop.ts re-export shim.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_MAX_TURNS|maxTurns: 200|for \(let turn|completedCategory\("max_turns"' src/apps/cli/repl/session-runtime-config.ts src/apps/web-daemon/runtime-factory.ts src/agent/loop/turn-loop.ts src/agent/loop.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI resolves the env knob, web daemon builds a bounded runtime config, and turn-loop.ts performs the actual bounded iteration and typed terminal completion.
+  - kind: test
+    command: bun test tests/unit/agent-submission-and-stop-category.test.ts tests/unit/loop-control-cutoff-fixes.test.ts tests/integration/agent-recovery-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 49 pass, 0 fail across category, tail-budget, and end-to-end recovery rails.
+audited_at: "2026-07-19"
+auditor: codex/root-p3-agent-loop
+review_state: approved
+reviewer: codex/cross-review-wave1

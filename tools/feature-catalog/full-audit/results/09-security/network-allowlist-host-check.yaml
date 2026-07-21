@@ -1,0 +1,45 @@
+version: 1
+feature_id: network-allowlist-host-check
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/network-allowlist.ts:isHostAllowed
+entrypoints:
+  - src/apps/agent/mode-presets/ci-bot.ts
+activation:
+  - CI-bot policy builds the audited default allowlist and checks configured outbound hosts.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/runtime/network-allowlist.ts:isHostAllowed
+consumer:
+  - src/apps/agent/mode-presets/ci-bot.ts
+reachable: yes
+surface_findings:
+  - Exact and subdomain-only wildcard matching deny malformed and exfil-shaped hosts.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/runtime/network-allowlist.test.ts tests/unit/apps/agent/ci-bot-preset.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Host, wildcard, malformed, default list, and preset rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/runtime/network-allowlist.test.ts tests/unit/apps/agent/ci-bot-preset.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Network allowlist rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

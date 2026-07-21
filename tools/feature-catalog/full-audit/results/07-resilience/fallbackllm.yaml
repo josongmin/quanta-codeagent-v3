@@ -1,0 +1,40 @@
+version: 1
+feature_id: fallbackllm
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/llm/fallback.ts:FallbackLLM"
+entrypoints: ["src/runner/assemble/llm.ts"]
+activation: ["Assembler supplies a fallback provider chain."]
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer: ["src/llm/fallback.ts:FallbackLLM"]
+consumer: ["src/runner/assemble/llm.ts"]
+reachable: yes
+surface_findings: ["Pre-yield eligible failures switch providers; post-yield failures emit a reset/tombstone rather than replaying partial output."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/fallback.test.ts tests/unit/fallback-hellgate.test.ts tests/unit/fallback-empty-tombstone.test.ts tests/unit/fallback-metrics-hellgate.test.ts tests/integration/fallback-tombstone-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Provider switching, post-yield reset, exhaustion, metrics, and real loop tombstone pass."
+failure_posture: fail-loud
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: "bun test tests/unit/fallback.test.ts tests/unit/fallback-hellgate.test.ts tests/unit/fallback-empty-tombstone.test.ts tests/unit/fallback-metrics-hellgate.test.ts tests/integration/fallback-tombstone-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 96-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

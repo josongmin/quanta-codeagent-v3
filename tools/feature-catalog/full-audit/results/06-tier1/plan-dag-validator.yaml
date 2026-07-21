@@ -1,0 +1,58 @@
+version: 1
+feature_id: plan-dag-validator
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/plan/mutations.ts
+entrypoints:
+  - src/apps/cli/repl/factories/plan-store.ts:buildPlanStoreOrUndefined
+  - src/agent/plan/mutations.ts:createPlan
+  - src/agent/plan/mutations.ts:addTodos
+  - src/agent/plan/mutations.ts:updateTodos
+activation:
+  - The default CLI plan store exposes the mutation operations.
+  - Each graph-producing mutation invokes validateDag before returning a new plan state.
+effective_defaults:
+  cli: on
+  web: off
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/plan/dag.ts:validateDag
+  - src/agent/plan/dag.ts:findCycle
+  - src/agent/plan/dag.ts:topologicalSort
+consumer:
+  - src/agent/plan/mutations.ts
+  - src/agent/plan/snapshot.ts:validatePlanSnapshot
+reachable: yes
+surface_findings:
+  - DAG validation is a mutation precondition for plan construction and edits, so self, dangling, and cycle errors cannot enter PlanStore through those APIs.
+  - The snapshot parser independently reuses the validator when restoring persisted plan data.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/plan/dag-hell.test.ts tests/unit/agent/plan/mutations-hell.test.ts tests/integration/plan-mode-stress-100k-ops.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 100-node validator and topological-sort performance, typed failure ordering, mutation enforcement, and 100k stress rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'validateDag|findCycle|topologicalSort' src/agent/plan
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Mutation and snapshot owners call the validator while the DAG module exposes cycle and deterministic sort utilities.
+  - kind: test
+    command: bun test tests/unit/agent/plan/dag-hell.test.ts tests/unit/agent/plan/mutations-hell.test.ts tests/integration/plan-mode-stress-100k-ops.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Cycle, dangling, self-dependency, performance, mutation, and stress assertions passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch16
+review_state: approved
+reviewer: codex/cross-review-wave1

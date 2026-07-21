@@ -1,0 +1,61 @@
+version: 1
+feature_id: toolcontext-depth
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/dispatch/tool-context.ts:buildToolContext
+entrypoints:
+  - src/agent/dispatch.ts:dispatchTool
+  - src/agent/subagent-runner-child-config.ts:child depth construction
+activation:
+  - Dispatch a tool from an AgentConfig carrying a valid depth; child configs derive and carry their authoritative lineage depth.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/subagent-runner-child-config.ts:childDepthOf
+  - src/agent/dispatch/tool-context.ts:buildToolContext
+consumer:
+  - src/subagent/agent-tool.ts:ctxDepth
+  - src/subagent/agent-tools-6.ts:subagent operations
+  - src/subagent/subagent-mailbox/index.ts:depth-aware routing
+reachable: yes
+surface_findings:
+  - Dispatch omits depth for a root/legacy config and projects an explicitly supplied AgentConfig.depth into every tool context.
+  - Child depth is lineage-derived rather than trusting request-provided depth; malformed values fail closed instead of becoming root depth zero.
+  - Spawn admission and its telemetry share the same depth authority, preventing tool exposure/admission split-brain.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/spawn-depth-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Root/legacy undefined depth preserves the documented root behavior while malformed depth is denied rather than coerced.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/dispatch.test.ts tests/unit/spawn-depth-hellgate.test.ts tests/unit/spawn-depth-telemetry-hellgate.test.ts tests/unit/subagent-resume-depth-preservation-hellgate.test.ts tests/unit/side-agent-spawn-depth-authority-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Dispatch context, derived-depth boundaries, telemetry agreement, resume persistence, and side-agent authority rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'config.depth|depth: childDepthOf|ToolContext.depth|ctxDepth|emitSpawnDepthDecision' src/agent/dispatch src/agent/subagent-runner-child-config.ts src/subagent src/tool/types.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Authoritative child depth is built in agent code, projected by dispatch, and read by subagent tool consumers with telemetry coverage.
+  - kind: test
+    command: bun test tests/unit/dispatch.test.ts tests/unit/spawn-depth-hellgate.test.ts tests/unit/spawn-depth-telemetry-hellgate.test.ts tests/unit/subagent-resume-depth-preservation-hellgate.test.ts tests/unit/side-agent-spawn-depth-authority-wiring-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused depth authority rails passed within the 155-pass 10-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

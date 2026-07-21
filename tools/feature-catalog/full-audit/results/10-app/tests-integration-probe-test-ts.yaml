@@ -1,0 +1,45 @@
+version: 1
+feature_id: tests-integration-probe-test-ts
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tests/unit/probe.test.ts
+entrypoints:
+  - test command only
+activation:
+  - Execute the probe test rail.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - tests/unit/probe.test.ts
+consumer: []
+reachable: no
+surface_findings:
+  - This record documents a test artifact, not a shipped feature.
+  - It covers probe parsing and rendering but the standalone probe app is separately audited.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/probe.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Probe graceful-ingest, bounded triage, and view-consistency assertions passed.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/probe.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Test-only probe rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

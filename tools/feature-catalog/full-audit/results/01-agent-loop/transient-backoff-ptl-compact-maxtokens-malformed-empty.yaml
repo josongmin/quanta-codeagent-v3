@@ -1,0 +1,55 @@
+version: 1
+feature_id: transient-backoff-ptl-compact-maxtokens-malformed-empty
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/recovery.ts:decideOnStreamError and resolveTurnAction
+entrypoints:
+  - src/agent/loop/same-turn-engine.ts:runSameTurnEngine
+  - src/agent/loop/recovery-executor.ts:applyNonSuccessRecoveryAction
+activation:
+  - All normal same-turn failures and assembled stop reasons are routed through recovery decisions; no feature flag gates the core bounded recovery policy.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/recovery.ts:decideOnStreamError
+  - src/agent/recovery.ts:decideOnAssembled
+consumer:
+  - src/agent/loop/same-turn-engine.ts:applyAction
+  - src/agent/loop/recovery-executor.ts:applyNonSuccessRecoveryAction
+reachable: yes
+surface_findings:
+  - The real same-turn loop sends thrown stream failures and assembled stop outcomes through the recovery policy, then executes its selected action before the next attempt.
+  - Retry, output continuation, malformed tool use, and empty turn budgets are bounded; exhaustion is terminal rather than a retry loop.
+  - Prompt-too-long and typed context-window signals take the reactive compaction path, which emits recovery and compaction events and returns an explicit failure if compaction cannot recover.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/recovery-hellgate.test.ts tests/unit/recovery-hell.test.ts tests/unit/recovery-router-consumer-wire.test.ts tests/integration/agent-recovery-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 92 pass, 0 fail; unit bounds and integrated runAgent rails cover transient backoff, PTL compaction, max_tokens, malformed, empty, abort, and recovery-event paths.
+failure_posture: fail-loud
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'decideOnStreamError|resolveTurnAction|applyNonSuccessRecoveryAction|applyAction' src/agent/recovery.ts src/agent/loop/same-turn-engine.ts src/agent/loop/recovery-executor.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Same-turn execution obtains a recovery action from the policy and consumes it through the executor, including bounded backoff and reactive compaction.
+  - kind: test
+    command: bun test tests/unit/recovery-hellgate.test.ts tests/unit/recovery-hell.test.ts tests/unit/recovery-router-consumer-wire.test.ts tests/integration/agent-recovery-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 92 pass, 0 fail across policy bounds, router wire, and real runAgent recovery behavior.
+audited_at: "2026-07-19"
+auditor: codex/root-p3-agent-loop
+review_state: approved
+reviewer: codex/cross-review-wave1

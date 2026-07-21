@@ -1,0 +1,45 @@
+version: 1
+feature_id: edit-fuzzy-ladder
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/edit/fuzzy.ts:applyFuzzyEdit
+entrypoints: [src/tool/edit/index.ts:makeEditTool, src/tool/index.ts:buildBaseDefaultTools]
+activation: ["edit is default-registered and delegates fuzzy fallback to applyFuzzyEdit when exact matching cannot apply an edit."]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: [src/tool/edit/exact.ts:applyExactEdit, src/tool/edit/fuzzy.ts:applyFuzzyEdit, src/tool/edit/fuzzy.ts:tryScoredCandidate]
+consumer: [src/tool/edit/index.ts:makeEditTool, src/tool/index.ts:buildBaseDefaultTools]
+reachable: yes
+surface_findings: ["Exact, whitespace-flexible, and anchored-trim paths remain live with focused tests and default edit-tool reachability.", "The frozen catalog says ambiguous fuzzy matches stop the ladder, but live code adds a fourth scored-candidate recovery rung that can apply one strict exact-anchor winner after ambiguity."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/fuzzy.test.ts tests/unit/edit.test.ts tests/unit/edit-recovery-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused exact, fuzzy, ambiguity, scored-recovery, and edit integration rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog title and purpose must describe the fourth ADR-0456 scored-candidate recovery rung and narrow the absolute ambiguous-stops claim.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "applyFuzzyEdit|tryWhitespaceFlexible|tryAnchoredTrim|tryScoredCandidate|scored-candidate|buildBaseDefaultTools" src/tool/edit/fuzzy.ts src/tool/edit/index.ts src/tool/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production code explicitly documents and invokes the fourth recovery rung after ambiguity.
+  - kind: test
+    command: bun test tests/unit/fuzzy.test.ts tests/unit/edit.test.ts tests/unit/edit-recovery-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Fuzzy and edit rails include positive scored-candidate recovery and tie safety cases.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch4
+review_state: approved
+reviewer: codex/cross-review-wave1

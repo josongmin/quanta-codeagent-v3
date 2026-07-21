@@ -1,0 +1,54 @@
+version: 1
+feature_id: ci-bot-mode-policy
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/agent/mode-presets/ci-bot.ts:runMode
+entrypoints:
+  - src/apps/agent/index.ts:runMain
+  - src/apps/agent/mode-presets/ci-bot.ts:runMode
+activation:
+  - The agent argv dispatcher selects mode ci-bot with a required PR target.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/agent/mode-presets/ci-bot-policy.ts:buildCiBotWiring
+  - src/apps/agent/mode-presets/ci-bot.ts:branchOnlyGuardedRunner
+consumer:
+  - src/apps/agent/mode-presets/ci-bot.ts:runMode
+  - src/apps/agent/index.ts:defaultLoadDispatcher
+reachable: yes
+surface_findings:
+  - The argv dispatcher dynamically loads the ci-bot preset and supplies its ciBot request field.
+  - The live runner excludes bash and remote-write gh tools, guards protected-branch git writes before execution, fences untrusted PR content, and supports dry-run comment suppression.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/agent/ci-bot-preset.test.ts tests/unit/apps/agent/mode-presets/ci-bot.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Restricted registry, protected branch rejection, PR flow, untrusted-data fencing, and dry-run/comment branches pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'ci-bot|runMode|branchOnlyGuardedRunner|buildCiBotWiring' src/apps/agent/index.ts src/apps/agent/mode-presets/ci-bot.ts src/apps/agent/mode-presets/ci-bot-policy.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI-style dispatcher, policy builder, guarded git runner, and mode entry are connected.
+  - kind: test
+    command: bun test tests/unit/apps/agent/ci-bot-preset.test.ts tests/unit/apps/agent/mode-presets/ci-bot.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused ci-bot proof is included in the 193-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

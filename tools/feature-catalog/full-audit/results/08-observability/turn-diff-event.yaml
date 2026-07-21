@@ -1,0 +1,60 @@
+version: 1
+feature_id: turn-diff-event
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/turn-diff/index.ts:captureTurnStart, computeTurnDiff, and buildTurnDiffEvent
+entrypoints:
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts
+  - src/agent/loop/turn-loop.ts
+  - src/agent/turn-closeout.ts
+activation:
+  - QUANTA_TURN_DIFF truthy installs AgentConfig.gitObservability.enabled in the CLI runtime composition.
+  - The enabled loop builds a TurnDiffSession, calls startTurn, and emits a returned event during closeout.
+effective_defaults:
+  cli: off
+  web: na
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/turn-diff/index.ts captures baseline SHA, computes unified diff, and shapes the AgentEvent.
+consumer:
+  - src/agent/loop/turn-loop.ts starts the session per turn.
+  - src/agent/turn-closeout.ts emits the returned turn_diff_updated event onto the stream.
+reachable: yes
+surface_findings:
+  - The core event now has live opt-in loop wiring; the catalog note that loop wiring is deferred is stale.
+  - CLI debug and timeline consumers recognize the event; browser bridge/render remains outside this feature's active scope.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/loop-turn-diff-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent gitObservability calls neither startTurn nor endTurn and emits no diff event.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/turn-diff-emitter-hellgate.test.ts tests/unit/loop-turn-diff-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The emitter shapes diffs and the real loop rail starts, closes, and emits ordered turn diff events when enabled.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'QUANTA_TURN_DIFF\|turnDiffSession\|turn_diff_updated' 9a12f7a -- src/apps/cli/repl src/agent/loop src/agent/turn-closeout.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI opt-in config reaches session bootstrap, per-turn loop calls, and stream closeout emission.
+  - kind: test
+    command: bun test tests/unit/turn-diff-emitter-hellgate.test.ts tests/unit/loop-turn-diff-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused emitter and loop wiring rail passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

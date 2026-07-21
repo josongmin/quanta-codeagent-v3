@@ -1,0 +1,57 @@
+version: 1
+feature_id: test-runner-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/test-runner/index.ts:testRunnerTool
+entrypoints:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+activation:
+  - "test_runner is an unconditional base tool; each invocation remains subject to the permission layer's shell-command projection."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/test-runner/index.ts:testRunnerTool
+  - src/tool/test-runner/index.ts:detectCommand
+  - src/tool/test-runner/index.ts:verdict
+consumer:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+reachable: yes
+surface_findings:
+  - "The base tool executes explicit or auto-detected commands, returns typed evidence, and projects both explicit command and path-derived command strings to HARD_DENY."
+  - "The feature is live across composition roots, but the catalog's bun detection claim is stale: package.json scripts.test is not a bun marker in the frozen detectCommand implementation; bun.lockb, bunfig.toml, and packageManager=bun are."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/test-runner-verdict-hellgate.test.ts tests/unit/test-runner-local-env-hellgate.test.ts tests/unit/test-runner-path-harddeny-hellgate.test.ts tests/integration/test-runner.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "62 focused verdict, detector, local environment, injection-hard-deny, explicit execution, failure, timeout, and npm fallback assertions passed."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: "Update the catalog purpose to remove package.json.scripts.test as a bun auto-detection condition, or change detectCommand and add a direct rail if that condition is intended."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'buildBaseDefaultTools|testRunnerTool|bunMarker|packageManager|scripts\.test|extractShellCommand|projectShellCommand' src/tool/index.ts src/tool/test-runner/index.ts src/runner/assemble/tooling.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "test_runner is a base tool; detectCommand only tests lockfile, bunfig, packageManager, package presence, and Python markers."
+  - kind: test
+    command: bun test tests/unit/tool/test-runner-verdict-hellgate.test.ts tests/unit/test-runner-local-env-hellgate.test.ts tests/unit/test-runner-path-harddeny-hellgate.test.ts tests/integration/test-runner.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "62 focused detector, execution, and permission-projection assertions passed."
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch5
+review_state: approved
+reviewer: codex/cross-review-wave1

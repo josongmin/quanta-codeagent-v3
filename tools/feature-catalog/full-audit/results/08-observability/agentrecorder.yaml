@@ -1,0 +1,41 @@
+version: 1
+feature_id: agentrecorder
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/observability/metrics/in-memory-registry.ts:InMemoryMetricsRegistry"
+entrypoints: ["src/apps/cli/internal.ts metrics composition"]
+activation: ["QUANTA_METRICS optionally attaches a sink; in-process recording remains available without it."]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: ["src/observability/metrics/in-memory-registry.ts"]
+consumer: ["src/agent/metrics.ts", "src/apps/cli/internal.ts"]
+reachable: yes
+surface_findings:
+  - "Registry counters and percentiles stay in process; optional failing sinks do not corrupt registry updates."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/observability.test.ts tests/unit/observability-metrics-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Counters, percentiles, sink isolation, and JSONL sink rails pass."
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: "bun test tests/unit/observability.test.ts tests/unit/observability-metrics-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 108-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

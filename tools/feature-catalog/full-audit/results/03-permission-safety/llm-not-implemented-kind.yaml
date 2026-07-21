@@ -1,0 +1,55 @@
+version: 1
+feature_id: llm-not-implemented-kind
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/retry/decorator-policy.ts:retryDispositionForKind
+entrypoints:
+  - src/runner/assemble/llm.ts:composeLLMCore
+  - src/llm/fallback.ts:FallbackLLM
+activation:
+  - "A provider would have to emit LLMError kind not_implemented before the fallback decorator can consume this policy entry."
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/shared/errors.ts:LLMErrorKind
+  - src/llm/retry/codex-spec-router.ts:codexSpecRoute
+consumer:
+  - src/agent/retry.ts:isRetryable
+  - src/llm/fallback.ts:isFallbackTrigger
+reachable: no
+surface_findings:
+  - "The enum member remains consumed by retry and fallback policy, but no production source constructs an LLMError with kind not_implemented."
+  - "ChatGPTOAuthAdapter is Phase 2: its dedicated test states the Phase-1 not_implemented stub was retired and exercises real HTTP/SSE behavior instead."
+  - "Consequently the catalog's stated ChatGPT OAuth stub activation path cannot occur at this snapshot."
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: na
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: "The claimed Phase-1 ChatGPT OAuth stub producer no longer exists; policy-only tests cannot establish a live not_implemented runtime path."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg -n --glob '*.ts' 'not_implemented' src"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Production references are enum and routing-policy cases only; no source constructs kind not_implemented."
+  - kind: test
+    command: "bun test tests/unit/auth/chatgpt-oauth-adapter.test.ts tests/unit/errors.test.ts tests/unit/retry-decorator-policy-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "123 focused tests passed; the OAuth adapter test explicitly records that the Phase-1 stub was retired while decorator tests prove only the retained policy mapping."
+  - kind: source
+    command: "sed -n '1,45p' tests/unit/auth/chatgpt-oauth-adapter.test.ts && sed -n '100,180p' src/runner/assemble/llm.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The adapter's Phase-2 test header names the retired stub, and runtime composition shows fallback consumes provider errors only after they are emitted."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch7
+review_state: approved
+reviewer: codex/cross-review-wave1

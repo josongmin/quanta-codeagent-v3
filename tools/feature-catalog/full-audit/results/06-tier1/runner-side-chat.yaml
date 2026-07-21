@@ -1,0 +1,61 @@
+version: 1
+feature_id: runner-side-chat
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/internal/context-binding/side-conversation.ts:startSideConversation
+entrypoints:
+  - src/apps/cli/slash/registry-session.ts:sideCmd
+  - src/apps/cli/repl/session-loop.ts:registerSideConversationStart
+  - src/host/runtime/internal/context-binding/side-conversation.ts:startSideConversation
+activation:
+  - /side is part of the CLI session slash registry without an environment gate.
+  - The active REPL loop installs session.side.start into the mutable slash surface before interactive prompts are processed.
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/runtime/internal/context-binding/side-conversation.ts:buildIsolatedSideConversationConfig
+  - src/host/runtime/internal/context-binding/side-conversation.ts:startSideConversation
+consumer:
+  - src/apps/cli/side-cmd.ts:sideCmd
+  - src/apps/cli/repl/session-loop.ts:registerSideConversationStart
+reachable: yes
+surface_findings:
+  - The host constructs a fresh message list, filtered read-only ToolRegistry, capped AgentConfig, and isolated usage tally before invoking runAgent.
+  - The command is honest when the late-bound session starter is absent, returning a not-wired result rather than pretending success.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/side-cmd.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The absent side starter produces the explicit not-wired exit-2 posture.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/host/runtime-side-conversation-isolation-hellgate.test.ts tests/unit/cli/side-cmd.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Live isolated execution, parent-store exclusion, CLI dispatch, and separate usage reporting passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'sideCmd|registerSideConversationStart|session.side.start|startSideConversation' src/apps/cli src/host/runtime
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI slash dispatch late-binds the host session starter and the host invokes the isolated run owner.
+  - kind: test
+    command: bun test tests/unit/host/runtime-side-conversation-isolation-hellgate.test.ts tests/unit/cli/side-cmd.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused side-conversation rails passed within the 216-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch17
+review_state: approved
+reviewer: codex/cross-review-wave1

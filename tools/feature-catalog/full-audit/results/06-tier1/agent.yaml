@@ -1,0 +1,61 @@
+version: 1
+feature_id: agent
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal.ts:buildSubagentConfig
+entrypoints:
+  - src/agent/features.ts:buildSessionFeatures
+  - src/agent/tier1/subagent.ts:buildSubagentBlock
+activation:
+  - CLI subagent capability is enabled by default; QUANTA_SUBAGENT=0 explicitly removes the subagent block.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/apps/cli/internal.ts:buildSubagentConfig
+  - src/agent/tier1/subagent.ts:createSubagentRunner
+consumer:
+  - src/agent/features.ts:buildSessionFeatures
+  - src/subagent/agent-tool.ts
+  - src/subagent/tools-6.ts
+reachable: yes
+surface_findings:
+  - CLI config defaults QUANTA_SUBAGENT to enabled and builds the trio plus default-enabled six-tool, batch, and introspection paths through the shared task registry.
+  - Child config inherits safety settings, and depth, cancellation, lifecycle cleanup, and tool contracts have focused integration coverage.
+  - The catalog says activation requires QUANTA_SUBAGENT to be set; the current CLI behavior is default-ON with an explicit opt-out.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/subagent-features-wiring.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: An absent config omits the trio and registry, preserving the no-subagent feature-builder control.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-runner.test.ts tests/unit/subagent-6-tools-hellgate.test.ts tests/integration/subagent-6tool-hell-e2e.test.ts tests/integration/subagent-features-wiring.test.ts tests/integration/subagent-cleanup-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Runner, six-tool, registry-sharing, and cleanup rails passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: The catalog claims QUANTA_SUBAGENT must be set to enable the tool, but buildSubagentConfig defaults the CLI gate to true and uses QUANTA_SUBAGENT=0 as the kill switch.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildSubagentConfig|QUANTA_SUBAGENT|buildSubagentBlock|buildSessionFeatures' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/internal.ts src/agent/features.ts src/agent/tier1/subagent.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI default-ON config reaches the session feature block and subagent tools.
+  - kind: test
+    command: bun test tests/unit/subagent-runner.test.ts tests/unit/subagent-6-tools-hellgate.test.ts tests/integration/subagent-6tool-hell-e2e.test.ts tests/integration/subagent-features-wiring.test.ts tests/integration/subagent-cleanup-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused subagent lifecycle and contract rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

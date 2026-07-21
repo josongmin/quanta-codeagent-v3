@@ -1,0 +1,55 @@
+version: 1
+feature_id: semantic-search-port
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/retrieval/semantic/headless-embedder.ts:createHeadlessEmbedder"
+entrypoints:
+  - "src/runner/assemble/pipeline.ts:assemblePipeline"
+  - "src/apps/agent/pipeline-wire.ts:assemblePipeline"
+activation:
+  - "QUANTA_PIPELINE=semantic-only, parallel-rrf, semantic-then-rerank, or budget-aware constructs the deterministic embedder."
+  - "Absent, empty, unknown, or none QUANTA_PIPELINE returns null and leaves the search pipeline slot omitted."
+effective_defaults:
+  cli: off
+  web: unknown
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/retrieval/semantic/headless-embedder.ts:createHeadlessEmbedder"
+consumer:
+  - "src/runner/assemble/pipeline.ts:adaptSemanticEmbedder"
+  - "src/runner/assemble/pipeline.ts:buildSemanticOnly"
+  - "src/runner/assemble/pipeline.ts:buildParallelRrf"
+reachable: no
+surface_findings:
+  - "The surviving Embedder seam is imported by the production pipeline assembler and is reached after an explicit semantic pipeline preset."
+  - "The default semantic index adapter returns an empty corpus, so this feature proves deterministic vector construction but not usable semantic retrieval results."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/retrieval/semantic-search-hellgate.test.ts tests/unit/apps/agent/pipeline-wire-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Absent and none pipeline settings return null and leave the AgentConfig search pipeline omitted."
+on_efficacy_proof: null
+failure_posture: degraded
+security_posture: na
+observability: unknown
+verdict: seam-only
+blocker: "The default adapter's SemanticIndex.query returns an empty array; a real provider-backed index is owned by the sibling semantic-index-real-embedder feature."
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg createHeadlessEmbedder and adaptSemanticIndex in src/runner/assemble/pipeline.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Semantic presets use the headless embedder while the default index adapter returns an empty result list."
+  - kind: test
+    command: "bun test tests/unit/retrieval/semantic-search-hellgate.test.ts tests/unit/retrieval/pipeline-hellgate.test.ts tests/unit/apps/agent/pipeline-wire-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "All selected deterministic embedding, semantic pipeline composition, and explicit ON/OFF wire tests passed."
+audited_at: "2026-07-19"
+auditor: codex/p1-context-events
+review_state: approved
+reviewer: codex/cross-review-wave1

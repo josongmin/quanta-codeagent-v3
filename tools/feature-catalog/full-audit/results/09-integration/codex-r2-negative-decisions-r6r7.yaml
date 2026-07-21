@@ -1,6 +1,6 @@
 version: 1
 feature_id: codex-r2-negative-decisions-r6r7
-snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
 status: closed
 owner_seam: docs/decisions/0343-per-turn-image-retry-rebuild.md
 entrypoints: []
@@ -34,5 +34,5 @@ receipts:
     evidence: Both negative-decision ADRs resolve from the catalog entry.
 audited_at: "2026-07-19"
 auditor: codex/root
-review_state: pending
-reviewer: null
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,58 @@
+version: 1
+feature_id: connector-token-rotation
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/mcp-oauth-provider.ts:createConnectorsMcpOAuthProvider
+entrypoints:
+  - src/host/mcp-composition.ts:resolveMcpOAuthProvider
+  - src/host/runtime/mcp-oauth-provider.ts:resolveTokenFor
+activation:
+  - Set QUANTA_MCP_OAUTH=1 and configure an HTTP MCP server with oauth: true; refreshable stored tokens use the rotator.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/connectors/token-rotation.ts:createTokenRotator
+consumer:
+  - src/host/runtime/mcp-oauth-provider.ts:createConnectorsMcpOAuthProvider
+  - src/host/mcp-composition.ts:resolveMcpOAuthProvider
+reachable: yes
+surface_findings:
+  - The production MCP OAuth provider instantiates createTokenRotator with its token store and clock, then uses read, isExpired, rotate, and forget in token acquisition and invalidation.
+  - CLI composition creates the file-backed MCP OAuth token store; optional keyring composition decorates that store when enabled.
+off_identity_proof:
+  kind: source
+  command: git grep -n -E 'mcpOAuth|buildMcpOAuthWiring' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host/mcp-composition.ts src/host/runtime/mcp-oauth-provider.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The default OAuth gate returns no provider, so no rotator or token store is constructed.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/connector-token-rotation-hellgate.test.ts tests/unit/connectors-token-rotator.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused mutex, expiration, replacement, persistence-error, and retry-after-failure rails passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: conditional
+blocker: The rotator is live for MCP OAuth, but its connector-generic catalog claim remains conditional on a concrete connector composition and persistent-store policy outside that MCP path.
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'createTokenRotator|rotator\.rotate|createFileMcpTokenStore' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host/mcp-composition.ts src/host/runtime/mcp-oauth-provider.ts src/connectors/token-rotation.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI MCP composition creates the file store and the live OAuth provider invokes the rotator refresh path.
+  - kind: test
+    command: bun test tests/unit/connector-token-rotation-hellgate.test.ts tests/unit/connectors-token-rotator.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused token-rotation rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

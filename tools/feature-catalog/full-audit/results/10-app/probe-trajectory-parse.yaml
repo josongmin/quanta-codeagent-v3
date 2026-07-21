@@ -1,0 +1,53 @@
+version: 1
+feature_id: probe-trajectory-parse
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/probe/parse.ts:loadTrajectory and loadRun
+entrypoints:
+  - package.json:probe
+  - src/apps/probe/index.ts:main
+activation:
+  - Run the standalone probe command with a trajectory JSONL file or a bench run directory.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/probe/parse.ts:loadTrajectory
+  - src/apps/probe/parse.ts:loadRun
+consumer:
+  - src/apps/probe/index.ts:main
+reachable: no
+surface_findings:
+  - The parser is live inside the standalone read-only probe app, but has no interactive CLI or web-daemon import path.
+  - Malformed, unknown-schema, and missing-file inputs degrade to warnings and counted skipped lines rather than throwing.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/probe-parse.test.ts tests/unit/probe.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Valid and malformed JSONL, run-directory discovery, absent input, stable ordering, and CLI views passed.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'loadTrajectory|loadRun' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/probe
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Probe main imports both loaders and invokes loadRun for every accepted input path.
+  - kind: test
+    command: bun test tests/unit/probe-parse.test.ts tests/unit/probe.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Parser and standalone CLI focused rails passed as part of the 78-pass unit run.
+audited_at: "2026-07-20"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

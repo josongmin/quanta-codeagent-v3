@@ -1,0 +1,53 @@
+version: 1
+feature_id: abort-signal-compose
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/turn-runner.ts:runOneTurn
+entrypoints:
+  - src/apps/cli/repl/prompt-pipeline.ts:composePromptPipeline
+  - src/agent/subagent-runner-child-config.ts:chainedSignal
+activation:
+  - Composition is always used where the interactive turn or a subagent has more than one cancellation source.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/apps/cli/repl/turn-runner.ts:runOneTurn
+  - src/agent/subagent-runner-child-config.ts:chainedSignal
+consumer:
+  - src/apps/cli/repl/prompt-pipeline.ts:composePromptPipeline
+  - src/agent/subagent-runner.ts:createSubagentRunner
+reachable: yes
+surface_findings:
+  - Parent and extra cancellation signals propagate either-way; absent extra signal preserves parent identity.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-runner.test.ts tests/unit/apps/cli/turn-runner-hellgate.test.ts tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts tests/integration/subagent-cancellation-e2e.test.ts tests/integration/agent-abort.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unit and integration rails cover turn, parent-child, pre-aborted, cascade, and sibling-isolation paths.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'AbortSignal.any|chainedSignal' src/apps/cli/repl/prompt-pipeline.ts src/apps/cli/repl/turn-runner.ts src/agent/subagent-runner-child-config.ts src/agent/subagent-runner.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Interactive and subagent owners consume the same composition primitive.
+  - kind: test
+    command: bun test tests/unit/subagent-runner.test.ts tests/unit/apps/cli/turn-runner-hellgate.test.ts tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts tests/integration/subagent-cancellation-e2e.test.ts tests/integration/agent-abort.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused composition rails passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

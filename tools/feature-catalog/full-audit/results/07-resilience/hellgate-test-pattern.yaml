@@ -1,0 +1,40 @@
+version: 1
+feature_id: hellgate-test-pattern
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "tests/unit/*-hellgate.test.ts convention"
+entrypoints: ["bun test"]
+activation: ["Test selection includes representative hellgate files."]
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer: ["tests/unit/*-hellgate.test.ts"]
+consumer: ["bun test"]
+reachable: no
+surface_findings: ["This is a test-infrastructure convention rather than a runtime capability."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/fs-jail-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Representative adversarial filesystem jail cases pass."
+failure_posture: na
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: "No runtime surface exists."
+disposition: hold
+receipts:
+  - kind: test
+    command: "bun test tests/unit/fs-jail-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 108-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,59 @@
+version: 1
+feature_id: consolidator-session-hook
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/entry.ts:runAgent
+entrypoints:
+  - src/agent/loop/entry.ts:runAgent
+  - src/host/runtime/internal/context-binding/base.ts:extendBaseWithMemoryAuto
+activation:
+  - After a successful runAgent session, the loop invokes runMemoryConsolidatorHook with the assembled memoryConsolidator config and outcome messages.
+  - The interactive CLI supplies memoryAuto unconditionally; assembleMemoryAuto defaults QUANTA_MEMORY_AUTO to on and produces enabled true wires unless explicitly disabled.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: off
+  daemon: unknown
+producer:
+  - src/agent/memory-consolidator-hook.ts:runMemoryConsolidatorHook
+consumer:
+  - src/agent/loop/entry.ts:runAgent
+  - src/apps/cli/repl/runtime-context-compose.ts:composeRuntimeBootstrapContext
+reachable: yes
+surface_findings:
+  - Full CLI default-on e2e demonstrates session-end distillation and a durable Stage1 row, while an explicit off control produces no wires and no firing.
+  - The hook is no-throw: internal error is emitted as an error event and cannot change a successful session outcome.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/memory-auto-trigger-session-end-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: QUANTA_MEMORY_AUTO=off produces no wires and no session-end firing.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-consolidator-hook-hellgate.test.ts tests/integration/memory-auto-trigger-session-end-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Hook unit no-throw coverage and default-on real runAgent Stage1 persistence passed.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: Catalog purpose says absent host configuration is default-OFF, but the CLI host always supplies memoryAuto and assembleMemoryAuto defaults the gate to on.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg 'memoryAuto:|assembleMemoryAuto|runMemoryConsolidatorHook' src/apps/cli src/host/runtime src/runner src/agent/loop
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI composition supplies memoryAuto, the assembler default is on, and the successful runAgent boundary invokes the hook.
+  - kind: test
+    command: bun test tests/unit/memory-consolidator-hook-hellgate.test.ts tests/integration/memory-auto-trigger-session-end-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused hook default-off arm, error containment, and default-on live session rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

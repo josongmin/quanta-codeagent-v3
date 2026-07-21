@@ -1,0 +1,52 @@
+version: 1
+feature_id: pii-redaction-dispatch-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/dispatch/execute.ts:applyRedaction
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:maybeWirePiiRedaction
+  - src/agent/dispatch/execute.ts:applyRedaction
+activation:
+  - Set QUANTA_PII_REDACTION=1; assembly populates config.redaction.pii and dispatch applies masking after secret redaction.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - tool result and model-visible failure text
+consumer:
+  - secret-first PII masking before loop-visible dispatch output
+reachable: yes
+surface_findings:
+  - Production assembly gates the PII config and dispatch masks emails and phones after the secret pass without changing either independent off branch.
+  - Real-loop coverage proves the masked value reaches the next model turn rather than only a direct helper test.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/dispatch-pii-redaction-hellgate.test.ts tests/integration/pii-redaction-dispatch-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset and explicit-off gates leave PII config absent and the same tool output unchanged.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/dispatch-pii-redaction-hellgate.test.ts tests/integration/pii-redaction-dispatch-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unit and real-loop masking, ordering, and independent secret controls passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/dispatch-pii-redaction-hellgate.test.ts tests/integration/pii-redaction-dispatch-real-loop-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused PII default-off and real-loop rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,64 @@
+version: 1
+feature_id: plan-exit-three-way
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/plan-exit.ts:buildPlanExit
+entrypoints:
+  - src/apps/cli/repl/session-host-ports.ts:createCliPlanExitPort
+  - src/agent/dispatch/tool-context.ts:buildRequestPlanExit
+  - src/agent/loop/plan-exit-wire.ts:applyPendingPlanExit
+activation:
+  - "Plan-mode session with an injected planExitPort and a request_plan_exit tool call."
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/cli/repl/session-host-ports.ts:createCliPlanExitPort
+consumer:
+  - src/agent/plan-exit-flow.ts:runPlanExitFlow
+  - src/agent/loop/plan-exit-wire.ts:applyPendingPlanExit
+reachable: yes
+surface_findings:
+  - "CLI renders the three-way operator prompt and validates changes_requested feedback before returning a typed outcome."
+  - "The browser surface remains missing as catalogued; it does not invalidate the declared CLI surface."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/plan-exit.test.ts tests/unit/request-plan-exit-tool.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No injected requester returns a controlled unavailable tool result; no mode or store mutation is performed.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/plan-exit.test.ts tests/unit/plan-exit-flow.test.ts tests/integration/request-plan-exit-lifecycle-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 31 pass, 0 fail; the closed three-arm invariant, port revalidation, and live lifecycle effects all pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildPlanExit|createCliPlanExitPort|runPlanExitFlow|applyPendingPlanExit' src/agent src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI producer reaches the invariant builder, flow wrapper, and next-turn state consumer.
+  - kind: test
+    command: bun test tests/unit/plan-exit.test.ts tests/unit/plan-exit-flow.test.ts tests/integration/request-plan-exit-lifecycle-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 31 pass, 0 fail; bad ports and invalid feedback fail loudly while all valid outcomes take their intended path.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ feature reachability exception is reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-exit
+review_state: approved
+reviewer: codex/cross-review-wave1

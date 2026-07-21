@@ -1,0 +1,48 @@
+version: 1
+feature_id: swebench-smoke-baseline
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tests/smoke/swebench/select.ts and tests/smoke/swebench/picks.jsonl
+entrypoints:
+  - tests/smoke/swebench/select.ts:main
+  - src/apps/bench/run-main.ts:parseSwebenchJsonl
+activation:
+  - select.ts --audit verifies that the frozen six picks still satisfy selection criteria.
+  - A usable regression gate additionally requires recorded trajectories, official Docker certification, and a CI replay assertion.
+effective_defaults:
+  cli: na
+  web: na
+  bench: resource
+  headless: resource
+  daemon: na
+producer:
+  - tests/smoke/swebench/picks.jsonl supplies six upstream-shape SWE-bench rows.
+consumer:
+  - src/apps/bench/run-main.ts can ingest the JSONL, but no current smoke-battery replay assertion consumes the baseline.
+reachable: no
+surface_findings:
+  - The selection audit passed for all six pinned rows and reported 28 equally qualified alternatives.
+  - README records that trajectories, Docker certification, and CI replay wiring remain missing.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: na
+security_posture: na
+observability: na
+verdict: not-activatable
+blocker: Recorded gpt-5 trajectories, official Docker-harness certification, and a deterministic CI replay assertion are absent.
+disposition: hold
+receipts:
+  - kind: runtime
+    command: bun run tests/smoke/swebench/select.ts --audit
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All six frozen rows satisfied the live selection criteria; this validates fixture eligibility, not agent efficacy or grading.
+  - kind: source
+    command: rg -n "Not yet done|recorded-replay assertion|Docker harness" tests/smoke/swebench/README.md
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The documented promotion prerequisites are explicitly still incomplete.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,54 @@
+version: 1
+feature_id: synchronous-delegate-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/delegate.ts:buildDelegateBlock
+entrypoints:
+  - src/runner/session-execution-plane.ts:adaptDelegation
+  - src/agent/features.ts:buildSessionFeatures
+activation:
+  - A subagent-enabled execution plane supplies config.delegation.delegator, which registers delegate; no subagent configuration leaves the tool absent.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/runner/session-execution-plane.ts:adaptDelegation
+  - src/agent/delegation-runner/default-runner.ts:defaultDelegationRunner
+consumer:
+  - src/tool/delegate/delegate.ts:delegate tool
+  - Agent tool dispatch
+reachable: yes
+surface_findings:
+  - The execution-plane adapter carries parent depth into the mode-typed runner, and the feature builder exposes the tool only when its delegator slot is present.
+  - The tool validates its closed mode enum, propagates cancellation, returns typed failures for port errors and throws, and remains always-confirm.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/delegate-tool-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: An absent delegation slot leaves delegate out of extraTools, while a configured slot registers the same delegator instance.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/delegate-tool-hellgate.test.ts tests/unit/cli/repl-execution-plane-wire.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Mode routing, boomerang results, cancellation, no-throw handling, and subagent-enabled execution-plane delegation construction passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/delegate-tool-hellgate.test.ts tests/unit/cli/repl-execution-plane-wire.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The delegate and execution-plane focused rails passed without failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

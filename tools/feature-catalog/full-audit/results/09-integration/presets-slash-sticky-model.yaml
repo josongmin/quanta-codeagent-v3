@@ -1,0 +1,63 @@
+version: 1
+feature_id: presets-slash-sticky-model
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/surface-compose/runtime-compose.ts:buildRuntimeFacadeCompose
+entrypoints:
+  - src/apps/cli/index.ts:main
+  - src/apps/cli/repl/surface-compose/core-state.ts:buildSurfaceCoreState
+  - src/apps/cli/slash/registry-session.ts:SESSION_SLASH_COMMANDS
+activation:
+  - The interactive CLI always exposes /presets and shares one StickyPresetResolver between its command context and role-model resolution.
+  - Selecting a named preset changes role resolution for later delegated turns; clear restores the caller fallback verbatim.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/slash/presets-cmd.ts:runPresetsCommand
+  - src/apps/cli/repl/ctx-adapters/preset-role-resolver-adapter.ts:buildPresetRoleModelResolver
+consumer:
+  - src/apps/cli/repl/surface-compose/dispatch-compose.ts:buildReplDispatch
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts:buildRuntimeFacadeCompose
+  - src/agent/subagent-runner-overrides.ts:resolveChildLlm
+reachable: yes
+surface_findings:
+  - core-state mints one resolver, dispatch-compose supplies that same instance to /presets, and runtime-compose wraps it as AgentConfig.roleModelResolver.
+  - The command is registered in the session slash registry and selected bindings reach resolveChildLlm rather than remaining a display-only picker.
+  - With no selection, the adapter returns the exact caller fallback; the command is present but its model effect is default-off.
+off_identity_proof:
+  kind: test
+  command: bun test src/apps/cli/repl/ctx-adapters/__tests__/preset-role-resolver-adapter.hellgate.test.ts tests/unit/apps/cli/presets-role-model-compose-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unselected resolver and absent compose slot both preserve the parent model verbatim.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/presets-cmd.hellgate.test.ts src/apps/cli/repl/ctx-adapters/__tests__/preset-role-resolver-adapter.hellgate.test.ts tests/unit/apps/cli/presets-role-model-compose-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Command selection, shared-instance mutation, composed resolver identity, and real reviewer/executor model swaps passed.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'createStickyPresetResolver|buildPresetRoleModelResolver|presets: core.presetResolver|roleModelResolver' src/apps/cli/repl src/apps/cli/slash src/agent/subagent-runner-overrides.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: One resolver instance is produced, supplied to the slash context, projected into runtime configuration, and consumed by child LLM selection.
+  - kind: test
+    command: bun test src/apps/cli/__tests__/presets-cmd.hellgate.test.ts src/apps/cli/repl/ctx-adapters/__tests__/preset-role-resolver-adapter.hellgate.test.ts tests/unit/apps/cli/presets-role-model-compose-wiring-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Twenty-nine focused assertions passed, including the default-off paired controls and live model swaps.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-fastapply
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,51 @@
+version: 1
+feature_id: portable-session-v1
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/ipc/session-export.ts:exportSession
+entrypoints:
+  - src/ipc/index.ts
+activation:
+  - A future IPC surface imports the portable v1 session export or import functions.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/ipc/session-export.ts:exportSession
+  - src/ipc/session-import.ts:importSession
+consumer: []
+reachable: no
+surface_findings:
+  - The IPC v1 exporter and importer implement strict snake_case validation, fresh-id minting, title prefixing, and session-store persistence.
+  - Existing CLI session import/export uses the separate src/session/import-export and file helpers, not this src/ipc v1 surface.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/ipc/session-export-import.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Export, fresh-id import, metadata persistence, snake_case wire shape, and strict validation rails passed under test callers.
+failure_posture: fail-loud
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: No CLI, web-daemon, SDK, or session composition calls the src/ipc v1 export/import API; current interactive session commands use a separate session import-export implementation.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'from "@/ipc"|exportSession\(|importSession\(' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps src/sdk src/session src/ipc
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: IPC session transport imports exist, but no production caller invokes the portable v1 src/ipc export/import functions; CLI commands import src/session helpers.
+  - kind: test
+    command: bun test tests/unit/ipc/session-export-import.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused portable v1 rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

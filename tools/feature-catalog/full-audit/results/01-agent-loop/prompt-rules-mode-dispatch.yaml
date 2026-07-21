@@ -1,0 +1,53 @@
+version: 1
+feature_id: prompt-rules-mode-dispatch
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt-rules/index.ts:renderPackByMode
+entrypoints:
+  - src/agent/prompt.ts
+  - src/apps/cli/index.ts
+activation:
+  - Assemble an agent prompt under any supported run mode.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/prompt-rules/index.ts:renderPackByMode
+  - src/agent/prompt-rules/index.ts:renderToolUseRules
+consumer:
+  - src/agent/prompt.ts
+reachable: yes
+surface_findings:
+  - Prompt assembly consumes the legacy interactive pack and the run-mode registry covers interactive, headless, batch, and ci-bot rule variants.
+  - The interactive legacy entry remains byte-identical while every mode contains all seven core rule IDs exactly once.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/prompt-rules/byte-stable.test.ts tests/unit/agent/prompt-rules/packs.test.ts tests/unit/apps/agent/anti-regression-invariants.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Pack stability, exhaustive core-rule coverage, mode-specific additions, and matrix parity passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'renderPackByMode|renderToolUseRules' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent/prompt.ts src/agent/prompt-rules
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Prompt assembly and the registry's legacy path consume the mode pack renderer.
+  - kind: test
+    command: bun test tests/unit/agent/prompt-rules/byte-stable.test.ts tests/unit/agent/prompt-rules/packs.test.ts tests/unit/apps/agent/anti-regression-invariants.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Prompt rules rails passed in the clean 125-pass bundle.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

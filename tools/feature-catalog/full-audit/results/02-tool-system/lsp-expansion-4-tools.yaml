@@ -1,0 +1,67 @@
+version: 1
+feature_id: lsp-expansion-4-tools
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/lsp-bridge/tools.ts:lspNavToolList through src/apps/cli/internal.ts:selectLspNavTools
+entrypoints:
+  - src/apps/cli/internal.ts:assembleFeatures
+  - src/runner/batch/eval/driver/config-build.ts:buildConfig
+  - src/apps/cli/mcp-server-setup.ts:mergeLspBridgeTools
+activation:
+  - "CLI exposes read-only members when a language server is available and exposes all four only with QUANTA_LSP_TOOLS=full."
+  - "Bench defaults to the cheap read-only subset; full LSP registration is explicit. MCP exposes read-only members only with QUANTA_LSP_MCP."
+effective_defaults:
+  cli: resource
+  web: off
+  bench: on
+  headless: off
+  daemon: off
+producer:
+  - src/tool/lsp_nav/code-action.ts:lspCodeActionTool
+  - src/tool/lsp_nav/rename-apply.ts:lspRenameApplyTool
+  - src/tool/lsp_nav/format.ts:lspFormatTool
+  - src/tool/lsp_nav/signature-help.ts:lspSignatureHelpTool
+  - src/lsp/adapters/base.ts:LspClient
+consumer:
+  - src/agent/lsp-bridge/tools.ts:lspNavToolList
+  - src/apps/cli/internal.ts:selectLspNavTools
+  - src/runner/batch/eval/driver/config-build.ts:buildConfig
+  - src/apps/cli/mcp-server-setup.ts:mergeLspBridgeTools
+reachable: conditional
+surface_findings:
+  - "All four tools have real LspClient-backed ports: code action, format, and signature help open a client per call; rename applies the workspace edit through a held client and requires confirmation."
+  - "The catalog's default-adapter not-implemented/deferred-wire claim is stale: ADR-0143 adapters issue real JSON-RPC requests and the CLI, bench, and MCP composition roots consume them."
+  - "The catalog web:full surface claim is stale because the web-daemon registry builds default tools without an LSP navigation consumer."
+off_identity_proof:
+  kind: source
+  command: rg -n "resolveLspNavMode|selectLspNavTools|QUANTA_LSP_TOOLS|buildDaemonToolRegistry" src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/web-daemon/runtime-factory.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit off or no server yields no CLI nav list, and daemon assembly has no LSP navigation consumer.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/lsp-code-action-hellgate.test.ts tests/unit/tool/lsp-rename-apply-hellgate.test.ts tests/unit/tool/lsp-format-hellgate.test.ts tests/unit/tool/lsp-signature-help-hellgate.test.ts tests/unit/lsp-real-adapters-hellgate.test.ts tests/integration/hexagonal-ports-closeout.test.ts tests/unit/mode-mutating-table.test.ts tests/integration/plan-mode-dispatch-hell-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Tool contracts, real adapter JSON-RPC methods, workspace-edit atomicity, composition, and plan-mode classification rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog must replace deferred stub wording and web:full with actual resource-gated CLI, bench subset, and opt-in MCP surfaces.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "lspNavToolList|lspCodeActionPort|lspFormatPort|lspSignatureHelpPort|resolveLspNavMode|lspNavCheapToolList|mergeLspBridgeTools|buildDaemonToolRegistry" src/agent/lsp-bridge/tools.ts src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/runner/batch/eval/driver/config-build.ts src/apps/cli/mcp-server-setup.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Real producer ports and conditional CLI, bench, and MCP consumers are live; daemon has no LSP consumer.
+  - kind: test
+    command: bun test tests/unit/tool/lsp-code-action-hellgate.test.ts tests/unit/tool/lsp-rename-apply-hellgate.test.ts tests/unit/tool/lsp-format-hellgate.test.ts tests/unit/tool/lsp-signature-help-hellgate.test.ts tests/unit/lsp-real-adapters-hellgate.test.ts tests/integration/hexagonal-ports-closeout.test.ts tests/unit/mode-mutating-table.test.ts tests/integration/plan-mode-dispatch-hell-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 592 selected LSP contract, adapter, composition, and mode-guard tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch7
+review_state: approved
+reviewer: codex/cross-review-wave1

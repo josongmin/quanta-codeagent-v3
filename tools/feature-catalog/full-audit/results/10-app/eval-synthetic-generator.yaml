@@ -1,0 +1,52 @@
+version: 1
+feature_id: eval-synthetic-generator
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/synthetic/generator.ts:generateScenarios
+entrypoints:
+  - src/apps/eval/index.ts:cmdGenerate
+activation:
+  - Run bun run eval generate --usecase ID with a configured provider API key.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/eval/synthetic/generator.ts:generateScenarios
+consumer:
+  - src/apps/eval/index.ts:cmdGenerate
+reachable: yes
+surface_findings:
+  - The separate eval application resolves an agent LLM and passes it to the generator only for the explicit generate subcommand.
+  - Invalid JSON, schema, usecase, size, rubric, and duplicate-id results are rejected per item; only accepted scenarios are written.
+  - Missing provider credentials return an eval skip before generation rather than synthesizing local data.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-generator-validation.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Invalid arrays, rubric and file limits, wrong usecases, valid writes, and duplicate rejection passed.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'cmdGenerate|generateScenarios|resolveLLM' src/apps/eval/index.ts src/apps/eval/synthetic/generator.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The eval CLI entrypoint and strict generator consumer path were verified.
+  - kind: test
+    command: bun test tests/unit/eval-generator-validation.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused synthetic generator rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

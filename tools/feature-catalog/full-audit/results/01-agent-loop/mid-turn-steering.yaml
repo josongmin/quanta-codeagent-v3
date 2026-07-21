@@ -1,0 +1,67 @@
+version: 1
+feature_id: mid-turn-steering
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/steering.ts:steer
+entrypoints:
+  - src/apps/cli/repl/session-loop/turn-helpers.ts:startInTurnLineReader onLine
+  - src/agent/subagent-control-endpoint.ts:createChildControlSurface
+activation:
+  - CLI inbound mode is seeded as queue; weave or interrupt is selected by QUANTA_INBOUND_MODE or /inbound
+  - subagent steer plane requires the paired conversation-action and steer capability wires
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/steering.ts:steer
+  - src/agent/turn-kind.ts:isSteerable
+consumer:
+  - src/apps/cli/repl/inbound-dispatch.ts:routeMidTurnLine
+  - src/apps/cli/repl/session-loop/turn-helpers.ts:in-turn onLine callback
+  - src/agent/conversation-action.ts:decideAction
+  - src/agent/subagent-control-endpoint.ts:createChildControlSurface
+reachable: yes
+surface_findings:
+  - "CLI: reachable from the in-turn stdin reader; weave reaches pushUserMessage and the loop action drain, while queue remains the default capture path."
+  - "Web: no independently verified interactive input entrypoint was found for this CLI inbound-mode surface."
+off_identity_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/inbound-dispatch.hellgate.test.ts src/apps/cli/__tests__/inbound-mode-e2e.hellgate.test.ts tests/unit/agent/loop/midloop-conversation-action-drain-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Queue mode and absent conversation-action surface retain capture-only behavior; no-port paired control is inert.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/inbound-dispatch.hellgate.test.ts src/apps/cli/__tests__/inbound-mode-e2e.hellgate.test.ts tests/unit/agent/steering.test.ts tests/unit/agent/loop/midloop-conversation-action-drain-hellgate.test.ts tests/unit/subagent-control-endpoint-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: CLI weave reaches real decideAction as accepted_injection; interrupt aborts then queues replacement; active-turn, ordering, and bounded subagent admission cases pass.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: "Catalog note says loop.ts wiring and activeTurnRef injection are follow-up/unwired, but the snapshot has the live CLI turn-helpers and inbound-dispatch consumers."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg production steering consumers in src/agent and src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI turn-helpers routes in-turn lines through routeMidTurnLine; conversation-action and subagent-control endpoint consume steer.
+  - kind: test
+    command: bun test src/apps/cli/__tests__/inbound-dispatch.hellgate.test.ts src/apps/cli/__tests__/inbound-mode-e2e.hellgate.test.ts tests/unit/agent/turn-kind.test.ts tests/unit/agent/steering.test.ts tests/unit/inbound-mode-router-hellgate.test.ts tests/unit/agent/loop/midloop-conversation-action-drain-hellgate.test.ts tests/unit/apps/cli/conversation-action-surface-hellgate.test.ts tests/unit/subagent-control-endpoint-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 117 pass, 0 fail across the steering policy, CLI entrypoint, same-turn loop drain, and subagent-control rails.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No reachability exception was reported for mid-turn-steering.
+audited_at: "2026-07-19"
+auditor: codex/p1-agentloop-core
+review_state: approved
+reviewer: codex/cross-review-wave1

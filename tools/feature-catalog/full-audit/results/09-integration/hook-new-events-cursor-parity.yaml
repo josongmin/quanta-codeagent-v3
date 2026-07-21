@@ -1,0 +1,60 @@
+version: 1
+feature_id: hook-new-events-cursor-parity
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/hooks.ts:HookBus.emit
+entrypoints:
+  - src/agent/loop/session-lifecycle.ts:emitUserPromptSubmitHook
+  - src/agent/compaction.ts:pre_compact emission
+  - src/agent/subagent-runner.ts:subagent_stop emission
+activation:
+  - Supply an AgentConfig HookBus and trigger the corresponding lifecycle event.
+effective_defaults:
+  cli: off
+  web: resource
+  bench: off
+  headless: off
+  daemon: resource
+producer:
+  - src/agent/loop/session-hooks.ts:emitUserPromptSubmitHook
+  - src/agent/compaction.ts:pre_compact
+  - src/agent/subagent-runner.ts:subagent_stop
+consumer:
+  - src/agent/hooks.ts:HookBus.emit
+reachable: yes
+surface_findings:
+  - Loop, compaction, and subagent paths all emit the typed events when cfg.hooks is supplied.
+  - Default CLI requires hook composition, so catalog wording that every CLI run uses the bus is too broad.
+off_identity_proof:
+  kind: source
+  command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/agent/loop/session-hooks.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent HookBus takes the no-op path and leaves legacy session behavior unchanged.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/hooks-new-events-hellgate.test.ts tests/unit/hook-bus-bidirectional.test.ts tests/unit/hook-bidirectional-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Event payloads, prompt rewriting and abort behavior, compaction deferral, stop delivery, and bounded injection rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: "Lifecycle emitters are production-reachable but require the optional HookBus to be composed."
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'emitUserPromptSubmitHook|type: "pre_compact"|type: "subagent_stop"' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All three lifecycle emission owners are in production source and delegate to the optional bus.
+  - kind: test
+    command: bun test tests/unit/hooks-new-events-hellgate.test.ts tests/unit/hook-bus-bidirectional.test.ts tests/unit/hook-bidirectional-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused lifecycle hook rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

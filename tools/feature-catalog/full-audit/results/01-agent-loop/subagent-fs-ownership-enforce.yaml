@@ -1,0 +1,60 @@
+version: 1
+feature_id: subagent-fs-ownership-enforce
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/dispatch.ts:ownershipDeny
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+  - src/agent/subagent-runner.ts:createSubagentRunner
+activation:
+  - QUANTA_FS_OWNERSHIP_ENFORCE=1 builds an enforced child OwnershipPolicy from ownedSurfaces and forbiddenSurfaces.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: off
+producer:
+  - src/shared/runtime-config.ts:runtimeConfigFromEnv
+  - src/agent/subagent-runner-child-config.ts:buildChildBase
+  - src/agent/ownership-policy.ts:buildOwnershipPolicy
+consumer:
+  - src/agent/dispatch.ts:ownershipDeny before tool execution
+reachable: yes
+surface_findings:
+  - "The child config receives the strict runtime gate and attaches the policy only when owned or forbidden paths exist."
+  - "Dispatch checks extracted shell, direct-path, structured patch, and scripted-replace write effects before invoking the tool."
+  - "Canonical traversal, symlink escape, forbidden-over-owned precedence, and patch move targets have direct negative tests."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/subagent-ownership-enforce-hellgate.test.ts tests/unit/ownership-dispatch-e2e-hellgate.test.ts tests/unit/ownership-applypatch-scripted-bypass-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 27 passing cases cover enforced:false and absent-policy controls where outside-owned writes retain the legacy behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-ownership-enforce-hellgate.test.ts tests/unit/ownership-dispatch-e2e-hellgate.test.ts tests/unit/ownership-applypatch-scripted-bypass-hellgate.test.ts tests/unit/subagent-runner.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 58 passing cases prove strict gate propagation and hard denial of outside-owned, forbidden, traversal, symlink, bash, apply_patch, move, and scripted-replace writes.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'fsOwnershipEnforce|buildOwnershipPolicy|ownershipPolicy|ownershipDeny' src/shared/runtime-config.ts src/agent/subagent-runner-child-config.ts src/agent/dispatch.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Strict env parsing reaches child-policy construction and dispatch consults that policy before executing write-capable tools.
+  - kind: test
+    command: bun test tests/unit/subagent-ownership-enforce-hellgate.test.ts tests/unit/ownership-dispatch-e2e-hellgate.test.ts tests/unit/ownership-applypatch-scripted-bypass-hellgate.test.ts tests/unit/subagent-runner.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 58 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-agentloop-ops
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,52 @@
+version: 1
+feature_id: doctor-selfcheck
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/slash/registry-app.ts:APP_SLASH_COMMANDS
+entrypoints:
+  - src/apps/cli/slash/registry-app.ts
+  - src/apps/cli/doctor/cmd.ts:doctorCmd
+activation:
+  - Invoke /doctor in the CLI slash surface; use --json for machine-readable results.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/cli/doctor/registry.ts:runDoctor
+consumer:
+  - src/apps/cli/slash/registry-app.ts:APP_SLASH_COMMANDS
+reachable: yes
+surface_findings:
+  - doctorCmd is imported and included in APP_SLASH_COMMANDS, so the prior stated promotion step has already landed.
+  - The command uses injected probes and isolates probe failures, rendering redacted box or JSON output.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/doctor-selfcheck-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Registry, probe isolation, renderer, command, real store probe, redaction, and JSON rails passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: Catalog deliberate-hold text says APP_SLASH_COMMANDS registration is still pending, but registry-app imports and registers doctorCmd in this snapshot.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'doctorCmd|APP_SLASH_COMMANDS' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/slash/registry-app.ts src/apps/cli/doctor
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Shared app slash registry includes the real doctor command.
+  - kind: test
+    command: bun test tests/unit/doctor-selfcheck-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused doctor self-check rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

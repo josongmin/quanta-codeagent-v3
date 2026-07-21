@@ -1,0 +1,62 @@
+version: 1
+feature_id: closeout-critic-gate
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/closeout-critic-wire.ts:maybeRunCloseoutCritic
+entrypoints:
+  - src/agent/loop/recovery-executor.ts:applyAction
+  - src/runner/assemble/interactive-knobs.ts:wireInteractiveKnobs
+  - src/agent/optional-ports.ts:wireCloseoutCritic
+activation:
+  - QUANTA_CLOSEOUT_CRITIC=on
+  - interactive knob fold enables AgentConfig.closeoutCritic
+  - reviewer-backed critic port is available through the composition root
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/optional-ports.ts:buildReviewerBackedCloseoutCritic
+  - src/runner/knobs/knobs/closeout-critic.ts:applyCloseoutCritic
+consumer:
+  - src/agent/loop/closeout-critic-wire.ts:maybeRunCloseoutCritic
+  - src/agent/loop/recovery-executor.ts:applyAction
+reachable: yes
+surface_findings:
+  - "CLI and supported interactive agent surfaces fold the knob and preserve a DI-provided reviewer critic."
+  - "Missing reviewer/subagent materializes no critic port and deliberately fails open; denied verdicts emit advisory recovery data and never block sealing."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/closeout-critic-hellgate.test.ts tests/integration/closeout-critic-reopen-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: OFF and port-absent controls complete with zero closeout events and no critic await.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/closeout-critic.test.ts tests/unit/agent/closeout-critic-hellgate.test.ts tests/unit/agent/optional-ports-wire.test.ts tests/integration/closeout-critic-reopen-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 42 tests pass; both completed seal sites surface allow/deny observations while the real loop still completes.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'wireCloseoutCritic|closeoutCritic|maybeRunCloseoutCritic' src/agent/optional-ports.ts src/runner/assemble/interactive-knobs.ts src/agent/loop
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The composition root supplies the reviewer-backed DI port, the knob folds enabled true, and both completed seal paths invoke the non-blocking helper.
+  - kind: test
+    command: bun test tests/unit/agent/closeout-critic.test.ts tests/unit/agent/closeout-critic-hellgate.test.ts tests/unit/agent/optional-ports-wire.test.ts tests/integration/closeout-critic-reopen-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 42 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-agentloop-subagent
+review_state: approved
+reviewer: codex/cross-review-wave1

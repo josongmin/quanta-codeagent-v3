@@ -1,0 +1,52 @@
+version: 1
+feature_id: phase2-promotion-gate
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/memory/consolidate/phase2-promotion.ts:selectForPhase2Promotion
+entrypoints:
+  - src/memory/consolidate/index.ts:selectForPhase2Promotion export
+activation:
+  - No production phase-2 trigger calls selectForPhase2Promotion.
+  - The selection function runs only when a caller explicitly imports and invokes it.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/memory/consolidate/phase2-promotion.ts:selectForPhase2Promotion
+consumer:
+  - src/memory/consolidate/index.ts:barrel export only
+reachable: no
+surface_findings:
+  - The pure selector implements fail exclusion, deterministic score order, and the floor-capped sample rate exactly in its unit rail.
+  - Live phase-2 routes use separate phase2 ports and never call this selector, so the stated CLI-side pipeline decision is not active.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-promotion.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 20 focused tests passed for the 10 percent cap, ranking, fail exclusion, deterministic ordering, and invalid rate fallback.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production composition root passes Stage1 entries through selectForPhase2Promotion before invoking Phase 2.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg "selectForPhase2Promotion\\s*\\(" src --glob '!src/memory/consolidate/**'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production caller exists outside the definition and barrel export; phase-2 host paths use other APIs.
+  - kind: test
+    command: bun test tests/unit/memory-promotion.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused promotion rail passed as part of the 141-pass audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch9
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,54 @@
+version: 1
+feature_id: cli-session-cmd-shim-removal
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl.ts:runSessionMain
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/repl.ts:runSessionMain
+activation:
+  - The interactive CLI routes session subcommands through runSessionMain, which directly injects the import handler and list environment into runner/session-ops.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/session-import-handler.ts:createCliImportHandler
+  - src/apps/cli/session-list-env.ts:resolveCliSessionListEnv
+consumer:
+  - src/apps/cli/repl.ts:runSessionMain
+  - src/runner/session-ops/index.ts:runSessionCommand
+reachable: yes
+surface_findings:
+  - The former session-commands shim is absent and no source file imports it.
+  - repl.ts directly wires the CLI-owned migration handler and list-env resolver into runner/session-ops.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts tests/unit/cli-session-commands.test.ts tests/unit/apps/cli/repl-host-slim-hellgate.test.ts tests/unit/apps/headless/headless-second-consumer-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The combined focused rail passed 142 tests, including shim absence, direct dependency injection, and session command behavior.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'runSessionCommandInner|createCliImportHandler|resolveCliSessionListEnv' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/repl.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The snapshot REPL imports the runner command and both direct CLI dependency factories, then wires them in runSessionMain.
+  - kind: test
+    command: bun test tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts tests/unit/cli-session-commands.test.ts tests/unit/apps/cli/repl-host-slim-hellgate.test.ts tests/unit/apps/headless/headless-second-consumer-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 142 focused tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

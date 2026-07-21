@@ -1,0 +1,54 @@
+version: 1
+feature_id: cr3-rule-catalog-ssot-fu1-rule-per-concern-invert
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/permission/policy-rules.ts:HARD_DENY_RULES"
+entrypoints:
+  - "src/agent/dispatch.ts:dispatchToolInner"
+  - "src/permission/policy.ts:evaluate"
+activation:
+  - "Every dispatchable tool exposing a shell command is classified before execute()."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - "src/permission/policy-rules.ts:HARD_DENY_RULES"
+  - "src/permission/policy.ts:hardDeny"
+consumer:
+  - "src/agent/admissibility-gate.ts:runAdmissibilityGate"
+  - "src/permission/policy.ts:evaluate"
+reachable: yes
+surface_findings:
+  - "dispatchToolInner derives a shell command from the registry and routes it through the admissibility/policy path before execution."
+  - "The catalog is a named immutable rule list projected to the legacy pattern array; tests exercise every rule's positive and negative corpus plus real multi-tool execution ordering."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/permission-rules.test.ts tests/unit/hard-deny-redos-bound.test.ts tests/integration/hard-deny-mid-multitool-hell-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "260 tests pass, including per-rule must-block/must-allow fixtures, bounded regex adversarial cases, and multi-tool e2e denial behavior."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n \"HARD_DENY_RULES|hardDeny\\(|runAdmissibilityGate\\(\" src/permission/policy-rules.ts src/permission/policy.ts src/agent/dispatch.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The named catalog projects to the policy's hard-deny function and production dispatch invokes the gate before execute."
+  - kind: test
+    command: "bun test tests/unit/permission-rules.test.ts tests/unit/hard-deny-redos-bound.test.ts tests/integration/hard-deny-mid-multitool-hell-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "260 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch2
+review_state: approved
+reviewer: codex/cross-review-wave1

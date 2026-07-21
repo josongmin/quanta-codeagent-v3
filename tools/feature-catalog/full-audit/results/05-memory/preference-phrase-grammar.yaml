@@ -1,0 +1,53 @@
+version: 1
+feature_id: preference-phrase-grammar
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/memory/consolidate/grammar.ts:parsePreferenceSignal
+entrypoints:
+  - src/memory/consolidate/index.ts:parsePreferenceSignal export
+activation:
+  - No shipped composition root calls parsePreferenceSignal or lintMemoryFrontmatter.
+  - The exported pure parser and warning-only linter are exercised only by their unit rail.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/memory/consolidate/grammar.ts:parsePreferenceSignal
+  - src/memory/consolidate/lint.ts:lintMemoryFrontmatter
+consumer:
+  - src/memory/consolidate/index.ts:barrel export only
+reachable: no
+surface_findings:
+  - The grammar preserves literal quote slices, evidence fields, and confidence derivation; the lint path remains warning-only.
+  - Search found no production invocation outside src/memory/consolidate; the catalog's interactive CLI reachability claim is unsupported.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-grammar.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 51 parser and linter assertions passed, including literal Korean quote preservation, confidence precedence, and warning-only lint behavior.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production memory consolidation or CLI assembly invokes the parser or linter.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg "parsePreferenceSignal\\s*\\(|lintMemoryFrontmatter\\s*\\(" src --glob '!src/memory/consolidate/**'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production call was found outside the defining consolidate module; index.ts only re-exports both symbols.
+  - kind: test
+    command: bun test tests/unit/memory-grammar.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused grammar rail passed as part of the 141-pass audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch9
+review_state: approved
+reviewer: codex/cross-review-wave1

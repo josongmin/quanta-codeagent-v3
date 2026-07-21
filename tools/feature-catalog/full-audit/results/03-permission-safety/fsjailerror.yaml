@@ -1,0 +1,63 @@
+version: 1
+feature_id: fsjailerror
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/storage/service.ts:enforceJail
+entrypoints:
+  - src/tool/read/index.ts:readTool
+  - src/tool/write/index.ts:writeTool
+  - src/tool/edit/index.ts:editTool
+activation:
+  - resolvePath with a supplied ctx.cwd and resolveJailed both enforce the jail by default.
+  - Only QUANTA_FS_JAIL=off disables confinement for a process after runtime-config resolution.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/storage/service.ts:resolveJailed
+  - src/storage/service.ts:enforceJail
+consumer:
+  - src/tool/read/index.ts:readTool
+  - src/tool/write/index.ts:writeTool
+  - src/tool/edit/index.ts:editTool
+reachable: yes
+surface_findings:
+  - Read, write, and edit route tool paths through the storage chokepoint and convert FsJailError into typed permission_denied results.
+  - The validator resolves lexical climbs, existing and dangling outward symlinks, and repeated resolves before access; the agent-loop rail proves no outside write or read-content leak.
+  - Explicit QUANTA_FS_JAIL=off is a documented kill switch and is the sole confinement opt-out.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/fs-jail-hellgate.test.ts tests/integration/fs-jail-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Exact off permits the documented same-path opt-out while unset/default confines paths.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/fs-jail.test.ts tests/unit/fs-jail-hellgate.test.ts tests/unit/fs-jail-deep-security-r5-hellgate.test.ts tests/integration/fs-jail-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Direct and agent-loop traversal, symlink-chain, dangling-link, TOCTOU re-resolution, typed denial, and no-leak cases passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "enforceJail|resolveJailed|FsJailError|permission_denied" src/storage/service.ts src/tool/read/index.ts src/tool/write/index.ts src/tool/edit/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The storage enforcement owner and all three live document-tool error consumers are concrete.
+  - kind: test
+    command: bun test tests/unit/fs-jail.test.ts tests/unit/fs-jail-hellgate.test.ts tests/unit/fs-jail-deep-security-r5-hellgate.test.ts tests/integration/fs-jail-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused filesystem-jail rail passed in the 414-pass selected audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch1
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,63 @@
+version: 1
+feature_id: commit-pr-authoring
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/compose-authoring.ts:buildComposeAuthoringBlock
+entrypoints:
+  - src/runner/assemble/interactive-knobs.ts:wireInteractiveKnobs
+  - src/agent/features.ts:buildSessionFeatures
+activation:
+  - QUANTA_COMPOSE_AUTHORING must equal 1 on cli, agent-batch, or agent-interactive.
+  - The interactive knob fold supplies AgentConfig.composeAuthoring.authorLLM, after which the feature builder registers git_compose_commit and git_compose_pr.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/git/compose.ts:gitComposeCommitTool
+  - src/tool/git/compose.ts:gitComposePrTool
+  - src/runner/knobs/knobs/compose-authoring.ts:composeAuthoringKnob
+consumer:
+  - src/runner/assemble/interactive-knobs.ts:wireInteractiveKnobs
+  - src/agent/tier1/compose-authoring.ts:buildComposeAuthoringBlock
+  - src/agent/features.ts:buildSessionFeatures
+reachable: yes
+surface_findings:
+  - The strict env gate folds the existing session LLM into the authoring slot; the session feature builder then exposes exactly the two read-only tools.
+  - Real-git proof stages a change, authors a Conventional Commit subject, and feeds that result into the separate always-confirm git_commit surface.
+  - The catalog's web:full claim is unsupported: the shipped knob is limited to cli, agent-batch, and agent-interactive and no web-daemon composition consumer was found.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/tool/git-compose-knob.hellgate.test.ts tests/unit/tool/git-compose-e2e.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent or non-exact env values preserve the same config and omit both tools from the session registry.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/git-compose.hellgate.test.ts tests/unit/tool/git-compose-knob.hellgate.test.ts tests/unit/tool/git-compose-e2e.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 77 selected cases passed, including live repository author-to-commit flow, input caps, prompt-injection framing, tool registration, and strict gate parsing.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog must remove web:full or add a web composition root that applies compose-authoring and registers the resulting tools.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'composeAuthoring|wireInteractiveKnobs|buildComposeAuthoringBlock|QUANTA_COMPOSE_AUTHORING|buildSessionFeatures' src/runner/assemble src/runner/knobs src/agent src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The real interactive knob and agent feature consumers exist; the knob restricts supported surfaces and no web-daemon registration consumer was found.
+  - kind: test
+    command: bun test tests/unit/tool/git-compose.hellgate.test.ts tests/unit/tool/git-compose-knob.hellgate.test.ts tests/unit/tool/git-compose-e2e.hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 77 focused behavior, registry, and real-git end-to-end cases passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-shadow
+review_state: approved
+reviewer: codex/cross-review-wave1

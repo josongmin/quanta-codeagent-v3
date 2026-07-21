@@ -1,0 +1,58 @@
+version: 1
+feature_id: tool-failure-exploration-ladder
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt-body.ts:BODY_AFTER_PERSONA_TOOL_FAILURES_AND_EXPLORATION
+entrypoints:
+  - src/agent/prompt.ts:buildSystemPrompt
+  - src/agent/prompt-graph.ts:BODY_AFTER_PERSONA_ATOMS
+activation:
+  - "Every buildSystemPrompt call includes the static Tool failures & exploration body atom."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/prompt-body.ts:BODY_AFTER_PERSONA_TOOL_FAILURES_AND_EXPLORATION
+consumer:
+  - src/agent/prompt.ts:buildSystemPrompt
+  - src/agent/prompt-sections.ts:sectioned prompt transform
+reachable: yes
+surface_findings:
+  - "This is prompt-only policy injected into the static system prompt, not a standalone UI affordance."
+  - "The literal rule body now lives in prompt-body.ts and is composed by prompt.ts; the catalog's entrypoint evidence still reaches it."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/prompt-system.test.ts tests/unit/agent/tool-failure-mode.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 67 pass, 0 fail; the rendered prompt contains all five ladder rules and remains byte-stable.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'Tool failures & exploration|Cap hints|two NON-CAP failures|ORIENT|NARROW|CONFIRM' src/agent/prompt.ts src/agent/prompt-body.ts src/agent/prompt-sections.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The five static rules are defined in prompt-body and composed into buildSystemPrompt through the prompt graph.
+  - kind: test
+    command: bun test tests/unit/prompt-system.test.ts tests/unit/agent/tool-failure-mode.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 67 pass, 0 fail; all prompt-rule assertions and the typed tool-failure normalization rail pass.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ feature reachability exception is reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-exit
+review_state: approved
+reviewer: codex/cross-review-wave1

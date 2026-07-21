@@ -1,0 +1,60 @@
+version: 1
+feature_id: lsp-nav-tool-slice
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/lsp_nav/index.ts:lspNavTools and src/apps/cli/internal.ts:selectLspNavTools
+entrypoints:
+  - src/apps/cli/internal.ts:assembleFeatures
+  - src/apps/cli/mcp-server-setup.ts:mergeLspBridgeTools
+activation:
+  - "Interactive CLI registers read-only navigation tools only when an LSP server binary is available or QUANTA_LSP_TOOLS selects a mode."
+  - "MCP server registers the read-only list only when QUANTA_LSP_MCP is enabled."
+effective_defaults:
+  cli: resource
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/lsp_nav/index.ts:lspNavTools
+  - src/agent/lsp-bridge/tools.ts:lspNavToolList
+consumer:
+  - src/apps/cli/internal.ts:selectLspNavTools
+  - src/apps/cli/mcp-server-setup.ts:mergeLspBridgeTools
+reachable: conditional
+surface_findings:
+  - "The base lspNavTools factory exposes ten read-only navigation tools, not the catalog title's eight; all use jailed paths and 1-based input coordinates."
+  - "The interactive CLI surface is resource-gated by available language-server binaries, and web-daemon builds only default tools without an lspNavTools consumer."
+off_identity_proof:
+  kind: source
+  command: rg -n "resolveLspNavMode|anyLspServerOnPath|selectLspNavTools|buildDaemonToolRegistry" src/apps/cli/internal.ts src/apps/web-daemon/runtime-factory.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No server or explicit off produces an empty CLI nav list, and web-daemon does not compose the list.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/lsp-nav-tools.test.ts tests/unit/lsp-nav-per-tool.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 34 focused tests passed for all ten registrations, jailed-path handling, 1-based conversion, results, errors, aborts, and session cleanup.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog must correct the eight-tool count and replace web:full with the actual resource-gated CLI and opt-in MCP registration surfaces.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "lspNavTools|lspNavToolList|resolveLspNavMode|anyLspServerOnPath|mergeLspBridgeTools|buildDaemonToolRegistry" src/tool/lsp_nav/index.ts src/agent/lsp-bridge/tools.ts src/apps/cli/internal.ts src/apps/cli/mcp-server-setup.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The ten-tool producer and both conditional consumers are live; web-daemon has no nav consumer.
+  - kind: test
+    command: bun test tests/unit/lsp-nav-tools.test.ts tests/unit/lsp-nav-per-tool.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 34 focused nav registration and per-tool behavior rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch6
+review_state: approved
+reviewer: codex/cross-review-wave1

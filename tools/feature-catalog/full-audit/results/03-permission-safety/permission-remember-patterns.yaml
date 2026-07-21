@@ -1,0 +1,66 @@
+version: 1
+feature_id: permission-remember-patterns
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts:resolvePermissionPatternSlice
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+  - src/agent/admissibility-gate/gates.ts:runPatternAutoPassGate
+  - src/agent/admissibility-gate/hitl.ts:reviewAndDecide
+activation:
+  - "QUANTA_REMEMBER_PATTERNS=1 constructs one per-session PatternGrantStore and threads it to both admission and permission_propose_pattern."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/runtime/agent-arg-builder/gated-tool-ports.ts:resolvePermissionPatternSlice
+  - src/permission/remember-patterns.ts:PatternGrantStore
+consumer:
+  - src/agent/admissibility-gate/gates.ts:runPatternAutoPassGate
+  - src/agent/admissibility-gate/shared.ts:cascadeOnApprove
+  - src/tool/permission-propose/index.ts:permissionProposeTools
+reachable: yes
+surface_findings:
+  - "The host creates one store only when the runtime knob is enabled, then wires the same instance to user-approved cascade and the model-facing propose tool."
+  - "Off mode omits both the AgentConfig store and the tool port, retaining the legacy admission path and menu."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/permission-pattern-shared-store-composition-hellgate.test.ts tests/unit/permission-propose-pattern-tool-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Unset knob yields no store, absent permission_propose_pattern tool, and the legacy gate behavior."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/permission-remember-patterns.test.ts tests/unit/permission/remember-patterns-classifier-hell.test.ts tests/unit/permission-propose-pattern-hellgate.test.ts tests/unit/permission-propose-pattern-tool-hellgate.test.ts tests/unit/permission-pattern-shared-store-composition-hellgate.test.ts tests/unit/permission-gate-pattern-wire.test.ts tests/integration/remember-patterns-cascade-hell.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Focused rails prove shared-store lifecycle, user grant then cascade, model no-widen/no-self-grant, dangerous rejection, and default-off parity."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'resolvePermissionPatternSlice|permissionPatternStoreSlot|permissionPatternStore|permissionPatternPropose|cascadeOnApprove|runPatternAutoPassGate' src/host/runtime/agent-arg-builder.ts src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/agent/admissibility-gate src/tool"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Production composition allocates the shared store and both admission and tool consumers read the same live instance."
+  - kind: test
+    command: "bun test tests/unit/permission-remember-patterns.test.ts tests/unit/permission/remember-patterns-classifier-hell.test.ts tests/unit/permission-propose-pattern-hellgate.test.ts tests/unit/permission-propose-pattern-tool-hellgate.test.ts tests/unit/permission-pattern-shared-store-composition-hellgate.test.ts tests/unit/permission-gate-pattern-wire.test.ts tests/integration/remember-patterns-cascade-hell.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Focused lifecycle and abuse rails were green in the 244-pass batch."
+  - kind: source
+    command: "bun fc reachability"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "No L3+ feature reachability exception was reported."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch5
+review_state: approved
+reviewer: codex/cross-review-wave1

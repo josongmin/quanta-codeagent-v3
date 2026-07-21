@@ -1,0 +1,57 @@
+version: 1
+feature_id: assemble-store-core
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/store.ts:buildStoreCore
+entrypoints:
+  - src/runner/assemble/memory-factory.ts:buildMemoryForSession
+  - src/apps/cli/internal.ts:buildStore
+  - src/apps/web-daemon/runtime-factory.ts:buildWebRuntimeCore
+activation:
+  - Unset QUANTA_MEMORY resolves to a volatile InMemoryStore; QUANTA_MEMORY=sqlite is the explicit persistent-store path.
+  - Embedder requires a store, enabled embedding knob, and OPENAI_API_KEY.
+effective_defaults:
+  cli: on
+  web: on
+  bench: resource
+  headless: on
+  daemon: on
+producer:
+  - src/runner/assemble/store.ts:buildStoreCore
+  - src/runner/assemble/store.ts:buildEmbedderCore
+consumer:
+  - src/runner/assemble/memory-factory.ts:buildMemoryForSession
+  - src/apps/cli/internal.ts:buildStore
+  - src/apps/web-daemon/runtime-factory.ts:buildWebRuntimeCore
+reachable: yes
+surface_findings:
+  - Store construction is live for CLI and web-daemon through the session memory factory.
+  - The catalog's statement that both factories are default-OFF and plain runs are unchanged is false at the CLI surface: unset QUANTA_MEMORY produces a volatile InMemoryStore under ADR-0414.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-factory-hellgate.test.ts tests/integration/memory-default-on-e2e-hellgate.test.ts tests/unit/env-knob-branches.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Factory mode selection, SQLite reopen persistence, default volatile no-disk behavior, and real runAgent recall all pass.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: Catalog default-OFF/plain-run identity claim conflicts with the proven default-on volatile-memory CLI behavior.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/runner/assemble/memory-factory.ts | rg -n -C 2 'buildStoreCore|resolveMemoryKind'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The session factory resolves memory kind and passes it to buildStoreCore; CLI and web-daemon call the same session factory.
+  - kind: test
+    command: bun test tests/unit/memory-factory-hellgate.test.ts tests/integration/memory-default-on-e2e-hellgate.test.ts tests/unit/env-knob-branches.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 104 focused checks prove the default-on volatile mode, sqlite opt-in persistence, escape hatch, and loop reachability.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch20
+review_state: approved
+reviewer: codex/cross-review-wave1

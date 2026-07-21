@@ -1,0 +1,62 @@
+version: 1
+feature_id: deferred-result-registry-production
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildAsyncDeferredTools and src/tool/deferred/default-registry.ts:DefaultDeferredResultRegistry
+entrypoints:
+  - src/apps/cli/internal.ts:buildTooling
+  - src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildBaseRegistry
+activation:
+  - "QUANTA_ASYNC_TOOLS creates a DefaultDeferredResultRegistry and exposes poll_deferred."
+  - "No shipped tool calls defineToolAsync or receives the constructed registry, so no production work can register a deferred handle."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/deferred/default-registry.ts:DefaultDeferredResultRegistry
+  - src/tool/async-helper.ts:defineToolAsync
+consumer:
+  - src/tool/poll_deferred.ts:pollDeferredTool
+  - src/apps/cli/internal.ts:buildTooling
+  - src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildBaseRegistry
+reachable: no
+surface_findings:
+  - "The registry primitive has comprehensive unit behavior and poll_deferred is conditionally registered."
+  - "The two production composition roots mint an isolated registry and either discard it in buildBaseRegistry or explicitly void it in interactive CLI assembly."
+  - "No repository caller invokes defineToolAsync, leaving the visible poll tool unable to observe real deferred producer work."
+off_identity_proof:
+  kind: source
+  command: "rg -n 'QUANTA_ASYNC_TOOLS|buildAsyncDeferredTools|asyncDeferredRegistry|void asyncDeferredRegistry' src/apps/cli/internal.ts src/host/runtime/agent-arg-builder/gated-tool-ports.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Gate-off returns an empty tool list and no registry; gate-on only creates the poll-facing registry."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/tool/deferred-registry-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "18 isolated registry lifecycle, cancellation, timeout, eviction, and default-cap assertions passed."
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: not-activatable
+blocker: "Wire one shipped defineToolAsync producer to the exact registry instance owned by poll_deferred, and add an end-to-end producer-to-poll proof; current roots only reserve the seam for a future caller."
+disposition: wire
+receipts:
+  - kind: source
+    command: "rg -n 'defineToolAsync\\(|buildAsyncDeferredTools|asyncDeferredRegistry|void asyncDeferredRegistry|future.*producer' src tests -g '*.ts'"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The only defineToolAsync text is its definition; production assembly documents and demonstrates that the mint is currently unused."
+  - kind: test
+    command: "bun test tests/unit/tool/deferred-registry-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The primitive works in isolation but this is not a composition proof."
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch8
+review_state: approved
+reviewer: codex/cross-review-wave1

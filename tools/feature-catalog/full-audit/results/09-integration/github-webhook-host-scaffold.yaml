@@ -1,0 +1,62 @@
+version: 1
+feature_id: github-webhook-host-scaffold
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/webhook-server-setup.ts:runWebhookServerCmd
+entrypoints:
+  - src/apps/cli/index.ts:webhook dispatch
+activation:
+  - quanta webhook requires QUANTA_GITHUB_WEBHOOK=1 and a resolvable webhook secret configuration.
+  - The host binds a transport, polls createWebhookEventSource, and publishes verified triggers to the reactor-watch bridge.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/integrations/github/webhook-server.ts:createWebhookEventSource
+  - src/integrations/github/signature-verify.ts:verifyHubSignature256
+  - src/integrations/github/webhook-secret-resolver.ts:loadWebhookSecretConfig
+consumer:
+  - src/apps/cli/webhook-server-setup.ts:runWebhookServerCmd
+  - src/apps/cli/reactor-watch-bridge.ts:publishReactorWatchTrigger
+  - src/apps/cli/index.ts:webhook dispatch
+reachable: yes
+surface_findings:
+  - The host is live: CLI dispatch reaches a Bun/listener-backed inbound transport, verified HMAC/dedup event source, and reactor-watch publication pump.
+  - The purpose text claiming createWebhookEventSource deliberately throws NOT_IMPLEMENTED and that host binding is deferred is contradicted by the live implementation and end-to-end rails.
+  - Gate-off, missing secrets, malformed secret maps, forged signatures, and unknown installation paths bind nothing or publish nothing.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/github-webhook-host-cli-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset or loose gate values exit 64 before bind or source construction; an empty secret also binds nothing.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/integrations/github/signature-verify.test.ts tests/unit/integrations/github/signature-verify-attack-hellgate.test.ts tests/integration/github-webhook-host-cli-hellgate.test.ts tests/integration/github-webhook-reactor-e2e-hellgate.test.ts tests/integration/github-webhook-multi-secret-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: A signed mention reaches the live reactor consumer; forged signatures, duplicate deliveries, oversized bodies, and bad installation keys do not publish.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'runWebhookServerCmd|createWebhookEventSource|verifyHubSignature256|publishReactorWatchTrigger|QUANTA_GITHUB_WEBHOOK' src/apps/cli src/integrations/github
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production CLI dispatch, host composition, HMAC verifier, secret resolver, event source, and reactor bridge consumers are present.
+  - kind: test
+    command: bun test tests/integration/github-webhook-host-cli-hellgate.test.ts tests/integration/github-webhook-reactor-e2e-hellgate.test.ts tests/integration/github-webhook-multi-secret-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Host gate, signature, delivery dedup, multi-secret routing, publish pump, and full reactor chain all passed.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-github
+review_state: approved
+reviewer: codex/cross-review-wave1

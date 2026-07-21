@@ -1,0 +1,47 @@
+version: 1
+feature_id: session-protocol-codec
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/protocol/session/codec.ts
+entrypoints: [src/apps/agent/mode-presets/stream-json-sink.ts]
+activation: [session.v1 IPC, daemon, attach, and stream-json protocol surfaces]
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: na
+  headless: resource
+  daemon: resource
+producer: [src/protocol/session/codec.ts]
+consumer: [src/apps/agent/mode-presets/stream-json-sink.ts, attach and web protocol projections]
+reachable: yes
+surface_findings:
+  - "Canonical codec round-trips commands, events, and snapshots with typed validation failures."
+  - "Codec and frontend drift tests pass, but the listed surface-protocol inventory rail is currently red because AGENT_EVENT_TYPES grew to 40 while its reviewed count remains 39."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/protocol/session-codec.test.ts tests/unit/protocol/protocol-validate-typesafe-hellgate.test.ts tests/unit/surface-protocol-inventory-hellgate.test.ts tests/unit/apps/cli/attach/attach-render-inventory-hellgate.test.ts tests/unit/web-frontend-protocol-drift-contract-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: Codec and copy drift rails pass, but surface-protocol inventory expected 39 agent events and received 40.
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: proof-gap
+blocker: "tests/unit/surface-protocol-inventory-hellgate.test.ts is red due to stale reviewed AGENT_EVENT_TYPES count 39 versus current 40."
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'encodeSession|decodeSession|SESSION_PROTOCOL_VERSION' src/protocol/session src/apps/agent/mode-presets/stream-json-sink.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Codec and a production stream-json sink consume the canonical protocol.
+  - kind: test
+    command: bun test tests/unit/protocol/session-codec.test.ts tests/unit/protocol/protocol-validate-typesafe-hellgate.test.ts tests/unit/surface-protocol-inventory-hellgate.test.ts tests/unit/apps/cli/attach/attach-render-inventory-hellgate.test.ts tests/unit/web-frontend-protocol-drift-contract-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: Session codec validation passes, but inventory count is stale at 39 instead of 40.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

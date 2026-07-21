@@ -1,0 +1,47 @@
+version: 1
+feature_id: slash-queue-per-msg-mutators
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/queue-cmd.ts:queueCmd
+entrypoints:
+  - src/apps/cli/repl/surface-compose.ts:plan queue and SendNowSink
+activation:
+  - Queue follow-up work in the interactive REPL and invoke /queue mutators.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/agent/plan-queue.ts:mutators
+consumer:
+  - src/apps/cli/queue-cmd.ts:queueCmd
+  - REPL surface composition:SendNowSink
+reachable: yes
+surface_findings:
+  - Live REPL composition wires plan queue and a loop-owned SendNowSink into SlashContext.
+  - The first-turn late-bind window is intentionally fail-closed as send-not-ready with entry preservation; only web parity remains held.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/queue-per-msg-mutators-hellgate.test.ts tests/unit/cli/queue-cmd-hellgate.test.ts tests/unit/plan-queue-sendnow-failclosed-hellgate.test.ts tests/unit/observability-metrics-instrument-extra-hellgate.test.ts tests/unit/slash-commands.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Retry/edit/delete/send-now, prefix resolution, timing-window preservation, and metrics rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/queue-per-msg-mutators-hellgate.test.ts tests/unit/cli/queue-cmd-hellgate.test.ts tests/unit/plan-queue-sendnow-failclosed-hellgate.test.ts tests/unit/observability-metrics-instrument-extra-hellgate.test.ts tests/unit/slash-commands.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused queue mutation rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

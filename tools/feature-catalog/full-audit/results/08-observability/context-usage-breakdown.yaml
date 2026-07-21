@@ -1,0 +1,45 @@
+version: 1
+feature_id: context-usage-breakdown
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/context/usage-breakdown.ts:buildUsageBreakdown"
+entrypoints: ["REPL onPromptAssembled capture", "CLI /context slash"]
+activation: ["REPL wires onPromptAssembled; absent hook preserves loop behavior."]
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: ["src/agent/context/usage-breakdown.ts"]
+consumer: ["src/apps/cli/repl/context-usage-snapshot.ts", "CLI /context"]
+reachable: yes
+surface_findings: ["CLI captures the assembled prompt and renders a segmented context view; web has no executable /context surface."]
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/agent/prompt-assembled-capture-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Absent capture hook is byte-identical."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/agent/context-usage-breakdown-hellgate.test.ts tests/unit/cli/segmented-usage-hellgate.test.ts tests/unit/cli/context-usage-snapshot-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Measured categories, segment rendering, REPL holder, slash rendering, and reasoning split pass."
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: "bun test tests/unit/agent/context-usage-breakdown-hellgate.test.ts tests/unit/cli/segmented-usage-hellgate.test.ts tests/unit/agent/prompt-assembled-capture-hellgate.test.ts tests/unit/agent/context-snapshot-converter-hellgate.test.ts tests/unit/cli/context-usage-snapshot-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 60-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

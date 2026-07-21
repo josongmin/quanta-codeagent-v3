@@ -1,0 +1,59 @@
+version: 1
+feature_id: repl-orphan-resolution
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tests/unit/apps/cli/repl-orphan-resolution-hellgate.test.ts:orphan-decision ratchet
+entrypoints:
+  - src/apps/cli/repl.ts:buildMcpSurfaceInfo host dependency
+activation:
+  - Build the CLI REPL host; the orphan-resolution ratchet protects deleted legacy paths while repl.ts consumes the retained MCP translator.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/repl/mcp-surface-wire.ts:buildMcpSurfaceInfo
+  - tests/unit/apps/cli/repl-orphan-resolution-hellgate.test.ts:DELETED_MODULES
+consumer:
+  - src/apps/cli/repl.ts:buildMcpSurfaceInfo
+  - tests/unit/mcp-surface-wire.test.ts
+reachable: yes
+surface_findings:
+  - The ratchet confirms all 20 specifically named obsolete modules remain absent, while allowing newer split owners under repl/ to exist.
+  - mcp-surface-wire is no longer a future-only seam: repl.ts imports it and threads buildMcpSurfaceInfo into the live REPL host dependency composition.
+  - The retained translator accurately distinguishes absent MCP configuration from configured-but-failed servers and sanitizes bridged tool names.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/repl-orphan-resolution-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All designated deleted paths remain absent and dynamic import of a deleted path rejects.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/repl-orphan-resolution-hellgate.test.ts tests/unit/mcp-surface-wire.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The retained live translator exports, failed-server visibility, bridged-tool projection, config-path rendering, and REPL export rails passed.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: The catalog says mcp-surface-wire has no live consumer and is only a future seam, but src/apps/cli/repl.ts imports and supplies buildMcpSurfaceInfo to the live host composition.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'buildMcpSurfaceInfo|mcp-surface-wire' src/apps/cli/repl.ts src/apps/cli/repl/mcp-surface-wire.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live REPL imports the retained translator and exposes it through the host dependency object.
+  - kind: test
+    command: bun test tests/unit/apps/cli/repl-orphan-resolution-hellgate.test.ts tests/unit/mcp-surface-wire.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused orphan and translator rails passed within the 118-pass 11-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

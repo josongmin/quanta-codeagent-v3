@@ -1,0 +1,58 @@
+version: 1
+feature_id: swebench-python-uvx-shim
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tools/bin/swebench-python:exec uvx
+entrypoints:
+  - src/apps/bench/python-swebench.ts:pythonCandidates
+activation:
+  - Set QUANTA_SWEBENCH_PYTHON_BIN to the absolute path of tools/bin/swebench-python, with uvx available on PATH, then run a SWE-bench evaluation.
+effective_defaults:
+  cli: na
+  web: na
+  bench: resource
+  headless: na
+  daemon: na
+producer:
+  - tools/bin/swebench-python:uvx swebench interpreter wrapper
+consumer:
+  - src/shared/runtime-config.ts:swebenchPythonBin
+  - src/apps/bench/python-swebench.ts:pythonCandidates
+reachable: yes
+surface_findings:
+  - The bench runtime reads QUANTA_SWEBENCH_PYTHON_BIN first and passes the supplied executable through its no-shell argv probe and harness invocation path.
+  - The wrapper itself is not auto-selected: the operator must point the environment variable at it, and uvx must be present for the exec to succeed.
+  - The catalog's interactive CLI full-surface claim is false. No interactive CLI entry imports this bench-only helper.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/bench-eval.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: With the interpreter unavailable, the harness degrades to the local test command without throwing.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/swebench-buildargv-sphinx-ra.test.ts tests/integration/bench-eval.test.ts tests/integration/bench-python-harness-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Override precedence, argv construction, availability fallback, report parsing, and real spawned stub-interpreter rails passed; the external uvx executable is not exercised.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: The catalog marks this bench-only helper as full interactive CLI surface even though the only consumer is the optional bench interpreter override.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'swebenchPythonBin|QUANTA_SWEBENCH_PYTHON_BIN|pythonCandidates' src/shared/runtime-config.ts src/apps/bench/python-swebench.ts tools/bin/swebench-python src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime config and bench consume the explicit override; no interactive CLI consumer exists.
+  - kind: test
+    command: bun test tests/unit/swebench-buildargv-sphinx-ra.test.ts tests/integration/bench-eval.test.ts tests/integration/bench-python-harness-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Bench Python rails passed within the 315-pass 18-file command, with one optional real-corpus test skipped.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

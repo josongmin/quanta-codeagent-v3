@@ -1,0 +1,54 @@
+version: 1
+feature_id: probe-failure-triage
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/probe/triage.ts:triage
+entrypoints:
+  - package.json:probe
+  - src/apps/probe/index.ts:main
+activation:
+  - Run bun run probe PATH --failed, optionally with --json or --instance, against a trajectory run directory.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/probe/triage.ts:triage
+consumer:
+  - src/apps/probe/index.ts:renderTriage
+  - src/apps/probe/index.ts:buildJson
+reachable: no
+surface_findings:
+  - The standalone probe app runs the ordered pure rule table for failed run instances and also projects its result into --json output.
+  - Missing run summaries explicitly degrade to triage-all with exit code 2 instead of asserting every instance failed.
+  - The output contract is intentionally a bounded-confidence hypothesis and tests prohibit authoritative or verdict wording.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/probe-triage.test.ts tests/unit/probe.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Priority ordering, determinism, bounded confidence, wording constraints, text rendering, JSON projection, and missing-summary degradation rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'triage\(|renderTriage|triage_hypothesis|renderFailedView' src/apps/probe/index.ts src/apps/probe/triage.ts package.json
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The independent probe CLI invokes the rule table for text and JSON views and marks missing summaries as uncertain.
+  - kind: test
+    command: bun test tests/unit/probe-triage.test.ts tests/unit/probe.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused triage rails passed in the 294-case 15-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

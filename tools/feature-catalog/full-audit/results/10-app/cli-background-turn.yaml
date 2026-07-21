@@ -1,0 +1,51 @@
+version: 1
+feature_id: cli-background-turn
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/background-turn-portal.ts
+entrypoints:
+  - src/apps/cli/repl/session-loop.ts:Ctrl+B
+  - src/apps/cli/background-cmd.ts:/background
+activation:
+  - Set QUANTA_BG_TURN=1 in interactive CLI.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - active REPL turn body
+consumer:
+  - background portal and slash command
+reachable: yes
+surface_findings:
+  - Ctrl+B detaches the live body into the portal; list, print-only reattach, and cancel consume its terminal state.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/cli-background-turn-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Portal only wires under its opt-in gate.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/cli-background-turn-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real detached completion and cancellation rails passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/integration/cli-background-turn-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused portal e2e passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

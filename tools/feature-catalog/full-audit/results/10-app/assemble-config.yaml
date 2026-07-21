@@ -1,0 +1,52 @@
+version: 1
+feature_id: assemble-config
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/config.ts:assembleConfig
+entrypoints:
+  - src/runner/orchestrate/run-once.ts:per-turn runAgent configuration
+activation:
+  - A runner host assembles a turn with explicit SessionDeps.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/runner/assemble/config.ts:assembleConfig
+consumer:
+  - src/runner/orchestrate/run-once.ts:runAgent
+  - CLI session composition
+reachable: yes
+surface_findings:
+  - Runner orchestration assembles explicit collaborators before each runAgent call.
+  - Optional spreads retain absent-slot behavior without environment reads in the composer itself.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/cli-export-assembly.test.ts tests/unit/apps/cli/repl-thin-surface-ownership-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: CLI assembly threading and runner-owner boundary rails passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'assembleConfig\(' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/runner src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runner orchestration and host composition consume the single config composer.
+  - kind: test
+    command: bun test tests/integration/cli-export-assembly.test.ts tests/unit/apps/cli/repl-thin-surface-ownership-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused assembly ownership rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

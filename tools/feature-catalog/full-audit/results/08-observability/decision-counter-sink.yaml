@@ -1,0 +1,57 @@
+version: 1
+feature_id: decision-counter-sink
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/factories/turn-summary.ts:buildTurnSummaryAndStream
+entrypoints:
+  - src/apps/cli/repl.ts:buildTurnSummaryAndStream
+activation:
+  - QUANTA_DECISION_METRICS truthy value enables the CLI decision sink
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/observability/metrics/decision-counter-sink.ts:createDecisionCounterSink
+consumer:
+  - src/apps/cli/repl/factories/turn-summary.ts:appendDecisionCounterSink
+  - src/apps/cli/repl.ts:buildTurnSummaryAndStream
+reachable: yes
+surface_findings:
+  - The CLI feature config parses the knob once and only then allocates a registry and appends a TeeStream sink.
+  - OFF returns the literal upstream stream; decision fields other than kind and outcome never enter metric labels.
+off_identity_proof:
+  kind: source
+  command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/apps/cli/repl/factories/turn-summary.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Undefined metrics returns the input StreamPort reference and no registry or TeeStream is allocated.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability/decision-counter-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All gate kinds and outcomes increment canonical counters; non-decision events and high-cardinality fields do not create series.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'QUANTA_DECISION_METRICS|createDecisionCounterSink|buildTurnSummaryAndStream' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli src/observability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI parses the env knob and consumes the sink at the stream tee composition seam.
+  - kind: test
+    command: bun test tests/unit/observability/decision-counter-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 18 focused tests passed for matrix coverage, accumulation, no-throw degradation, and label-cardinality boundaries.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

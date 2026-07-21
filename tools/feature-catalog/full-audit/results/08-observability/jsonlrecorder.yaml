@@ -1,0 +1,53 @@
+version: 1
+feature_id: jsonlrecorder
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/stream/adapters/jsonl-recorder.ts:JsonlRecorder
+entrypoints:
+  - src/runner/assemble/streaming.ts:stream assembly
+  - src/runner/batch/observe.ts:bench observer
+activation:
+  - Set QUANTA_OBSERVE_DIR or provide an observe directory to a stream assembly; the recorder is constructed under a run-specific JSONL path.
+effective_defaults:
+  cli: off
+  web: off
+  bench: on
+  headless: off
+  daemon: off
+producer:
+  - AgentEvent stream
+consumer:
+  - JSONL trajectory file
+  - TeeStream fan-out
+reachable: yes
+surface_findings:
+  - Each supported AgentEvent becomes newline-framed trajectory JSON with deterministic sequence and span identifiers; turn boundaries and errors flush buffered data.
+  - Data is redacted before disk write. Non-strict write failures are observable degradation while strict mode rethrows; close remains idempotent.
+off_identity_proof:
+  kind: source
+  command: rg -n 'new JsonlRecorder|QUANTA_OBSERVE_DIR' src/runner/assemble/streaming.ts src/apps/cli/internal/argv.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: CLI assembly creates the recorder only from an explicit observe directory; the absent directory path does not add a stream sink.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/jsonl-recorder.test.ts tests/unit/jsonl-recorder-retention.test.ts tests/unit/tee.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Event normalization, JSONL validity, redaction, sequence and span stability, flush and failure behavior, retention, and fan-out rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/jsonl-recorder.test.ts tests/unit/jsonl-recorder-retention.test.ts tests/unit/tee.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused recorder command passed JSONL codec, retention, redaction, and TeeStream rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

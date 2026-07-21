@@ -1,0 +1,54 @@
+version: 1
+feature_id: eval-tier0-audit-grep-mapper
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/audit/grep-mapper.ts:auditOne
+entrypoints:
+  - src/apps/eval/index.ts:runAudit
+activation:
+  - Run the standalone eval audit command to scan taxonomy leaves with curated rules.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/eval/audit/grep-mapper.ts:auditOne
+  - src/apps/eval/audit/matrix.ts:buildMatrix
+consumer:
+  - src/apps/eval/audit/index.ts:runAudit
+  - src/apps/eval/index.ts:eval audit command
+reachable: no
+surface_findings:
+  - This is an offline eval application subsystem with no interactive CLI or web import path.
+  - It resolves rg then grep and reports neither-tool or invocation failures as tbd evidence instead of silently returning no matches.
+  - The batch loop isolates exceptions per taxonomy leaf, persists each finding, and exposes an error count rather than aborting the complete audit.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-audit-matrix.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Matrix rollup behavior and unknown-usecase exclusion passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: proof-gap
+blocker: The only declared focused test covers matrix rollup, not auditOne's rg-to-grep fallback, null-separated parsing, neither-tool failure, invocation-error evidence, or per-leaf error isolation.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'auditOne|resolveTool|runGrep|runAudit|buildMatrix' src/apps/eval/audit src/apps/eval/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The standalone eval path resolves tool failures explicitly, aggregates all leaves, and persists findings.
+  - kind: test
+    command: bun test tests/unit/eval-audit-matrix.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused matrix rail passed within the 315-pass 18-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

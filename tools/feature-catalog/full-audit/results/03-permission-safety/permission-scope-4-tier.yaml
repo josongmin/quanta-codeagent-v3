@@ -1,0 +1,53 @@
+version: 1
+feature_id: permission-scope-4-tier
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/permission-profile.ts:strongerScope
+entrypoints:
+  - src/permission/index.ts:strongerScope export
+activation:
+  - No CLI flag, environment configuration, profile resolver, or runtime policy consumer invokes strongerScope.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/permission/permission-profile.ts:PERMISSION_SCOPE_PRECEDENCE_DESC
+  - src/permission/permission-profile.ts:strongerScope
+  - src/permission/permission-profile.ts:isPermissionScope
+consumer: []
+reachable: no
+surface_findings:
+  - The precedence tuple, type guard, and strongerScope helper are implemented and unit tested.
+  - Production search finds no call to strongerScope and no concrete PermissionScope storage or resolution path.
+  - The catalog statement that managed/project/user/open resolves permission conflicts is therefore not runtime-active.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission-profile-types.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused 116-pass audit rail proves the pure ordering and guard behavior.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: PermissionScope is a type-and-helper catalogue with no production conflict-resolution caller or persisted scope input.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg "PermissionScope|strongerScope|PERMISSION_SCOPE_PRECEDENCE_DESC|isPermissionScope" src --glob '!**/*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Results are declarations, comments, and barrel export only; no runtime invocation of strongerScope exists.
+  - kind: test
+    command: bun test tests/unit/permission-profile-types.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Scope precedence and parse-boundary tests passed in the 116-pass focused audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch4
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,53 @@
+version: 1
+feature_id: refresh-coordinator
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/auth/chatgpt-oauth/refresh.ts:RefreshCoordinator
+entrypoints:
+  - src/llm/adapters/chatgpt-oauth.ts:ChatGPT OAuth refresh path
+activation:
+  - Use a ChatGPT OAuth-backed adapter with an expired access token and a refresh token.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/auth/chatgpt-oauth/refresh.ts:RefreshCoordinator.refresh
+consumer:
+  - src/auth/chatgpt-oauth/refresh.ts:refreshToken
+  - src/llm/adapters/chatgpt-oauth.ts
+  - src/apps/bench/remote/fresh-auth.ts
+reachable: yes
+surface_findings:
+  - The module default coordinator is consumed by the OAuth adapter and shares one in-flight exchange per issuer, client, and refresh token.
+  - Slots are installed before await and cleared in finally after either outcome, so rejection is shared and stale slots do not accumulate.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/auth/refresh.test.ts tests/unit/auth/t07-refresh-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Same-key deduplication, rejection cleanup, per-instance isolation, and default singleton rails passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'RefreshCoordinator|refreshToken\\(' src/auth/chatgpt-oauth/refresh.ts src/llm/adapters/chatgpt-oauth.ts src/apps/bench/remote/fresh-auth.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Live OAuth and bench consumers invoke the shared refresh coordinator.
+  - kind: test
+    command: bun test tests/unit/auth/refresh.test.ts tests/unit/auth/t07-refresh-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused refresh concurrency rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,59 @@
+version: 1
+feature_id: ratelimit-dual-window-snapshot
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/stream-consume.ts:feedProviderRateLimitToMeter
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/agent/loop/stream-consume.ts:buildResponseHeadersHook
+activation:
+  - QUANTA_MEMORY_WRITE_GUARD_PCT creates a BudgetMeter and provider response headers carry a recognized quota signal.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/ratelimit-snapshot/dual-window.ts:parseDualWindowSnapshot
+consumer:
+  - src/agent/loop/stream-consume.ts:feedProviderRateLimitToMeter
+  - src/host/bootstrap/bootstrap-session.ts:BudgetMeter wiring
+reachable: yes
+surface_findings:
+  - The live loop parses Codex used-percent headers and feeds 100-used to BudgetMeter, preferring the primary window and falling back to secondary.
+  - The catalog's AccountRateLimitStore claim is stale: that dead export was removed, and no per-account snapshot store or meter renderer exists.
+  - The catalog's no-live-consumer claim is stale because the response-header hook is wired whenever BudgetMeter is present.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/loop/memory-guard-provider-feed-loop-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: With no meter and no rate-limit feature, the hook is omitted; no quota parser path is installed.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm/ratelimit-dual-window-hellgate.test.ts tests/unit/memory-write-guard-provider-feed-seam-hellgate.test.ts tests/unit/loop/memory-guard-provider-feed-loop-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 24 parser, direct header-to-meter, and live loop-hook cases pass, including primary/secondary precedence and no-invented-value controls.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog describes a removed AccountRateLimitStore and says no live consumer despite the live parser-to-BudgetMeter loop path.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg -n 'parseDualWindowSnapshot|feedProviderRateLimitToMeter|buildResponseHeadersHook|QUANTA_MEMORY_WRITE_GUARD_PCT' src/llm/ratelimit-snapshot src/agent/loop/stream-consume.ts src/host/bootstrap"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The parser feeds the loop's BudgetMeter hook; dual-window.ts documents the removed per-account-store half.
+  - kind: test
+    command: bun test tests/unit/llm/ratelimit-dual-window-hellgate.test.ts tests/unit/memory-write-guard-provider-feed-seam-hellgate.test.ts tests/unit/loop/memory-guard-provider-feed-loop-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 24 focused parser and live wire cases pass.
+audited_at: "2026-07-19"
+auditor: codex/p1-llm-extended
+review_state: approved
+reviewer: codex/cross-review-wave1

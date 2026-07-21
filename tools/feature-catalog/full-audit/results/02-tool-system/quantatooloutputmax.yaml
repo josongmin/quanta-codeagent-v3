@@ -1,0 +1,58 @@
+version: 1
+feature_id: quantatooloutputmax
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/output-spill.ts:capToolOutput
+entrypoints:
+  - src/tool/registry.ts:ToolRegistry.run
+activation:
+  - Execute any registered tool whose output exceeds the effective cap; set QUANTA_TOOL_OUTPUT_MAX to a positive value to override the 200000-character default.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/shared/runtime-config.ts:toolOutputMaxChars
+  - src/tool/output-spill.ts:capToolOutput
+consumer:
+  - src/tool/registry.ts:ToolRegistry.run
+reachable: yes
+surface_findings:
+  - The universal registry applies a 200000-character cap when no valid environment override exists; under-cap results are returned byte-identically.
+  - Over-cap output is asynchronously written under the session cwd, replaced with a bounded head/tail marker, and spill retention is best-effort bounded.
+  - Invalid, zero, negative, and non-finite cap settings resolve back to the default rather than disabling the safety cap.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/output-spill.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Under-cap and boundary outputs remain unchanged with no write or GC activity.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/output-spill.test.ts tests/unit/output-spill-async-hellgate.test.ts tests/integration/tool-spill-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Override resolution, full-content spill, marker rendering, awaited async I/O, bounded GC, and real registry-to-agent spill behavior passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'toolOutputMaxChars|QUANTA_TOOL_OUTPUT_MAX|capToolOutput|spillKeep' src/shared/runtime-config.ts src/tool/output-spill.ts src/tool/registry.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Frozen runtime config feeds the universal registry cap and spill policy.
+  - kind: test
+    command: bun test tests/unit/output-spill.test.ts tests/unit/output-spill-async-hellgate.test.ts tests/integration/tool-spill-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused cap and spill rails passed within the 155-pass 10-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

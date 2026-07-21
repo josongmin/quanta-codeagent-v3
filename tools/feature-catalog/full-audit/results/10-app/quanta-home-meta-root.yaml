@@ -1,0 +1,53 @@
+version: 1
+feature_id: quanta-home-meta-root
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/quanta-home.ts:quantaHomeDir
+entrypoints:
+  - src/shared/runtime-config.ts:quantaHome
+activation:
+  - Set QUANTA_HOME before the process snapshot is built, or use the default home root.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/shared/quanta-home.ts:quantaHomeDir
+consumer:
+  - src/permission/permission-store.ts:default path
+  - src/apps/bench/corpus/paths.ts:bench paths
+  - src/apps/cli:preference and history paths
+reachable: yes
+surface_findings:
+  - Shared home resolution is consumed by permission, bench, CLI, and daemon-owned persistent paths.
+  - QUANTA_HOME is optional; absence resolves the normal home root without a behavior gap.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/help-render-discovery-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: CLI help and SSOT-routed environment discovery rail passed; source consumers confirm cross-slice path use.
+failure_posture: fail-loud
+security_posture: conditional
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'quantaHomeDir|quantaHomePath' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/permission src/apps src/shared
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Persistent path owners consume the shared home resolver.
+  - kind: test
+    command: bun test tests/unit/cli/help-render-discovery-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Help discovery and routed knob rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

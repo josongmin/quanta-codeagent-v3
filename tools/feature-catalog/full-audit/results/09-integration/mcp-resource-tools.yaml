@@ -1,0 +1,57 @@
+version: 1
+feature_id: mcp-resource-tools
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal.ts:loadFeatures MCP resources gate
+entrypoints:
+  - src/apps/cli/internal.ts:loadFeatures and buildMcpResourceTools
+  - src/agent/mcp-bridge.ts:resourcesHandleFor and aggregateResourcesHandle
+activation:
+  - Set QUANTA_MCP_RESOURCES=1 and connect at least one MCP server advertising resources or prompts; the CLI registers the six resource and prompt tools through the mcp-origin array.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - connected MCP resources and prompts aggregate handle
+consumer:
+  - six mcp resource/prompt tools and the CLI resource capture holder
+reachable: yes
+surface_findings:
+  - loadFeatures builds the aggregate from live or supervised clients, applies the strict gate, and appends tools through mcpTools so outputs receive MCP untrusted-source provenance and defanging.
+  - Read and prompt operations are typed no-throw; blob output is jailed and capped rather than inlined, while unavailable capabilities and reconnect gaps return typed failures.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mcp-resources-host-wire-e2e-hellgate.test.ts tests/unit/mcp-resource-tools-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent gate, client, or resource capability leaves no resource tool registration and preserves the bare default menu.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp-resource-tools-hellgate.test.ts tests/unit/mcp-resources-host-wire-e2e-hellgate.test.ts tests/unit/mcp-resources-supervised-hellgate.test.ts tests/unit/mcp-resources-prompts-roots-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed live single and multi-client routing, supervised restart behavior, all six tools, typed failures, output caps, jailed blobs, and hostile-content defanging.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'loadMcpToolsOrEmpty|mcpResourcesTools|aggregateResourcesHandle|runtimeConfig\\(\\).mcpResources' src/apps/cli/internal.ts src/agent/mcp-bridge.ts src/host/mcp-composition.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI loading, aggregate construction, strict gate, and mcp-origin tool append are all production paths.
+  - kind: test
+    command: bun test tests/unit/mcp-resource-tools-hellgate.test.ts tests/unit/mcp-resources-host-wire-e2e-hellgate.test.ts tests/unit/mcp-resources-supervised-hellgate.test.ts tests/unit/mcp-resources-prompts-roots-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All focused resource and prompt tool rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

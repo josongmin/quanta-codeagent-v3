@@ -1,0 +1,59 @@
+version: 1
+feature_id: adaptive-thinking
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/skill-gate.ts:applyEffortClassifierFloor
+entrypoints:
+  - src/shared/runtime-config.ts:runtimeConfig().adaptiveThinking
+  - src/agent/loop/skill-gate.ts selects the Anthropic thinking shape before the LLM stream call
+activation:
+  - QUANTA_ADAPTIVE_THINKING=1 with positive effort and a supported Anthropic family sends thinking:{type:adaptive}.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/loop/skill-gate.ts:applyEffortClassifierFloor
+  - src/llm/factory.ts:supportsAdaptiveThinking
+consumer:
+  - src/llm/adapters/anthropic.ts
+  - src/llm/anthropic-messages-codec.ts
+reachable: yes
+surface_findings:
+  - Gate-off preserves manual enabled/budget_tokens for the same effort and model.
+  - Gate-on is family-gated; unsupported and unknown models retain manual thinking, and OpenAI Responses ignores the Anthropic-only shape.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/adaptive-thinking-hellgate.test.ts tests/integration/adaptive-thinking-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off real-loop control sends the manual enabled/budget_tokens arm for opus-4-8.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/adaptive-thinking-hellgate.test.ts tests/integration/adaptive-thinking-real-loop-e2e.test.ts tests/integration/dof22-behavioral-gate-sweep.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 30 focused cases prove family normalization, codec wire shape, real runAgent delivery of adaptive without budget_tokens, and unsupported-family fallback.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n --glob 'src/**' 'adaptiveThinking|supportsAdaptiveThinking|QUANTA_ADAPTIVE_THINKING' src/shared src/agent src/llm
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The shared gate feeds the loop producer, which family-gates the adaptive union arm before Anthropic encoding.
+  - kind: test
+    command: bun test tests/unit/adaptive-thinking-hellgate.test.ts tests/integration/adaptive-thinking-real-loop-e2e.test.ts tests/integration/dof22-behavioral-gate-sweep.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 30 focused unit and real-loop cases pass.
+audited_at: "2026-07-19"
+auditor: codex/p1-observability-b
+review_state: approved
+reviewer: codex/cross-review-wave1

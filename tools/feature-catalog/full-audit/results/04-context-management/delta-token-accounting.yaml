@@ -1,0 +1,62 @@
+version: 1
+feature_id: delta-token-accounting
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/session-bootstrap.ts:createRunAgentContext
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+  - src/agent/loop/compaction-wire.ts:runMicrocompactPrepass
+  - src/agent/loop/recovery-executor.ts:applyCompactRecovery
+activation:
+  - QUANTA_DELTA_TOKEN_COUNT must be exactly 1.
+  - The composition root decorates WorkingMemory and live compaction reads tokenTotal when present.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/token-delta/counter.ts:createTokenDeltaCounter
+  - src/agent/token-delta/wm-decorator.ts:decorateWithDeltaCounter
+consumer:
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+  - src/agent/loop/compaction-wire.ts:runMicrocompactPrepass
+  - src/agent/loop/recovery-executor.ts:applyCompactRecovery
+reachable: yes
+surface_findings:
+  - "Strict env opt-in constructs the WorkingMemory decorator at the composition root; ON feeds the real proactive and reactive compaction reads."
+  - "OFF retains the raw WorkingMemory without tokenTotal or tokenReseed, while surfaced counts and non-usage events remain byte-identical."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/delta-token-knob-off-hellgate.test.ts tests/unit/delta-token-loop-wire-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset and nonliteral env values leave raw WorkingMemory in place and preserve precheck/event output.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/delta-token-identity-hellgate.test.ts tests/unit/delta-token-property-fuzz-r2-hellgate.test.ts tests/unit/delta-ratelimit-reachability-hellgate.test.ts tests/unit/delta-token-loop-wire-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Counter equality fuzz, root decoration, reseed mutation coverage, and real loop precheck reachability pass.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "deltaTokenCount|decorateWithDeltaCounter|tokenTotal" src/agent/loop/session-bootstrap.ts src/agent/loop/compaction-wire.ts src/agent/loop/recovery-executor.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The strict config gate decorates WorkingMemory once and both live compaction owners consume the optional O(1) total.
+  - kind: test
+    command: bun test tests/unit/delta-token-identity-hellgate.test.ts tests/unit/delta-token-knob-off-hellgate.test.ts tests/unit/delta-token-property-fuzz-r2-hellgate.test.ts tests/unit/delta-ratelimit-reachability-hellgate.test.ts tests/unit/delta-token-loop-wire-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 114 selected focused tests passed in the shared rail, covering ON efficacy, OFF identity, root wiring, and drift recovery.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch3
+review_state: approved
+reviewer: codex/cross-review-wave1

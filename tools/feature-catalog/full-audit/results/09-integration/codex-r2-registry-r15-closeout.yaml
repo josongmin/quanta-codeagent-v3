@@ -1,0 +1,58 @@
+version: 1
+feature_id: codex-r2-registry-r15-closeout
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/session-registry-cmd.ts:sessionRegistryCmd
+entrypoints:
+  - src/apps/cli/session-registry-cmd.ts:sessionRegistryCmd
+  - src/agent/session-resource-registry/sqlite-adapter/gc.ts:sweepSqliteRegistry
+  - src/agent/session-resource-registry/in-memory-registry.ts:listSessionIds
+activation:
+  - CLI registry slash exposes evict hygiene, bulk pattern eviction, and cleanup dry-run; SQLite WAL mode is selected by configured threshold and upgrade mode.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: na
+  daemon: resource
+producer:
+  - Registry backends expose listSessionIds and sweep results including mutually exclusive WAL restart/truncate outcomes.
+consumer:
+  - The CLI slash consumes listSessionIds and cleanup helpers; auto-sweep consumes configured WAL upgrade mode.
+reachable: yes
+surface_findings:
+  - Web has no registry slash command handler; its prefill palette is not an execution surface.
+  - TRUNCATE is opt-in behind threshold and walCheckpointUpgradeMode; absence retains passive/RESTART-compatible behavior.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/auto-sweep-hellgate.test.ts tests/unit/session-registry-slash.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent upgrade mode retains default behavior and no-flag cleanup remains the existing sweep path.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/agent/session-resource-registry/__tests__/registry.hellgate.test.ts src/agent/session-resource-registry/disk-adapter/__tests__/disk-store.hellgate.test.ts src/agent/session-resource-registry/sqlite-adapter/__tests__/sqlite-store.hellgate.test.ts src/agent/session-resource-registry/sqlite-adapter/__tests__/gc.hellgate.test.ts tests/unit/session-registry-slash.test.ts tests/unit/auto-sweep-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: List enumeration, glob safety cap, dry-run, WAL TRUNCATE, and result mutual exclusion rails passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "walCheckpointUpgradeMode|listSessionIds|BULK_EVICT_MAX_MATCHES|countSqliteRegistryCleanupCandidates" src/agent/session-resource-registry src/apps/cli/session-registry-cmd.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: R15 registry and slash consumers are present at the live owners.
+  - kind: test
+    command: bun test src/agent/session-resource-registry/__tests__/registry.hellgate.test.ts src/agent/session-resource-registry/disk-adapter/__tests__/disk-store.hellgate.test.ts src/agent/session-resource-registry/sqlite-adapter/__tests__/sqlite-store.hellgate.test.ts src/agent/session-resource-registry/sqlite-adapter/__tests__/gc.hellgate.test.ts tests/unit/session-registry-slash.test.ts tests/unit/auto-sweep-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 161 focused R15 registry, SQLite, slash, and auto-sweep tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

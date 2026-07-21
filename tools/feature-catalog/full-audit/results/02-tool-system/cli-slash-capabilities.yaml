@@ -1,0 +1,53 @@
+version: 1
+feature_id: cli-slash-capabilities
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/slash-commands-capabilities.ts:capabilitiesCmd
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/slash/registry-app.ts
+activation:
+  - In an interactive CLI session, invoke /capabilities or /caps.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/slash-commands-capabilities.ts:capabilitiesCmd
+  - src/capability/resolve.ts:resolveExposure
+consumer:
+  - src/apps/cli/slash/registry-app.ts
+reachable: yes
+surface_findings:
+  - The app slash registry registers /capabilities and /caps as a read-only capability exposure inspector.
+  - Master-gate-off mode is explicitly probe-only; command rendering does not mutate capability gates or environment.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/slash-commands-capabilities.test.ts tests/unit/capability/descriptor-and-registry.test.ts tests/unit/capability/capability-probe-bootstrap-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Registry discovery, exposure-grid resolution, master-gate behavior, filtering, completion, and probe bootstrap rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'capabilitiesCmd|capsAliasCmd|resolveExposure' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/slash src/apps/cli/slash-commands-capabilities.ts src/capability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Interactive slash registry consumes the command and it resolves capability exposure through the shared layer.
+  - kind: test
+    command: bun test tests/unit/cli/slash-commands-capabilities.test.ts tests/unit/capability/descriptor-and-registry.test.ts tests/unit/capability/capability-probe-bootstrap-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Capability command rails passed in the 197-pass focused bundle.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

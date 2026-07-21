@@ -1,0 +1,54 @@
+version: 1
+feature_id: eval-taxonomy-classifier
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/taxonomy/classifier.ts:classifyQuery
+entrypoints:
+  - package.json:eval
+  - src/apps/eval/index.ts:classifyCommand
+  - src/apps/eval/trajectory/classifier.ts:classifyTrajectories
+activation:
+  - Run eval classify with a configured LLM provider, or run trajectory classification over sessions with authoritative metadata.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/eval/taxonomy/classifier.ts:classifyQuery
+consumer:
+  - src/apps/eval/index.ts:classifyCommand
+  - src/apps/eval/trajectory/classifier.ts:classifyTrajectories
+reachable: no
+surface_findings:
+  - The separate eval application invokes classifyQuery for its ad-hoc classify command and the trajectory classifier delegates to it.
+  - Stream/JSON failures retain error information, while a valid null or unknown taxonomy selection remains distinguishable from infrastructure failure.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-classifier-parse.test.ts tests/unit/eval-error-channels.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Clean/prose JSON extraction, unknown-id handling, and model-error versus legitimate-null channel separation passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'classifyQuery|classifyTrajectories' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/eval/index.ts src/apps/eval/taxonomy src/apps/eval/trajectory
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Eval CLI and trajectory classification both consume the taxonomy classifier; interactive CLI does not.
+  - kind: test
+    command: bun test tests/unit/eval-classifier-parse.test.ts tests/unit/eval-error-channels.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Classifier parse and error-channel cases passed in the 46-pass eval unit bundle.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

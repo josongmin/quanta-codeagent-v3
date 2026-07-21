@@ -1,0 +1,55 @@
+version: 1
+feature_id: eval-tier3-trajectory
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/trajectory/index.ts:classifyTrajectories, replayFixture, and freezeFixture
+entrypoints:
+  - package.json:eval:trajectory
+  - src/apps/eval/index.ts:trajectoryCommand
+activation:
+  - Run eval trajectory classify, replay, or freeze against a real session fixture and a configured provider where replay/classification is requested.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/eval/trajectory/classifier.ts:classifyTrajectories
+  - src/apps/eval/trajectory/replay.ts:replayFixture
+  - src/apps/eval/trajectory/freeze.ts:freezeFixture
+consumer:
+  - src/apps/eval/index.ts:trajectoryCommand
+reachable: no
+surface_findings:
+  - Eval CLI maps classify, replay, and freeze subcommands to the trajectory module; classifier delegates only authoritative meta userPrompt values to taxonomy.
+  - Missing/malformed sidecars degrade without invented metadata, while freeze refuses a fixture lacking both sidecar and supplied prompt.
+  - Replay structural diff ignores known non-semantic noise and emits a bounded matched/partial/fail verdict.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-classifier-parse.test.ts tests/unit/eval-replay-verdict.test.ts tests/unit/eval-freeze.test.ts tests/unit/eval-meta-sidecar.test.ts tests/unit/eval-trajectory-diff.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Taxonomy parsing, replay threshold, freeze authority, sidecar degradation, and structural diff rails passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'classifyTrajectories|replayFixture|freezeFixture' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/eval/index.ts src/apps/eval/trajectory
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Eval trajectory command directly consumes all three public trajectory operations.
+  - kind: test
+    command: bun test tests/unit/eval-classifier-parse.test.ts tests/unit/eval-replay-verdict.test.ts tests/unit/eval-freeze.test.ts tests/unit/eval-meta-sidecar.test.ts tests/unit/eval-trajectory-diff.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Owner-local parse, verdict, freeze, metadata, and diff rails passed across the 46-pass and 22-pass eval bundles.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

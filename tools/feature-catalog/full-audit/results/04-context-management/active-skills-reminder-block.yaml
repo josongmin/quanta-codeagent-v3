@@ -1,0 +1,55 @@
+version: 1
+feature_id: active-skills-reminder-block
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/prompt-reminders.ts:renderActiveSkillsBlock"
+entrypoints:
+  - "src/agent/loop/context-assembler.ts:assembleTurnContext"
+  - "src/agent/prompt.ts:buildTurnContext"
+activation:
+  - "A nonempty activeSkills inventory is passed from AgentConfig through the loop context assembler and selects the active-skills dynamic reminder atom."
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: on
+  daemon: on
+producer:
+  - "src/agent/features.ts:loadAgentFeatures activeSkills inventory"
+  - "src/agent/prompt-reminders.ts:renderActiveSkillsBlock"
+consumer:
+  - "src/agent/loop/context-assembler.ts:assembleTurnContext"
+  - "src/agent/prompt-reminders.ts:contentByKey"
+  - "src/agent/prompt.ts:buildTurnContext"
+reachable: yes
+surface_findings:
+  - "The renderer retains supplied inventory order and only the first description line; SKILL.md bodies remain lazy."
+  - "Absent or empty inventory emits no block and does not perturb the cached system prefix."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/skill-trigger-rules.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Catalogue rendering, trigger footer, ordering, first-line disclosure, empty identity, memory ordering, and static-prefix isolation passed."
+failure_posture: na
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg activeSkills and renderActiveSkillsBlock in src/agent/features.ts src/agent/loop/context-assembler.ts src/agent/prompt-reminders.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The feature inventory reaches TurnContextInput.activeSkills, where the dynamic active-skills atom invokes the renderer."
+  - kind: test
+    command: "bun test tests/unit/agent/prompt-sections.test.ts tests/unit/prompt-sections-hellgate.test.ts tests/unit/prompt-dynamic.test.ts tests/unit/today-date-clock-port-hellgate.test.ts tests/unit/skill-trigger-rules.test.ts tests/integration/mode-block-matrix-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "98 pass, 0 fail across the shared focused prompt context audit rail."
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch2
+review_state: approved
+reviewer: codex/cross-review-wave1

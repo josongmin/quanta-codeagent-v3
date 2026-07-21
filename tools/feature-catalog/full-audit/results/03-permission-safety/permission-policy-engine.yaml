@@ -1,0 +1,59 @@
+version: 1
+feature_id: permission-policy-engine
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/admissibility-gate/gates.ts:runModePolicy"
+entrypoints:
+  - "src/agent/dispatch.ts:dispatchToolInner"
+  - "src/agent/admissibility-gate.ts:runAdmissibilityGate"
+activation:
+  - "Every registered dispatch reaches runAdmissibilityGate before execution."
+  - "The mode policy evaluates the permission stack when configured and otherwise applies the core policy, with the auto classifier used only for auto mode."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - "src/permission/policy.ts:evaluate"
+  - "src/permission/policy.ts:evaluateAuto"
+  - "src/permission/policy.ts:evaluateStack"
+  - "src/permission/policy.ts:inferToolTier"
+consumer:
+  - "src/agent/admissibility-gate/gates.ts:runModePolicy"
+  - "src/agent/admissibility-gate/gates.ts:runPermissionStack"
+  - "src/agent/dispatch.ts:dispatchToolInner"
+reachable: yes
+surface_findings:
+  - "The common dispatch path calls the admissibility gate before execute; its mode-policy and stack branches delegate to the policy engine with a registry-derived shell command."
+  - "HARD_DENY precedes read-only, HITL, auto classifier, and stack grants, preventing spoofed read-only or allow paths from widening a shell boundary."
+  - "The policy engine is a pure resolver, with stateful stores and classifier passed through its narrow context ports."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/admissibility-gate.test.ts tests/unit/admissibility-hellgate.test.ts tests/integration/admissibility-deny-steer-hell.test.ts tests/integration/hard-deny-mid-multitool-hell-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Canonical ordering, HARD_DENY precedence, stack/HITL behavior, deny steering, and mixed multi-tool execution order passed."
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'runAdmissibilityGate|runModePolicy|runPermissionStack|evaluateAuto|evaluateStack|hardDeny' src/agent/dispatch.ts src/agent/admissibility-gate.ts src/agent/admissibility-gate/gates.ts src/permission/policy.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Production dispatch-to-gate-to-policy calls are explicit, with HARD_DENY at the policy boundary before permit paths."
+  - kind: test
+    command: "bun test tests/unit/admissibility-gate.test.ts tests/unit/admissibility-hellgate.test.ts tests/integration/admissibility-deny-steer-hell.test.ts tests/integration/hard-deny-mid-multitool-hell-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Focused policy and dispatch integration rail passed in the 270-test audit batch."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch8
+review_state: approved
+reviewer: codex/cross-review-wave1

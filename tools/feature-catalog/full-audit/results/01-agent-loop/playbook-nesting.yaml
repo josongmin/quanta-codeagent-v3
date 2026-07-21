@@ -1,0 +1,59 @@
+version: 1
+feature_id: playbook-nesting
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/playbook/nesting/default-executor.ts:createDefaultNestedExecutor
+entrypoints: []
+activation:
+  - The playbook barrel exports createDefaultNestedExecutor, but no production host constructs or injects a NestedPlaybookExecutor.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/skill/playbook/nesting/default-executor.ts:createDefaultNestedExecutor
+consumer: []
+reachable: no
+surface_findings:
+  - The primitive is exported from the playbook barrel but parser, validator, dispatcher, and host adapters do not construct it.
+  - The existing macro path stays byte-identical because nesting has no production composition-root wire.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/skill/playbook/nesting-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: HELL-PN-10 proves the pre-0258 macro path is byte-identical when the executor is not constructed.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill/playbook/nesting-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 15 isolated primitive cases passed in the combined focused run; this does not establish host activation.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No host adapter, procedure-step dispatcher branch, or composition-root injection constructs NestedPlaybookExecutor.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg -n 'createDefaultNestedExecutor|NestedPlaybookExecutor' src --glob '!src/skill/playbook/nesting/**' --glob '!src/skill/playbook/index.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production construction or injection consumer exists outside the nesting slice and barrel export.
+  - kind: test
+    command: bun test tests/unit/skill/playbook/nesting-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All 15 bounded-recursion, cycle, failure, isolation, and default-off primitive cases passed.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Generic module reachability sees the barrel export, but consumer analysis finds no host invocation; production activation is absent.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-core
+review_state: approved
+reviewer: codex/cross-review-wave1

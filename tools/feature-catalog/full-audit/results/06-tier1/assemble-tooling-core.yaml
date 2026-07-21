@@ -1,0 +1,53 @@
+version: 1
+feature_id: assemble-tooling-core
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/tooling.ts:buildToolingCore
+entrypoints:
+  - src/apps/cli/internal.ts:buildTooling
+activation:
+  - CLI always builds the core after resolving its tool lists and typed configuration blocks.
+  - Store presence enables memory tools unless memory.selfEditTools is explicitly false.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: on
+  daemon: na
+producer:
+  - src/runner/assemble/tooling.ts:buildToolingCore
+consumer:
+  - src/apps/cli/internal.ts:buildTooling
+  - src/runner/assemble/config.ts:assembleConfig
+reachable: yes
+surface_findings:
+  - The CLI builds one registry from default, MCP, memory, LSP, navigation, git, and extra tools in the documented order.
+  - The default-on memory integration test drives the exact core through assembleConfig and then a real runAgent recall path.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/memory-default-on-e2e-hellgate.test.ts tests/integration/cli-export-assembly.test.ts tests/unit/memory-mode-knob-wire-hellgate.test.ts tests/unit/assemble-gate-log-level.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 34 focused checks prove registry creation, store-to-config identity, real memory tool dispatch, CLI assembly, and structured gate logs.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/apps/cli/internal.ts | rg -n -C 3 'return buildToolingCore\\('
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live CLI envelope resolves surface inputs and returns the runner core result directly.
+  - kind: test
+    command: bun test tests/integration/memory-default-on-e2e-hellgate.test.ts tests/integration/cli-export-assembly.test.ts tests/unit/memory-mode-knob-wire-hellgate.test.ts tests/unit/assemble-gate-log-level.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused assembly and dispatch rails passed in the snapshot-equivalent source set.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch20
+review_state: approved
+reviewer: codex/cross-review-wave1

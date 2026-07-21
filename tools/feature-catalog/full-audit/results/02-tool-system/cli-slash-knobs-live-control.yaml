@@ -1,0 +1,62 @@
+version: 1
+feature_id: cli-slash-knobs-live-control
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/slash-commands-knobs.ts:buildKnobsSlash
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/slash/registry-app.ts
+  - src/apps/cli/cli-knobs-accessor.ts
+activation:
+  - In an interactive CLI session invoke /knobs show, set, reset, preset, or save.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/slash-commands-knobs.ts:buildKnobsSlash
+  - src/shared/knob-overrides.ts
+  - src/config/knob-catalog.ts:displaySafeValue
+consumer:
+  - src/apps/cli/cli-knobs-accessor.ts
+  - src/shared/runtime-config.ts
+reachable: yes
+surface_findings:
+  - CLI slash commands write only session override state and re-resolve runtime config on the next read; process environment is not mutated.
+  - Strict security-boundary knobs are refused for session override, and invalid enum/numeric values fail before storage.
+  - Web can read the catalog but has intentionally narrower write authority than CLI.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/shared/knob-overrides.test.ts tests/integration/cli/knob-control-plane-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No overrides preserves cached runtime-config identity and reset restores the prior effective value.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/slash-knobs.test.ts tests/unit/shared/knob-overrides.test.ts tests/integration/cli/knob-control-plane-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Live CLI and runtime-config updates, reset/preset/save, validation, redaction boundary, and single-store cross-channel rails passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildKnobsSlash|setKnobOverride|readCliKnob|filterSessionForbidden' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli src/shared src/config
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Slash command, CLI accessor, override store, and runtime config share the live session control plane.
+  - kind: test
+    command: bun test tests/unit/cli/slash-knobs.test.ts tests/unit/shared/knob-overrides.test.ts tests/integration/cli/knob-control-plane-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Knob control-plane rails passed in the 197-pass focused bundle.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

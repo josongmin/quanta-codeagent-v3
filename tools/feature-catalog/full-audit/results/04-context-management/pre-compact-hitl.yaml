@@ -1,0 +1,64 @@
+version: 1
+feature_id: pre-compact-hitl
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/compaction-wire.ts:buildCompactIfNeededOptions
+entrypoints:
+  - src/apps/cli/repl/surface-compose/core-state.ts:buildPreCompactHook
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts:buildRuntimeFacadeComposeOptions
+  - src/agent/loop/session-bootstrap.ts:buildSessionBootstrap
+activation:
+  - QUANTA_PRECOMPACT_CONFIRM truthy builds the CLI onPreCompact callback.
+  - A compactable over-threshold transcript invokes the callback through compaction-wire preflight.
+  - ConversationSummaryArchive additionally requires AgentConfig.compaction.archive true, for which no production composition owner was found.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/cli/repl/surface-compose/core-state.ts:buildPreCompactHook
+  - src/agent/loop/compaction-wire.ts:applyProactiveResult
+consumer:
+  - src/agent/loop/compaction-wire.ts:maybeCompact
+  - src/stream/adapters/stdout.ts:StdoutStream.emit
+  - src/stream/adapters/jsonl-recorder.ts:JsonlRecorder
+reachable: conditional
+surface_findings:
+  - "CLI HITL is reachable behind QUANTA_PRECOMPACT_CONFIRM and maps an approval response to approve or defer_one_turn."
+  - "Archive append and context_compacted emission are implemented in the loop, but no production composition site enables compaction.archive true."
+  - "The catalog's full CLI claim overstates the archive and event portion; only the HITL portion has a discovered surface activation."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/compaction-precompact.test.ts tests/unit/compaction-precompact-hook-approve-hellgate.test.ts tests/unit/compaction-archive-loop.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent preflight proceeds on the legacy path and archive false emits no context_compacted event.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/compaction-archive-loop.test.ts tests/unit/compaction-precompact.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The real loop honors approve, defer, and force decisions; an explicitly supplied archive appends and emits context_compacted.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: No production composition root sets AgentConfig.compaction.archive true, so the bundled archive and context_compacted claim cannot be activated from a shipped surface.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg QUANTA_PRECOMPACT_CONFIRM and compaction.archive in src/apps/cli src/agent src/runner src/host
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI builds the gated callback and compaction-wire consumes it; archive construction is guarded by compaction.archive with no producer outside tests.
+  - kind: test
+    command: bun test tests/unit/compaction-precompact.test.ts tests/unit/compaction-precompact-hook-approve-hellgate.test.ts tests/unit/compaction-archive-loop.test.ts tests/unit/conversation-summary-archive.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 176 selected focused tests passed in the shared audit rail; this subset proves callback decisions, OFF behavior, archive append, FIFO bounds, and stream event behavior.
+audited_at: "2026-07-19"
+auditor: codex/p1-context-core
+review_state: approved
+reviewer: codex/cross-review-wave1

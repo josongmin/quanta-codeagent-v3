@@ -1,0 +1,54 @@
+version: 1
+feature_id: llm-error-taxonomy
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/errors.ts:LLMError.fromSdkError
+entrypoints:
+  - src/llm/adapters/anthropic.ts
+  - src/llm/adapters/openai.ts
+  - src/agent/retry.ts
+activation:
+  - Provider adapters classify SDK failures at their boundary and retry and fallback consume the typed kind rather than re-parsing downstream messages.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/shared/errors.ts:LLMError.fromSdkError
+  - src/shared/error-classifier.ts:classify
+consumer:
+  - src/agent/retry.ts
+  - src/llm/fallback.ts
+reachable: yes
+surface_findings:
+  - Typed taxonomy routes retry, fallback, and policy handling across both provider adapters.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/errors.test.ts tests/unit/error-classifier-hellgate.test.ts tests/unit/fallback.test.ts tests/unit/critical-surfaces.test.ts tests/unit/llm-providers-fromsdkerror-16-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Taxonomy, adapter classification, and policy rails passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'fromSdkError|classify\(|LLMErrorKind' src/shared src/llm src/agent/retry.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Adapters produce and policy consumers branch on typed errors.
+  - kind: test
+    command: bun test tests/unit/errors.test.ts tests/unit/error-classifier-hellgate.test.ts tests/unit/fallback.test.ts tests/unit/critical-surfaces.test.ts tests/unit/llm-providers-fromsdkerror-16-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Classification and downstream policy rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,68 @@
+version: 1
+feature_id: prompt-cache-observability
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-config-assembler.ts:maybeWirePromptCacheObserver
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+activation:
+  - The CLI-default QUANTA_PROMPT_CACHE_STATUS gate causes the runtime assembler to mint one PromptCacheObserver for the session.
+  - buildPromptCacheBlock registers prompt_cache_status over that observer and the loop records provider usage into the same instance.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/observability/prompt-cache/default.ts:defaultPromptCacheObserver
+  - src/agent/loop/emit-helpers.ts:usage-event observer record
+  - src/tool/prompt_cache_status.ts:promptCacheStatusTool
+consumer:
+  - src/host/runtime/agent-config-assembler.ts:maybeWirePromptCacheObserver
+  - src/agent/tier1/prompt-cache.ts:buildPromptCacheBlock
+  - src/agent/features.ts:buildSessionFeatures
+reachable: yes
+surface_findings:
+  - The assembler owns one observer per enabled session; the agent loop records cache buckets into it and the tier-1 builder exposes the same object through the tool.
+  - The tool is a live read-only session surface and dispatches without a permission confirmation in normal or plan mode.
+  - A dedicated browser cache panel is absent, so no web-specific delivery claim is made.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/jun04-default-off-byte-identity-hellgate.test.ts tests/unit/tier1-prompt-cache-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: An unported tool build has no prompt_cache_status leak and an AgentConfig without the observer slot yields no tier-1 tool.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/prompt-cache-observability-hellgate.test.ts tests/unit/prompt-cache-tracker-hellgate.test.ts tests/unit/tier1-prompt-cache-hellgate.test.ts tests/unit/wired-tools-dispatch-permission-r3-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 68 focused cases passed, proving observer math and metrics, the shared observer-to-tool path, usage-bucket fidelity, and allowed read-only dispatch.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'maybeWirePromptCacheObserver|promptCacheObserver|buildPromptCacheBlock|prompt_cache_status' src/host src/agent src/tool src/observability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The frozen graph contains the assembler, loop record hook, tier-1 registration, and tool consumer over the same AgentConfig slot.
+  - kind: test
+    command: bun test tests/unit/prompt-cache-observability-hellgate.test.ts tests/unit/prompt-cache-tracker-hellgate.test.ts tests/unit/tier1-prompt-cache-hellgate.test.ts tests/unit/wired-tools-dispatch-permission-r3-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 68 observer, bridge, tool, shared-instance, and permission-path cases passed with zero failures.
+  - kind: test
+    command: bun test tests/unit/jun04-default-off-byte-identity-hellgate.test.ts tests/unit/tier1-prompt-cache-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 15 unported-menu and absent-observer identity cases passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-bench
+review_state: approved
+reviewer: codex/cross-review-wave1

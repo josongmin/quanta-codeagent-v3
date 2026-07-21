@@ -1,0 +1,65 @@
+version: 1
+feature_id: ide-context-provider-seam
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/context-assembler.ts:injectIdeContext
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+  - src/agent/loop/context-assembler.ts:injectIdeContext
+activation:
+  - AgentConfig.ideContextProvider is supplied by the host
+  - FileSystemIdeContextProvider reads <cwd>/.quanta/ide-context.json when selected
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/ide-context.ts:FileSystemIdeContextProvider.snapshot
+  - src/agent/types/wire-slots-session.ts:AgentConfig.ideContextProvider
+consumer:
+  - src/agent/loop/context-assembler.ts:injectIdeContext
+  - src/agent/prompt.ts:buildTurnContext
+reachable: yes
+surface_findings:
+  - "CLI: a configured provider is consumed by the real runAgent context assembly before the LLM request."
+  - "Web: no IDE-host adapter was found; catalog correctly declares this backend seam as web-na."
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/ide-context-provider-wire.test.ts tests/integration/ide-context-provider-l4.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent provider and absent context file leave user messages without an IDE block.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/ide-context-provider-wire.test.ts tests/integration/ide-context-provider-l4.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The real runAgent lifecycle consumes the file provider, inserts a scrubbed ide-context block, and contains provider failure at the boundary.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'ideContextProvider|injectIdeContext|FileSystemIdeContextProvider' src/agent src/apps/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: AgentConfig slot reaches injectIdeContext; concrete file provider and IDE preset seam are present.
+  - kind: test
+    command: bun test tests/unit/agent/ide-context-render.test.ts tests/integration/ide-context-provider-wire.test.ts tests/integration/ide-context-provider-l4.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Render escaping, default-off, failure containment, concrete provider lifecycle, privacy projection, and real-loop injection passed.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception was reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-context
+review_state: approved
+reviewer: codex/cross-review-wave1

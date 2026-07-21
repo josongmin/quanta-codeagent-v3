@@ -1,0 +1,60 @@
+version: 1
+feature_id: structured-output-mode
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/adapters/openai.ts:OpenAIAdapter.openRawStream and src/llm/anthropic-messages-codec.ts:buildAnthropicMessagesRequest
+entrypoints:
+  - src/llm/adapters/openai.ts:OpenAIAdapter.openRawStream
+  - src/llm/anthropic-messages-codec.ts:buildAnthropicMessagesRequest
+activation:
+  - A production caller must populate StreamInput.responseFormat for a request.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/structured-output.ts:toOpenAIResponseFormat
+  - src/llm/structured-output.ts:toAnthropicForcedTool
+consumer:
+  - src/llm/adapters/openai.ts:OpenAIAdapter.openRawStream conditionally emits response_format
+  - src/llm/anthropic-messages-codec.ts:buildAnthropicMessagesRequest conditionally emits one forced tool
+reachable: no
+surface_findings:
+  - "Both adapter wires consume a supplied StreamInput.responseFormat and have focused ON/OFF proofs."
+  - "No production src caller constructs StreamInput with responseFormat; the documented adaptive router supplies ordinary tools/toolChoice, then invokes only the validator on returned text."
+  - "The catalog's cli: full integration assertion is therefore not supported at this snapshot; this is an executable adapter seam awaiting a product caller."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/llm-structured-output-hellgate.test.ts tests/unit/llm-structured-output-anthropic-parity-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent responseFormat omits OpenAI response_format and Anthropic forced-tool/tool_choice fragments; paired byte-identity controls pass.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm-structured-output-hellgate.test.ts tests/unit/llm-structured-output-anthropic-parity-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 43 focused cases pass for OpenAI native json_schema, Anthropic forced-tool wire, malformed-format failure, and no-throw response validation.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No product composition path or production StreamInput caller sets responseFormat, so no CLI, daemon, batch, or web turn can activate the claimed mode.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n -g '*.ts' 'responseFormat\\s*:' src --glob '!src/llm/types.ts' --glob '!src/llm/structured-output.ts' --glob '!src/llm/adapters/openai.ts' --glob '!src/llm/anthropic-messages-codec.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production caller supplies responseFormat outside its type, leaf, and adapter consumption sites.
+  - kind: test
+    command: bun test tests/unit/llm-structured-output-hellgate.test.ts tests/unit/llm-structured-output-anthropic-parity-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 43 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-llm-core
+review_state: approved
+reviewer: codex/cross-review-wave1

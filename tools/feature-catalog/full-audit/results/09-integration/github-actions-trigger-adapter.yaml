@@ -1,0 +1,62 @@
+version: 1
+feature_id: github-actions-trigger-adapter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/integrations/github/event-source-actions.ts:createActionsEventSource
+entrypoints:
+  - src/apps/cli/from-pr-cmd-runner.ts:import.meta.main
+  - .github/workflows/quanta-pr-bot.yml.template:run quanta from-pr
+activation:
+  - A copied GitHub Actions workflow invokes the standalone from-pr runner with QUANTA_GH_ACTIONS_TRIGGER=1.
+  - createActionsEventSource accepts only a valid GitHub event file and a mention/trust-approved sender.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/integrations/github/event-source-actions.ts:createActionsEventSource
+  - src/integrations/github/event-payload.ts:normalizeGhEvent
+consumer:
+  - src/apps/cli/from-pr-cmd.ts:runFromPrCmd
+  - src/apps/cli/from-pr-cmd-runner.ts:runFromPrCmdMain
+  - .github/workflows/quanta-pr-bot.yml.template:run step
+reachable: yes
+surface_findings:
+  - The standalone import.meta.main runner is an executable root and is invoked by the shipped workflow template; it is not an interactive src/apps/cli/index.ts subcommand.
+  - The catalog's cli=missing evidence incorrectly treats the absence of a top-level interactive dispatcher edge as absence of the CI-bot executable path.
+  - The workflow template's stale prerequisite note says the runner has not landed even though from-pr-cmd-runner.ts exists in this snapshot.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/integrations/github/event-source-actions.test.ts tests/unit/integrations/github/event-source-actions-state-hellgate-r2.test.ts tests/unit/apps/cli/from-pr-cmd-runner.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset or non-1 QUANTA_GH_ACTIONS_TRIGGER yields no trigger and the standalone runner exits 0 without processing an event.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/integrations/github/event-source-actions.test.ts tests/unit/integrations/github/event-source-idempotency-hellgate.test.ts tests/integration/integrations/github/github-actions-end-to-end.test.ts tests/unit/integrations/github/cli-real-adapters-hellgate-r3.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Valid Actions payloads traverse event normalization, mention/trust gates, PR context, redaction, and idempotent comment posting; malformed, bot, and non-collaborator inputs do not emit.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'import\.meta\.main|runFromPrCmd|createActionsEventSource|QUANTA_GH_ACTIONS_TRIGGER|from-pr-cmd-runner' src/apps/cli src/integrations/github .github/workflows/quanta-pr-bot.yml.template
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The Actions adapter has a real standalone consumer and workflow installation path; the interactive dispatcher is intentionally not that consumer.
+  - kind: test
+    command: bun test tests/unit/integrations/github/event-source-actions.test.ts tests/unit/integrations/github/event-source-idempotency-hellgate.test.ts tests/integration/integrations/github/github-actions-end-to-end.test.ts tests/unit/integrations/github/cli-real-adapters-hellgate-r3.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused Actions adapter and real-adapter rails completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-github
+review_state: approved
+reviewer: codex/cross-review-wave1

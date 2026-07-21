@@ -1,0 +1,62 @@
+version: 1
+feature_id: run-ledger-attribution
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/observability-wire/wire.ts:setupSubscription
+entrypoints:
+  - src/host/runtime/agent-arg-builder/observability-wire.ts:resolveObservabilitySlots
+  - src/apps/web-daemon/runtime-factory.ts:buildObservability
+activation:
+  - QUANTA_OBSERVABILITY=on builds a RunLedger and a live HookBus.
+  - setupSubscription subscribes createRunLedgerHookSubscriber to post_tool_use before the hook bus is put in AgentConfig.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/run-ledger-attribution/matchers.ts:defaultLedgerMatcher
+  - src/agent/run-ledger-attribution/subscriber.ts:createRunLedgerHookSubscriber
+consumer:
+  - src/agent/observability-wire/wire.ts:setupSubscription
+  - src/host/runtime/agent-arg-builder/observability-wire.ts:resolveObservabilitySlots
+  - src/apps/web-daemon/runtime-factory.ts:buildObservability
+reachable: yes
+surface_findings:
+  - The former follow-up is live: host composition creates a HookBus, setupSubscription registers post_tool_use attribution, and AgentConfig receives the same bus and RunLedger.
+  - The catalog purpose and deliberate_hold claiming that subscription is intentionally unshipped are stale.
+  - A hostile subscription degrades to a no-op detach with a surfaced attribution degradation; malformed tool events and matcher/ledger errors are no-throw drops.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability-wire-hellgate.test.ts tests/unit/observability-live-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off constructs no RunLedger, HookBus, or attribution subscription and omits every observability slot from AgentConfig.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/run-ledger-attribution-hellgate.test.ts tests/unit/observability-wire-hellgate.test.ts tests/unit/observability-live-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Literal bash, subagent, and MCP banners map to ledger start/touch/settle actions, and a live HookBus drives the constructed ledger in host composition.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'createRunLedgerHookSubscriber|setupSubscription|post_tool_use|resolveObservabilitySlots|QUANTA_OBSERVABILITY' src/agent src/host/runtime src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The subscriber, production host composition, HookBus adapter, and live consumer paths are all present.
+  - kind: test
+    command: bun test tests/unit/run-ledger-attribution-hellgate.test.ts tests/unit/observability-wire-hellgate.test.ts tests/unit/observability-live-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Matcher contract, subscription, default-off identity, and live host delivery rails completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-github
+review_state: approved
+reviewer: codex/cross-review-wave1

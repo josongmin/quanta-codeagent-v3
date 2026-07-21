@@ -1,0 +1,45 @@
+version: 1
+feature_id: apply-patch-v4a
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/apply-patch.ts:applyPatchTool
+entrypoints: [src/tool/index.ts:buildBaseDefaultTools, src/agent/dispatch/execute.ts:executeTool]
+activation: ["apply_patch is a default built-in mutating tool; normal dispatch and approval policy govern invocation"]
+effective_defaults:
+  cli: on
+  web: on
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer: [src/patch/parser.ts:parsePatch, src/patch/applier.ts:applyPatch, src/tool/apply-patch.ts:guardedParseAndApply]
+consumer: [src/tool/index.ts:buildBaseDefaultTools, src/apps/cli/preflight.ts:preflightApplyPatch, src/agent/dispatch/execute.ts:executeTool]
+reachable: yes
+surface_findings: ["The default registry exposes the V4A wrapper, which converts unified input, preflights all targets, and uses the jailed filesystem port.", "Parser and applier retain typed grammar, ambiguous-anchor, and atomic rollback failures rather than silently applying a partial patch."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/patch/parser.test.ts tests/unit/patch/applier.test.ts tests/unit/patch/unified-to-v4a-hellgate.test.ts tests/unit/patch/unified-to-v4a-scenarios.test.ts tests/unit/patch/integration.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 116 focused tests passed, including real-filesystem mixed operations, move atomicity, rollback, grammar rejection, and unified-diff conversion.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "applyPatchTool|guardedParseAndApply|parsePatch|buildBaseDefaultTools" src/tool/apply-patch.ts src/patch/parser.ts src/patch/applier.ts src/tool/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The default registry, parser/applier, jailed wrapper, target guards, and OTel trace injection form a live production path.
+  - kind: test
+    command: bun test tests/unit/patch/parser.test.ts tests/unit/patch/applier.test.ts tests/unit/patch/unified-to-v4a-hellgate.test.ts tests/unit/patch/unified-to-v4a-scenarios.test.ts tests/unit/patch/integration.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 116 parser, applier, converter, and real-filesystem rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-edit
+review_state: approved
+reviewer: codex/cross-review-wave1

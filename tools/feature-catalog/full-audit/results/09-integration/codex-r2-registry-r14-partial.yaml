@@ -1,0 +1,58 @@
+version: 1
+feature_id: codex-r2-registry-r14-partial
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/session-registry-cmd.ts:sessionRegistryCmd
+entrypoints:
+  - src/agent/session-resource-registry/auto-sweep.ts:startAutoSweep
+  - src/agent/session-resource-registry/unified-api.ts:getOrCreateRegistry
+  - src/apps/cli/session-registry-cmd.ts:sessionRegistryCmd
+activation:
+  - The CLI slash invokes cleanup and global registry operations; configured registry backends enable auto-sweep work.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: na
+  daemon: resource
+producer:
+  - Auto-sweep produces WAL/retention results and unified API selects global or caller-owned registries.
+consumer:
+  - /session-registry cleanup invokes sweepNow and registry consumers use unified/global APIs.
+reachable: yes
+surface_findings:
+  - The R14 components remain live and tested, but its present-tense claim that three follow-ups are deferred is stale because R15 landed them.
+  - Web remains a prefill-only surface for this slash command.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/auto-sweep-hellgate.test.ts tests/unit/unified-registry-api-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset sweep configuration and default unified API preserve global singleton behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/auto-sweep-hellgate.test.ts tests/unit/session-registry-slash.test.ts tests/unit/unified-registry-api-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: WAL telemetry, cleanup slash dispatch, and unified registry routing passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "startAutoSweep|sweepNow|getOrCreateRegistry|session-registry" src/agent/session-resource-registry src/apps/cli/session-registry-cmd.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: R14 sweep, slash, and unified API owners remain present; R15 owns the formerly deferred follow-ups.
+  - kind: test
+    command: bun test tests/unit/auto-sweep-hellgate.test.ts tests/unit/session-registry-slash.test.ts tests/unit/unified-registry-api-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 84 focused R14 and slash routing tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

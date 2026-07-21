@@ -1,0 +1,55 @@
+version: 1
+feature_id: skill-admin-enforcement
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/install-enforcement.ts:decideInstall
+entrypoints:
+  - src/skill/admin-policy.ts:loadAdminPolicy
+  - src/skill/install-enforcement.ts:decideInstall
+activation:
+  - The policy parser and pure decision matrix can be called with an injected or filesystem reader.
+  - No install CLI, startup policy load, or host caller invokes loadAdminPolicy or decideInstall.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/skill/admin-policy.ts:loadAdminPolicy
+  - src/skill/install-enforcement.ts:decideInstall
+  - src/skill/audit-log.ts
+consumer: []
+reachable: no
+surface_findings:
+  - Strict policy parsing, required versus banned cross-field validation, and install decision outcomes are implemented and tested.
+  - The runtime has no quanta skill install command and no composition-root policy load or decision invocation.
+  - auditRequired cannot cause audit logging because the host-side decision and audit writer composition is absent.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill-admin-enforcement.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Policy parse, loud malformed-policy failure, and decision matrix rails pass in isolation.
+failure_posture: na
+security_posture: conditional
+observability: na
+verdict: not-activatable
+blocker: No install surface or composition root loads org-policy.json, calls decideInstall, or appends its audit events.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg 'loadAdminPolicy\(|decideInstall\(' src --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Search finds declarations and tests but no CLI, daemon, or agent host call site.
+  - kind: test
+    command: bun test tests/unit/skill-admin-enforcement.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Strict policy and decision matrix rails passed in isolation.
+audited_at: "2026-07-19"
+auditor: codex/p2_tier1_batch14
+review_state: approved
+reviewer: codex/cross-review-wave1

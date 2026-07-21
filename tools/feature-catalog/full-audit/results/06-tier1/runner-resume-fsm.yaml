@@ -1,0 +1,51 @@
+version: 1
+feature_id: runner-resume-fsm
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/orchestrate/resume-fsm.ts:resolveResume
+entrypoints:
+  - src/host/bootstrap/bootstrap-session.ts:resolveSessionResume
+activation:
+  - Session bootstrap calls resolveResume for every CLI session start and resolves its returned conflict or missing-id sentinel before continuing.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: off
+  headless: resource
+  daemon: resource
+producer:
+  - src/runner/orchestrate/resume-fsm.ts:resolveResume
+consumer:
+  - src/host/bootstrap/bootstrap-session.ts:resolveSessionResume
+reachable: yes
+surface_findings:
+  - Session bootstrap forwards parsed resume/new-session input to the FSM, maps conflict and missing-id sentinels to failSessionBootstrap, and carries history, sessionId, idMeta, and resumed cwd forward.
+  - The no-flag path now mints and saves an id-mode session; explicit path-mode and id-mode remain input-selected branches.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli-resume-heuristic.test.ts tests/unit/apps/cli/resume-wire-hellgate.test.ts tests/integration/resume-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused heuristic, bootstrap-wire, and resume lifecycle rails passed in the 251-test combined run.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'resolveResume(' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host src/runner
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The host bootstrap is a production caller and explicitly handles the FSM result sentinels.
+  - kind: test
+    command: bun test tests/unit/cli-resume-heuristic.test.ts tests/unit/apps/cli/resume-wire-hellgate.test.ts tests/integration/resume-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused resume rails passed with zero failures.
+audited_at: '2026-07-19'
+auditor: codex/p2-tier1-batch18
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,58 @@
+version: 1
+feature_id: hitl-4-tier-gate
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/admissibility-gate.ts:runAdmissibilityGate"
+entrypoints:
+  - "src/apps/cli/repl/runtime-context-compose.ts:buildBootstrapContextArgs"
+  - "src/apps/web-daemon/runtime-factory.ts:createRuntime"
+activation:
+  - "CLI TTY composition supplies hitl.enabled=true."
+  - "Web daemon composition supplies hitl.enabled=true."
+  - "hand-off-required remains an unconditional floor at the dispatch gate."
+effective_defaults:
+  cli: resource
+  web: on
+  bench: unknown
+  headless: off
+  daemon: on
+producer:
+  - "src/agent/hitl-tier-registry.ts:resolveHitlAnnotation"
+  - "src/agent/admissibility-gate/shared.ts:resolveHitlTier"
+consumer:
+  - "src/agent/admissibility-gate/gates.ts:runHandoffFloorGate"
+  - "src/agent/admissibility-gate/gates.ts:runHitlReviewGate"
+  - "src/agent/dispatch.ts:dispatchToolInner"
+reachable: yes
+surface_findings:
+  - "CLI enables the tier review gate only for a live TTY, avoiding an unanswerable approval prompt in piped runs."
+  - "The web daemon seeds hitl.enabled=true; dispatch routes registry-derived tier decisions before execution."
+  - "The hand-off tier is an unconditional pre-policy floor, and override entries can escalate but cannot relax a hand-off requirement."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/hitl-tier-registry.test.ts tests/unit/hitl-tier-gate.test.ts tests/integration/hitl-tier-dispatch-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Override ratchet, typed handoff callback, hard-deny precedence, decline, and real dispatch routing all passed."
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'runHandoffFloorGate|runHitlReviewGate|resolveHitlTier|hitl: { enabled: true }' src/agent/admissibility-gate.ts src/agent/admissibility-gate/gates.ts src/apps/cli/repl/runtime-context-compose.ts src/apps/web-daemon/runtime-factory.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Both interactive composition roots feed the dispatch gate, whose hand-off floor runs before policy and review gate runs before execution."
+  - kind: test
+    command: "bun test tests/unit/hitl-tier-registry.test.ts tests/unit/hitl-tier-gate.test.ts tests/integration/hitl-tier-dispatch-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Focused HITL registry, gate, and real dispatch evidence passed in the audited test batch."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch3
+review_state: approved
+reviewer: codex/cross-review-wave1

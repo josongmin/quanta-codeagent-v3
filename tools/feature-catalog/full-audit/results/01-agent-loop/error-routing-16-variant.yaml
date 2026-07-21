@@ -1,0 +1,57 @@
+version: 1
+feature_id: error-routing-16-variant
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/error-routing/default-classifier.ts and default-router.ts
+entrypoints:
+  - src/agent/retry.ts:RetryingLLM option seam
+activation:
+  - Construct RetryingLLM with an explicit errorRouting classifier/router pair.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/error-routing/default-classifier.ts:defaultErrorClassifier
+  - src/agent/error-routing/default-router.ts:defaultRetryRouter
+consumer:
+  - src/agent/retry.ts:RetryingLLM
+reachable: no
+surface_findings:
+  - RetryingLLM correctly consumes an explicitly supplied errorRouting option and retains byte-identical legacy behavior when absent.
+  - No production config assembler or runtime caller supplies AgentConfig.errorRouting or constructs RetryingLLM with this option; the catalog itself describes the wire as opt-in.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/error-routing-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent option retains legacy retry counts and immediate fatal behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/error-routing-hellgate.test.ts tests/unit/agent/error-routing-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All 16 classifier arms, five router actions, deterministic fallback, and injected retry-option behavior passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production assembly path supplies the optional errorRouting pair to RetryingLLM.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg -n 'errorRouting' src/agent src/host src/apps
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Snapshot consumers stop at retry option/type declarations; no host or app composition assigns a non-test routing pair.
+  - kind: test
+    command: bun test tests/unit/agent/error-routing-hellgate.test.ts tests/unit/agent/error-routing-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Isolated classifier/router and injected option rails passed in the clean 125-pass bundle.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,50 @@
+version: 1
+feature_id: cross-slice-mirror
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/hitl-tier.ts:type-level mirror assertions
+entrypoints:
+  - TypeScript compilation
+activation:
+  - Run typecheck or a focused mirror rail.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/agent/hitl-tier.ts:AssertEqual invariant
+consumer: []
+reachable: no
+surface_findings:
+  - This is a compile-time architecture guard; it has no runtime surface.
+  - Mirror drift fails static type checking rather than altering live CLI behavior.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cross-slice-mirrors.test.ts tests/unit/hitl-tier-gate.test.ts tests/integration/hitl-tier-dispatch-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Mirror equality, HITL gate, and dispatch integration rails passed.
+failure_posture: fail-closed
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'AssertEqual' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent src/permission src/tool
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The owner seam consists of static type assertions, not a runtime consumer.
+  - kind: test
+    command: bun test tests/unit/cross-slice-mirrors.test.ts tests/unit/hitl-tier-gate.test.ts tests/integration/hitl-tier-dispatch-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused static and runtime boundary rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

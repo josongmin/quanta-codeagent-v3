@@ -1,0 +1,61 @@
+version: 1
+feature_id: branch-search-pure-scorer
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/branch-search/tool.ts:branchSearchTool
+entrypoints:
+  - src/runner/knobs/knobs/branch-search.ts:applyBranchSearch
+  - src/agent/features.ts:buildSessionFeatures
+  - src/agent/branch-search/tool.ts:execute
+activation:
+  - QUANTA_BENCH_BRANCH_SEARCH with a valid candidate count creates AgentConfig.branchSearch on the bench surface.
+  - The optional configuration registers branch_search, whose execution creates the scorer and minimal-change selector.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/branch-search/score.ts:makeScorer
+  - src/agent/branch-search/score.ts:minimalChangeSelector
+consumer:
+  - src/agent/branch-search/tool.ts:branchSearchTool
+  - src/agent/branch-search/search.ts:runBranchSearch
+reachable: yes
+surface_findings:
+  - The scorer is consumed by the live branch_search execution path after an explicit bench opt-in.
+  - No interactive CLI composition route supplies AgentConfig.branchSearch, contrary to the catalog CLI-full surface claim.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/bench-branch-search-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset, malformed, and out-of-range QUANTA_BENCH_BRANCH_SEARCH values omit the branchSearch key byte-identically.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/branch-search.test.ts tests/unit/branch-search-minimal-change-hellgate.test.ts tests/unit/branch-search-tool.test.ts tests/integration/multi-plane-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused scorer, selector, tool-result, and feature-composition tests passed, including branchSearch registration in SessionFeatures.
+failure_posture: fail-loud
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: Catalog says the scorer runs in the interactive CLI, but the sole configuration producer is the default-off bench knob.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_BENCH_BRANCH_SEARCH|branchSearch|makeScorer|minimalChangeSelector' src/runner/knobs src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Bench knob produces the optional config; feature assembly and tool execution consume it to construct and invoke the scorer.
+  - kind: test
+    command: bun test tests/unit/branch-search.test.ts tests/unit/branch-search-minimal-change-hellgate.test.ts tests/unit/branch-search-tool.test.ts tests/unit/bench-branch-search-wiring-hellgate.test.ts tests/integration/multi-plane-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Default-off identity and configured scorer behavior passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch16
+review_state: approved
+reviewer: codex/cross-review-wave1

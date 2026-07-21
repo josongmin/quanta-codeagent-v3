@@ -1,0 +1,53 @@
+version: 1
+feature_id: llm-provider-phase2
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/factory.ts:createMulticloudLLM
+entrypoints:
+  - src/llm/factory.ts:createMulticloudLLM
+  - src/llm/factory.ts:buildBedrock
+  - src/llm/factory.ts:buildVertex
+activation:
+  - Provider selection chooses bedrock or vertex with valid cloud credential configuration.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - Multicloud factory constructs the concrete Bedrock or Vertex adapter and injects credential/client seams.
+consumer:
+  - The selected adapter implements the active LLMPort stream consumed by agent surfaces.
+reachable: yes
+surface_findings:
+  - Adapter selection is live through the common multicloud factory, but real calls require AWS or GCP credentials and network access.
+  - Test client factories prove stream shaping without cloud network calls.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm-providers/bedrock-adapter-hellgate.test.ts tests/unit/llm-providers/vertex-adapter-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Both adapters produced mapped streams, forwarded cancellation, validated configuration, and preserved typed failures.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "buildBedrock|buildVertex|BedrockProviderAdapter|VertexProviderAdapter" src/llm/factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The multicloud composition factory owns both concrete adapter construction paths.
+  - kind: test
+    command: bun test tests/unit/llm-providers/bedrock-adapter-hellgate.test.ts tests/unit/llm-providers/vertex-adapter-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 39 focused Bedrock and Vertex streaming tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,52 @@
+version: 1
+feature_id: engineering-skills-bundle
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/system-skills/index.ts:discoverSystemSkills
+entrypoints:
+  - src/agent/tier1/skill.ts:buildSkillTier
+  - src/apps/web-daemon/runtime-factory.ts
+activation:
+  - CLI and web runtime discovery include the bundled system skills; activation remains prompt and explicit Skill-tool invocation driven.
+effective_defaults:
+  cli: on
+  web: on
+  bench: resource
+  headless: resource
+  daemon: on
+producer:
+  - src/skill/system-skills/index.ts:discoverSystemSkills
+consumer:
+  - src/agent/tier1/skill.ts:buildSkillTier
+  - src/apps/web-daemon/runtime-factory.ts
+reachable: yes
+surface_findings:
+  - The four bundle skill directories are in system discovery and system names win collision resolution.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/system-skills-new-bundle-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Bundle frontmatter, body contract, and router drift rails passed.
+failure_posture: na
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'discoverSystemSkills|debug-error|add-tests|explain-code|extract-function' src/skill src/agent/tier1 src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: System discovery is consumed by CLI tier and web runtime.
+  - kind: test
+    command: bun test tests/unit/system-skills-new-bundle-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Bundle contract rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

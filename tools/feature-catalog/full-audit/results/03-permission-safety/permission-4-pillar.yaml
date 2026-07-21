@@ -1,0 +1,56 @@
+version: 1
+feature_id: permission-4-pillar
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/policy.ts:inferApprovalPolicy
+entrypoints:
+  - src/host/runtime/agent-arg-builder/permission-profile.ts:resolvePermissionModeFromProfile
+activation:
+  - QUANTA_PERMISSION_PROFILE or --permission-profile resolves a profile and derives the approval mode.
+  - The four infer*Policy projectors have no production caller outside their export module.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/permission/policy.ts:inferApprovalPolicy
+  - src/permission/policy.ts:inferNetworkPolicy
+  - src/permission/policy.ts:inferSandboxPolicy
+  - src/permission/policy.ts:inferControlPolicy
+consumer:
+  - src/host/runtime/agent-arg-builder/permission-profile.ts:resolvePermissionModeFromProfile
+reachable: no
+surface_findings:
+  - Profile selection can derive the approval mode through permissionModeFromProfile.
+  - Network, sandbox, and control pillar projectors are only declared and re-exported; no production policy-enforcement call site consumes them.
+  - Prototype-pollution and frozen-default hellgates verify the pure projectors but do not establish the four-pillar runtime boundary claimed by the catalog.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission-pillars.test.ts tests/unit/permission/permission-pillar-projection-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused 116-pass audit rail proves strict defaults and prototype-safe pure projection behavior.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: seam-only
+blocker: Only the approval profile is projected into the existing mode path; the network, sandbox, and control pillar projectors have no live enforcement consumer.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg "inferApprovalPolicy|inferNetworkPolicy|inferSandboxPolicy|inferControlPolicy" src --glob '!**/*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Each infer helper appears at definition/export only; no runtime caller consumes the projectors.
+  - kind: test
+    command: bun test tests/unit/permission-pillars.test.ts tests/unit/permission/permission-pillar-projection-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Four-pillar defaults and nonvacuous prototype-pollution hellgate passed in the 116-pass focused run.
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch4
+review_state: approved
+reviewer: codex/cross-review-wave1

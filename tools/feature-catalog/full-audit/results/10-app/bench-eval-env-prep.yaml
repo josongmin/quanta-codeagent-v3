@@ -1,0 +1,46 @@
+version: 1
+feature_id: bench-eval-env-prep
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/bench/eval/env-prep.ts:prepare environment
+entrypoints:
+  - src/apps/bench/eval/exec.ts:bench execution
+activation:
+  - Run a bench instance carrying setupCmd.
+effective_defaults:
+  cli: na
+  web: na
+  bench: resource
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/bench/eval/env-prep.ts
+consumer:
+  - src/apps/bench/eval/exec.ts
+reachable: yes
+surface_findings:
+  - Bench execution runs setup inside the sandbox before the agent when setupCmd exists.
+  - Setup failure emits distinct env_prep_failed and prevents model execution.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/bench-env-prep.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Setup success, scrubbed environment, nonzero fail-fast, and no-agent-spend rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/bench-env-prep.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused bench environment rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

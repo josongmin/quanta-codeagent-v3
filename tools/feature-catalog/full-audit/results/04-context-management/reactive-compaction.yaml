@@ -1,0 +1,55 @@
+version: 1
+feature_id: reactive-compaction
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/recovery-executor.ts:applyCompactRecovery
+entrypoints:
+  - src/agent/loop/recovery-executor.ts:applyNonSuccessRecoveryAction
+  - src/agent/loop.ts:runAgent
+activation:
+  - A context_window_exceeded recovery action reaches applyCompactRecovery.
+  - The recovery path calls reactiveCompact with the live WorkingMemory snapshot.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: on
+  daemon: on
+producer:
+  - src/agent/compaction.ts:reactiveCompact
+  - src/agent/compaction.ts:summarizeWith
+consumer:
+  - src/agent/loop/recovery-executor.ts:applyCompactRecovery
+  - src/agent/loop.ts:runAgent
+reachable: yes
+surface_findings:
+  - "PTL recovery is not feature-gated: the live recovery executor invokes the aggressive two-turn squeeze after context_window_exceeded."
+  - "No-summarizable-prefix and less-than-15-percent-shrink outcomes are terminal errors, preventing a retry spin."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/compaction.test.ts tests/unit/compaction-breaker-hellgate.test.ts tests/integration/agent-recovery-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: PTL drives the real runAgent recovery to reactive compaction and completion; fail-fast shrink and breaker boundaries pass.
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "reactiveCompact\\(|context_window_exceeded" src/agent/loop/recovery-executor.ts src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Recovery routing reaches applyCompactRecovery, which calls reactiveCompact on the live snapshot.
+  - kind: test
+    command: bun test tests/unit/compaction.test.ts tests/unit/compaction-breaker-hellgate.test.ts tests/integration/agent-recovery-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 114 selected focused tests passed in the shared rail, including PTL recovery and no-progress failure boundaries.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch3
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,62 @@
+version: 1
+feature_id: idle-monitor-snooze
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl.ts:cliBuildIdleGuards and src/apps/cli/repl/prompt-pipeline.ts:composePromptPipeline
+entrypoints:
+  - src/apps/cli/repl.ts:cliBuildIdleGuards
+  - src/apps/cli/repl/session-runtime-config.ts:readSessionRuntimeConfig
+  - src/apps/cli/repl/prompt-pipeline.ts:composePromptPipeline
+activation:
+  - "QUANTA_IDLE_SUPPRESS defaults to 1 in CLI runtime configuration; QUANTA_IDLE_SUPPRESS=0 disables idle and reject enforcement."
+  - "The interactive CLI wires IdleMonitor and RejectCounter into slash commands, approval prompts, and next-prompt admission."
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/cli/idle-monitor.ts:createIdleMonitor
+  - src/apps/cli/reject-counter.ts:createRejectCounter
+consumer:
+  - src/apps/cli/repl/prompt-pipeline.ts:composePromptPipeline
+  - src/apps/cli/repl/runtime-context-compose.ts:buildCliOnConfirm
+  - src/apps/cli/slash/registry-surface.ts:/snooze and /resume
+reachable: yes
+surface_findings:
+  - "CLI defaults the suppression switch on, creates guards in repl.ts, gates new prompt admission, and uses reject counts from real approval choices."
+  - "The catalog claim that all behavior is default-OFF conflicts with session-runtime-config.ts, which resolves QUANTA_IDLE_SUPPRESS with default value 1."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/idle-monitor.test.ts tests/unit/apps/cli/reject-counter.test.ts tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts tests/unit/apps/cli/session-setup-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Persistence, idle threshold, snooze/resume, 20-denial graceful exit, and real prompt-pipeline admission rails pass."
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: "The feature catalog says all behavior is default-OFF, while the authoritative CLI runtime config enables QUANTA_IDLE_SUPPRESS unless the user explicitly sets 0."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_IDLE_SUPPRESS|createIdleMonitor|createRejectCounter|isSnoozed|shouldAutoExit|recordDeny' src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The default-on environment resolution, REPL composition, prompt gate, approval denial accounting, and snooze slash commands are all live."
+  - kind: test
+    command: bun test tests/unit/apps/cli/idle-monitor.test.ts tests/unit/apps/cli/reject-counter.test.ts tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts tests/unit/apps/cli/session-setup-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "61 focused monitor, counter, prompt-pipeline, and session composition cases passed."
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Strict reachability reported zero L3+ unreachable or dead-API feature claims."
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-compaction
+review_state: approved
+reviewer: codex/cross-review-wave1

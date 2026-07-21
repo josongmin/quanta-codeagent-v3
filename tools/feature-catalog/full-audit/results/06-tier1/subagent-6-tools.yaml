@@ -1,0 +1,50 @@
+version: 1
+feature_id: subagent-6-tools
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/subagent/dispatch-6.ts:dispatchSubagent6"
+entrypoints: [src/apps/cli/index.ts]
+activation: ["AgentConfig.subagent.enable6Tools=true", "subagent Tier-1 block is assembled"]
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer: ["src/subagent/tools-6.ts:SUBAGENT_6_TOOL_CONTRACTS", "src/subagent/handlers-6.ts"]
+consumer: ["src/subagent/dispatch-6.ts:dispatchSubagent6", "src/agent/tier1/subagent.ts:buildSubagentBlock"]
+reachable: yes
+surface_findings: ["The Tier-1 block appends the frozen six-tool set only when enable6Tools is true. The router validates each strict contract and returns typed errors instead of throwing.", "The six-tool spawn, wait, close, and send paths share the task registry; close capability tokens remain distinct from trusted host force-stop authority."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/subagent-features-wiring.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The normal subagent block exposes only the foreground trio; the six-tool optional block is absent without its explicit configuration.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-tools-6-contracts.test.ts tests/unit/subagent-6-tools-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Contract, router, PTY, spawn, wait, close, input-channel, capability, and end-to-end mosaic rails pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'SUBAGENT_6_TOOL_CONTRACTS|dispatchSubagent6|createSubagent6Tools|enable6Tools' src/subagent src/agent/tier1/subagent.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The immutable contract table, non-throwing dispatch, and gated Tier-1 consumer are concrete production links.
+  - kind: test
+    command: bun test tests/unit/subagent-tools-6-contracts.test.ts tests/unit/subagent-6-tools-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The six-tool contract and behavior suite passes with all success and typed error paths covered.
+audited_at: "2026-07-19"
+auditor: codex/p1-tier1-core
+review_state: approved
+reviewer: codex/cross-review-wave1

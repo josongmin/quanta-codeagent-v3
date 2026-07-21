@@ -1,0 +1,63 @@
+version: 1
+feature_id: codex-r2-system-prompt-cache-and-audit
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt.ts:resolveCachedSystemPrompt
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+  - src/agent/loop/context-assembler.ts:assembleTurnContext
+activation:
+  - A sessionId causes the host composition root to install a cache and paired key; buildTurnContext uses the pair when no caller-owned system prompt is supplied.
+  - The cache-control analyzer and makeStrictDriftCache are exported primitives, but no production caller invokes either audit or strict-drift path.
+effective_defaults:
+  cli: resource
+  web: unknown
+  bench: off
+  headless: resource
+  daemon: resource
+producer:
+  - src/llm/system-prompt-cache/in-memory-cache.ts:createInMemorySystemPromptCache
+  - src/llm/system-prompt-cache/drift-detector.ts:makeStrictDriftCache
+  - src/llm/cache-control-audit/analyzer.ts:analyzePrefixStability
+consumer:
+  - src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+  - src/agent/loop/context-assembler.ts:assembleTurnContext
+  - src/agent/prompt.ts:resolveCachedSystemPrompt
+reachable: no
+surface_findings:
+  - The session cache itself is composed into AgentConfig, carried into the turn context, and used by buildTurnContext with a cache-key pair.
+  - No non-test source consumer calls analyzePrefixStability or makeStrictDriftCache; the catalog combines those dormant audit primitives with the live cache path under one L3 feature.
+  - Cache absence or a caller-supplied system prompt bypasses the cache and retains legacy prompt construction.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/prompt-adr-0327-wire-hellgate.test.ts tests/unit/composition-roots-codex-r2-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent cache/key is byte-identical to legacy prompt construction, and no sessionId leaves the cache pair unset.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm/cache-control-audit-hellgate.test.ts src/llm/system-prompt-cache/__tests__/in-memory-cache.hellgate.test.ts src/llm/system-prompt-cache/__tests__/drift-detector.hellgate.test.ts src/llm/system-prompt-cache/__tests__/port-contract.test.ts tests/unit/prompt-adr-0327-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The cache hits across turn builds and both audit primitives satisfy their owner-local contract, but the latter are not production-composed.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: The strict drift detector and passive cache-control audit have no production consumer; only the cache half of the combined feature is reachable.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg "analyzePrefixStability\\(|makeStrictDriftCache\\(|resolveCachedSystemPrompt|systemPromptCacheKey" src tests/unit
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Cache wiring reaches host, loop, and prompt consumers, while analyzer and strict-drift calls are absent outside their owner tests.
+  - kind: test
+    command: bun test tests/unit/llm/cache-control-audit-hellgate.test.ts src/llm/system-prompt-cache/__tests__/in-memory-cache.hellgate.test.ts src/llm/system-prompt-cache/__tests__/drift-detector.hellgate.test.ts src/llm/system-prompt-cache/__tests__/port-contract.test.ts tests/unit/prompt-adr-0327-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected focused rails passed as part of the 174-pass, 0-fail audit run.
+audited_at: "2026-07-19"
+auditor: codex/p1-observability-a
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,57 @@
+version: 1
+feature_id: skill-scope-v2-availability-permission
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/stream-consume.ts:streamConsume and src/agent/stream-callbacks.ts:createStreamDispatcher
+entrypoints:
+  - src/apps/cli/index.ts interactive session composition
+  - src/host/runtime/agent-config-assembler.ts shared interactive assembler
+activation:
+  - An invoked skill with allowedTools arms skillGate; streamConsume filters model-visible specs with the same allow predicate as dispatch.
+  - QUANTA_SKILL_SCOPE_V2 enables scope escalation events and the CLI state projection; its unset path retains flat out-of-scope denial.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/loop/skill-gate.ts:filterSpecsByScope
+  - src/agent/skill-scope-escalation.ts:decideScopeEscalation
+consumer:
+  - src/agent/loop/stream-consume.ts:streamConsume
+  - src/agent/stream-callbacks.ts:createStreamDispatcher
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts:onSkillScopeReady
+reachable: yes
+surface_findings:
+  - Availability is deliberately active whenever a skill gate is armed, including with QUANTA_SKILL_SCOPE_V2 unset, so the model-visible and dispatchable tool sets remain equal.
+  - The flag still gates only the escalation UX and state observer; the OFF path returns the legacy flat skill-scoped deny for an out-of-scope call.
+  - CLI composes the scope observer behind the same gate; the stream callback emits requested/resolved escalation events for a surface-provided confirmation path.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/skill-gate.test.ts tests/unit/agent/skill-scope-escalation.test.ts tests/unit/agent/skill-scope-escalation-emit.test.ts src/agent/loop/__tests__/skill-scope-view.test.ts tests/integration/skill-scope-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused gate, visibility, escalation decision/event, and end-to-end rails passed in the 183-test combined run.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "filterSpecsByScope|skillScopeV2|decideScopeEscalation|onSkillScopeReady" src/agent/loop/stream-consume.ts src/agent/stream-callbacks.ts src/agent/loop/session-bootstrap.ts src/apps/cli/repl/surface-compose
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live loop filters before sampling, dispatch handles the same scope denial/escalation, and the CLI owns the gated observation seam.
+  - kind: test
+    command: bun test tests/unit/agent/skill-gate.test.ts tests/unit/agent/skill-scope-escalation.test.ts tests/unit/agent/skill-scope-escalation-emit.test.ts src/agent/loop/__tests__/skill-scope-view.test.ts tests/integration/skill-scope-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Scope filtering, hard-deny, ask/resolve events, OFF legacy denial, and active-skill visibility behavior passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch15
+review_state: approved
+reviewer: codex/cross-review-wave1

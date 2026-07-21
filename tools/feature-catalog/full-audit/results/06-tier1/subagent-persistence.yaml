@@ -1,0 +1,64 @@
+version: 1
+feature_id: subagent-persistence
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/session-execution-plane.ts:buildSharedExecutionPlaneRuntimeAugments
+entrypoints:
+  - src/host/runtime/internal/context-binding/base.ts:extendBaseWithExecutionPlane
+activation:
+  - A configured subagent block creates the persistent scheduler and JSONL store; QUANTA_SUBAGENT_RESUME is required to re-fork interrupted work after restart.
+effective_defaults:
+  cli: resource
+  web: unknown
+  bench: off
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/subagent-persistence.ts:snapshotToFile and restoreFromFile
+  - src/agent/subagent-persistence-store/hydrating-scheduler.ts:persistentBackgroundSubagentScheduler
+consumer:
+  - src/runner/session-execution-plane.ts:buildSharedExecutionPlaneRuntimeAugments
+  - src/host/runtime/internal/context-binding/base.ts:extendBaseWithExecutionPlane
+reachable: yes
+surface_findings:
+  - The live runtime composition creates persistentBackgroundSubagentScheduler when subagents are configured, using the JSONL store and optional QUANTA_BG_STORE_DIR.
+  - The catalog's ADR-0153 helper API is not the live resume path: no production caller invokes snapshotToFile, restoreFromFile, or hydrateFrom.
+  - Cross-restart re-execution is deliberately gated by QUANTA_SUBAGENT_RESUME; without it, the scheduler persists state but does not sweep and re-fork interrupted handles.
+off_identity_proof:
+  kind: source
+  command: rg -n "subagentResume|QUANTA_SUBAGENT_RESUME" src/runner/session-execution-plane.ts src/shared/runtime-config.ts src/shared/runtime-config/types.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Interrupted-handle sweeping is guarded by the default-off subagentResume runtime config.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-persistence-hellgate.test.ts tests/unit/subagent-background-hellgate.test.ts tests/unit/subagent-background-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 45 focused persistence, scheduler, and wiring tests passed; helper roundtrips and scheduler tool wiring are covered.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: conditional
+blocker: The catalog says caller wires snapshot/restore at session boundaries, but those ADR-0153 helper exports have no production caller; actual restart re-fork remains opt-in through QUANTA_SUBAGENT_RESUME.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "persistentBackgroundSubagentScheduler|QUANTA_BG_STORE_DIR|subagentResume" src/runner/session-execution-plane.ts src/host/runtime/internal/context-binding/base.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Host runtime composition reaches the persistent scheduler, while resume is explicitly conditional.
+  - kind: source
+    command: rg -n "snapshotToFile\\(|restoreFromFile\\(|hydrateFrom:" src --glob '!**/*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No non-test production invocation of the ADR-0153 helper API was found.
+  - kind: test
+    command: bun test tests/unit/subagent-persistence-hellgate.test.ts tests/unit/subagent-background-hellgate.test.ts tests/unit/subagent-background-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 45 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch21
+review_state: approved
+reviewer: codex/cross-review-wave1

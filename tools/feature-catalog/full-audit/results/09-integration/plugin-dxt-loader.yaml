@@ -1,0 +1,51 @@
+version: 1
+feature_id: plugin-dxt-loader
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/plugin-isolation/dxt-loader.ts:launchDxt
+entrypoints:
+  - src/plugin-isolation/index.ts:launchDxt export
+activation:
+  - No production caller constructs or invokes launchDxt.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/plugin-isolation/dxt-loader.ts:validateDxt
+  - src/plugin-isolation/dxt-loader.ts:launchDxt
+consumer: []
+reachable: no
+surface_findings:
+  - Manifest validation, limits, and PluginHost construction are implemented and tested.
+  - launchDxt is exported from the plugin-isolation barrel, but no non-test source calls it.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/plugin-isolation-dxt-hellgate.test.ts tests/unit/plugin-isolation-dxt.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: DXT manifest parsing, schema limits, and validation behavior passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: seam-only
+blocker: launchDxt has no production instantiation or invocation outside its barrel export.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n 'launchDxt' 9a12f7a855640a8be1e4654472766bbc445696ea -- src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Source contains only the loader declaration and barrel export, with no production call site.
+  - kind: test
+    command: bun test tests/unit/plugin-isolation-dxt-hellgate.test.ts tests/unit/plugin-isolation-dxt.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused DXT validation rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

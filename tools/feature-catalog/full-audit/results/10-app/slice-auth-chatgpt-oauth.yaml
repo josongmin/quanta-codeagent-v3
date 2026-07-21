@@ -1,0 +1,52 @@
+version: 1
+feature_id: slice-auth-chatgpt-oauth
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/auth/chatgpt-oauth/index.ts
+entrypoints: [src/apps/cli/login-cmd.ts, src/apps/web-daemon/auth-routes.ts]
+activation: [QUANTA_PROVIDER=chatgpt-oauth, /login, web /auth/login]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/auth/chatgpt-oauth/browser-flow.ts, src/auth/chatgpt-oauth/token-store.ts, src/auth/chatgpt-oauth/refresh.ts]
+consumer: [src/apps/cli/login-cmd.ts, src/apps/web-daemon/auth-routes.ts, src/apps/bench/auth-pool/login.ts]
+reachable: yes
+surface_findings:
+  - "CLI /login invokes the production browser flow, and web daemon auth routes import the same flow, exchange, and token-store slice."
+  - "The provider is opt-in; inactive provider selection performs no OAuth callback listener, exchange, or token write."
+off_identity_proof:
+  kind: source
+  command: rg -n 'QUANTA_PROVIDER=chatgpt-oauth|runBrowserFlow|auth/login' src/apps/cli src/apps/web-daemon
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: OAuth actions are reached by explicit login or provider activation rather than common startup.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/auth/pkce.test.ts tests/unit/auth/jwt.test.ts tests/unit/auth/browser-flow.test.ts tests/unit/auth/token-store.test.ts tests/unit/auth/refresh.test.ts tests/unit/cli/login-status-cmd.test.ts tests/unit/auth/chatgpt-oauth-adapter.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: PKCE, JWT verification, callback flow, token persistence, refresh coordination, CLI commands, and authenticated adapter behavior pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'runBrowserFlow|exchangeCode|writeToken' src/apps/cli/login-cmd.ts src/apps/web-daemon/auth-routes.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI and web production entrypoints consume the slice directly.
+  - kind: test
+    command: bun test tests/unit/auth/pkce.test.ts tests/unit/auth/jwt.test.ts tests/unit/auth/browser-flow.test.ts tests/unit/auth/token-store.test.ts tests/unit/auth/refresh.test.ts tests/unit/cli/login-status-cmd.test.ts tests/unit/auth/chatgpt-oauth-adapter.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: OAuth focused rail passed as part of the 229-test batch.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

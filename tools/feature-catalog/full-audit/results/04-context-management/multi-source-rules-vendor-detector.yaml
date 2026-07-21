@@ -1,0 +1,64 @@
+version: 1
+feature_id: multi-source-rules-vendor-detector
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/agent/mode-presets/system.ts:resolveModePresetGlobRules
+entrypoints:
+  - src/apps/agent/mode-presets/interactive.ts:buildInteractiveBase
+  - src/apps/agent/mode-presets/headless.ts:buildHeadlessBase
+  - src/apps/agent/mode-presets/ide.ts:buildIdeBase
+activation:
+  - QUANTA_VENDOR_RULES must be truthy.
+  - The run mode must be trusted by modeLoadsRepoRules.
+  - resolveModePresetGlobRules calls loadGlobRulesWithVendors with vendorDetectorEnabled true and attaches nonempty globRules to AgentConfig.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/rules/vendor-detector/default-detector.ts:createDefaultVendorDetector
+  - src/agent/glob-rules.ts:loadGlobRulesWithVendors
+consumer:
+  - src/apps/agent/mode-presets/system.ts:resolveModePresetGlobRules
+  - src/apps/agent/mode-presets/interactive.ts:buildInteractiveBase
+  - src/agent/prompt.ts:buildPrompt
+reachable: yes
+surface_findings:
+  - "Trusted interactive, headless, and IDE presets consume vendor rules behind QUANTA_VENDOR_RULES and carry them to the prompt's glob rule rendering."
+  - "Batch, ci-bot, and daemon remain rule-less even when the gate is set, preventing untrusted repository rules from entering the system prompt."
+  - "The catalog deliberate_hold says production call-site 0, but the production resolver and all three trusted preset consumers are present at the snapshot."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/vendor-glob-unconsumed-failclosed-hellgate.test.ts tests/unit/vendor-glob-composition-wire-spec-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset vendorDetectorEnabled is byte-identical to legacy rules; gate-off trusted modes do not attach globRules.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/vendor-glob-composition-wire-spec-hellgate.test.ts tests/unit/stage1-phase2-consume-and-vendor-glob-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real .windsurfrules and .clinerules reach trusted preset config and the rendered prompt; untrusted modes are rejected.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg resolveModePresetGlobRules and loadGlobRulesWithVendors in src/apps/agent src/agent/glob-rules.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The production resolver gates by trust and feature flag, then the trusted base-builders conditionally attach detected glob rules.
+  - kind: test
+    command: bun test tests/unit/vendor-rules-detector-hellgate.test.ts tests/unit/vendor-glob-unconsumed-failclosed-hellgate.test.ts tests/unit/stage1-phase2-consume-and-vendor-glob-e2e-hellgate.test.ts tests/unit/vendor-glob-composition-wire-spec-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 176 selected focused tests passed in the shared audit rail; this subset proves six-vendor parsing, OFF identity, failure attribution, prompt efficacy, and trusted-mode wiring.
+audited_at: "2026-07-19"
+auditor: codex/p1-context-core
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,55 @@
+version: 1
+feature_id: today-date-line-clock-port
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/prompt-reminders.ts:todayDateLine"
+entrypoints:
+  - "src/agent/prompt-reminders.ts:contentByKey"
+  - "src/agent/prompt.ts:buildTurnContext"
+  - "src/agent/loop/context-assembler.ts:assembleTurnContext"
+activation:
+  - "The date reminder is always selected for a turn; an optional TurnContextInput.now clock overrides the Date.now fallback."
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: on
+  daemon: on
+producer:
+  - "src/agent/prompt-reminders.ts:todayDateLine"
+consumer:
+  - "src/agent/prompt-reminders.ts:contentByKey"
+  - "src/agent/prompt-reminders.ts:buildDynamicContext"
+  - "src/agent/prompt.ts:buildTurnContext"
+reachable: yes
+surface_findings:
+  - "The injected clock flows through contentByKey into the single trailing system-reminder."
+  - "Without injection, Date.now remains the production fallback; fixed epochs produce fixed literal dates in focused tests."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/today-date-clock-port-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Fixed epochs, paired controls, fallback behavior, and assembled reminder propagation passed."
+failure_posture: na
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg todayDateLine and contentByKey in src/agent/prompt-reminders.ts src/agent/prompt.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The dynamic reminder's date atom calls todayDateLine(input.now), and buildTurnContext wraps that rendered reminder for the provider."
+  - kind: test
+    command: "bun test tests/unit/agent/prompt-sections.test.ts tests/unit/prompt-sections-hellgate.test.ts tests/unit/prompt-dynamic.test.ts tests/unit/today-date-clock-port-hellgate.test.ts tests/unit/skill-trigger-rules.test.ts tests/integration/mode-block-matrix-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "98 pass, 0 fail across the shared focused prompt context audit rail."
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch2
+review_state: approved
+reviewer: codex/cross-review-wave1

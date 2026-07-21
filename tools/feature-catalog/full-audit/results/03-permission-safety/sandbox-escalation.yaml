@@ -1,0 +1,61 @@
+version: 1
+feature_id: sandbox-escalation
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/host/runtime/sandbox-escalation-wire.ts:maybeWireBashSandboxEscalation"
+entrypoints:
+  - src/apps/cli/index.ts
+  - "src/host/runtime/agent-config-assembler.ts:assembleAgentConfig"
+activation:
+  - "QUANTA_SANDBOX_ESCALATION=1."
+  - "A per-call sandboxed bash invocation returns a classified sandbox-blocked result."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/runtime/os-sandbox/denial-classify.ts:classifySandboxDenial"
+  - "src/agent/sandbox-escalation/orchestrator.ts:runSandboxEscalation"
+consumer:
+  - "src/host/runtime/sandbox-escalation-wire.ts:maybeWireBashSandboxEscalation"
+  - "src/tool/bash/sandbox-escalation-wire.ts:getBashSandboxEscalationHandler"
+reachable: yes
+surface_findings:
+  - "The host assembler installs the bash handler only under the runtime gate and clears it otherwise."
+  - "Approval records risk before override, re-runs exactly one byte-identical command through the normal permission gate, and never auto-grants."
+  - "The web confirmation surface can receive collapsed approval, but sandbox classification and escalation context are not fully rendered there."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/sandbox-escalation-off-byte-identity-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Unset gate leaves classifier and handler inactive and preserves a plain sandbox failure."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/sandbox-escalation-classify-hellgate.test.ts tests/unit/sandbox-escalation-loop-hellgate.test.ts tests/unit/sandbox-escalation-off-byte-identity-hellgate.test.ts tests/unit/sandbox-escalation-bash-wire-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "35 classifier boundary, approval and denial, cap, ordering, live bash wire, and off-identity cases pass."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n '(maybeWireBashSandboxEscalation|sandboxEscalation|classifySandboxDenial|runSandboxEscalation)' src/host/runtime/agent-config-assembler.ts src/host/runtime/sandbox-escalation-wire.ts src/tool/bash/sandbox-escalation-wire.ts src/tool/bash/index.ts src/shared/runtime-config.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The strict gate, host installation point, classifier, orchestrator, and bash callback seam are all on the live assembly path."
+  - kind: test
+    command: "bun test tests/unit/sandbox-escalation-classify-hellgate.test.ts tests/unit/sandbox-escalation-loop-hellgate.test.ts tests/unit/sandbox-escalation-off-byte-identity-hellgate.test.ts tests/unit/sandbox-escalation-bash-wire-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "35 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p1-security-policy
+review_state: approved
+reviewer: codex/cross-review-wave1

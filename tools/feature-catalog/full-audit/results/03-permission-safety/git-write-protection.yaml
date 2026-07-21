@@ -1,0 +1,56 @@
+version: 1
+feature_id: git-write-protection
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/dispatch/tool-context.ts:buildToolContext"
+entrypoints:
+  - "src/agent/dispatch.ts:dispatchToolInner"
+  - "src/agent/dispatch/tool-context.ts:buildToolContext"
+activation:
+  - "Every dispatched tool call receives gitWriteProtectReason through ToolContext."
+  - "Mutating write, edit, and patch paths consult the context guard before filesystem mutation."
+effective_defaults:
+  cli: on
+  web: resource
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - "src/permission/git-write-guard.ts:gitWriteProtectReason"
+consumer:
+  - "src/agent/dispatch/tool-context.ts:buildToolContext"
+  - "src/tool/write/index.ts:writeStaticDeny"
+  - "src/tool/edit/index.ts:editStaticDeny"
+  - "src/tool/apply-patch.ts:guardPatchTargets"
+reachable: yes
+surface_findings:
+  - "The shared dispatch context installs the pure guard unconditionally; ordinary paths remain allowed while protected .git and .vscode targets turn into typed permission_denied results before a mutation."
+  - "The matcher is segment anchored and supports nested git directories and both separator styles, avoiding substring false positives."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/permission/git-write-guard.test.ts tests/unit/git-write-protection-wired.test.ts tests/integration/git-write-protection-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Pattern completeness, write/edit wiring, normal-path allowance, Windows separator handling, and red-on-unwired positive control all passed."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'gitWriteProtectReason|gitWriteGuard|gitWriteGuardDeny|guardPatchTargets' src/agent/dispatch/tool-context.ts src/tool/write/index.ts src/tool/edit/index.ts src/tool/apply-patch.ts src/permission/git-write-guard.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The guard producer is attached at the common dispatch context and consumed before each listed mutation path."
+  - kind: test
+    command: "bun test tests/unit/permission/git-write-guard.test.ts tests/unit/git-write-protection-wired.test.ts tests/integration/git-write-protection-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Focused static deny and live tool rails passed in the 270-test audit batch."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch8
+review_state: approved
+reviewer: codex/cross-review-wave1

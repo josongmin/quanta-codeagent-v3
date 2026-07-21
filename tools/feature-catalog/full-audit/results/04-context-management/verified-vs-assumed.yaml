@@ -1,0 +1,48 @@
+version: 1
+feature_id: verified-vs-assumed
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/compaction.ts:{SUMMARY_SYSTEM,CONTINUATION_SYSTEM}
+entrypoints:
+  - src/agent/compaction.ts:compactIfNeeded
+  - src/agent/compaction.ts:reactiveCompact
+activation:
+  - Any proactive or reactive compaction summary uses the corresponding fixed summarizer instruction.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/compaction.ts:SUMMARY_SYSTEM
+  - src/agent/compaction.ts:CONTINUATION_SYSTEM
+consumer:
+  - compaction summarizer LLMPort
+reachable: yes
+surface_findings:
+  - Proactive summaries request a distinction between running or reading confirmations and assumptions; reactive continuation asks which claims were verified versus assumed.
+  - The instruction is model-facing guidance, not a deterministic validator of the generated summary's factual labels.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/compaction.test.ts tests/unit/compaction-summarizer.test.ts tests/unit/prompt-system.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Both proactive and reactive compaction paths call their summarizer, including the dedicated summarizer override; prompt rails retain the verified-versus-assumed discipline.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: conditional
+blocker: The fixed instructions reach both compaction paths, but no deterministic evaluator verifies that an LLM-produced summary labels every claim correctly.
+disposition: hold
+receipts:
+  - kind: test
+    command: bun test tests/unit/compaction.test.ts tests/unit/compaction-summarizer.test.ts tests/unit/prompt-system.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The combined compaction and prompt command passed 66 summary-path and prompt-discipline rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

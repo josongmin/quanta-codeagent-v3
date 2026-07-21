@@ -1,0 +1,52 @@
+version: 1
+feature_id: git-review-diff
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/git/review-diff.ts:gitReviewDiffTool
+entrypoints: [src/tool/git/index.ts:gitTools, src/apps/cli/internal.ts:gitToolList]
+activation: ["QUANTA_GIT_TOOLS=1 registers git_review_diff in the interactive CLI; it is absent from the default CLI menu and web daemon registry."]
+effective_defaults:
+  cli: off
+  web: off
+  bench: unknown
+  headless: off
+  daemon: off
+producer: [src/tool/git/review-diff.ts:gitReviewDiffTool, src/tool/git/review-diff.ts:invokeReviewer]
+consumer: [src/tool/git/index.ts:gitTools, src/apps/cli/internal.ts:gitToolList, src/apps/agent/mode-presets/ci-bot-policy.ts:buildCiBotPolicy]
+reachable: conditional
+surface_findings:
+  - "gitReviewDiffTool uses a host-injected reviewerAgent and returns a deterministic typed failure when the port is absent."
+  - "The catalog's cli:full and web:full claims are stale: normal CLI registration is QUANTA_GIT_TOOLS-gated and the web daemon does not construct gitTools."
+off_identity_proof:
+  kind: source
+  command: rg -n 'gitToolsEnabled|gitToolList|gitTools\(' src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/web-daemon
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The CLI produces an empty gitToolList without QUANTA_GIT_TOOLS, while no web-daemon composition root calls gitTools.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/git-review-diff.test.ts tests/integration/git-review-diff-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 23 cases passed including real git diff review, reviewer isolation, argv injection rejection, missing-port failure, and error paths.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: Catalog must describe the QUANTA_GIT_TOOLS-gated CLI surface and remove web:full until a web composition root consumes gitTools.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'gitReviewDiffTool|reviewerAgent|gitToolsEnabled|gitToolList|buildDaemonToolRegistry' src/tool/git/review-diff.ts src/tool/git/index.ts src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The producer and both gated CLI and ci-bot consumers are live; the normal CLI and daemon do not expose it by default.
+  - kind: test
+    command: bun test tests/unit/tool/git-review-diff.test.ts tests/integration/git-review-diff-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 23 focused unit and integration cases passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-next
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,55 @@
+version: 1
+feature_id: branch-search-minimal-change
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/branch-search/score.ts:minimalChangeSelector and src/agent/branch-search/verify.ts:patchSizeVerifier
+entrypoints:
+  - src/agent/branch-search-runner.ts:buildBranchSearchTool
+  - src/agent/tier1/branch-search.ts:buildBranchSearchFeatures
+activation:
+  - branchSearch config creates the branch_search tool; daemon and IDE presets supply default configs, while the CLI interactive preset does not.
+effective_defaults:
+  cli: off
+  web: unknown
+  bench: off
+  headless: off
+  daemon: on
+producer:
+  - src/agent/branch-search/verify.ts:patchSizeVerifier
+  - src/agent/branch-search/score.ts:minimalChangeSelector
+  - src/agent/branch-search-runner.ts:buildBranchProgressTrace
+consumer:
+  - src/agent/branch-search/tool.ts:branchSearchTool
+  - src/agent/branch-search-runner.ts:buildBranchSearchTool
+reachable: yes
+surface_findings:
+  - The scorer, patch verifier, and progress adapter are production-consumed whenever branchSearch config exists; daemon and IDE presets establish that config by default.
+  - The catalog's CLI full claim is false at the frozen revision: interactive CLI never supplies branchSearch and its tool is absent unless a host explicitly injects configuration.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/branch-search-minimal-change-hellgate.test.ts tests/unit/cli/branch-search-progress.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Patch penalty, tie-breaking selector, formatter, and progress callback rails passed in the 251-test combined run.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: The catalog says CLI integration is full, but interactive CLI has no default branchSearch config; only daemon and IDE presets supply it by default.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n 'branchSearch: req.base.branchSearch\|buildBranchSearchTool\|minimalChangeSelector' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/agent/mode-presets src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Daemon and IDE preset builders default branchSearch, while interactive does not; the branch tool wires the selector and patch verifier.
+  - kind: test
+    command: bun test tests/unit/branch-search-minimal-change-hellgate.test.ts tests/unit/cli/branch-search-progress.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused minimal-change and progress rail passed with zero failures.
+audited_at: '2026-07-19'
+auditor: codex/p2-tier1-batch18
+review_state: approved
+reviewer: codex/cross-review-wave1

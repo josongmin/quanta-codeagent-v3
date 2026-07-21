@@ -1,0 +1,50 @@
+version: 1
+feature_id: product-onboard-skill
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/skill/system-skills/index.ts:discoverSystemSkills"
+entrypoints: [src/apps/cli/index.ts]
+activation: ["explicit product-onboard invocation", "system skill description match"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/skill/system-skills/product-onboard/SKILL.md]
+consumer: ["src/skill/system-skills/index.ts:discoverSystemSkills", "src/skill/index.ts"]
+reachable: yes
+surface_findings: ["The bundled SKILL.md is discovered with system scope, so it wins over a user shadow of the same name.", "Its frontmatter grants the existing update_plan seam and the body enforces the five-step first-user flow without a bespoke onboarding tool."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/system-skills-product-onboard-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The system skill stays trigger-gated and distinct from the repo-recon onboard skill.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/system-skills-product-onboard-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 11 strict-frontmatter, system-discovery, trigger-distinctness, update-plan, identity-mode, and write-capability tests pass.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'discoverSystemSkills|product-onboard|update_plan' src/skill/system-skills src/skill/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The shipped system-skill asset and its discovery consumer are present at the CLI-reachable system skill boundary.
+  - kind: test
+    command: bun test tests/unit/system-skills-product-onboard-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 11 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-tier1-core
+review_state: approved
+reviewer: codex/cross-review-wave1

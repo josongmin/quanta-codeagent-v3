@@ -1,0 +1,58 @@
+version: 1
+feature_id: mcp-sampling-handler
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/mcp-composition.ts:resolveMcpInboundWiring
+entrypoints:
+  - src/host/mcp-composition.ts:buildMcpLoadOpts
+  - src/agent/mcp-bridge.ts:applyMcpClientWiring
+activation:
+  - Set QUANTA_MCP_SAMPLING=1 and QUANTA_MCP_CAPS=full in a CLI MCP load with an LLM and interactive consent prompter.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/runtime/mcp-sampling-handler.ts:buildSamplingWiring
+consumer:
+  - src/host/mcp-composition.ts:resolveMcpInboundWiring
+  - src/agent/mcp-bridge.ts:applyMcpClientWiring
+reachable: yes
+surface_findings:
+  - Surface composition computes handler and capability advertisement from one gate, then applies the bundle on both single-client and supervised restart paths.
+  - Missing consent or LLM leaves no handler; headless routing declines inbound sampling rather than spending inference.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mcp-sampling-handler-hellgate.test.ts tests/unit/mcp-sampling-handler-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Disabled and dependency-missing cases omit advertisement and use the rejecting default handler.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp-sampling-handler-hellgate.test.ts tests/unit/mcp-sampling-handler-e2e-hellgate.test.ts tests/unit/mcp-sampling-honest-advertise-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Handler mapping, consent allow and deny, total error behavior, router delivery, and advertise-iff-handler rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildSamplingWiring|resolveMcpInboundWiring|samplingHandler' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host/mcp-composition.ts src/agent/mcp-bridge.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Composition resolves the handler and negotiator together and hands the same optional wiring to the bridge.
+  - kind: test
+    command: bun test tests/unit/mcp-sampling-handler-hellgate.test.ts tests/unit/mcp-sampling-handler-e2e-hellgate.test.ts tests/unit/mcp-sampling-honest-advertise-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Sampling focused rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

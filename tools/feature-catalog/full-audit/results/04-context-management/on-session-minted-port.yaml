@@ -1,0 +1,47 @@
+version: 1
+feature_id: on-session-minted-port
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/orchestrate/resume-fsm.ts:ResolveResumeInput.onSessionMinted
+entrypoints:
+  - src/host/bootstrap/bootstrap-session.ts:resolveSessionResume
+  - src/runner/orchestrate/resume-fsm.ts:resolveResume
+activation:
+  - The CLI bootstrap supplies a startup-line callback, and resolveResume fires it after each fresh session persists.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: on
+  daemon: on
+producer:
+  - src/runner/orchestrate/resume-fsm.ts invokes onSessionMinted after saveSessionById in explicit and auto-mint branches
+consumer:
+  - src/host/bootstrap/bootstrap-session.ts supplies a CLI startup-line callback to resolveResume
+reachable: yes
+surface_findings:
+  - The callback is surface-owned while the resume FSM remains independent of CLI logger imports.
+  - Both fresh mint paths call it after persistence; resume-by-id and path mode do not spuriously emit it.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: proof-gap
+blocker: The frozen test corpus has no assertion that a supplied onSessionMinted callback fires exactly once after either fresh-mint branch; nearby resume tests cover mint and id-mode logging but not this callback port.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'onSessionMinted|resolveResume\\(' src/runner/orchestrate/resume-fsm.ts src/host/bootstrap/bootstrap-session.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Bootstrap passes the callback and both fresh-mint branches invoke it after saveSessionById.
+  - kind: test
+    command: bun test tests/unit/cli-resume-heuristic.test.ts tests/integration/session-ux-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The selected resume rails passed fresh-mint and id-mode behavior, but do not supply onSessionMinted or observe a callback invocation.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch1
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,61 @@
+version: 1
+feature_id: apply-patch-structured-result
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/tool/apply-patch-structured-tool.ts:makeApplyPatchStructuredTool"
+entrypoints:
+  - "src/apps/cli/index.ts:CLI seeded gate loop"
+  - "src/apps/cli/internal.ts:buildTooling"
+  - "src/tool/index.ts:CONDITIONAL_REGISTRATIONS"
+activation:
+  - "CLI seeds QUANTA_ENABLE_STRUCTURED_PATCH=1 unless explicitly overridden."
+  - "The CLI passes structuredPatch to buildDefaultTools, which registers apply_patch_structured."
+effective_defaults:
+  cli: on
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/patch/structured.ts:applyPatchStructured"
+  - "src/tool/apply-patch-structured-tool.ts:makeApplyPatchStructuredTool"
+consumer:
+  - "src/apps/cli/internal.ts:buildTooling"
+  - "src/tool/index.ts:CONDITIONAL_REGISTRATIONS"
+reachable: yes
+surface_findings:
+  - "The CLI manifest seed promotes the sibling tool by default, while explicit =0 restores the legacy menu."
+  - "The production adapter applies independent sibling operations through the jailed filesystem port and retains structured partial outcomes."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/apply-patch-structured-tool-wire-hellgate.test.ts src/apps/cli/__tests__/apply-patch-structured-composition-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Unset and explicit 0 omit the tool and restore the legacy menu; the original throwing applyPatch contract remains pinned."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/patch-structured-apply-hellgate.test.ts tests/unit/apply-patch-structured-tool-wire-hellgate.test.ts tests/integration/apply-patch-structured-cli-promotion-e2e.test.ts src/apps/cli/__tests__/apply-patch-structured-composition-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "37 pass: CLI seed, real filesystem partial success, failed-target preservation, jail isolation, stale guard, and git-write guard."
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'QUANTA_ENABLE_STRUCTURED_PATCH|structuredPatch|apply_patch_structured' src/apps/cli src/tool src/patch"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The CLI seed, local knob projection, conditional registration, and structured patch adapter form a live production path."
+  - kind: test
+    command: "bun test tests/unit/patch-structured-apply-hellgate.test.ts tests/unit/apply-patch-structured-tool-wire-hellgate.test.ts tests/integration/apply-patch-structured-cli-promotion-e2e.test.ts src/apps/cli/__tests__/apply-patch-structured-composition-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "37 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p1-tools-runtime
+review_state: approved
+reviewer: codex/cross-review-wave1

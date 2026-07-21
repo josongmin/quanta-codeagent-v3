@@ -1,0 +1,64 @@
+version: 1
+feature_id: submission-op-envelope
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/session-lifecycle.ts:handleSubmissionControlOp
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:buildSeedMessages
+  - src/agent/loop/session-lifecycle.ts:runSessionLifecycle
+activation:
+  - "Host passes AgentConfig.submission; user-input ops seed the loop and control ops are consumed before session restore."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/submission.ts:submissionFromMessages
+  - host-provided AgentConfig.submission
+consumer:
+  - src/agent/loop-helpers.ts:buildSeedMessages
+  - src/agent/loop/session-lifecycle.ts:handleSubmissionControlOp
+reachable: yes
+surface_findings:
+  - "The envelope is host-facing and has no standalone CLI affordance; runAgent consumes it directly when supplied."
+  - "Current union is eight variants, not the catalogued six: set_mode and set_brief are wired control operations."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/submission.test.ts tests/unit/agent-submission-and-stop-category.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Legacy messages still seed an unchanged run when submission is absent.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/submission.test.ts tests/unit/agent-submission-and-stop-category.test.ts tests/unit/agent/control-op-handler-hellgate.test.ts tests/unit/agent/submission-set-mode-hell.test.ts tests/unit/brief-mode-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 92 pass, 0 fail; user-input seeding, interrupt abort, subagent cancellation, set_mode, and set_brief control paths are covered.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: "Catalog title and purpose still claim a 6-variant union and accepted-and-ignored control ops. Source has an 8-variant union; interrupt, cancel_subagent, set_mode, and set_brief have behavioral consumers."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'SubmissionOp|ALL_SUBMISSION_OP_KINDS|handleSubmissionControlOp|isSetModeOp|isSetBriefOp' src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Eight discriminants are enumerated and session lifecycle consumes interrupt, cancel, mode, and brief variants.
+  - kind: test
+    command: bun test tests/unit/agent/submission.test.ts tests/unit/agent-submission-and-stop-category.test.ts tests/unit/agent/control-op-handler-hellgate.test.ts tests/unit/agent/submission-set-mode-hell.test.ts tests/unit/brief-mode-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 92 pass, 0 fail; the expanded union and behavioral control paths are exercised.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ feature reachability exception is reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-exit
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,11 +1,14 @@
 #!/usr/bin/env bun
+import { execFile } from "node:child_process"
 import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, join, relative } from "node:path"
+import { promisify } from "node:util"
 import { checkDefaultOffLedger, loadDefaultOffLedger } from "../default-off-ledger-checker"
 import { loadFeaturesStrict } from "../schema"
 import { stringifyYaml } from "../yaml"
 import { loadAuditRecords, loadAuditSnapshot } from "./io"
 import { auditStatus, buildAuditSnapshot, validateAuditState } from "./model"
+import { readAuditInputDigests } from "./provenance"
 
 const ROOT = process.cwd()
 const BASE = join(ROOT, "tools/feature-catalog/full-audit")
@@ -13,6 +16,7 @@ const SNAPSHOT_PATH = join(BASE, "snapshot.json")
 const RESULTS_DIR = join(BASE, "results")
 const BASELINE_PATH = join(ROOT, "tools/feature-catalog/baseline.json")
 const LEDGER_PATH = join(ROOT, "tools/feature-catalog/default-off-ledger.yaml")
+const execFileAsync = promisify(execFile)
 
 const stdout = (value: string): void => {
   process.stdout.write(`${value}\n`)
@@ -42,9 +46,19 @@ const loadBaselineGrandfathered = async (): Promise<Set<string>> => {
   return new Set(baseline.fc?.l3_reachability_grandfathered ?? [])
 }
 
+const currentGitHead = async (): Promise<string> => {
+  const { stdout: head } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: ROOT })
+  return head.trim()
+}
+
 const commandSnapshot = async (): Promise<void> => {
   const snapshotHead = flag("--head") ?? usage()
   const createdAt = flag("--date") ?? usage()
+  const gitHead = await currentGitHead()
+  if (snapshotHead !== gitHead)
+    throw new Error(
+      `snapshot --head must equal current HEAD: expected ${gitHead}, received ${snapshotHead}`,
+    )
   const features = await loadFeaturesStrict()
   const ledger = await loadDefaultOffLedger(LEDGER_PATH)
   const defaultOff = await checkDefaultOffLedger(ledger)
@@ -56,6 +70,7 @@ const commandSnapshot = async (): Promise<void> => {
     reachabilityGrandfatheredIds: await loadBaselineGrandfathered(),
     snapshotHead,
     createdAt,
+    inputDigests: await readAuditInputDigests(ROOT, features, LEDGER_PATH, BASELINE_PATH),
   })
   await mkdir(dirname(SNAPSHOT_PATH), { recursive: true })
   await writeFile(SNAPSHOT_PATH, `${JSON.stringify(snapshot, null, 2)}\n`)
@@ -69,12 +84,22 @@ const loadState = async () => {
     loadAuditRecords(RESULTS_DIR),
     loadFeaturesStrict(),
   ])
-  return { snapshot, records, featureIds: new Set(features.map(({ feature }) => feature.id)) }
+  return {
+    snapshot,
+    records,
+    featureIds: new Set(features.map(({ feature }) => feature.id)),
+    inputDigests: await readAuditInputDigests(ROOT, features, LEDGER_PATH, BASELINE_PATH),
+  }
 }
 
 const commandValidate = async (): Promise<void> => {
   const state = await loadState()
-  const report = validateAuditState(state.snapshot, state.records, state.featureIds)
+  const report = validateAuditState(
+    state.snapshot,
+    state.records,
+    state.featureIds,
+    state.inputDigests,
+  )
   for (const warning of report.warnings) stderr(`warn: ${warning}`)
   for (const error of report.errors) stderr(`error: ${error}`)
   stdout(

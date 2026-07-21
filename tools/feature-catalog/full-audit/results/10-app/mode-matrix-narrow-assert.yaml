@@ -1,0 +1,52 @@
+version: 1
+feature_id: mode-matrix-narrow-assert
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/run-mode/narrow.ts:assertModeMatrix
+entrypoints:
+  - src/apps/agent/mode preset composition
+activation:
+  - Construct or validate an agent run-mode policy.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/run-mode/narrow.ts:narrowMode
+  - src/agent/run-mode/narrow.ts:assertModeMatrix
+consumer:
+  - src/apps/agent/mode-presets
+reachable: yes
+surface_findings:
+  - Runtime assertion consumes the same canonical preset table used by agent-mode composition.
+  - Type-level coverage guards prevent lever-field drift; runtime errors reject cast-corrupted policy values.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/run-mode/narrow.test.ts tests/unit/mode-mutating-table-coverage-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Valid presets, all mismatch defenses, and adjacent mutating-policy coverage rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'assertModeMatrix|narrowMode' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent/run-mode src/apps/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The owner helpers are exported and consumed by agent-mode composition.
+  - kind: test
+    command: bun test tests/unit/agent/run-mode/narrow.test.ts tests/unit/mode-mutating-table-coverage-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused mode matrix rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

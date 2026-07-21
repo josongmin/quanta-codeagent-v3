@@ -1,0 +1,60 @@
+version: 1
+feature_id: mcp-launch-governance
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal.ts:loadFeatures
+entrypoints:
+  - src/apps/cli/index.ts:runCli
+  - src/apps/cli/internal.ts:loadFeatures
+activation:
+  - QUANTA_CENTRAL_CONFIG enables central settings resolution.
+  - A resolved MCP policy supplies deniedServers, enabledServers, or managed-only restrictions.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/config/mcp-governance.ts:filterMcpServersByPolicy
+  - src/apps/cli/internal.ts:resolveMcpLaunchPolicy
+consumer:
+  - src/apps/cli/internal.ts:readMcpConfig
+reachable: yes
+surface_findings:
+  - loadFeatures resolves the policy before materializing MCP configuration and passes it into readMcpConfig.
+  - Denies remain active for untrusted repositories; trusted enables are an exclusive allowlist; managed-only rejects repository additions.
+  - No-policy and gate-off controls retain the unfiltered legacy MCP server set.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mcp-governance-live-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off produces an undefined policy and all configured servers materialize unchanged.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/config/mcp-governance-filter.test.ts tests/unit/config/mcp-governance-merge-hellgate.test.ts tests/unit/mcp-governance-live-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Filter, precedence, trusted and untrusted policy cases, and the live loadFeatures wire all passed.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'resolveMcpLaunchPolicy|readMcpConfig|filterMcpServersByPolicy|mcpDeniedServers|allowManagedMcpServersOnly' src/config src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI composition root resolves and consumes the launch policy, and the filter reports each dropped server.
+  - kind: test
+    command: bun test tests/unit/config/mcp-governance-filter.test.ts tests/unit/config/mcp-governance-merge-hellgate.test.ts tests/unit/mcp-governance-live-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused proof completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-core
+review_state: approved
+reviewer: codex/cross-review-wave1

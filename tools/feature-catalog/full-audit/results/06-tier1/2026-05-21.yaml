@@ -1,0 +1,54 @@
+version: 1
+feature_id: 2026-05-21
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/admissibility-gate.ts
+entrypoints:
+  - src/agent/dispatch.ts
+  - src/apps/cli/internal.ts:loadFeatures
+activation:
+  - The runtime mode check admits read-only actions in every mode and blocks mutating actions outside the current positive mutating set.
+  - Plan is opt-in through QUANTA_PLAN or --plan; review and audit modes are explicit AgentConfig postures.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: on
+  daemon: unknown
+producer:
+  - src/agent/mode.ts:isMutatingToolBlockedInMode
+consumer:
+  - src/agent/admissibility-gate.ts
+  - src/agent/dispatch.ts
+reachable: yes
+surface_findings:
+  - Loop e2e covers plan, review, and audit mutation denial plus default-mode allow controls.
+  - Read-only tool calls remain admitted in restrictive modes.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/admissibility-hellgate.test.ts tests/unit/mode-plan-block.test.ts tests/integration/mode-block-e2e.test.ts tests/integration/mode-block-matrix-e2e.test.ts tests/integration/plan-mode-dispatch-hell-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Mode matrix and runAgent dispatch e2e passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'isMutatingToolBlockedInMode|mode' src/agent/admissibility-gate.ts src/agent/mode.ts src/agent/dispatch.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Dispatch consumes the mode admission decision before tool execution.
+  - kind: test
+    command: bun test tests/unit/admissibility-hellgate.test.ts tests/unit/mode-plan-block.test.ts tests/integration/mode-block-e2e.test.ts tests/integration/mode-block-matrix-e2e.test.ts tests/integration/plan-mode-dispatch-hell-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Restrictive and default controls passed through the live loop.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,66 @@
+version: 1
+feature_id: session-resilience
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/orchestrate/session-turn-driver.ts:runSessionTurn
+entrypoints:
+  - src/apps/cli/repl/session-loop.ts:runReplSession
+  - src/apps/cli/repl.ts:runRepl
+  - src/apps/cli/doctor/default-probes.ts:defaultDoctorProbes
+  - src/apps/web-daemon/runtime-factory.ts:buildReadoutSources
+activation:
+  - QUANTA_CRASH_RESUME enables marker bracketing for a durable session id.
+  - QUANTA_CRASH_RESUME_PARTIAL additionally enables partial-output flushes.
+  - Store health runs on explicit CLI /doctor or web daemon /doctor readout requests.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/session/crash-resume.ts:markSessionInterrupted
+  - src/session/store-health.ts:checkSessionStoreHealth
+  - src/runner/orchestrate/crash-resume-wire.ts:withCrashResumeMarker
+consumer:
+  - src/runner/orchestrate/session-turn-driver.ts:runSessionTurn
+  - src/apps/cli/doctor/default-probes.ts:defaultDoctorProbes
+  - src/apps/web-daemon/runtime-factory.ts:buildReadoutSources
+reachable: yes
+surface_findings:
+  - The turn driver brackets a durable session turn with the injected crash-resume gate, supports the partial-output superset gate, and CLI startup fences auto-reinjection to the same session id.
+  - Store-health is no longer export-only: the real CLI /doctor probes it and the web daemon always exposes its /doctor source.
+  - The catalog hold and prose claiming an unwired store-health diagnostic are stale; crash-resume remains default off while health runs only on explicit diagnostic requests.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/session/crash-resume.test.ts tests/integration/crash-resume-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent crash gate preserves session bytes and prevents marker writes or partial subscription.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/session/crash-resume.test.ts tests/integration/crash-resume-hellgate.test.ts tests/integration/crash-resume-wire-hellgate.test.ts tests/unit/session/store-health.test.ts tests/unit/doctor-selfcheck-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Marker lifecycle, restart detection, same-session reinjection fence, partial flush race containment, aggregate health classification, and real doctor probe wiring pass.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'withCrashResumeMarker|attachCrashResumePartial|bootstrapCrashResumeOffers|selectCrashResumeReinject|checkSessionStoreHealth' src/runner/orchestrate src/apps/cli src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live turn, CLI restart, CLI doctor, and web-daemon doctor consumers are present.
+  - kind: test
+    command: bun test tests/unit/session/crash-resume.test.ts tests/integration/crash-resume-hellgate.test.ts tests/integration/crash-resume-wire-hellgate.test.ts tests/unit/session/store-health.test.ts tests/unit/doctor-selfcheck-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Crash-resume, store-health, and real doctor wiring focused rails passed within the 241-pass run.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch23
+review_state: approved
+reviewer: codex/cross-review-wave1

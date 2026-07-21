@@ -1,0 +1,53 @@
+version: 1
+feature_id: eval-synthetic-judge
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/synthetic/judge.ts:judgeScenario
+entrypoints:
+  - src/apps/eval/synthetic/index.ts:runSynthetic
+activation:
+  - Run the eval synthetic tier with agent and judge LLMs configured.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/eval/synthetic/judge.ts:judgeScenario
+consumer:
+  - src/apps/eval/synthetic/index.ts:runSynthetic
+  - src/apps/eval/synthetic/index.ts:verdictFor
+reachable: yes
+surface_findings:
+  - The synthetic runner consumes judge output and keeps infrastructure errors distinct from legitimate all-false rubric judgments.
+  - Partial or unparseable rubric responses become the typed error channel rather than silently defaulting missing items to failures.
+  - Missing verdict ids receive zero score only after a valid verdict result reaches weighted scoring.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-error-channels.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Stream failure, garbage response, partial rubric, and complete valid verdict channels passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'judgeScenario|verdictFor|weightedScore|error' src/apps/eval/synthetic/judge.ts src/apps/eval/synthetic/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The judge's typed error contract is consumed by the synthetic verdict mapper.
+  - kind: test
+    command: bun test tests/unit/eval-error-channels.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused judge error-channel rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

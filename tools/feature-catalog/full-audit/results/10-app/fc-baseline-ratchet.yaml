@@ -1,0 +1,55 @@
+version: 1
+feature_id: fc-baseline-ratchet
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tools/feature-catalog/lint.ts:runLint
+entrypoints:
+  - tools/feature-catalog/cli.ts:lint command
+  - tools/feature-catalog/refresh-baseline.ts:baseline writer
+activation:
+  - Run bun fc lint for the ratchet or bun tools/feature-catalog/refresh-baseline.ts to refresh measurement fields.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - tools/feature-catalog/lint.ts:runLint
+  - tools/feature-catalog/refresh-baseline.ts:main
+consumer:
+  - tools/feature-catalog/cli.ts:lint command
+  - tools/feature-catalog/render.ts:baseline renderer
+reachable: no
+surface_findings:
+  - The lint rule fails on new empty stubs and new non-grandfathered accepted ADR orphans; explicit update-baseline rewrites only the fc subobject.
+  - The refresh command measures typecheck:all, Biome targets, and unit plus integration tests, then serializes the result into baseline.json.
+  - The catalog claim naming tsc --noEmit and per-tier measurement is stale: the implementation invokes bun run typecheck:all and writes zero per-tier counts rather than measuring each tier.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/feature-catalog-lint.test.ts tests/unit/feature-catalog-baseline.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Ratchet growth and tightening cases, baseline preservation, parser completeness, and malformed-output behavior passed.
+failure_posture: fail-closed
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: Catalog describes commands and per-tier counts that differ from the implemented baseline refresh behavior.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'TYPECHECK_BASELINE_CMD|bun test|by_tier|runLint|empty_stubs_max|orphan_adrs_grandfathered' tools/feature-catalog/refresh-baseline.ts tools/feature-catalog/lint.ts tools/feature-catalog/cli.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Current commands, zeroed tier fields, strict ratchet, and CLI consumer were verified.
+  - kind: test
+    command: bun test tests/unit/feature-catalog-lint.test.ts tests/unit/feature-catalog-baseline.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused baseline and lint rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

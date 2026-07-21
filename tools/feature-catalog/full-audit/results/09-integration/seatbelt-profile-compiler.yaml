@@ -1,0 +1,61 @@
+version: 1
+feature_id: seatbelt-profile-compiler
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/os-sandbox/seatbelt.ts:compileSeatbeltProfile
+entrypoints:
+  - src/apps/cli/index.ts:installCliSandbox
+  - src/runtime/os-sandbox/wrap-argv.ts
+  - src/runtime/os-sandbox/default.ts:defaultOsSandbox
+activation:
+  - Set QUANTA_SANDBOX to a restrictive profile on macOS with sandbox-exec available.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer:
+  - src/runtime/os-sandbox/seatbelt.ts:compileSeatbeltProfile
+consumer:
+  - src/runtime/os-sandbox/wrap-argv.ts
+  - src/runtime/os-sandbox/default.ts
+  - src/apps/cli/sandbox-wire.ts
+reachable: yes
+surface_findings:
+  - The compiler is used by both the CLI-installed shell sandbox path and the portable default OS sandbox port.
+  - Focused rails prove profile-arm output, workspace escaping, strict-knob identity, parity fixtures, runtime argv wrapping, and fail-closed missing-backend behavior in the default port.
+  - The catalog's empty test evidence and note that no test imports its evidence paths are stale.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/runtime/seatbelt-verbatim-hellgate.test.ts tests/integration/seatbelt-exec-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Off and danger-full-access compile to null, so sandbox-exec is not invoked.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/runtime/seatbelt-verbatim-hellgate.test.ts tests/unit/os-sandbox-hellgate.test.ts tests/integration/seatbelt-exec-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Compiler, runtime wrapper, default port, parity, and negative live-exec rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: The catalog lists no tests and says no test imports evidence paths, but dedicated unit and integration rails import and execute compileSeatbeltProfile through compiler and runtime paths.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'compileSeatbeltProfile|installCliSandbox|defaultOsSandbox' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli src/runtime/os-sandbox
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI installation, argv wrapping, and the default OS sandbox all consume the compiler.
+  - kind: test
+    command: bun test tests/unit/runtime/seatbelt-verbatim-hellgate.test.ts tests/unit/os-sandbox-hellgate.test.ts tests/integration/seatbelt-exec-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused Seatbelt compiler and runtime rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

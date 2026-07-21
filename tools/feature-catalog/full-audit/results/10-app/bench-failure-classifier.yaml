@@ -1,0 +1,54 @@
+version: 1
+feature_id: bench-failure-classifier
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/corpus/failure-classifier.ts:classify
+entrypoints:
+  - src/apps/bench/run-report.ts:printSummary
+  - src/runner/batch/report.ts:buildReport
+activation:
+  - Every bench summary and report classifies completed InstanceResult records.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: on
+  headless: na
+  daemon: na
+producer:
+  - src/runner/batch/corpus/failure-classifier.ts:classify
+  - src/runner/batch/corpus/failure-classifier.ts:aggregate
+consumer:
+  - src/apps/bench/run-report.ts:printSummary
+  - src/runner/batch/report.ts:buildReport
+reachable: yes
+surface_findings:
+  - The canonical runner classifier feeds both console failure tags/rollups and report.json failureBreakdown/perInstance fields.
+  - Classification is derived from completed result and optional trajectory data; malformed or unavailable trajectory input degrades to a covering unknown classification.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/bench-failure-classifier.test.ts tests/unit/bench-failure-classifier-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Termination precedence, co-occurring signals, malformed trajectories, and aggregate invariance pass.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'failure-classifier|classify\(|aggregate\(' src/runner/batch/report.ts src/apps/bench/run-report.ts src/runner/batch/corpus/failure-classifier.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: One classifier owns console and JSON-report classification consumers.
+  - kind: test
+    command: bun test tests/unit/bench-failure-classifier.test.ts tests/unit/bench-failure-classifier-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused classifier proof is included in the 193-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

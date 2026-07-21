@@ -1,0 +1,57 @@
+version: 1
+feature_id: otel-attribute-vocab
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/vocabulary.ts:QUANTA_ATTRS and GEN_AI_ATTRS
+entrypoints:
+  - src/observability/attrs.ts:attrs
+  - src/observability/otel-exporter.ts:buildResource
+  - src/observability/patch-trace/otel-patch-trace.ts:otelPatchTrace
+activation:
+  - Typed observability callers import canonical attribute maps and pass values through attrs validation.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/observability/vocabulary.ts:QUANTA_ATTRS
+  - src/observability/vocabulary.ts:GEN_AI_ATTRS
+  - src/observability/attrs.ts:attrs
+consumer:
+  - src/observability/otel-exporter.ts:buildResource
+  - src/observability/patch-trace/otel-patch-trace.ts:otelPatchTrace
+  - src/agent/metrics.ts:AgentMetrics
+reachable: yes
+surface_findings:
+  - Canonical quanta and gen_ai maps provide the AttrKey union; attrs rejects unknown keys and invalid attribute values before emission.
+  - Migration ratchets prohibit raw canonical attribute literals outside the vocabulary owner and assert the vocabulary membership and namespace contract.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability/vocabulary.test.ts tests/unit/observability/attrs.test.ts tests/unit/observability/vocabulary-migration.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Namespace, uniqueness, key membership, invalid-value rejection, frozen bags, and orphan-literal migration rails pass.
+failure_posture: fail-loud
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_ATTRS|GEN_AI_ATTRS|isAttrKey|attrs\(' src/observability/vocabulary.ts src/observability/attrs.ts src/observability/otel-exporter.ts src/observability/patch-trace/otel-patch-trace.ts src/agent/metrics.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Vocabulary and validation owner seams feed actual exporter, patch trace, and metrics consumers.
+  - kind: test
+    command: bun test tests/unit/observability/vocabulary.test.ts tests/unit/observability/attrs.test.ts tests/unit/observability/vocabulary-migration.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Vocabulary, attrs, and orphan-literal migration focused rails passed within the 241-pass run.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch23
+review_state: approved
+reviewer: codex/cross-review-wave1

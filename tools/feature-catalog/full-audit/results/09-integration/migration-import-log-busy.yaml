@@ -1,0 +1,52 @@
+version: 1
+feature_id: migration-import-log-busy
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/migration/persistence.ts:appendImportLog
+entrypoints:
+  - src/apps/cli/session-import-handler.ts:persistAllSessions
+activation:
+  - Run the CLI session import path.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/migration/persistence.ts:loadImportLog
+  - src/migration/persistence.ts:appendImportLog
+consumer:
+  - src/apps/cli/session-import-handler.ts:persistAllSessions
+reachable: yes
+surface_findings:
+  - The CLI import handler loads the durable dedup log and appends a row after each persisted translated session.
+  - Concurrent sidecar-lock collisions fail explicitly instead of merging writes.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/migration-persistence.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing-log defaults, atomic persistence, and busy-lock error behavior passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'loadImportLog|appendImportLog' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/session-import-handler.ts src/migration
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Session import production code consumes both log load and append operations.
+  - kind: test
+    command: bun test tests/unit/migration-persistence.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused persistence rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

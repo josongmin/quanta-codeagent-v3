@@ -1,0 +1,65 @@
+version: 1
+feature_id: precedence-rule-r3-p1
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/closeout-guard.ts:decideCloseoutGuard
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:buildGuardChain
+  - src/agent/guards/closeout-guard.ts:createCloseoutGuard
+activation:
+  - AgentConfig.closeoutGuard.enabled must be true
+  - AgentConfig.closeoutGuard.fourRule true selects the explicit R3-P1 reminder over the default union reminder
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/closeout-guard.ts:decideCloseoutGuard
+consumer:
+  - src/agent/loop/session-bootstrap.ts:buildCloseoutGuard and buildGuardChain
+  - src/agent/guards/closeout-guard.ts:createCloseoutGuard
+  - src/agent/guards/chain.ts:runGuardChain
+reachable: yes
+surface_findings:
+  - "Shared agent loop: closeout state is allocated only when enabled, then the chain intercepts a finish attempt."
+  - "CLI and other AgentConfig hosts share the same loop-level consumer; no separate rendered web affordance is required."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/closeout-guard.test.ts tests/integration/closeout-forces-none.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Undefined or disabled config does not block; the real loop retains auto tool choice when closeoutGuard is disabled.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/closeout-guard.test.ts tests/unit/code-mod-closeout.test.ts tests/integration/closeout-forces-none.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: fourRule true selects the explicit four-rule reminder and the real loop forces the next turn to tool_choice none.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg closeoutGuard and buildGuardChain in src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: session-bootstrap builds state and chain from AgentConfig; the closeout guard delegates to decideCloseoutGuard.
+  - kind: test
+    command: bun test tests/unit/closeout-guard.test.ts tests/unit/code-mod-closeout.test.ts tests/unit/wire-audit-closeout-hellgate.test.ts tests/integration/closeout-forces-none.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 39 pass, 0 fail; includes explicit precedence, removal of heuristic routing, and loop-level forced re-entry.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No reachability exception was reported for precedence-rule-r3-p1.
+audited_at: "2026-07-19"
+auditor: codex/p1-agentloop-core
+review_state: approved
+reviewer: codex/cross-review-wave1

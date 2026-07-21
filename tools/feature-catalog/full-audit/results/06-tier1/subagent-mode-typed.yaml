@@ -1,0 +1,47 @@
+version: 1
+feature_id: subagent-mode-typed
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/subagent-typed/delegation-router.ts:defaultDelegationRouter
+entrypoints: [src/runner/session-execution-plane.ts, src/agent/tier1/delegate.ts]
+activation: [AgentConfig delegator slot]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/agent/subagent-typed/delegation-router.ts]
+consumer: [src/runner/session-execution-plane.ts, src/agent/tier1/delegate.ts]
+reachable: yes
+surface_findings:
+  - "Session execution plane creates a typed delegation port when its host slot is supplied; absent config yields no delegate tool."
+  - "Mode registry enforces per-mode tool and budget constraints before child execution."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-mode-typed-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Closed modes, budgets, isolation, error boomerang, and default-off port behavior pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'DelegationPort|defaultDelegationRouter|delegateTools' src/agent/subagent-typed src/runner/session-execution-plane.ts src/agent/tier1/delegate.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Typed port producer and host/tool consumers are present.
+  - kind: test
+    command: bun test tests/unit/subagent-mode-typed-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Mode-typed delegation rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

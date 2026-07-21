@@ -1,0 +1,53 @@
+version: 1
+feature_id: oidc-federation
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/oidc-federation.ts:OidcFederationExchanger
+entrypoints: []
+activation:
+  - No production composition root constructs OidcFederationExchanger or consumes readOidcEnv.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/oidc-federation.ts:OidcFederationExchanger
+consumer: []
+reachable: no
+surface_findings:
+  - The isolated exchanger and environment parser have strong DI-backed behavior tests, but source search finds no production constructor or exchange caller.
+off_identity_proof:
+  kind: source
+  command: rg -n 'readOidcEnv|OidcFederationExchanger' src --glob '*.ts'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No production consumer outside the defining module was found.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/oidc-federation-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The exchanger contract passes under injected file, HTTP, and clock ports.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: not-activatable
+blocker: Missing composition-root construction and provider-auth consumer.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'readOidcEnv|OidcFederationExchanger|oidc-federation' src --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: References outside the module are types or comments; no exchange path reaches provider construction.
+  - kind: test
+    command: bun test tests/unit/oidc-federation-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Isolated contract rail passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

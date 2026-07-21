@@ -1,0 +1,67 @@
+version: 1
+feature_id: runner-multimodal-image
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/prompt-pipeline.ts:localPayload
+entrypoints:
+  - src/apps/cli/repl.ts:buildImageQueue
+  - src/apps/cli/repl/surface-compose/dispatch.ts:dispatchSurfaceSlash
+  - src/runner/orchestrate/run-once.ts:runOnce
+activation:
+  - Interactive CLI creates the in-memory queue by default; only QUANTA_IMAGE_QUEUE=0 disables it.
+  - /image mutates that queue and the next accepted prompt drains it into the widened payload.
+effective_defaults:
+  cli: on
+  web: on
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/cli/image-queue.ts:createImageQueue
+  - src/apps/cli/repl/prompt-pipeline.ts:localPayload
+consumer:
+  - src/runner/orchestrate/run-once.ts:runOnce
+  - src/protocol/session/verb-surface.ts:SessionVerbSurface.input.append
+reachable: yes
+surface_findings:
+  - The CLI queue, slash dispatch, single-shot drain, PromptPayload widening, and runOnce content construction form a live route.
+  - QUANTA_IMAGE_QUEUE is default-on, not default-off; only literal 0 disables it.
+  - The catalog's claimed web composer source path composer/image-attachment.ts is absent. Web can pass ImageBlock values through input.append, but it is a separate protocol route rather than this CLI queue owner.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/cli-feature-config-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The explicit QUANTA_IMAGE_QUEUE=0 branch disables queue creation while default config enables it.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/image-cmd.test.ts tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts tests/unit/runner/run-once-multimodal.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Queue operations, prompt composition, and image content construction passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: na
+verdict: stale-claim
+blocker: The catalog's web evidence names a nonexistent composer/image-attachment.ts source and conflates the independent protocol image route with this CLI queue feature.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_IMAGE_QUEUE|buildImageQueue|imageQueue\?\.drain|normalizePromptPayload|input\.append' src/apps/cli src/runner src/protocol src/sdk
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI queue route and separate protocol image route are present.
+  - kind: source
+    command: rg --files src | rg 'composer/image-attachment'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: No claimed web composer implementation file exists in the snapshot.
+  - kind: test
+    command: bun test tests/unit/cli/image-cmd.test.ts tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts tests/unit/runner/run-once-multimodal.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused multimodal rails passed within the 216-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch17
+review_state: approved
+reviewer: codex/cross-review-wave1

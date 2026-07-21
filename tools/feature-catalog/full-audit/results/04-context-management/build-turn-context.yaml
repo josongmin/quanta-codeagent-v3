@@ -1,0 +1,53 @@
+version: 1
+feature_id: build-turn-context
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt.ts:compile and buildTurnContext
+entrypoints:
+  - src/agent/loop/context-assembler.ts:prepareTurnContext
+  - src/agent/prompt.ts:buildTurnContext
+activation:
+  - prepareTurnContext invokes buildTurnContext for every live loop turn before the LLM stream is opened.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/loop/context-assembler.ts collects working memory, configuration, rules, skills, and dynamic context
+consumer:
+  - src/agent/prompt.ts returns SystemBlock and Message arrays consumed by the live agent loop
+  - src/agent/loop/context-assembler.ts emits the assembled context into the stream path
+reachable: yes
+surface_findings:
+  - Dynamic data rides one trailing system-reminder while static system sections remain cacheable.
+  - The compile artifact is built and then rendered on the production per-turn path, not only in tests.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/prompt-dynamic.test.ts tests/unit/prompt-sections-hellgate.test.ts tests/unit/agent/prompt-sections.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused prompt rails passed static-prefix stability, dynamic single-reminder assembly, section ordering, and mode/rule behavior.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'export const buildTurnContext|const ctx = buildTurnContext|prepareTurnContext' src/agent/prompt.ts src/agent/loop/context-assembler.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live context assembler invokes buildTurnContext after assembling production turn inputs.
+  - kind: test
+    command: bun test tests/unit/prompt-dynamic.test.ts tests/unit/prompt-sections-hellgate.test.ts tests/unit/agent/prompt-sections.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused dynamic and section rails passed as part of the 236-pass audit command.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch1
+review_state: approved
+reviewer: codex/cross-review-wave1

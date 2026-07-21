@@ -1,0 +1,57 @@
+version: 1
+feature_id: sticky-model-loop-consume
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/stream-consume.ts:streamConsume model resolution
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:resolveStickyModelStore
+  - src/agent/loop/stream-consume.ts:readStickyModelForMode and resolveSkillTurnOverride
+activation:
+  - The host injects an in-memory sticky store by default or an fs-backed store with --sticky-model; set a mode-to-model entry through the CLI model surfaces before a turn.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - StickyModelStore per-mode model id
+consumer:
+  - agent loop selected LLM port from modelCandidates
+reachable: yes
+surface_findings:
+  - Runtime argument assembly injects an in-memory sticky store for every host mode and upgrades it to the fs-backed store under --sticky-model.
+  - streamConsume resolves mode-local sticky state on every turn and maintains skill override over sticky over base-model precedence; unknown ids fall through without a crash.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/loop/sticky-model-precedence-hellgate.test.ts tests/integration/loop-sticky-model.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Store-absent and unset-mode controls retain base-port behavior, with explicit default-OFF identity coverage.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/loop/sticky-model-precedence-hellgate.test.ts tests/integration/loop-sticky-model.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed sticky candidate selection, mode switching, skill-over-sticky precedence, unknown-id fallback, and the no-store control.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'resolveStickyModelStore|stickyModelStore|readStickyModelForMode' src/host/runtime/agent-arg-builder.ts src/agent/loop/stream-consume.ts src/agent/loop/skill-gate.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Host construction, per-turn read, and selection precedence form a complete production path.
+  - kind: test
+    command: bun test tests/unit/loop/sticky-model-precedence-hellgate.test.ts tests/integration/loop-sticky-model.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All focused precedence and end-to-end loop cases passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

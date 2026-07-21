@@ -1,0 +1,54 @@
+version: 1
+feature_id: runner-run-interactive
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl.ts:runRepl and src/apps/cli/repl/session-loop.ts:runSessionLoop
+entrypoints:
+  - src/apps/cli/index.ts:main
+activation:
+  - CLI main unconditionally delegates normal execution to runRepl.
+effective_defaults:
+  cli: on
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/repl.ts:runRepl
+  - src/apps/cli/repl/prompt-pipeline.ts:composePromptPipeline
+  - src/apps/cli/repl/turn-runner.ts:runOneTurn
+consumer:
+  - src/apps/cli/index.ts:main
+  - src/apps/cli/repl/session-loop.ts:runSessionLoop
+reachable: yes
+surface_findings:
+  - The legacy runInteractive symbol is intentionally absent, but its CLI REPL responsibilities are live under runRepl, the prompt pipeline, turn runner, and session loop.
+  - The CLI root calls runRepl after help/version/profile handling, and runRepl invokes runSessionLoop for both interactive and one-shot CLI turns.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/agent/mode-presets/interactive.test.ts tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts tests/unit/apps/cli/turn-runner-hellgate.test.ts tests/unit/runner/public-old-seam-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused REPL cutover, prompt acquisition, per-turn wrapper, and retired-public-seam rails passed in the 251-test combined run.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'runRepl()\|runSessionLoop\|runOneTurn' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI main calls runRepl, which owns the concrete session-loop and per-turn driver composition.
+  - kind: test
+    command: bun test tests/unit/apps/agent/mode-presets/interactive.test.ts tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts tests/unit/apps/cli/turn-runner-hellgate.test.ts tests/unit/runner/public-old-seam-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The combined focused rail passed with zero failures.
+audited_at: '2026-07-19'
+auditor: codex/p2-tier1-batch18
+review_state: approved
+reviewer: codex/cross-review-wave1

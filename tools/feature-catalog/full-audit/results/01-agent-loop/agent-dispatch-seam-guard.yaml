@@ -1,0 +1,61 @@
+version: 1
+feature_id: agent-dispatch-seam-guard
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/dispatch-seam-guard.ts:checkDispatchAllowed
+entrypoints:
+  - src/agent/dispatch.ts:consultPlanModeSeam
+activation:
+  - dispatchTool resolves collaboration mode and consults checkDispatchAllowed before admissibility and execution for non-read-only plan-mode calls.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/dispatch-seam-guard.ts:checkDispatchAllowed
+consumer:
+  - src/agent/dispatch.ts:consultPlanModeSeam
+reachable: yes
+surface_findings:
+  - Default collaboration mode takes the explicit no-work allow path; plan mode blocks mutating and unknown table entries before execution.
+  - This is an internal safety predicate; the visible effect is the typed tool-result denial.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/plan-mode-dispatch-block-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default-off/default-collaboration behavior preserves mutating dispatch while plan mode is absent.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/plan-mode-dispatch-block-hellgate.test.ts tests/unit/mode-plan-block.test.ts tests/integration/plan-mode-dispatch-hell-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rail passed in the combined 854-pass run, including mutating blocks, read-only allows, fail-closed unknown tools, and loop e2e.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'checkDispatchAllowed\(' src/agent/dispatch.ts src/agent/dispatch-seam-guard.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: dispatch.ts calls the pure guard from consultPlanModeSeam before gate and execution flow.
+  - kind: test
+    command: bun test tests/unit/plan-mode-dispatch-block-hellgate.test.ts tests/unit/mode-plan-block.test.ts tests/integration/plan-mode-dispatch-hell-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Combined focused audit rail passed with direct matrix and real-loop coverage.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 0 L3+ feature reachability exceptions.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-core
+review_state: approved
+reviewer: codex/cross-review-wave1

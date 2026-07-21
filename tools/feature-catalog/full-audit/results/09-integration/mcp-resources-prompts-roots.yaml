@@ -1,0 +1,59 @@
+version: 1
+feature_id: mcp-resources-prompts-roots
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/mcp-composition.ts:resolveMcpInboundWiring
+entrypoints:
+  - src/host/mcp-composition.ts:buildMcpLoadOpts
+  - src/agent/mcp-bridge.ts:applyMcpClientWiring
+activation:
+  - Set QUANTA_MCP_ROOTS=1 and QUANTA_MCP_CAPS=full in an MCP load; outbound resource and prompt methods act only when the server advertises their capability.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/runtime/mcp-roots-provider.ts:buildRootsWiring
+  - src/mcp/client.ts
+consumer:
+  - src/host/mcp-composition.ts:resolveMcpInboundWiring
+  - src/agent/mcp-bridge.ts:applyMcpClientWiring
+reachable: yes
+surface_findings:
+  - The host derives roots provider and roots advertisement from one branch, checks the compiled negotiator, and forwards the bundle through normal and supervised MCP loads.
+  - Outbound resources and prompts are capability-gated by the remote server; absent roots provider still answers inbound roots/list with an empty result rather than an unknown-method error.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mcp-roots-supervised-wire-hellgate.test.ts tests/unit/mcp-roots-supervised-wire-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default-off cases omit roots advertisement while preserving the empty roots/list response.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp-resources-prompts-roots-hellgate.test.ts tests/unit/mcp-resources-prompts-roots-e2e-hellgate.test.ts tests/unit/mcp-roots-supervised-wire-hellgate.test.ts tests/unit/mcp-roots-supervised-wire-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Resource and prompt round trips, typed failures, roots provider wire, and supervised reconnect rails passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildRootsWiring|rootsProvider|resolveMcpInboundWiring' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host/mcp-composition.ts src/host/runtime/mcp-roots-provider.ts src/agent/mcp-bridge.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The roots provider and advertised capability share the host decision and reach both bridge paths.
+  - kind: test
+    command: bun test tests/unit/mcp-resources-prompts-roots-hellgate.test.ts tests/unit/mcp-resources-prompts-roots-e2e-hellgate.test.ts tests/unit/mcp-roots-supervised-wire-hellgate.test.ts tests/unit/mcp-roots-supervised-wire-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Resources prompts roots focused rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

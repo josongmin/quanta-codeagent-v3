@@ -1,0 +1,52 @@
+version: 1
+feature_id: compactionbreaker
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/compaction-breaker.ts:CompactionBreaker
+entrypoints: [src/apps/cli/internal.ts:buildCompactionBreakerConfig, src/agent/loop/session-bootstrap.ts]
+activation: [default-on, QUANTA_COMPACT_BREAKER=off disables, optional cap overrides]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: [src/agent/compaction-breaker.ts]
+consumer: [src/agent/loop/compaction-wire.ts, src/agent/loop/recovery-executor.ts]
+reachable: yes
+surface_findings:
+  - "CLI config keeps breaker enabled by default and session bootstrap constructs it unless explicitly disabled."
+  - "Proactive and reactive no-progress strikes terminate thrash deterministically while productive runs reset counters."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/compaction-breaker-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Productive and under-floor paths remain clean; explicit disabled config omits construction.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/compaction-breaker-hellgate.test.ts tests/unit/compaction-no-progress-strike-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Reactive and proactive boundaries, progress threshold, and clean halt verdicts pass.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'CompactionBreaker|compactionBreaker|COMPACT_BREAKER' src/apps/cli/internal.ts src/agent/loop src/agent/compaction-breaker.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Default-on config, bootstrap owner, and compaction consumers are live.
+  - kind: test
+    command: bun test tests/unit/compaction-breaker-hellgate.test.ts tests/unit/compaction-no-progress-strike-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Breaker rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,53 @@
+version: 1
+feature_id: semantic-index-real-embedder
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/search-index-backend.ts:buildSemanticBackend
+entrypoints:
+  - src/runner/assemble/search-pipeline.ts:search pipeline assembly
+  - src/retrieval/engines/embedder/registry.ts:createEmbedderFromEnv
+activation:
+  - Set QUANTA_EMBED_PROVIDER for a provider and QUANTA_VECTOR_STORE for an explicit store; unset values retain hash embedding and in-memory storage.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/runner/assemble/search-index-backend.ts:resolveIndexEmbedder
+  - src/retrieval/engines/store/registry.ts:createStoreFromEnv
+consumer:
+  - src/runner/assemble/search-pipeline.ts:semantic upsert and query wire
+reachable: yes
+surface_findings:
+  - Recognized embedders are selected through the registry, and provider failures fall back deterministically while reporting latency metrics.
+  - Explicit unknown or incompatible vector-store requests hard-disable the semantic backend rather than silently indexing in an alternate store; Lance reconciliation is exercised against the in-process REST fixture.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/runner/search-index-backend.test.ts tests/unit/runner/search-pipeline.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing or unknown provider retained hash embedding and unset persistence retained the in-memory backend.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/runner/search-index-backend.test.ts tests/integration/search-pipeline-lance-wire.test.ts tests/contract/lance-real-wire.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: blocked
+  evidence: Unit and in-process Lance wiring rails passed, but the real python plus lancedb contract rail skipped because that runtime was unavailable.
+failure_posture: fail-closed
+security_posture: conditional
+observability: verified
+verdict: proof-gap
+blocker: The frozen host lacks python plus lancedb, so real Lance-backed contract behavior is skipped; current proof is limited to unit adapters and an in-process compatible REST fixture.
+disposition: hold
+receipts:
+  - kind: test
+    command: bun test tests/unit/runner/search-index-backend.test.ts tests/unit/runner/search-pipeline.test.ts tests/integration/search-pipeline-lance-wire.test.ts tests/contract/lance-real-wire.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: blocked
+    evidence: The focused command passed all available semantic and Lance-wire rails with one expected real-backing skip.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

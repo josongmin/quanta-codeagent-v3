@@ -1,0 +1,56 @@
+version: 1
+feature_id: token-estimator-chars-quarter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/compaction/token-baseline.ts:estimateTokens
+entrypoints:
+  - src/agent/loop/compaction-wire.ts:maybeCompact
+  - src/agent/loop/recovery-executor.ts:applyCompactRecovery
+activation:
+  - Proactive compaction prechecks estimate the live snapshot.
+  - Reactive PTL recovery measures pre- and post-squeeze transcript sizes.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: on
+  daemon: on
+producer:
+  - src/agent/compaction/token-baseline.ts:charsOf
+  - src/agent/compaction/token-baseline.ts:estimateTokens
+consumer:
+  - src/agent/loop/compaction-wire.ts:runMicrocompactPrepass
+  - src/agent/loop/recovery-executor.ts:applyCompactRecovery
+  - src/agent/compaction.ts:reactiveCompact
+reachable: yes
+surface_findings:
+  - "The token baseline module owns charsOf and one final ceiling division; compaction re-exports this owner rather than carrying a divergent loop."
+  - "The threshold path and reactive progress guard consume the estimator on live snapshots."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/compaction.test.ts tests/unit/delta-token-knob-off-hellgate.test.ts tests/unit/delta-token-loop-wire-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: chars per four baseline, extracted charsOf equivalence, and real compaction precheck equality all pass.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "estimateTokens|charsOf" src/agent/compaction/token-baseline.ts src/agent/loop/compaction-wire.ts src/agent/loop/recovery-executor.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Shared estimator is consumed by proactive precheck and reactive recovery measurement paths.
+  - kind: test
+    command: bun test tests/unit/compaction.test.ts tests/unit/delta-token-knob-off-hellgate.test.ts tests/unit/delta-token-loop-wire-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 114 shared-rail tests passed; extraction remains byte-identical and the loop sees the full-rescan-equivalent estimate.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch3
+review_state: approved
+reviewer: codex/cross-review-wave1

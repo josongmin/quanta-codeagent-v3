@@ -1,0 +1,59 @@
+version: 1
+feature_id: work-metrics
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/session-resources.ts:buildWorkMetricsResources
+entrypoints:
+  - src/apps/cli/repl/factories/metrics-sink.ts:buildWorkMetricsSink
+  - src/host/bootstrap/bootstrap-session.ts
+activation:
+  - QUANTA_METRICS=1 enables the CLI stderr work-metrics sink.
+  - Session resource assembly allocates a collector only when AgentConfig.workMetricsSink is present.
+effective_defaults:
+  cli: off
+  web: na
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/work-metrics-collector.ts accumulates actions, reads, tokens, and optional diff rows.
+consumer:
+  - src/agent/session-resources.ts emits final turn metrics to workMetricsSink.
+  - src/apps/cli/repl/factories/metrics-sink.ts renders the CLI stderr work summary.
+reachable: yes
+surface_findings:
+  - The CLI sink is genuinely default-off behind QUANTA_METRICS and absent sink avoids collector allocation.
+  - Diff parsing is implemented but no loop path automatically calls recordDiff, so diffMap remains conditional as the catalog notes.
+off_identity_proof:
+  kind: source
+  command: git show 9a12f7a:src/apps/cli/repl/factories/metrics-sink.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The factory returns undefined unless the feature gate is enabled and session resources no-op without a sink.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/work-metrics.test.ts tests/unit/work-metrics-collector.test.ts tests/unit/observability/attrs.test.ts tests/integration/loop-work-metrics-sink.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Pure aggregation and collector rails pass and integration proves per-turn sink emission with the rendered work summary.
+failure_posture: na
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'workMetricsSink\|QUANTA_METRICS\|buildWorkMetricsResources' 9a12f7a -- src/agent src/apps/cli src/host
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The env gate builds the CLI sink, session resources consume it, and bootstrap preserves the slot into AgentConfig.
+  - kind: test
+    command: bun test tests/unit/work-metrics.test.ts tests/unit/work-metrics-collector.test.ts tests/unit/observability/attrs.test.ts tests/integration/loop-work-metrics-sink.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused unit and loop integration rail passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

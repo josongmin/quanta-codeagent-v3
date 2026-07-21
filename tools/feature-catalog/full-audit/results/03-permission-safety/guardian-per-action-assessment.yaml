@@ -1,0 +1,61 @@
+version: 1
+feature_id: guardian-per-action-assessment
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/permission/reviewer.ts:reviewAction"
+entrypoints:
+  - src/apps/cli/index.ts
+  - "src/apps/cli/repl/runtime-context-compose.ts:buildRuntimeContext"
+activation:
+  - "QUANTA_GUARDIAN_ASSESSOR=1."
+  - "The CLI composition has a reviewer agent and installs guardianAssess on the reviewer port."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/agent/tier1/reviewer-subagent.ts:createSubagentBackedGuardianAssess"
+  - "src/permission/assessment-collapse.ts:collapseAssessment"
+consumer:
+  - "src/apps/cli/repl/runtime-context-compose.ts:buildRuntimeContext"
+  - "src/permission/reviewer.ts:reviewAction"
+reachable: yes
+surface_findings:
+  - "The interactive CLI only supplies guardianAssess when both a reviewer agent and the strict gate are present."
+  - "reviewAction uses the typed assessor only when the optional port method is present and collapses all non-allow or malformed outcomes conservatively."
+  - "The browser protocol has only approve or deny, so typed steering and edit fidelity do not cross that surface."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/guardian-per-action-assessor-e2e-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Unset and loose-truthy gates retain the binary guardian path and do not call guardianAssess."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/guardian-assessment-collapse-hellgate.test.ts tests/unit/guardian-assessor-subagent-hellgate.test.ts tests/unit/guardian-per-action-assessor-e2e-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "66 typed routing, hostile reply, strict decoder, conservative collapse, real adapter, and default-off cases pass."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n '(guardianAssess|guardianAssessor|collapseAssessment)' src/apps/cli/repl/runtime-context-compose.ts src/permission/reviewer.ts src/agent/tier1/reviewer-subagent.ts src/shared/runtime-config.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The CLI composition constructs the optional assessor and reviewAction consumes it behind the same strict gate."
+  - kind: test
+    command: "bun test tests/unit/guardian-assessment-collapse-hellgate.test.ts tests/unit/guardian-assessor-subagent-hellgate.test.ts tests/unit/guardian-per-action-assessor-e2e-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "66 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p1-security-policy
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,64 @@
+version: 1
+feature_id: codex-r2-mention-injection-pipeline
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/codex-r2-wire-install/install.ts:buildMentionInjector"
+entrypoints:
+  - "src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2"
+  - "src/host/runtime/internal/mention-wire.ts:installCliMentionInjector"
+  - "src/agent/loop/context-assembler.ts:resolveMentionInjectionMessages"
+activation:
+  - "Assembler installs mentionInjector using the default mention resolver; @file is default-ON and its explicit gate can disable it."
+  - "Plugin activation remains conditional on a discovered plugin root, but file and symbol mention injection are live without that prerequisite."
+effective_defaults:
+  cli: on
+  web: on
+  bench: unknown
+  headless: on
+  daemon: on
+producer:
+  - "src/agent/mention-injection/parser.ts:parseMentions"
+  - "src/agent/mention-injection/resolver.ts:buildInjectionFragments"
+  - "src/agent/mention-injection/inject-messages.ts:buildMentionInjectionMessages"
+  - "src/agent/mention-injection/event-emitter.ts:emitMentionEvents"
+consumer:
+  - "src/agent/codex-r2-wire-install/install.ts:buildMentionInjector"
+  - "src/agent/loop/context-assembler.ts:resolveMentionInjectionMessages"
+  - "src/agent/prompt.ts:buildTurnContext"
+reachable: yes
+surface_findings:
+  - "The real assembler and CLI mention installer both reach the same injector closure consumed by the loop."
+  - "The ledger's AgentConfig.activatePlugins gate does not describe the live file and symbol injection path; it only covers a conditional plugin subpath."
+off_identity_proof:
+  kind: source
+  command: "rg mentionResolverDep and fillMentionInjector in src/host/runtime/agent-config-assembler.ts src/agent/codex-r2-wire-install/install.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: "The all-surfaces default-OFF claim is contradicted by default resolver installation; QUANTA_MENTION_FILE=off is an opt-out, not the default."
+on_efficacy_proof:
+  kind: test
+  command: "bun test src/agent/mention-injection/__tests__/parser.hellgate.test.ts src/agent/mention-injection/__tests__/resolver.hellgate.test.ts src/agent/mention-injection/__tests__/event-emitter.hellgate.test.ts src/agent/mention-injection/__tests__/inject-messages.hellgate.test.ts src/agent/mention-runner/__tests__/skill-resolver.hellgate.test.ts src/agent/mention-runner/__tests__/default-resolver.hellgate.test.ts src/agent/plugin-activation-handler/__tests__/handler.hellgate.test.ts src/agent/plugin-activation-handler/__tests__/composite-activation.hellgate.test.ts tests/unit/skill-registry-readonly.test.ts tests/integration/mention-e2e-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Real filesystem and production composition tests prove file and symbol injections; parser, resolver, message, typed-event, skill, and plugin branches pass."
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg mentionInjector and resolveMentionInjectionMessages in src/agent src/host/runtime"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Composition installs mentionInjector and the loop awaits it before prompt construction."
+  - kind: test
+    command: "bun test src/agent/mention-injection/__tests__/parser.hellgate.test.ts src/agent/mention-injection/__tests__/resolver.hellgate.test.ts src/agent/mention-injection/__tests__/event-emitter.hellgate.test.ts src/agent/mention-injection/__tests__/inject-messages.hellgate.test.ts src/agent/mention-runner/__tests__/skill-resolver.hellgate.test.ts src/agent/mention-runner/__tests__/default-resolver.hellgate.test.ts src/agent/plugin-activation-handler/__tests__/handler.hellgate.test.ts src/agent/plugin-activation-handler/__tests__/composite-activation.hellgate.test.ts tests/unit/skill-registry-readonly.test.ts tests/integration/mention-e2e-hellgate.test.ts src/agent/loop/__tests__/provider-throw-emits-error.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "150 pass, 0 fail across pipeline primitives, production-wire e2e, failure observability, and plugin activation branches."
+audited_at: "2026-07-19"
+auditor: codex/p1-context-events
+review_state: approved
+reviewer: codex/cross-review-wave1

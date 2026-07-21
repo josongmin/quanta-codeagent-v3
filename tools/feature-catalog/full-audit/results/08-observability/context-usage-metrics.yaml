@@ -1,0 +1,56 @@
+version: 1
+feature_id: context-usage-metrics
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/emit-helpers.ts:emitUsage and src/apps/cli/status-line.ts
+entrypoints:
+  - src/agent/loop/emit-helpers.ts:usage event fan-out
+  - src/apps/cli/repl/session-setup.ts:context usage holder
+activation:
+  - Each provider usage event reaches AgentRecorder when a recorder is configured.
+  - The CLI session installs a context usage holder and exposes its view through slash surface composition.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/metrics.ts:AgentRecorder.tokensUsed emits canonical GenAI usage counters.
+  - src/agent/loop/emit-helpers.ts forwards provider usage into the recorder.
+consumer:
+  - src/apps/cli/repl/context-usage-snapshot.ts retains a usage view for the CLI surface.
+  - src/apps/cli/slash/registry-surface/preferences-cmds.ts reads the context usage slot.
+reachable: yes
+surface_findings:
+  - Metrics fan-out is live and the current CLI exposes segmented context usage through the slash surface.
+  - The catalog is stale about formatContextUsage and a 20-cell status-line bar; that renderer had no production caller and was deleted.
+  - The listed src/agent/loop.ts owner path is stale; the live fan-out is emit-helpers.ts.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/metrics-tokens.test.ts tests/unit/cli/status-line-driver-hellgate.test.ts tests/unit/observability/vocabulary.test.ts tests/integration/agent-metrics-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Token counter vocabulary and integration fan-out pass; the current status-line rail covers the segmented renderer.
+failure_posture: na
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: The catalog describes a deleted single-bar formatContextUsage renderer and its obsolete loop owner path.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n 'tokensUsed\|formatContextUsage\|formatSegmentedUsage' 9a12f7a -- src/agent/loop src/agent/metrics.ts src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: emitUsage calls recorder.tokensUsed; status-line documents deletion of the old formatContextUsage variant and exports the segmented view.
+  - kind: test
+    command: bun test tests/unit/agent/metrics-tokens.test.ts tests/unit/cli/status-line-driver-hellgate.test.ts tests/unit/observability/vocabulary.test.ts tests/integration/agent-metrics-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused metric and renderer rail passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

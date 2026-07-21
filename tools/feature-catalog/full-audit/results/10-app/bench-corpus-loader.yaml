@@ -1,0 +1,52 @@
+version: 1
+feature_id: bench-corpus-loader
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/corpus/loader.ts:loadCorpus
+entrypoints: [src/runner/batch/core.ts, src/apps/agent/mode-presets/batch.ts]
+activation: [QUANTA_SWEBENCH_CORPUS_ROOT, batch or bench corpus load]
+effective_defaults:
+  cli: na
+  web: na
+  bench: resource
+  headless: resource
+  daemon: na
+producer: [src/runner/batch/corpus/loader.ts]
+consumer: [src/runner/batch/core.ts, src/apps/agent/mode-presets/batch.ts]
+reachable: yes
+surface_findings:
+  - "Current authority is runner/batch/corpus; apps/bench/corpus/loader is a compatibility re-export."
+  - "Missing or invalid corpus roots return an empty list, while real SWE-bench, JSONL manifest, and directory layouts select distinct loaders."
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/bench-eval.test.ts tests/integration/bench.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing and empty roots return [] without throwing.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/bench-eval.test.ts tests/integration/bench.test.ts tests/unit/issue-hint/swebench-corpus.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Synthetic corpus loading, real-layout detection, and bench execution rails pass; external real corpus fixture is appropriately skipped when absent.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: sed -n '230,255p' src/runner/batch/corpus/loader.ts && rg -n 'loadCorpus' src/runner/batch/core.ts src/apps/agent/mode-presets/batch.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Corpus layout selection feeds batch core and agent batch-mode composition.
+  - kind: test
+    command: bun test tests/integration/bench-eval.test.ts tests/integration/bench.test.ts tests/unit/issue-hint/swebench-corpus.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused corpus rails passed with one environment-dependent real-corpus case skipped.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

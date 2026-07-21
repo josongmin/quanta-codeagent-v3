@@ -1,0 +1,59 @@
+version: 1
+feature_id: swebench-matrix-runner
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tools/swebench-matrix.ts:main
+entrypoints:
+  - package.json:direct bun script invocation
+activation:
+  - Run bun run tools/swebench-matrix.ts with dataset, corpus, output, and optional conditions or axes arguments.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - tools/swebench-matrix.ts:conditionToEnv
+  - tools/swebench-matrix.ts:collectRowsForCondition
+  - tools/swebench-matrix/state.ts:sweep-state checkpointing
+consumer:
+  - tools/swebench-matrix.ts:main
+reachable: no
+surface_findings:
+  - This is a manually invoked experiment tool, not a bench, interactive CLI, headless, or daemon production consumer.
+  - Its baseline condition emits an empty environment overlay, preserving the benchmark's existing default-off knobs rather than writing false values.
+  - The tool persists resumable state and parses existing summary and JSONL artifacts; it does not alter benchmark source or runtime configuration.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/swebench-matrix.test.ts tests/unit/swebench-matrix-axes.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Baseline and every absent axis omit their environment keys rather than setting an off value.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/swebench-matrix.test.ts tests/unit/swebench-matrix-axes.test.ts tests/unit/swebench-matrix-axes-hellgate.test.ts tests/unit/swebench-matrix-progress.test.ts tests/unit/swebench-matrix-progress-hellgate.test.ts tests/unit/swebench-matrix-resume.test.ts tests/unit/swebench-matrix-state-hellgate.test.ts tests/unit/swebench-matrix-summary-hellgate.test.ts tests/integration/matrix-resume-flow.test.ts tests/integration/matrix-resume-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Axis composition, summary parsing, progress, adversarial artifact handling, atomic resume state, and resume integration rails passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'conditionToEnv|collectRowsForCondition|matrix-summary|main\(' tools/swebench-matrix.ts tools/swebench-matrix
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The standalone runner owns overlay creation, artifact collection, resumable state, and its manual entrypoint.
+  - kind: test
+    command: bun test tests/unit/swebench-matrix.test.ts tests/unit/swebench-matrix-axes.test.ts tests/unit/swebench-matrix-axes-hellgate.test.ts tests/unit/swebench-matrix-progress.test.ts tests/unit/swebench-matrix-progress-hellgate.test.ts tests/unit/swebench-matrix-resume.test.ts tests/unit/swebench-matrix-state-hellgate.test.ts tests/unit/swebench-matrix-summary-hellgate.test.ts tests/integration/matrix-resume-flow.test.ts tests/integration/matrix-resume-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Matrix rails passed within the 315-pass 18-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,47 @@
+version: 1
+feature_id: cli-main-e
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/index.ts:main
+entrypoints: [src/apps/cli/index.ts]
+activation: [quanta process entrypoint]
+effective_defaults:
+  cli: on
+  web: off
+  bench: na
+  headless: on
+  daemon: na
+producer: [src/apps/cli/repl.ts:runRepl, src/apps/cli/internal.ts]
+consumer: [src/apps/cli/index.ts:main]
+reachable: yes
+surface_findings:
+  - "The entrypoint delegates session and slash short-circuits then awaits runRepl for normal CLI flow."
+  - "Runtime-session loop rails cover one-shot and interactive branches, lifecycle teardown, prompt dispatch, and error rendering through the extracted REPL orchestration."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli-summarizer.test.ts tests/unit/apps/cli/session-loop-hellgate.test.ts tests/unit/apps/cli/repl/session-loop-options-background-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: CLI summarizer composition and one-shot/interactive REPL session loop rails pass.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'runRepl|runSessionMain|runSlashMain|const main' src/apps/cli/index.ts src/apps/cli/repl.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI entrypoint dispatches to the extracted REPL and subcommand owners.
+  - kind: test
+    command: bun test tests/unit/cli-summarizer.test.ts tests/unit/apps/cli/session-loop-hellgate.test.ts tests/unit/apps/cli/repl/session-loop-options-background-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI loop-focused rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,60 @@
+version: 1
+feature_id: git-conflict-inspect
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/git/conflict-inspect.ts:gitConflictInspectTool
+entrypoints:
+  - src/tool/git/index.ts:gitTools
+  - src/apps/cli/internal.ts:loadFeatures
+activation:
+  - QUANTA_GIT_TOOLS enables the interactive CLI gitTools registry, which includes git_conflict_inspect.
+effective_defaults:
+  cli: off
+  web: off
+  bench: unknown
+  headless: off
+  daemon: off
+producer:
+  - src/tool/git/conflict-inspect.ts:gitConflictInspectTool
+  - src/tool/git/conflict-parser/parse.ts:parseConflicts
+consumer:
+  - src/tool/git/index.ts:gitTools
+  - src/apps/cli/internal.ts:gitToolList
+reachable: conditional
+surface_findings:
+  - The tool uses git status --porcelain=v1 only for discovery, then reads confined repo-relative paths and parses conflict markers without merge mutation.
+  - Absolute and traversal paths fail before the runner or filesystem read; auto-discovered rows are capped before reading and output is capped at 50 KB.
+  - The catalog's cli:full and web:full claims are stale: interactive registration is QUANTA_GIT_TOOLS-gated and web-daemon has no gitTools consumer.
+off_identity_proof:
+  kind: source
+  command: rg -n 'gitToolsEnabled|gitToolList|gitTools\(' src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/web-daemon/runtime-factory.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The false CLI gate yields an empty gitToolList, and the web-daemon registry does not invoke gitTools.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git-conflict-inspect-tool.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 13 focused cases passed for explicit and discovered conflicts, malformed markers, caps, path rejection, runner errors, and signal forwarding.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: Catalog must describe QUANTA_GIT_TOOLS-gated CLI availability and remove web:full until a web registry consumes gitTools.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'gitConflictInspectTool|git_conflict_inspect|gitToolsEnabled|gitToolList|buildDaemonToolRegistry' src/tool/git/conflict-inspect.ts src/tool/git/index.ts src/apps/cli/internal.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The read-only producer is in gitTools, whose only audited product consumer is the CLI opt-in list.
+  - kind: test
+    command: bun test tests/unit/git-conflict-inspect-tool.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 13 focused contract and security-boundary cases passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-shadow
+review_state: approved
+reviewer: codex/cross-review-wave1

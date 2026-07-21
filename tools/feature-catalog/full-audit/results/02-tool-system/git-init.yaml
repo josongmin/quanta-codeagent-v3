@@ -1,0 +1,47 @@
+version: 1
+feature_id: git-init
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/git/index.ts:gitTools
+entrypoints: [src/apps/cli/internal.ts:gitToolList, src/tool/git/index.ts:gitTools]
+activation: [QUANTA_GIT_TOOLS=1 registers the supported git tool factories; no git_init factory is present.]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [No src/tool/git factory or Tool spec has the name git_init.]
+consumer: [No production registry consumer for a git_init Tool exists.]
+reachable: no
+surface_findings:
+  - The catalog title claims a first-class git init feature, but gitTools builds diff, status, log, blame, commit, branch-switch, and other tools without git_init.
+  - git init appears only in the real-repository test harness used to prepare degenerate-repository fixtures; it is not a model-invokable runtime tool.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: na
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: The catalog's git init title, L4 maturity, and full CLI/web integration claim have no matching runtime tool or registry consumer.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'name: "git_|gitTools\(|gitToolList|git init' src/tool/git/index.ts src/tool/git src/apps/cli/internal.ts tests/unit/git-tools-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The git registry contains no git_init name; the only git init occurrences are fixture setup in the test rail.
+  - kind: test
+    command: bun test tests/unit/git-tools.test.ts tests/unit/git-tools-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All selected git-tool cases passed; the real-repository rail uses git init only to construct test inputs.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Strict reachability has no inferred git_init runtime owner because no such catalog-backed API is present.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-pr
+review_state: approved
+reviewer: codex/cross-review-wave1

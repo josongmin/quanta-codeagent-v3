@@ -1,0 +1,52 @@
+version: 1
+feature_id: task-budget-soft
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/context-assembler.ts:resolveTaskBudgetForTurn
+entrypoints: [src/agent/loop/session-bootstrap.ts, src/agent/loop/context-assembler.ts]
+activation: [QUANTA_TASK_BUDGET through task-budget knob application]
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/runner/knobs/knobs/task-budget.ts]
+consumer: [src/agent/loop/context-assembler.ts, src/agent/prompt-reminders.ts]
+reachable: yes
+surface_findings:
+  - "Once AgentConfig.taskBudget is populated, session bootstrap creates spend state and context assembly injects a bounded advisory reminder."
+  - "The knob itself is pure and surface-gated; catalog notes the interactive CLI does not yet universally fold resolved knobs into live config."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/prompt-task-budget-hellgate.test.ts tests/unit/runner/knobs/task-budget-knob-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent or non-positive budget adds no dynamic prompt bytes and knob application preserves config identity.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/prompt-task-budget-hellgate.test.ts tests/unit/runner/knobs/task-budget-knob-hellgate.test.ts tests/integration/task-budget-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Parsed budget increments observed usage and renders advisory escalation without enforcing a stop.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: conditional
+blocker: "The task-budget knob and loop wire work, but CLI-wide automatic resolved-knob application remains an acknowledged promotion gap."
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'taskBudget|taskSpend|resolveTaskBudgetForTurn' src/agent/loop src/runner/knobs/knobs/task-budget.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Spend state, per-turn context injection, and knob owner are present.
+  - kind: test
+    command: bun test tests/unit/prompt-task-budget-hellgate.test.ts tests/unit/runner/knobs/task-budget-knob-hellgate.test.ts tests/integration/task-budget-loop-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Task budget focused rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

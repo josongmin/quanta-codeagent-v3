@@ -1,0 +1,68 @@
+version: 1
+feature_id: background-side-agent
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-config-assembler.ts:maybeWireSideAgent
+entrypoints:
+  - src/apps/cli/index.ts:runCli
+  - src/agent/features.ts:buildSessionFeatures
+activation:
+  - QUANTA_SIDE_AGENT enables the host-owned daemon registry.
+  - QUANTA_SIDE_AGENT_PROCESS optionally selects the supervised forked-process backer; otherwise the live in-process runner and mailbox backer is used.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/side-agent/registry.ts:createSideAgentDaemonRegistry
+  - src/agent/side-agent-runner.ts:wireSideAgentDaemons
+  - src/tool/side-agent/index.ts:sideAgentTools
+consumer:
+  - src/host/runtime/agent-config-assembler.ts:maybeWireSideAgent
+  - src/agent/tier1/side-agent.ts:buildSideAgentBlock
+  - src/agent/features.ts:buildSessionFeatures
+reachable: yes
+surface_findings:
+  - The production assembler mints a real registry only under QUANTA_SIDE_AGENT, and the Tier-1 feature builder exposes the same registry through four side_agent tools.
+  - The in-process backer adapts a bounded, read-biased subagent pass and broadcasts capped findings to the root mailbox; session cleanup calls stopAll without propagating errors.
+  - The optional process backer has supervised fork and pullable findings, but does not push findings through the session mailbox; this is a documented behavior distinction, not an unreachable seam.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/side-agent-assembler-wire-hellgate.test.ts tests/unit/side-agent-block-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: An unset or invalid gate leaves the daemon slot absent and registers no side_agent tools.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/side-agent-hellgate.test.ts tests/unit/side-agent-tools-hellgate.test.ts tests/unit/side-agent-runner-hellgate.test.ts tests/unit/side-agent-block-e2e-hellgate.test.ts tests/unit/side-agent-assembler-wire-hellgate.test.ts tests/unit/side-agent-root-recipient-hellgate.test.ts tests/unit/side-agent-stopall-session-end-hellgate.test.ts tests/unit/side-agent-stopall-wiring-guard.test.ts tests/unit/side-agent-spawn-depth-authority-wiring-hellgate.test.ts tests/unit/side-agent-typed-kind-gates-default-off.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 66 focused cases passed for host activation, actual tool-to-registry operation, bounded passes, mailbox surfacing, depth authority, lifecycle caps, and session-end cleanup.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_SIDE_AGENT|maybeWireSideAgent|wireSideAgentDaemons|sideAgentDaemons|buildSideAgentBlock|stopAll' src/host/runtime/agent-config-assembler.ts src/agent/side-agent-runner.ts src/agent/tier1/side-agent.ts src/agent/features.ts src/agent/loop/session-lifecycle.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The host configuration owns activation, the feature builder consumes the same registry, and the lifecycle chokepoint tears it down.
+  - kind: test
+    command: bun test tests/unit/side-agent-hellgate.test.ts tests/unit/side-agent-tools-hellgate.test.ts tests/unit/side-agent-runner-hellgate.test.ts tests/unit/side-agent-block-e2e-hellgate.test.ts tests/unit/side-agent-assembler-wire-hellgate.test.ts tests/unit/side-agent-root-recipient-hellgate.test.ts tests/unit/side-agent-stopall-session-end-hellgate.test.ts tests/unit/side-agent-stopall-wiring-guard.test.ts tests/unit/side-agent-spawn-depth-authority-wiring-hellgate.test.ts tests/unit/side-agent-typed-kind-gates-default-off.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 66 pass, 0 fail.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3 feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-persistence
+review_state: approved
+reviewer: codex/cross-review-wave1

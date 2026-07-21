@@ -1,0 +1,51 @@
+version: 1
+feature_id: jsonrpc-request-id-correlation
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/jsonrpc/correlation.ts:createRequestIdGenerator
+entrypoints:
+  - src/shared/jsonrpc/index.ts
+activation:
+  - A future JSON-RPC client or server constructs a request-id generator and uses its ids in a live correlation map.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/shared/jsonrpc/correlation.ts:createRequestIdGenerator
+  - src/shared/jsonrpc/correlation.ts:nextRequestId
+consumer: []
+reachable: no
+surface_findings:
+  - Deterministic seed, monotonic counter, overflow rejection, and branded external-id support are implemented.
+  - No production transport imports the shared generator; an unrelated bridge-attestation helper has its own local request-id function and is not a consumer.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/jsonrpc-correlation.test.ts tests/integration/jsonrpc-envelope-hell-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Determinism, overflow, independent generators, and concurrent correlation rails passed under test callers.
+failure_posture: unknown
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production JSON-RPC transport uses createRequestIdGenerator or nextRequestId for a live request correlation lifecycle.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'createRequestIdGenerator|nextRequestId' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/shared/jsonrpc src/apps src/host src/mcp src/lsp
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Shared JSON-RPC generator references are limited to its own implementation and export.
+  - kind: test
+    command: bun test tests/unit/jsonrpc-correlation.test.ts tests/integration/jsonrpc-envelope-hell-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused correlation rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

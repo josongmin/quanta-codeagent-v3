@@ -1,0 +1,67 @@
+version: 1
+feature_id: team-idle-barrier-coordination
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/side-agent-runner.ts:wireSideAgentDaemons
+entrypoints:
+  - src/apps/cli/index.ts:runCli
+  - src/host/runtime/agent-config-assembler.ts:maybeWireSideAgent
+activation:
+  - QUANTA_SIDE_AGENT enables the in-process resident daemon registry.
+  - QUANTA_TEAM_IDLE enables the injected idle barrier for that registry.
+  - QUANTA_SIDE_AGENT_PROCESS remains unset; the forked process registry does not compose this in-process barrier.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/subagent/coordination/idle-barrier.ts:createIdleBarrier
+  - src/side-agent/registry.ts:createSideAgentDaemonRegistry
+consumer:
+  - src/agent/side-agent-runner.ts:wireSideAgentDaemons
+  - src/host/runtime/agent-config-assembler.ts:maybeWireSideAgent
+reachable: yes
+surface_findings:
+  - The live in-process side-agent host builds a real idle barrier under QUANTA_TEAM_IDLE and the registry drives beacons through spawn, pass, reactivation, completion, and stop lifecycle events.
+  - With no barrier the registry reports teamIdle false and idleSince undefined, preserving legacy polling semantics.
+  - The OS-process side-agent backer is an explicit composition limitation: it bypasses wireSideAgentDaemons and therefore does not expose this barrier; its findings remain pull-only.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/coordination/team-idle-side-agent-live-e2e-hellgate.test.ts tests/unit/side-agent-assembler-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: An absent barrier yields false and undefined, while an unset side-agent gate yields no daemon registry or tools.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/coordination/team-idle-barrier-hellgate.test.ts tests/unit/coordination/team-idle-barrier-e2e-hellgate.test.ts tests/unit/coordination/team-idle-side-agent-live-e2e-hellgate.test.ts tests/unit/coordination/team-idle-churn-bound-hellgate.test.ts tests/unit/coordination/team-idle-flip-race-hellgate.test.ts tests/unit/side-agent-assembler-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 38 focused cases passed for real-registry lifecycle wiring, fan-in, flip races, stale-beacon handling, bounded churn, and host activation.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'teamIdle|createIdleBarrier|wireSideAgentDaemons|QUANTA_TEAM_IDLE|maybeWireSideAgent' src/shared/runtime-config.ts src/agent/side-agent-runner.ts src/side-agent/registry.ts src/host/runtime/agent-config-assembler.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime configuration gates the actual in-process host wiring, and the registry consumes the injected barrier on each daemon lifecycle transition.
+  - kind: test
+    command: bun test tests/unit/coordination/team-idle-barrier-hellgate.test.ts tests/unit/coordination/team-idle-barrier-e2e-hellgate.test.ts tests/unit/coordination/team-idle-side-agent-live-e2e-hellgate.test.ts tests/unit/coordination/team-idle-churn-bound-hellgate.test.ts tests/unit/coordination/team-idle-flip-race-hellgate.test.ts tests/unit/side-agent-assembler-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 38 pass, 0 fail.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3 feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-persistence
+review_state: approved
+reviewer: codex/cross-review-wave1

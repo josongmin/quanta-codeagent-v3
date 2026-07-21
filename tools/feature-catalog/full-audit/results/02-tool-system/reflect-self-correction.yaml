@@ -1,0 +1,58 @@
+version: 1
+feature_id: reflect-self-correction
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildGatedToolPorts
+entrypoints:
+  - src/agent/tier1/reflect.ts:reflectConsultFromLLM
+  - src/tool/reflect/reflect.ts:makeReflectTool
+activation:
+  - Set QUANTA_REFLECT=1 and provide an LLMPort; the composition root injects reflectConsultFromLLM only when both are present.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/tier1/reflect.ts:reflectConsultFromLLM
+consumer:
+  - src/tool/reflect/reflect.ts:makeReflectTool
+  - src/tool/index.ts:buildDefaultTools
+reachable: yes
+surface_findings:
+  - The current composition root creates the actual LLM-backed port under QUANTA_REFLECT and a non-null LLM, so the catalog's claim that this wiring is follow-up is obsolete.
+  - The consultant runs a one-shot critique turn with tools: [] and folds provider failure, cancellation, and empty output into typed tool results.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/reflect-tool-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: An absent ReflectPort keeps reflect out of the default menu; a present port registers the tool.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/reflect-consult-wire-hellgate.test.ts tests/unit/reflect-tool-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The one-shot LLM adapter passed critique assembly, no-tools, empty-output, thrown-provider, cancellation, quota, and forcing-function rails.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: Catalog purpose says LLM-backed port wiring is follow-up and omits the active QUANTA_REFLECT knob, but the snapshot wires reflectConsultFromLLM when the gate and LLM are present.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_REFLECT|reflectConsultFromLLM|tools: \[\]' src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/agent/tier1/reflect.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Gate and LLM presence create the port, and the adapted critic explicitly receives no tools.
+  - kind: test
+    command: bun test tests/unit/reflect-tool-hellgate.test.ts tests/unit/reflect-consult-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The combined 12-file audit command passed 13 reflect contract and LLM-adapter rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

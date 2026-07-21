@@ -1,0 +1,52 @@
+version: 1
+feature_id: async-shell-background
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/bash/index.ts:runBash
+entrypoints: [src/tool/index.ts]
+activation: ["bash timeout_behavior=background", bash_await, bash_kill]
+effective_defaults:
+  cli: on
+  web: on
+  bench: na
+  headless: on
+  daemon: on
+producer: [src/runtime/bash-bg-registry.ts, src/tool/bash/index.ts]
+consumer: [src/tool/bash/await.ts, src/tool/bash/kill.ts, src/tool/index.ts]
+reachable: yes
+surface_findings:
+  - "Bash, bash_await, and bash_kill are registered in the standard tool composition; background behavior is request-specific and legacy kill remains the omitted-field default."
+  - "Registry handles are bounded and kill escalates; await is read-only polling while kill is explicitly mutating."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/bash-async-hellgate.test.ts tests/unit/bash.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Omitted timeout behavior preserves foreground timeout behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/bash-async-hellgate.test.ts tests/unit/bash.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Background handles, await, kill, abort, overflow, status monotonicity, and shell env scrubbing pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'timeout_behavior|bashAwaitTool|bashKillTool|BashBg' src/tool/bash src/tool/index.ts src/runtime/bash-bg-registry.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Main shell mode and sibling control tools consume the bounded registry.
+  - kind: test
+    command: bun test tests/unit/bash-async-hellgate.test.ts tests/unit/bash.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused async shell rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

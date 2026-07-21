@@ -1,0 +1,55 @@
+version: 1
+feature_id: shadow-odb-rewind
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/storage/shadow-odb/default/ops.ts:opRewindToLast
+entrypoints:
+  - src/tool/shadow/rewind.ts:shadow rewind tool
+  - src/apps/cli/snapshot-cmd.ts:snapshot command
+activation:
+  - Enable QUANTA_SHADOW and invoke a shadow rewind after an anchor exists.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/storage/shadow-odb/default/ops.ts:opRewindToLast
+consumer:
+  - src/storage/shadow-odb/default.ts:ShadowOdb.rewindToLast
+  - src/tool/shadow/rewind.ts
+  - src/apps/cli/snapshot-cmd.ts
+reachable: yes
+surface_findings:
+  - The default-off shadow capability is absent until QUANTA_SHADOW constructs the store.
+  - Rewind rejects an uninitialized store and in-progress merge, captures a create-only pre-rewind ref first, then restores tracked content with explicit untracked policy.
+  - The tool and snapshot command expose the operation through confirmation-aware CLI surfaces.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli-rewind-slash-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing shadow capability is surfaced without workspace mutation.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/shadow-odb-hellgate.test.ts tests/unit/shadow-odb-rewind-extensions-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Restore, merge and path guards, pre-rewind safety refs, idempotent verified anchors, and partial extension rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/shadow-odb-hellgate.test.ts tests/unit/shadow-odb-rewind-extensions-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused rewind safety rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

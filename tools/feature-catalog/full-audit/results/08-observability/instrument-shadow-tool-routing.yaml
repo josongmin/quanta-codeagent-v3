@@ -1,0 +1,64 @@
+version: 1
+feature_id: instrument-shadow-tool-routing
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/metrics/instrument-tool.ts:instrumentToolsForExport
+entrypoints:
+  - src/observability/metrics/instrument-shadow.ts:instrumentShadowOdb
+  - src/observability/metrics/instrument-tool.ts:instrumentToolsForExport
+  - src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildToolRegistry
+activation:
+  - Tool routing emits only when the process-default metric exporter is enabled.
+  - ShadowOdb wrapping needs an explicit caller; none was found outside its helper family.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - instrumentShadowOdb and instrumentTool forward calls and add metric emission.
+consumer:
+  - Host and runner tool registries invoke instrumentToolsForExport; no production caller invokes instrumentShadowOdb.
+reachable: yes
+surface_findings:
+  - Tool call metric routing is live but conditional on exporter configuration.
+  - AlertManager and Grafana provisioning artifacts do not themselves establish a live ShadowOdb producer.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability-metrics-instrument-shadow-tool-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Metrics failures are swallowed and forwarded tool properties remain unchanged.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-metrics-instrument-shadow-tool-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: ShadowOdb operation labels, tool success/failure labels, durations, and bulk wrapping passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: conditional
+blocker: ShadowOdb metrics lack a production composition caller; only tool instrumentation is conditionally installed at live registry owners.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n "instrumentToolsForExport" src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/runner/assemble/tooling.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Two composition owners install the tool export wrapper.
+  - kind: source
+    command: rg -n "instrumentShadowOdb" src --glob '!src/observability/metrics/instrument-shadow.ts' --glob '!src/observability/metrics/observability-helper.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production ShadowOdb wrapper installation was found.
+  - kind: test
+    command: bun test tests/unit/observability-metrics-instrument-shadow-tool-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 15 focused ShadowOdb and tool wrapper tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

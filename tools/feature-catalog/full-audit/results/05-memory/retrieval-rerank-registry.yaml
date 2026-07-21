@@ -1,0 +1,51 @@
+version: 1
+feature_id: retrieval-rerank-registry
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/retrieval.ts:buildRetrievalStackCore
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:buildRetrievalStackFromEnv
+  - src/runner/assemble/retrieval.ts:buildRetrievalStackCore
+activation:
+  - QUANTA_RETRIEVAL_HYBRID enables construction of a RetrievalStack containing the built-in reranker registry.
+  - The live agent loop stores but never reads AgentConfig.retrievalStack, and the only rankWithRetrievalStack call sites are test files.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/retrieval/rerank-registry.ts:RerankRegistry
+  - src/runner/assemble/retrieval.ts:buildRegistry
+consumer:
+  - src/host/runtime/agent-arg-builder.ts:buildRetrievalStackFromEnv
+  - src/agent/types/wire-slots-session.ts:AgentConfig retrievalStack slot
+reachable: no
+surface_findings:
+  - The registry and all four strategies have substantial focused behavioral tests, and the host composition root can construct the stack behind an explicit default-off knob.
+  - No production rankWithRetrievalStack consumer exists; the integration rail itself asserts runAgent ignores the slot.
+  - Therefore the catalog claim that this runs in the interactive CLI is stale: construction is reachable, reranking behavior is not.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: No production consumer invokes the assembled defaultReranker; only tests call the memory ranking bridge.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "buildRetrievalStackCore|retrievalStack|rankWithRetrievalStack" src tests/integration/retrieval-composition-root.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production builds and carries the optional stack, while rankWithRetrievalStack references outside its definition are test-only.
+  - kind: test
+    command: bun test tests/unit/retrieval-rerank-registry.test.ts tests/unit/retrieval-composition-wire-hellgate.test.ts tests/integration/retrieval-composition-root.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 70 focused registry and composition tests passed, including the explicit no-loop-consumption control.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch11
+review_state: approved
+reviewer: codex/cross-review-wave1

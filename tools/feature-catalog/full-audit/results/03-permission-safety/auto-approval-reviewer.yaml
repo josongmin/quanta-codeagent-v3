@@ -1,0 +1,54 @@
+version: 1
+feature_id: auto-approval-reviewer
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/auto-approval-review.ts:createApprovalReviewer
+entrypoints: []
+activation:
+  - "A host would have to construct the approval ledger, call record for every grant, and render shouldReviewNow() itself."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/permission/auto-approval-review.ts:createApprovalReviewer
+consumer: []
+reachable: no
+surface_findings:
+  - "The catalogued N-auto-approval cadence is a pure ledger only; no production source imports or constructs createApprovalReviewer."
+  - "The live auto-approval-review observer is a distinct T03 lifecycle notifier in reviewer.ts; it does not instantiate this ledger or enforce the periodic threshold."
+off_identity_proof:
+  kind: source
+  command: "rg -n 'createApprovalReviewer|AutoApprovalReviewer' src --glob '!src/permission/auto-approval-review.ts' --glob '!src/permission/index.ts'"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Only the barrel export remains outside the owner; no production construction or record call exists."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/permission-pillars.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The isolated ledger threshold, reset, history, and rearm cases pass, but no live runtime consumes them."
+failure_posture: na
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: "No composition root constructs the cadence ledger, no gate records auto-grants into it, and no surface renders its threshold result."
+disposition: wire
+receipts:
+  - kind: source
+    command: "rg -n 'createApprovalReviewer|AutoApprovalReviewer|auto-approval-review' src --glob '!src/permission/auto-approval-review.ts' --glob '!src/permission/index.ts'"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "References resolve to the independent observer lifecycle implementation, not to the cadence-ledger owner."
+  - kind: test
+    command: "bun test tests/unit/permission-pillars.test.ts tests/unit/guardian-gate-wiring-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Focused ledger and independent observer rails passed; their separate coverage demonstrates the missing bridge rather than runtime activation."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch5
+review_state: approved
+reviewer: codex/cross-review-wave1

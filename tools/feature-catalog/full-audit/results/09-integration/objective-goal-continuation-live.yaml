@@ -1,0 +1,58 @@
+version: 1
+feature_id: objective-goal-continuation-live
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/session-loop.ts:startGoalContinuationTicker
+entrypoints:
+  - src/apps/cli/repl/session-loop.ts
+  - src/apps/cli/goal-continuation-hook.ts:startGoalContinuationTicker
+activation:
+  - Start a persistent CLI session, set an active /goal, and set QUANTA_GOAL_ENFORCE=1 while the session is idle.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer:
+  - src/agent/objective/continuation.ts:runIdleContinuation
+  - src/apps/cli/goal-continuation-hook.ts:startGoalContinuationTicker
+consumer:
+  - src/apps/cli/repl/session-loop.ts
+reachable: yes
+surface_findings:
+  - The CLI session loop arms the ticker over the shared objective store beside the reactor bridge and enqueues the pursue prompt through the live heartbeat queue.
+  - The runtime config reader supplies QUANTA_GOAL_ENFORCE; disabled mode returns no ticker and leaves the session loop without an idle continuation timer.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/goal-continuation-ticker-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The focused rail proves disabled mode arms no timer and enabled mode arms the idle ticker.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/goal-pursuit-chain-hellgate.test.ts tests/unit/goal-continuation-ticker-hellgate.test.ts tests/unit/goal-pursuit-prompt-hellgate.test.ts tests/unit/status-pills-goal-chip-hellgate.test.ts tests/e2e-pty/cli-goal-pursuit-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unit rails and real CLI PTY boot prove command registration, active-goal recording, ticker gating, prompt content, and goal-chip behavior.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'startGoalContinuationTicker|goalContinuationEnforce|buildPursuitContinuationPrompt' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/repl/session-loop.ts src/apps/cli/goal-continuation-hook.ts src/shared/runtime-config.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI loop reads the runtime gate and routes active-goal continuation prompts through its live enqueue path.
+  - kind: test
+    command: bun test tests/unit/goal-pursuit-chain-hellgate.test.ts tests/unit/goal-continuation-ticker-hellgate.test.ts tests/unit/goal-pursuit-prompt-hellgate.test.ts tests/unit/status-pills-goal-chip-hellgate.test.ts tests/e2e-pty/cli-goal-pursuit-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused unit rails and PTY CLI e2e passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

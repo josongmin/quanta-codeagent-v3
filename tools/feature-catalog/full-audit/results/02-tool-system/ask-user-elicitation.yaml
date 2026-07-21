@@ -1,0 +1,61 @@
+version: 1
+feature_id: ask-user-elicitation
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/ask-user-wire.ts:buildCliAskUserTool and src/apps/web-daemon/runtime-factory.ts:mintSessionCollaborators
+entrypoints:
+  - src/apps/cli/internal.ts:assembleFeatures
+  - src/apps/web-daemon/runtime-factory.ts:buildAgentConfigBase
+activation:
+  - "CLI registers ask_user only when QUANTA_ASK_USER is enabled and an interactive prompter exists."
+  - "Web registers ask_user when QUANTA_ASK_USER and QUANTA_WEB_AGENT_STATE provide a WebUserInputPort."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/ask-user/ask-user.ts:askUserTool
+  - src/apps/cli/ask-user-wire.ts:askUserPortFromPrompter
+  - src/apps/web-daemon/web-ask-user-port.ts:createWebAskUserPort
+consumer:
+  - src/apps/cli/internal.ts:buildTooling
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+reachable: yes
+surface_findings:
+  - "The CLI path adapts the shared elicitation prompter and omits the tool when a TTY-backed answer path is absent."
+  - "Contrary to the catalog's Jul-03 web evidence, the frozen snapshot has a real gated web ask_user port and registry consumer."
+off_identity_proof:
+  kind: source
+  command: "rg -n 'QUANTA_ASK_USER|buildCliAskUserTool|askUserTools|createWebAskUserPort' src/apps/cli/internal.ts src/apps/cli/ask-user-wire.ts src/apps/web-daemon/runtime-factory.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Absent CLI prompter or absent web user-input port produces no ask_user registration."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/ask-user-hellgate.test.ts tests/unit/cli/ask-user-cli-wire-hellgate.test.ts src/apps/web-daemon/web-ask-user-port.test.ts src/apps/web-daemon/web-user-input-port.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "33 focused CLI, schema, refusal, and web structured-input assertions passed."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: "Catalog surface evidence states that web has no AskUserPort and marks web missing; the frozen snapshot has a gated web port and consumer."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg -n 'askUserTools|createWebAskUserPort|buildDaemonToolRegistry|QUANTA_ASK_USER' src/apps/web-daemon/runtime-factory.ts src/apps/web-daemon/web-ask-user-port.ts src/apps/cli/internal.ts src/apps/cli/ask-user-wire.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Both production surface consumers register the same tool over their own answer port only under the explicit gates."
+  - kind: test
+    command: "bun test tests/unit/ask-user-hellgate.test.ts tests/unit/cli/ask-user-cli-wire-hellgate.test.ts src/apps/web-daemon/web-ask-user-port.test.ts src/apps/web-daemon/web-user-input-port.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Structured validation and both adapters' normal and error paths passed."
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch8
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,45 @@
+version: 1
+feature_id: voice-input-stt-slice
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/voice-cmd.ts:runVoiceCmd
+entrypoints: []
+activation: ["requires explicit construction of recorder, transcriber, and voice command context"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/voice/default-recorder.ts:createDefaultRecorder, src/apps/cli/voice-cmd.ts:runVoiceCmd]
+consumer: []
+reachable: no
+surface_findings: ["The /voice handler and adapters are tested, but no interactive CLI composition root registers or injects the required recorder and transcriber context."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/voice-recorder-hellgate.test.ts tests/unit/voice-transcriber-hellgate.test.ts tests/unit/cli/voice-cmd-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 31 adapter, recorder, error, cancel, and command-context cases pass under injected ports.
+failure_posture: fail-loud
+security_posture: conditional
+observability: unknown
+verdict: seam-only
+blocker: No production slash registry or CLI composition root constructs and injects the recorder plus selected transcriber.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg -n "runVoiceCmd|createDefaultRecorder" src/apps/cli src/voice
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Search finds the owner code and tests but no production command registration consumer.
+  - kind: test
+    command: bun test tests/unit/voice-recorder-hellgate.test.ts tests/unit/voice-transcriber-hellgate.test.ts tests/unit/cli/voice-cmd-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 31 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

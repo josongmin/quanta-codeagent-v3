@@ -1,0 +1,62 @@
+version: 1
+feature_id: codex-r2-context-change-injection-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/codex-r2-wire-install/install.ts:fillContextEvents"
+entrypoints:
+  - "src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2"
+  - "src/agent/loop/context-assembler.ts:prepareTurnContext"
+  - "src/agent/prompt.ts:buildTurnContext"
+activation:
+  - "Assembler supplies getSnapshot and store, so fillContextEvents installs AgentConfig.contextEventsForTurn by default."
+  - "The loop resolves events each turn and injects nonempty results into buildTurnContext."
+effective_defaults:
+  cli: on
+  web: on
+  bench: unknown
+  headless: on
+  daemon: on
+producer:
+  - "src/agent/context-change/detector.ts:detectContextChanges"
+  - "src/agent/codex-r2-wire-install/install.ts:buildContextEventsProducer"
+consumer:
+  - "src/agent/loop/compaction-wire.ts:resolveContextEventsForTurn"
+  - "src/agent/loop/context-assembler.ts:prepareTurnContext"
+  - "src/agent/prompt.ts:buildTurnContext"
+reachable: yes
+surface_findings:
+  - "prepareTurnContext calls resolveContextEventsForTurn before building the prompt, then passes nonempty events as contextChangeEvents."
+  - "The catalog and default-off ledger say all surfaces are OFF, but the shared assembler fills the required slot without a gate."
+off_identity_proof:
+  kind: source
+  command: "rg fillContextEvents and wireSessionResourcesAndCodexR2 in src/agent/codex-r2-wire-install src/host/runtime/agent-config-assembler.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: "The default-off claim is false for assembler-backed surfaces because getSnapshot and store are always supplied."
+on_efficacy_proof:
+  kind: test
+  command: "bun test src/agent/context-change/__tests__/detector.hellgate.test.ts src/agent/context-change/__tests__/inject.hellgate.test.ts src/agent/context-events-producer/__tests__/factory.hellgate.test.ts tests/unit/prompt-adr-0327-wire-hellgate.test.ts tests/unit/agent/albb-19-compaction-system-parity.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "State changes become typed events, render untrusted-safe messages, splice in chronological prompt order, and the live skill cursor reaches the producer."
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg resolveContextEventsForTurn and contextChangeEvents in src/agent/loop"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The loop resolves the installed closure and forwards nonempty events into buildTurnContext."
+  - kind: test
+    command: "bun test src/agent/context-change/__tests__/detector.hellgate.test.ts src/agent/context-change/__tests__/inject.hellgate.test.ts src/agent/context-events-producer/__tests__/factory.hellgate.test.ts tests/unit/prompt-adr-0327-wire-hellgate.test.ts tests/unit/agent/albb-19-compaction-system-parity.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "All selected detection, injection, prompt splice, producer, and live-loop cursor tests passed."
+audited_at: "2026-07-19"
+auditor: codex/p1-context-events
+review_state: approved
+reviewer: codex/cross-review-wave1

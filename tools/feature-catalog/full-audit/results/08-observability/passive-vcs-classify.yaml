@@ -1,0 +1,63 @@
+version: 1
+feature_id: passive-vcs-classify
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/bash/index.ts:runShellCommand post-exec maybeEmitPassiveVcs hook
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+  - src/agent/dispatch/tool-context.ts:buildToolContext
+  - src/tool/bash/index.ts:runShellCommand
+activation:
+  - QUANTA_PASSIVE_VCS=1
+  - AgentConfig.stream is available for maybeWireVcsEventSink to install the sink.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/git/passive-classify/classifier.ts:classifyPassiveVcs
+  - src/git/passive-classify/bash-hook.ts:maybeEmitPassiveVcs
+consumer:
+  - src/tool/bash/index.ts:runShellCommand foreground post-exec path
+  - src/host/runtime/agent-config-assembler.ts:createPassiveVcsStreamSink
+  - AgentConfig.stream receives recovery reason vcs_event
+reachable: yes
+surface_findings:
+  - "The host assembler installs the stream sink only under the strict env gate, dispatch threads it to ToolContext, and the real bash post-exec path calls the classifier."
+  - "The end-to-end rail performs real git merge and commit operations, then observes recovery/vcs_event on the configured stream."
+  - "A broken sink is intentionally swallowed because this is best-effort observability and must not alter bash output."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/passive-vcs-classify-e2e-hellgate.test.ts tests/unit/passive-vcs-bus-wire-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate absent and gate-on-without-sink controls emit no vcs_event while preserving bash output byte-for-byte.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/passive-vcs-classify-hellgate.test.ts tests/unit/passive-vcs-classify-e2e-hellgate.test.ts tests/unit/passive-vcs-bus-wire-hellgate.test.ts tests/unit/passive-vcs-bus-wire-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 70 focused cases pass, including real merge and commit commands through real dispatch, host adapter, and stream sink.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n -g '*.ts' 'maybeEmitPassiveVcs|vcsEventSink|maybeWireVcsEventSink|createPassiveVcsStreamSink|passiveVcs' src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Strict runtime gate, host sink composition, dispatch threading, and bash post-exec consumption form one live path.
+  - kind: test
+    command: bun test tests/unit/passive-vcs-classify-hellgate.test.ts tests/unit/passive-vcs-classify-e2e-hellgate.test.ts tests/unit/passive-vcs-bus-wire-hellgate.test.ts tests/unit/passive-vcs-bus-wire-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 70 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-llm-core
+review_state: approved
+reviewer: codex/cross-review-wave1

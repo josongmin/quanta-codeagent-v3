@@ -1,0 +1,56 @@
+version: 1
+feature_id: repl-mcp-surface-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/mcp-surface-wire.ts:buildMcpSurfaceInfo
+entrypoints:
+  - src/apps/cli/repl.ts:surface composition
+activation:
+  - Configure an MCP server or QUANTA_MCP_CONFIG, then invoke /mcp in the REPL.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/repl/mcp-surface-wire.ts:buildMcpSurfaceInfo
+consumer:
+  - src/apps/cli/repl.ts:buildMcpSurfaceInfo
+reachable: yes
+surface_findings:
+  - REPL imports the translator; it returns undefined when no server and no config path exist.
+  - Snapshot intentionally exposes structural data only and never live client process metadata.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mcp-surface-wire.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Empty configuration produces undefined and preserves the not-wired fallback.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp-surface-wire.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Configured, bridged, failed, tool-name, and env-key snapshot rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: "The CLI translator is wired, but its slash surface only exists when MCP configuration is supplied."
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildMcpSurfaceInfo' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: REPL composition consumes the translator.
+  - kind: test
+    command: bun test tests/unit/mcp-surface-wire.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused MCP surface rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

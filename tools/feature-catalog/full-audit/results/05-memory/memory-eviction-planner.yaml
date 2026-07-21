@@ -1,0 +1,53 @@
+version: 1
+feature_id: memory-eviction-planner
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/memory.ts:sweepEviction
+entrypoints:
+  - src/agent/memory.ts:persistSession
+  - src/agent/loop/session-lifecycle.ts:persistFinalMessages
+activation:
+  - persistSession takes one live store snapshot, applies saved/merged records to it, then invokes planEviction and realizes the returned decay and delete ids through the configured store.
+  - The planner is resource-backed: it runs only when the session has an enabled durable memory persistence path and records were distilled.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/memory/eviction.ts:planEviction
+consumer:
+  - src/agent/memory.ts:sweepEviction
+reachable: yes
+surface_findings:
+  - The production persistence pipeline consumes the pure plan after every non-empty persistence batch.
+  - Decay and deletion remain best-effort, preserving the agent session if a store mutation fails.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eviction.test.ts tests/integration/memory-dedup-planner-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unit rail proves deterministic cap, stale supersede, and decay planning; real-loop persistence e2e proves the planner-adjacent durable write path.
+failure_posture: degraded
+security_posture: verified
+observability: unknown
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'planEviction|sweepEviction|persistSession' src/agent/memory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: persistSession invokes sweepEviction after applying each batch, and sweepEviction realizes planEviction output through the store.
+  - kind: test
+    command: bun test tests/unit/eviction.test.ts tests/integration/memory-dedup-planner-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused planner and live persistence rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,6 +1,6 @@
 version: 1
 feature_id: spec-fidelity-steer-knob
-snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
 status: closed
 owner_seam: src/runner/batch/eval/driver/config-build.ts:buildDirectiveSteers
 entrypoints: [src/apps/bench/index.ts]
@@ -51,5 +51,5 @@ receipts:
     evidence: ON, OFF, fail-closed, precision, and code-block recall cases pass.
 audited_at: "2026-07-19"
 auditor: codex/root
-review_state: pending
-reviewer: null
+review_state: approved
+reviewer: codex/cross-review-wave1

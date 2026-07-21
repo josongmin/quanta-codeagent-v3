@@ -1,0 +1,55 @@
+version: 1
+feature_id: completed-maxturns-aborted-error
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/session-lifecycle.ts:buildFinalAgentOutcome
+entrypoints:
+  - src/agent/loop/entry.ts:runAgent
+  - src/agent/loop/turn-loop.ts:runAgentTurnLoop
+activation:
+  - Every runAgent completion flows through the session lifecycle finalizer, which returns the legacy reason plus structured stopCategory when the terminal path supplies it.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/loop/turn-loop.ts:runAgentTurnLoop
+  - src/agent/loop/turn-outcome.ts:resolveTurnLoopOutcome
+consumer:
+  - src/agent/loop/session-lifecycle.ts:buildFinalAgentOutcome
+  - src/agent/stop-category.ts
+reachable: yes
+surface_findings:
+  - Completed, max_turns, aborted, and error all remain live terminal outcomes with structured stop categories for key paths.
+  - The actual StopReason union additionally includes budget_exhausted, refusal, and awaiting_approval; the catalog's four-value purpose is therefore incomplete.
+  - Refusal has an integrated runAgent terminal rail, and abort settles rather than rejecting across pre-loop and mid-stream paths.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent-submission-and-stop-category.test.ts tests/unit/agent/stop-category.test.ts tests/integration/agent-abort.test.ts tests/integration/agent-refusal-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 47 pass, 0 fail; stop category matrix, max_turns, abort settlement, and refusal outcome behavior are covered through real runAgent rails.
+failure_posture: fail-loud
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: The catalog must expand its outcome vocabulary and source evidence from the four legacy reasons to the current StopReason union and lifecycle owner.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'type StopReason|buildFinalAgentOutcome|completedCategory|interruptedCategory' src/agent/types/agent-outcome.ts src/agent/loop/session-lifecycle.ts src/agent/loop/turn-loop.ts src/agent/stop-category.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The current outcome union has seven variants and lifecycle/turn-loop paths mint the terminal reason with structured category metadata.
+  - kind: test
+    command: bun test tests/unit/agent-submission-and-stop-category.test.ts tests/unit/agent/stop-category.test.ts tests/integration/agent-abort.test.ts tests/integration/agent-refusal-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 47 pass, 0 fail across stop-category, abort, and refusal outcome rails.
+audited_at: "2026-07-19"
+auditor: codex/root-p3-agent-loop
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,60 @@
+version: 1
+feature_id: subagent-resume-replay
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/session-execution-plane.ts:buildSharedExecutionPlaneRuntimeAugments
+entrypoints:
+  - src/host/runtime/internal/context-binding/base.ts:extendBaseWithExecutionPlane
+  - src/runner/session-execution-plane.ts:buildSharedExecutionPlaneSessionDeps
+activation:
+  - QUANTA_SUBAGENT_RESUME=1 with a subagent configuration constructs the persistent scheduler and sweeps interrupted workspace handles before returning the execution-plane dependencies.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/agent/subagent-resume/resumer.ts:resumeInterruptedHandles
+  - src/agent/subagent-resume/replay.ts:buildReplaySpec
+consumer:
+  - src/runner/session-execution-plane.ts:buildSharedExecutionPlaneRuntimeAugments
+  - src/host/runtime/internal/context-binding/base.ts:extendBaseWithExecutionPlane
+reachable: yes
+surface_findings:
+  - "The catalog claim and feature notes say built-not-wired with no knob, but the frozen source imports resumeInterruptedHandles into the shared execution plane and gates it with QUANTA_SUBAGENT_RESUME."
+  - "The active path builds a persistent scheduler, re-forks eligible interrupted handles, writes the original handle as resumed, and evicts only resume or mark-failed cache entries."
+  - "The replay helper remains an optional ResumerOpts dependency; the verified live execution-plane wire exercises resume, not tool-history replay injection."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/runner/subagent-resume-wire.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate absent and QUANTA_SUBAGENT_RESUME=0 preserve interrupted store state; absent subagent config also leaves the store untouched when the gate is on.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-resume-hellgate.test.ts tests/unit/subagent-resume-replay-hellgate.test.ts tests/unit/runner/subagent-resume-wire.test.ts tests/unit/subagent-resume-cache-eviction.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 49 passing cases cover policy, idempotent re-fork, replay metadata, ON-gate persisted resume, and cache eviction correctness.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: The catalog's deliberate_hold, knobs, surface evidence, and rollback text still describe an unwired primitive even though the frozen source contains a live gated resume consumer; replay is only optional on that consumer.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'resumeInterruptedHandles|subagentResume|QUANTA_SUBAGENT_RESUME|buildSharedExecutionPlaneRuntimeAugments' src/runner src/host src/shared/runtime-config.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The shared execution plane imports and calls the resumer behind the runtime gate, and the host composition root invokes that plane.
+  - kind: test
+    command: bun test tests/unit/subagent-resume-hellgate.test.ts tests/unit/subagent-resume-replay-hellgate.test.ts tests/unit/runner/subagent-resume-wire.test.ts tests/unit/subagent-resume-cache-eviction.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 49 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-agentloop-ops
+review_state: approved
+reviewer: codex/cross-review-wave1

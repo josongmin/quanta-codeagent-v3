@@ -1,0 +1,69 @@
+version: 1
+feature_id: mode-cycle-pill
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/surface-compose/prompt-ux.ts:buildModeCycle
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/repl.ts:runRepl
+  - src/apps/cli/repl/session-loop-options.ts:buildSessionLoopOptions
+activation:
+  - The CLI seeds QUANTA_MODE_CYCLE=1 when unset; explicit non-1 disables it.
+  - The shared ModeCycleStore drives Shift+Tab, /mode, the prompt pill, status pill, and next-session permission projection.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/mode-cycle.ts:createModeCycleStore
+  - src/apps/cli/repl/surface-compose/core-state.ts:buildModeWire
+consumer:
+  - src/apps/cli/repl/surface-compose/prompt-ux.ts:buildModeCycle
+  - src/apps/cli/raw-line-reader.ts:readLine
+  - src/apps/cli/repl/surface-compose/dispatch.ts:buildSurfaceDispatch
+  - src/apps/cli/repl/session-loop-options.ts:buildSessionLoopOptions
+reachable: yes
+surface_findings:
+  - A single surface-owned store is passed both to the Shift+Tab UX and /mode slot; the session loop consumes its current permission posture for the following session.
+  - The catalog's default-OFF/unset wording is false for the shipped CLI: index.ts seeds QUANTA_MODE_CYCLE to 1 before runRepl. The documented explicit opt-out remains valid.
+  - The catalog correctly retains the limitation that plan's AgentMode is a visual/system-prompt posture rather than a RuntimeSessionConfig read-only fence.
+off_identity_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/mode-cycle.hellgate.test.ts tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The pure gate rejects 0 and unset in an unseeded caller, Shift+Tab without a hook is inert, and the CLI seed rail proves explicit =0 remains an opt-out.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/mode-cycle.hellgate.test.ts tests/unit/cli/mode-slash-hellgate.test.ts tests/integration/cli/mode-slash-gate-e2e.test.ts tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Backtab and CSI-Z cycle the shared posture, /mode projects the same store, bypass reaches the real permission gate, and CLI seeding is verified.
+failure_posture: degraded
+security_posture: conditional
+observability: na
+verdict: stale-claim
+blocker: The feature YAML says QUANTA_MODE_CYCLE unset is off/default-OFF, while the shipped CLI seed loop sets it to 1 when unset.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_MODE_CYCLE|buildModeCycle|modeCycleStore|onCycleMode|permissionMode' src/apps/cli/index.ts src/apps/cli/repl src/apps/cli/raw-line-reader.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI startup seeds the gate and the same ModeCycleStore is consumed by input, slash dispatch, status pill, and session options.
+  - kind: test
+    command: bun test src/apps/cli/__tests__/mode-cycle.hellgate.test.ts tests/unit/cli/mode-slash-hellgate.test.ts tests/integration/cli/mode-slash-gate-e2e.test.ts tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 22 cycle/slash/e2e cases and the CLI seed/opt-out rail passed in this audit.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3 feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-repl
+review_state: approved
+reviewer: codex/cross-review-wave1

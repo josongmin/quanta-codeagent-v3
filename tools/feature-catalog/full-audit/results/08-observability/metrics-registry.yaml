@@ -1,0 +1,51 @@
+version: 1
+feature_id: metrics-registry
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/metrics/in-memory-registry.ts:defaultMetricsRegistry
+entrypoints:
+  - src/observability/metrics/instrument-tool.ts
+activation:
+  - Instrumented paths construct or receive the in-memory registry and expose its snapshot to downstream renderers or sinks.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/observability/metrics/in-memory-registry.ts:defaultMetricsRegistry
+consumer:
+  - src/observability/metrics/instrument-tool.ts
+  - src/observability/cost-dashboard.ts
+reachable: yes
+surface_findings:
+  - Registry handles counters, gauges, timers, label normalization, percentile summaries, and sink failures without losing the in-memory record.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-metrics-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Core registry, sink, histogram, percentile, and edge-case rails passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'defaultMetricsRegistry|MetricsRegistry|buildCostDashboard' src/observability/metrics src/observability/cost-dashboard.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Instrumentation and dashboard consumers use the typed registry.
+  - kind: test
+    command: bun test tests/unit/observability-metrics-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused metrics rail passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

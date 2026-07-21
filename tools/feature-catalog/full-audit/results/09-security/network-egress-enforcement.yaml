@@ -1,0 +1,57 @@
+version: 1
+feature_id: network-egress-enforcement
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+entrypoints:
+  - src/agent/network-guard.ts:buildNetworkDispatchGuard
+  - src/agent/dispatch/preflight-consults.ts
+activation:
+  - Configure a restrictive network allowlist through runtime agent configuration.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/runtime/agent-config-assembler.ts assembles the network dispatch guard.
+consumer:
+  - dispatch preflight consults the guard before tools and shell egress execute.
+reachable: yes
+surface_findings:
+  - Open configuration leaves the guard absent; a restrictive allowlist allows matching destinations and blocks unmatched destinations.
+  - The real-loop rail proves URL-tool denial; shell denial is proved only for the deny-all configuration.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/network-egress-wiring-hellgate.test.ts tests/unit/agent/network-guard-shell-egress-hellgate.test.ts tests/integration/network-egress-enforcement-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unconfigured network policy creates no guard and preserves normal dispatch behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/network-egress-wiring-hellgate.test.ts tests/unit/agent/network-guard-shell-egress-hellgate.test.ts tests/integration/network-egress-enforcement-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Deny-all blocks shell dispatch and restrictive allowlist routing covers URL tools; non-empty allowlists do not prove shell-host extraction or enforcement.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: conditional
+blocker: "Deny-all shell blocking is covered, but a non-empty allowlist leaves shell command host extraction and transport enforcement unproven; an off-list curl-style shell request can bypass the URL-tool guard."
+disposition: hold
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildNetworkDispatchGuard|networkDispatchGuardFor|dispatchGuard' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host/runtime src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime assembly creates the guard and dispatch preflight consumes it.
+  - kind: test
+    command: bun test tests/unit/agent/network-egress-wiring-hellgate.test.ts tests/unit/agent/network-guard-shell-egress-hellgate.test.ts tests/integration/network-egress-enforcement-real-loop-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused rails prove deny-all shell blocking and URL-tool real-loop denial, not non-empty-allowlist shell host enforcement.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

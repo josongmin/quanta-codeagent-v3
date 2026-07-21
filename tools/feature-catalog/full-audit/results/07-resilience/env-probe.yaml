@@ -1,0 +1,58 @@
+version: 1
+feature_id: env-probe
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/apps/cli/repl/env-probe-wire.ts:maybeRunEnvProbeWire"
+entrypoints:
+  - "src/apps/cli/repl/session-setup.ts:setupSession"
+activation:
+  - "QUANTA_ENABLE_ENV_PROBE=true"
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/runtime/env-probe/probe.ts:runEnvProbe"
+  - "src/apps/cli/repl/env-probe-wire.ts:createProbeExecPort"
+consumer:
+  - "src/apps/cli/repl/session-setup.ts awaits maybeRunEnvProbeWire before the first prompt"
+reachable: conditional
+surface_findings:
+  - "The catalog deliberate_hold is stale insofar as a real CLI startup adapter, canonical gate, Bun.spawn port, notice sink, and session-setup consumer are now present."
+  - "The live wire does not pass a manifest to runEnvProbe, so manifest-derived test-runner checks are not active at the CLI consumer."
+  - "Warnings are emitted to the startup stream and logger but are not persisted into session state or supplied to later agent context."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/cli/env-probe-wire-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Unset, falsy, and garbage gate values return before exec-port construction or stream emission."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/env-probe-hellgate.test.ts tests/unit/cli/env-probe-wire-hellgate.test.ts tests/unit/cli/env-probe-adapter-timeout-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The CLI wire invokes an injected or real bounded exec port, renders a warning notice, and degrades safely on failures."
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: conditional
+blocker: "The currently reachable CLI path omits manifest-derived checks and does not preserve startup warnings for agent adaptation; the catalog purpose claims both capabilities."
+disposition: wire
+receipts:
+  - kind: source
+    command: "rg -n 'maybeRunEnvProbeWire|runEnvProbe|QUANTA_ENABLE_ENV_PROBE|manifest' src/apps/cli/repl/session-setup.ts src/apps/cli/repl/env-probe-wire.ts src/runtime/env-probe"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Session setup invokes the real gate-owned CLI adapter, while the adapter calls runEnvProbe without its optional manifest argument."
+  - kind: test
+    command: "bun test tests/unit/env-probe-hellgate.test.ts tests/unit/cli/env-probe-wire-hellgate.test.ts tests/unit/cli/env-probe-adapter-timeout-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "All selected pure probe, CLI wire, and real hanging-child timeout-containment rails passed with zero failures."
+audited_at: "2026-07-19"
+auditor: codex/p1-resilience-tier1
+review_state: approved
+reviewer: codex/cross-review-wave1

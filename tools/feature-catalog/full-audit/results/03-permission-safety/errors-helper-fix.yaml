@@ -1,0 +1,56 @@
+version: 1
+feature_id: errors-helper-fix
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/errors.ts:errMessage
+entrypoints:
+  - src/shared/index.ts:errMessage export
+  - src/apps/cli/index.ts:fatal handler
+  - src/agent/loop and src/agent/dispatch error paths
+activation:
+  - "Every production caller that formats an unknown caught value invokes errMessage immediately."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/shared/errors.ts:errMessage
+consumer:
+  - src/apps/cli/index.ts:fatal handler
+  - src/agent/loop/stream-consume.ts
+  - src/agent/dispatch.ts
+  - src/runtime/sandbox.ts
+reachable: yes
+surface_findings:
+  - "This is an internal shared helper, not an independently rendered surface."
+  - "The shared barrel and CLI fatal handler prove a production consumer; repository-wide callers cover agent, tool, runtime, session, and observability failure paths."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/errors.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "20 tests pass including the synchronous non-recursion regression pin and hostile stringification fallbacks."
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'function errMessage|const errMessage|errMessage\\(' src/shared/errors.ts src/shared/index.ts src/apps/cli/index.ts src/agent src/runtime"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "errMessage has the literal Error-or-String implementation and live imports/calls in CLI, agent, and runtime paths."
+  - kind: test
+    command: "bun test tests/unit/errors.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "20 pass, 0 fail; recursion regression and hostile non-Error conversion behavior are exercised."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch6
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,62 @@
+version: 1
+feature_id: embed-cache
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/pipeline.ts:adaptEmbedCache
+entrypoints:
+  - src/runner/assemble/search-pipeline.ts:buildSearchPipeline
+activation:
+  - QUANTA_PIPELINE selects a semantic pipeline preset.
+  - QUANTA_EMBED_CACHE=in-memory or sqlite selects a non-noop cache adapter.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/retrieval/cache/registry.ts:resolveEmbedCacheFromEnv
+  - src/retrieval/cache/in-memory-lru.ts:newInMemoryEmbedCache
+  - src/retrieval/cache/sqlite-cache.ts:newSqliteEmbedCache
+consumer:
+  - src/runner/assemble/pipeline.ts:adaptEmbedCache
+  - src/retrieval/pipeline/semantic-only.ts:semanticOnlyPipeline
+  - src/retrieval/pipeline/parallel-rrf.ts:parallelRrfPipeline
+  - src/retrieval/pipeline/semantic-then-rerank.ts:semanticThenRerankPipeline
+reachable: yes
+surface_findings:
+  - The catalog's deliberate_hold is stale: runner pipeline assembly constructs and supplies the cache to all semantic presets.
+  - The live adapter uses the fixed noncanonical model tag pipeline-wire-default, so a durable sqlite cache cannot distinguish provider, model, version, or vector dimension changes.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/retrieval/embed-cache-hellgate.test.ts tests/unit/apps/agent/pipeline-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: None adapter is no-op and absent or none QUANTA_PIPELINE returns null without a search pipeline.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/retrieval/embed-cache-hellgate.test.ts tests/unit/retrieval/pipeline-hellgate.test.ts tests/unit/apps/agent/pipeline-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Adapter storage, sqlite persistence, cache-hit bypass of embedding, and semantic-pipeline assembly pass.
+failure_posture: degraded
+security_posture: conditional
+observability: na
+verdict: conditional
+blocker: The production bridge hard-codes PIPELINE_CACHE_MODEL_TAG instead of deriving the documented canonical provider-model-version-dimension tag; sqlite reuse can serve a vector from a prior model after a model change.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg "resolveEmbedCacheFromEnv|PIPELINE_CACHE_MODEL_TAG|cache" src/runner/assemble/pipeline.ts src/retrieval/pipeline
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runner assembly adapts the cache into every semantic preset, but binds all entries to one fixed tag.
+  - kind: test
+    command: bun test tests/unit/retrieval/embed-cache-hellgate.test.ts tests/unit/retrieval/pipeline-hellgate.test.ts tests/unit/retrieval-composition-wire-hellgate.test.ts tests/unit/apps/agent/pipeline-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected focused rail passed as part of the 244-pass, 0-fail audit run.
+audited_at: "2026-07-19"
+auditor: codex/p1-context-memory
+review_state: approved
+reviewer: codex/cross-review-wave1

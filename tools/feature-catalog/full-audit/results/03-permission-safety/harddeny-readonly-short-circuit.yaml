@@ -1,0 +1,53 @@
+version: 1
+feature_id: harddeny-readonly-short-circuit
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/classifier.ts:AutoModeClassifier.evaluateAuto
+entrypoints:
+  - src/permission/policy.ts:evaluate
+  - src/agent/admissibility-gate/gates.ts:runModePolicy
+activation:
+  - Auto-mode evaluation of a readonly action or a HARD_DENY action.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/permission/policy.ts:hardDenyReason
+  - src/tool/readonly.ts readonly tool metadata
+consumer:
+  - src/permission/classifier.ts:AutoModeClassifier.evaluateAuto
+reachable: yes
+surface_findings:
+  - HARD_DENY executes before readonly classification and before the LLM classifier; a spoofed readonly flag cannot bypass a dangerous shell action.
+  - Legitimate readonly tools short-circuit before port invocation, preserving the no-LLM fast path.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission-classifier.test.ts tests/unit/permission-rules.test.ts tests/integration/auto-classifier-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails prove hard-deny precedence, spoof resistance, readonly bypass, and live gate execution.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'hardDenyReason|isReadOnly|evaluateAuto' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/permission/policy.ts src/permission/classifier.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The evaluator orders HARD_DENY before readonly and classifier branches.
+  - kind: test
+    command: bun test tests/unit/permission-classifier.test.ts tests/unit/permission-rules.test.ts tests/integration/auto-classifier-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused precedence and integration rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,51 @@
+version: 1
+feature_id: remember-patterns-dangerous-knob
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder.ts:resolvePermissionPatternSlice
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts
+activation:
+  - Set QUANTA_REMEMBER_PATTERNS=on and QUANTA_REMEMBER_PATTERNS_DANGEROUS truthy for a baseline-covered dangerous proposal.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/permission/gate-pattern-wire.ts
+consumer:
+  - src/host/runtime/agent-arg-builder.ts
+reachable: yes
+surface_findings:
+  - Dangerous recording remains inert without the primary remember-pattern gate.
+  - The opt-in only lifts the dangerous flag; the independent no-widen check still rejects uncovered proposals.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/remember-patterns-dangerous-knob-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent knob retains dangerous-proposal rejection.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/remember-patterns-dangerous-knob-hellgate.test.ts tests/unit/permission-propose-pattern-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate threading and no-widen behavior passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: Two explicit off-by-default gates are required before dangerous proposals can be recorded.
+disposition: hold
+receipts:
+  - kind: test
+    command: bun test tests/unit/remember-patterns-dangerous-knob-hellgate.test.ts tests/unit/permission-propose-pattern-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused dangerous-pattern rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

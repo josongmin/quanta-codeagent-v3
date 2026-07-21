@@ -1,0 +1,48 @@
+version: 1
+feature_id: gh-cli-tool-slice
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/agent/mode-presets/ci-bot.ts:buildCiBotWiring
+entrypoints: [src/apps/agent/mode-presets/ci-bot.ts:runMode, src/apps/agent/mode-presets/ci-bot-policy.ts:buildCiBotWiring]
+activation: ["The ci-bot mode constructs ghTools; QUANTA_CI_BOT_GH_WRITE controls whether mutating GH tools join the read-only ci-bot registry."]
+effective_defaults:
+  cli: off
+  web: off
+  bench: na
+  headless: off
+  daemon: off
+producer: [src/tool/gh/index.ts:ghTools, src/tool/gh/runner.ts:defaultGhRunner]
+consumer: [src/apps/agent/mode-presets/ci-bot.ts:buildCiBotWiring, src/apps/agent/mode-presets/ci-bot-policy.ts:buildCiBotWiring]
+reachable: conditional
+surface_findings:
+  - The live ci-bot preset mounts read-only GH tools by default and includes writes only under QUANTA_CI_BOT_GH_WRITE; the standard interactive CLI and web-daemon registries do not call ghTools.
+  - The source now has ten baseline GH tools, with further opt-in tools for authoring, thread resolution, code tour, and CI findings; it is no longer the catalog's six-tool slice.
+  - The default runner uses argv arrays and a scoped scrubbed environment that retains GitHub credentials but drops provider secrets.
+off_identity_proof:
+  kind: source
+  command: rg -n "ghTools\(|QUANTA_CI_BOT_GH_WRITE|buildDaemonToolRegistry|gitToolList" src/apps/agent/mode-presets/ci-bot.ts src/apps/agent/mode-presets/ci-bot-policy.ts src/apps/cli/internal.ts src/apps/web-daemon/runtime-factory.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Normal CLI and daemon registries omit ghTools, while ci-bot excludes mutating GH tools until its write gate is enabled.
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: The catalog calls this a six-tool CLI/web slice and says interactive may opt in, but the implementation exposes ten baseline tools only from ci-bot composition; neither standard interactive CLI nor web-daemon has a ghTools consumer.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "ghTools\(|gh_pr_|CI_BOT_GH_WRITE|buildCiBotWiring|buildDaemonToolRegistry" src/tool/gh src/apps/agent/mode-presets/ci-bot.ts src/apps/agent/mode-presets/ci-bot-policy.ts src/apps/cli/internal.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The tool factory has ten baseline entries and ci-bot is its production composition owner; standard CLI/web roots omit it.
+  - kind: test
+    command: bun test tests/unit/tool/gh.test.ts tests/unit/gh-pr-tools-hellgate.test.ts tests/unit/apps/agent/ci-bot-preset.test.ts tests/unit/apps/agent/mode-presets/ci-bot.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 58 focused GH tool and ci-bot composition tests passed, including read/write selection and runner behavior.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-multimodal
+review_state: approved
+reviewer: codex/cross-review-wave1

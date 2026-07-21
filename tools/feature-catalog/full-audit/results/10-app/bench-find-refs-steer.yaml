@@ -1,0 +1,60 @@
+version: 1
+feature_id: bench-find-refs-steer
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/eval/driver/config-build.ts:buildBenchRegistry
+entrypoints:
+  - src/apps/bench/run-main.ts:runMain
+  - src/apps/bench/eval/driver.ts:runInstance
+activation:
+  - QUANTA_BENCH_FIND_REFS=1
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/tool/find-refs/index.ts:findReferencesTool
+  - src/agent/localize-phase-guard.ts:FIND_REFS_STEER
+consumer:
+  - src/runner/batch/eval/driver/config-build.ts:buildBenchRegistry
+  - src/runner/batch/eval/driver/config-build.ts:buildDirectiveSteers
+reachable: yes
+surface_findings:
+  - The real bench config conditionally registers find_references and adds its prompt steer only for SWE-bench instances.
+  - The tool executes ripgrep with literal whole-word matching and rejects workspace-escaping paths.
+  - The env-direct gate has a schema inventory entry but intentionally no runner knob adapter; the live config builder is the authoritative consumer.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/bench-prompt-steer-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: With QUANTA_BENCH_FIND_REFS unset, the composed real bench prompt omits the steer; non-SWE runs also omit it when enabled.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/bench-prompt-steer-hellgate.test.ts src/tool/find-refs/find-refs.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed, covering ON prompt composition plus real ripgrep whole-word lookup, literal metachar handling, result caps, and jail rejection.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_BENCH_FIND_REFS|findReferencesTool|FIND_REFS_STEER' src/runner/batch/eval/driver/config-build.ts src/tool/find-refs/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The production config builder gates both registry membership and prompt composition from the same env key.
+  - kind: test
+    command: bun test tests/unit/bench-prompt-steer-hellgate.test.ts src/tool/find-refs/find-refs.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused rails passed, including actual ripgrep execution and path-jail failure behavior.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-bench-controls
+review_state: approved
+reviewer: codex/cross-review-wave1

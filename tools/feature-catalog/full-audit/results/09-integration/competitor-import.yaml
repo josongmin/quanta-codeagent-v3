@@ -1,0 +1,61 @@
+version: 1
+feature_id: competitor-import
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/session-import-handler.ts:createCliImportHandler
+entrypoints:
+  - src/apps/cli/repl.ts:runSessionMain
+  - src/runner/session-ops.ts:runSessionCommand
+activation:
+  - session import claude_code optionally accepts --no-skills
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/migration/importer.ts:runImport
+  - src/migration/dedup.ts:wasAlreadyImported
+  - src/apps/cli/session-import-handler.ts:persistTranslatedSession
+consumer:
+  - src/apps/cli/session-import-handler.ts:createCliImportHandler
+  - src/session/store.ts:saveSessionById
+reachable: yes
+surface_findings:
+  - Imported Claude Code transcripts are redacted, persisted as resumable sessions, and content-hash deduplicated through the import log.
+  - Credential filenames are rejected before read; MCP configuration, hooks, and rules are translated only through guarded readers.
+  - The catalog config reference claiming cursor and aider import verbs is stale: the live IMPORT_PROVIDERS list contains claude_code only and explicit tests reject cursor and aider.
+off_identity_proof:
+  kind: source
+  command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/apps/cli/session-import-handler.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Import work is behind the explicit session import verb and has no startup or per-turn activation path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/migration-import-persistence-e2e-hellgate.test.ts tests/unit/migration-import-roundtrip-hellgate.test.ts tests/unit/migration-config-translators.test.ts tests/unit/migration-persistence.test.ts tests/unit/migration-stages.test.ts tests/unit/migration-detector.test.ts tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts tests/unit/cli-session-commands.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Import persists and reloads exact messages, re-imports idempotently, never reads auth.json, and rejects unsupported providers before persistence.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: "Catalog config_refs advertises session import cursor and session import aider, but the frozen CLI accepts only claude_code; cursor and aider are detection-only stubs and are rejected before import or persistence."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n 'IMPORT_PROVIDERS|saveSessionById|wasAlreadyImported|readImportFile' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/session-import-handler.ts src/migration
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI allowlisting is claude_code-only; persistence, dedup, and credential-read fencing are in the live import path.
+  - kind: test
+    command: bun test tests/unit/migration-import-persistence-e2e-hellgate.test.ts tests/unit/migration-import-roundtrip-hellgate.test.ts tests/unit/migration-config-translators.test.ts tests/unit/migration-persistence.test.ts tests/unit/migration-stages.test.ts tests/unit/migration-detector.test.ts tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts tests/unit/cli-session-commands.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused persistence, exact round-trip, dedup, secret fencing, and CLI provider-boundary rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

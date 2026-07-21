@@ -1,0 +1,61 @@
+version: 1
+feature_id: per-thread-permissions
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/admissibility-gate/gates.ts:runPermissionStack"
+entrypoints: []
+activation:
+  - "AgentConfig.permissionStack.enabled=true with a sessionId and a PermissionStore supplied to the gate."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/permission/per-thread-store.ts:setThreadPermission"
+  - "src/permission/permission-store.ts:createPermissionStore"
+consumer: []
+reachable: no
+surface_findings:
+  - "CLI composition loads and threads a PermissionStore into admissibility, but it never supplies AgentConfig.permissionStack.enabled."
+  - "No production source constructs the permissionStack config slot; therefore runPermissionStack returns before per-thread lookup in all live compositions at this snapshot."
+  - "The integration suite proves injected enforcement and precedence, not production activation."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/integration/permission-stack-gate-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The omitted permissionStack control preserves legacy bypass behavior even with a stored per-thread read-only record."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/permission-per-thread.test.ts tests/integration/permission-stack-gate-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Injected store and stack configuration prove persistence, precedence, per-thread denial, post-denial override, and hard-deny dominance."
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: seam-only
+blocker: "No production composition root sets AgentConfig.permissionStack.enabled; the loaded CLI store is consequently never consulted by the live per-thread enforcement branch."
+disposition: wire
+receipts:
+  - kind: source
+    command: "rg -n 'permissionStack' src -g '*.ts'"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Only the type declaration and gate reader exist; there is no application configuration producer."
+  - kind: source
+    command: "rg -n 'permissionStore|loadPermissionStore' src/apps/cli/repl/runtime-context-compose.ts src/apps/cli/repl/session-setup.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "CLI loads the store and forwards it as an optional admissibility dependency, but does not arm permissionStack."
+  - kind: test
+    command: "bun test tests/unit/permission-per-thread.test.ts tests/integration/permission-stack-gate-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The injected-only behavior passed, confirming the blocked composition seam is the remaining activation gap."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch3
+review_state: approved
+reviewer: codex/cross-review-wave1

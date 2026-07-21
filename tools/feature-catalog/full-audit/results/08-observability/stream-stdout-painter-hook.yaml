@@ -1,0 +1,60 @@
+version: 1
+feature_id: stream-stdout-painter-hook
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal.ts:buildCliMarkdownPainter
+entrypoints:
+  - src/apps/cli/internal.ts:buildStreaming
+  - src/runner/assemble/streaming.ts:buildStreamingCore
+activation:
+  - CLI creates a painter only for TTY stdout with NO_COLOR unset, QUANTA_MD_HIGHLIGHT not 0, and QUANTA_MD_MODE not off.
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/cli/markdown-painter.ts:createMarkdownPainter
+consumer:
+  - src/apps/cli/internal.ts:buildCliMarkdownPainter
+  - src/runner/assemble/streaming.ts:buildStreamingCore
+  - src/stream/adapters/stdout.ts:StdoutStream
+reachable: yes
+surface_findings:
+  - Interactive CLI default is painter-on, not default-off: absence of disabling environment values and a TTY creates the conservative painter.
+  - Non-TTY and all disabling gates omit the painter, leaving the redacted stdout path byte-identical; non-CLI surfaces do not inject one.
+  - StdoutStream redacts before optional painter processing and flushes buffered text before non-assistant events.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/markdown-painter.test.ts tests/unit/stdout.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Disabled painter modes pass deltas unchanged and ordinary StdoutStream remains valid without a painter.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/markdown-painter.test.ts tests/unit/stdout.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Markdown formatting FSM, fragmented deltas, flush behavior, Unicode, and StdoutStream redaction rails pass.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildCliMarkdownPainter|createMarkdownPainter|painter|redact' src/apps/cli/internal.ts src/apps/cli/markdown-painter.ts src/runner/assemble/streaming.ts src/stream/adapters/stdout.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI gating builds the painter by default for TTY output, while the assembler and stdout adapter preserve the painter-absent path.
+  - kind: test
+    command: bun test tests/unit/cli/markdown-painter.test.ts tests/unit/stdout.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Included in the focused 394-pass, 0-fail run.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch23
+review_state: approved
+reviewer: codex/cross-review-wave1

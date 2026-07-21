@@ -1,0 +1,52 @@
+version: 1
+feature_id: trajectory-schema
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/trajectory.ts:TRAJECTORY_SCHEMA
+entrypoints:
+  - src/stream/adapters/jsonl-recorder.ts
+  - src/apps/eval/trajectory/replay.ts
+activation:
+  - JSONL recorder and trajectory readers consume the shared envelope contract whenever observability recording is configured.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/shared/trajectory.ts:TRAJECTORY_SCHEMA
+consumer:
+  - src/stream/adapters/jsonl-recorder.ts
+  - src/apps/eval/trajectory/replay.ts
+reachable: yes
+surface_findings:
+  - Runtime guard enforces the schema identity and required run context; reader tests tolerate malformed rows and unknown forward-compatible fields.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/trajectory.test.ts tests/unit/probe-parse.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Schema invariants and tolerant trajectory parsing rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'TRAJECTORY_SCHEMA|TrajectoryEvent|isTrajectoryEvent' src/shared/trajectory.ts src/stream/adapters/jsonl-recorder.ts src/apps/eval/trajectory/replay.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Shared schema producer is consumed by recording and replay paths.
+  - kind: test
+    command: bun test tests/unit/trajectory.test.ts tests/unit/probe-parse.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused schema and reader rails passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,56 @@
+version: 1
+feature_id: memory-citation-surface
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/context-assembler.ts:resolveMemoryContext
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:bootstrapTurnSession
+  - src/agent/loop/context-assembler.ts:resolveMemoryContext
+  - src/agent/loop/session-lifecycle.ts:buildFinalAgentOutcome
+activation:
+  - A configured memory store makes every assembled turn call resolveMemoryContext.
+  - recallContext emits only records placed in the reminder tail; the loop accumulates them and emits AgentOutcome.memoryCitations only when at least one record was placed.
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: unknown
+  daemon: off
+producer:
+  - src/agent/memory.ts:recallContext onPlaced callback
+  - src/agent/loop/context-assembler.ts:resolveMemoryContext citation accumulator
+consumer:
+  - src/agent/loop/session-lifecycle.ts:buildFinalAgentOutcome
+reachable: yes
+surface_findings:
+  - The normal CLI factory supplies an in-memory memory store by default, while QUANTA_MEMORY=off removes the entire recall and citation path.
+  - The citation is emitted only after a recalled record is actually placed in the reminder tail; empty stores and no-store legacy sessions omit the optional outcome field.
+  - The web daemon deliberately exposes memory readout only and does not put store or memory configuration on its live agent base, so it does not recall or create citations.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/memory-citation-accumulator.test.ts tests/integration/memory-citation-end-to-end.test.ts tests/unit/cli/turn-summary.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 39 focused tests passed, including actual reminder-tail placement, outcome accumulation, no-store omission, and best-effort callback failure handling.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "onPlaced|memoryCitations|resolveMemoryContext|buildFinalAgentOutcome" src/agent/memory.ts src/agent/loop/context-assembler.ts src/agent/loop/session-bootstrap.ts src/agent/loop/session-lifecycle.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Recall placement is accumulated in the live loop and conditionally projected into the final AgentOutcome.
+  - kind: test
+    command: bun test tests/unit/agent/memory-citation-accumulator.test.ts tests/integration/memory-citation-end-to-end.test.ts tests/unit/cli/turn-summary.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused citation producer, live-loop outcome, and CLI rendering rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch11
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,62 @@
+version: 1
+feature_id: subagent-read-inbox
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/subagent-mailbox/index.ts:subagentMailboxTools
+entrypoints:
+  - src/agent/tier1/subagent-mailbox.ts:buildSubagentMailboxBlock
+  - src/agent/features.ts:buildSessionFeatures
+  - src/agent/loop/turn-iteration.ts:syncQueuedTurnInputs
+activation:
+  - QUANTA_SUBAGENT_MAILBOX=on or a host-supplied mailbox enables the shared Tier-1 tool pair.
+  - Calling subagent_read_messages polls the caller's own mailbox identity; peer-team wiring can additionally auto-drain the shared port at turn start.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: off
+  headless: off
+  daemon: unknown
+producer:
+  - src/tool/subagent-mailbox/index.ts:subagentReadMessagesTool
+  - src/agent/subagent-mailbox/peer-inbox.ts:createPeerInboxDrain
+consumer:
+  - src/agent/tier1/subagent-mailbox.ts:buildSubagentMailboxBlock
+  - src/agent/loop/turn-iteration.ts:syncQueuedTurnInputs
+reachable: yes
+surface_findings:
+  - The same Tier-1 builder publishes subagent_read_messages beside subagent_send_message and binds both to one mailbox instance.
+  - Manual polling preserves read versus peek semantics, oldest-first bounds, and a post-read pending count.
+  - The catalog's no-auto-drain hold is stale: syncQueuedTurnInputs polls peerInbox at the turn seam, and the peer inbox adapter reads from this same MailboxPort with bounded provenance-tagged injection.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/subagent-mailbox-read-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: With no mailbox slot the builder returns no send or read tool.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-mailbox-read-hellgate.test.ts tests/unit/subagent-mailbox-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The focused rails passed for read marking, peek identity, bounded output, sender identity, shared-port registration, send-read round trip, and hostile input containment.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'subagent_read_messages|subagentMailboxTools|buildSubagentMailboxBlock|pollPeerInbox|createPeerInboxDrain' src/agent src/tool
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Tool registration and the separate turn-top peer inbox consumer are both reachable from production loop composition.
+  - kind: test
+    command: bun test tests/unit/subagent-mailbox-read-hellgate.test.ts tests/unit/subagent-mailbox-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused proof completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-core
+review_state: approved
+reviewer: codex/cross-review-wave1

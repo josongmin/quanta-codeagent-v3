@@ -1,0 +1,55 @@
+version: 1
+feature_id: mode-repo-rules-active-skills-working-state-memory-hints
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt-reminders.ts:buildDynamicContext
+entrypoints:
+  - src/apps/cli/index.ts agent loop prompt construction
+  - src/agent/loop/context-assembler.ts builds turn context before each model call
+activation:
+  - buildTurnContext compiles the mode, repo/global rules, active skills, working state, and memory inputs into ordered reminder atoms when those session resources are present.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: na
+producer:
+  - src/agent/prompt-reminders.ts resolves the ordered reminder atom content
+  - src/agent/repo-rules.ts:loadRepoRules resolves repository authority
+consumer:
+  - src/agent/prompt.ts:compile invokes buildDynamicContext
+  - src/agent/loop/context-assembler.ts invokes buildTurnContext for the live agent loop
+reachable: yes
+surface_findings:
+  - Dynamic reminder ordering is mode, optional brief/directive/language/env, repo rules, glob rules, active skills, working state, memory, hook tail, then task budget; the claimed relative ordering remains intact.
+  - Repo rules can be hoisted to the static cached system section when sectioned input is used; they are not duplicated in the dynamic reminder.
+  - Optional resources collapse when absent, preserving the baseline reminder shape.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/prompt-sections-hellgate.test.ts tests/unit/repo-rules-tree-hellgate.test.ts tests/integration/sota-codex-full.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 33 focused cases prove all-phase composition, authority placement, mode parity, cross-turn working-state visibility, rule resolution, and cache-section limits.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildDynamicContext|mode notice|active-skills|working-state|memory-context|renderRepoRulesBlock' src/agent/prompt.ts src/agent/prompt-reminders.ts src/agent/repo-rules.ts src/agent/loop/context-assembler.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live loop calls the compiler, which delegates to the ordered reminder builder and its repo-rule, skill, working-state, and memory branches.
+  - kind: test
+    command: bun test tests/unit/prompt-sections-hellgate.test.ts tests/unit/repo-rules-tree-hellgate.test.ts tests/integration/sota-codex-full.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 33 focused ordering, live-composition, rule-tree, and cross-turn-state cases pass.
+audited_at: "2026-07-19"
+auditor: codex/p2-boundary-batch11
+review_state: approved
+reviewer: codex/cross-review-wave1

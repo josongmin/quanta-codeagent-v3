@@ -1,6 +1,6 @@
 version: 1
 feature_id: otlp-helper
-snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
 status: closed
 owner_seam: src/observability/metrics/otlp-helper.ts:otlpHttpMetricSink
 entrypoints: []
@@ -44,5 +44,5 @@ receipts:
     evidence: 20 pass, 0 fail.
 audited_at: "2026-07-19"
 auditor: codex/root
-review_state: pending
-reviewer: null
+review_state: approved
+reviewer: codex/cross-review-wave1

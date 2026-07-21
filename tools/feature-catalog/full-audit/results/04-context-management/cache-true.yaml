@@ -1,0 +1,47 @@
+version: 1
+feature_id: cache-true
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt.ts:buildSystemSections
+entrypoints: [src/agent/turn-context.ts, src/llm/adapters/anthropic.ts]
+activation: [system prompt assembly]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: [src/agent/prompt-sections.ts:fourSectionPreset]
+consumer: [src/llm/adapters/anthropic.ts:toAnthropicSystem]
+reachable: yes
+surface_findings:
+  - "Static base prompt is cache-marked and Anthropic serializes a bounded cache-control breakpoint."
+  - "Catalog claim of a single cache:true block is stale: sectioned prompts can carry up to four cached sections for base, project, session, and user append."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/prompt-sections-hellgate.test.ts tests/unit/anthropic-cache.test.ts tests/unit/anthropic-cache-control-blocks.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Breakpoint cap, deterministic sectioning, Anthropic serialization, and cross-turn prefix stability pass.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: "Update purpose from a single cache:true block to the current bounded four-section cached-prefix model."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'cache: true|MAX_CACHE_BREAKPOINTS|cache_control' src/agent/prompt.ts src/agent/prompt-sections.ts src/llm/adapters/anthropic.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Sectioned cached prompt producer and Anthropic consumer are live.
+  - kind: test
+    command: bun test tests/unit/prompt-sections-hellgate.test.ts tests/unit/anthropic-cache.test.ts tests/unit/anthropic-cache-control-blocks.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Cached prefix rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,45 @@
+version: 1
+feature_id: quantamcpconfig
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/mcp/client.ts:McpClient
+entrypoints:
+  - src/apps/cli/internal.ts
+activation:
+  - QUANTA_MCP_CONFIG loads stdio JSON-RPC tool bridges into the agent registry.
+effective_defaults:
+  cli: off
+  web: resource
+  bench: off
+  headless: off
+  daemon: resource
+producer:
+  - src/mcp/client.ts:McpClient
+consumer:
+  - src/apps/cli/internal.ts
+reachable: yes
+surface_findings:
+  - Empty commands and pump death fail pending requests promptly; bridge tools continue normal agent loop handling.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp-client-errors.test.ts tests/unit/mcp/stdio-pump-death-hellgate.test.ts tests/integration/mcp-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Error, subprocess-pump, and end-to-end bridge rails passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/mcp-client-errors.test.ts tests/unit/mcp/stdio-pump-death-hellgate.test.ts tests/integration/mcp-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: MCP rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

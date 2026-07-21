@@ -1,0 +1,61 @@
+version: 1
+feature_id: flock-operations-telemetry
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/session-resource-registry/disk-adapter/file-lock.ts:acquireSessionLock
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+  - src/agent/session-resource-registry/caller-owned-builder.ts:buildCallerOwnedRegistryWithTelemetry
+activation:
+  - A real MetricsRegistry and sessionId cause agent-config assembly to mint the caller-owned registry with the adapted metrics emitter.
+  - Disk registry configuration must be set before registry operations reach acquireSessionLock.
+effective_defaults:
+  cli: off
+  web: unknown
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/session-resource-registry/disk-adapter/file-lock.ts:acquireSessionLock
+consumer:
+  - src/agent/session-resource-registry/disk-adapter/disk-store.ts:createDiskSessionResourceRegistry
+  - src/agent/session-resource-registry/caller-owned-builder.ts:buildCallerOwnedRegistryWithTelemetry
+  - src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+reachable: yes
+surface_findings:
+  - Agent-config assembly builds a caller-owned disk registry with the adapted emitter whenever the required runtime resources are supplied.
+  - The end-to-end assembly rail mutates the assembled store under a disk registry and observes codex_r2.lock.acquire_success at the supplied MetricsRegistry.
+  - Missing metrics emitter leaves lock behavior unchanged and produces zero telemetry calls.
+off_identity_proof:
+  kind: test
+  command: bun test src/agent/session-resource-registry/disk-adapter/__tests__/file-lock-telemetry.hellgate.test.ts tests/unit/assemble-caller-owned-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent emitter has zero emit calls and absent MetricsRegistry preserves the global registry path.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/agent/session-resource-registry/disk-adapter/__tests__/file-lock-telemetry.hellgate.test.ts tests/unit/assemble-caller-owned-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Success, timeout, failure, stale reclaim, latency, hostile-emitter, concurrency, and assembled caller-owned disk paths emit the documented lock metrics.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "buildCallerOwnedRegistryWithTelemetry|metricsEmitter|acquireSessionLock" src/host/runtime/agent-config-assembler.ts src/agent/session-resource-registry
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The host adapter builds and consumes a telemetry-equipped disk registry, and disk-store forwards the emitter to acquireSessionLock.
+  - kind: test
+    command: bun test src/agent/session-resource-registry/disk-adapter/__tests__/file-lock-telemetry.hellgate.test.ts tests/unit/assemble-caller-owned-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected focused rails passed as part of the 174-pass, 0-fail audit run.
+audited_at: "2026-07-19"
+auditor: codex/p1-observability-a
+review_state: approved
+reviewer: codex/cross-review-wave1

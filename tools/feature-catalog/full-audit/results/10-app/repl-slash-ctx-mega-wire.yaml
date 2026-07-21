@@ -1,0 +1,70 @@
+version: 1
+feature_id: repl-slash-ctx-mega-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/slash-surface.ts:buildReplSlashCtx
+entrypoints:
+  - src/apps/cli/repl.ts:runRepl
+  - src/apps/cli/repl/surface-compose/composer.ts:composeSurfaceWires
+  - src/apps/cli/repl/surface-compose/slash-context-compose.ts:buildSurfaceSlashContext
+activation:
+  - composeSurfaceWires always passes plan, composer, conversation-store, and text-inbox adapters to buildReplSlashCtx.
+  - Per-tool, profile, identity, and focus-chain slots additionally depend on their documented runtime resources or gates.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/repl/ctx-adapters/plan-edit-adapter.ts:buildPlanEditAdapter
+  - src/apps/cli/repl/ctx-adapters/composer-edit-adapter.ts:buildComposerEditAdapter
+  - src/apps/cli/repl/ctx-adapters/fork-session-adapter.ts:buildForkSessionAdapter
+  - src/apps/cli/repl/ctx-adapters/per-tool-checkpoint-adapter.ts:buildPerToolCheckpointAdapter
+consumer:
+  - src/apps/cli/repl/surface-compose/slash-context-compose.ts:buildSurfaceSlashContext
+  - src/apps/cli/repl/surface-compose/dispatch.ts:buildSurfaceDispatch
+  - src/apps/cli/slash-commands.ts:runSlashCommand
+reachable: yes
+surface_findings:
+  - The frozen source has a live composition-root consumer: buildSurfaceSlashContext calls buildReplSlashCtx and dispatch projects it to the real SlashContext.
+  - planEdit, composerEdit, forkSession, and textInbox are passed on the ordinary CLI path; per-tool/profile/identity/focus-chain are resource or gate dependent.
+  - The YAML notes still say surface-compose is not modified and the host must opt in to optional args. That is stale: the current composer routes the live slots, so the all-slots default-OFF framing is no longer accurate.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/repl-slash-ctx-mega-wire-hellgate.test.ts tests/unit/cli/repl-surface-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: The isolated builder has a byte-identical no-args projection, but production composeSurfaceWires always supplies several adapters; therefore the catalog's production default-OFF claim is false.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/repl-slash-ctx-mega-wire-hellgate.test.ts tests/unit/cli/repl-surface-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All eight adapter contracts and slash bodies pass in isolation, while the surface-wire rail proves the live composition root supplies the applicable slots.
+failure_posture: degraded
+security_posture: conditional
+observability: na
+verdict: stale-claim
+blocker: The catalog's note/default-OFF story describes a pre-composition primitive, but the frozen production CLI composes and dispatches several ADR-0291 slots by default.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'buildReplSlashCtx|buildSurfaceSlashContext|planStore:|composerHandle:|conversationStore:|textInbox:' src/apps/cli/repl src/apps/cli/slash-commands.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: REPL startup builds surface wires, the slash-context composer provides concrete adapters, and dispatch projects them to runSlashCommand.
+  - kind: test
+    command: bun test tests/unit/cli/repl-slash-ctx-mega-wire-hellgate.test.ts tests/unit/cli/repl-surface-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 40 adapter, slash-body, composition, and default-projection cases passed.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3 feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-repl
+review_state: approved
+reviewer: codex/cross-review-wave1

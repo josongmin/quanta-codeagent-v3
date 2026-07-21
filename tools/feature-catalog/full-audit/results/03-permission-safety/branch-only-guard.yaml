@@ -1,0 +1,57 @@
+version: 1
+feature_id: branch-only-guard
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/apps/agent/mode-presets/ci-bot.ts:branchOnlyGuardedRunner"
+entrypoints:
+  - "src/apps/agent/mode-presets/ci-bot.ts:buildCiBotWiring"
+  - "src/apps/agent/mode-presets/ci-bot.ts:runMode"
+activation:
+  - "Selecting ci-bot constructs a guarded GitRunner; every git-tool argv crosses decideBranchOnly before inner git execution."
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - "src/permission/branch-only.ts:decideBranchOnly"
+consumer:
+  - "src/apps/agent/mode-presets/ci-bot.ts:branchOnlyGuardedRunner"
+reachable: yes
+surface_findings:
+  - "Ci-bot is opt-in, but its production wiring wraps the actual GitRunner rather than merely exposing a diagnostic predicate."
+  - "Protected-branch commits resolve HEAD lazily and rejected operations return before inner git is called; push/reset are checked from argv."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/apps/agent/mode-presets/ci-bot.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Default ci-bot tool surface remains restricted and does not add bash or remote-write gh tools."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/permission/branch-only.test.ts tests/unit/permission/branch-only-bypass-hellgate.test.ts tests/unit/apps/agent/mode-presets/ci-bot.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Protected-branch commit is rejected before git runs; alias injection, wholesale pushes, and destructive reset bypasses are denied."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'branchOnlyGuardedRunner|decideBranchOnly|gitWrite=branch-only' src/apps/agent/mode-presets/ci-bot.ts src/permission/branch-only.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The ci-bot composition root wraps its live GitRunner and calls the pure protected-branch decision before execution."
+  - kind: test
+    command: "bun test tests/unit/permission/branch-only.test.ts tests/unit/permission/branch-only-bypass-hellgate.test.ts tests/unit/apps/agent/mode-presets/ci-bot.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "297 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch9
+review_state: approved
+reviewer: codex/cross-review-wave1

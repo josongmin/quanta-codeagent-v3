@@ -1,0 +1,51 @@
+version: 1
+feature_id: slash-branches-progress
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/branch-search-progress.ts:branch trace state
+entrypoints:
+  - CLI slash/status surface
+activation:
+  - Enable branch search progress on a TTY and run a branch-search operation.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/branch-search-progress.ts:ingest
+consumer:
+  - CLI branch trace observer and /branches slash
+reachable: yes
+surface_findings:
+  - Typed branch trace state renders a status line and detailed /branches panel.
+  - Non-TTY or QUANTA_BRANCH_SEARCH_PROGRESS=0 omits ingestion and leaves slash not wired.
+off_identity_proof:
+  kind: source
+  command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/apps/cli/branch-search-progress.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate disables branch progress composition on non-TTY or explicit off.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/branch-search-progress.test.ts tests/unit/slash-commands.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Trace phases, deterministic rank/winner state, render output, and slash registration rails passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: conditional
+blocker: "The progress UI is deliberate default-off/TTY-only composition."
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/cli/branch-search-progress.test.ts tests/unit/slash-commands.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused branch-progress rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

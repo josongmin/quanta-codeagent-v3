@@ -1,0 +1,50 @@
+version: 1
+feature_id: prompt-cache-1h-ttl
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/factory.ts:resolveCacheTtl
+entrypoints:
+  - src/llm/adapters/anthropic.ts
+activation:
+  - QUANTA_PROMPT_CACHE_TTL is allowlist-resolved at the factory and forwarded to Anthropic codec construction.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/anthropic-messages-codec.ts:ttlControl
+consumer:
+  - src/llm/factory.ts:resolveCacheTtl
+reachable: yes
+surface_findings:
+  - Default 5m omits the ttl field; 1h is applied only to allowlisted model families.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/prompt-cache-1h-ttl-codec-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Codec TTL stamping and default shape rails passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'resolveCacheTtl|cacheTtl|QUANTA_PROMPT_CACHE_TTL' src/llm
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Factory allowlist and all provider adapters forward the TTL.
+  - kind: test
+    command: bun test tests/unit/prompt-cache-1h-ttl-codec-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: TTL codec rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

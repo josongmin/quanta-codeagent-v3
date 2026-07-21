@@ -1,0 +1,53 @@
+version: 1
+feature_id: built-in-slash-commands
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/slash-commands.ts:BUILTINS
+entrypoints:
+  - src/apps/cli/index.ts:argv short-circuit
+  - src/apps/cli/repl.ts:interactive slash runtime
+activation:
+  - Enter a registered slash command in the CLI or REPL.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/cli/slash-commands.ts:BUILTINS
+consumer:
+  - src/apps/cli/index.ts:main
+  - src/apps/cli/help-render.ts:renderHelp
+reachable: yes
+surface_findings:
+  - The registry is live in CLI argv routing and REPL/help composition.
+  - Catalog itself declares context and usage commands as placeholders pending loop usage export, so the stated full 10-command capability is incomplete.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/slash-commands.test.ts tests/unit/cli/login-status-cmd.test.ts tests/unit/auth/auth-ui.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Registry dispatch, preferences, OAuth status/login, and malformed argument rails passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: conditional
+blocker: "The catalog's deliberate hold leaves /context and /usage without their promised real-time data producers."
+disposition: hold
+receipts:
+  - kind: source
+    command: git grep -n -E 'BUILTINS|isSlashCommand' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI index, help renderer, and slash runtime consume the single built-in registry.
+  - kind: test
+    command: bun test tests/unit/slash-commands.test.ts tests/unit/cli/login-status-cmd.test.ts tests/unit/auth/auth-ui.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused slash rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

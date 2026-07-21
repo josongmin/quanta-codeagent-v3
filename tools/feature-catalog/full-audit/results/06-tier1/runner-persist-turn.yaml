@@ -1,0 +1,53 @@
+version: 1
+feature_id: runner-persist-turn
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/orchestrate/persist-turn.ts:persistTurn
+entrypoints:
+  - src/host/runtime/internal/context-binding/turn-runner.ts:runRuntimeTurn
+  - src/runner/orchestrate/run-once.ts:runOnce
+activation:
+  - Each completed runtime turn calls persistTurn; writes occur when state or idMeta was established by session bootstrap.
+effective_defaults:
+  cli: on
+  web: resource
+  bench: off
+  headless: resource
+  daemon: resource
+producer:
+  - src/runner/orchestrate/persist-turn.ts:persistTurn
+consumer:
+  - src/host/runtime/internal/context-binding/turn-runner.ts:runRuntimeTurn
+  - src/runner/orchestrate/run-once.ts:runOnce
+reachable: yes
+surface_findings:
+  - Both production turn paths await persistTurn after runAgent returns.
+  - The function is zero-I/O only when both state and idMeta are absent; CLI bootstrap normally establishes idMeta, so CLI id-mode save is active by default.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/repl-extract-shape.test.ts tests/unit/cli-resume-heuristic.test.ts tests/integration/resume-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Extract-shape, resume FSM, and lifecycle round-trip rails passed in the 251-test combined run.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'persistTurn(' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host src/runner
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Both runtime and one-shot orchestration paths await the single persistence owner.
+  - kind: test
+    command: bun test tests/unit/cli/repl-extract-shape.test.ts tests/unit/cli-resume-heuristic.test.ts tests/integration/resume-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused persistence and resume lifecycle rails passed with zero failures.
+audited_at: '2026-07-19'
+auditor: codex/p2-tier1-batch18
+review_state: approved
+reviewer: codex/cross-review-wave1

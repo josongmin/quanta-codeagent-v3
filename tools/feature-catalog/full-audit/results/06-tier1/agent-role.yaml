@@ -1,0 +1,55 @@
+version: 1
+feature_id: agent-role
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/subagent/role.ts:getToolPolicyForRole"
+entrypoints:
+  - "src/subagent/role.ts public role policy API"
+activation:
+  - "No production spawn path calls getToolPolicyForRole or roleAllowsKind."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/subagent/role.ts:POLICY_TABLE"
+  - "src/subagent/nicknames.ts:assignNickname"
+consumer: []
+reachable: no
+surface_findings:
+  - "The policy table and deterministic nickname pool are tested, but the actual subagent spawn path does not consume the policy table; the catalog hold is accurate."
+off_identity_proof:
+  kind: source
+  command: "rg -n 'getToolPolicyForRole\\(|roleAllowsKind\\(' src --glob '!src/subagent/role.ts'"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "No production caller exists outside the owner module."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/agent-role-policy.test.ts tests/unit/nicknames.test.ts tests/integration/nicknames-hell-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Policy exhaustiveness and deterministic non-reusing nickname semantics pass."
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: "Spawn composition does not apply the role policy."
+disposition: wire
+receipts:
+  - kind: source
+    command: "rg -n 'getToolPolicyForRole\\(|roleAllowsKind\\(' src --glob '!src/subagent/role.ts'"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Search returns no production consumer."
+  - kind: test
+    command: "bun test tests/unit/agent-role-policy.test.ts tests/unit/nicknames.test.ts tests/integration/nicknames-hell-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 502-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

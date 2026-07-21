@@ -1,0 +1,60 @@
+version: 1
+feature_id: lsp-warm-backend-prewarm
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/session-bootstrap.ts:maybeStartLspPrewarm
+entrypoints:
+  - src/host/runtime/agent-arg-builder-config-slots.ts:resolveLspPrewarmSlot
+  - src/agent/loop/session-bootstrap.ts:maybeStartLspPrewarm
+  - src/agent/lsp-bridge/warm-pool.ts:proveStrictLspReady
+  - src/agent/loop/session-lifecycle.ts:disposeSessionResources
+activation:
+  - Nav tools enabled plus QUANTA_LSP_PREWARM not set to 0 installs the default-on warm slot.
+  - Bench config enables hard pool eviction at session end when LSP nav is enabled.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: off
+  daemon: off
+producer:
+  - Session bootstrap starts the background workspace warm without delaying startup.
+consumer:
+  - LSP navigation reuses the shared pool, strict bench readiness consumes proveStrictLspReady, and lifecycle disposal reaps bench workspaces.
+reachable: yes
+surface_findings:
+  - Prewarm is default-on only inside the nav-enabled surface and requires a usable language-server backend; QUANTA_LSP_PREWARM=0 remains the cold arm.
+  - Strict readiness fails closed on unavailable or not-ready pyright, while ordinary navigation degrades softly.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/lsp-prewarm-wire-hellgate.test.ts tests/unit/lsp-prewarm-orchestration-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Nav-disabled and explicit-off paths omit the slot and spawn no warm work.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/lsp-warm-pool-hellgate.test.ts tests/unit/lsp-prewarm-orchestration-hellgate.test.ts tests/unit/lsp-prewarm-wire-hellgate.test.ts tests/unit/lsp-strict-ready-proof.test.ts tests/unit/bench-strict-lsp-grounding-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Pool sharing, eviction races, default-on slot wiring, strict readiness taxonomy, and pyright fail-closed bench behavior passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "maybeStartLspPrewarm|resolveLspPrewarmSlot|evictLspPoolOnEnd|proveStrictLspReady" src/agent src/host/runtime src/runner/batch/eval
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Composition slot, session-start trigger, strict consumer, and bench teardown are all live.
+  - kind: test
+    command: bun test tests/unit/lsp-warm-pool-hellgate.test.ts tests/unit/lsp-prewarm-orchestration-hellgate.test.ts tests/unit/lsp-prewarm-wire-hellgate.test.ts tests/unit/lsp-strict-ready-proof.test.ts tests/unit/bench-strict-lsp-grounding-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 37 focused lifecycle, gate, strict-proof, and bench rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

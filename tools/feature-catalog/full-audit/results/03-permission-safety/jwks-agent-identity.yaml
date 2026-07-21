@@ -1,0 +1,54 @@
+version: 1
+feature_id: jwks-agent-identity
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/security/jwks-identity/default-client.ts:defaultJwksClient"
+entrypoints: []
+activation:
+  - "No production composition root constructs or injects a JwksClient at this snapshot."
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/security/jwks-identity/default-client.ts:defaultJwksClient"
+consumer: []
+reachable: no
+surface_findings:
+  - "The public barrel exports default and headless clients, but all source references outside this slice are absent."
+  - "The advertised verify-only foundation is real and isolated, not an agent-task, dispatcher, or realtime authentication path."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/security/jwks-identity-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The barrel-import control proves no dispatch path is touched without explicit composition."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/security/jwks-identity-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "15 fetch, bounded-cache, RSA, ECDSA, expiry, tamper, unsupported-algorithm, and performance cases pass."
+failure_posture: fail-closed
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: "No CLI, dispatcher, task registrar, realtime, or callback composition root constructs and consumes the verifier."
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n '(jwks-identity|defaultJwksClient|headlessJwksClient|JwksClient)' src --glob '!src/security/jwks-identity/**' || test $? -eq 1"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The query has no source consumer outside the owning slice."
+  - kind: test
+    command: "bun test tests/unit/security/jwks-identity-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "15 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p1-security-policy
+review_state: approved
+reviewer: codex/cross-review-wave1

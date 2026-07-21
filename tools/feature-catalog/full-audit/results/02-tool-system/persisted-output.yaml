@@ -1,0 +1,53 @@
+version: 1
+feature_id: persisted-output
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/output-spill.ts:capToolOutput
+entrypoints:
+  - src/tool/registry.ts:execute result cap
+activation:
+  - A tool result exceeds the configured output maximum.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/tool/output-spill.ts:capToolOutput
+consumer:
+  - src/tool/registry.ts
+  - src/agent/loop/compaction-wire.ts
+reachable: yes
+surface_findings:
+  - Registry caps each tool result and attaches the absolute spill path to evidence when content is persisted.
+  - Over-cap output writes full text, returns a bounded head/tail marker, and best-effort retention prunes old spill files.
+  - Invalid or absent cap and retention values resolve to safe defaults.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/output-spill.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: At-or-under-cap output returns byte-identically with no write.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/output-spill.test.ts tests/unit/output-spill-async-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Spill, excerpt, async write, and bounded retention rails passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/output-spill.test.ts tests/unit/output-spill-async-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused persisted-output rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,60 @@
+version: 1
+feature_id: repro-oracle-gold-calibration
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/eval/driver/selection-port-factories.ts:makeCalibratedReproConsensusPort
+entrypoints:
+  - src/runner/batch/eval/driver/selection-phase.ts
+  - src/runner/batch/eval/repro-oracle-calibration.ts:calibrateReproOracle
+activation:
+  - Bench verify-select requires QUANTA_BENCH_VERIFY_SELECT plus QUANTA_BENCH_VERIFY_SELECT_ESCAPE=1 and a repro-enabled posture.
+  - Gold calibration additionally requires a dataset goldPatch; absent or unmaterializable gold returns unavailable without a claim.
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/runner/batch/eval/repro-oracle-calibration.ts:calibrateReproOracle
+consumer:
+  - src/runner/batch/eval/driver/selection-port-factories.ts:makeCalibratedReproConsensusPort
+  - src/runner/batch/eval/driver/selection-phase.ts
+reachable: yes
+surface_findings:
+  - The wrapper probes base and gold materializations, marks false-negative or vacuous oracle states, and substitutes a null-returning port so an untrustworthy oracle cannot reject candidates.
+  - It is eval-only: gold does not reach the agent loop, and the absent-gold path is unavailable rather than falsely calibrated.
+  - The catalog activation reference omits the required QUANTA_BENCH_VERIFY_SELECT_ESCAPE gate, so an operator setting only the listed knob leaves verify-select inert.
+off_identity_proof:
+  kind: test
+  command: bun test src/runner/batch/eval/knobs-bench-verify-select-escape.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Verify-select remains inert without the explicit escape acknowledgement.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/repro-oracle-calibration-hellgate.test.ts tests/unit/calibrated-repro-consensus-port.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real git and Python repro tests prove gold materialization, false-negative/vacuous fail-open, sound-oracle scoring, and unavailable controls.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: conditional
+blocker: Eval-only activation needs both the escape hatch and dataset gold; the catalog's knob list records only QUANTA_BENCH_VERIFY_SELECT, which is insufficient by itself.
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'makeCalibratedReproConsensusPort|calibrateReproOracle|calibratedOracleMustFailOpen|QUANTA_BENCH_VERIFY_SELECT_ESCAPE' src/runner/batch/eval/driver/selection-port-factories.ts src/runner/batch/eval/driver/selection-phase.ts src/runner/batch/eval/repro-oracle-calibration.ts src/runner/batch/eval/knobs-bench.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selection port, fail-open predicate, gold calibration, and fail-closed escape gate are present.
+  - kind: test
+    command: bun test tests/unit/repro-oracle-calibration-hellgate.test.ts tests/unit/calibrated-repro-consensus-port.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Thirty-three focused assertions passed, including real materialization and fail-open controls.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

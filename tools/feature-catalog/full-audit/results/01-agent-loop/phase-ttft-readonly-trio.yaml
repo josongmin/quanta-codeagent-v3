@@ -1,0 +1,59 @@
+version: 1
+feature_id: phase-ttft-readonly-trio
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/assemble.ts:determinePhases and src/agent/loop/stream-consume.ts:streamConsume
+entrypoints:
+  - src/agent/loop/entry.ts:runAgent
+  - src/apps/cli/repl.ts:bootstrapSession
+activation:
+  - Every assembled agent message receives the deterministic post-pass phase labels.
+  - Every opened stream receives a per-sampling-request timing capture; a deny_and_steer confirmation reads the declared registry readonly bit.
+effective_defaults:
+  cli: on
+  web: off
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/llm/assemble.ts:determinePhases
+  - src/observability/turn-timing.ts:createTurnTimingCapture
+  - src/agent/admissibility-gate/shared.ts:denyFromConfirm
+consumer:
+  - src/session/store.ts:TextBlock phase persistence
+  - src/agent/loop/session-lifecycle.ts:AgentOutcome.turnTiming
+  - src/agent/loop-helpers.ts:gen_ai.response.time_to_first_token_ms span attribute
+  - src/agent/dispatch-types.ts:permission_denied isReadonly envelope
+reachable: yes
+surface_findings:
+  - Phase labels are persisted in session message content, not merely computed in a test-only helper.
+  - TTFT capture is created at the live stream consumer, records first productive chunks, reaches AgentOutcome, and emits a guarded OTel attribute.
+  - The readonly note is derived from Tool.isReadOnly in the admission gate and carried on the denied envelope; browser rendering is intentionally absent.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm/assemble-phase.test.ts tests/unit/observability/turn-timing.test.ts tests/unit/agent/readonly-deny-steer.test.ts tests/unit/phase-ttft-readonly-trio-hellgate.test.ts tests/integration/admissibility-deny-steer.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused tests prove phase labelling and persistence shape, real-loop timing capture and guarded scalar emission, plus registry-derived readonly deny steering.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'determinePhases|markFirstToken|turnTiming|READONLY_DENY_STEER_NOTE|buildDenySteerMessage' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent src/llm src/observability src/session
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The frozen source traces all three producer paths to session, outcome, OTel, or typed permission-envelope consumers.
+  - kind: test
+    command: bun test tests/unit/llm/assemble-phase.test.ts tests/unit/observability/turn-timing.test.ts tests/unit/agent/readonly-deny-steer.test.ts tests/unit/phase-ttft-readonly-trio-hellgate.test.ts tests/integration/admissibility-deny-steer.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected phase/TTFT/readonly rail was part of the 283-pass, 0-fail focused audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-prompt
+review_state: approved
+reviewer: codex/cross-review-wave1

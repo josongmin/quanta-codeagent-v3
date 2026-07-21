@@ -1,0 +1,48 @@
+version: 1
+feature_id: web-fetch-search
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/index.ts:buildDefaultTools
+entrypoints: [src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildBaseRegistry, src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry]
+activation: ["web_fetch is always in buildDefaultTools. web_search is registered by the tier-1 block only when AgentConfig.webSearch.provider resolves from BRAVE_SEARCH_API_KEY or QUANTA_WEB_SEARCH_DUCKDUCKGO."]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: [src/tool/web/fetch.ts:webFetchTool, src/tool/web/search.ts:webSearchTool, src/tool/web/providers/from-env.ts:providerFromEnv]
+consumer: [src/tool/index.ts:buildDefaultTools, src/agent/tier1/web-search.ts:buildWebSearchBlock, src/agent/features.ts:buildSessionFeatures, src/host/runtime/agent-config-assembler.ts:maybeWireWebSearch]
+reachable: yes
+surface_findings:
+  - web_fetch is a live default tool across the standard registries and binds global fetch in production.
+  - web_search is a separate provider-gated tier-1 tool; it is omitted without a provider rather than registered as the tool's typed no-provider fallback.
+  - HTTPS, literal-host SSRF denial, response bounds, and typed failures are implemented; DNS-aware post-resolution SSRF remains the documented hold.
+off_identity_proof:
+  kind: source
+  command: rg -n "webFetchTool\(\)|buildWebSearchBlock|maybeWireWebSearch|providerFromEnv" src/tool/index.ts src/agent/tier1/web-search.ts src/agent/features.ts src/host/runtime/agent-config-assembler.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The normal registry always includes fetch while the search block is absent if the provider slot is absent.
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: conditional
+observability: na
+verdict: stale-claim
+blocker: The catalog says neither web_fetch nor web_search is in defaultTools. Current buildDefaultTools unconditionally registers web_fetch; only web_search is caller-wired and provider-gated.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "webFetchTool\(\)|webSearchTool|buildWebSearchBlock|maybeWireWebSearch|providerFromEnv" src/tool/index.ts src/tool/web src/agent/tier1/web-search.ts src/agent/features.ts src/host/runtime/agent-config-assembler.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Fetch has a concrete default registry consumer; search has a concrete provider-gated session-feature consumer.
+  - kind: test
+    command: bun test tests/unit/tool/web-fetch-hellgate.test.ts tests/unit/tool/web-search-hellgate.test.ts tests/unit/defaults-registration-hellgate.test.ts tests/unit/wire-closeout-final-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 66 focused tool, security, provider, and registry tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-multimodal
+review_state: approved
+reviewer: codex/cross-review-wave1

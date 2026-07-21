@@ -1,0 +1,51 @@
+version: 1
+feature_id: repl-interactive-surface
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl.ts:runReplLoop
+entrypoints:
+  - src/apps/cli/index.ts:interactive CLI startup
+activation:
+  - Start quanta without an alternate mode or one-shot prompt.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/repl.ts:REPL surface
+consumer:
+  - src/apps/cli/index.ts:main
+reachable: yes
+surface_findings:
+  - Interactive CLI owns a composed REPL surface with runner-owned session assembly and in-REPL slash routing.
+  - Individual enhancement slots remain independently gated, while base continuous conversation is the default CLI surface.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli-image-loader.test.ts tests/unit/cli/repl-surface-dispatch-defects-hellgate.test.ts tests/unit/cli/repl-surface-wire-hellgate.test.ts tests/unit/apps/cli/repl-thin-surface-ownership-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Input/image safety, surface composition, default-off slot omission, dispatch defects, and ownership rails passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'runReplLoop|runRepl' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/index.ts src/apps/cli/repl.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI entry starts the interactive REPL owner.
+  - kind: test
+    command: bun test tests/unit/cli-image-loader.test.ts tests/unit/cli/repl-surface-dispatch-defects-hellgate.test.ts tests/unit/cli/repl-surface-wire-hellgate.test.ts tests/unit/apps/cli/repl-thin-surface-ownership-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused REPL rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

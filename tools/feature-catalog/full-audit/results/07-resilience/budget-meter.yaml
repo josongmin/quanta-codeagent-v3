@@ -1,0 +1,60 @@
+version: 1
+feature_id: budget-meter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/budget/meter.ts:BudgetMeter
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+  - src/runner/batch/eval/driver/config-build.ts:bench budget assembly
+activation:
+  - assembleAgentConfig constructs BudgetMeter from each mode preset dials and caps.
+  - The agent loop ticks the configured meter for usage, model calls, tools, and turns.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/budget/meter.ts:BudgetMeter tracks cumulative dials and returns deterministic exhaustion.
+consumer:
+  - src/host/runtime/agent-config-assembler.ts attaches a new meter to AgentConfig.
+  - src/agent/loop/emit-helpers.ts and turn-iteration.ts tick it.
+  - src/agent/loop/turn-outcome.ts consumes checkExhausted to return budget_exhausted.
+reachable: yes
+surface_findings:
+  - The production assembler constructs a meter for each mode rather than leaving it only as a test seam.
+  - An absent meter remains byte-identical for callers that provide a manual AgentConfig without it.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/loop-budget-integration.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The undefined-meter branch preserves outcome shape and produces no budget_exhausted reason.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/budget/meter.test.ts tests/unit/agent/loop-budget-integration.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Meter dials tick deterministically and a live loop reaches budget_exhausted at the configured turn cap.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'new BudgetMeter\|budgetMeter?.tick\|checkExhausted' 9a12f7a -- src/host/runtime src/runner/batch src/agent/loop
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Mode assembly creates the meter and the loop feeds and consumes it on production paths.
+  - kind: test
+    command: bun test tests/unit/agent/budget/meter.test.ts tests/unit/agent/loop-budget-integration.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 32 pass and 0 fail across state machine, OFF identity, and loop enforcement.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

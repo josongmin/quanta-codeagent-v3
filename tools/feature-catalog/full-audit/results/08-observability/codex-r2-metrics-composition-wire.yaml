@@ -1,0 +1,59 @@
+version: 1
+feature_id: codex-r2-metrics-composition-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+entrypoints:
+  - src/apps/agent/assemble.ts:assembleAgentConfig
+  - src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+  - src/agent/loop-activation-hook.ts:resolvePluginActivationForTurn
+activation:
+  - A caller provides AgentConfig.metrics with the MetricsRegistry shape; a sessionId enables cache decoration.
+  - The host assembler exposes metricsEmitter for the loop activation hook.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - host/runtime adapts a MetricsRegistry and conditionally decorates the session cache.
+consumer:
+  - The loop activation hook reads the structural metricsEmitter and emits activation counters.
+reachable: yes
+surface_findings:
+  - The catalog's cited apps/agent/assemble.ts is only a thin surface shim; the owning wire moved to host/runtime/agent-config-assembler.ts.
+  - Metrics and sessionId absent preserves the legacy no-emission path; bench without a session skips cache wrapping.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/composition-codex-r2-metrics-wire-hellgate.test.ts tests/unit/loop-activation-telemetry-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent or legacy metrics leaves no wrapper or metricsEmitter and activation emits nothing.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/codex-r2-metrics-adapter-hellgate.test.ts tests/unit/composition-codex-r2-metrics-wire-hellgate.test.ts tests/unit/loop-activation-telemetry-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Registry adaptation, session cache counters, emitter exposure, and activation counters were exercised together.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "adaptMetricsRegistryToEmitter|withCacheMetrics|metricsEmitter" src/host/runtime/agent-config-assembler.ts src/agent/loop-activation-hook.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The host composition root adapts cfg.metrics, installs cache metrics, and exposes the emitter to the activation consumer.
+  - kind: test
+    command: bun test tests/unit/codex-r2-metrics-adapter-hellgate.test.ts tests/unit/composition-codex-r2-metrics-wire-hellgate.test.ts tests/unit/loop-activation-telemetry-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 31 focused adapter, composition, OFF, and activation telemetry tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

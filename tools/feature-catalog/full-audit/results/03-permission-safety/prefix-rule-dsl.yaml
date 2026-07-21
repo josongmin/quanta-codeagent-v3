@@ -1,0 +1,45 @@
+version: 1
+feature_id: prefix-rule-dsl
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/rules/store.ts:RulesStore
+entrypoints: []
+activation: ["explicit RulesStore construction and injection into an admissibility gate"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/rules/parser.ts:parseRules, src/rules/matcher.ts:matchCommand, src/rules/store.ts:RulesStore]
+consumer: []
+reachable: no
+surface_findings: ["The admissibility gate can accept a RulesStore, but this snapshot has no production store construction or injection call site."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/rules/matcher.test.ts tests/unit/rules/parser.test.ts tests/unit/rules/store.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 57 parser, longest-prefix, layer precedence, and immutable-store tests pass.
+failure_posture: fail-closed
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: No application composition root constructs and injects RulesStore into the live agent gate.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg -n "createRulesStore|new RulesStore" src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production construction call was found.
+  - kind: test
+    command: bun test tests/unit/rules/matcher.test.ts tests/unit/rules/parser.test.ts tests/unit/rules/store.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 57 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

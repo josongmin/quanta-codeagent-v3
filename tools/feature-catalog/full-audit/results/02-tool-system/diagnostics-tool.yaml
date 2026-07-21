@@ -1,0 +1,64 @@
+version: 1
+feature_id: diagnostics-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/diagnostics/index.ts:diagnosticsTool
+entrypoints:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/apps/cli/internal.ts:resolveCliFeatures
+  - src/runner/assemble/tooling.ts:buildToolingCore
+activation:
+  - "Base registration uses nullDiagnosticsProvider by default."
+  - "CLI appends lspDiagnosticsTool only when QUANTA_LSP=1 or --lsp; the duplicate name replaces the null provider in ToolRegistry."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/diagnostics/index.ts:diagnosticsTool
+  - src/tool/diagnostics/index.ts:nullDiagnosticsProvider
+  - src/agent/lsp-bridge/diagnostics.ts:lspDiagnosticsTool
+consumer:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/apps/cli/internal.ts:lspTools
+  - src/runner/assemble/tooling.ts:buildToolingCore
+reachable: conditional
+surface_findings:
+  - "All default registries expose a diagnostics-named tool, but without injected LSP it deterministically returns diagnostics unavailable rather than provider-backed diagnostics."
+  - "Only the CLI has a real LSP provider replacement, and it is QUANTA_LSP/--lsp default-OFF; web-daemon constructs buildDefaultTools without diagnostics port or LSP replacement."
+  - "Catalog cli:full and web:full plus configurable:static therefore overstate the effective provider-backed surface."
+off_identity_proof:
+  kind: source
+  command: rg -n 'nullDiagnosticsProvider|lspEnabled\(|lspDiagnosticsTool\(|buildDaemonToolRegistry' src/tool/index.ts src/tool/diagnostics/index.ts src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/web-daemon/runtime-factory.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Absent QUANTA_LSP/--lsp leaves CLI on the null provider; daemon has no real diagnostics-provider injection."
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/diagnostics.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "11 focused formatting, null-degrade, injected-provider, jailed-path, error-result, and stop-finally assertions passed."
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: "Catalog must describe QUANTA_LSP/--lsp-gated CLI replacement and the web-daemon null-provider degradation, or wire a real provider into every claimed full surface."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'diagnosticsTool|nullDiagnosticsProvider|lspEnabled\(|lspDiagnosticsTool\(|buildDefaultTools\(' src/tool/diagnostics/index.ts src/tool/index.ts src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/runner/assemble/tooling.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Default construction is null-provider; CLI replacement is explicitly gated; daemon does not inject or append an LSP tool."
+  - kind: test
+    command: bun test tests/unit/diagnostics.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "11 focused diagnostics behavior and graceful-degrade assertions passed."
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch5
+review_state: approved
+reviewer: codex/cross-review-wave1

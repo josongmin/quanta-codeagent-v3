@@ -1,0 +1,57 @@
+version: 1
+feature_id: phase2-auto-trigger-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/memory-consolidator-hook.ts:runMemoryPhase2AutoTrigger
+entrypoints:
+  - src/runner/session-memory-auto.ts:prepareSessionStartMemory
+  - src/host/runtime/internal/context-binding/base.ts:extendBaseWithMemoryAuto
+  - src/apps/cli/repl/runtime-context-compose.ts:composeRuntimeBootstrapContext
+activation:
+  - The interactive CLI always supplies memoryAuto; empty environment enables assembleMemoryAuto and mints a phase2 store, writer, and port.
+  - The auto-trigger only dispatches Phase 2 when a pending-count or age threshold is satisfied; otherwise it returns a typed skip.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: unknown
+  headless: on
+  daemon: unknown
+producer:
+  - src/agent/memory-consolidator-hook.ts:runMemoryPhase2AutoTrigger
+  - src/runner/session-memory-auto.ts:buildSessionMemoryAutoWires
+consumer:
+  - src/runner/session-memory-auto.ts:prepareSessionStartMemory
+  - src/host/runtime/internal/context-binding/base.ts:extendBaseWithMemoryAuto
+reachable: yes
+surface_findings:
+  - The lower-level helper accepts an absent phase2 block as a no-op, but the production CLI composition does not leave that block absent under its default memory-auto configuration.
+  - Threshold evaluation is synchronous and the actual runPhase2 call is queued in a microtask; background failures become logged typed errors and do not reject session start.
+  - The catalog's default-OFF statement is therefore only true for isolated callers of the helper, not for the documented interactive CLI surface.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-phase2-wire-hellgate.test.ts tests/unit/cli/session-memory-auto.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed for CLI default wire construction, threshold scheduling, background non-blocking semantics, typed error handling, and in-flight exclusion.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: The catalog calls this feature DEFAULT-OFF even though the live CLI composition passes memoryAuto and empty environment produces the phase2 block by default.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg 'memoryAuto:|buildSessionMemoryAutoWires|prepareSessionStartMemory|runMemoryPhase2AutoTrigger' src/apps/cli/repl/runtime-context-compose.ts src/host/runtime/internal/context-binding/base.ts src/runner/session-memory-auto.ts src/agent/memory-consolidator-hook.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI composition passes memoryAuto, the host invokes the builder, and the builder invokes the phase2 trigger with concrete dependencies.
+  - kind: test
+    command: bun test tests/unit/memory-phase2-wire-hellgate.test.ts tests/unit/cli/session-memory-auto.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 27 focused tests passed for default construction, skip arms, threshold arms, non-blocking dispatch, and error isolation.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch10
+review_state: approved
+reviewer: codex/cross-review-wave1

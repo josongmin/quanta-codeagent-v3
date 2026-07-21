@@ -1,0 +1,52 @@
+version: 1
+feature_id: seatbelt-verbatim
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/os-sandbox/seatbelt.ts:compileSeatbeltProfile
+entrypoints:
+  - src/runtime/os-sandbox/default.ts:defaultOsSandbox
+  - src/runtime/os-sandbox/seatbelt/strict-policy.ts:applyStrictKnobs
+activation:
+  - On darwin, request read-only, workspace-write, or workspace-write-net sandboxing; QUANTA_SANDBOX_STRICT selects additive strict-policy behavior.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/runtime/os-sandbox/seatbelt/verbatim-profile.ts:renderVerbatim
+consumer:
+  - src/runtime/os-sandbox/default.ts:runSeatbelt
+reachable: yes
+surface_findings:
+  - The compiler renders all three baseline profile arms against fixed fixtures and escapes the workspace path once before SBPL interpolation.
+  - Off and danger-full-access compile to null; strict knobs are identity when absent or all false and only add restrictive or explicit allow rules when enabled.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/runtime/seatbelt-verbatim-hellgate.test.ts tests/integration/seatbelt-exec-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Off and danger-full-access were null passthroughs, and omitted strict options were byte-identical to all-false options.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/runtime/seatbelt-verbatim-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Fixture parity, path escaping, strict-rule insertion, tmp aliases, and profile diff rails passed.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: proof-gap
+blocker: The only live sandbox-exec integration rails cover null-profile negative cases; no positive macOS execution rail proves the generated read-only or workspace-write policy is enforced by sandbox-exec.
+disposition: hold
+receipts:
+  - kind: test
+    command: bun test tests/unit/runtime/seatbelt-verbatim-hellgate.test.ts tests/integration/seatbelt-exec-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The combined permission/sandbox audit command passed 207 tests with the Seatbelt negative integration rails green.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

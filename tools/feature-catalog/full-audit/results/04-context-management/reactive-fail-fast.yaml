@@ -1,0 +1,54 @@
+version: 1
+feature_id: reactive-fail-fast
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/compaction-breaker.ts:CompactionBreaker
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:breaker construction
+  - src/agent/loop/compaction-wire.ts:maybeCompact
+activation:
+  - Active whenever the loop has a compaction path; QUANTA_COMPACT_BREAKER=off explicitly disables the breaker and optional cap values override defaults.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/compaction.ts:reactiveCompact
+  - src/agent/loop/compaction-wire.ts:record proactive and reactive outcomes
+consumer:
+  - src/agent/loop/compaction-wire.ts:breaker check before retry
+  - src/agent/stop-category.ts:compaction stop classification
+reachable: yes
+surface_findings:
+  - The session bootstrap creates a breaker unless explicitly disabled; both reactive and proactive compaction paths feed the same instance.
+  - No-progress compactions accumulate deterministic strikes, while productive compactions and productive turns reset them; a tripped breaker returns a reason instead of retrying indefinitely.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/compaction-breaker-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Clean, productive, and disabled-equivalent paths do not trip the breaker; custom thresholds retain the default behavior when absent.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/compaction-breaker-hellgate.test.ts src/agent/loop/__tests__/proactive-compact-failure-breaker.test.ts src/agent/loop/__tests__/proactive-empty-summary-strike-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Boundary, ratio, reactive fail-fast, thrown summarizer, and empty-summary outcomes all reached the live loop breaker and tripped at the configured cap.
+failure_posture: fail-closed
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/compaction-breaker-hellgate.test.ts src/agent/loop/__tests__/proactive-compact-failure-breaker.test.ts src/agent/loop/__tests__/proactive-empty-summary-strike-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused breaker command passed 27 rails including loop wiring and failure-to-strike behavior.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

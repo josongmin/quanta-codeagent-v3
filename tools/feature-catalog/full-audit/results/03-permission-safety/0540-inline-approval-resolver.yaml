@@ -1,0 +1,49 @@
+version: 1
+feature_id: 0540-inline-approval-resolver
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/web-daemon/server/approval-continuation.ts:approval continuation
+entrypoints:
+  - src/apps/web-daemon/runtime-factory.ts
+  - src/apps/headless/approval-wiring.ts
+activation:
+  - Enable QUANTA_INLINE_APPROVAL_RESOLVER in headless or web-daemon composition and approve a pending request.
+effective_defaults:
+  cli: na
+  web: off
+  bench: na
+  headless: off
+  daemon: off
+producer:
+  - src/apps/web-daemon/server/approval-continuation.ts
+  - src/apps/headless/approval-wiring.ts
+consumer:
+  - src/sdk/runtime/session/engine.ts
+  - apps/web-frontend/src/ws/session-hooks.ts
+reachable: yes
+surface_findings:
+  - Daemon continuation is enqueued after approval resolution on the dispatch tail, while marker-aware clients suppress their legacy reissue.
+  - Gate-off retains the old client continuation path; CLI is intentionally outside this feature because it is already inline.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/attach/attach-approval-verbs-hellgate.test.ts src/apps/agent/mode-presets/__tests__/interactive-approval-resolver.hellgate.test.ts tests/unit/host/host-capability-derivation.test.ts tests/integration/approval-respond-mid-turn-web-daemon-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The catalog-declared unit and web-daemon continuation rails exist; focused execution is pending a later batch because this root bundle did not include them.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: Web and headless continuation stays default-off under its excluded flip-campaign gate.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'approval-continuation|serverAutoContinues|QUANTA_INLINE_APPROVAL_RESOLVER' src/apps/headless src/apps/web-daemon src/sdk/runtime apps/web-frontend
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Ownership transfer and capability-marker consumers are wired across daemon, engine, and client.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

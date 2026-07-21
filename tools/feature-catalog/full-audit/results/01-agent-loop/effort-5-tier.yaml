@@ -1,0 +1,68 @@
+version: 1
+feature_id: effort-5-tier
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/effort.ts:resolveEffort and effortToTokenBudget
+entrypoints:
+  - src/host/bootstrap/bootstrap-session.ts:createEffortStore
+  - src/host/runtime/internal/context-binding/base.ts:sessionEffort accessor
+  - src/apps/cli/repl/surface-compose/slash-context-compose.ts:effort slash context
+activation:
+  - QUANTA_EFFORT seeds a non-default session tier
+  - /effort or session_config set_effort mutates the shared session store
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/bootstrap/bootstrap-session.ts:effortStore
+  - src/apps/cli/repl/surface-compose/slash-context-compose.ts:effort.set
+  - src/tool/session_config.ts:set_effort
+consumer:
+  - src/agent/loop/skill-gate.ts:resolveSkillTurnOverride
+  - src/agent/loop/stream-consume.ts:LLM stream input
+  - src/llm/openai-responses-wire.ts:reasoning effort adapter
+reachable: yes
+surface_findings:
+  - "CLI: bootstrap, /effort, and session_config share one EffortStore; the next loop turn reads its live value."
+  - "The catalog notes still call effort.ts a pure leaf with loop wiring deferred, but current code imports it from skill-gate and threads its result into live LLM input."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/effort.test.ts tests/unit/cli/effort-slash-hellgate.test.ts tests/integration/session-effort-wire-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No sessionEffort accessor and the default tier both yield no thinking field on the real stream input.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/effort.test.ts tests/unit/cli/effort-slash-hellgate.test.ts tests/integration/session-effort-wire-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The real loop sends low, medium, high, and max as the expected thinking budget values, and /effort mutates the store.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: "The catalog note says adapter and loop wiring are a separate future phase; both are present in the frozen code and covered by a real-loop efficacy rail."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'effortStore|sessionEffort|effortToTokenBudget|set_effort' src/host src/apps/cli src/agent/loop src/llm
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The shared store is seeded at bootstrap, exposed to slash and tool writes, read by the loop, and reaches the adapter request.
+  - kind: test
+    command: bun test tests/unit/effort.test.ts tests/unit/cli/effort-slash-hellgate.test.ts tests/integration/session-effort-wire-real-loop-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 33 pass, 0 fail; five-tier mapping, slash mutation, real-loop efficacy, and paired OFF controls pass.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception was reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-plan
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,51 @@
+version: 1
+feature_id: architecture-generator
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tools/arch-gen/main.ts:runGenerator
+entrypoints:
+  - tools/arch-gen/main.ts
+activation:
+  - Run bun tools/arch-gen/main.ts with optional output and deterministic today arguments.
+effective_defaults:
+  cli: na
+  web: na
+  bench: resource
+  headless: resource
+  daemon: na
+producer:
+  - tools/arch-gen/main.ts:runGenerator
+consumer:
+  - docs/ARCHITECTURE.generated.md
+reachable: yes
+surface_findings:
+  - The tool has an import-meta-main CLI entry and a current generated architecture artifact.
+  - The focused rail covers scan, render, argument parsing, and hermetic write behavior.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/arch-gen-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Nineteen ADR scan, slice scan, render, parse, and generator write rails passed.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'runGenerator|import\.meta\.main|ARCHITECTURE.generated' 9a12f7a855640a8be1e4654472766bbc445696ea -- tools/arch-gen docs/ARCHITECTURE.generated.md
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The tool declares its direct CLI entry and the repository carries its generated output.
+  - kind: test
+    command: bun test tests/unit/arch-gen-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused architecture generator rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,53 @@
+version: 1
+feature_id: hookbus
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/hooks.ts:HookBus
+entrypoints:
+  - src/runner/knobs/knobs/hooks.ts
+  - src/apps/web-daemon/runtime-factory.ts
+activation:
+  - Composition creates HookBus and admissibility, loop, compaction, and subagent owners consume it.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/hooks.ts:HookBus
+consumer:
+  - src/agent/admissibility-gate.ts
+  - src/agent/loop-helpers.ts
+  - src/agent/subagent-runner.ts
+reachable: yes
+surface_findings:
+  - Bidirectional promptHook remains bounded, abort first-wins, malformed handlers are isolated, and permission retains final authority after input rewrite.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/hooks.test.ts tests/unit/hooks-matcher.test.ts tests/unit/hooks-updated-input-hellgate.test.ts tests/unit/hook-bidirectional-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Hook matching, update, bounded bidirectional response, and poison isolation rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'new HookBus|hooks:' src/apps src/runner src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI runner and web runtime composition construct the bus and pass it to agent owners.
+  - kind: test
+    command: bun test tests/unit/hooks.test.ts tests/unit/hooks-matcher.test.ts tests/unit/hooks-updated-input-hellgate.test.ts tests/unit/hook-bidirectional-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Hook bus rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

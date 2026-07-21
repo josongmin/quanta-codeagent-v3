@@ -1,0 +1,51 @@
+version: 1
+feature_id: patch-observer-fail-open
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/patch/applier.ts:wrapObserver
+entrypoints:
+  - src/tool/apply-patch.ts:applyPatchTool.execute
+activation:
+  - Every apply_patch tool execution passes the production PATCH_TRACE port to applyPatch.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/patch/applier.ts:wrapObserver
+consumer:
+  - src/tool/apply-patch.ts:applyPatchTool.execute
+reachable: yes
+surface_findings:
+  - The production apply_patch composition root passes PATCH_TRACE as the fourth applyPatch argument.
+  - Each observer and trace emission is independently caught, so telemetry failure cannot abort a committed patch.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/patch-observer-fail-open-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Throwing observer, trace, and both-sink controls still mutate disk and return success through the real apply_patch tool root.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'wrapObserver|applyPatch\(patch, port, undefined, PATCH_TRACE\)' src/patch/applier.ts src/tool/apply-patch.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live tool root supplies the trace port and the owner seam independently swallows observer and trace failures.
+  - kind: test
+    command: bun test tests/unit/patch-observer-fail-open-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 6 focused hellgate cases passed in the 93-pass resilience rail.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch23
+review_state: approved
+reviewer: codex/cross-review-wave1

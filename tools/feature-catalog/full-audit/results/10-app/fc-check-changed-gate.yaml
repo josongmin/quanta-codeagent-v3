@@ -1,0 +1,57 @@
+version: 1
+feature_id: fc-check-changed-gate
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tools/feature-catalog/check-changed.ts:runCheckChanged
+entrypoints:
+  - tools/feature-catalog/cli.ts:cmdCheckChanged
+  - .github/workflows/ci.yml:feature-catalog PR job
+  - .github/workflows/fc-gate.yml:fc-gate PR job
+activation:
+  - Execute bun fc check-changed against a PR base ref; both CI workflows run that command for pull requests.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - tools/feature-catalog/check-changed.ts:parseDiffNameStatus
+  - tools/feature-catalog/check-changed.ts:runCheckChanged
+consumer:
+  - tools/feature-catalog/cli.ts:cmdCheckChanged
+  - .github/workflows/ci.yml
+  - .github/workflows/fc-gate.yml
+reachable: no
+surface_findings:
+  - PR workflows invoke the CLI and block when an added unreferenced TypeScript file is found.
+  - The implementation checks non-exempt .ts paths literally, not only src/**/*.ts; existing catalog evidence for an external surface explicitly relies on that broader behavior.
+  - Modified files warn, while deletions, renames, and copies do not block because only status A is a blocker.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/feature-catalog-check-changed.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Exemptions, added-block behavior, modified warnings, rename handling, and parser cases passed.
+failure_posture: fail-closed
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: Catalog narrows the gate to src/**/*.ts, but isExemptFromFc instead evaluates every non-exempt .ts path and a feature note depends on that broader behavior.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'check-changed|runCheckChanged|isExemptFromFc' tools/feature-catalog/check-changed.ts tools/feature-catalog/cli.ts .github/workflows/ci.yml .github/workflows/fc-gate.yml tools/feature-catalog/features/09-integration/vscode-chatsessions-surface.yaml
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The pure rule, CLI, two PR consumers, and wider-than-src feature evidence were verified.
+  - kind: test
+    command: bun test tests/unit/feature-catalog-check-changed.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused check-changed rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

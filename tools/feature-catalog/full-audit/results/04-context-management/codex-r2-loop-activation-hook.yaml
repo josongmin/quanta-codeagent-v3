@@ -1,0 +1,50 @@
+version: 1
+feature_id: codex-r2-loop-activation-hook
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop-activation-hook.ts:resolvePluginActivationForTurn
+entrypoints: [src/agent/loop/context-assembler.ts:prepareTurnContext, src/host/runtime/agent-config-assembler.ts:autoWirePluginActivation]
+activation: [A .quanta/plugins manifest is discovered by autoWirePluginActivation; the loop invokes it only for a user turn containing a plugin mention.]
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: off
+  headless: resource
+  daemon: resource
+producer: [src/agent/plugin-activation-handler/auto-wire.ts:autoWirePluginActivation, src/agent/loop-activation-hook.ts:resolvePluginActivationForTurn]
+consumer: [src/agent/loop/context-assembler.ts:prepareTurnContext]
+reachable: yes
+surface_findings: [Primary shared runtime composition auto-wires discovered plugin manifests, and the per-turn context assembler invokes the resolver before prompt construction. Empty discovery and handler errors preserve the legacy no-activation path.]
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/loop-adr-0346-activation-hook-hellgate.test.ts tests/unit/composition-activation-auto-wire-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Absent activator, empty discovery, and non-plugin input are no-op rails."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/loop-adr-0346-activation-hook-hellgate.test.ts tests/unit/composition-activation-auto-wire-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Discovered manifest fills the slot, a plugin mention invokes it, and resolved skills reach the turn union."
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'resolvePluginActivationForTurn|autoWirePluginActivation|prepareTurnContext' src/agent src/host/runtime/agent-config-assembler.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Auto-wire feeds AgentConfig and the loop consumes it before turn context construction."
+  - kind: test
+    command: "bun test tests/unit/loop-adr-0346-activation-hook-hellgate.test.ts tests/unit/composition-activation-auto-wire-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 325-pass focused batch."
+audited_at: '2026-07-19'
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

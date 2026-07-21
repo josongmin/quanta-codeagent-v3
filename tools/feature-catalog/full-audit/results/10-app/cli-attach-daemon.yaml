@@ -1,0 +1,59 @@
+version: 1
+feature_id: cli-attach-daemon
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/attach/attach-client.ts:attachToDaemon
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/attach-cmd.ts:runAttachCmd
+activation:
+  - quanta attach [ws-url] optionally supplies --token or QUANTA_WEB_AUTH_TOKEN.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: resource
+producer:
+  - src/apps/cli/attach/handshake.ts
+  - src/apps/cli/attach/commands.ts
+consumer:
+  - src/apps/cli/attach/attach-client.ts:attachToDaemon
+  - src/apps/cli/attach-cmd.ts:runAttachCmd
+reachable: yes
+surface_findings:
+  - The top-level CLI uses an exact argv[2] attach gate and lazy import, leaving bare interactive startup untouched.
+  - Attach discovers the canonical session id, drives the shared IPC codec, serializes approval input, and tears down on daemon close/error/session.closed without reconnect loops.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/attach/attach-routing-guard.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Bare and non-attach invocations cannot import or execute the attach path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/attach/attach-pure.test.ts tests/unit/apps/cli/attach/attach-client.test.ts tests/unit/apps/cli/attach/attach-cmd.test.ts tests/unit/apps/cli/attach/attach-routing-guard.test.ts tests/unit/apps/cli/attach/attach-render-inventory-hellgate.test.ts tests/unit/apps/cli/attach/attach-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real ephemeral-daemon e2e, handshake, event rendering, approval fail-safe, auth-token encoding, and routing proof pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'process.argv\[2\] === "attach"|runAttachCmd|attachToDaemon|QUANTA_WEB_AUTH_TOKEN' src/apps/cli/index.ts src/apps/cli/attach-cmd.ts src/apps/cli/attach
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Strict CLI dispatch, credential selection, client orchestration, and protocol helpers are wired.
+  - kind: test
+    command: bun test tests/unit/apps/cli/attach/attach-pure.test.ts tests/unit/apps/cli/attach/attach-client.test.ts tests/unit/apps/cli/attach/attach-cmd.test.ts tests/unit/apps/cli/attach/attach-routing-guard.test.ts tests/unit/apps/cli/attach/attach-render-inventory-hellgate.test.ts tests/unit/apps/cli/attach/attach-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused attach proof is included in the 157-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

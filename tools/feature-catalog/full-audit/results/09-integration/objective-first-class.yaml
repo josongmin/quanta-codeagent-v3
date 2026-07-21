@@ -1,0 +1,54 @@
+version: 1
+feature_id: objective-first-class
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/surface-compose/core-state.ts:buildSurfaceCoreState
+entrypoints:
+  - src/apps/cli/repl/surface-compose/core-state.ts:buildSurfaceCoreState
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts:buildRuntimeFacadeCompose
+  - src/apps/cli/repl/surface-compose/dispatch-compose.ts
+  - src/apps/cli/repl/session-loop.ts
+activation:
+  - The CLI surface creates one ObjectivePort and threads the same instance into slash dispatch, runtime compose, goal status, and idle continuation.
+effective_defaults:
+  cli: on
+  web: resource
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - CLI surface composition creates the in-memory ObjectivePort.
+consumer:
+  - Slash goal commands, AgentConfig runtime composition, the status pill, and idle continuation consume the shared store.
+reachable: yes
+surface_findings:
+  - The catalog's MODEL ONLY / no-consumer claim is stale; current CLI composition has multiple lifecycle consumers.
+  - The barrel's old model-only comment is also stale and should not be used as runtime evidence.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/objective-hellgate.test.ts tests/unit/objective-tools-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Store invariants and same-port objective tool binding passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "createObjectiveStore|objectiveStore|objective: core.objectiveStore" src/apps/cli/repl/surface-compose src/apps/cli/repl/session-loop.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: One CLI-owned store is constructed and threaded to dispatch, runtime composition, status rendering, and continuation.
+  - kind: test
+    command: bun test tests/unit/objective-hellgate.test.ts tests/unit/objective-tools-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 68 store and tool-binding tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

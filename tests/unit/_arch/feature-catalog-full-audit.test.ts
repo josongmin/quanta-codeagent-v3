@@ -4,6 +4,7 @@ import {
   priorityFor,
   validateAuditState,
 } from "../../../tools/feature-catalog/full-audit/model"
+import { digestAuditInputs } from "../../../tools/feature-catalog/full-audit/provenance"
 import { AuditRecordSchema } from "../../../tools/feature-catalog/full-audit/schema"
 import type { LoadedFeature } from "../../../tools/feature-catalog/schema"
 
@@ -40,6 +41,13 @@ const feature = (id: string, maturity: "L2" | "L3" | "L4" = "L3"): LoadedFeature
   },
 })
 
+const inputDigests = () =>
+  digestAuditInputs({
+    catalog: [{ path: "tools/feature-catalog/features/01-agent-loop/a.yaml", content: "id: a\n" }],
+    defaultOffLedger: "rows: []\n",
+    baseline: "{}\n",
+  })
+
 describe("feature catalog full-audit", () => {
   test("priority is P0 reachability, P1 default-OFF, P2 L4+, then P3", () => {
     expect(priorityFor(feature("dead").feature, new Set(), new Set(["dead"]))).toBe("P0")
@@ -55,6 +63,7 @@ describe("feature catalog full-audit", () => {
       reachabilityGrandfatheredIds: new Set(),
       snapshotHead: "a".repeat(40),
       createdAt: "2026-07-19",
+      inputDigests: inputDigests(),
     })
     expect(snapshot.catalog_total).toBe(2)
     expect(snapshot.priority_counts).toEqual({ P0: 0, P1: 1, P2: 1, P3: 0 })
@@ -106,6 +115,7 @@ describe("feature catalog full-audit", () => {
       reachabilityGrandfatheredIds: new Set(),
       snapshotHead: "a".repeat(40),
       createdAt: "2026-07-19",
+      inputDigests: inputDigests(),
     })
     const record = AuditRecordSchema.parse({
       version: 1,
@@ -148,8 +158,63 @@ describe("feature catalog full-audit", () => {
       review_state: "approved",
       reviewer: "b",
     })
-    const report = validateAuditState(snapshot, [record], new Set(["a"]))
+    const report = validateAuditState(snapshot, [record], new Set(["a"]), inputDigests())
     expect(report.errors).toContain("default-OFF PASS lacks OFF identity proof: a")
+  })
+
+  test("snapshot provenance rejects a catalog mutation even when feature IDs match", () => {
+    const snapshot = buildAuditSnapshot({
+      features: [feature("a")],
+      defaultOffIds: new Set(),
+      reachabilityGrandfatheredIds: new Set(),
+      snapshotHead: "a".repeat(40),
+      createdAt: "2026-07-19",
+      inputDigests: inputDigests(),
+    })
+    const mutations = [
+      {
+        field: "catalog_yaml",
+        inputs: {
+          catalog: [
+            {
+              path: "tools/feature-catalog/features/01-agent-loop/a.yaml",
+              content: "id: a\nmaturity: L2\n",
+            },
+          ],
+          defaultOffLedger: "rows: []\n",
+          baseline: "{}\n",
+        },
+      },
+      {
+        field: "default_off_ledger",
+        inputs: {
+          catalog: [
+            { path: "tools/feature-catalog/features/01-agent-loop/a.yaml", content: "id: a\n" },
+          ],
+          defaultOffLedger: "rows:\n  - feature_id: a\n",
+          baseline: "{}\n",
+        },
+      },
+      {
+        field: "baseline",
+        inputs: {
+          catalog: [
+            { path: "tools/feature-catalog/features/01-agent-loop/a.yaml", content: "id: a\n" },
+          ],
+          defaultOffLedger: "rows: []\n",
+          baseline: '{"fc":{"l3_reachability_grandfathered":["a"]}}\n',
+        },
+      },
+    ] as const
+    for (const mutation of mutations) {
+      const report = validateAuditState(
+        snapshot,
+        [],
+        new Set(["a"]),
+        digestAuditInputs(mutation.inputs),
+      )
+      expect(report.errors).toEqual([`audit snapshot input digest mismatch: ${mutation.field}`])
+    }
   })
 
   test("non-runtime verdict cannot claim production reachability", () => {

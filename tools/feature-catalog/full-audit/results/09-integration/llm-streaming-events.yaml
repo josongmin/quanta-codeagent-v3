@@ -1,0 +1,51 @@
+version: 1
+feature_id: llm-streaming-events
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/streaming-events.ts:decodeSseEvent and decodeWsEvent
+entrypoints:
+  - src/llm/index.ts:streaming event exports
+activation: []
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/llm/streaming-events.ts:parseSseFrame
+  - src/llm/streaming-events.ts:decodeSseEvent
+  - src/llm/streaming-events.ts:decodeWsEvent
+consumer: []
+reachable: no
+surface_findings:
+  - The decoder is exported from the LLM barrel and has focused unit coverage.
+  - No non-test source consumer of parseSseFrame, decodeSseEvent, or decodeWsEvent exists in the frozen tree; current provider paths use their own stream parsers.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/streaming-events-in-progress.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: SSE and WebSocket parsing tolerate malformed input, preserve supported frames, and surface unknown kinds without throwing.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: "No production call site consumes the decoder exports, so the catalog's CLI full integration claim is unsupported by the frozen source."
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'decodeSseEvent|decodeWsEvent|parseSseFrame' 9a12f7a855640a8be1e4654472766bbc445696ea -- src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Matches are confined to streaming-events.ts and the barrel export; no production consumer was found.
+  - kind: test
+    command: bun test tests/unit/streaming-events-in-progress.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused decoder robustness and forward-compatibility rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

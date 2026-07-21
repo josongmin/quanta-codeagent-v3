@@ -1,0 +1,51 @@
+version: 1
+feature_id: python-harness-e2e-2026-05-21-l3-l4
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/bench/python-swebench.ts:runPythonSwebench
+entrypoints:
+  - src/apps/bench/index.ts:bench application
+activation:
+  - Run a SWE-bench bench workload with a usable Python harness and configured corpus.
+effective_defaults:
+  cli: na
+  web: na
+  bench: resource
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/bench/python-swebench.ts:spawn harness
+consumer:
+  - src/apps/bench:index
+reachable: yes
+surface_findings:
+  - The harness belongs to the separate bench application, not the interactive CLI; catalog CLI-full wording is inaccurate.
+  - Runtime gracefully reports unavailable/failed/malformed harness outcomes without throwing.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/swebench-buildargv-sphinx-ra.test.ts tests/integration/bench-python-harness-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real spawned stub covers success, failure, argv contract, malformed report, timeout, missing harness, and non-SWE input.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: "The feature is bench-app reachable, not reachable from the interactive CLI as the catalog surface claim states."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'python-swebench|runPythonSwebench' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/bench src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Ownership and consumption are in bench; interactive CLI has no consumer.
+  - kind: test
+    command: bun test tests/unit/swebench-buildargv-sphinx-ra.test.ts tests/integration/bench-python-harness-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused Python harness rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

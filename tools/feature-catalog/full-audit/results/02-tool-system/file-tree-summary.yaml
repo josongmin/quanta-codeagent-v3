@@ -1,0 +1,45 @@
+version: 1
+feature_id: file-tree-summary
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/file-tree-summary/index.ts:fileTreeSummaryTool.execute
+entrypoints: [src/tool/index.ts:buildBaseDefaultTools, src/apps/cli/serve-stdio-cmd.ts:buildServeStdioDeps, src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry]
+activation: ["Always registered by buildDefaultTools; no feature gate or external resource is required."]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: [src/tool/file-tree-summary/index.ts:aggregate, src/tool/file-tree-summary/index.ts:render, src/tool/file-tree-summary/index.ts:fileTreeSummaryTool]
+consumer: [src/tool/index.ts:buildBaseDefaultTools, src/agent/dispatch/execute.ts:executeTool, src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry]
+reachable: yes
+surface_findings: ["The default registry includes file_tree_summary in every standard buildDefaultTools consumer, including CLI serve-stdio and web-daemon.", "The tool jail-validates an optional path, uses rg --files, bounds depth/files, and returns a structural nextAction when output is capped."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/file-tree-summary.test.ts tests/integration/file-tree-summary-rank.test.ts tests/unit/file-tree-summary-purpose.test.ts tests/unit/file-tree-summary-rank.test.ts tests/unit/file-tree-ignore-files.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused tests passed, including real-rg tree rendering, depth/file caps, FS jail, ignore-file behavior, recency rank, and purpose hints.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "fileTreeSummaryTool|buildBaseDefaultTools|buildServeStdioDeps|buildDaemonToolRegistry" src/tool/file-tree-summary/index.ts src/tool/index.ts src/apps/cli/serve-stdio-cmd.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Live producer and default CLI/web registry consumers are present.
+  - kind: test
+    command: bun test tests/integration/file-tree-summary.test.ts tests/integration/file-tree-summary-rank.test.ts tests/unit/file-tree-summary-purpose.test.ts tests/unit/file-tree-summary-rank.test.ts tests/unit/file-tree-ignore-files.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-gitimpact
+review_state: approved
+reviewer: codex/cross-review-wave1

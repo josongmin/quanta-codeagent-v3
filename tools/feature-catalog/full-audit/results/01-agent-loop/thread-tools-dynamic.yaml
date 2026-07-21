@@ -1,0 +1,52 @@
+version: 1
+feature_id: thread-tools-dynamic
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/thread-tools/in-memory-store.ts:inMemoryThreadToolStore
+entrypoints:
+  - src/agent/types/wire-slots-session.ts:threadToolRegistry optional slot
+activation:
+  - A host must instantiate a ThreadToolRegistry and compose it into a session toolset; no production composition currently does so.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/thread-tools/in-memory-store.ts:inMemoryThreadToolStore
+  - src/agent/thread-tools/composer.ts
+consumer:
+  - src/agent/types/wire-slots-session.ts:threadToolRegistry type slot
+reachable: no
+surface_findings:
+  - Store, lazy resolver, and composer are implemented and hermetically tested.
+  - Outside the thread-tools slice, only an optional type slot and design comment reference the registry; no factory or session composition instantiates it.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/thread-tools-hellgate.test.ts tests/unit/agent/thread-tools-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Registration, precedence, lazy single-flight, eviction, and wire-contract rails passed.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production factory constructs or injects a ThreadToolRegistry into a session runtime.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'inMemoryThreadToolStore|threadToolRegistry' src --glob '!src/agent/thread-tools/**'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Only the optional session type slot remains outside the implementation slice.
+  - kind: test
+    command: bun test tests/unit/agent/thread-tools-hellgate.test.ts tests/unit/agent/thread-tools-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused thread tool rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

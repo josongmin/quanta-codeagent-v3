@@ -1,0 +1,62 @@
+version: 1
+feature_id: hitltier-hand-off-required-always-confirm-pre-approval-ok-no
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/admissibility-gate/gates.ts:runHitlReviewGate
+entrypoints:
+  - src/agent/dispatch.ts:dispatchTool
+  - src/apps/cli/repl/runtime-context-compose.ts:buildRuntimeContext
+activation:
+  - Dispatch resolves each tool's HITL tier before policy execution.
+  - Interactive CLI composition sets hitl.enabled when stdin is a TTY; hand-off-required remains a universal floor even when the opt-in overlay is absent.
+effective_defaults:
+  cli: resource
+  web: unknown
+  bench: off
+  headless: off
+  daemon: unknown
+producer:
+  - src/permission/policy.ts:inferToolTier
+  - src/agent/admissibility-gate/shared.ts:resolveHitlTier
+consumer:
+  - src/agent/admissibility-gate/gates.ts:runHandoffFloorGate
+  - src/agent/admissibility-gate/gates.ts:runHitlReviewGate
+  - src/agent/dispatch.ts:dispatchTool
+reachable: yes
+surface_findings:
+  - The dispatch gate makes hand-off-required non-bypassable, routes always-confirm through the confirmation port or a typed deny, lets pre-approval-ok defer to mode policy, and permits none.
+  - Interactive CLI enables the tier gate by default when a TTY is present; headless behavior differs, while the hand-off-required floor remains universal.
+  - The catalog note that hitl.enabled is default OFF is stale for the interactive CLI surface.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/hitl-tier-dispatch.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: hitl-absent legacy controls preserve the non-overlay dispatch behavior while the universal floor remains explicit.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/hitl-tier-classifier.test.ts tests/unit/hitl-tier-dispatch.test.ts tests/unit/hitl-tier-gate.test.ts tests/unit/hitl-tier-registry.test.ts tests/integration/hitl-tier-dispatch-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Classifier, bypass, confirmation, handoff callback, override ratchet, and dispatch integration cases passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "runHandoffFloorGate|runHitlReviewGate|inferToolTier|onConfirm|onHandoff|process.stdin.isTTY" src/agent/admissibility-gate.ts src/agent/admissibility-gate src/permission src/apps/cli/repl/runtime-context-compose.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Classifier, universal-floor, confirm, handoff, dispatch, and interactive CLI composition seams are concrete.
+  - kind: test
+    command: bun test tests/unit/hitl-tier-classifier.test.ts tests/unit/hitl-tier-dispatch.test.ts tests/unit/hitl-tier-gate.test.ts tests/unit/hitl-tier-registry.test.ts tests/integration/hitl-tier-dispatch-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused HITL rail passed in the 414-pass selected audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch1
+review_state: approved
+reviewer: codex/cross-review-wave1

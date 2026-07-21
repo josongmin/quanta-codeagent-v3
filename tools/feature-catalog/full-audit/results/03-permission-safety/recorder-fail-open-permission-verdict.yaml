@@ -1,0 +1,57 @@
+version: 1
+feature_id: recorder-fail-open-permission-verdict
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/recorder.ts:emitPermissionDecision
+entrypoints:
+  - src/permission/policy.ts
+  - src/permission/reviewer.ts
+activation:
+  - A host registers a PermissionRecorder through setPermissionRecorder before a permission decision is emitted.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/permission/policy.ts:emitPermissionDecision
+  - src/permission/reviewer.ts:emitPermissionDecision
+consumer: []
+reachable: no
+surface_findings:
+  - The recorder functions correctly preserve the verdict when a registered emitter throws and emit only categorical or hashed decision fields.
+  - No production source caller registers a recorder through setPermissionRecorder, so the live default is the intended no-op and no telemetry adapter receives these records.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/permission-otel-emit-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The no-recorder path preserves decision shape.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission-otel-emit-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Throw isolation, outcome coverage, and raw-command exclusion rails pass under an injected recorder.
+failure_posture: degraded
+security_posture: na
+observability: unknown
+verdict: seam-only
+blocker: No production composition root calls setPermissionRecorder or installs an adapter, leaving the fail-open recorder interface unconsumed outside tests.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'setPermissionRecorder\(' 9a12f7a855640a8be1e4654472766bbc445696ea -- src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The only source occurrence is the recorder function definition; no production registration caller exists.
+  - kind: test
+    command: bun test tests/unit/permission-otel-emit-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused recorder invariant rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

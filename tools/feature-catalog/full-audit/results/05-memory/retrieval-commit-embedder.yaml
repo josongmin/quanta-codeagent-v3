@@ -1,0 +1,49 @@
+version: 1
+feature_id: retrieval-commit-embedder
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/retrieval/commit-embedder.ts:createCommitEmbedder
+entrypoints:
+  - src/runner/assemble/retrieval.ts:buildRetrievalStackCore
+  - src/host/runtime/agent-arg-builder.ts:buildRetrievalStackFromEnv
+activation:
+  - The optional retrieval builder creates commitEmbedder only when both injected gitLog and embedding ports are supplied.
+  - The live environment builder supplies neither port, and no production code calls CommitEmbedder.recent.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/retrieval/commit-embedder.ts:createCommitEmbedder
+consumer:
+  - src/runner/assemble/retrieval.ts:buildRetrievalStackCore optional stack field
+reachable: no
+surface_findings:
+  - The LRU and embedding behavior is well specified and covered, including abort propagation and cache poisoning resistance.
+  - The normal CLI retrieval env path passes enabled only, not GitLogPort or EmbeddingPort, so it cannot construct this optional component.
+  - No production recent call exists, making the catalog interactive-CLI claim stale rather than an activation-ready feature.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: The live composition root supplies no GitLogPort or EmbeddingPort and no production caller invokes CommitEmbedder.recent.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "createCommitEmbedder|commitEmbedder|\\.recent\\(" src --glob '!src/retrieval/commit-embedder.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The builder retains an optional field, but production has no recent invocation and the environment path provides no required ports.
+  - kind: test
+    command: bun test tests/unit/retrieval-commit-embedder-hellgate.test.ts tests/unit/retrieval-composition-wire-hellgate.test.ts tests/integration/retrieval-composition-root.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 57 focused commit-embedding and composition tests passed, including conditional builder wiring, but no live execution consumer.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch11
+review_state: approved
+reviewer: codex/cross-review-wave1

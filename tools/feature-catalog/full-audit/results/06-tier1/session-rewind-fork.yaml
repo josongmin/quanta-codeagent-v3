@@ -1,0 +1,62 @@
+version: 1
+feature_id: session-rewind-fork
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/rewind-cmd.ts:rewindCommands
+entrypoints:
+  - src/apps/cli/slash/registry-app.ts:REWIND_COMMANDS
+  - src/apps/cli/repl.ts:buildRewindSlashState
+  - src/apps/cli/rewind-cmd.ts:rewindCommands
+activation:
+  - QUANTA_REWIND defaults to enabled, registering /rewind and /fork in the CLI slash registry.
+  - A live REPL session supplies the session id and installs the history and fork-switch adapters.
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/session/rewind.ts:rewindSession
+  - src/session/rewind.ts:forkSessionAtMessage
+consumer:
+  - src/apps/cli/rewind-cmd.ts:rewindCmdImpl
+  - src/apps/cli/rewind-cmd.ts:forkCmdImpl
+reachable: conditional
+surface_findings:
+  - The CLI commands are registered by default, contrary to the catalog prose calling the rewind path default-OFF.
+  - Rewind and fork resolve their target solely through Message.id, but no production persistence caller invokes assignMessageIds for ordinary transcripts.
+  - File restore is safely refused unless both the destructive gate and port are present, and even then intentionally degrades because no persisted per-message checkpoint exists.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/session/rewind.test.ts tests/unit/session/rewind-wrapper.test.ts tests/integration/session-rewind-e2e.test.ts tests/unit/cli/rewind-cmd.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Id-bearing fixtures prove rewind, fork, prefix resolution, source preservation, and CLI refusal behavior, but not production id minting.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: conditional
+blocker: Production session persistence does not assign Message.id values, so normal persisted transcripts are not proven usable as rewind or fork targets.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'assignMessageIds\(' src --glob '!src/session/store.ts' --glob '!**/*.test.*'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: No production caller assigns ids before normal session snapshots are persisted.
+  - kind: source
+    command: rg -n 'QUANTA_REWIND|isRewindEnabled|REWIND_COMMANDS|buildRewindSlashState' src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Default fallback is enabled and the CLI registry plus REPL state wire the commands.
+  - kind: test
+    command: bun test tests/unit/session/rewind.test.ts tests/unit/session/rewind-wrapper.test.ts tests/integration/session-rewind-e2e.test.ts tests/unit/cli/rewind-cmd.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused rewind rails passed within the 216-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch17
+review_state: approved
+reviewer: codex/cross-review-wave1

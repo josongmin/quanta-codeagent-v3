@@ -1,0 +1,54 @@
+version: 1
+feature_id: skill-ecosystem-frontmatter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/discover.ts:discoverSkill
+entrypoints:
+  - src/skill/frontmatter.ts:strict parser
+  - src/skill/skill-tool.ts:listing row renderer
+activation:
+  - Add optional argument-hint or metadata.short-description frontmatter, or resource subdirectories, to a discovered SKILL.md package.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/skill/discover.ts:lenient discovery parser
+  - src/skill/skill-resources.ts:resource walker
+consumer:
+  - src/skill/skill-tool.ts:renderSkillRow
+  - skill inventory and prompt assembly
+reachable: yes
+surface_findings:
+  - Strict and lenient frontmatter parsers agree on the additive hint and short-description fields, and listing prefers the short description when supplied.
+  - Resource discovery records presence and names without injecting references or assets into the skill body; malformed resource metadata skips safely. Script execution and GUI icons remain explicitly deferred.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/skill-ecosystem-frontmatter-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Plain SKILL.md discovery and listing retained no new fields and the pre-ADR listing shape.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill-ecosystem-frontmatter-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Argument hints, metadata descriptions, strict and lenient consistency, resource presence, malformed metadata skipping, and non-injection of assets all passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/skill-ecosystem-frontmatter-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused ecosystem frontmatter command passed 20 parser, discovery, resource, and compatibility rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

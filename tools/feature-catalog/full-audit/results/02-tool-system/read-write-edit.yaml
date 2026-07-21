@@ -1,0 +1,63 @@
+version: 1
+feature_id: read-write-edit
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/index.ts:buildBaseDefaultTools
+entrypoints:
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+  - src/apps/agent/mode-presets/interactive.ts:createInteractivePreset
+activation:
+  - Default registration of read, write, edit, bash, grep, glob, localize, diagnostics, and test_runner; individual calls remain policy-gated where mutating.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/read/index.ts:readTool
+  - src/tool/write/index.ts:writeTool
+  - src/tool/edit/index.ts:editTool
+  - src/tool/index.ts:buildBaseDefaultTools
+consumer:
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+  - src/apps/agent/mode-presets/interactive.ts:createInteractivePreset
+reachable: yes
+surface_findings:
+  - "The umbrella's nine named core tools are built by buildBaseDefaultTools and consumed by shared, web, and preset composition roots."
+  - "Mutating members are not automatically executed: dispatch and permission layers remain the policy consumer above this registration seam."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/read.test.ts tests/unit/write.test.ts tests/unit/edit.test.ts tests/unit/bash.test.ts tests/unit/grep.test.ts tests/unit/glob.test.ts tests/unit/localize.test.ts tests/unit/diagnostics.test.ts tests/integration/test-runner.test.ts tests/integration/lsp-diagnostics-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 119 pass, 0 fail; every umbrella member's owner-local behavior or runtime integration rail passes.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildBaseDefaultTools|buildDefaultTools|buildDaemonToolRegistry' src/tool/index.ts src/runner/assemble/tooling.ts src/apps/web-daemon/runtime-factory.ts src/apps/agent/mode-presets
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The nine primitives are registered by the shared builder and reused by all claimed product surfaces.
+  - kind: test
+    command: bun test tests/unit/read.test.ts tests/unit/write.test.ts tests/unit/edit.test.ts tests/unit/bash.test.ts tests/unit/grep.test.ts tests/unit/glob.test.ts tests/unit/localize.test.ts tests/unit/diagnostics.test.ts tests/integration/test-runner.test.ts tests/integration/lsp-diagnostics-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 119 pass, 0 fail; read/write/edit policy boundaries, shell behavior, search, localization, diagnostics, and test runner rails pass.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception is reported for read-write-edit.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-git
+review_state: approved
+reviewer: codex/cross-review-wave1

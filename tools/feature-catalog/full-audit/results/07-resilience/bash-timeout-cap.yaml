@@ -1,0 +1,63 @@
+version: 1
+feature_id: bash-timeout-cap
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/bash/index.ts:runShellWithEscalation and resolveBgDetach
+entrypoints:
+  - src/tool/index.ts:buildDefaultTools
+  - src/apps/agent/mode-presets/interactive.ts
+  - src/apps/web-daemon/runtime-factory.ts
+activation:
+  - bash is included by default through buildDefaultTools.
+  - The tool accepts timeout_ms and delegates execution to runShell.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/bash/index.ts:resolveBgDetach resolves the timeout deadline and default background behavior.
+  - src/runtime/shell.ts:runShell enforces spawned-process deadlines.
+consumer:
+  - src/tool/index.ts:buildDefaultTools registers makeBashTool in every default registry.
+  - src/apps/web-daemon/runtime-factory.ts builds the web daemon default tool registry.
+reachable: yes
+surface_findings:
+  - bash is a live default tool and timeout_ms is schema-validated and routed to runShell.
+  - The catalog is stale: completed bash output is no longer capped at 30000; registry-level head-and-tail capping owns it.
+  - The catalog is stale: regex-based HITL patterns were removed and tier selection now derives from the composition-root sandbox profile.
+  - Default deadline behavior may detach to the background registry rather than always kill, depending on runtime config.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/bash.test.ts tests/unit/runtime/kill-escalation-and-worktree-retry.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 28 passing cases cover normal output, timeout, typed timeout failure, abort, schema validation, and escalation behavior.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: The feature remains live, but its catalog purpose claims obsolete per-tool 30000 output capping and removed command-regex HITL semantics.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git show 9a12f7a:src/tool/bash/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Source comments and logic state that completed output delegates to registry capToolOutput and that command-string ALWAYS_CONFIRM patterns were deleted.
+  - kind: source
+    command: git grep -n 'makeBashTool\|buildDefaultTools\|runtime-factory' 9a12f7a -- src/tool/index.ts src/apps/agent src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Default CLI-like mode presets and the web daemon register the bash tool.
+  - kind: test
+    command: bun test tests/unit/bash.test.ts tests/unit/runtime/kill-escalation-and-worktree-retry.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 28 pass and 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

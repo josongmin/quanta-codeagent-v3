@@ -1,0 +1,57 @@
+version: 1
+feature_id: gh-pr-resolve-thread
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/agent/mode-presets/ci-bot.ts:buildCiBotWiring
+entrypoints: [src/apps/agent/mode-presets/ci-bot.ts:runMode, src/tool/gh/index.ts:ghTools]
+activation: [ci-bot mode with QUANTA_CI_BOT_GH_WRITE=1 and the guarded GitRunner wired]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/tool/gh/pr-resolve-thread.ts:ghPrResolveThreadTool]
+consumer: [src/tool/gh/index.ts:ghTools, src/apps/agent/mode-presets/ci-bot.ts:buildCiBotWiring]
+reachable: yes
+surface_findings:
+  - The tool uses constant GraphQL documents with named variables, validates PR/thread/head-ref values before argv, and bounds concurrent-push handling to one rebase attempt.
+  - It is production-reachable only through the ci-bot write gate. The interactive CLI has no ghTools composition, so the catalog's full CLI/web claim and all-surface mode list are stale.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/b3456-feature-seams-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: B3-OFF proves gh_pr_resolve_thread is absent when QUANTA_CI_BOT_GH_WRITE is unset.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/gh-pr-resolve-thread-hellgate.test.ts tests/unit/b3456-feature-seams-hellgate.test.ts tests/unit/apps/agent/mode-presets/ci-bot.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All selected cases passed across list/resolve modes, GraphQL/argv injection rails, bounded rebase conflict handling, and live ci-bot gate-on registration.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: The catalog asserts full CLI and web integration, but the frozen production composition exposes this mutating tool only in ci-bot mode with QUANTA_CI_BOT_GH_WRITE=1.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'ghPrResolveThreadTool|gh_pr_resolve_thread|QUANTA_CI_BOT_GH_WRITE|gitRunner|gitToolList|ghTools\(' src/tool/gh/pr-resolve-thread.ts src/tool/gh/index.ts src/apps/agent/mode-presets/ci-bot.ts src/apps/cli/internal.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The guarded GitRunner reaches ghTools only on the ci-bot write gate; CLI construction contains gitTools only and supplies no gh registry.
+  - kind: test
+    command: bun test tests/unit/gh-pr-resolve-thread-hellgate.test.ts tests/unit/b3456-feature-seams-hellgate.test.ts tests/unit/apps/agent/mode-presets/ci-bot.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All selected cases passed with 0 failures.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Strict reachability reported no L3-or-higher unreachable or dead-API feature claims.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-pr
+review_state: approved
+reviewer: codex/cross-review-wave1

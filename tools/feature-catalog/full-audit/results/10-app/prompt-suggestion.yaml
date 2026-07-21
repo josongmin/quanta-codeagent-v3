@@ -1,0 +1,61 @@
+version: 1
+feature_id: prompt-suggestion
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/prompt-suggestion-wire.ts:maybeCreatePromptSuggestionWire
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/repl/session-loop.ts:runInteractiveBranch
+activation:
+  - QUANTA_ENABLE_PROMPT_SUGGESTION=1 creates the CLI wire around the live LLMPort.
+  - The completed interactive turn invokes the state-aware completion adapter before the next input prompt.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: off
+producer:
+  - src/agent/prompt-suggestion/orchestrator.ts:runPromptSuggestion
+  - src/apps/cli/repl/prompt-suggestion-wire.ts:buildSuggestFn
+consumer:
+  - src/apps/cli/repl/session-loop.ts:buildPromptSuggestionTurnCompletionAdapter
+  - src/apps/cli/repl/session-loop.ts:runInteractiveBranch
+reachable: yes
+surface_findings:
+  - The interactive CLI creates the wire only under the exact opt-in gate, then calls it after each completed turn with history, cancellation, plan-mode, rate-limit, and pending-prompt state.
+  - A gate-off session builds no wire and makes no suggestion-model call; an enabled accepted suggestion renders to the CLI stderr hint line.
+  - The feature remains intentionally CLI-only; browser and batch consumers do not exist.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/prompt-suggestion-hellgate.test.ts tests/unit/cli/prompt-suggestion-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The focused wire rail proves an unset or non-1 gate creates no wire and makes zero stream calls.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/prompt-suggestion-hellgate.test.ts tests/unit/cli/prompt-suggestion-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 85 focused cases passed, covering enabled single-shot LLM adaptation, state suppression, sanitizer/reject-gate outcomes, rendering, and no-throw failures.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_ENABLE_PROMPT_SUGGESTION|maybeCreatePromptSuggestionWire|buildPromptSuggestionTurnCompletionAdapter|promptSuggestionTurnCompletion' src/apps/cli src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The exact gate, LLM adapter, completed-turn call site, and state ports are connected in the frozen interactive CLI graph.
+  - kind: test
+    command: bun test tests/unit/prompt-suggestion-hellgate.test.ts tests/unit/cli/prompt-suggestion-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 85 pure and CLI-wire cases passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-bench
+review_state: approved
+reviewer: codex/cross-review-wave1

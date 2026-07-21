@@ -1,0 +1,58 @@
+version: 1
+feature_id: cli-resume-state-machine
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/orchestrate/resume-fsm.ts:resolveResume
+entrypoints:
+  - src/apps/cli/repl.ts:resume resolver injection
+  - src/host/bootstrap/bootstrap-session.ts:bootstrap resolver
+activation:
+  - Supply --resume or QUANTA_RESUME with a path-like token or session id.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer:
+  - src/runner/orchestrate/resume-fsm.ts:resolveResume
+consumer:
+  - src/apps/cli/repl.ts:resolveResume
+  - src/host/bootstrap/bootstrap-session.ts:resolveResume
+reachable: yes
+surface_findings:
+  - CLI re-exports the runner FSM and injects it into bootstrap; host bootstrap also uses the same resolver.
+  - Absent resume input retains a fresh-session default path.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli-resume-heuristic.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No flags preserve id-mode disabled behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli-resume-heuristic.test.ts tests/integration/resume-e2e.test.ts tests/integration/cli-resume-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Path/id classification, conflict handling, full transcript resume, and corrupt-state failure rails passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: conditional
+blocker: "The FSM is production-wired but only activates when an explicit resume token or environment input is provided."
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'resolveResume|isPathLikeToken' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli src/runner/orchestrate src/host/bootstrap
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI and bootstrap consume the runner-owned resume FSM.
+  - kind: test
+    command: bun test tests/unit/cli-resume-heuristic.test.ts tests/integration/resume-e2e.test.ts tests/integration/cli-resume-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused resume rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

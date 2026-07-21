@@ -1,0 +1,67 @@
+version: 1
+feature_id: surface-wire-r2
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/per-tool-checkpoint-wire.ts:buildPerToolCheckpointWire
+entrypoints:
+  - src/apps/cli/index.ts:main
+  - src/apps/cli/repl.ts:runRepl
+  - src/apps/cli/repl/surface-compose/core-state.ts:buildSurfaceCoreState
+activation:
+  - QUANTA_PER_TOOL_RECORD must be enabled and a shadow ODB must exist before the composition root creates the producer and /rewind-tool consumer state.
+  - /rewind-tool requires both QUANTA_PER_TOOL_RECORD and QUANTA_SHADOW; otherwise it reports the missing wire rather than restoring.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/repl/per-tool-checkpoint-wire.ts:buildPerToolCheckpointWire
+  - src/apps/cli/repl/surface-compose/core-state.ts:buildSurfaceCoreState
+consumer:
+  - src/apps/cli/repl/ctx-adapters/per-tool-checkpoint-adapter.ts:buildPerToolCheckpointAdapter
+  - src/apps/cli/rewind-tool-cmd.ts:rewindToolCmd
+reachable: conditional
+surface_findings:
+  - The source uses one session-scoped granular registry for dispatch anchoring and /rewind-tool, and dispose clears its bounded state.
+  - The live surface has a genuine resource gate: the wire is omitted unless both the record gate and shadow ODB are available.
+  - The isolated R2 lifecycle rail passes, but the authoritative ThreeWayRestorePort rail currently fails the files and both restore assertions because filesChanged is empty after an apparently successful restore.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/surface-wire-r2-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The wire is gated, keeps a bounded registry, and dispose clears anchors; with no wire the slash reports not-wired.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/per-tool-checkpoint-hellgate.test.ts tests/unit/cli/surface-wire-r2-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: HELL-D11 and HELL-D13 fail: restoreFiles and restoreBoth report ok but return filesChanged=[] where the real restored path is expected.
+failure_posture: fail-loud
+security_posture: conditional
+observability: na
+verdict: proof-gap
+blocker: The shared file-restore rail is red, so the feature cannot claim an efficacious files or both /rewind-tool restore despite its live producer-consumer composition.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_PER_TOOL_RECORD|buildPerToolCheckpointWire|granularPolicy|perToolCheckpoint|rewind-tool' src/apps/cli/repl src/apps/cli/rewind-tool-cmd.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The source confirms the same session-scoped registry flows from dispatch policy to the /rewind-tool slash state under its dual gate.
+  - kind: test
+    command: bun test tests/unit/per-tool-checkpoint-hellgate.test.ts tests/unit/cli/surface-wire-r2-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: The R2 lifecycle cases pass, but HELL-D11 and HELL-D13 fail on empty filesChanged in the shared ThreeWayRestorePort files path.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3-plus feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-session
+review_state: approved
+reviewer: codex/cross-review-wave1

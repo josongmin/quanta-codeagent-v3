@@ -1,0 +1,45 @@
+version: 1
+feature_id: conversation-checkpoint-store
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/conversation-checkpoint.ts:defaultConversationCheckpointStore
+entrypoints: [src/apps/cli/repl.ts:runRepl, src/runner/session-execution-plane.ts:buildSessionExecutionPlane]
+activation: ["The CLI and session execution plane allocate the in-memory store for each session.", "Its user-visible rewind recording is supplied by the separately gated conv-checkpoint-auto-record wire."]
+effective_defaults:
+  cli: resource
+  web: na
+  bench: unknown
+  headless: resource
+  daemon: unknown
+producer: [src/agent/conversation-checkpoint.ts:defaultConversationCheckpointStore]
+consumer: [src/apps/cli/repl.ts:runRepl, src/runner/session-execution-plane.ts:buildSessionExecutionPlane, src/apps/cli/repl/surface-compose/composer.ts:composeSurfaceWires]
+reachable: yes
+surface_findings: ["runRepl mints one store and passes the same instance through session setup and surface composition.", "The store is a live session resource even with the rewind slash wire disabled; no record side effect occurs until that wire is enabled."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/conversation-checkpoint-hellgate.test.ts tests/unit/cli/repl-execution-plane-wire.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Snapshot restore, LRU, immutability, and supplied-store reuse all passed.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'defaultConversationCheckpointStore|convStore' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/repl.ts src/runner/session-execution-plane.ts src/apps/cli/repl/surface-compose
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The production REPL and session plane construct and thread the store into live consumers.
+  - kind: test
+    command: bun test tests/unit/conversation-checkpoint-hellgate.test.ts tests/unit/cli/repl-execution-plane-wire.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 26 selected store and composition tests passed in the focused audit rail.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch4
+review_state: approved
+reviewer: codex/cross-review-wave1

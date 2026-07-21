@@ -1,0 +1,50 @@
+version: 1
+feature_id: realtime-websocket-codex
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/realtime/default-adapter.ts:createBunWebSocketAdapter
+entrypoints: [src/apps/cli/repl/voice-live-wire.ts, src/apps/web-daemon/server/ws-handlers.ts]
+activation: ["QUANTA_VOICE_LIVE=1 plus interactive TTY for the CLI voice session", "web daemon websocket handler"]
+effective_defaults:
+  cli: off
+  web: on
+  bench: off
+  headless: resource
+  daemon: on
+producer: [src/realtime/default-adapter.ts:createBunWebSocketAdapter]
+consumer: [src/realtime/voice-session/openai-realtime-adapter.ts, src/apps/cli/repl/voice-live-wire.ts, src/apps/web-daemon/server/ws-handlers.ts]
+reachable: yes
+surface_findings: ["The CLI /voice-live consumer is opt-in; the web daemon has a separate live websocket adapter. SDP remains text-level and audio codec remains marker-only as documented."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/realtime/voice-session-hellgate.test.ts tests/unit/cli/voice-live-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off returns no voice session and the only voice-session import is the opt-in surface.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/realtime/realtime-hellgate.test.ts tests/unit/realtime/t07-realtime-close-hellgate.test.ts tests/unit/realtime/voice-session-hellgate.test.ts tests/unit/cli/voice-live-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 58 selected rails prove websocket lifecycle, abort cleanup, FIFO, voice-session state, and CLI wire activation.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "createBunWebSocketAdapter|voiceLive" src/realtime/voice-session src/apps/cli/repl src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Concrete CLI and daemon consumers construct the transport.
+  - kind: test
+    command: bun test tests/unit/realtime/realtime-hellgate.test.ts tests/unit/realtime/t07-realtime-close-hellgate.test.ts tests/unit/realtime/voice-session-hellgate.test.ts tests/unit/cli/voice-live-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected realtime and composition rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

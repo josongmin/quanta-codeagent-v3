@@ -1,0 +1,58 @@
+version: 1
+feature_id: codex-r2-image-history-sanitization
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/session-bootstrap.ts:maybeWrapImageSanitizationRetry
+entrypoints:
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts:buildRuntimeFacadeCompose
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+activation:
+  - QUANTA_IMAGE_SANITIZATION truthy creates AgentConfig.imageSanitizationRetry enabled true in the CLI composition root.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/memory/history-sanitization/working-memory-adapter.ts:createWorkingMemoryHistorySanitization
+  - src/llm/image-sanitization-retry/wrapping.ts:withImageSanitizationRetry
+consumer:
+  - src/agent/loop/session-bootstrap.ts:maybeWrapImageSanitizationRetry
+reachable: yes
+surface_findings:
+  - The CLI config gate projects enabled true, and session bootstrap wraps the live LLM only for enabled true.
+  - On invalid_image the decorator sanitizes the working-memory last turn, re-snapshots it, and retries within the bounded policy; absent, false, or empty slot leaves the LLM unchanged.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/loop-image-retry-hookup-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Undefined, false, and empty configuration do not wrap or retry.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/memory/history-sanitization/__tests__/working-memory-adapter.hellgate.test.ts src/llm/image-sanitization-retry/__tests__/wrapping.hellgate.test.ts tests/unit/loop-image-retry-hookup-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Sanitization, bounded invalid_image retry, fresh working-memory snapshots, and loop hook behavior pass.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_IMAGE_SANITIZATION|imageSanitizationRetry|maybeWrapImageSanitizationRetry|withImageSanitizationRetry' src/apps/cli/repl/surface-compose/runtime-compose.ts src/agent/loop/session-bootstrap.ts src/llm/image-sanitization-retry
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI gate projects the slot and session bootstrap consumes it at the live LLM owner seam.
+  - kind: test
+    command: bun test src/memory/history-sanitization/__tests__/working-memory-adapter.hellgate.test.ts src/llm/image-sanitization-retry/__tests__/wrapping.hellgate.test.ts tests/unit/loop-image-retry-hookup-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Image-sanitization adapter, decorator, and loop-hook focused rails passed within the 241-pass run.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch23
+review_state: approved
+reviewer: codex/cross-review-wave1

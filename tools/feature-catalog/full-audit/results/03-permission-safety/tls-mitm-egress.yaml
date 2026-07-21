@@ -1,0 +1,53 @@
+version: 1
+feature_id: tls-mitm-egress
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/network-proxy/mitm.ts:mitmTerminate
+entrypoints:
+  - src/runtime/network-proxy/loopback-proxy.ts:CONNECT path
+activation:
+  - Set QUANTA_TLS_MITM=1 and the exact acknowledgement token while the network proxy is enabled.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/runtime/network-proxy/mitm-cert.ts:MitmCertAuthority
+  - src/runtime/network-proxy/mitm.ts
+consumer:
+  - src/runtime/network-proxy/loopback-proxy.ts
+reachable: yes
+surface_findings:
+  - Two explicit gate values are required before an ephemeral session CA can terminate CONNECT traffic.
+  - Upstream TLS keeps standard certificate verification; termination, scan, and watchdog failures deny by default.
+  - Bun bridge and Node channel paths share scan and fail-closed semantics.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/tls-mitm-gate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing or malformed gate/ack retains opaque CONNECT behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tls-mitm-cert.test.ts tests/unit/tls-mitm-gate.test.ts tests/unit/tls-mitm-scan-integration.test.ts tests/unit/tls-mitm-bun-bridge-parse.test.ts tests/unit/tls-mitm-bun-bridge-hellgate.test.ts tests/integration/tls-mitm-egress-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: CA chain, strict gate, scanner, Bun bridge, hostile input, and e2e HTTPS rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: MITM trust-anchor behavior is deliberately disabled unless both operator gates are provided.
+disposition: hold
+receipts:
+  - kind: test
+    command: bun test tests/unit/tls-mitm-cert.test.ts tests/unit/tls-mitm-gate.test.ts tests/unit/tls-mitm-scan-integration.test.ts tests/unit/tls-mitm-bun-bridge-parse.test.ts tests/unit/tls-mitm-bun-bridge-hellgate.test.ts tests/integration/tls-mitm-egress-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused TLS MITM rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

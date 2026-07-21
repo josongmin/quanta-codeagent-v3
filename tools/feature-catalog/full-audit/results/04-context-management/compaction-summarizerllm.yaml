@@ -1,0 +1,52 @@
+version: 1
+feature_id: compaction-summarizerllm
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal.ts:buildSummarizerLlm
+entrypoints: [src/agent/loop/session-bootstrap.ts, src/agent/loop/recovery-executor.ts]
+activation: [QUANTA_COMPACT_MODEL, QUANTA_COMPACT_PROVIDER optional]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/apps/cli/internal.ts:buildSummarizerLlm]
+consumer: [src/agent/compaction.ts, src/agent/loop/compaction-wire.ts, src/agent/loop/recovery-executor.ts]
+reachable: yes
+surface_findings:
+  - "Configured compact model builds a separate retry-wrapped LLM; absent config falls back to the main LLM without changing compaction behavior."
+  - "Both proactive and reactive compaction leaves select summarizerLlm before main LLM."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/compaction-summarizer.test.ts tests/unit/cli-summarizer.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No summarizer uses config.llm at both leaf sites.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/compaction-summarizer.test.ts tests/unit/cli-summarizer.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Dedicated summarizer drives proactive and reactive summary calls.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildSummarizerLlm|summarizerLlm \?\?' src/apps/cli/internal.ts src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Composition and leaf fallback consumers are present.
+  - kind: test
+    command: bun test tests/unit/compaction-summarizer.test.ts tests/unit/cli-summarizer.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Summarizer rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

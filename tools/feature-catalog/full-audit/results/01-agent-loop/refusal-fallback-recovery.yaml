@@ -1,0 +1,60 @@
+version: 1
+feature_id: refusal-fallback-recovery
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/recovery.ts:resolveTurnAction
+entrypoints:
+  - src/host/runtime/internal/context-binding/base.ts:buildAgentConfigFromBase
+  - src/agent/loop/same-turn-engine.ts:runSameTurnEngine
+activation:
+  - QUANTA_REFUSAL_FALLBACK truthy causes wireOptionalAgentPorts to supply AgentConfig.refusalFallback; the same-turn engine derives the input and routes a text-only refusal through the one-shot recovery action.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/optional-ports.ts:wireRefusalFallback
+  - src/agent/recovery.ts:buildRefusalFallbackInput
+consumer:
+  - src/agent/loop/same-turn-engine.ts:runSameTurnEngine
+  - src/agent/loop/recovery-executor.ts:applyNonSuccessRecoveryAction
+reachable: yes
+surface_findings:
+  - The host runtime base binding applies wireOptionalAgentPorts; its source explicitly identifies the CLI REPL as using buildAgentConfigFromBase.
+  - With the gate absent, no refusalFallback config exists and a refusal remains terminal; an enabled text-only refusal neutralizes the old assistant message, emits a recovery nudge, and re-prompts once.
+  - Tool-carrying refusal, exhausted one-shot capacity, or task-budget exhaustion stay terminal; the logic protects against loss/re-execution of already-started read-only results.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/refusal-fallback-recovery-hellgate.test.ts tests/unit/refusal-fallback-units.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: OFF config and unset env leave refusal terminal with one LLM call; units prove absent or enabled:false yields no fallback input.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/refusal-fallback-recovery-hellgate.test.ts tests/unit/refusal-fallback-units.test.ts tests/integration/content-filtered-default-e2e.test.ts tests/integration/dof22-behavioral-gate-sweep.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 44 pass, 0 fail; ON provider-agnostic recovery changes behavior, second refusal is terminal, budget guard holds, and paired A/B rail proves non-vacuity.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'wireRefusalFallback|buildRefusalFallbackInput|refusal_fallback|buildAgentConfigFromBase' src/agent/optional-ports.ts src/agent/recovery.ts src/agent/loop/same-turn-engine.ts src/agent/loop/recovery-executor.ts src/host/runtime/internal/context-binding/base.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime composition wires the gate into AgentConfig, same-turn recovery consumes it, and the executor performs neutralize plus one re-prompt.
+  - kind: test
+    command: bun test tests/unit/refusal-fallback-recovery-hellgate.test.ts tests/unit/refusal-fallback-units.test.ts tests/integration/content-filtered-default-e2e.test.ts tests/integration/dof22-behavioral-gate-sweep.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 44 pass, 0 fail across off identity, on efficacy, cross-provider refusal, and paired gate-effect rails.
+audited_at: "2026-07-19"
+auditor: codex/root-p3-agent-loop
+review_state: approved
+reviewer: codex/cross-review-wave1

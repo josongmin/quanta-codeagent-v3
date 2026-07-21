@@ -1,0 +1,63 @@
+version: 1
+feature_id: peer-message-surfacing
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/peer-message-sink-wire.ts:maybeWirePeerMessageSurface
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/host/runtime/agent-config-assembler.ts:wireOptionalCapabilitySlots
+activation:
+  - QUANTA_SUBAGENT_MAILBOX supplies a mailbox.
+  - QUANTA_PEER_MSG_SURFACE is enabled before side-agent and team mailbox decorators are installed.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/subagent-mailbox/surface-notify.ts:surfaceNotifyMailbox
+  - src/host/runtime/peer-message-sink-wire.ts:createPeerMessageStreamSink
+consumer:
+  - src/stream/adapters/stdout.ts:renderPeerMessage
+  - src/stream/item-stream-projector.ts:onPeerMessage
+  - src/stream/adapters/jsonl-recorder.ts:peerMessageData
+  - src/apps/cli/timeline-panel.ts
+reachable: yes
+surface_findings:
+  - The assembler wraps the mailbox after it exists and before side-agent/team decorators, so allowed peer and daemon traffic reaches the sink while denied cross-team traffic does not.
+  - The terminal renderer, item-stream projector, trajectory recorder, and CLI timeline each consume peer_message.
+  - The notifier sanitizes/redacts its emitted notice and sink failure does not prevent mailbox delivery.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/peer-message-surface-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Assembler knob-off emits no peer_message event and retains the undecorated mailbox path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/peer-message-surface-hellgate.test.ts tests/unit/peer-message-item-stream-and-render-hellgate.test.ts tests/unit/peer-message-recorder-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 25 focused cases pass across real assembly, render/projector, redaction, denied-team suppression, and JSONL recording.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'maybeWirePeerMessageSurface|surfaceNotifyMailbox|peer_message|peerMessage|renderPeerMessage' src/host/runtime src/agent/subagent-mailbox src/stream src/apps/cli/timeline-panel.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The host mint seam wires the decorator and four production consumers handle the emitted event.
+  - kind: test
+    command: bun test tests/unit/peer-message-surface-hellgate.test.ts tests/unit/peer-message-item-stream-and-render-hellgate.test.ts tests/unit/peer-message-recorder-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 25 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-team
+review_state: approved
+reviewer: codex/cross-review-wave1

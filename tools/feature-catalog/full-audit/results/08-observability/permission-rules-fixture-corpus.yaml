@@ -1,0 +1,51 @@
+version: 1
+feature_id: permission-rules-fixture-corpus
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tests/unit/permission-rules.fixtures.ts:PERMISSION_RULE_FIXTURES
+entrypoints:
+  - tests/unit/permission-rules.test.ts:HARD_DENY rule corpus checks
+activation:
+  - Bun unit-test discovery imports the fixture corpus and compares it with HARD_DENY_RULES.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - tests/unit/permission-rules.fixtures.ts:PERMISSION_RULE_FIXTURES
+consumer:
+  - tests/unit/permission-rules.test.ts:rule-to-fixture bidirectional and regex-case assertions
+reachable: no
+surface_findings:
+  - The fixture module is test-only data with no shipped runtime importer.
+  - The unit rail requires every HARD_DENY rule to have non-empty mustBlock and mustAllow cases, rejects orphan fixtures, and executes both sets against the live patterns.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission-rules.test.ts tests/unit/hard-deny-redos-bound.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Rule/fixture parity, positive blocking, negative allowance, and regex bound rails pass.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'PERMISSION_RULE_FIXTURES|mustBlock|mustAllow' tests/unit/permission-rules.test.ts tests/unit/permission-rules.fixtures.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The only consumer is the test suite, which has bidirectional corpus and live regex assertions.
+  - kind: test
+    command: bun test tests/unit/permission-rules.test.ts tests/unit/hard-deny-redos-bound.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Included in the focused 394-pass, 0-fail run.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch23
+review_state: approved
+reviewer: codex/cross-review-wave1

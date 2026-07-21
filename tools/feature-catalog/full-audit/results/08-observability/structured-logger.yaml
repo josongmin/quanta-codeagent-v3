@@ -1,0 +1,50 @@
+version: 1
+feature_id: structured-logger
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/logger.ts:StructuredLogger
+entrypoints:
+  - src/observability/index.ts
+activation:
+  - Consumers instantiate the JSON-line logger or use its exported default instance.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/observability/logger.ts:StructuredLogger
+consumer:
+  - src/observability/index.ts
+reachable: yes
+surface_findings:
+  - Structured logger delegates threshold ordering to shared runtime configuration and writes machine-readable records only to stderr.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/logger-threshold.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Threshold selection, injected sink, child inheritance, and one-line framing passed.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'StructuredLogger|runtimeConfig|JSON.stringify|writeStderr' src/observability/logger.ts src/observability/types.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Structured logger has a distinct JSON sink and imports shared threshold authority.
+  - kind: test
+    command: bun test tests/unit/logger-threshold.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused logger rail passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

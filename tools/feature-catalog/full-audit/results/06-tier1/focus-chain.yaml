@@ -1,0 +1,52 @@
+version: 1
+feature_id: focus-chain
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/turn-iteration.ts:injectFocusChainMessage
+entrypoints: [src/agent/loop/turn-iteration.ts, src/apps/cli/slash/registry-surface/focus-effort-brief.ts]
+activation: [AgentConfig.focusChain tracker]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/agent/focus-chain/default-tracker.ts]
+consumer: [src/agent/loop/turn-iteration.ts, CLI focus-chain slash adapter]
+reachable: yes
+surface_findings:
+  - "Loop synchronizes todos, ticks tracker, and appends a reinjection message; absent slot is a byte-identical no-op."
+  - "CLI surface projects the same tracker to focus-chain controls when wired."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/focus-chain-hellgate.test.ts tests/unit/focus-chain-loop-seam-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing focusChain slot and empty todo list emit no injection.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/focus-chain-hellgate.test.ts tests/unit/focus-chain-loop-seam-e2e.test.ts tests/unit/focus-chain-plan-bridge.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Cadence, consume behavior, progress/drift, plan sync, and loop reinjection pass.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'injectFocusChainMessage|syncFocusChainFromPlan|focusChain' src/agent/loop/turn-iteration.ts src/apps/cli/repl
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime injection and CLI adapter consumers are present.
+  - kind: test
+    command: bun test tests/unit/focus-chain-hellgate.test.ts tests/unit/focus-chain-loop-seam-e2e.test.ts tests/unit/focus-chain-plan-bridge.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focus chain rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

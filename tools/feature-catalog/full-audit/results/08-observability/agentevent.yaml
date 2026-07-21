@@ -1,0 +1,40 @@
+version: 1
+feature_id: agentevent
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/stream/types.ts:AGENT_EVENT_TYPES"
+entrypoints: ["src/agent/turn-context.ts", "src/apps/cli timeline and turn summary"]
+activation: ["Engine emits typed events during every active run."]
+effective_defaults:
+  cli: on
+  web: resource
+  bench: on
+  headless: on
+  daemon: on
+producer: ["src/stream/types.ts AgentEvent union"]
+consumer: ["CLI timeline", "turn summary", "recorder and web bridge subsets"]
+reachable: yes
+surface_findings: ["The union and surface partition are live, but the catalog's 36-variant count is stale; the current source inventory has grown to 40, which also makes the older fixed-count inventory rail red."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/cli/agent-event-surface-inventory-hellgate.test.ts tests/unit/observability.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Timeline partition and observability consumers pass against the live type set."
+failure_posture: fail-loud
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: test
+    command: "bun test tests/unit/cli/agent-event-surface-inventory-hellgate.test.ts tests/unit/observability.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 108-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

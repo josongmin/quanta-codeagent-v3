@@ -1,0 +1,55 @@
+version: 1
+feature_id: retrieval-composition-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder.ts:buildRetrievalStackFromEnv
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+  - src/runner/assemble/retrieval.ts:buildRetrievalStackCore
+activation:
+  - QUANTA_RETRIEVAL_HYBRID must equal 1 for the host to mint and attach retrievalStack.
+  - The attached AgentConfig slot has no production reader.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/runtime/agent-arg-builder.ts:buildRetrievalStackFromEnv
+  - src/runner/assemble/retrieval.ts:buildRetrievalStackCore
+consumer:
+  - No production consumer reads AgentConfig.retrievalStack.
+reachable: no
+surface_findings:
+  - The host recognizes the strict env opt-in and threads a typed stack slot into AgentConfig.
+  - The loop explicitly does not read retrievalStack, and rankWithRetrievalStack is only exercised directly by tests.
+  - No production localize or memory call passes the attached slot into a bridge, so enabling the knob has no retrieval behavior.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/retrieval-composition-wire-hellgate.test.ts tests/integration/retrieval-composition-root.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default absent and false inputs omit the slot; integration asserts the loop ignores a present stack.
+on_efficacy_proof: null
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: The live host produces the slot, but no production memory or localize consumer reads it; current ON behavior is allocation plus an ignored config field.
+disposition: wire
+receipts:
+  - kind: source
+    command: "rg -n 'retrievalStack|rankWithRetrievalStack|runLocalizeHybrid' src --glob '*.ts'"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The stack is written in agent-arg-builder and config assembly, while no production read or localize bridge invocation exists.
+  - kind: test
+    command: bun test tests/unit/retrieval-composition-wire-hellgate.test.ts tests/integration/retrieval-composition-root.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 33 focused tests passed, including the explicit runAgent ignores retrievalStack control.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch12
+review_state: approved
+reviewer: codex/cross-review-wave1

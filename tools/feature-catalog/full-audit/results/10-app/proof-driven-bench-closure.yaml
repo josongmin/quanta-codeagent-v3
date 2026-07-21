@@ -1,0 +1,63 @@
+version: 1
+feature_id: proof-driven-bench-closure
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/eval/closure-session.ts:buildClosureSession
+entrypoints:
+  - src/apps/bench/index.ts
+  - src/apps/bench/run-main.ts:runMain
+activation:
+  - The default-OFF proof-closure posture knobs project fault evidence, verification plan, primary rail, patch hygiene, no-patch breaker, and repair escalation into bench configuration.
+  - A SWE-bench attempt with the relevant posture builds ClosureSession state; run-main writes a closure diagnostics sidecar when explicitly requested or closure telemetry is present.
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/agent/closure/bundle.ts:assembleClosureBundle
+  - src/runner/batch/eval/closure-session.ts:buildClosureSession
+  - src/runner/batch/eval/closure-diagnostics.ts:computeClosureDiagnostics
+consumer:
+  - src/runner/batch/eval/driver/attempt-context.ts:buildClosureAttemptState
+  - src/apps/bench/eval/driver.ts:closure prompt and repair path
+  - src/apps/bench/run-main.ts:writeClosureSidecar
+reachable: yes
+surface_findings:
+  - Attempt-context constructs a ClosureBundle from real SWE-bench evidence and projects its primary rail and closure hint into the live driver path.
+  - The runner emits diagnostics as an offline sidecar only after results are available; oracle data remains post-hoc rather than entering the agent loop.
+  - Closure posture knobs are default-off and their disabled state leaves the legacy posture unchanged.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/proof-closure-knobs-wiring-hellgate.test.ts tests/unit/bench-closure-prompt-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset closure knobs leave all six posture fields falsy and no closure prompt is added to the legacy path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/closure/closure-bundle.test.ts tests/unit/closure/evaluate-success-predicate.test.ts tests/unit/closure/closure-session.test.ts tests/unit/closure/primary-false-green.test.ts tests/unit/closure/primary-false-red.test.ts tests/unit/closure-diagnostics.test.ts tests/unit/closure-diagnostics-io.test.ts tests/unit/proof-closure-knobs-wiring-hellgate.test.ts tests/unit/bench-closure-prompt-wiring-hellgate.test.ts tests/unit/bench-fault-evidence-wiring.test.ts tests/integration/bench-closure-repair-gate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 96 focused cases passed, including ClosureBundle derivation, primary-rail false-green/false-red controls, prompt injection, diagnostics, and a real repair-loop integration rail.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'assembleClosureBundle|buildClosureSession|writeClosureSidecar|QUANTA_BENCH_CLOSURE_DIAG|closureTelemetryPresent' src/apps/bench src/runner src/agent src/config
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The frozen code connects posture to closure session and live driver state, then writes the post-run diagnostics sidecar from run-main.
+  - kind: test
+    command: bun test tests/unit/closure/closure-bundle.test.ts tests/unit/closure/evaluate-success-predicate.test.ts tests/unit/closure/closure-session.test.ts tests/unit/closure/primary-false-green.test.ts tests/unit/closure/primary-false-red.test.ts tests/unit/closure-diagnostics.test.ts tests/unit/closure-diagnostics-io.test.ts tests/unit/proof-closure-knobs-wiring-hellgate.test.ts tests/unit/bench-closure-prompt-wiring-hellgate.test.ts tests/unit/bench-fault-evidence-wiring.test.ts tests/integration/bench-closure-repair-gate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 96 unit and integration cases passed with zero failures, including red-on-injection repair controls.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-bench
+review_state: approved
+reviewer: codex/cross-review-wave1

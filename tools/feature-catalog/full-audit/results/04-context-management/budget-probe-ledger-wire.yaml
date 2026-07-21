@@ -1,0 +1,54 @@
+version: 1
+feature_id: budget-probe-ledger-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/retrieval/budget-probe/from-ledger.ts:createBudgetProbeFromLedger
+entrypoints:
+  - src/retrieval/budget-probe/index.ts
+activation:
+  - A future assembly owner must translate the real BudgetLedger totalCost snapshot to the adapter's totalUsd shape.
+  - That owner must then pass the created probe to budgetAwarePipeline.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/retrieval/budget-probe/from-ledger.ts:createBudgetProbeFromLedger
+  - src/retrieval/budget-probe/static-probe.ts:createStaticBudgetProbe
+consumer:
+  - tests/unit/retrieval/budget-probe-hellgate.test.ts
+reachable: no
+surface_findings:
+  - "No file under src/agent, src/runner, or src/apps imports the budget-probe barrel at ship time; the dedicated hellgate asserts this invariant."
+  - "The existing pipeline composition root uses an inline usdSoFar zero stub rather than createBudgetProbeFromLedger, so it does not consume the ledger adapter."
+  - "The adapter and factory semantics are unit-proven, but no production ledger-to-pipeline bridge exists."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/retrieval/budget-probe-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: HELL-BP-09 confirms no ship-time import from agent, runner, or apps.
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production assembly site translates defaultBudgetLedger's totalCost snapshot, constructs createBudgetProbeFromLedger, and supplies it to budgetAwarePipeline.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg createBudgetProbeFromLedger createStaticBudgetProbe and budgetProbe in src tests
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Factory symbols have no production consumer; runner assemblePipeline uses a local usdSoFar stub for its budget-aware preset.
+  - kind: test
+    command: bun test tests/unit/retrieval/budget-probe-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Adapter math, typed failure behavior, error exhaustiveness, and the no-production-import invariant pass.
+audited_at: "2026-07-19"
+auditor: codex/p1-context-core
+review_state: approved
+reviewer: codex/cross-review-wave1

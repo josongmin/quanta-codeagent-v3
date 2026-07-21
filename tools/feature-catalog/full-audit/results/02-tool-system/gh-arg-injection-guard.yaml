@@ -1,0 +1,58 @@
+version: 1
+feature_id: gh-arg-injection-guard
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/gh/ref.ts:normalizeRef
+entrypoints: []
+activation:
+  - "ghTools constructs guarded tool objects, but no production composition root calls ghTools at the frozen snapshot."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/gh/ref.ts:normalizeRef
+  - src/tool/gh/index.ts:ghPrViewTool
+  - src/tool/gh/index.ts:ghIssueViewTool
+  - src/tool/gh/pr-blame.ts:ghPrBlameTool
+consumer: []
+reachable: no
+surface_findings:
+  - "normalizeRef rejects leading-dash and non-number/non-http inputs before the guarded gh tools construct argv."
+  - "The source has guarded gh tool factories, but rg finds no production call of ghTools; src/apps/cli/internal.ts wires gitTools instead."
+  - "The catalog's cli:full claim is unsupported, and its statement that eight tools route through the helper is stale: the frozen source contains nine normalizeRef call sites."
+off_identity_proof:
+  kind: source
+  command: rg -n 'ghTools\(' src --glob '*.ts'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "No production ghTools invocation exists; the only matching source occurrence is the ghTools definition/comment surface."
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/gh-pr-tools-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "18 focused gh assertions passed, including the leading-dash rejection and no-runner-spawn rail."
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: seam-only
+blocker: "No CLI, web, runner, bench, headless, or daemon composition root registers ghTools, so the guarded factory has no production consumer."
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'normalizeRef\(|ghTools\(' src/tool/gh src/apps/cli src/runner src/apps/web-daemon --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Nine guarded call sites are live inside the gh slice, but no composition root invokes ghTools; CLI's optional group is gitTools."
+  - kind: test
+    command: bun test tests/unit/gh-pr-tools-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "18 focused gh rails passed, including HELL-10 leading-dash rejection."
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch5
+review_state: approved
+reviewer: codex/cross-review-wave1

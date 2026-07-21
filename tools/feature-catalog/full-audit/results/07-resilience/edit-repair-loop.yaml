@@ -1,0 +1,65 @@
+version: 1
+feature_id: edit-repair-loop
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/dispatch/edit-repair.ts:openLintBracket and runEditCommandRepair
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:maybeWireDiagnostics
+  - src/agent/dispatch/execute.ts:executeToolCall
+activation:
+  - QUANTA_EDIT_REPAIR_LOOP must equal "1".
+  - The host injects the real diagnostics provider only when the gate is on; dispatch then brackets edit/write calls and may drive the injected LLM repair reactor.
+  - Command repair additionally requires both AgentConfig.editRepair.command and AgentConfig.editRepair.exec.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/edit-repair-loop/runner.ts:runRepairLoop
+  - src/agent/edit-repair-wire.ts:buildRepairReactor
+  - src/agent/edit-repair-wire.ts:lintRepairCheck
+consumer:
+  - src/host/runtime/agent-config-assembler.ts:maybeWireDiagnostics
+  - src/agent/dispatch/execute.ts:executeToolCall
+  - src/agent/dispatch/edit-repair.ts:openLintBracket
+  - src/agent/dispatch/edit-repair.ts:runEditCommandRepair
+reachable: yes
+surface_findings:
+  - The host constructs the real LSP diagnostics provider only behind the strict gate, and dispatch consumes it around edit/write tool execution.
+  - The lint and command variants both reach the bounded loop; command repair remains deliberately unavailable unless its injected command and exec ports are both present.
+  - The default-off path returns before provider, LLM, and command-port use, preserving the legacy tool path.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/edit-repair-loop-hellgate.test.ts tests/unit/edit-repair-command-loop-hellgate.test.ts tests/unit/dispatch-lint-delta-hellgate.test.ts tests/unit/edit-reactor-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset gate leaves provider, LLM, and command ports unused; the tool output is byte-identical to the legacy path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/edit-repair-loop-hellgate.test.ts tests/unit/edit-repair-wire-hellgate.test.ts tests/unit/edit-repair-command-loop-hellgate.test.ts tests/unit/dispatch-lint-delta-hellgate.test.ts tests/unit/edit-reactor-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Introduced diagnostics are isolated, the real dispatch seam invokes the reactor, and bounded lint and command repairs converge or terminate with typed reports.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "editRepairLoopEnabled|openLintBracket|runEditCommandRepair|runRepairLoop" src/host/runtime/agent-config-assembler.ts src/agent/dispatch src/agent/edit-repair-wire.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Host gate, dispatch consumer, bounded runner, diagnostics adapter, and LLM reactor form a live production chain.
+  - kind: test
+    command: bun test tests/unit/edit-repair-loop-hellgate.test.ts tests/unit/edit-repair-wire-hellgate.test.ts tests/unit/edit-repair-command-loop-hellgate.test.ts tests/unit/dispatch-lint-delta-hellgate.test.ts tests/unit/edit-reactor-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected focused rails passed as part of the 174-pass, 0-fail audit run.
+audited_at: "2026-07-19"
+auditor: codex/p1-observability-a
+review_state: approved
+reviewer: codex/cross-review-wave1

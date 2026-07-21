@@ -1,0 +1,63 @@
+version: 1
+feature_id: mcp-isolated-spawn
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/mcp/isolated-client.ts:IsolatedMcpClient
+entrypoints:
+  - src/agent/plugin-mcp-launcher/isolated-launcher-port.ts:createIsolatedMcpLauncherPort
+  - src/agent/plugin-activation-handler/auto-wire.ts:plugin MCP launcher wiring
+  - src/agent/skill-mcp-wire.ts:skill MCP launcher wiring
+activation:
+  - Plugin or skill MCP launch requests construct the isolated launcher directly.
+  - Catalogued MCP_USE_ISOLATED_SPAWN flag has a parser but no production caller.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/mcp/isolated-client.ts:IsolatedMcpClient
+  - src/plugin-isolation/bun-spawner.ts:createBunSpawner
+consumer:
+  - src/agent/plugin-mcp-launcher/isolated-launcher-port.ts:createIsolatedMcpLauncherPort
+  - src/agent/plugin-activation-handler/auto-wire.ts:plugin activation wiring
+  - src/agent/skill-mcp-wire.ts:skill MCP wiring
+reachable: yes
+surface_findings:
+  - The isolated client is live through plugin activation and skill-MCP launcher ports.
+  - isolatedMcpEnabledFromEnv parses MCP_USE_ISOLATED_SPAWN, but no production source consumer calls that helper; the catalogued env-gated alternative is therefore not the actual activation authority.
+  - Protocol negotiation rejects unsupported versions and resets the client to a retryable stopped state.
+off_identity_proof:
+  kind: source
+  command: git grep -n 'isolatedMcpEnabledFromEnv|MCP_USE_ISOLATED_SPAWN' 9a12f7a855640a8be1e4654472766bbc445696ea -- src
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The flag parser exists only in isolated-client.ts; no production call site selects the isolated client through it.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/plugin-isolation-mcp-integration-hellgate.test.ts tests/unit/plugin-isolation-mcp-integration.test.ts tests/unit/mcp/protocol-version-isolated-exit-signal-hellgate.test.ts tests/unit/mcp/protocol-version-isolated-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Isolated spawn, tool calls, lifecycle, protocol pinning, and fail-closed unsupported-version behavior passed.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: Catalog claims MCP_USE_ISOLATED_SPAWN selects the isolated client, but live production wiring constructs it directly and never consumes the flag parser.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n 'IsolatedMcpClient|createIsolatedMcpLauncherPort|isolatedMcpEnabledFromEnv|MCP_USE_ISOLATED_SPAWN' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/mcp src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Plugin activation and skill MCP wiring consume the direct isolated launcher; the flag helper has no consumer.
+  - kind: test
+    command: bun test tests/unit/plugin-isolation-mcp-integration-hellgate.test.ts tests/unit/plugin-isolation-mcp-integration.test.ts tests/unit/mcp/protocol-version-isolated-exit-signal-hellgate.test.ts tests/unit/mcp/protocol-version-isolated-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused isolated-client and protocol fail-closed rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

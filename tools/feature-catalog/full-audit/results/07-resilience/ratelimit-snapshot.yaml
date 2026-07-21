@@ -1,0 +1,60 @@
+version: 1
+feature_id: ratelimit-snapshot
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/session-bootstrap.ts:buildTurnSession rateLimitProactive
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:buildTurnSession
+  - src/agent/loop/stream-consume.ts:buildResponseHeadersHook
+  - src/agent/loop/stream-consume.ts:applyProactiveRateLimitBackoff
+activation:
+  - QUANTA_RATELIMIT_PROACTIVE enables the snapshot store, response-header hook, and pre-request backoff.
+  - QUANTA_RATELIMIT_NOTICE alone wires capture and a notice event but leaves proactive sleep disabled.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/responses-stream.ts and src/llm/adapters/anthropic.ts call the optional response-header hook.
+consumer:
+  - session-bootstrap constructs the store only when proactive or notice is enabled.
+  - stream-consume parses headers, emits the restricted notice, and applies the provider-reset delay before the next request only when proactive is enabled.
+reachable: yes
+surface_findings:
+  - The interactive CLI is the catalog's verified surface; the web host drops this transient event.
+  - Empty provider buckets delay by the supplied reset only, with a 60-second ceiling; malformed or unknown headers degrade to no proactive action.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/delta-ratelimit-reachability-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: OFF run is byte-identical, with no header hook, delay, or notice.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/account-ratelimit-parse-hellgate.test.ts tests/unit/account-ratelimit-policy-hellgate.test.ts tests/unit/delta-ratelimit-reachability-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Parser, empty-bucket policy, real adapter capture, and loop-level ON backoff/notice rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "rateLimitProactive|buildResponseHeadersHook|applyProactiveRateLimitBackoff" src/agent/loop src/llm
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime construction and both stream-consume consumers exist at the owner seam.
+  - kind: test
+    command: bun test tests/unit/account-ratelimit-parse-hellgate.test.ts tests/unit/account-ratelimit-policy-hellgate.test.ts tests/unit/delta-ratelimit-reachability-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 67 focused assertions passed across parser, policy, adapter, and loop rails.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

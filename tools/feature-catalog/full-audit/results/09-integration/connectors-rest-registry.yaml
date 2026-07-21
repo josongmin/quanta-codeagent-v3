@@ -1,0 +1,56 @@
+version: 1
+feature_id: connectors-rest-registry
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/connectors/rest-registry.ts:createRestConnectorRegistry
+entrypoints:
+  - src/host/runtime/mcp-connector-wire.ts:buildMcpConnectorDiscoveryPortFromRegistry
+activation:
+  - A host must construct createRestConnectorRegistry with fetch, clock, cache, and base URL, then pass it to buildMcpConnectorDiscoveryPortFromRegistry before tool construction.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - REST GET baseUrl/connectors snapshot and cache entries
+consumer:
+  - ConnectorRegistryPort catalog adapter and MCP connector discovery port
+reachable: no
+surface_findings:
+  - The registry implements validated snapshots, cache TTL, stale-cache degradation, and in-flight refresh coalescing; the host adapter maps a supplied registry to installable MCP catalog entries.
+  - Production tool assembly still constructs the bundled connector catalog directly, while createRestConnectorRegistry and buildMcpConnectorDiscoveryPortFromRegistry have no non-test construction caller.
+off_identity_proof:
+  kind: source
+  command: rg -n 'buildMcpConnectorDiscoveryPortFromRegistry|createRestConnectorRegistry' src --glob '!**/*.test.ts'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The only non-test occurrences are the factory and its unused adapter definition; live gated tool assembly calls buildMcpConnectorDiscoveryPort without a registry.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/connector-registry-rest-hellgate.test.ts tests/unit/connectors-rest-registry-cache.test.ts tests/unit/mcp-connector-registry-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed valid fetch, TTL/cache, malformed and outage degradation, coalescing, remote-catalog mapping, atomic install, and bundled fallback.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: seam-only
+blocker: No production composition root creates the REST registry or passes it through the remote-registry adapter; the live MCP connector gate uses the bundled catalog only.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'buildMcpConnectorDiscoveryPortFromRegistry|createRestConnectorRegistry|buildMcpConnectorDiscoveryPort' src/host/runtime/mcp-connector-wire.ts src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The remote adapter is export-only while the live gate builds the bundled catalog path.
+  - kind: test
+    command: bun test tests/unit/connector-registry-rest-hellgate.test.ts tests/unit/connectors-rest-registry-cache.test.ts tests/unit/mcp-connector-registry-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All focused REST registry and adapter rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

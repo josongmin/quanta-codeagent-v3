@@ -1,0 +1,54 @@
+version: 1
+feature_id: disclaimer-shell-wrapper
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/runtime/sandbox.ts:LocalSandbox.run and DockerSandbox.buildArgv"
+entrypoints: []
+activation:
+  - "An application must construct a LocalSandbox or DockerSandbox and pass SandboxPolicy.disclaimShell=true."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/runtime/shell-disclaim.ts:disclaimedShellArgv"
+consumer: []
+reachable: no
+surface_findings:
+  - "The runtime implementations consume the flag correctly, but no production source constructs either sandbox and no composition root supplies disclaimShell=true."
+  - "Test and contract construction is not a production consumer; the catalog's CLI-full claim is therefore unsupported at this snapshot."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/shell-disclaim.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Unset and explicit false preserve the legacy bash -lc argv exactly."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/shell-disclaim.test.ts tests/unit/runtime/disclaim-shell-argv-integrity-hellgate.test.ts tests/unit/sandbox.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Bash, zsh, and sh argv construction plus hostile flag-shaped and metachar payload invariants passed."
+failure_posture: unknown
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: "No production composition root constructs LocalSandbox or DockerSandbox, and no live SandboxPolicy supplies disclaimShell=true."
+disposition: wire
+receipts:
+  - kind: source
+    command: "rg -n 'new LocalSandbox|new DockerSandbox|disclaimShell' src tests"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "All concrete sandbox construction is test-only; production source contains only the optional policy branch and exports."
+  - kind: test
+    command: "bun test tests/unit/shell-disclaim.test.ts tests/unit/runtime/disclaim-shell-argv-integrity-hellgate.test.ts tests/unit/sandbox.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The isolated wrapper implementation and injection-resistance rails passed."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch3
+review_state: approved
+reviewer: codex/cross-review-wave1

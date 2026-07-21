@@ -1,0 +1,52 @@
+version: 1
+feature_id: git-runner-env-determinism
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/storage/git-runner.ts:buildGitEnv
+entrypoints: [src/tool/git/runner.ts:buildGitEnv, src/tool/git/index.ts:gitTools]
+activation: ["The runner is used whenever a git tool set is constructed; the normal interactive CLI constructs gitTools only with QUANTA_GIT_TOOLS=1, while ci-bot constructs it directly."]
+effective_defaults:
+  cli: off
+  web: off
+  bench: unknown
+  headless: off
+  daemon: off
+producer: [src/storage/git-runner.ts:buildGitEnv, src/storage/git-runner.ts:defaultGitRunner]
+consumer: [src/tool/git/runner.ts:buildGitEnv, src/tool/git/index.ts:gitTools, src/apps/agent/mode-presets/ci-bot-policy.ts:buildCiBotPolicy]
+reachable: conditional
+surface_findings:
+  - "The live runner applies an environment allowlist and deterministic git, pager, locale, terminal, and credential-prompt overrides before each spawn."
+  - "The catalog's cli:full claim is stale for the normal interactive CLI because gitTools is QUANTA_GIT_TOOLS-gated; the runner remains live for the ci-bot composition."
+off_identity_proof:
+  kind: source
+  command: rg -n 'gitToolsEnabled|gitToolList|gitTools\(' src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/headless src/apps/web-daemon src/apps/agent/mode-presets
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The normal CLI omits gitTools without the gate, while ci-bot explicitly constructs the git tool set.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git-env-and-budget-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 35 cases passed covering deterministic overrides, allowed parent values, timeout signal fusion, budget behavior, and gitTools runner wiring.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: Catalog must distinguish the conditional normal CLI surface from the ci-bot consumer rather than claiming interactive CLI full reachability.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'buildGitEnv|defaultGitRunner|gitToolsEnabled|gitToolList|gitTools\(' src/storage/git-runner.ts src/tool/git/runner.ts src/tool/git/index.ts src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/agent/mode-presets
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The spawn boundary is live under gitTools and ci-bot, but normal CLI activation remains gated.
+  - kind: test
+    command: bun test tests/unit/git-env-and-budget-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 35 focused cases passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-next
+review_state: approved
+reviewer: codex/cross-review-wave1

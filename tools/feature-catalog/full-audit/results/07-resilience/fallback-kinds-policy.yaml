@@ -1,0 +1,60 @@
+version: 1
+feature_id: fallback-kinds-policy
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/fallback.ts:isFallbackTrigger and FallbackLLM.stream
+entrypoints:
+  - src/apps/cli/internal.ts:fallbackModels
+  - src/runner/assemble/llm.ts:composeLLMCore
+activation:
+  - QUANTA_MODEL_FALLBACK parses to a non-empty fallbackModelIds list.
+  - composeLLMCore wraps the retrying primary in FallbackLLM only when that list is non-empty.
+effective_defaults:
+  cli: off
+  web: na
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/llm/fallback.ts:isFallbackTrigger derives structured kind routing from isFallbackKind.
+  - src/runner/assemble/llm.ts:composeLLMCore creates the fallback provider chain.
+consumer:
+  - src/llm/fallback.ts:FallbackLLM.stream consumes isFallbackTrigger before swapping provider slots.
+reachable: yes
+surface_findings:
+  - The CLI parses QUANTA_MODEL_FALLBACK and forwards the list to composeLLMCore.
+  - An empty list preserves retryingLLM identity; non-empty input constructs a live fallback chain.
+  - The title is historically stale about a literal set, but the claimed structured provider-swap policy is live through isFallbackKind.
+off_identity_proof:
+  kind: source
+  command: git show 9a12f7a:src/runner/assemble/llm.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: composeLLMCore starts with retryingLLM and only constructs FallbackLLM when fallbackModelIds.length is greater than zero.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/fallback.test.ts tests/unit/fallback-empty-tombstone.test.ts tests/unit/fallback-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 37 passing cases cover structured trigger and non-trigger classification, provider swaps, tombstones, exhaustion, and abort behavior.
+failure_posture: fail-loud
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'fallbackModelIds\|new FallbackLLM\|isFallbackTrigger' 9a12f7a -- src/apps/cli/internal.ts src/runner/assemble/llm.ts src/llm/fallback.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI env parsing reaches composition; FallbackLLM checks the structured policy before a provider swap.
+  - kind: test
+    command: bun test tests/unit/fallback.test.ts tests/unit/fallback-empty-tombstone.test.ts tests/unit/fallback-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 37 pass and 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

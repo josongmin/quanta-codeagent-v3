@@ -1,0 +1,63 @@
+version: 1
+feature_id: command-hooks
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/command-hooks-wire.ts:installCommandHooksIntoBase
+entrypoints:
+  - src/apps/agent/index.ts:loadCommandHooks
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+activation:
+  - QUANTA_COMMAND_HOOKS=1 arms the root wire only when QUANTA_COMMAND_HOOKS_ACK is non-empty.
+  - The async agent root loads settings.json bindings and the root installs them onto the live HookBus.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/command-hooks/settings-loader.ts:loadCommandHookBindings
+  - src/agent/command-hooks/install.ts:installCommandHooks
+  - src/agent/command-hooks/runner.ts:runCommandHook
+consumer:
+  - src/apps/agent/index.ts:runMain
+  - src/host/runtime/agent-arg-builder/command-hooks-wire.ts:installCommandHooksIntoBase
+  - src/agent/hook-bus.ts:HookBus
+reachable: yes
+surface_findings:
+  - The root reads disk bindings only on the strict opt-in path, then passes them to buildBaseFromArgs and installs handlers on the session HookBus.
+  - Missing or blank acknowledgement fails at startup before handlers can arm; an empty binding set remains disarmed.
+  - Hook payload is passed as bounded JSON stdin, not interpolated into the command string; timeout and non-zero results deny.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/command-hooks-hellgate.test.ts tests/unit/apps/agent/command-hooks-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset knob creates no bus path or handler, and armed-without-binding does not spawn.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/command-hooks-hellgate.test.ts tests/unit/command-hooks-fail-closed-hardening-hellgate.test.ts tests/unit/apps/agent/command-hooks-wire-hellgate.test.ts tests/unit/command-hooks-trust-gate-hellgate.test.ts tests/unit/command-hooks-trust-gate-migration-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused proof exercised real HookBus install/fire, acknowledgement failure, bounded stdin, trust review migration, and deny/rewrite semantics.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'loadCommandHookBindings|installCommandHooksIntoBase|QUANTA_COMMAND_HOOKS|QUANTA_COMMAND_HOOKS_ACK|HookBus' src/apps/agent src/host/runtime src/agent/command-hooks
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The disk loader, CLI async root, composition wire, and HookBus installer form one live chain.
+  - kind: test
+    command: bun test tests/unit/command-hooks-hellgate.test.ts tests/unit/command-hooks-fail-closed-hardening-hellgate.test.ts tests/unit/apps/agent/command-hooks-wire-hellgate.test.ts tests/unit/command-hooks-trust-gate-hellgate.test.ts tests/unit/command-hooks-trust-gate-migration-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused command-hook proof completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-surfaces
+review_state: approved
+reviewer: codex/cross-review-wave1

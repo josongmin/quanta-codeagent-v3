@@ -1,0 +1,47 @@
+version: 1
+feature_id: env-context-repo-map
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/env-context.ts:probeRepoMap
+entrypoints: [src/runner/knobs/knobs/repo-map.ts]
+activation: [QUANTA_REPO_MAP=1 plus live turn-0 context assembly]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/runner/assemble/repo-map-scan.ts:makeRepoMapScan]
+consumer: [tests/unit/repo-map-injection.test.ts]
+reachable: no
+surface_findings:
+  - "Probe, capped scan adapter, renderer field, and knob slot are implemented and tested."
+  - "No production loop caller invokes probeRepoMap on turn 0 or supplies env.repoMap to dynamic prompt assembly."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/repo-map-injection.test.ts tests/unit/repo-map-scan-caps.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent map leaves env rendering unchanged and scan failures return undefined.
+on_efficacy_proof: null
+failure_posture: na
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: "The documented turn-0 probe call has no production owner in context-assembler; config.repoMap is never consumed there."
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'probeRepoMap|config\.repoMap|repoMap' src/agent/loop/context-assembler.ts src/agent/env-context.ts src/runner/knobs/knobs/repo-map.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Repo-map owner and knob exist, while live context assembly has no caller.
+  - kind: test
+    command: bun test tests/unit/repo-map-injection.test.ts tests/unit/repo-map-scan-caps.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Probe and renderer rails pass but prove only the seam.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

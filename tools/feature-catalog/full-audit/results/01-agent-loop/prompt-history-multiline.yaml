@@ -1,0 +1,66 @@
+version: 1
+feature_id: prompt-history-multiline
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/surface-compose/prompt-ux.ts:buildPromptUx
+entrypoints:
+  - src/apps/cli/repl.ts:runRepl
+  - src/apps/cli/repl/prompt-pipeline.ts:defaultPromptLineReader
+activation:
+  - Interactive CLI uses buildPromptUx, which creates the history port and enables multiline in the raw-line reader.
+  - QUANTA_HISTORY=0 disables history and QUANTA_MULTILINE=0 disables heredoc; both are otherwise CLI-default-on.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/prompt-history.ts:createPromptHistory
+  - src/apps/cli/raw-line-reader.ts:readLine
+consumer:
+  - src/apps/cli/repl/surface-compose/prompt-ux.ts:buildPromptUx
+  - src/apps/cli/repl/prompt-pipeline.ts:defaultPromptLineReader
+reachable: yes
+surface_findings:
+  - The CLI composition creates PromptHistory unless QUANTA_HISTORY is the literal 0, then passes it to the production raw-line reader.
+  - The same composition enables heredoc multiline unless QUANTA_MULTILINE is the literal 0; there is no web/headless input-surface consumer.
+  - Catalog claim says every behavior is default-OFF, but the live resolver explicitly treats omitted history and multiline knobs as ON.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/raw-line-reader-history.test.ts tests/unit/apps/cli/raw-line-reader-multiline.test.ts tests/unit/apps/cli/cli-feature-config-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit history and multiline opt-outs omit their reader behavior; absent history option retains the raw single-line reader path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/prompt-history.test.ts tests/unit/apps/cli/raw-line-reader-history.test.ts tests/unit/apps/cli/raw-line-reader-multiline.test.ts tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts tests/unit/apps/cli/cli-feature-config-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused suite passes history navigation, reverse search, persistence ring semantics, heredoc assembly, and REPL prompt-pipeline wiring.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: Catalog purpose and knob descriptions call history and multiline default-OFF, while readCliFeatureConfig makes both default-ON for the CLI.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'createPromptHistory|promptHistory|multiline|QUANTA_HISTORY|QUANTA_MULTILINE' src/apps/cli/repl src/apps/cli/raw-line-reader.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The source path is CLI composition to prompt pipeline to raw reader; CliFeatureConfig resolves both omitted knobs to enabled.
+  - kind: test
+    command: bun test tests/unit/apps/cli/prompt-history.test.ts tests/unit/apps/cli/raw-line-reader-history.test.ts tests/unit/apps/cli/raw-line-reader-multiline.test.ts tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts tests/unit/apps/cli/cli-feature-config-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 199-pass focused audit run includes unit and composed CLI reader behavior.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception is reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-cliux
+review_state: approved
+reviewer: codex/cross-review-wave1

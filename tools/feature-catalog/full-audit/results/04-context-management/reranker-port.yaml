@@ -1,0 +1,61 @@
+version: 1
+feature_id: reranker-port
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/pipeline.ts:adaptReranker
+entrypoints:
+  - src/runner/assemble/pipeline.ts:buildSemanticThenRerank
+  - src/runner/assemble/search-pipeline.ts:buildSearchPipelineFromEnv
+activation:
+  - Set QUANTA_PIPELINE=semantic-then-rerank; QUANTA_RERANKER selects identity, headless, cohere, or voyage.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/retrieval/reranker/registry.ts:createRerankerFromEnv
+  - src/retrieval/reranker/cohere-reranker.ts:createCohereReranker
+  - src/retrieval/reranker/voyage-reranker.ts:createVoyageReranker
+consumer:
+  - src/runner/assemble/pipeline.ts:adaptReranker
+  - src/retrieval/pipeline/semantic-then-rerank.ts
+reachable: yes
+surface_findings:
+  - The pipeline composition constructs the env-selected reranker for the semantic-then-rerank preset and adapts Result failures to stable input ordering.
+  - Absent QUANTA_RERANKER selects identity; vendor selection requires the semantic pipeline preset and the relevant credentials, while factory failure disables that requested pipeline without crashing startup.
+  - The catalog's claim that a composition-root runHybridQuery reranker wire is future work is stale because the pipeline composition already consumes this port.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/retrieval/reranker-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset QUANTA_RERANKER selects the identity reranker with pass-through ordering.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/retrieval/reranker-hellgate.test.ts tests/unit/apps/agent/pipeline-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Vendor boundary, identity default, env selection, and semantic-then-rerank composition rails passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: The catalog says no composition root picks this port, but the live semantic-then-rerank pipeline invokes createRerankerFromEnv through adaptReranker.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'createRerankerFromEnv|adaptReranker|semantic-then-rerank|buildSemanticThenRerank' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/runner/assemble/pipeline.ts src/runner/assemble/search-pipeline.ts src/retrieval/reranker src/retrieval/pipeline
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live pipeline composes the vendor-aware port for the semantic-then-rerank preset.
+  - kind: test
+    command: bun test tests/unit/retrieval/reranker-hellgate.test.ts tests/unit/apps/agent/pipeline-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused reranker and pipeline composition rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

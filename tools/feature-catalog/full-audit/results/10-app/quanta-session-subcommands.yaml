@@ -1,0 +1,52 @@
+version: 1
+feature_id: quanta-session-subcommands
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl.ts:runSessionCommand
+entrypoints:
+  - src/apps/cli/index.ts:session argv route
+activation:
+  - Run quanta session with a supported lifecycle subcommand.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/runner/session-ops:index
+consumer:
+  - src/apps/cli/index.ts:session subcommand router
+  - src/apps/cli/repl.ts:runSessionCommand
+reachable: yes
+surface_findings:
+  - CLI index routes the session subcommand before regular startup and the REPL owns the dispatcher surface.
+  - Browser protocol does not expose equivalent lifecycle verbs, matching catalog web-missing disclosure.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli-session-commands.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Read-only and mutating lifecycle routing, typed errors, import, and operation dispatch rails passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'quanta session|runSessionCommand|session subcommand' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI index and REPL dispatcher own the live session route.
+  - kind: test
+    command: bun test tests/unit/cli-session-commands.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused session command rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

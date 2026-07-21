@@ -1,0 +1,64 @@
+version: 1
+feature_id: instrument-wrap
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/metrics/observability-helper.ts:withFullObservability
+entrypoints:
+  - src/observability/metrics/instrument.ts:instrumentLlmProvider
+  - src/observability/metrics/observability-helper.ts:withFullObservability
+  - src/observability/metrics/instrument-tool.ts:instrumentToolsForExport
+activation:
+  - The tool sub-wrap is installed by host and runner composition only when the process-default metric exporter is enabled.
+  - LLM, scheduler, shadow, budget, LSP, and plan wrappers require a caller to invoke withFullObservability; no production composition call was found.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - Observability wrappers emit counters and histograms while preserving wrapped method contracts.
+consumer:
+  - host/runtime and runner/assemble consume instrumentToolsForExport; other wrappers remain reachable only through the exported helper.
+reachable: yes
+surface_findings:
+  - The catalog-wide all-wrapper E2E is synthetic and proves wrapper behavior, not a production caller for every wrapped port.
+  - Tool metrics have a live conditional export route; the claimed LLM and scheduler composition route is absent.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/instrumentation-coverage-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The zero-wrapper baseline records no metrics, and thrown metric ports preserve wrapped behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-metrics-instrument-hellgate.test.ts tests/unit/observability-metrics-instrument-extra-hellgate.test.ts tests/integration/instrumentation-coverage-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Wrapper contracts and synthetic full-bag coverage passed, including no-throw metric failure handling.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: conditional
+blocker: Only instrumentToolsForExport has a production composition consumer; the remaining wrapper families require a caller to install withFullObservability.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n "instrumentToolsForExport" src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/runner/assemble/tooling.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Tool wrapping is installed in two live composition owners.
+  - kind: source
+    command: rg -n "withFullObservability" src --glob '!src/observability/metrics/observability-helper.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production caller composes the full wrapper bag.
+  - kind: test
+    command: bun test tests/unit/observability-metrics-instrument-hellgate.test.ts tests/unit/observability-metrics-instrument-extra-hellgate.test.ts tests/integration/instrumentation-coverage-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 45 wrapper and integration tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

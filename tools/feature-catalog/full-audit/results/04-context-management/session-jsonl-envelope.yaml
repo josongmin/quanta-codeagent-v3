@@ -1,0 +1,54 @@
+version: 1
+feature_id: session-jsonl-envelope
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/session/store.ts:appendEnvelope JSONL append seam
+entrypoints:
+  - src/session/store.ts:appendEnvelope
+  - src/session/envelope-encoder.ts:encodeSessionLine
+activation:
+  - appendEnvelope is exported from the session barrel and has deterministic codec plus filesystem integration coverage.
+  - No production source caller appends a session envelope at the frozen revision.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/session/envelope-encoder.ts encodes validated SessionEnvelopeRecord values
+consumer:
+  - tests/integration/session-envelope-store-seam.test.ts invokes appendEnvelope and iterateSessionFile
+  - tests/integration/session-envelope-hell-e2e.test.ts exercises the JSONL rail end-to-end
+reachable: no
+surface_findings:
+  - The codec and append seam are implemented and strongly tested.
+  - `rg 'appendEnvelope\\(' src --glob '!src/session/store.ts'` finds no runtime producer, so interactive CLI persistence is not actually wired.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/session-envelope-schema.test.ts tests/unit/session-envelope-encoding.test.ts tests/unit/session-envelope-streaming.test.ts tests/unit/session-envelope-hellgate.test.ts tests/integration/session-envelope-store-seam.test.ts tests/integration/session-envelope-hell-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The codec, schema, append/read ordering, corruption handling, concurrent writers, and independent snapshot rail all passed in focused tests.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: seam-only
+blocker: No production call site emits session_meta, turn_context, event_msg, response_item, or thread_spawn records through appendEnvelope.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'appendEnvelope\\(' src --glob '!src/session/store.ts' --glob '!*.tmp'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: No production caller was found outside the append seam itself; the catalog CLI-reachability claim is therefore unsupported.
+  - kind: test
+    command: bun test tests/unit/session-envelope-schema.test.ts tests/unit/session-envelope-encoding.test.ts tests/unit/session-envelope-streaming.test.ts tests/unit/session-envelope-hellgate.test.ts tests/integration/session-envelope-store-seam.test.ts tests/integration/session-envelope-hell-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused JSONL rails passed as part of the 236-pass audit command.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch1
+review_state: approved
+reviewer: codex/cross-review-wave1

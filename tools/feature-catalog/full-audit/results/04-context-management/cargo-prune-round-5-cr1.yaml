@@ -1,0 +1,47 @@
+version: 1
+feature_id: cargo-prune-round-5-cr1
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt.ts:buildSystemPrompt
+entrypoints:
+  - src/agent/prompt.ts:buildSystemPrompt
+  - src/agent/prompt-sections.ts:defaultPromptSections
+activation:
+  - Static prompt construction; no operator gate or separate runtime component.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/prompt.ts:static prompt literals
+consumer:
+  - src/agent/prompt.ts:buildTurnContext
+reachable: yes
+surface_findings:
+  - The former context-compaction note is absent from the static prompt while the single concise command-injection and immediate-fix security rule remains.
+  - Prompt-system tests pin both deletion and retained security wording, and prompt-rules tests pin byte-stable cache-prefix assembly.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/prompt-system.test.ts tests/unit/prompt-rules-snapshot.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The compact OWASP rule remained present, the cargo compaction note was absent, and static prompt output stayed byte-stable.
+failure_posture: na
+security_posture: conditional
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/prompt-system.test.ts tests/unit/prompt-rules-snapshot.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The combined prompt audit command passed 68 static-prompt and cache-prefix rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

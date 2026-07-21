@@ -1,0 +1,55 @@
+version: 1
+feature_id: mode-notice-block
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/prompt-graph/atoms-notices.ts notice atom selection via src/agent/prompt-reminders.ts:resolveReminderBlocks"
+entrypoints:
+  - "src/agent/loop/context-assembler.ts:assembleTurnContext"
+  - "src/agent/prompt.ts:buildTurnContext"
+activation:
+  - "resolveAgentMode determines the effective mode; PLAN, REVIEW, and AUDIT notice atoms render in the trailing system-reminder."
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: on
+  daemon: on
+producer:
+  - "src/agent/prompt-body.ts:PLAN_NOTICE, REVIEW_NOTICE, AUDIT_NOTICE"
+  - "src/agent/prompt-graph/atoms-notices.ts:NOTICE_ATOMS"
+consumer:
+  - "src/agent/prompt-reminders.ts:resolveReminderBlocks"
+  - "src/agent/prompt-reminders.ts:buildDynamicContext"
+  - "src/agent/prompt.ts:buildTurnContext"
+reachable: yes
+surface_findings:
+  - "Default mode emits no mode notice, while explicit mode wins over legacy planMode."
+  - "The same mode surface has integration proof that PLAN, REVIEW, and AUDIT block mutating built-ins while default mode permits them."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/prompt-dynamic.test.ts tests/integration/mode-block-matrix-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Notice injection, default-mode absence, mode precedence, and end-to-end mode dispatch matrix passed."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg PLAN_NOTICE and resolveReminderBlocks in src/agent/prompt-body.ts src/agent/prompt-graph src/agent/prompt-reminders.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Notice text is atomized, selected by effective mode, and rendered only if the corresponding atom fires."
+  - kind: test
+    command: "bun test tests/unit/agent/prompt-sections.test.ts tests/unit/prompt-sections-hellgate.test.ts tests/unit/prompt-dynamic.test.ts tests/unit/today-date-clock-port-hellgate.test.ts tests/unit/skill-trigger-rules.test.ts tests/integration/mode-block-matrix-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "98 pass, 0 fail across the shared focused prompt context audit rail."
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch2
+review_state: approved
+reviewer: codex/cross-review-wave1

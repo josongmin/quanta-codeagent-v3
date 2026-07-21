@@ -1,0 +1,54 @@
+version: 1
+feature_id: llm-assemble
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/assemble.ts:assembleFromEvents
+entrypoints:
+  - src/agent/streaming-dispatch.ts:stream completion
+  - src/host/runtime/mcp-sampling-handler.ts:sample response assembly
+activation:
+  - Every completed LLM event sequence is folded by consumers that need a Message
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/llm/assemble.ts:assembleFromEvents
+consumer:
+  - src/agent/streaming-dispatch.ts:assembleFromEvents
+  - src/host/runtime/mcp-sampling-handler.ts:assembleFromEvents
+  - src/apps/cli/why-cmd.ts:assembleFromEvents
+reachable: yes
+surface_findings:
+  - Agent stream dispatch and host sampling use the same assembler, rather than reimplementing content-block folding.
+  - Thinking, signature, reset, and deterministic commentary/final phase rules are covered at the owner seam.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm/assemble-thinking.test.ts tests/unit/llm/assemble-thinking-hell.test.ts tests/unit/llm/assemble-phase.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The reducer preserves block ordering, redaction separation, signatures, resets, stop reasons, and phase tags.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'assembleFromEvents' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent src/host src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Live agent dispatch, host sampling, and CLI analysis consumers import the single LLM assembler.
+  - kind: test
+    command: bun test tests/unit/llm/assemble-thinking.test.ts tests/unit/llm/assemble-thinking-hell.test.ts tests/unit/llm/assemble-phase.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused thinking, adversarial, reset, and phase rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

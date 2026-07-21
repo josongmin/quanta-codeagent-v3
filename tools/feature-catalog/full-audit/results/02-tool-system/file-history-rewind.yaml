@@ -1,0 +1,54 @@
+version: 1
+feature_id: file-history-rewind
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts:resolveFileHistorySlice
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+  - src/tool/index.ts:buildDefaultTools
+activation:
+  - Set QUANTA_FILE_HISTORY=1 before session construction; the root supplies one store to the rewind tool and the write/edit capture sink.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/file-history/capture.ts:captureFileHistory
+  - src/tool/file-history/sink.ts:createFileHistorySink
+consumer:
+  - src/tool/file-history/tool.ts:makeFileHistoryRewindTool
+  - src/agent/dispatch/tool-context.ts:ToolContext fileHistory
+reachable: yes
+surface_findings:
+  - The same per-session store is wired to successful write/edit capture and read/restore, avoiding an isolated tool-side history.
+  - Restore validates the jailed path before lookup and write; absent history and unknown versions return typed results without a write.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/file-history-rewind-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Without the port, the tool is absent and capture is a no-op; a throwing capture sink cannot affect the original mutation.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/file-history-rewind-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Store bounds, spelling normalization, jailed restore, typed failure behavior, worktree-key selection, and write-to-restore round trip passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/file-history-rewind-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The combined 12-file audit command passed all 27 file-history rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

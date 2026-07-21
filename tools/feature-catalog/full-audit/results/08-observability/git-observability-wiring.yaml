@@ -1,0 +1,59 @@
+version: 1
+feature_id: git-observability-wiring
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/git-observability/index.ts:wireGitObservability
+entrypoints:
+  - src/agent/loop-helpers.ts:buildTurnDiffSession
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts
+activation:
+  - QUANTA_TURN_DIFF enables the loop-owned TurnDiffSession composition.
+  - Callers can directly construct the composite for fingerprintMeta and turnDiff.
+effective_defaults:
+  cli: off
+  web: na
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/git-observability/index.ts bundles fingerprintMeta and TurnDiffSession helpers.
+consumer:
+  - src/agent/loop-helpers.ts consumes only the composite turnDiff member for enabled loop execution.
+reachable: conditional
+surface_findings:
+  - CLI opt-in fully wires the turn-diff half of the composite into the agent loop.
+  - No production composition root calls fingerprintMeta at session open, so session git metadata is not populated on the claimed CLI path.
+  - The helper and real-git composite integration are sound, but the catalog's claim of both halves being wired in one CLI line is overbroad.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/loop-turn-diff-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Without gitObservability, the loop does not allocate or call the turn diff session.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git-observability-wiring-hellgate.test.ts tests/integration/git-observability-composite.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Both composite helper arms pass unit rails and real-git integration proves fingerprint and turn-diff behavior.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: The production CLI loop consumes only turnDiff; no live session-open caller invokes fingerprintMeta despite the catalog claiming both composition halves are wired.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n 'wireGitObservability\|fingerprintMeta\|gitObservability' 9a12f7a -- src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Loop helper obtains wireGitObservability(...).turnDiff while fingerprintMeta has no production invocation.
+  - kind: test
+    command: bun test tests/unit/git-observability-wiring-hellgate.test.ts tests/integration/git-observability-composite.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused helper and real-git composite rail passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

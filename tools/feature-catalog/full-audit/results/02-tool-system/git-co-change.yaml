@@ -1,0 +1,50 @@
+version: 1
+feature_id: git-co-change
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal.ts:gitToolList
+entrypoints: [src/apps/cli/index.ts]
+activation: ["QUANTA_GIT_TOOLS=1 plus QUANTA_GIT_CO_CHANGE=1"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/tool/git/co-change.ts:gitCoChangeTool]
+consumer: [src/apps/cli/internal.ts:gitToolList, src/apps/agent/mode-presets/ci-bot.ts]
+reachable: yes
+surface_findings: ["CLI composition appends git_co_change only when both the git suite and co-change gates are enabled; no separate browser tool surface exists."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/git-co-change.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: gitTools() and gitTools(undefined,{}) retain the legacy tool set without git_co_change.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git-co-change.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 14 tests cover RS commit grouping, ranking, deterministic ties, error collapse, and the enabled registration path.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "gitCoChangeEnabled|coChange: true" src/apps/cli src/apps/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI and CI-bot composition paths construct the enabled tool only under the gate.
+  - kind: test
+    command: bun test tests/unit/git-co-change.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 14 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

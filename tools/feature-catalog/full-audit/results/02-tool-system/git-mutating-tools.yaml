@@ -1,0 +1,53 @@
+version: 1
+feature_id: git-mutating-tools
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/git/{commit,branch-switch}.ts through src/tool/git/index.ts:gitTools
+entrypoints: [src/apps/cli/internal.ts:loadFeatures, src/runner/assemble/tooling.ts:buildToolingCore]
+activation: ["QUANTA_GIT_TOOLS=1 causes the interactive CLI to append gitTools; the ordinary CLI and web daemon do not register these tools."]
+effective_defaults:
+  cli: off
+  web: off
+  bench: unknown
+  headless: off
+  daemon: off
+producer: [src/tool/git/commit.ts:gitCommitTool, src/tool/git/branch-switch.ts:gitBranchSwitchTool]
+consumer: [src/tool/git/index.ts:gitTools, src/apps/cli/internal.ts:gitToolList, src/runner/assemble/tooling.ts:buildToolingCore]
+reachable: conditional
+surface_findings:
+  - "git_commit uses argv-only add/commit, distinguishes regular always-confirm from reversible WIP pre-approval, and never bypasses hooks."
+  - "git_branch_switch validates branch names, handles commit-wip/stash/discard explicitly, and escalates destructive discard to always-confirm."
+  - "The catalog's cli:full and web:partial claims are stale: the CLI list is empty unless QUANTA_GIT_TOOLS is enabled, and buildDaemonToolRegistry never calls gitTools."
+off_identity_proof:
+  kind: source
+  command: rg -n 'gitToolsEnabled|gitToolList|gitTools\(' src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/web-daemon/runtime-factory.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The false CLI gate yields an empty gitToolList and the daemon registry expands only buildDefaultTools plus explicit extras.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/git-commit.test.ts tests/unit/tool/git-branch-switch.test.ts tests/unit/tool/git-branch-switch-dirty-action.test.ts tests/unit/git-directive-stage-push-pr-hooks-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused argv, injection, hook, failure, dirty-flow, HITL-tier, and directive tests passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog must describe QUANTA_GIT_TOOLS-gated CLI availability and remove the web surface claim until a web composition root registers gitTools.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'gitCommitTool|gitBranchSwitchTool|hitlTier|gitToolsEnabled|gitToolList|buildDaemonToolRegistry' src/tool/git/commit.ts src/tool/git/branch-switch.ts src/tool/git/index.ts src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Both producers are in gitTools, the CLI consumer is explicitly env-gated, and the daemon has no gitTools consumer.
+  - kind: test
+    command: bun test tests/unit/tool/git-commit.test.ts tests/unit/tool/git-branch-switch.test.ts tests/unit/tool/git-branch-switch-dirty-action.test.ts tests/unit/git-directive-stage-push-pr-hooks-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 58 selected mutation, recovery, command-injection, hook, and directive cases passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-mutating
+review_state: approved
+reviewer: codex/cross-review-wave1

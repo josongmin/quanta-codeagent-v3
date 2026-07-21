@@ -1,0 +1,46 @@
+version: 1
+feature_id: llm-multicloud-provider-router
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/llm/provider-router.ts:resolveProviderWithRouter"
+entrypoints: ["src/llm factory provider resolution"]
+activation: ["Every provider factory resolution applies caller, cloud-env, OAuth, API-key, and default precedence."]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: ["src/llm/provider-router.ts:resolveProviderWithRouter"]
+consumer: ["LLM factory provider resolution"]
+reachable: yes
+surface_findings:
+  - "Mutually enabled cloud flags fail loudly with deterministic conflicts; absent flags fall through the legacy default-provider chain."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/llm-provider-router-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Absent and false cloud flags fall through to lower precedence providers."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/llm-provider-router-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "All precedence layers, strict parsing, conflict, OAuth probe, and deterministic result rails pass."
+failure_posture: fail-loud
+security_posture: conditional
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: "bun test tests/unit/llm-provider-router-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 108-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

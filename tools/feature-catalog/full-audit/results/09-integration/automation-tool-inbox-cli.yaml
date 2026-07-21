@@ -1,0 +1,62 @@
+version: 1
+feature_id: automation-tool-inbox-cli
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/index.ts:CONDITIONAL_REGISTRATIONS
+entrypoints:
+  - src/apps/cli/repl/session-loop.ts
+  - src/tool/index.ts:buildDefaultTools
+activation:
+  - QUANTA_AUTOMATION=on and a wired AutomationEngineSlot register automation_update and threads_handoff.
+  - QUANTA_AUTOMATION_INBOX=true additionally composes the REPL stderr inbox banner onto that slot's ticker.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/automation_update.ts:automationUpdateTool
+  - src/tool/threads_handoff.ts:threadsHandoffTool
+  - src/apps/cli/repl/automation-banner.ts:wireInboxBannerOntoSlot
+consumer:
+  - src/tool/index.ts:CONDITIONAL_REGISTRATIONS
+  - src/apps/cli/repl/session-loop.ts:runReplSession
+reachable: yes
+surface_findings:
+  - buildDefaultTools registers both model-facing tools only when automationEngine is present.
+  - The REPL ticker composes the banner only behind a second default-OFF QUANTA_AUTOMATION_INBOX knob.
+  - Tool CRUD, handoff registration, banner stderr discipline, and default tool absence are covered by the focused rail.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/automation-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Without the engine port, defaultTools omits automation_update and threads_handoff; the automation slot is absent by default.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/automation-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The 6-action tool, conditional registration, inbox count, and stderr-only banner behavior all pass.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: The catalog states QUANTA_AUTOMATION alone activates the REPL inbox banner, but production session-loop additionally requires QUANTA_AUTOMATION_INBOX=true; add that activation condition and knob to the feature claim.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'automationEngine|automationUpdateTool|threadsHandoffTool|wireInboxBannerOntoSlot|QUANTA_AUTOMATION_INBOX' src/tool/index.ts src/apps/cli/repl/session-loop.ts src/apps/cli/repl/automation-banner.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Tool registration follows the engine port, whereas banner wiring is independently guarded by QUANTA_AUTOMATION_INBOX.
+  - kind: test
+    command: bun test tests/unit/cli/automation-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All 22 focused automation wire cases passed, including tool registration, CRUD, banner count, stderr discipline, and default-OFF behavior.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-runtime
+review_state: approved
+reviewer: codex/cross-review-wave1

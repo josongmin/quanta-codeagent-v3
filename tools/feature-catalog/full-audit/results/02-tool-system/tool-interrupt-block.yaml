@@ -1,0 +1,61 @@
+version: 1
+feature_id: tool-interrupt-block
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/dispatch.ts:maybeBuildInterruptRouter to buildToolContext handoff"
+entrypoints:
+  - src/apps/cli/index.ts
+  - "src/agent/dispatch.ts"
+activation:
+  - QUANTA_TOOL_INTERRUPT_BLOCK canonical gate enabled
+  - registry interruptBehavior(toolName) returns block
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/tool/critical-section.ts:makeInterruptRouter"
+  - "src/tool/registry.ts:ToolRegistry.interruptBehavior"
+consumer:
+  - "src/agent/dispatch.ts:dispatchTool"
+  - src/tool/write.ts
+  - src/tool/edit.ts
+reachable: yes
+surface_findings:
+  - "Dispatch creates and disposes a per-call router only for an enabled block-policy tool; otherwise the raw signal is retained."
+  - "write and edit consume the optional criticalSection seam around their atomic windows."
+off_identity_proof:
+  kind: source
+  command: "rg -n 'toolInterruptBlock|maybeBuildInterruptRouter|criticalSection' src/agent/dispatch.ts src/shared/runtime-config.ts src/tool/registry.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Runtime config defaults the gate off and dispatch omits the interrupt handoff when no router is built."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/tool-interrupt-behavior-core-hellgate.test.ts tests/unit/tool-interrupt-behavior-tools-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Core defer, watchdog, idempotence, disposal, and write/edit atomic-window differential rails passed."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'toolInterruptBlock|maybeBuildInterruptRouter|criticalSection' src/agent/dispatch.ts src/shared/runtime-config.ts src/tool/registry.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The gate, registry policy lookup, context handoff, and finally disposal are present on the live dispatch path."
+  - kind: test
+    command: "bun test tests/unit/tool-interrupt-behavior-core-hellgate.test.ts tests/unit/tool-interrupt-behavior-tools-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The selected battery passed, including watchdog forced delivery and no-half-apply write/edit controls."
+audited_at: "2026-07-19"
+auditor: codex/p1-tools-exec
+review_state: approved
+reviewer: codex/cross-review-wave1

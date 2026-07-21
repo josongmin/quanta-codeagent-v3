@@ -1,0 +1,50 @@
+version: 1
+feature_id: per-tool-checkpoint-granularity
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/apps/cli/repl/surface-compose/core-state.ts:buildSurfaceCoreState"
+entrypoints: [src/apps/cli/index.ts]
+activation: ["QUANTA_PER_TOOL_RECORD truthy", "QUANTA_SHADOW truthy"]
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer: ["src/apps/cli/repl/per-tool-checkpoint-wire.ts:buildPerToolCheckpointWire", "src/agent/per-tool-checkpoint/granular-policy.ts:defaultGranularCheckpointPolicy"]
+consumer: ["src/agent/checkpoint-wiring.ts:wireCheckpointedEffectChannel", "src/apps/cli/rewind-tool-cmd.ts:rewindToolCommand"]
+reachable: yes
+surface_findings: ["The CLI composition root requires both gates, constructs one session-scoped granular policy, sends that same registry to the checkpoint wrapper and the /rewind-tool consumer, and disposes it with the surface."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/per-tool-record-lifecycle-hellgate.test.ts tests/unit/cli/repl-surface-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 31 bounded-lifecycle and surface default-OFF assertions pass; absent checkpoint configuration keeps the same channel and the surface omits optional slots.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/per-tool-checkpoint-hellgate.test.ts --test-name-pattern 'GranularCheckpointPolicy|tag collision|abort-mid-checkpoint'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 14 granularity, tag, LRU, tool-call identity, and no-throw tests pass; 12 unrelated 3-way-restore tests are filtered.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'perToolCkpt|buildPerToolCheckpointWire|perToolRegistry|granularPolicy' src/apps/cli/repl/surface-compose src/agent/checkpoint-wiring.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The shared session registry is concretely wired into both the dispatch producer and the slash consumer under the two explicit gates.
+  - kind: test
+    command: bun test tests/unit/cli/surface-wire-r2-hellgate.test.ts tests/unit/cli/repl-surface-wire-hellgate.test.ts tests/unit/cli/repl-slash-ctx-mega-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 43 CLI composition, registry lifecycle, slash projection, and default-OFF tests pass.
+audited_at: "2026-07-19"
+auditor: codex/p1-security-sandbox
+review_state: approved
+reviewer: codex/cross-review-wave1

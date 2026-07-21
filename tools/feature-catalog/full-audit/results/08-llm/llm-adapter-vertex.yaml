@@ -1,0 +1,55 @@
+version: 1
+feature_id: llm-adapter-vertex
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/providers/vertex-adapter.ts:VertexProviderAdapter
+entrypoints:
+  - src/llm/providers/registry.ts:resolveProvider
+activation:
+  - Provider registry selects Vertex only for explicit provider choice or Vertex environment conventions.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/providers/vertex-adapter.ts:VertexProviderAdapter
+consumer:
+  - src/llm/providers/registry.ts:FACTORIES.vertex
+reachable: yes
+surface_findings:
+  - Adapter validates project and location before streaming, permits ADC fallback, and maps transport failures to typed errors.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/llm-providers/registry-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Empty provider configuration selects the default provider rather than Vertex.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm-providers/vertex-adapter-hellgate.test.ts tests/unit/llm-providers/registry-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Adapter contract and registry selection rails passed; live GCP exchange remains the documented hold.
+failure_posture: fail-loud
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'VertexProviderAdapter|FACTORIES.vertex|CLAUDE_CODE_USE_VERTEX' src/llm/providers/vertex-adapter.ts src/llm/providers/registry.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Registry owns opt-in selection and constructs the adapter through its factory.
+  - kind: test
+    command: bun test tests/unit/llm-providers/vertex-adapter-hellgate.test.ts tests/unit/llm-providers/registry-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused Vertex and registry rails passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

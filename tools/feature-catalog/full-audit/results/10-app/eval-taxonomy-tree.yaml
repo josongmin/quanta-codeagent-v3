@@ -1,0 +1,57 @@
+version: 1
+feature_id: eval-taxonomy-tree
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/taxonomy/usecases.ts:TAXONOMY
+entrypoints:
+  - src/apps/eval/taxonomy/index.ts:derived helpers
+activation:
+  - Run an eval classifier, generator, trajectory replay, report, or audit operation that imports the taxonomy helpers.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/eval/taxonomy/usecases.ts:TAXONOMY
+  - src/apps/eval/taxonomy/index.ts:allLeaves leafById parseId
+consumer:
+  - src/apps/eval/taxonomy/classifier.ts
+  - src/apps/eval/synthetic/generator.ts
+  - src/apps/eval/audit/index.ts
+  - src/apps/eval/report/coverage-matrix.ts
+  - src/apps/eval/trajectory/replay.ts
+reachable: no
+surface_findings:
+  - TAXONOMY is an in-process SSOT; derived views lazily cache a stable flattened list and id map for the process lifetime.
+  - Multiple offline eval consumers use the helpers for validation, classification, generation, audit, replay, and reports.
+  - It has no interactive CLI or web surface and no runtime behavior independent of those eval consumers.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-taxonomy.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Tree shape, unique well-formed ids, required examples and evidence keys, helper round trips, count, stable rendering, and malformed-id rejection passed.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'allLeaves|leafById|parseId|TAXONOMY' src/apps/eval/taxonomy src/apps/eval/audit src/apps/eval/synthetic src/apps/eval/report src/apps/eval/trajectory
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The taxonomy owner and its offline eval consumers are directly connected.
+  - kind: test
+    command: bun test tests/unit/eval-taxonomy.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The taxonomy SSOT rail passed within the 315-pass 18-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

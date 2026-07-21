@@ -1,0 +1,54 @@
+version: 1
+feature_id: bench-knob-unit-display
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/eval/knobs-bench.ts:formatKnobValue
+entrypoints:
+  - src/runner/batch/core.ts:buildBatchCore
+  - src/apps/bench/eval/driver.ts
+activation:
+  - Bench knob resolution projects each active knob through knobsForReport, which supplies unit and display fields to bench reports.
+effective_defaults:
+  cli: na
+  web: na
+  bench: on
+  headless: na
+  daemon: na
+producer:
+  - src/runner/batch/eval/knobs-bench.ts:formatKnobValue
+  - src/runner/batch/eval/knobs-bench.ts:knobsForReport
+consumer:
+  - src/runner/batch/core.ts:buildBatchCore
+  - src/apps/bench/eval/driver.ts
+reachable: yes
+surface_findings:
+  - Bench core and eval driver consume the shared report projection rather than formatting knob values independently.
+  - Numeric values carry their unit, including wrapper-object values whose first numeric field is the report quantity; unitless knobs remain on/off flags.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/knob-unit-display.test.ts tests/unit/bench-knob-unit-display-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Numeric, wrapped numeric, boolean, string-with-unit, and red-on-injection report-projection cases passed.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'knobsForReport|formatKnobValue' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/runner/batch src/apps/bench
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Snapshot bench core and eval driver import the common knobsForReport projection.
+  - kind: test
+    command: bun test tests/unit/knob-unit-display.test.ts tests/unit/bench-knob-unit-display-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Unit-display owner rails passed within the 205-test focused run.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

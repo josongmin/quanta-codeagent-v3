@@ -1,0 +1,63 @@
+version: 1
+feature_id: spawn-agents-on-csv
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/subagent.ts:buildSubagentBlock through src/agent/batch-jobs-dispatch.ts:buildInMemoryBatchRunPort
+entrypoints:
+  - src/apps/cli/internal.ts:buildSubagentConfig
+  - src/agent/tier1/subagent.ts:buildSubagentBlock
+  - src/apps/cli/batch-cmd.ts:runBatchCmd
+activation:
+  - "The agent tool requires QUANTA_SUBAGENT and QUANTA_SPAWN_AGENTS_CSV; every call is always-confirm and uses an in-memory job store."
+  - "Sqlite persistence and resume are a separate human quanta batch CLI path, not the agent-callable tool path."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: unknown
+  daemon: off
+producer:
+  - src/tool/spawn-agents-csv/index.ts:spawnAgentsCsvTool
+  - src/agent/batch-jobs-dispatch.ts:buildInMemoryBatchRunPort
+  - src/agent/batch-jobs/runner.ts:BatchJobRunner
+consumer:
+  - src/agent/tier1/subagent.ts:buildSubagentBlock
+  - src/apps/cli/batch-cmd.ts:runBatchCmd
+reachable: yes
+surface_findings:
+  - "The LLM-callable path executes one child per row with the pool cap, parent-depth propagation, abort-to-failure behavior, and results CSV."
+  - "The SQLite store and resume rails are real but belong to the human CLI; the agent tool always mints InMemoryJobStore."
+  - "No web-daemon registry consumer exists, so catalog web full is false."
+off_identity_proof:
+  kind: source
+  command: "rg -n 'enableSpawnAgentsCsv|QUANTA_SPAWN_AGENTS_CSV|spawnAgentsCsvTool|buildInMemoryBatchRunPort' src/apps/cli/internal.ts src/agent/tier1/subagent.ts src/agent/batch-jobs-dispatch.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Absent opt-in omits the tool from the tier-1 block; its agent-callable port is explicitly in-memory."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/agent-batch-jobs-hellgate.test.ts tests/unit/batch-jobs-sqlite-store-hellgate.test.ts tests/unit/spawn-agents-csv-hellgate.test.ts tests/unit/cli/batch-cmd-resume-hellgate.test.ts tests/unit/report-job-result-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "75 selected CSV, cap, recursion, abort, structured result, SQLite durability, and CLI-resume assertions passed."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: "Catalog title and web surface claim conflate the in-memory agent tool with the separate durable CLI runner and incorrectly mark web full."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg -n 'new InMemoryJobStore|new SqliteJobStore|spawnAgentsCsvTool|buildInMemoryBatchRunPort|buildDaemonToolRegistry' src/agent/batch-jobs-dispatch.ts src/agent/tier1/subagent.ts src/apps/cli/batch-cmd.ts src/apps/web-daemon/runtime-factory.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The tool's producer is explicitly ephemeral while the durable store is wired only by the batch command; web does not compose it."
+  - kind: test
+    command: "bun test tests/unit/agent-batch-jobs-hellgate.test.ts tests/unit/batch-jobs-sqlite-store-hellgate.test.ts tests/unit/spawn-agents-csv-hellgate.test.ts tests/unit/cli/batch-cmd-resume-hellgate.test.ts tests/unit/report-job-result-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Core fan-out and distinct durable CLI paths have focused passing rails."
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch8
+review_state: approved
+reviewer: codex/cross-review-wave1

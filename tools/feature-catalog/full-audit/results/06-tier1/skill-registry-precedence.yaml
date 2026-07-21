@@ -1,0 +1,53 @@
+version: 1
+feature_id: skill-registry-precedence
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/registry.ts:buildSkillRegistry
+entrypoints:
+  - src/skill/registry.ts:buildSkillRegistry
+activation:
+  - buildSkillRegistry can discover seven source directories and resolve collisions in a deterministic pure snapshot.
+  - No CLI, daemon, web, or agent composition root invokes buildSkillRegistry.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/skill/registry.ts:defaultSkillSources
+  - src/skill/registry.ts:buildSkillRegistry
+consumer: []
+reachable: no
+surface_findings:
+  - Registry discovery, legacy fallback, collision recording, lookup, and bySope are fully unit-tested.
+  - CLI and daemon instead use direct discoverSkills plus discoverSystemSkills merges, bypassing all seven-source precedence.
+  - The catalog's deliberate hold correctly names the missing buildSkillsConfigCore host integration.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill-registry-precedence.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Registry behavior passes in isolated fixtures; no production activation path exists.
+failure_posture: na
+security_posture: conditional
+observability: na
+verdict: not-activatable
+blocker: No production composition root calls buildSkillRegistry or exposes its seven-source lookup result.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg 'buildSkillRegistry\(' src --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The only implementation occurrence is the registry declaration; no host call site exists.
+  - kind: test
+    command: bun test tests/unit/skill-registry-precedence.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Seven-source discovery and precedence matrix rails passed as isolated behavior.
+audited_at: "2026-07-19"
+auditor: codex/p2_tier1_batch14
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,46 @@
+version: 1
+feature_id: git-diff-scope-inference
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/git/compose.ts:diffToScopes
+entrypoints:
+  - src/tool/git/compose.ts:commit author flow
+activation:
+  - Invoke the git compose/commit author tool on a diff containing recognized source-root paths.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: na
+  headless: resource
+  daemon: resource
+producer:
+  - src/tool/git/compose.ts:diffToScopes
+consumer:
+  - src/tool/git/compose.ts:authorOnce prompt construction
+reachable: yes
+surface_findings:
+  - Candidate scopes are a deterministic optional author prompt hint; absent candidates leave the prompt without a hint.
+  - Conventional-commit scope mismatch remains advisory and never blocks the authored commit.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/git-compose.hellgate.test.ts tests/unit/tool/git-compose-knob.hellgate.test.ts tests/unit/tool/git-compose-e2e.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Diff parsing, scope hint, knobs, and compose flow rails passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/tool/git-compose.hellgate.test.ts tests/unit/tool/git-compose-knob.hellgate.test.ts tests/unit/tool/git-compose-e2e.hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused git scope rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

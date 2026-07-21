@@ -1,0 +1,55 @@
+version: 1
+feature_id: distill-redaction-port
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/memory-consolidator-hook.ts:applyRedactor
+entrypoints:
+  - src/runner/session-memory-auto.ts:buildSessionMemoryAutoWires
+  - src/agent/memory-consolidator-hook.ts:runMemoryConsolidatorHook
+activation:
+  - buildSessionMemoryAutoWires supplies redactSecrets with origin memory_distill to the consolidator block.
+  - The consolidator applies that callback to each text segment before calling its Phase1 port.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: unknown
+  headless: on
+  daemon: unknown
+producer:
+  - src/agent/memory-consolidator-hook.ts:applyRedactor
+consumer:
+  - src/agent/memory-consolidator-hook.ts:runMemoryConsolidatorHook
+  - src/runner/session-memory-auto.ts:buildSessionMemoryAutoWires
+reachable: yes
+surface_findings:
+  - Omitted redact remains the documented identity seam for direct callers.
+  - The live memory-auto composition already injects the real redactor, including the memory_distill origin, before Phase1 sees rollout text.
+  - The deliberate-hold promotion path saying CLI wiring is future user WIP is stale against the current builder.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-distill-redaction-hellgate.test.ts tests/unit/memory-consolidator-hook-hellgate.test.ts tests/integration/memory-auto-trigger-session-end-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed for text-block transformation, raw-secret exclusion from Phase1, real session-end distill, and durable store write.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog promotion text says the CLI still needs to wire the real redactor, but buildSessionMemoryAutoWires already supplies it on the live CLI memory-auto path.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg 'redact: \(content\).*redactSecrets|applyRedactor|runMemoryConsolidatorHook' src/runner/session-memory-auto.ts src/agent/memory-consolidator-hook.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The builder injects redactSecrets at the owner seam and the hook maps it over rollout text before invoking Phase1.
+  - kind: test
+    command: bun test tests/unit/memory-distill-redaction-hellgate.test.ts tests/unit/memory-consolidator-hook-hellgate.test.ts tests/integration/memory-auto-trigger-session-end-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 43 focused tests passed for secret exclusion and the real session-end consolidation path.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch10
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,48 @@
+version: 1
+feature_id: eval-storage-result-store
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/storage/result-store.ts:ResultStore
+entrypoints:
+  - src/apps/eval/index.ts:eval commands
+activation:
+  - Run an eval tier that writes run records.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/eval/storage/result-store.ts:ResultStore
+consumer:
+  - src/apps/eval/compare/index.ts:runCompare
+  - src/apps/eval/trajectory/replay.ts:replayFixture
+reachable: yes
+surface_findings:
+  - Eval tier consumers use one store per run and await finish after writing records.
+  - Per-run promise serialization preserves JSONL line boundaries while unrelated runs remain independent.
+  - Malformed or schema-invalid records are dropped with warnings rather than yielded as valid evidence.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-storage-roundtrip.test.ts tests/unit/eval-error-channels.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Roundtrip, serialized records, and malformed-payload drop rails passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/eval-storage-roundtrip.test.ts tests/unit/eval-error-channels.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused eval storage rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

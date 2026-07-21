@@ -1,0 +1,52 @@
+version: 1
+feature_id: branch-search-isolate-symlink-safe
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/branch-search/isolate.ts
+entrypoints:
+  - src/agent/branch-search-runner.ts:buildBranchIsolator
+  - src/runner/knobs/knobs/branch-search.ts:applyBranchSearch
+activation:
+  - The isolator is constructed only after the bench-only branchSearch config is present.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/branch-search/isolate.ts:tmpdirIsolator
+  - src/agent/branch-search/isolate.ts:worktreeIsolator
+consumer:
+  - src/agent/branch-search-runner.ts:buildBranchIsolator
+reachable: yes
+surface_findings:
+  - Symlink-safe cleanup is exercised by the registered bench branch-search path, not an interactive CLI wiring.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/branch-search.test.ts tests/unit/bench-branch-search-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Isolation and bench wiring tests passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: Catalog's CLI full claim is unsupported; isolator is reachable only through default-off bench branch-search configuration.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg 'buildBranchIsolator|branchSearch|SURFACES' src/agent/branch-search-runner.ts src/runner/knobs/knobs/branch-search.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Isolator construction requires branchSearch and that config is bench-only.
+  - kind: test
+    command: bun test tests/unit/branch-search.test.ts tests/unit/bench-branch-search-wiring-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused isolation rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

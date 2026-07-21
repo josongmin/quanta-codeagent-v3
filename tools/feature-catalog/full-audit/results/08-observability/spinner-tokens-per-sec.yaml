@@ -1,0 +1,45 @@
+version: 1
+feature_id: spinner-tokens-per-sec
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/apps/cli/turn-indicator.ts:createTurnIndicator"
+entrypoints: ["src/apps/cli/internal.ts streaming indicator composition"]
+activation: ["TTY CLI indicator enabled unless QUANTA_SPINNER is explicitly disabled; tok/s appears after two output samples."]
+effective_defaults:
+  cli: on
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer: ["src/apps/cli/turn-indicator.ts trailing sample ring"]
+consumer: ["CLI statusBar transient spinner"]
+reachable: yes
+surface_findings: ["The bounded trailing slope shows streaming rate only with valid sample pairs and leaves one-sample output byte-identical."]
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/cli/turn-indicator.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Single sample, disabled spinner, and non-TTY rails produce no rate."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/cli/turn-indicator.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Slope, trailing-window drop, zero-time guard, ring cap, and render order pass."
+failure_posture: na
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: "bun test tests/unit/cli/turn-indicator.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 108-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

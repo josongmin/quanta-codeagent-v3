@@ -1,0 +1,60 @@
+version: 1
+feature_id: subagent-background-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-config-assembler.ts:maybeWireBackgroundSubagent -> src/agent/features.ts:buildSessionFeatures -> src/agent/tier1/subagent-bg.ts:buildSubagentBgBlock
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+activation:
+  - QUANTA_SUBAGENT_BG=1 injects one BackgroundSubagentScheduler into AgentConfig.subagentBackground.
+  - buildSessionFeatures materializes subagent_fork, subagent_poll, and subagent_await only when that slot is present.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: unknown
+producer:
+  - src/host/runtime/agent-config-assembler.ts:maybeWireBackgroundSubagent
+  - src/agent/tier1/subagent-bg.ts:buildSubagentBgBlock
+consumer:
+  - src/agent/features.ts:buildSessionFeatures
+  - src/tool/subagent-bg.ts:subagentBgTools
+reachable: yes
+surface_findings:
+  - The host assembler owns the explicit QUANTA_SUBAGENT_BG opt-in and injects the scheduler before session feature construction.
+  - The feature builder registers exactly the three background scheduler tools when the slot is populated; the forced-background fourth tool remains independently gated.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/subagent-background-wire-hellgate.test.ts tests/integration/hexagonal-ports-closeout.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent slot produces no background tools, including in the composed feature surface.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent-config-injected-env-wiring-hellgate.test.ts tests/unit/subagent-background-wire-hellgate.test.ts tests/integration/hexagonal-ports-closeout.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Request-scoped env wiring installs the scheduler and focused rails prove all three tools share and use that exact scheduler instance.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'maybeWireBackgroundSubagent|QUANTA_SUBAGENT_BG|buildSubagentBgBlock|subagentBgTools' src/host/runtime/agent-config-assembler.ts src/agent/features.ts src/agent/tier1/subagent-bg.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The opt-in producer, feature composition consumer, and concrete tool factory form one live path.
+  - kind: test
+    command: bun test tests/unit/agent-config-injected-env-wiring-hellgate.test.ts tests/unit/subagent-background-wire-hellgate.test.ts tests/integration/hexagonal-ports-closeout.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused injected-env and composition rails passed with no failures.
+audited_at: '2026-07-19'
+auditor: codex/p2-tier1-batch19
+review_state: approved
+reviewer: codex/cross-review-wave1

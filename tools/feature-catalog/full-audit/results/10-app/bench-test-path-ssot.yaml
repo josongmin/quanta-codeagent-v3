@@ -1,0 +1,58 @@
+version: 1
+feature_id: bench-test-path-ssot
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/test-path.ts:isTestFilePath
+entrypoints:
+  - src/agent/dispatch/preflight-consults.ts:consultTestScope
+  - src/runner/batch/eval/snapshot.ts:sourceOnlyDiff
+activation:
+  - Enable QUANTA_BENCH_PROTECT_TESTS for a bench dispatch or generate a source-only bench snapshot.
+effective_defaults:
+  cli: off
+  web: na
+  bench: resource
+  headless: resource
+  daemon: na
+producer:
+  - src/shared/test-path.ts:isTestFilePath
+consumer:
+  - src/agent/dispatch/preflight-consults.ts:consultTestScope
+  - src/runner/batch/eval/snapshot.ts:sourceOnlyDiff
+  - src/runner/batch/eval/stream-tap.ts
+reachable: yes
+surface_findings:
+  - Dispatch preflight and bench snapshot sanitation import the shared matcher instead of re-implementing test-path detection.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/dispatch-test-scope-guard-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Disabled protection permits the same test-path edit.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/dispatch-test-scope-guard-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Enabled guard denies test edits and allows source-only edits, including apply_patch paths.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'isTestFilePath' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent/dispatch src/runner/batch/eval src/shared
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Both guard and sanitizer consume the shared classifier.
+  - kind: test
+    command: bun test tests/unit/dispatch-test-scope-guard-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused test-path guard rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,46 @@
+version: 1
+feature_id: lsp-client-base
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/lsp/adapters/base.ts:LspClient
+entrypoints:
+  - src/lsp/adapters/typescript.ts
+  - src/lsp/adapters/pyright.ts
+activation:
+  - Language adapters inherit the base client handshake and navigation RPC implementation.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: resource
+producer:
+  - src/lsp/adapters/base.ts:LspClient
+consumer:
+  - src/tool/lsp_nav/index.ts
+reachable: yes
+surface_findings:
+  - Lifecycle, cancellation, capability null, wire error, document synchronization, and symbol normalization have focused coverage.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/lsp-nav-rpc.test.ts tests/unit/lsp-nav-per-tool.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Base client RPC and downstream tool behavior rails passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/lsp-nav-rpc.test.ts tests/unit/lsp-nav-per-tool.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: LSP base-client rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

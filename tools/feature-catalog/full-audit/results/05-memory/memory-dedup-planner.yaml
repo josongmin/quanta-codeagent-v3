@@ -1,0 +1,53 @@
+version: 1
+feature_id: memory-dedup-planner
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/memory.ts:persistSession
+entrypoints:
+  - src/agent/memory.ts:persistSession
+  - src/agent/loop/session-lifecycle.ts:persistFinalMessages
+activation:
+  - For every distilled candidate, persistSession calls findNearDuplicates on the current store snapshot before arbitration and applying insert, merge, or supersede.
+  - The path is resource-backed and activates only with a configured durable memory persistence path.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/memory/dedup.ts:findNearDuplicates
+consumer:
+  - src/agent/memory.ts:persistSession
+reachable: yes
+surface_findings:
+  - Real runAgent e2e proves a near duplicate reaches arbitration and realizes both supersede and merge outcomes on the durable store.
+  - The distinct-record control proves the evidence is not vacuous: no candidate means no arbitration and a new row is inserted.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/dedup.test.ts tests/integration/memory-dedup-planner-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Pure similarity behavior and runAgent durable-store supersede, merge, and distinct controls passed.
+failure_posture: degraded
+security_posture: verified
+observability: unknown
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'findNearDuplicates|decideOp|applyOp' src/agent/memory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The production persistence loop calls the planner before its LLM arbitration and durable operation application.
+  - kind: test
+    command: bun test tests/unit/dedup.test.ts tests/integration/memory-dedup-planner-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Similarity unit rail and non-vacuous runAgent e2e passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

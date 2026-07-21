@@ -1,0 +1,58 @@
+version: 1
+feature_id: spinner-stall-detection
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/spinner-stall-live-wire.ts:buildSpinnerStallLiveWire
+entrypoints:
+  - src/apps/cli/repl/session-setup.ts:setupSession decorates boot.llm when the CLI gate is enabled
+activation:
+  - QUANTA_SPINNER_STALL=1 constructs one session-scoped detector, wraps the LLM, and installs a 1s poll timer.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/spinner-stall/default-detector.ts:createDefaultStallDetector
+  - src/llm/spinner-stall/event-emitter.ts:createSpinnerStallEmitter
+consumer:
+  - src/apps/cli/repl/session-setup.ts:setupSession
+  - src/shared/operator-notice.ts:emitOperatorNotice
+reachable: yes
+surface_findings:
+  - CLI setup preserves the literal boot.llm and schedules no timer while OFF.
+  - ON wraps every stream, composes caller onChunk, stops correlation in finally, and tears down the timer during session shutdown.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/session-setup-hellgate.test.ts tests/unit/apps/cli/repl/spinner-stall-live-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off cases prove literal LLM pass-through and no scheduled poll timer.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/session-setup-hellgate.test.ts tests/unit/apps/cli/repl/spinner-stall-live-wire-hellgate.test.ts tests/unit/llm/spinner-stall-operator-notice-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-on tests prove one latched stall warning, recovery clear, onChunk composition, no correlation leak, and shutdown cancellation.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n --glob 'src/**' 'buildSpinnerStallLiveWire|QUANTA_SPINNER_STALL|spinnerStallWire' src/apps/cli src/llm
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI session setup owns the gate, LLM decoration, and shutdown teardown; the wire owns detector lifecycle and polling.
+  - kind: test
+    command: bun test tests/unit/spinner-stall-detector-hellgate.test.ts tests/unit/llm-providers-onchunk-wire-hellgate.test.ts tests/unit/llm/spinner-stall-operator-notice-hellgate.test.ts tests/unit/apps/cli/repl/spinner-stall-live-wire-hellgate.test.ts tests/unit/apps/cli/session-setup-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 68 detector, provider-hook, operator-notice, live-wire, and session-setup cases pass.
+audited_at: "2026-07-19"
+auditor: codex/p1-observability-b
+review_state: approved
+reviewer: codex/cross-review-wave1

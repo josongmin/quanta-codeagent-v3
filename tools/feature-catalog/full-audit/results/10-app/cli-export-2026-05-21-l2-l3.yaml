@@ -1,0 +1,54 @@
+version: 1
+feature_id: cli-export-2026-05-21-l2-l3
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal.ts:exported assembly helpers
+entrypoints:
+  - src/apps/cli/index.ts:main
+  - src/apps/cli/repl.ts:buildLLMWithByok
+activation:
+  - Interactive CLI startup consumes the exported assembly helpers.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/cli/internal.ts:buildLLM
+  - src/apps/cli/internal.ts:buildStore
+consumer:
+  - src/apps/cli/internal.ts:main composition
+  - src/apps/cli/repl.ts:bootstrapSession
+reachable: yes
+surface_findings:
+  - The CLI entry and REPL consume the same internal assembly helpers; no local config-assemble shim remains.
+  - Several represented options remain feature-gated individually, but the export/assembly closure itself is always live in CLI composition.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli-summarizer.test.ts tests/integration/cli-export-assembly.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Exported helper assembly, provider selection, optional ports, and summarizer seams passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildLLM|buildStore|buildLLMWithByok' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI internal and REPL composition consume the exported helper seams.
+  - kind: test
+    command: bun test tests/unit/cli-summarizer.test.ts tests/integration/cli-export-assembly.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused CLI export/assembly rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

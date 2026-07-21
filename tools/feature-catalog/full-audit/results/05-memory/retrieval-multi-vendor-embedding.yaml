@@ -1,0 +1,49 @@
+version: 1
+feature_id: retrieval-multi-vendor-embedding
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/retrieval/embedders/openai.ts:createOpenAIEmbedder and src/retrieval/embedders/voyage.ts:createVoyageEmbedder
+entrypoints:
+  - src/retrieval/index.ts exports the eight retrieval embedding adapters.
+activation:
+  - The six non-OpenAI/Voyage adapters always throw when embed is called.
+  - No production source constructs either runtime retrieval adapter or supplies one to the retrieval stack.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/retrieval/embedders/openai.ts:createOpenAIEmbedder
+  - src/retrieval/embedders/voyage.ts:createVoyageEmbedder
+consumer:
+  - No production consumer; constructors appear only in unit/eval test code and barrel exports.
+reachable: no
+surface_findings:
+  - The catalog accurately describes two injected-HTTP implementations and six loud stubs.
+  - src/host/runtime/agent-arg-builder.ts enables a retrieval stack without an embedding adapter, so QUANTA_RETRIEVAL_HYBRID cannot activate this feature.
+  - The separate retrieval engines registry is a distinct implementation and does not consume this EmbeddingPort.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No shipped composition root constructs a retrieval EmbeddingPort or routes an embedding query through it.
+disposition: wire
+receipts:
+  - kind: source
+    command: "rg -n 'create(OpenAI|Voyage)Embedder\\(|embedding:' src --glob '*.ts'"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production search found no constructor call for the retrieval adapters and the host stack builder receives no embedding input.
+  - kind: test
+    command: bun test tests/unit/retrieval-embedding-multi-vendor-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 25 focused tests passed for adapter batching, aborts, HTTP failures, and six loud stubs.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch12
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,54 @@
+version: 1
+feature_id: memory-self-edit-tools
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/tooling.ts:buildToolingCore
+entrypoints:
+  - src/runner/assemble/tooling.ts:buildToolingCore
+activation:
+  - A configured persistent store and memory.selfEditTools not false register memory_search, memory_write, and memory_update.
+  - The Web daemon does not pass a memory store or memory configuration into its live agent registry; it exposes a readout-only store instead.
+effective_defaults:
+  cli: resource
+  web: off
+  bench: resource
+  headless: unknown
+  daemon: off
+producer:
+  - src/agent/memory-tools.ts:memoryTools
+consumer:
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/tool/registry.ts:ToolRegistry
+reachable: conditional
+surface_findings:
+  - CLI-style assembly registers all three tools when its normal memory store exists, and each tool converts execution failures into typed results.
+  - Real-loop coverage proves write then search dispatch mutates and rereads the store; the neuter control proves that assertion depends on registry registration.
+  - Catalog surface_integration.web says full, but buildAgentConfigBase in the web daemon creates only default, MCP, artifact, and ask-user tools; no memoryTools call or memory config reaches the registry.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-tools.test.ts tests/unit/memory-embedder.test.ts tests/unit/memory-hellgate.test.ts tests/integration/memory-self-edit-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Tool contracts and the real-loop write-search e2e with non-vacuous registry-removal control passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: Catalog claims a full Web surface although the production Web daemon does not register the self-edit memory tools.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg "memoryTools\(|buildToolingCore|memoryStore|buildDaemonToolRegistry" src/runner/assemble/tooling.ts src/agent/memory-tools.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The normal tooling assembler consumes memoryTools, while the Web daemon's live registry omits it and uses memoryStore only for readout sources.
+  - kind: test
+    command: bun test tests/unit/memory-tools.test.ts tests/unit/memory-embedder.test.ts tests/unit/memory-hellgate.test.ts tests/integration/memory-self-edit-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused self-edit tool contracts and real-loop e2e passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch8
+review_state: approved
+reviewer: codex/cross-review-wave1

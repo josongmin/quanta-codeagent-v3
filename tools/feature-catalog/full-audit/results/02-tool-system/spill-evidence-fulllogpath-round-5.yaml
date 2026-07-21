@@ -1,0 +1,60 @@
+version: 1
+feature_id: spill-evidence-fulllogpath-round-5
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/registry.ts:ToolRegistry.run spill evidence merge
+entrypoints:
+  - src/agent/dispatch/execute.ts:evidenceOf
+  - src/agent/stream-callbacks.ts:tool_result trajectory projection
+activation:
+  - Execute a tool whose output exceeds the configured cap so capToolOutput returns a spillPath.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/tool/output-spill.ts:capToolOutput
+  - src/tool/registry.ts:ToolRegistry.run
+consumer:
+  - src/agent/dispatch/execute.ts:evidenceOf
+  - src/agent/stream-callbacks.ts:tool_result fullLogPath projection
+reachable: yes
+surface_findings:
+  - Only an oversized result creates a spill path; the normal under-cap route leaves existing ToolResult evidence untouched.
+  - Registry merges the typed path into evidence.fullLogPath without clobbering existing evidence, then execute evidenceOf lifts it into DispatchResult.
+  - The real loop emits the same path on tool_result trajectory events, permitting an operator to locate the untruncated artifact.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/output-spill.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Under-cap output yields no spill path, write, marker, or path evidence.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/output-spill.test.ts tests/integration/tool-spill-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Oversized output writes the full artifact and the integration rail observes the identical path in the model result and emitted tool_result event.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'spillPath|fullLogPath|evidenceOf|tool_result' src/tool/output-spill.ts src/tool/registry.ts src/agent/dispatch/execute.ts src/agent/stream-callbacks.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The spill path passes through typed result evidence, dispatch evidence, and stream event projection.
+  - kind: test
+    command: bun test tests/unit/output-spill.test.ts tests/integration/tool-spill-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused spill routing rails passed within the 155-pass 10-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

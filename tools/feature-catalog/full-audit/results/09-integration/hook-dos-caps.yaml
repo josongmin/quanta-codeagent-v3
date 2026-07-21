@@ -1,0 +1,52 @@
+version: 1
+feature_id: hook-dos-caps
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/hooks.ts:HookBus.on and HookBus.emit
+entrypoints:
+  - src/host/runtime/agent-arg-builder/command-hooks-wire.ts:HookBus construction
+activation:
+  - Supply a HookBus; structural caps apply at its default values or explicit overrides.
+effective_defaults:
+  cli: off
+  web: resource
+  bench: off
+  headless: off
+  daemon: resource
+producer:
+  - src/agent/hooks.ts:HookBus
+consumer:
+  - src/host/runtime/agent-arg-builder/command-hooks-wire.ts:installCommandHooksIntoBase
+  - src/apps/web-daemon/runtime-factory.ts:HookBus
+reachable: yes
+surface_findings:
+  - Every instantiated bus uses the handler and payload cap logic; default host CLI composition only instantiates a bus when hooks are configured.
+  - The cap rejects registration overflow and truncates payloads while preserving dispatch.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/hooks-timeout-cap-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Handler-count failure, payload truncation, anti-leak logging, and caller immutability rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: conditional
+blocker: "The guard is active for every composed HookBus but no HookBus is created on the default CLI path without configured hooks."
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'new HookBus|MAX_HANDLERS_PER_EVENT|MAX_PAYLOAD_BYTES' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent/hooks.ts src/host/runtime src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production composition sites and in-bus cap authority were found.
+  - kind: test
+    command: bun test tests/unit/hooks-timeout-cap-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused DoS cap rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

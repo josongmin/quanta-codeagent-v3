@@ -1,0 +1,60 @@
+version: 1
+feature_id: gate-pattern-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/admissibility-gate/gates.ts:runPatternAutoPassGate"
+entrypoints:
+  - "src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs"
+  - "src/agent/admissibility-gate.ts:runAdmissibilityGate"
+activation:
+  - "QUANTA_REMEMBER_PATTERNS=1 allocates one per-session PatternGrantStore and threads it to both the tool port and admissibility gate."
+  - "A covered, non-dangerous action carrying non-empty rememberPatterns reaches the synthetic auto-pass branch."
+effective_defaults:
+  cli: off
+  web: unknown
+  bench: off
+  headless: off
+  daemon: unknown
+producer:
+  - "src/permission/gate-pattern-wire.ts:autoPassByPatterns"
+  - "src/host/runtime/agent-arg-builder/gated-tool-ports.ts:resolvePermissionPatternSlice"
+consumer:
+  - "src/agent/admissibility-gate/gates.ts:runPatternAutoPassGate"
+  - "src/agent/admissibility-gate/shared.ts:cascadeOnApprove"
+reachable: yes
+surface_findings:
+  - "The host runtime creates one shared store only under the explicit runtime knob and injects it into the live AgentConfig."
+  - "Auto-pass still routes through pre-tool hooks, while empty, uncovered, or dangerous patterns fall through; HARD_DENY remains ahead of the bypass."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/permission-gate-pattern-wire.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Absent permissionPatternStore preserves the pre-feature path."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/permission-gate-pattern-wire.test.ts tests/unit/permission-remember-patterns.test.ts tests/unit/permission/remember-patterns-classifier-hell.test.ts tests/integration/remember-patterns-cascade-hell.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "58 tests pass, including live gate auto-pass, hook veto, HARD_DENY precedence, cascades, and no-widen controls."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'resolvePermissionPatternSlice|permissionPatternStoreSlot|runPatternAutoPassGate|autoPassByPatterns' src/host/runtime/agent-arg-builder.ts src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/agent/admissibility-gate/gates.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The opt-in host composition route shares one store between its model port and the production gate."
+  - kind: test
+    command: "bun test tests/unit/permission-gate-pattern-wire.test.ts tests/unit/permission-remember-patterns.test.ts tests/unit/permission/remember-patterns-classifier-hell.test.ts tests/integration/remember-patterns-cascade-hell.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "58 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch9
+review_state: approved
+reviewer: codex/cross-review-wave1

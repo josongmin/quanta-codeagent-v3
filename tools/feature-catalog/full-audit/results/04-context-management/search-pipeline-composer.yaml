@@ -1,0 +1,64 @@
+version: 1
+feature_id: search-pipeline-composer
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/search-pipeline.ts:buildSearchPipelineFromEnv
+entrypoints:
+  - src/apps/cli/internal.ts:buildTooling
+  - src/host/runtime/agent-arg-builder.ts:buildAgentArgs
+activation:
+  - QUANTA_PIPELINE=none disables the live search wire.
+  - With no explicit kill-switch, buildSearchPipelineFromEnv selects lexical-only search; QUANTA_INDEX enables indexed semantic presets.
+  - The composition root calls assemblePipeline, which instantiates the catalogued composer presets.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: unknown
+  headless: on
+  daemon: unknown
+producer:
+  - src/retrieval/pipeline/compose.ts:compose
+  - src/retrieval/pipeline/lexical-only.ts:lexicalOnlyPipeline
+  - src/retrieval/pipeline/parallel-rrf.ts:parallelRrfPipeline
+consumer:
+  - src/runner/assemble/pipeline.ts:assemblePipeline
+  - src/runner/assemble/search-pipeline.ts:buildSearchPipelineFromEnv
+  - src/apps/cli/internal.ts:buildTooling
+reachable: yes
+surface_findings:
+  - "CLI tooling constructs buildSearchPipelineFromEnv and registers search_codebase from the resulting pipeline."
+  - "The live default is lexical-only unless QUANTA_PIPELINE=none; QUANTA_INDEX selects indexed semantic compositions."
+  - "The catalog claim that nothing in @/agent or @/runner instantiates a pipeline is contradicted by src/runner/assemble/pipeline.ts and its live callers."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/agent/pipeline-wire-hellgate.test.ts tests/unit/retrieval/indexer-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: assemblePipeline defaults to null and QUANTA_PIPELINE=none disables the live search wire.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/retrieval/pipeline-hellgate.test.ts tests/unit/apps/agent/pipeline-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All five presets execute with injected adapters and the composition root returns a SearchPipeline whose tool delegates searches.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg buildSearchPipelineFromEnv and assemblePipeline in src/apps/cli src/host src/runner
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Both CLI and host composition roots construct the search wire; search-pipeline delegates to assemblePipeline and registers search_codebase.
+  - kind: test
+    command: bun test tests/unit/retrieval/pipeline-hellgate.test.ts tests/unit/apps/agent/pipeline-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 176 selected focused tests passed in the shared audit rail; this subset proves preset execution, pipe-to-tool delegation, and explicit assembler OFF behavior.
+audited_at: "2026-07-19"
+auditor: codex/p1-context-core
+review_state: approved
+reviewer: codex/cross-review-wave1

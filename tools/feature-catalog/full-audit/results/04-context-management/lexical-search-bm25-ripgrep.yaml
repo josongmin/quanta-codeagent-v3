@@ -1,0 +1,59 @@
+version: 1
+feature_id: lexical-search-bm25-ripgrep
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/search-pipeline.ts:buildSearchPipelineFromEnv
+entrypoints:
+  - src/apps/cli/internal.ts:buildTooling
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+activation:
+  - Interactive CLI or agent host starts with QUANTA_PIPELINE not set to none; lexical-only is the default no-index preset.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/retrieval/lexical/ripgrep-impl.ts:createRipgrepLexicalSearch
+consumer:
+  - src/runner/assemble/search-pipeline.ts:buildLexicalOverride
+  - src/tool/search-codebase.ts:searchCodebaseTool
+reachable: yes
+surface_findings:
+  - The product search composition creates a ripgrep-backed lexical engine over the workspace and registers the search_codebase tool; QUANTA_PIPELINE=none is the explicit kill switch.
+  - BM25 and ripgrep adapters retain their focused correctness rails, including literal search, fallback, and closed error handling.
+  - The catalog's deliberate hold that no hybrid-query consumer or composition root is pre-wired is stale.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/agent/pipeline-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The older generic pipeline helper returns null for absent or explicit none; product search uses a separate default lexical wire with an explicit none kill switch.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/retrieval/lexical-hellgate.test.ts tests/unit/apps/agent/pipeline-wire-hellgate.test.ts tests/unit/runner/t06-search-pipeline-dispose-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Lexical engine, composition, tool delegation, and resource disposal rails passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: The catalog says no composition root pre-wires the engine, but buildSearchPipelineFromEnv is called by live CLI and host tooling and defaults to lexical-only.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildSearchPipelineFromEnv|createRipgrepLexicalSearch|DEFAULT_NO_INDEX_PRESET|searchPipeline' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/runner/assemble/search-pipeline.ts src/apps/cli/internal.ts src/host/runtime/agent-arg-builder.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Live composition constructs ripgrep lexical search and registers the pipeline/tool with lexical-only as the no-index default.
+  - kind: test
+    command: bun test tests/unit/retrieval/lexical-hellgate.test.ts tests/unit/apps/agent/pipeline-wire-hellgate.test.ts tests/unit/runner/t06-search-pipeline-dispose-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused lexical and product pipeline rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

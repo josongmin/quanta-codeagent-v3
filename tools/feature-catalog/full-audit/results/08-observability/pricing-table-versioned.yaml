@@ -1,0 +1,50 @@
+version: 1
+feature_id: pricing-table-versioned
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/pricing.ts:costUsd
+entrypoints:
+  - src/observability/cost-dashboard.ts:buildCostDashboard
+activation:
+  - Pricing math is consumed whenever a cost dashboard or evaluation requests an estimate for a known model.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/observability/pricing.ts:costUsd
+consumer:
+  - src/observability/cost-dashboard.ts:buildCostDashboard
+reachable: yes
+surface_findings:
+  - Known models use pinned pricing.v2 rates; unknown models return null and provider-specific cache-read accounting avoids double counting.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/pricing.test.ts tests/unit/pricing-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Pinned rate, version, cache-read, and malformed-token rails passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'PRICING_VERSION|costUsd|providerOf' src/observability/pricing.ts src/observability/cost-dashboard.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Versioned price authority is consumed by dashboard aggregation.
+  - kind: test
+    command: bun test tests/unit/pricing.test.ts tests/unit/pricing-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused pricing rails passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

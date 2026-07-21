@@ -1,0 +1,54 @@
+version: 1
+feature_id: communicate-update
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/progress-sink-wire.ts:maybeWireProgressSink
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:wireOptionalCapabilitySlots
+  - src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildGatedToolPorts
+activation:
+  - Set QUANTA_PROGRESS_UPDATE=1; registration and the stream-backed ProgressSink use the same assembler gate.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/communicate-update.ts:communicateUpdateTool
+  - src/host/runtime/progress-sink-wire.ts:createProgressStreamSink
+consumer:
+  - src/stream/adapters/stdout.ts:renderProgressUpdate
+  - src/stream/adapters/jsonl-recorder.ts:record progress_update
+reachable: yes
+surface_findings:
+  - The gate wires both tool registration and a no-throw mirror-to-AgentEvent adapter; a configured tool call reaches the shared stream as progress_update.
+  - The documented missing Tauri status-presentation work is additive; CLI stdout and JSONL consumers are active.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/communicate-update-hellgate.test.ts tests/unit/progress-sink-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off leaves the tool and sink absent, while an unwired sink is an intentional no-op acknowledgement.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts tests/unit/communicate-update-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Composition-root activation emitted a progress event and the e2e rail verified ordered stream events plus JSONL durable intent.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/communicate-update-hellgate.test.ts tests/unit/progress-sink-wire-hellgate.test.ts tests/unit/communicate-update-e2e-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The combined 12-file audit command passed 156 tests, including gate-off identity, assembler wiring, stream delivery, and JSONL recording.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

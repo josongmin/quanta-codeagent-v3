@@ -1,0 +1,52 @@
+version: 1
+feature_id: runtime-config-ssot
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/runtime-config.ts:runtimeConfig
+entrypoints:
+  - src/shared/logger.ts
+  - src/observability/logger.ts
+activation:
+  - Runtime configuration lazily freezes on first read and exposes parsed fields to application consumers.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/shared/runtime-config.ts:runtimeConfigFromEnv
+consumer:
+  - src/shared/logger.ts
+  - src/observability/logger.ts
+reachable: yes
+surface_findings:
+  - Parser, parity, no-dead-knob, and reader-reachability rails pass, but the raw-process-env burn-down ratchet currently fails because 56 direct QUANTA reads exceed its ceiling of 50.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/runtime-config-live-wire.test.ts tests/unit/runtime-config-knobs-default-parity-hellgate.test.ts tests/unit/runtime-config-no-dead-knob-ratchet.test.ts tests/unit/runtime-config-reader-reachability-ratchet.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Configuration projection, catalog parity, reader reachability, and dead-knob rails passed.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: stale-claim
+blocker: The catalog's only-process-env-owner claim is contradicted by 56 direct QUANTA reads and its failing 50-read ratchet.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'process\.env\.QUANTA_' src tests
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Direct QUANTA environment reads remain outside the runtime-config owner.
+  - kind: test
+    command: bun test tests/unit/no-raw-process-env-knob-ratchet-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: Burn-down ratchet reports 56 reads against its enforced maximum of 50.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

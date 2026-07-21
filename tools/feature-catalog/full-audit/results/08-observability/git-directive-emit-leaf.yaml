@@ -1,0 +1,51 @@
+version: 1
+feature_id: git-directive-emit-leaf
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/git-directives/{serializer,parser,default-stdout-emitter}.ts
+entrypoints:
+  - src/tool/git/{commit,branch-switch,stage,push}.ts accept an optional GitDirectiveEmitter
+activation:
+  - A production composition root would have to pass gitDirectiveEmitter into a git tool factory.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/git-directives/serializer.ts:serialize
+  - src/agent/git-directives/default-stdout-emitter.ts:defaultStdoutEmitter
+consumer: []
+reachable: no
+surface_findings:
+  - src/apps/cli/internal.ts constructs gitTools without gitDirectiveEmitter.
+  - Production source has no gitDirectiveEmitter assignment; only optional tool-factory seams consume it.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/git-directives-hellgate.test.ts tests/unit/git-directive-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 19 leaf serdes/emitter cases and 4 opt-in git-tool cases pass, but all ON cases inject the emitter directly rather than using a production root.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production composition root supplies GitDirectiveEmitter to the git tool factories, so the leaf cannot emit on an actual surface.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg -n --glob 'src/**' 'gitDirectiveEmitter\\s*:' src; rg -n --glob 'src/**' 'gitTools\\s*\\(' src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The only production gitTools CLI call passes coChange and budget options, never gitDirectiveEmitter; assignments exist only inside factory forwarding code.
+  - kind: test
+    command: bun test tests/unit/agent/git-directives-hellgate.test.ts tests/unit/git-directive-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 19 ADR-0220 leaf and 4 optional factory-wire cases pass.
+audited_at: "2026-07-19"
+auditor: codex/p1-observability-b
+review_state: approved
+reviewer: codex/cross-review-wave1

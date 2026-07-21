@@ -1,0 +1,57 @@
+version: 1
+feature_id: slash-plan-panel
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/slash/registry-surface.ts:planCmd
+entrypoints:
+  - src/apps/cli/repl/slash-surface.ts:composeSurfaceSlashCtx
+activation:
+  - Run /plan in the interactive CLI; its PlanStore is default-on unless QUANTA_PLAN_STORE explicitly disables the store.
+effective_defaults:
+  cli: on
+  web: off
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/repl/factories/plan-store.ts:buildPlanStoreOrUndefined
+consumer:
+  - src/apps/cli/slash/registry-surface.ts:planCmd
+  - src/apps/cli/repl/slash-surface.ts:planSnapshot
+reachable: yes
+surface_findings:
+  - The default CLI plan store is threaded into the slash context as a read-only snapshot getter.
+  - Missing stores print the defined not-wired sentinel; callback failures return a command error without mutating plan state.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/plan-panel.test.ts tests/unit/apps/cli/slashctx-ports-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent snapshot wiring returns the not-wired path without an exception.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/plan-panel.test.ts tests/unit/slash-commands.test.ts tests/unit/apps/cli/slashctx-ports-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Ordered rendering, color-off behavior, truncation, registry dispatch, and wired snapshot paths passed.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildPlanStoreOrUndefined|planSnapshot|planCmd' src/apps/cli/repl src/apps/cli/slash
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI creates the default-on store and consumes it in the /plan registry command.
+  - kind: test
+    command: bun test tests/unit/cli/plan-panel.test.ts tests/unit/slash-commands.test.ts tests/unit/apps/cli/slashctx-ports-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused plan panel and slash port rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch24
+review_state: approved
+reviewer: codex/cross-review-wave1

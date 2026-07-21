@@ -1,0 +1,55 @@
+version: 1
+feature_id: fork-session-port
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/ctx-adapters/fork-session-adapter.ts:buildForkSessionAdapter
+entrypoints:
+  - src/apps/cli/repl/surface-compose/slash-context-compose.ts:buildSurfaceSlashContext
+  - src/apps/cli/fork-checkpoint-cmd.ts
+activation:
+  - Invoke /fork-checkpoint in an interactive REPL session with a checkpoint reference.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/agent/fork-session/default-forker.ts:defaultForker
+  - src/agent/fork-session/default-checkpoint-base.ts
+consumer:
+  - src/apps/cli/repl/ctx-adapters/fork-session-adapter.ts:buildForkSessionAdapter
+  - src/apps/cli/fork-checkpoint-cmd.ts
+reachable: yes
+surface_findings:
+  - The REPL surface owns a default conversation checkpoint store and passes it into buildReplSlashCtx, which constructs the rich fork adapter and exposes /fork-checkpoint.
+  - Focused rails prove valid forks, branch lineage, cancellation without mutation, shadow-ODB failure semantics, and the slash command no longer reports not wired when its conversation store is present.
+  - The catalog's default-OFF statement that the composition root leaves ctx.forkSession unwired is stale.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/fork-session-port-hellgate.test.ts tests/unit/tool/shadow-fork-hellgate.test.ts tests/unit/agent/fork-session-wire-hellgate.test.ts tests/unit/cli/repl-slash-ctx-mega-wire-hellgate.test.ts tests/unit/cli/repl-surface-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Port, checkpoint wire, slash context, and command rails passed.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: The catalog says ctx.forkSession is left unwired by the composition root, but the current REPL creates a default conversation store and adapts it into the slash context.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildForkSessionAdapter|conversationStore: convStore|forkSession' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/repl/surface-compose src/apps/cli/repl/ctx-adapters src/apps/cli/repl/slash-surface.ts src/apps/cli/fork-checkpoint-cmd.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The REPL composes a default checkpoint store into the fork-session slash adapter and command.
+  - kind: test
+    command: bun test tests/unit/agent/fork-session-port-hellgate.test.ts tests/unit/tool/shadow-fork-hellgate.test.ts tests/unit/agent/fork-session-wire-hellgate.test.ts tests/unit/cli/repl-slash-ctx-mega-wire-hellgate.test.ts tests/unit/cli/repl-surface-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused fork-session and REPL slash rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

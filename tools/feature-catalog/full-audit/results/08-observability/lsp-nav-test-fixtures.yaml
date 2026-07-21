@@ -1,0 +1,56 @@
+version: 1
+feature_id: lsp-nav-test-fixtures
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tests/unit/lsp-nav-fixtures.ts:fakeProvider and run
+entrypoints:
+  - tests/unit/lsp-nav-tools.test.ts
+  - tests/unit/lsp-nav-per-tool.test.ts
+  - tests/unit/lsp-call-hierarchy-tools-hellgate.test.ts
+activation:
+  - Focused LSP navigation test suites import reusable fake LSP providers and tool runners.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - tests/unit/lsp-nav-fixtures.ts:fakeProvider
+  - tests/unit/lsp-nav-fixtures.ts:run
+consumer:
+  - tests/unit/lsp-nav-tools.test.ts
+  - tests/unit/lsp-nav-per-tool.test.ts
+  - tests/unit/lsp-call-hierarchy-tools-hellgate.test.ts
+reachable: no
+surface_findings:
+  - The module is pure test scaffolding; production LSP navigation does not import it.
+  - Consumers exercise registration, jail handling, per-tool provider forwarding, abort behavior, and call-hierarchy rendering against the shared fake provider.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/lsp-nav-tools.test.ts tests/unit/lsp-nav-per-tool.test.ts tests/unit/lsp-call-hierarchy-tools-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Shared fixtures drive registration, tool behavior, and call-hierarchy adversarial rails.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'lsp-nav-fixtures' tests/unit --glob '*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All discovered imports are test suites; no production source consumer exists.
+  - kind: test
+    command: bun test tests/unit/lsp-nav-tools.test.ts tests/unit/lsp-nav-per-tool.test.ts tests/unit/lsp-call-hierarchy-tools-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Included in the focused 394-pass, 0-fail run.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch23
+review_state: approved
+reviewer: codex/cross-review-wave1

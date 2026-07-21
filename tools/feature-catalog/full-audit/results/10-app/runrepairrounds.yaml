@@ -1,0 +1,50 @@
+version: 1
+feature_id: runrepairrounds
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/eval/repair/index.ts:runRepairRounds
+entrypoints:
+  - src/apps/bench/eval/driver.ts:runRepairRoundsInSnapshot
+activation:
+  - Run bench evaluation with repair dependencies enabled.
+effective_defaults:
+  cli: off
+  web: na
+  bench: on
+  headless: off
+  daemon: off
+producer:
+  - repair agent patches and validation results
+consumer:
+  - bench eval repair outcome and subsequent repair context
+reachable: yes
+surface_findings:
+  - The current shared runner core executes rounds inside one snapshot and the bench driver delegates to it; catalog code paths naming the old app-local repair owner are stale.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/bench-repair.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing repair dependency retains one-run baseline behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/bench-repair.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Multi-round validation gates, snapshot continuity, aborts, caps, context bounds, and failures passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: Catalog identifies src/apps/bench/eval/repair as the implementation, but the live owner is the shared src/runner/batch/eval/repair path.
+disposition: fix-claim
+receipts:
+  - kind: test
+    command: bun test tests/integration/bench-repair.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused bench repair integration rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

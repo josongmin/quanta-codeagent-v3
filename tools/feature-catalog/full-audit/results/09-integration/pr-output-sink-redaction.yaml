@@ -1,6 +1,6 @@
 version: 1
 feature_id: pr-output-sink-redaction
-snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
 status: closed
 owner_seam: src/integrations/github/pr-output-sink.ts:createPrOutputSink
 entrypoints: [src/apps/cli/from-pr-cmd-runner.ts]
@@ -46,5 +46,5 @@ receipts:
     evidence: Sink security and production-adapter rails passed in the 384-case grouped run.
 audited_at: "2026-07-19"
 auditor: codex/root
-review_state: pending
-reviewer: null
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,50 @@
+version: 1
+feature_id: pricing-null-proto-guard
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/pricing.ts:TABLE
+entrypoints:
+  - src/observability/pricing.ts:costUsd
+activation:
+  - Every cost estimation performs the null-prototype and own-property lookup before price arithmetic.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/observability/pricing.ts:TABLE
+consumer:
+  - src/observability/pricing.ts:costUsd
+reachable: yes
+surface_findings:
+  - Prototype-key model strings resolve as unknown and return null rather than inherited-object arithmetic or NaN.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/pricing.test.ts tests/unit/pricing-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Prototype-key, unknown-model, cache-read, and totalization rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'Object.create\(null\)|Object.hasOwn\(TABLE|costUsd' src/observability/pricing.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Price table has no prototype chain and cost function owns an own-property guard.
+  - kind: test
+    command: bun test tests/unit/pricing.test.ts tests/unit/pricing-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused pricing guard rails passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

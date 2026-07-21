@@ -1,0 +1,45 @@
+version: 1
+feature_id: codebase-indexer
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/retrieval/indexer/default-scanner.ts:createDefaultScanner
+entrypoints: [src/runner/assemble/search-pipeline.ts]
+activation: ["QUANTA_INDEX=on through the search pipeline assembly"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/retrieval/indexer/default-scanner.ts:createDefaultScanner]
+consumer: [src/runner/assemble/search-pipeline.ts]
+reachable: yes
+surface_findings: ["Indexer construction is opt-in and driven by pipeline assembly; default module loading has no scan side effect."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/retrieval/indexer-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit pipeline none emits no wire; no side-effect construction occurs by default.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/retrieval/indexer-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Workspace scan, delta, ignore, abort, and QUANTA_INDEX wire rails pass.
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/retrieval/indexer-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 31 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

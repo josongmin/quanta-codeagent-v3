@@ -1,0 +1,50 @@
+version: 1
+feature_id: repl-code-smell-cleanup
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/status-flash-config.ts:resolveStatusFlashConfig
+entrypoints:
+  - src/apps/cli/repl session composition
+activation:
+  - Interactive CLI reads optional flash and banner environment overrides.
+effective_defaults:
+  cli: on
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - REPL environment and failure paths
+consumer:
+  - status flashes, banners, paint helper, and warning logger
+reachable: yes
+surface_findings:
+  - Default values preserve prior UX timing; valid overrides and invalid fallback are sealed by focused configuration tests.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/repl-status-flash-config-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default configuration is byte-stable.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/repl-status-flash-config-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Override and invalid-value rails passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/apps/cli/repl-status-flash-config-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused cleanup rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

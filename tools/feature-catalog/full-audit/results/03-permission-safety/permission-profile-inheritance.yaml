@@ -1,0 +1,53 @@
+version: 1
+feature_id: permission-profile-inheritance
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/profile-inheritance.ts:resolveProfileInheritance
+entrypoints:
+  - src/apps/agent/index.ts:buildProfileDefinitionRegistry
+  - src/permission/two-layer-manager.ts:setPermissionProfileFromRegistry
+activation:
+  - Set QUANTA_PERMISSION_PROFILES_JSON to a validated definition registry and select a user-defined profile by flag or QUANTA_PERMISSION_PROFILE.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/agent/index.ts:buildProfileDefinitionRegistry
+consumer:
+  - src/permission/profile-inheritance.ts:resolveProfileInheritance
+  - src/permission/two-layer-manager.ts:live profile slot
+reachable: yes
+surface_findings:
+  - The resolver is pure and resolves user definitions through monotone-narrowing merge; cycles, self-extension, unknown bases, and configured managed widening are typed failures.
+  - The composition root validates the JSON registry and applies a resolved user profile to the live manager; no definitions keeps built-in reference identity and the legacy path.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/permission/profile-inheritance-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: With no user definitions, built-ins are byte-identical and the historical A2 wiring is unchanged.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission/profile-inheritance-hellgate.test.ts tests/unit/permission/profile-inheritance-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All-axis monotonicity, graph failures, managed ceiling behavior, deep/diamond graphs, parser rejection, and end-to-end wiring passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/permission/profile-inheritance-hellgate.test.ts tests/unit/permission/profile-inheritance-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The combined audit command passed all 23 inheritance resolver and composition-root rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

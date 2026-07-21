@@ -1,0 +1,59 @@
+version: 1
+feature_id: jun-11-surface-protocol-inventory
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/internal/session-host-turn-event-bridge.ts:toSessionHostTurnEvent
+entrypoints:
+  - src/host/runtime/internal/context-binding/turn-runner.ts
+  - src/apps/cli/attach/render.ts
+  - apps/web-frontend/src/ws/session-hooks.ts
+activation:
+  - The context-binding turn runner maps AgentEvent values through the central bridge before forwarding them to the session host.
+  - CLI attach and the web transcript consume the protocol inventories.
+effective_defaults:
+  cli: on
+  web: on
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/stream/types.ts:AGENT_EVENT_TYPES
+  - src/protocol/session/events.ts:SESSION_EVENT_TYPES
+  - src/host/runtime/internal/session-host-turn-event-bridge.ts:toSessionHostTurnEvent
+consumer:
+  - src/host/runtime/internal/context-binding/turn-runner.ts
+  - src/apps/cli/attach/render.ts
+  - apps/web-frontend/src/ws/session-hooks.ts
+reachable: yes
+surface_findings:
+  - The bridge is live and context-binding is its production consumer.
+  - The catalog text is stale: it declares 36 AgentEvent types, 15 SessionEvent types, and 7 bridged tags; the snapshot has 40, 23, and 11 respectively.
+  - The inventory hellgate is itself stale at 39 AgentEvent types and fails against the actual 40-type source inventory.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: The feature's pinned inventory counts and bridge-width claim no longer match its source of truth, and its count hellgate is red.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: bun -e 'import {AGENT_EVENT_TYPES} from "./src/stream"; import {SESSION_EVENT_TYPES} from "./src/protocol/session"; import {AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES} from "./src/host/runtime/internal/session-host-turn-event-bridge"; console.log(AGENT_EVENT_TYPES.length, SESSION_EVENT_TYPES.length, AGENT_EVENT_TO_SESSION_HOST_TURN_EVENT_BRIDGED_TYPES.length)'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Canonical inventory sizes are 40 AgentEvent, 23 SessionEvent, and 11 bridged tags.
+  - kind: source
+    command: git grep -n 'toSessionHostTurnEvent' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host/runtime/internal
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: context-binding/turn-runner imports and calls the bridge.
+  - kind: test
+    command: bun test tests/unit/surface-protocol-inventory-hellgate.test.ts tests/unit/host/session-host-turn-event-bridge-hellgate.test.ts tests/unit/kernel/session-host-turn-event-projection-hellgate.test.ts tests/unit/agent-state-projection-ownership-hellgate.test.ts tests/unit/cli/agent-event-surface-inventory-hellgate.test.ts tests/unit/apps/cli/attach/attach-render-inventory-hellgate.test.ts tests/unit/web-frontend-transcript-consumer-inventory-hellgate.test.ts tests/unit/web-frontend-protocol-drift-contract-hellgate.test.ts tests/unit/web-frontend-agent-state-drift-contract-hellgate.test.ts tests/unit/feature-catalog-surface-integration.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: The inventory count assertion fails at expected 39 versus actual 40; the web transcript rail is also blocked by a missing local react package.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,60 @@
+version: 1
+feature_id: zod-toolresult
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/registry.ts:ToolRegistry.run
+entrypoints:
+  - src/agent/dispatch/execute.ts:registry execute adapter
+  - src/agent/dispatch.ts:dispatchTool
+activation:
+  - Dispatch a registered tool with malformed Zod input or an invalid declared structured output.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/registry.ts:input safeParse
+  - src/tool/factory.ts:enforceOutputSchema
+consumer:
+  - src/agent/dispatch/execute.ts:executeAndNormalize
+  - src/agent/dispatch.ts:dispatchTool
+reachable: yes
+surface_findings:
+  - Registry input validation raises a typed ToolInputError; the dispatch boundary normalizes that throw into a structurally valid error tool_result for the model.
+  - Declared output schemas rewrite malformed successful structured results to an ok:false retry instruction and remove stale structured data.
+  - Tools without an output schema retain their prior structured-output behavior, so validation remains opt-in for output shape.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/tool-output-schema-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Tools without an output schema preserve structured output, and pre-existing ok:false results are not rewritten.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool-output-schema-hellgate.test.ts tests/unit/dispatch.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Zod output failure, retry messaging, streaming seam behavior, malformed input ToolInputError normalization, and valid tool_result structure rails passed.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'safeParse|ToolInputError|enforceOutputSchema|registry.run|error tool_result' src/tool/registry.ts src/tool/factory.ts src/agent/dispatch.ts src/agent/dispatch/execute.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Registry performs typed validation and dispatch supplies the recoverable tool_result conversion claimed by the feature.
+  - kind: test
+    command: bun test tests/unit/tool-output-schema-hellgate.test.ts tests/unit/dispatch.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused schema and dispatch rails passed within the 155-pass 10-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,59 @@
+version: 1
+feature_id: read-file-unchanged-dedup
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/tool/read/index.ts:tryReadDedup"
+entrypoints:
+  - "src/apps/cli/index.ts:CLI seeded gate loop"
+  - "src/tool/read/index.ts:resolveReadOutcome"
+activation:
+  - "CLI seeds QUANTA_READ_DEDUP=1 when unset."
+  - "The read tool requires runtimeConfig().readDedup and the session ReadFileState before it can short-circuit."
+effective_defaults:
+  cli: on
+  web: off
+  bench: na
+  headless: off
+  daemon: off
+producer:
+  - "src/tool/read/index.ts:tryReadDedup"
+  - "src/tool/stale-read-guard/state.ts:ReadFileState.recordReadRange"
+consumer:
+  - "src/tool/read/index.ts:read tool result renderer"
+reachable: yes
+surface_findings:
+  - "CLI startup seeds the gate; a same-path, same-range, same-content re-read yields the actionable file_unchanged result."
+  - "The cache is a bounded per-session optimization and a miss, missing state, or changed content falls back to a full render."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/read-file-unchanged-dedup-hellgate.test.ts tests/unit/read-file-unchanged-dedup-e2e-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Knob-off cases return full content on repeated reads and never allocate the range dedup map."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/read-file-unchanged-dedup-hellgate.test.ts tests/unit/read-file-unchanged-dedup-e2e-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "17 pass: real-file repeated reads short-circuit only for the exact range and identical content; changed or different ranges re-render."
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'QUANTA_READ_DEDUP|tryReadDedup|recordReadRange|file_unchanged' src/apps/cli src/shared src/tool"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The CLI seed enables runtime config, and the read tool computes a content hash before deciding whether to render full content or the sentinel."
+  - kind: test
+    command: "bun test tests/unit/read-file-unchanged-dedup-hellgate.test.ts tests/unit/read-file-unchanged-dedup-e2e-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "17 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p1-tools-runtime
+review_state: approved
+reviewer: codex/cross-review-wave1

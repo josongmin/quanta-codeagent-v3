@@ -1,0 +1,50 @@
+version: 1
+feature_id: jsonl-cumulative-retention
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/stream/adapters/jsonl-retention.ts:applyRetention
+entrypoints:
+  - src/apps/cli/session-transcript-retention.ts
+activation:
+  - Explicit transcript-retention command invokes the one-shot sliding-window rewrite.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/stream/adapters/jsonl-retention.ts:applyRetention
+consumer:
+  - src/apps/cli/session-transcript-retention.ts
+reachable: yes
+surface_findings:
+  - Retention keeps newest JSONL rows within the byte cap, rewrites atomically, and fails loudly when a sibling temporary file indicates a concurrent writer.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/jsonl-recorder-retention.test.ts tests/integration/jsonl-retention-realfile.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Boundary accounting, atomic output, busy handling, dry-run, and real-file retention passed.
+failure_posture: fail-loud
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'applyRetention|JsonlRecorderRetentionBusyError' src/stream/adapters/jsonl-retention.ts src/apps/cli/session-transcript-retention.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI transcript retention consumes the stream-layer atomic retention primitive.
+  - kind: test
+    command: bun test tests/unit/jsonl-recorder-retention.test.ts tests/integration/jsonl-retention-realfile.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused retention rails passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

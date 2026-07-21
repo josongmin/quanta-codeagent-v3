@@ -1,0 +1,50 @@
+version: 1
+feature_id: cli-status-command-runner
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/status-line-driver.ts:createStatusLineDriver
+entrypoints:
+  - src/apps/cli/repl/session-setup.ts:status line session setup
+activation:
+  - Set QUANTA_STATUS_LINE and a valid QUANTA_STATUS_LINE_CONFIG.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - scrubbed status payload
+consumer:
+  - operator command stdout first line and pills row
+reachable: yes
+surface_findings:
+  - Session setup starts the driver only after both config gates; runner scrubs environment, bounds execution, and formats ANSI-safe output.
+off_identity_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/status-command-runner.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Configuration absence leaves the driver unconstructed.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/status-command-runner.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Payload allowlist, ANSI formatting, and runner behavior rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test src/apps/cli/__tests__/status-command-runner.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused runner rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

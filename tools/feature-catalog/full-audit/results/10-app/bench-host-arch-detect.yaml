@@ -1,0 +1,47 @@
+version: 1
+feature_id: bench-host-arch-detect
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/bench/harness/arch.ts:hostArch
+entrypoints:
+  - src/apps/bench/harness/prepare.ts:image preparation
+activation:
+  - Run SWE-bench harness preparation.
+effective_defaults:
+  cli: na
+  web: na
+  bench: resource
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/bench/harness/arch.ts
+  - src/apps/bench/harness/images.ts
+consumer:
+  - src/apps/bench/harness/prepare.ts
+reachable: yes
+surface_findings:
+  - Bench preparation uses host architecture and read-only Docker image inventory.
+  - Docker daemon failure degrades to an empty inventory rather than crashing preparation.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/bench-harness-images.test.ts tests/unit/bench-harness-config.test.ts tests/unit/bench-harness-prepare.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Image classification/list degradation, configuration, and preparation rails passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/bench-harness-images.test.ts tests/unit/bench-harness-config.test.ts tests/unit/bench-harness-prepare.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused architecture/image rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

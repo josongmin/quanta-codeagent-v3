@@ -1,0 +1,66 @@
+version: 1
+feature_id: codex-r2-disk-persistence-and-env-swap
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/session-resource-registry/global.ts:getGlobalSessionResourceRegistry
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+activation:
+  - A composed session has sessionId and QUANTA_SESSION_REGISTRY_DISK_DIR is a non-empty usable path.
+  - The first process-level registry lookup selects the disk adapter; unset, empty, or failed paths degrade to in-memory.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: off
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/session-resource-registry/disk-adapter/disk-store.ts:createDiskSessionResourceRegistry
+  - src/agent/session-resource-registry/disk-adapter/gc.ts:sweepDiskRegistry
+consumer:
+  - src/agent/session-resource-registry/global.ts:getGlobalSessionResourceRegistry
+  - src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+reachable: yes
+surface_findings:
+  - The assembler obtains the global registry for a sessionId and installs its store/cache pair into Codex-R2 wires.
+  - Global backend selection reads runtime-config disk path on first mint, uses JSONL disk persistence when available, and falls back to memory without aborting startup.
+  - Cross-machine replication remains intentionally absent under ADR-0355; this is an explicit negative decision rather than a runtime gap.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/session-registry-env-swap-hellgate.test.ts tests/unit/composition-registry-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset/empty/hosed disk-path controls retain a usable in-memory singleton and composition path.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/agent/session-resource-registry/disk-adapter/__tests__/serializer.hellgate.test.ts src/agent/session-resource-registry/disk-adapter/__tests__/disk-store.hellgate.test.ts src/agent/session-resource-registry/disk-adapter/__tests__/gc.hellgate.test.ts tests/unit/session-registry-env-swap-hellgate.test.ts tests/unit/composition-registry-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 74 focused cases pass for serialization, persistence/reload, path guards, TTL/size GC, env selection, fallback, and host registry reuse.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'sessionRegistryDiskDir|createDiskSessionResourceRegistry|getGlobalSessionResourceRegistry|sessionResources.*getOrCreate|sweepDiskRegistry' src/agent/session-resource-registry src/host/runtime/agent-config-assembler.ts src/shared/runtime-config.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime config selects the disk backend, the global singleton owns fallback, and host composition consumes the selected session resources.
+  - kind: test
+    command: bun test src/agent/session-resource-registry/disk-adapter/__tests__/serializer.hellgate.test.ts src/agent/session-resource-registry/disk-adapter/__tests__/disk-store.hellgate.test.ts src/agent/session-resource-registry/disk-adapter/__tests__/gc.hellgate.test.ts tests/unit/session-registry-env-swap-hellgate.test.ts tests/unit/composition-registry-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 74 pass, 0 fail.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3 feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-team
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,54 @@
+version: 1
+feature_id: subagent-multi-agent-bounds
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/subagent.ts:buildSubagentBlock
+entrypoints:
+  - src/apps/cli/internal.ts:buildSubagentConfigCore
+activation:
+  - Enable the CLI subagent capability and configure namespace, timeout, or concurrency options; six-tool wait and cap behavior additionally requires enable6Tools.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/subagent-runner.ts
+  - src/subagent/handlers-6.ts
+consumer:
+  - src/agent/tier1/subagent.ts:buildSubagentBlock
+  - src/apps/cli/internal.ts
+reachable: yes
+surface_findings:
+  - Optional namespace, timeout policy, and concurrency fields are threaded through the live builder; absent fields preserve unrestricted legacy behavior.
+  - Six-tool router assembly gates wait_agent clamping and spawn concurrency denial behind enable6Tools.
+  - Tool namespace maps scoped child names back to the underlying registry rather than changing the parent tool identity.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/subagent-config-knobs-hellgate.test.ts tests/unit/side-agent-typed-kind-gates-default-off.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent optional knobs retain the legacy default behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-tool-namespace-hellgate.test.ts tests/unit/subagent-bounds-hellgate.test.ts tests/unit/subagent-config-knobs-hellgate.test.ts tests/unit/subagent6-live-assembly-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Namespace routing, timeout clamp, concurrency cap, and live six-tool assembly passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: Six-tool timeout and concurrency protections are intentionally inactive until the subagent capability and enable6Tools are selected.
+disposition: hold
+receipts:
+  - kind: test
+    command: bun test tests/unit/subagent-tool-namespace-hellgate.test.ts tests/unit/subagent-bounds-hellgate.test.ts tests/unit/subagent-config-knobs-hellgate.test.ts tests/unit/subagent6-live-assembly-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused multi-agent bound rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

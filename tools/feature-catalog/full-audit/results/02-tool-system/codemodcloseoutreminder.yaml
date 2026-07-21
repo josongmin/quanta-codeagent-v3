@@ -1,0 +1,45 @@
+version: 1
+feature_id: codemodcloseoutreminder
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/closeout-guard.ts:decideCloseoutGuard
+entrypoints: [src/agent/loop/session-bootstrap.ts, src/agent/guards/build.ts]
+activation: ["The claimed CODE_MOD_CLOSEOUT_REMINDER and isCodeModificationSession path has no activation; the replacement closeoutGuard requires config.closeoutGuard.enabled=true."]
+effective_defaults:
+  cli: off
+  web: unknown
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer: [src/agent/closeout-guard.ts:decideCloseoutGuard]
+consumer: [src/agent/guards/closeout-guard.ts:createCloseoutGuard, src/agent/guards/build.ts:buildGuardChain]
+reachable: no
+surface_findings: ["The catalog describes a removed CODE_MOD_CLOSEOUT_REMINDER plus tool-history heuristic; tests assert both symbols and the history scan are absent.", "A live successor exists, but it is a config-gated UNION/four-rule closeout guard and is not the catalogued feature contract."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/code-mod-closeout.test.ts tests/unit/closeout-guard.test.ts tests/unit/agent/guard-chain.test.ts tests/integration/sota-codex-full.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default-off successor behavior and removal of the claimed heuristic both passed explicit rails.
+on_efficacy_proof: null
+failure_posture: na
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: The catalog's stated constant and isCodeModificationSession heuristic were removed; successor semantics are materially different.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "CODE_MOD_CLOSEOUT_REMINDER|isCodeModificationSession|decideCloseoutGuard|closeoutGuard" src/agent/closeout-guard.ts src/agent/guards src/agent/session-resources.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Live closeout composition is config-gated and has no code-modification history classifier.
+  - kind: test
+    command: bun test tests/unit/code-mod-closeout.test.ts tests/unit/closeout-guard.test.ts tests/unit/agent/guard-chain.test.ts tests/integration/sota-codex-full.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 49 rails passed, including explicit removal teeth and successor loop composition.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-edit
+review_state: approved
+reviewer: codex/cross-review-wave1

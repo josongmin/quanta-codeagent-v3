@@ -1,0 +1,62 @@
+version: 1
+feature_id: shell-snapshot
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal/shell-snapshot.ts:buildShellSnapshotConfig
+entrypoints:
+  - src/apps/cli/repl/runtime-context-compose.ts:createRuntimeContext
+  - src/agent/loop/session-bootstrap.ts
+  - src/tool/bash/index.ts
+activation:
+  - Enable QUANTA_SHELL_SNAPSHOT or pass --shell-snapshot for an interactive CLI session.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/runtime/shell-snapshot/file-store.ts:createShellSnapshotPort
+  - src/runtime/shell-snapshot/bun-spawner.ts:createBunSpawner
+consumer:
+  - src/apps/cli/internal/shell-snapshot.ts:buildShellSnapshotConfig
+  - src/agent/shell-snapshot-session.ts
+  - src/tool/bash/index.ts
+reachable: yes
+surface_findings:
+  - The default remains OFF: absent config leaves the session helper undefined and bash retains its legacy spawn path.
+  - When enabled, CLI composition creates the Bun-backed port; session bootstrap captures/restores per turn and bash consumes the restore seam, with capture failures degrading to legacy spawning.
+  - The catalog's slice-only statement that synthesis sites are zero and runShell is unmodified is stale at this snapshot.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/shell-snapshot-runshell-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent configuration keeps the session helper undefined and bash sees no sourced snapshot.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/runtime/shell-snapshot-hellgate.test.ts tests/integration/shell-snapshot-runshell-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Capture, restore, permissions, pruning, loop capture, bash consumption, and capture-failure fallback rails passed.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: stale-claim
+blocker: The catalog says this is a slice with zero synthesis sites and an unmodified runShell, but the frozen CLI now wires the production port, session lifecycle, and bash restore path behind the default-OFF gate.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildShellSnapshotConfig|shellSnapshotSession|snapshotForTurn|shellSnapshot' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli src/agent src/tool/bash src/runtime/shell-snapshot
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI config, session lifecycle, and bash restoration are connected in production code.
+  - kind: test
+    command: bun test tests/unit/runtime/shell-snapshot-hellgate.test.ts tests/integration/shell-snapshot-runshell-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused shell-snapshot rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

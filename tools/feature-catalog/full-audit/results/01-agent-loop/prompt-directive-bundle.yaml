@@ -1,0 +1,66 @@
+version: 1
+feature_id: prompt-directive-bundle
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt-reminders.ts:resolveDirectiveConfig and resolveReminderBlocks
+entrypoints:
+  - src/agent/loop/context-assembler.ts:buildTurnContext
+  - src/agent/prompt.ts:buildDynamicContext
+activation:
+  - Each runtime directive gate must resolve enabled; all are absent by default.
+  - The resulting directive text is selected into the dynamic reminder atom before the model sees the turn context.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/prompt-directives.ts:selectActiveDirectives
+  - src/agent/prompt-reminders.ts:resolveDirectiveConfig
+consumer:
+  - src/agent/prompt-reminders.ts:resolveReminderBlocks
+  - src/agent/prompt.ts:buildDynamicContext
+reachable: yes
+surface_findings:
+  - The core turn assembler projects runtime config into a pure selector, then the shared dynamic reminder graph carries selected text to the LLM request.
+  - All-off returns an empty selector result and leaves the frozen dynamic-tail golden unchanged; an ON environment is proven through a real runAgent loop.
+  - Catalog count and strict-gate claims drift: current source has nine directives including advisor and code-mode, and gateOn accepts canonical truthy values beyond literal 1.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/prompt-directives-hellgate.test.ts tests/integration/dof22-prompt-directive-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All-false injected and env-unset controls preserve the frozen dynamic reminder without directive bytes.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/prompt-directives-hellgate.test.ts tests/integration/dof22-prompt-directive-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Per-directive selector tests and the real-loop ON versus OFF control prove delivery to the model-visible reminder.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: Catalog describes seven behavioral directives and strict === 1 wiring, while current source and tests expose nine directives and canonical truthy gate semantics.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'DIRECTIVE_ORDER|codeModeOnly|directiveAdvisorRail|resolveDirectiveConfig|resolveReminderBlocks' src/agent/prompt-directives.ts src/agent/prompt-reminders.ts src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime config projection, fixed-order selection, and dynamic reminder consumption form one continuous core-loop path.
+  - kind: test
+    command: bun test tests/unit/prompt-directives-hellgate.test.ts tests/integration/dof22-prompt-directive-real-loop-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 199-pass focused audit run proves all-off identity, ON content selection, deterministic order, static-cache isolation, and real-loop delivery.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception is reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-cliux
+review_state: approved
+reviewer: codex/cross-review-wave1

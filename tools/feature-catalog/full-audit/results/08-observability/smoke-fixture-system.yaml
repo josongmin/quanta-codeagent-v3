@@ -1,0 +1,60 @@
+version: 1
+feature_id: smoke-fixture-system
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tests/smoke/runner.ts:runScenario
+entrypoints:
+  - package.json:smoke
+  - tests/unit/smoke-battery.test.ts
+activation:
+  - bun run smoke runs the replay battery by default.
+  - QUANTA_SMOKE_LIVE=1 or smoke:live selects provider-backed execution.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - tests/smoke/replay-llm.ts replays recorded provider trajectories.
+  - tests/smoke/runner.ts evaluates scenario fixtures and expectations.
+consumer:
+  - tests/unit/smoke-battery.test.ts invokes the tier-0 battery in the normal test process.
+  - package.json exposes replay, live, record, and report commands.
+reachable: yes
+surface_findings:
+  - The snapshot contains all 15 declared single, medium, and tikitaka fixtures with recorded trajectories.
+  - Live execution and recording remain explicitly opt-in; the default replay battery is deterministic.
+off_identity_proof:
+  kind: source
+  command: git show 9a12f7a:tests/smoke/index.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: CLI argument parsing defaults tier to replay unless QUANTA_SMOKE_LIVE is exactly 1 or the live tier is supplied.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/smoke-battery.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The tier-0 suite discovered and replayed all fifteen fixture scenarios successfully.
+failure_posture: fail-loud
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git ls-tree -r --name-only 9a12f7a -- tests/smoke/fixtures
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Fixture tree includes 4 single, 4 medium, and 7 tikitaka scenarios with trajectory and expectation files.
+  - kind: test
+    command: bun test tests/unit/smoke-battery.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 16 pass and 0 fail including discovery plus all scenario replays.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

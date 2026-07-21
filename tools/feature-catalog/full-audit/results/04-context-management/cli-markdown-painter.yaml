@@ -1,0 +1,54 @@
+version: 1
+feature_id: cli-markdown-painter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal.ts:buildCliMarkdownPainter
+entrypoints:
+  - src/apps/cli/internal.ts:buildStreaming
+activation:
+  - buildStreaming constructs and forwards the painter only for TTY stdout with NO_COLOR unset and without the two explicit disable settings.
+  - QUANTA_MD_HIGHLIGHT=0 or QUANTA_MD_MODE=off removes the painter; otherwise a TTY CLI gets conservative or aggressive painting.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/markdown-painter.ts:createMarkdownPainter
+consumer:
+  - src/apps/cli/internal.ts:buildStreaming
+  - src/stream/adapters/stdout.ts:StdoutStream
+reachable: yes
+surface_findings:
+  - The live CLI streaming assembler passes the painter into buildStreamingCore, which gives the stdout adapter the delta transformer.
+  - The focused unit rail proves line buffering, fences, inline code, bullets, terminal reset, Unicode, and pass-through gates.
+  - "The catalog's Default-OFF wording is stale: with an unset QUANTA_MD_HIGHLIGHT and QUANTA_MD_MODE, a normal TTY constructs the painter by default."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/markdown-painter.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 23 focused tests passed for stream fragmentation, syntax painting, large fenced output, and explicit pass-through modes.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg "buildStreaming|buildCliMarkdownPainter|QUANTA_MD_HIGHLIGHT|QUANTA_MD_MODE" src/apps/cli/internal.ts src/apps/cli/markdown-painter.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The TTY CLI construction and its explicit env disable gates are wired in the production stream assembly path.
+  - kind: test
+    command: bun test tests/unit/cli/markdown-painter.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused streaming painter rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-memory-batch6
+review_state: approved
+reviewer: codex/cross-review-wave1

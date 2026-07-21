@@ -1,0 +1,59 @@
+version: 1
+feature_id: default-on-subagent-and-skills
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal.ts:buildSubagentConfig
+entrypoints:
+  - src/apps/cli/internal.ts:buildSubagentConfig
+  - src/apps/cli/internal.ts:buildSkillsConfig
+  - src/apps/web-daemon/runtime-factory.ts
+activation:
+  - CLI defaults both subagent and bundled skills on when their environment variables are unset; explicit false restores absent config blocks.
+  - Web runtime constructs the same capabilities for its session factory.
+effective_defaults:
+  cli: on
+  web: on
+  bench: off
+  headless: resource
+  daemon: on
+producer:
+  - src/runner/assemble/env-flag.ts:parseEnvFlag
+consumer:
+  - src/apps/cli/internal.ts
+  - src/apps/web-daemon/runtime-factory.ts
+reachable: yes
+surface_findings:
+  - CLI assembly verifies default-on blocks and explicit off byte-identical removal.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/env-knob-branches.test.ts tests/integration/cli-export-assembly.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit QUANTA_SUBAGENT and QUANTA_SKILLS off cases omit their blocks.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/env-knob-branches.test.ts tests/unit/features.test.ts tests/integration/cli-export-assembly.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default-on session config and feature materialization passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'buildSubagentConfig|buildSkillsConfig|parseEnvFlag' src/apps/cli src/apps/web-daemon src/runner/assemble
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI and web composition roots consume the shared default-on semantics.
+  - kind: test
+    command: bun test tests/unit/env-knob-branches.test.ts tests/unit/features.test.ts tests/integration/cli-export-assembly.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused default/on-off rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,61 @@
+version: 1
+feature_id: stop-category-matrix
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/turn-outcome.ts:resolveTurnLoopOutcome
+entrypoints:
+  - src/agent/loop/turn-loop.ts:runTurnLoop
+  - src/agent/loop/session-bootstrap.ts:finish
+activation:
+  - "Every runAgent terminal outcome reaches finish with a structured stop category."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/stop-category.ts:classifyErrorReason
+  - src/agent/stop-category.ts:completedCategory
+  - src/agent/stop-category.ts:interruptedCategory
+  - src/agent/stop-category.ts:budgetCategory
+consumer:
+  - src/agent/loop/turn-outcome.ts:resolveTurnLoopOutcome
+  - src/agent/loop/session-lifecycle.ts:buildFinalAgentOutcome
+reachable: yes
+surface_findings:
+  - "The structured category is attached to AgentOutcome across terminal paths; surfaces can consume it as an additive result field."
+  - "No separate browser rendering claim is made; catalog's non-UI characterization remains accurate."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/stop-category.test.ts tests/unit/agent-submission-and-stop-category.test.ts tests/unit/agent/loop/turn-outcome.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 56 pass, 0 fail; provider, compaction, malformed/empty, user/system, refusal, budget, completion, and max-turns routes retain typed categories.
+failure_posture: fail-closed
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'classifyErrorReason|completedCategory|interruptedCategory|budgetCategory|stopCategory' src/agent/loop src/agent/stop-category.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Loop resolution supplies a category for aborted, error, refusal, completed, max-turns, and budget terminal paths before final outcome construction.
+  - kind: test
+    command: bun test tests/unit/agent/stop-category.test.ts tests/unit/agent-submission-and-stop-category.test.ts tests/unit/agent/loop/turn-outcome.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 56 pass, 0 fail; source-to-outcome attachment and category classification are directly asserted.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ feature reachability exception is reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-exit
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,62 @@
+version: 1
+feature_id: central-config-project-trust
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/apps/agent/index.ts:resolveCommandHookBindings"
+entrypoints:
+  - "src/apps/agent/index.ts:loadAgentStartupPartial"
+  - "src/apps/agent/index.ts:resolveCommandHookBindings"
+activation:
+  - "QUANTA_COMMAND_HOOKS arms command-hook composition; QUANTA_CENTRAL_CONFIG=1 selects the central trust-gated resolver."
+  - "The resolver canonicalizes the project, reads layered settings once, and only arms trusted repo hook grants."
+effective_defaults:
+  cli: off
+  web: unknown
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/config/loader.ts:readLayers"
+  - "src/config/merge.ts:mergeSettings"
+  - "src/config/trust-store.ts:TrustStore"
+consumer:
+  - "src/apps/agent/index.ts:resolveCommandHookBindings"
+  - "src/agent/command-hooks/settings-loader.ts:bindingsFromResolvedSettings"
+reachable: yes
+surface_findings:
+  - "The agent composition root switches on the strict centralConfig runtime gate and sends resolved hooks, not raw repo settings, into command-hook bindings."
+  - "For an untrusted project, repo allow/hooks/MCP grants are dropped while tightening denies remain; an explicit trust record or allow-list re-arms that project's grant only."
+  - "With the strict gate off the central reader and trust store are untouched and the legacy settings loader remains the deliberate compatibility path."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/central-config-off-byte-identity-hellgate.test.ts tests/unit/central-config-comproot-wire-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Unset or loose-truthy gate values retain the legacy command-hook loader with zero central reads and zero trust-store construction."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/central-config-trust-hellgate.test.ts tests/unit/central-config-trust-store-hellgate.test.ts tests/unit/central-config-comproot-wire-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The integration wire drops malicious untrusted repo hooks, admits trusted/user-layer hooks, persists accepted trust, and proves red-on-neutering."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'centralConfig|resolveCommandHookBindings|readDiskLayers|mergeDiskLayers|bindingsFromResolvedSettings' src/apps/agent/index.ts src/config src/agent/command-hooks/settings-loader.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Strict gate selection, real composition-root consumption, trust-gated merge, and resolved-hook conversion are all live."
+  - kind: test
+    command: "bun test tests/unit/central-config-trust-hellgate.test.ts tests/unit/central-config-trust-store-hellgate.test.ts tests/unit/central-config-off-byte-identity-hellgate.test.ts tests/unit/central-config-comproot-wire-hellgate.test.ts tests/unit/managed-settings-path-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Trust, merge, off-identity, composition-root, and managed-path rails passed in the focused audit batch."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch8
+review_state: approved
+reviewer: codex/cross-review-wave1

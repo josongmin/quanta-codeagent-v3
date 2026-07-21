@@ -1,0 +1,50 @@
+version: 1
+feature_id: tool-search
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/tool-search.ts:createToolSearchTool
+entrypoints: [src/agent/tier1/skill.ts:buildSkillBlock, src/apps/cli/internal.ts:buildSkillsConfig]
+activation: [CLI enables bundled skills and ToolSearch by default; QUANTA_SKILLS=0 removes the whole Skill/ToolSearch block.]
+effective_defaults:
+  cli: on
+  web: off
+  bench: unknown
+  headless: unknown
+  daemon: off
+producer: [src/skill/tool-search.ts:createToolSearchTool]
+consumer: [src/agent/tier1/skill.ts:buildSkillBlock, src/apps/cli/internal.ts:buildSkillsConfig]
+reachable: yes
+surface_findings: ["CLI buildSkillsConfig defaults to enabled and buildSkillBlock registers ToolSearch against the live registry catalog.", "The source explicitly states that this is lexical discovery only: every catalog tool is already callable and no provider-neutral deferred-tool loading or schema restoration mechanism exists. The catalog title and purpose therefore overclaim deferred-tool behavior; web-daemon does not compose the skill block."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/features.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent skills config produces no Skill or ToolSearch extra tools, preserving the byte-identical opt-out path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool-search.test.ts tests/unit/features.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 28 focused cases passed for live-registry registration, select aliases, compound tokenization, ranking, and legacy ordering.
+failure_posture: na
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: Catalog must rename and describe ToolSearch as an already-callable lexical catalog search, not a deferred-tool loader or schema-restoration mechanism, and remove web:full.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'buildSkillsConfig|createToolSearchTool|config\.skills|deferred-tool|already callable|buildDaemonToolRegistry' src/apps/cli/internal.ts src/agent/tier1/skill.ts src/skill/tool-search.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI default composition and the source's no-deferral contract are explicit; daemon only builds default tools.
+  - kind: test
+    command: bun test tests/unit/tool-search.test.ts tests/unit/features.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 28 pass, 0 fail; lexical selection and skill-block registration are covered.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-registry
+review_state: approved
+reviewer: codex/cross-review-wave1

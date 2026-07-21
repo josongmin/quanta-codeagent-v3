@@ -1,0 +1,50 @@
+version: 1
+feature_id: glob-rules
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/agent/mode-presets/system.ts:resolveModePresetGlobRules
+entrypoints: [src/apps/agent/mode-presets/interactive.ts:buildInteractiveBase, src/apps/agent/mode-presets/headless.ts:buildHeadlessBase, src/apps/agent/mode-presets/ide.ts:buildIdeBase]
+activation: [QUANTA_VENDOR_RULES must be truthy and the mode must pass modeLoadsRepoRules., Nonempty loaded rules are attached to AgentConfig.globRules and context-assembler passes them to the prompt renderer.]
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/agent/glob-rules.ts:loadGlobRulesWithVendors, src/agent/glob-rules.ts:selectGlobRules]
+consumer: [src/apps/agent/mode-presets/system.ts:resolveModePresetGlobRules, src/apps/agent/mode-presets/interactive.ts:buildInteractiveBase, src/agent/loop/context-assembler.ts:assembleTurnContext, src/agent/prompt.ts:renderGlobRulesBlock]
+reachable: yes
+surface_findings: ["Interactive, headless, and IDE production presets load and attach rules only under the gate and trusted-mode policy.", "Batch, CI-bot, and daemon receive an empty result so untrusted repository rules never reach their prompts.", "The checked catalog statement that globRules is unwired is stale at the frozen snapshot."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/glob-rules.test.ts tests/unit/vendor-glob-unconsumed-failclosed-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent config and gate-off trusted modes leave the prompt and AgentConfig.globRules byte-identical.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/glob-rules-hellgate.test.ts tests/unit/agent/glob-rules.test.ts tests/unit/vendor-glob-composition-wire-spec-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Rules load, match changed paths, render safely, and reach trusted preset configs under the enabled gate.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'resolveModePresetGlobRules|loadGlobRulesWithVendors|globRules' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/agent src/agent/loop/context-assembler.ts src/agent/prompt.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The trusted preset resolver loads and attaches glob rules, then the loop forwards them to prompt construction.
+  - kind: test
+    command: bun test tests/unit/glob-rules-hellgate.test.ts tests/unit/agent/glob-rules.test.ts tests/unit/vendor-glob-composition-wire-spec-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected glob parsing, boundary, default-off, and trusted preset wire tests passed in the focused audit rail.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch4
+review_state: approved
+reviewer: codex/cross-review-wave1

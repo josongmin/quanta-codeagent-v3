@@ -1,0 +1,61 @@
+version: 1
+feature_id: conversation-action-steering
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/control-poll.ts:pollConversationAction
+entrypoints:
+  - src/apps/cli/repl/surface-compose/core-state.ts:createSurfaceCoreState
+  - src/agent/loop/turn-iteration.ts:drainConversationActionsMidTurn
+activation:
+  - QUANTA_CONVERSATION_ACTIONS=on (CLI typed action surface)
+  - QUANTA_THIN_CLIENT_DISPATCH=on (web-daemon follower co-control surface)
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/cli/repl/conversation-action-surface.ts:createConversationActionSurface
+  - src/agent/conversation-action.ts:decideAction
+consumer:
+  - src/agent/loop/control-poll.ts:pollConversationAction
+  - src/agent/loop/turn-iteration.ts:drainConversationActionsMidTurn
+reachable: yes
+surface_findings:
+  - "CLI: QUANTA_CONVERSATION_ACTIONS gates the same surface used by /cancel, /summarize-now, /steer, /interrupt, and /resume-turn."
+  - "Web daemon: the separate QUANTA_THIN_CLIENT_DISPATCH gate mints the follower co-control surface; it is not a browser UI control plane."
+  - "Catalog purpose overclaims unknown_subagent as an ActionRejectionReason. The decision union has only the two additions control_turn_mismatch and not_interrupted; registry lookup is a later side effect."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/loop/midloop-conversation-action-drain-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Port-absent controls prove zero summarizer calls, unchanged rounds, and no working-memory or stream mutation.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/conversation-action.test.ts tests/unit/agent/control-op-handler-hellgate.test.ts tests/unit/agent/loop/midloop-conversation-action-drain-hellgate.test.ts tests/integration/crash-resume-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 65 tests pass, covering all five actions, same-turn summarize/cancel, child-only cancellation, and crash-resume.
+failure_posture: fail-loud
+security_posture: conditional
+observability: verified
+verdict: stale-claim
+blocker: "The catalog's ActionRejectionReason description includes unknown_subagent, but the owner decision boundary deliberately excludes it; unknown-child handling is emitted after accepted_control."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'ActionRejectionReason|unknown_subagent' src/agent/conversation-action.ts src/agent/loop/control-poll.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The closed rejection union omits unknown_subagent and the loop performs child registry handling after decideAction accepts the control action.
+  - kind: test
+    command: bun test tests/unit/agent/conversation-action.test.ts tests/unit/agent/control-op-handler-hellgate.test.ts tests/unit/agent/loop/midloop-conversation-action-drain-hellgate.test.ts tests/integration/crash-resume-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 65 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-agentloop-subagent
+review_state: approved
+reviewer: codex/cross-review-wave1

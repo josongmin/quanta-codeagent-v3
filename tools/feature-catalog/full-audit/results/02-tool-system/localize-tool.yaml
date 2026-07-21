@@ -1,0 +1,55 @@
+version: 1
+feature_id: localize-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/localize/index.ts:localizeTool
+entrypoints:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+activation:
+  - "localize is in the always-registered base default tool set."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/localize/index.ts:localizeTool
+consumer:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+reachable: yes
+surface_findings:
+  - "The live default-tool builder includes localize, and shared runner plus web-daemon composition consume that builder."
+  - "Owner rails exercise definition ranking, deterministic output, vendored-tier and JS-sibling penalties, output caps, and verbose evidence output against real temporary trees."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/localize.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 19 focused tests passed for ranking, penalties, deterministic rendering, input bounds, and omission accounting.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "localizeTool|buildBaseDefaultTools|buildToolingCore|buildDaemonToolRegistry" src/tool/localize/index.ts src/tool/index.ts src/runner/assemble/tooling.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The producer is in the base registry consumed by shared and web composition roots.
+  - kind: test
+    command: bun test tests/unit/localize.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 19 focused owner rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch6
+review_state: approved
+reviewer: codex/cross-review-wave1

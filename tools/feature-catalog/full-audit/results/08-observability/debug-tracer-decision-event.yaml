@@ -1,0 +1,51 @@
+version: 1
+feature_id: debug-tracer-decision-event
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/debug-tracer.ts:createDebugTracer
+entrypoints:
+  - src/apps/cli/repl/factories/debug-tracer.ts
+activation:
+  - TTY QUANTA_DEBUG or the debug command attaches the tracer to the interactive event stream.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/decision-emit-phase3.ts
+  - src/agent/admissibility-gate/shared.ts
+consumer:
+  - src/apps/cli/debug-tracer.ts:createDebugTracer
+reachable: yes
+surface_findings:
+  - Decision variants now have live agent emitters; tracer filters categories, truncates unsafe rendering, and remains disabled for non-TTY auto-enable.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/debug-tracer-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Empty or disabled debug input emits no category output.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/debug-tracer-hellgate.test.ts tests/integration/dof21-debug-tracer-gate-wire-proof.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Per-variant formatting and gate-to-tracer wire proof passed.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/cli/debug-tracer-hellgate.test.ts tests/integration/dof21-debug-tracer-gate-wire-proof.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Debug tracer and wire rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

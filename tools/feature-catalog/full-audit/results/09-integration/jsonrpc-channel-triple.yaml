@@ -1,0 +1,50 @@
+version: 1
+feature_id: jsonrpc-channel-triple
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/jsonrpc/channel-naming.ts:channelTriple
+entrypoints:
+  - src/shared/jsonrpc/index.ts
+activation:
+  - A future JSON-RPC transport derives request, response, and timeout channel names from a base method.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/shared/jsonrpc/channel-naming.ts:channelTriple
+consumer: []
+reachable: no
+surface_findings:
+  - Triple generation, reserved-suffix rejection, and parse round-trip behavior are implemented as a pure shared primitive.
+  - No production dispatch table or transport consumes generated channel names; all current invocations are test-only.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/jsonrpc-channel-naming.test.ts tests/integration/jsonrpc-envelope-hell-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Naming validation and 10,000-name round-trip rails passed.
+failure_posture: unknown
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production IPC or transport dispatch table consumes channelTriple or the parser helpers.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'channelTriple|parseChannelKind|parseChannelBase' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/shared/jsonrpc src/apps src/host src/mcp src/lsp
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: References outside the shared module have no executable production caller.
+  - kind: test
+    command: bun test tests/unit/jsonrpc-channel-naming.test.ts tests/integration/jsonrpc-envelope-hell-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused channel naming rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

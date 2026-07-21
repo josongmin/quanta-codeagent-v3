@@ -1,0 +1,46 @@
+version: 1
+feature_id: special-path-resolver
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/special-path-resolver.ts:resolveSpecialPath
+entrypoints:
+  - src/permission/access-check.ts
+activation:
+  - Evaluate a permission path rule using a special path kind.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/permission/special-path-resolver.ts
+consumer:
+  - src/permission/access-check.ts
+reachable: yes
+surface_findings:
+  - Resolver uses injected OS, cwd, and git ports and caches keys that include all path inputs.
+  - OS-specific tmp and root behavior feeds normal permission path evaluation.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission-profile-types.test.ts tests/unit/permission-access-check.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Profile special-path types and access evaluation rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/permission-profile-types.test.ts tests/unit/permission-access-check.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused special path rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

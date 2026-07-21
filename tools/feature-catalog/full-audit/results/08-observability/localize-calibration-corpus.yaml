@@ -1,0 +1,40 @@
+version: 1
+feature_id: localize-calibration-corpus
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "tests/smoke/localize/measure.ts"
+entrypoints: ["offline calibration command"]
+activation: ["Operator runs the localize measurement script against corpus.json."]
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer: ["tests/smoke/localize/measure.ts"]
+consumer: ["offline baseline and calibration reports"]
+reachable: no
+surface_findings: ["The corpus is an offline measurement instrument and deliberately not a regression CI authority."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/localize-measure.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Ranking parsing, normalization, recall, MRR, and aggregation pass."
+failure_posture: na
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: "Offline calibration infrastructure only."
+disposition: hold
+receipts:
+  - kind: test
+    command: "bun test tests/unit/localize-measure.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 60-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

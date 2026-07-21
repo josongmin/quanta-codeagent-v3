@@ -1,0 +1,61 @@
+version: 1
+feature_id: repro-doubt-knob
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/dispatch.ts:applyReproDoubtSteer
+entrypoints:
+  - src/apps/bench/run-main.ts:runMain
+  - src/runner/batch/eval/driver/config-build.ts:buildConfig
+activation:
+  - QUANTA_BENCH_REPRO_DOUBT=N where N is an integer in [2,12]
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/runner/knobs/knobs/repro-doubt.ts:applyReproDoubt
+  - src/agent/repro-doubt-guard.ts:reproDoubtStep
+consumer:
+  - src/runner/knobs/register-bench-knobs.ts:APPLY_BINDINGS
+  - src/agent/session-resources.ts:buildReproDoubt
+  - src/agent/dispatch.ts:applyReproDoubtSteer
+reachable: yes
+surface_findings:
+  - The registered bench knob projects a bounded threshold onto AgentConfig, then session resources create per-run state and dispatch injects the steer after qualifying test churn.
+  - The OFF path has neither config nor state and dispatch returns without allocation or prompt change.
+  - The intervention is advisory and marks the run research-contaminated through score-label posture; it does not assert a repair succeeded.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/repro-doubt-wiring.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: With reproDoubt unset, live dispatch emits no steer across edit and repeated test-tool calls.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/repro-doubt-guard.test.ts tests/unit/repro-doubt-wiring.test.ts tests/unit/runner/knobs/parsers-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed, including bounded parsing, one-shot live dispatch injection, reset-on-edit, and non-test command exclusion.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'applyReproDoubt|reproDoubtState|applyReproDoubtSteer' src/runner/knobs src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Central bench registration applies the config, session setup allocates state, and the dispatch chokepoint consumes it.
+  - kind: test
+    command: bun test tests/unit/repro-doubt-guard.test.ts tests/unit/repro-doubt-wiring.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Guard and live-dispatch rails passed, including default-OFF and exactly-once behavior.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-bench-controls
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,56 @@
+version: 1
+feature_id: mode-posture-hitl-4-tier-permission-policy-harddeny-redundan
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/admissibility-gate.ts:runAdmissibilityGate"
+entrypoints:
+  - "src/agent/dispatch.ts:dispatchToolInner"
+  - "src/apps/cli/repl/runtime-context-compose.ts:buildAdmissibility"
+activation:
+  - "Any registered agent tool call reaches dispatchToolInner."
+  - "HITL-specific branches activate when a tool tier/configuration requires them; mode policy and HARD_DENY remain on the dispatch path."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - "src/agent/admissibility-gate/gates.ts:runModePolicy"
+  - "src/agent/admissibility-gate/gates.ts:runHitlReviewGate"
+  - "src/permission/policy.ts:evaluate"
+consumer:
+  - "src/agent/dispatch.ts:dispatchToolInner"
+  - "src/apps/cli/repl/runtime-context-compose.ts:buildAdmissibility"
+reachable: yes
+surface_findings:
+  - "dispatchToolInner resolves the shell command and calls runAdmissibilityGate before execute()."
+  - "The CLI composition root supplies a ReviewerPort/default reviewer; optional HITL branches retain their explicit configuration semantics while the mode-policy and HARD_DENY paths are live."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/hitl-tier-dispatch.test.ts tests/unit/admissibility-gate.test.ts tests/unit/admissibility-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "53 tests pass, including hard-deny precedence over allow signals, mode ordering, HITL handoff/confirm, and pre-tool hook ordering."
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n \"runAdmissibilityGate\\(\" src/agent/dispatch.ts; rg -n \"buildAdmissibility|createOnConfirmReviewerPort|selectDefaultReviewer\" src/apps/cli/repl/runtime-context-compose.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Production dispatch calls the gate before execution and the CLI composition root constructs its reviewer/admissibility bundle."
+  - kind: test
+    command: "bun test tests/unit/hitl-tier-dispatch.test.ts tests/unit/admissibility-gate.test.ts tests/unit/admissibility-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "53 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch2
+review_state: approved
+reviewer: codex/cross-review-wave1

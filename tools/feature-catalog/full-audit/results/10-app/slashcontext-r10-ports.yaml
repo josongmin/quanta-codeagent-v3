@@ -1,0 +1,60 @@
+version: 1
+feature_id: slashcontext-r10-ports
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/slash-surface.ts:buildReplSlashCtx
+entrypoints:
+  - src/apps/cli/repl/surface-compose/slash-context-compose.ts:composeSlashContext
+  - src/apps/cli/repl/surface-compose/dispatch.ts:buildSurfaceDispatch
+activation:
+  - Start an interactive TTY REPL and invoke /cost, /plan, /state, /history, or /branches after their respective session inputs are wired.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/repl/slash-surface.ts:buildReplSlashCtx
+  - src/apps/cli/slash/registry-surface.ts:buildSurfaceSlashCommands
+consumer:
+  - src/apps/cli/repl/surface-compose/dispatch.ts:buildSurfaceDispatch
+  - src/apps/cli/slash/registry-surface.ts:costCmd planCmd stateCmd historyCmd branchesCmd
+reachable: yes
+surface_findings:
+  - The five context fields are projected by presence into the common SlashContext and the commands render a no-op or empty state when an optional resource is absent.
+  - The catalog claim that all five are default-OFF is false: on a TTY, cost and branch-progress are default-on when unset, planStore is default-on, history is default-on, and workingState is always projected as an empty-capable getter.
+  - Their resource behavior still correctly omits cost and branch slots on non-TTY or explicit opt-out, and plan supports explicit opt-out.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/cost-panel.test.ts tests/unit/cli/plan-panel.test.ts tests/unit/cli/working-state-panel.test.ts tests/unit/cli/history-cmd.test.ts tests/unit/cli/branch-search-progress.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit off, absent-slot, non-TTY, and empty-resource behaviors are covered by the panel rails.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/cost-panel.test.ts tests/unit/cli/plan-panel.test.ts tests/unit/cli/working-state-panel.test.ts tests/unit/cli/history-cmd.test.ts tests/unit/cli/branch-search-progress.test.ts tests/unit/slash-commands.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Panel rendering, registry dispatch, TTY gates, history, and branch state rails passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: The feature YAML's shared default-OFF assertion contradicts the live TTY defaults for cost, plan, history, and branch-progress, plus the always-projected working-state getter.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'costPanel|planStore|branchProgress|workingState|history|isCostPanelEnabled|isBranchProgressEnabled|parsePlanStoreEnv' src/apps/cli/repl src/apps/cli/cost-panel.ts src/apps/cli/branch-search-progress.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Live construction and gate helpers show the five slots plus their actual default semantics.
+  - kind: test
+    command: bun test tests/unit/cli/cost-panel.test.ts tests/unit/cli/plan-panel.test.ts tests/unit/cli/working-state-panel.test.ts tests/unit/cli/history-cmd.test.ts tests/unit/cli/branch-search-progress.test.ts tests/unit/slash-commands.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused R10 panel rails passed in the 294-case 15-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

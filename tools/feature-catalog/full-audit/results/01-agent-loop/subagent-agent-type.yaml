@@ -1,0 +1,54 @@
+version: 1
+feature_id: subagent-agent-type
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/subagent/agent-type.ts:validateAgentType
+entrypoints:
+  - src/agent/tier1/subagent.ts:buildSubagentBlock
+  - src/subagent/agent-tool.ts:spawn boundary
+activation:
+  - Set QUANTA_SUBAGENT_TYPED_KIND to enable strict kind canonicalization and custom-kind admission checks.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/subagent/agent-type.ts:classifyAgentType
+  - src/subagent/agent-type.ts:validateAgentType
+consumer:
+  - src/subagent/agent-tool.ts
+  - src/agent/tier1/subagent.ts
+reachable: yes
+surface_findings:
+  - Default-off validation accepts the historical free-string behavior unchanged.
+  - Gate-on validation canonicalizes known kinds, permits registered custom kinds, and returns a recoverable denial before the runner starts for a true miss.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/side-agent-typed-kind-gates-default-off.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent gate leaves typed-kind enforcement false.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-agent-type-typed.test.ts tests/unit/subagent-typed-kind-boundary-hellgate.test.ts tests/unit/subagent-typed-kind-live-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Classification, strict boundary behavior, and live gate wiring passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: Strict typed-kind validation is intentionally disabled unless QUANTA_SUBAGENT_TYPED_KIND is set.
+disposition: hold
+receipts:
+  - kind: test
+    command: bun test tests/unit/subagent-agent-type-typed.test.ts tests/unit/subagent-typed-kind-boundary-hellgate.test.ts tests/unit/subagent-typed-kind-live-wire-hellgate.test.ts tests/unit/side-agent-typed-kind-gates-default-off.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused typed subagent rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,58 @@
+version: 1
+feature_id: async-mention-resolver-and-file-symbol
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/host/runtime/internal/mention-wire.ts:installCliMentionInjector"
+entrypoints:
+  - "src/host/runtime/agent-config-assembler.ts:mentionResolverDep"
+  - "src/apps/web-daemon/runtime-factory.ts:buildInteractiveTurnAssembler"
+activation:
+  - "QUANTA_MENTION_FILE and QUANTA_MENTION_SYMBOL default on; either set to off removes that resolver before prompt injection."
+effective_defaults:
+  cli: on
+  web: on
+  bench: unknown
+  headless: on
+  daemon: on
+producer:
+  - "src/agent/mention-injection/resolver.ts:buildInjectionFragments"
+  - "src/agent/mention-injection/symbol-resolver.ts:createSymbolResolver"
+consumer:
+  - "src/host/runtime/internal/mention-wire.ts:installCliMentionInjector"
+  - "src/host/runtime/agent-config-assembler.ts:mentionResolverDep"
+reachable: yes
+surface_findings:
+  - "The host assembler and web daemon reuse the same resolver composition. File resolution is jailed and capped; symbol lookup is production-wired but gracefully returns null without a language server or populated index."
+off_identity_proof:
+  kind: test
+  command: "bun test src/host/runtime/internal/__tests__/mention-symbol-deps.hellgate.test.ts src/host/runtime/internal/__tests__/mention-wire.hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Per-kind off removes dependencies and produces no mention injection."
+on_efficacy_proof:
+  kind: test
+  command: "bun test src/agent/mention-injection/__tests__/parser-file-symbol.hellgate.test.ts src/agent/mention-injection/__tests__/resolver-file.hellgate.test.ts src/agent/mention-injection/__tests__/symbol-resolver.hellgate.test.ts src/host/runtime/internal/__tests__/mention-symbol-deps.hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Parser, async resolution, file jail, LSP/semantic fallback, and production fragment injection pass."
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'buildDefaultMentionResolver|buildMentionSymbolDeps|installCliMentionInjector' src/host/runtime src/apps/web-daemon"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "CLI, shared runtime, and web composition use the same resolver builder."
+  - kind: test
+    command: "bun test src/agent/mention-injection/__tests__/parser.hellgate.test.ts src/agent/mention-injection/__tests__/parser-file-symbol.hellgate.test.ts src/agent/mention-injection/__tests__/resolver.hellgate.test.ts src/agent/mention-injection/__tests__/resolver-file.hellgate.test.ts src/agent/mention-injection/__tests__/resolver-async.hellgate.test.ts src/agent/mention-injection/__tests__/symbol-resolver.hellgate.test.ts src/agent/mention-injection/__tests__/symbol-lookup-lsp.hellgate.test.ts src/agent/mention-injection/__tests__/symbol-lookup-semantic.hellgate.test.ts src/agent/mention-injection/__tests__/anchor-synth.hellgate.test.ts src/host/runtime/internal/__tests__/mention-symbol-deps.hellgate.test.ts src/agent/mention-runner/__tests__/default-resolver.hellgate.test.ts src/agent/mention-runner/__tests__/skill-resolver.hellgate.test.ts src/agent/plugin-app-resolver/__tests__/file-resolver.hellgate.test.ts src/agent/plugin-app-resolver/__tests__/composite-resolver.hellgate.test.ts src/agent/plugin-app-resolver/__tests__/composite-resolver-file.hellgate.test.ts src/host/runtime/internal/__tests__/mention-wire.hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 325-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

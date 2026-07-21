@@ -1,0 +1,64 @@
+version: 1
+feature_id: gitdiff
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/git/diff.ts:gitDiffTool
+entrypoints:
+  - src/apps/cli/internal.ts:loadFeatures
+  - src/runner/assemble/tooling.ts:buildToolingCore
+activation:
+  - QUANTA_GIT_TOOLS=1 in the interactive CLI process
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/git/diff.ts:gitDiffTool
+  - src/tool/git/index.ts:gitTools
+consumer:
+  - src/apps/cli/internal.ts:gitToolList
+  - src/runner/assemble/tooling.ts:buildToolingCore
+reachable: yes
+surface_findings:
+  - "The CLI gate constructs git_diff and the shared tooling assembler registers it when QUANTA_GIT_TOOLS is enabled."
+  - "The catalog's web: full claim is stale: web-daemon builds only buildDefaultTools and has no gitTools invocation."
+off_identity_proof:
+  kind: source
+  command: rg -n 'gitToolsEnabled|gitToolList|gitTools' src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/web-daemon/runtime-factory.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The CLI returns an empty gitToolList when the strict env gate is unset; web-daemon has no gitTools consumer.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git-tools.test.ts tests/unit/git-tools-hellgate.test.ts tests/integration/git-tools.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 64 pass, 0 fail; direct argv, leading-dash rejection, real-repository diff, and typed failure paths pass.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: The catalog declares web full although the web-daemon composition root never registers git tools.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'gitToolsEnabled|gitToolList|gitTools' src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/runner/assemble/tooling.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI produces the gated list and the shared assembler consumes it; the web registry expands only buildDefaultTools.
+  - kind: test
+    command: bun test tests/unit/git-tools.test.ts tests/unit/git-tools-hellgate.test.ts tests/integration/git-tools.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 64 pass, 0 fail.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception is reported for gitdiff.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-git
+review_state: approved
+reviewer: codex/cross-review-wave1

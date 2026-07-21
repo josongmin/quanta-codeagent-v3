@@ -1,0 +1,47 @@
+version: 1
+feature_id: dotenv-loader-first-wins
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/env-files.ts:loadEnvFiles
+entrypoints: [src/apps/cli/index.ts, src/apps/agent/index.ts]
+activation: [process startup loads .env.dev then .env.local then .env]
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: on
+  daemon: on
+producer: [src/shared/env-files.ts:loadEnvFiles]
+consumer: [src/apps/cli/index.ts, src/apps/agent/index.ts]
+reachable: yes
+surface_findings:
+  - "The old apps/cli/dotenv module is now a compatibility re-export; shared/env-files owns the parser."
+  - "Both CLI and agent process entrypoints invoke the same fixed precedence list and preserve already-exported environment values."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/dotenv.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No-override, first-wins, export stripping, quoting, comments, and missing-file behavior pass.
+failure_posture: na
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'loadEnvFiles' src/apps/cli/index.ts src/apps/agent/index.ts src/shared/env-files.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Both executable roots call the shared loader with .env.dev, .env.local, and .env ordering.
+  - kind: test
+    command: bun test tests/unit/dotenv.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Dedicated dotenv parser rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

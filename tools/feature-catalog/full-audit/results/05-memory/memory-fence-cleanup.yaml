@@ -1,0 +1,53 @@
+version: 1
+feature_id: memory-fence-cleanup
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/memory/consolidate/phase2-llm.ts
+entrypoints:
+  - biome.json:overrides.noRestrictedImports
+  - tests/unit/memory-fence-no-llm-import-hellgate.test.ts
+activation:
+  - The condition is continuously enforced by Biome's memory-to-llm import restriction and a tree-wide static test.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/memory/consolidate/phase2-llm.ts:LlmPhase2Port
+consumer:
+  - src/runner/session-memory-auto.ts:buildSessionMemoryAutoWires
+reachable: yes
+surface_findings:
+  - phase2-llm imports only local types and constants and exposes the structural Phase2Summarizer boundary; no src/memory TypeScript file imports @/llm.
+  - The static rail checks both alias forms, the removed dead alias, the retained port API, and the Biome restriction.
+  - The catalog's cli full integration label is stale because this is a structural fence, not a CLI runtime feature.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-fence-no-llm-import-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The focused structural fence rail passed all import, orphan-alias, port-API, and Biome assertions.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: Catalog surface integration marks CLI full even though the claimed value is a build-time slice-boundary invariant with no CLI affordance or activation.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg 'from ["'"']@/llm|@llm|_useVerify|Phase2Summarizer' src/memory/consolidate/phase2-llm.ts src/memory biome.json
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The owner module retains the structural port while the prohibited import and dead alias are absent from the memory slice.
+  - kind: test
+    command: bun test tests/unit/memory-fence-no-llm-import-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Five focused fence assertions passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch10
+review_state: approved
+reviewer: codex/cross-review-wave1

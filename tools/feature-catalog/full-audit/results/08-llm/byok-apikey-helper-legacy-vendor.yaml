@@ -1,0 +1,57 @@
+version: 1
+feature_id: byok-apikey-helper-legacy-vendor
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal.ts:buildLLMWithByok
+entrypoints:
+  - src/apps/cli/repl.ts
+activation:
+  - Legacy vendor mint requires apiKeyHelperLegacyVendor, helper configuration, and trusted credential attestation.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/factory.ts:resolveVendorApiKey
+consumer:
+  - src/runner/assemble/llm.ts:buildLLMWithByokCore
+  - src/apps/cli/internal.ts:buildLLMWithByok
+  - src/apps/cli/repl.ts
+reachable: yes
+surface_findings:
+  - Only anthropic and openai are mintable; explicit supplied key wins, default-off preserves the same options reference, and untrusted or empty mint fails before stale environment fallback.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/byok-apikey-resolve-hellgate.test.ts tests/unit/ai-title-byok-reachability-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Knob-off path avoids minting and retains legacy environment-key behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/byok-apikey-resolve-hellgate.test.ts tests/unit/byok-apikey-e2e-hellgate.test.ts tests/unit/ai-title-byok-reachability-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Mint precedence, adapter injection, trust denial, empty helper, and no-leak rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'resolveVendorApiKey|buildLLMWithByok|apiKeyHelperLegacyVendor' src/llm/factory.ts src/runner/assemble/llm.ts src/apps/cli/internal.ts src/apps/cli/repl.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI composition awaits mint resolution before the synchronous legacy factory is invoked.
+  - kind: test
+    command: bun test tests/unit/byok-apikey-resolve-hellgate.test.ts tests/unit/byok-apikey-e2e-hellgate.test.ts tests/unit/ai-title-byok-reachability-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused BYOK rails passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

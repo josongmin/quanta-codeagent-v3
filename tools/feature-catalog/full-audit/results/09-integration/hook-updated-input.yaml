@@ -1,0 +1,58 @@
+version: 1
+feature_id: hook-updated-input
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/dispatch.ts:dispatchTool
+entrypoints:
+  - src/agent/hooks.ts:HookBus.emitPreToolUse
+  - src/agent/command-hooks/runner.ts:command hook verdict
+activation:
+  - A matching pre_tool_use hook returns an updatedInput key
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/hooks.ts:HookBus.emitPreToolUse
+  - src/agent/command-hooks/runner.ts:runCommandHooks
+consumer:
+  - src/agent/dispatch.ts:dispatchTool
+reachable: yes
+surface_findings:
+  - Rewrite composition is registration-ordered and presence-based, so falsy rewrites remain valid values.
+  - Dispatch applies the final rewrite only after upstream permission checks; any deny still prevents execution.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/hooks-updated-input.test.ts tests/unit/agent/hook-updated-input.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No hook or no updatedInput executes the original input unchanged.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/hooks-updated-input.test.ts tests/unit/hooks-updated-input-hellgate.test.ts tests/unit/agent/hook-updated-input.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Matching rewrites reach execution, compose safely, and cannot bypass deny, permission, or schema validation.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'updatedInput|pre_tool_use' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent/hooks.ts src/agent/dispatch.ts src/agent/command-hooks
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Hook and command-hook producers both feed the dispatch seam that executes the rewritten input.
+  - kind: test
+    command: bun test tests/unit/hooks-updated-input.test.ts tests/unit/hooks-updated-input-hellgate.test.ts tests/unit/agent/hook-updated-input.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused rewrite, deny precedence, matcher, schema, and upstream-policy rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

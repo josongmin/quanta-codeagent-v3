@@ -1,0 +1,68 @@
+version: 1
+feature_id: web-agent-state-channel
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/web-daemon/runtime-factory.ts:mintInboundPorts
+entrypoints:
+  - src/apps/web-daemon/index.ts
+  - src/apps/web-daemon/runtime-factory.ts:createRuntimeFactory
+activation:
+  - QUANTA_WEB_AGENT_STATE=1 mints the agent-state source and the paired web user-input port.
+  - The assembled daemon config installs onAgentState and userInputPort only when those ports exist.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/web-daemon/agent-state-source.ts:createAgentStateSource
+  - src/apps/web-daemon/web-user-input-port.ts:createWebUserInputPort
+  - src/agent/optional-ports.ts:wireAgentStateTap
+consumer:
+  - src/apps/web-daemon/runtime-factory.ts:mintInboundPorts
+  - src/apps/web-daemon/runtime-factory.ts:buildAgentConfigBase
+  - src/apps/web-daemon/index.ts:buildSupportedReadModels
+reachable: yes
+surface_findings:
+  - The daemon factory gates the outbound source and inbound resolver together, then conditionally projects both into the live agent config and server facade.
+  - Real daemon WS evidence delivers decoded agent-state messages and has a gate-off no-frame case; the user-input port resolves browser answers without turn-lease takeover.
+  - The declared surface-protocol inventory hellgate is RED because its pinned AgentEvent count is 39 while the live SSOT contains 40 tags.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent-state-tap-byte-identical-hellgate.test.ts tests/integration/agent-state-observability-ws-daemon-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent sink returns the original stream and the real daemon gate-off case emits no agentState frame.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/surface-protocol-inventory-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: The required inventory rail fails at AGENT_EVENT_TYPES length: expected 39, received 40.
+failure_posture: fail-loud
+security_posture: verified
+observability: verified
+verdict: proof-gap
+blocker: The feature's declared surface-protocol inventory evidence is stale and RED; update the canonical inventory expectation and re-run the non-vacuity rail before treating the full protocol claim as closed.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_WEB_AGENT_STATE|createAgentStateSource|createWebUserInputPort|onAgentState|userInputPort|agentState' src/apps/web-daemon/runtime-factory.ts src/apps/web-daemon/index.ts src/agent/optional-ports.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The same gate mints the source and resolver, projects both into the daemon config, and advertises the read model only when present.
+  - kind: test
+    command: bun test tests/unit/agent-state-daemon-e2e-flow-hellgate.test.ts tests/unit/web-user-input-port-lifecycle-hellgate.test.ts tests/unit/agent-state-tap-byte-identical-hellgate.test.ts tests/unit/web-frontend-agent-state-drift-contract-hellgate.test.ts tests/integration/web-user-input-port-e2e.test.ts tests/integration/agent-state-observability-ws-daemon-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused producer-to-real-WS and inbound-answer rails passed; one explicit injection example remains skipped by design.
+  - kind: test
+    command: bun test tests/unit/surface-protocol-inventory-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: Canonical inventory count drift is exposed rather than silently accepted.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-runtime
+review_state: approved
+reviewer: codex/cross-review-wave1

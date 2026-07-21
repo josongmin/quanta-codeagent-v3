@@ -1,0 +1,65 @@
+version: 1
+feature_id: stale-read-guard
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/host/runtime/agent-config-assembler.ts:maybeWireReadFileState"
+entrypoints:
+  - "src/host/runtime/agent-config-assembler.ts:assembleAgentConfig"
+  - "src/agent/dispatch.ts:ToolContext readFileState projection"
+  - "src/tool/read/index.ts:read-time record"
+  - "src/tool/write/index.ts:staleWriteGuard"
+  - "src/tool/edit/index.ts:editPreCommitDeny"
+  - "src/tool/bash/index.ts:buildPostBashStaleReminder"
+activation:
+  - "Default on: assembleAgentConfig mints ReadFileState unless QUANTA_STALE_READ_GUARD=off."
+  - "Read records a canonical path baseline; write, edit, and patch preflights consult it."
+effective_defaults:
+  cli: on
+  web: on
+  bench: na
+  headless: on
+  daemon: on
+producer:
+  - "src/tool/read/index.ts:ctx.readFileState.record"
+  - "src/tool/bash/index.ts:buildPostBashStaleReminder"
+consumer:
+  - "src/tool/write/index.ts:staleWriteGuard"
+  - "src/tool/edit/index.ts:editPreCommitDeny"
+  - "src/tool/patch-mutation-safety.ts:guardStalePatchTargets"
+reachable: yes
+surface_findings:
+  - "All assembled agent modes receive the default-on state except the exact off kill switch; the web daemon uses the same assembler path."
+  - "Externally advanced files produce an ok:false stale_read result before mutation; stat uncertainty on patch targets is rejected before writes."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/staleness-default-on-hellgate.test.ts src/tool/stale-read-guard/gate-contract.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Exact QUANTA_STALE_READ_GUARD=off leaves the state unwired and preserves the legacy path; stray falsy values remain protected."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/stale-read-guard-hellgate.test.ts tests/unit/stale-read-guard-concurrency-r4-hellgate.test.ts tests/unit/staleness-default-on-hellgate.test.ts tests/unit/apply-patch-staleness-hellgate.test.ts src/tool/stale-read-guard/gate-contract.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "95 pass: host wiring, write and edit rejection, patch zero-write denial, reminder defanging, concurrency, and strict kill-switch behavior."
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'maybeWireReadFileState|guardWrite|staleAfterBash|guardStalePatchTargets' src/host src/agent src/tool"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The assembler mints one session state and dispatch plus read, write, edit, bash, and patch paths consume the same state."
+  - kind: test
+    command: "bun test tests/unit/stale-read-guard-hellgate.test.ts tests/unit/stale-read-guard-concurrency-r4-hellgate.test.ts tests/unit/staleness-default-on-hellgate.test.ts tests/unit/apply-patch-staleness-hellgate.test.ts src/tool/stale-read-guard/gate-contract.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "95 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p1-tools-runtime
+review_state: approved
+reviewer: codex/cross-review-wave1

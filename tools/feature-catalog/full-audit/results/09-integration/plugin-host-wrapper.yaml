@@ -1,0 +1,52 @@
+version: 1
+feature_id: plugin-host-wrapper
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/plugin-isolation/plugin-host.ts:PluginHost
+entrypoints:
+  - src/mcp/isolated-client.ts:IsolatedMcpClient.start
+activation:
+  - Plugin or skill MCP activation reaches IsolatedMcpClient, which wraps the child process in PluginHost.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/plugin-isolation/plugin-host.ts:PluginHost
+consumer:
+  - src/mcp/isolated-client.ts:IsolatedMcpClient.start
+  - src/agent/plugin-mcp-launcher/isolated-launcher-port.ts:createIsolatedMcpLauncherPort
+reachable: yes
+surface_findings:
+  - IsolatedMcpClient creates PluginHost over the spawned process before protocol requests.
+  - Host request correlation, timeout, child-exit handling, and idempotent shutdown have focused coverage.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/plugin-isolation-host-hellgate.test.ts tests/unit/plugin-isolation-host.test.ts tests/unit/plugin-isolation-mcp-integration-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Host request/response, process-exit, lifecycle, and isolated MCP integration rails passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'new PluginHost|IsolatedMcpClient|createIsolatedMcpLauncherPort' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/mcp src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live isolated MCP path constructs PluginHost and is consumed by plugin-MCP launcher wiring.
+  - kind: test
+    command: bun test tests/unit/plugin-isolation-host-hellgate.test.ts tests/unit/plugin-isolation-host.test.ts tests/unit/plugin-isolation-mcp-integration-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused host and integrated isolated MCP rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

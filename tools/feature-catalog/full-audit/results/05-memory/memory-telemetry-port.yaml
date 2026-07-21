@@ -1,0 +1,55 @@
+version: 1
+feature_id: memory-telemetry-port
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/memory/telemetry-port.ts:MemoryTelemetryPort
+entrypoints:
+  - src/memory/consolidate/phase1.ts:runPhase1
+  - src/memory/consolidate/phase2.ts:runPhase2
+  - src/memory/ranking.ts:rankEntries
+activation:
+  - Memory operations accept an optional telemetry port and emit bounded events only when a caller supplies one.
+  - buildMemoryTelemetry constructs the observability adapter, but no production composition root calls that factory or passes its result into memory operations.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/memory/telemetry-port.ts:MemoryTelemetryPort
+  - src/memory/telemetry-port.ts:noopMemoryTelemetry
+consumer: []
+reachable: no
+surface_findings:
+  - The port, allow-list constants, optional operation parameters, and observability adapter are implemented and exercised by focused tests.
+  - Repository-wide search finds buildMemoryTelemetry only at its declaration and barrel export; production callers use no injected telemetry port.
+  - The catalog correctly labels this catalog slice seam-only, rather than claiming a live metrics binding.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-telemetry-port-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The focused rail proves optional no-op behavior, event allow-lists, content exclusion, outcome mapping, adapter emission, and sink-throw resilience.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: seam-only
+blocker: No production composition root invokes buildMemoryTelemetry or supplies MemoryTelemetryPort to Phase1, Phase2, or recall.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg 'buildMemoryTelemetry\(|MemoryTelemetryPort|recordPhase1|recordPhase2|recordRecall' src --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The adapter factory has no production call site while the memory APIs expose only optional port parameters.
+  - kind: test
+    command: bun test tests/unit/memory-telemetry-port-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 31 focused tests passed for no-op default, anti-leak contracts, adapter mapping, and sink-fault isolation.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch10
+review_state: approved
+reviewer: codex/cross-review-wave1

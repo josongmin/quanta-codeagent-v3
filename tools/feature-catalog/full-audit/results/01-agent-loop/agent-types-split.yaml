@@ -1,0 +1,63 @@
+version: 1
+feature_id: agent-types-split
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/types.ts:AgentConfig public re-export boundary
+entrypoints:
+  - src/agent/loop.ts:runAgent
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+activation:
+  - AgentConfig and its extracted type groups are imported by live loop and host assembly code; the root types module preserves the public import boundary.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/types.ts re-exports the extracted outcome, memory, compaction, capability, and wire-slot contracts
+consumer:
+  - src/agent/loop.ts consumes AgentConfig through the retained root module
+  - src/host/runtime/agent-arg-builder.ts consumes AgentConfig through the retained root module
+reachable: yes
+surface_findings:
+  - The split is type-level cohesion work, so its efficacy surface is compile-time compatibility rather than a new runtime toggle.
+  - The root module imports and re-exports the extracted groups; existing root-module consumers remain valid.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun x tsc --noEmit --incremental false -p tsconfig.typecheck.src.json
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Full src typecheck completed successfully with the extracted type modules and preserved AgentConfig surface.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'types/(agent-outcome|memory-config|compaction-config|agent-capabilities|wire-slots)' src/agent/types.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Root types.ts imports and re-exports each extracted cohesion group while AgentConfig extends the wire-slot interfaces.
+  - kind: source
+    command: rg -n 'from ["'"'"']@/agent/types["'"'"']' src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Live source consumers retain the public root-module import path; no source migration is required for the split.
+  - kind: test
+    command: bun x tsc --noEmit --incremental false -p tsconfig.typecheck.src.json
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Full src typecheck completed successfully.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 0 L3+ feature reachability exceptions.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-core
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,57 @@
+version: 1
+feature_id: mcp-connector-discovery
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts:mcpConnectors slot
+entrypoints:
+  - src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildMcpConnectorDiscoveryPort
+  - src/tool/mcp-connector/index.ts:mcpConnectorTools
+activation:
+  - Set QUANTA_MCP_CONNECTORS=1; the host creates a bundled catalog discovery port and registers mcp_connector_list and mcp_connector_install against the resolved .mcp.json path.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - bundled MCP connector catalog and selected connector id
+consumer:
+  - mcp_connector_list and mcp_connector_install tool execution plus atomic .mcp.json merge
+reachable: yes
+surface_findings:
+  - The gated tool port reaches the real host writer, which preserves unrelated config entries, rejects malformed config and divergent same-name server values, and carries OAuth metadata for HTTP entries.
+  - The default menu has neither tool until the strict connector gate is enabled; the catalog permits only trusted catalog ids, not model-provided commands.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mcp-connector-tools-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: An absent discovery port leaves both connector tools out of the default menu.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp-connector-catalog-hellgate.test.ts tests/unit/mcp-connector-tools-e2e-hellgate.test.ts tests/unit/mcp-connector-wire-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed catalog transform, tool list/install, atomic config merge, idempotence, unknown-id handling, and corrupt or conflicting config refusal.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'mcpConnectors|buildMcpConnectorDiscoveryPort|mcpConnectorTools' src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/tool/mcp-connector/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The strict gate, port construction, and tool registration form a live host path.
+  - kind: test
+    command: bun test tests/unit/mcp-connector-catalog-hellgate.test.ts tests/unit/mcp-connector-tools-e2e-hellgate.test.ts tests/unit/mcp-connector-wire-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All focused catalog, tool, writer, and conflict rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,54 @@
+version: 1
+feature_id: eval-synthetic-scenario-schema
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/synthetic/scenario.ts:parseScenario and loadScenarioFile
+entrypoints:
+  - src/apps/eval/synthetic/index.ts:runSynthetic
+  - src/apps/eval/synthetic/generator.ts:generateScenarios
+activation:
+  - Parse a declared synthetic scenario file through the standalone eval application.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/eval/synthetic/scenario.ts:parseScenario
+  - src/apps/eval/synthetic/scenario.ts:loadScenarioFile
+consumer:
+  - src/apps/eval/synthetic/index.ts:runSynthetic
+  - src/apps/eval/synthetic/generator.ts:generateScenarios
+reachable: no
+surface_findings:
+  - The scenario parser is an internal eval primitive consumed by both synthetic run and generation paths.
+  - Invalid forbidden entries and invalid maxTurns throw rather than being silently coerced; invalid rubric weights degrade to the documented default.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-error-channels.test.ts tests/unit/eval-generator-validation.test.ts tests/unit/eval-storage-roundtrip.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Strict forbidden/maxTurns validation, valid scenarios, generator write acceptance, and result storage round-trip passed.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'parseScenario|loadScenarioFile' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/eval/synthetic
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Generator and synthetic run paths consume the strict schema parser.
+  - kind: test
+    command: bun test tests/unit/eval-error-channels.test.ts tests/unit/eval-generator-validation.test.ts tests/unit/eval-storage-roundtrip.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Schema and storage rails passed in the 46-pass eval unit bundle.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

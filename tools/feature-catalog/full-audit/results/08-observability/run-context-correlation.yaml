@@ -1,0 +1,52 @@
+version: 1
+feature_id: run-context-correlation
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/run-context.ts:RunContext
+entrypoints:
+  - src/runner/assemble/streaming.ts:buildStreamingCore
+  - src/agent/session-resources.ts:stampTurn
+activation:
+  - Observability-configured stream assembly creates a run context; loop and dispatch-owned resources enrich it by turn and tool use.
+effective_defaults:
+  cli: off
+  web: na
+  bench: on
+  headless: resource
+  daemon: resource
+producer:
+  - src/runner/assemble/streaming.ts:buildStreamingCore
+consumer:
+  - src/agent/session-resources.ts:stampTurn
+  - src/stream/adapters/jsonl-recorder.ts
+reachable: yes
+surface_findings:
+  - No observe configuration preserves undefined context; when configured, the flat structure is stamped into trajectory envelopes without conversion.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/probe-funnel.test.ts tests/unit/eval-trajectory-diff.test.ts tests/unit/trajectory.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Consumer-side trajectory and evaluation rails passed; no direct dedicated RunContext mutation rail exists.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: conditional
+blocker: Direct default-on interactive CLI evidence is absent because run context is only built with observability configuration.
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'RunContext|stampTurn|runId|observeDir' src/runner/assemble/streaming.ts src/agent/session-resources.ts src/stream/adapters/jsonl-recorder.ts src/agent/types.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Stream assembly creates the optional context and agent session resources stamp per-turn state.
+  - kind: test
+    command: bun test tests/unit/probe-funnel.test.ts tests/unit/eval-trajectory-diff.test.ts tests/unit/trajectory.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused downstream trajectory rails passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

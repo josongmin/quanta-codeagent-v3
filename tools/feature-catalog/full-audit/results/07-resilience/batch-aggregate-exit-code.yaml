@@ -1,0 +1,50 @@
+version: 1
+feature_id: batch-aggregate-exit-code
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/agent/mode-presets/batch.ts:computeExitCode
+entrypoints:
+  - src/apps/agent/mode-presets/batch.ts:runMode
+activation:
+  - Batch agent mode aggregates all evaluated instance verdicts before returning the process exit code.
+effective_defaults:
+  cli: off
+  web: na
+  bench: on
+  headless: off
+  daemon: off
+producer:
+  - src/apps/agent/mode-presets/batch.ts:computeExitCode
+consumer:
+  - src/apps/agent/mode-presets/batch.ts:runMode
+reachable: yes
+surface_findings:
+  - The catalog correctly marks interactive CLI missing; batch mode returns one when any instance fails or degrades and zero for an empty corpus.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/agent/mode-presets/batch.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Aggregation, degraded verdict, and empty-corpus branches passed.
+failure_posture: fail-loud
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'computeExitCode|runMode|exitCode' src/apps/agent/mode-presets/batch.ts src/apps/agent/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Batch owner computes and returns the aggregate exit code to the app entry.
+  - kind: test
+    command: bun test tests/unit/apps/agent/mode-presets/batch.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused aggregate-exit rail passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

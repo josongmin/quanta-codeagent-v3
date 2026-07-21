@@ -1,0 +1,58 @@
+version: 1
+feature_id: codex-r2-registry-cleanup-dry-run
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/session-registry-cmd.ts:runCleanup
+entrypoints:
+  - src/apps/cli/session-registry-cmd.ts:sessionRegistryCmd
+  - src/agent/session-resource-registry/disk-adapter/gc.ts:countDiskRegistryCleanupCandidates
+  - src/agent/session-resource-registry/sqlite-adapter/gc.ts:countSqliteRegistryCleanupCandidates
+activation:
+  - /session-registry cleanup --dry-run selects candidate-count functions instead of sweepNow.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - Disk and SQLite count functions calculate retention candidates without deletion or write operations.
+consumer:
+  - The registered CLI slash command parses --dry-run and renders the preview.
+reachable: yes
+surface_findings:
+  - Flag absence retains the mutating cleanup sweep; dry-run has no web command handler.
+  - Candidate count behavior depends on the configured disk or SQLite registry backend.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/session-registry-slash.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No-flag cleanup preserves the sweep marker and existing behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/agent/session-resource-registry/disk-adapter/__tests__/gc.hellgate.test.ts src/agent/session-resource-registry/sqlite-adapter/__tests__/gc.hellgate.test.ts tests/unit/session-registry-slash.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Disk/SQLite candidate counts match sweep selection, remain idempotent, and the slash dispatch avoids sweeping.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "countDiskRegistryCleanupCandidates|countSqliteRegistryCleanupCandidates|dry-run" src/apps/cli/session-registry-cmd.ts src/agent/session-resource-registry
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Slash parsing selects the non-mutating count implementations.
+  - kind: test
+    command: bun test src/agent/session-resource-registry/disk-adapter/__tests__/gc.hellgate.test.ts src/agent/session-resource-registry/sqlite-adapter/__tests__/gc.hellgate.test.ts tests/unit/session-registry-slash.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 82 dry-run, slash, and retention matching tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

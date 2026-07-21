@@ -1,0 +1,49 @@
+version: 1
+feature_id: bench-trajectory-record
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/bench/trajectory.ts:maybeRecordTrajectory
+entrypoints:
+  - src/apps/bench/run-main.ts:resolveLLM
+activation:
+  - QUANTA_BENCH_RECORD_TRAJECTORY
+  - QUANTA_BENCH_TRAJECTORY_DEBUG=1
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/apps/bench/trajectory.ts:maybeRecordTrajectory
+  - src/apps/bench/trajectory-debug-sink.ts:debugSink
+consumer:
+  - src/apps/bench/index.ts:public re-export only
+reachable: no
+surface_findings:
+  - maybeRecordTrajectory is implemented and its isolated tests show a recorder that writes a replayable JSONL cassette.
+  - No production source call site invokes maybeRecordTrajectory or maybeReplayTrajectory; run-main resolves the LLM without this wrapper.
+  - The helper test asserts recording is default-on when called, contradicting the catalog's default-OFF wording, but the uncomposed helper has no bench runtime effect.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: The recorder/replayer is exported and tested but absent from the production resolveLLM composition root.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'maybeRecordTrajectory' --glob '!tests/**' --glob '!tools/**' .
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The only production references are the helper definition, its index re-export, and documentation; no runtime consumer calls it.
+  - kind: test
+    command: bun test tests/unit/bench-trajectory-record-hellgate.test.ts tests/unit/trajectory-debug-sink-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Helper-level rails passed for cassette writing, replay miss behavior, debug gating, per-lane isolation, and metadata drain; they do not supply production composition proof.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-bench-controls
+review_state: approved
+reviewer: codex/cross-review-wave1

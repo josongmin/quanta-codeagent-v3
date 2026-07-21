@@ -3,6 +3,13 @@ import { z } from "zod"
 export const AuditPrioritySchema = z.enum(["P0", "P1", "P2", "P3"])
 export type AuditPriority = z.infer<typeof AuditPrioritySchema>
 
+export const AuditInputDigestsSchema = z.object({
+  catalog_yaml: z.string().regex(/^[0-9a-f]{64}$/),
+  default_off_ledger: z.string().regex(/^[0-9a-f]{64}$/),
+  baseline: z.string().regex(/^[0-9a-f]{64}$/),
+})
+export type AuditInputDigests = z.infer<typeof AuditInputDigestsSchema>
+
 export const AuditSnapshotEntrySchema = z.object({
   feature_id: z.string().min(1),
   source_path: z.string().min(1),
@@ -15,9 +22,10 @@ export const AuditSnapshotEntrySchema = z.object({
 })
 
 export const AuditSnapshotSchema = z.object({
-  version: z.literal(1),
+  version: z.literal(2),
   snapshot_head: z.string().regex(/^[0-9a-f]{40}$/),
   created_at: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  input_digests: AuditInputDigestsSchema,
   catalog_total: z.number().int().nonnegative(),
   priority_counts: z.record(AuditPrioritySchema, z.number().int().nonnegative()),
   entries: z.array(AuditSnapshotEntrySchema),

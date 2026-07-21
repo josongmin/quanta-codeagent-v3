@@ -1,0 +1,55 @@
+version: 1
+feature_id: llm-adapter-foundry
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/providers/foundry-adapter.ts:FoundryProviderAdapter
+entrypoints:
+  - src/llm/providers/registry.ts:resolveProvider
+activation:
+  - Provider registry selects Foundry only for explicit provider choice or Foundry environment conventions.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/providers/foundry-adapter.ts:FoundryProviderAdapter
+consumer:
+  - src/llm/providers/registry.ts:FACTORIES.foundry
+reachable: yes
+surface_findings:
+  - The adapter performs real SDK streaming when selected; absent or invalid SDK/auth conditions produce typed errors instead of a silent stub.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/llm-providers/registry-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Empty provider configuration selects the default provider rather than Foundry.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm-providers/foundry-adapter-hellgate.test.ts tests/unit/llm-providers/foundry-real-stream-hellgate.test.ts tests/unit/llm-providers/registry-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Factory selection, real-stream translation, typed failures, and cancellation rails passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'FoundryProviderAdapter|FACTORIES.foundry|CLAUDE_CODE_USE_FOUNDRY' src/llm/providers/foundry-adapter.ts src/llm/providers/registry.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Registry owns opt-in selection and the adapter owns the streaming transport.
+  - kind: test
+    command: bun test tests/unit/llm-providers/foundry-adapter-hellgate.test.ts tests/unit/llm-providers/foundry-real-stream-hellgate.test.ts tests/unit/llm-providers/registry-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused Foundry and registry rails passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

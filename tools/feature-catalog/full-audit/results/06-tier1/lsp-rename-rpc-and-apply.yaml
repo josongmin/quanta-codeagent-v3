@@ -1,0 +1,60 @@
+version: 1
+feature_id: lsp-rename-rpc-and-apply
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/lsp-bridge/tools.ts:lspRenameApplyPort and lspNavToolList
+entrypoints:
+  - src/apps/cli/internal.ts:selectLspNavTools
+activation:
+  - QUANTA_LSP_TOOLS=full selects all LSP navigation tools including the mutating lsp_rename_apply; default and readonly modes omit it.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: unknown
+producer:
+  - src/lsp/adapters/base.ts:LspClient.computeRename
+  - src/lsp/adapters/default-rename-apply.ts:DefaultRenameApplyAdapter
+  - src/agent/lsp-bridge/tools.ts:lspRenameApplyPort
+consumer:
+  - src/agent/lsp-bridge/tools.ts:lspNavToolList
+  - src/apps/cli/internal.ts:selectLspNavTools
+reachable: yes
+surface_findings:
+  - The CLI calls resolveLspNavMode and selects lspNavToolList; only explicit full includes the mutating rename tool, preserving a default-off registry delta.
+  - The bridge holds one LspClient across computeRename and applyEdit, then applies the normalized WorkspaceEdit through the existing atomic two-phase writer.
+  - The MCP server route intentionally filters this mutating tool; it is not a browser or reverse-MCP affordance.
+off_identity_proof:
+  kind: source
+  command: rg -n "resolveLspNavMode|raw.*full|selectLspNavTools|mode === \\"all\\"" src/apps/cli/internal.ts src/apps/cli/internal/argv.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset selects only read-only tools when a server exists, and only the explicit full mode returns the mutating member.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/lsp-rename-rpc-hellgate.test.ts tests/unit/lsp-default-rename-apply-hellgate.test.ts tests/unit/lsp-rename-bridge-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: RPC request shape, workspace-edit normalization, atomic multi-file application, unavailable-server posture, tool registration, and mandatory confirmation all passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "computeRename|applyWorkspaceEdit|lspRenameApplyTool|lspNavToolList|selectLspNavTools" src/lsp/adapters/base.ts src/lsp/adapters/default-rename-apply.ts src/agent/lsp-bridge/tools.ts src/apps/cli/internal.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The RPC adapter, atomic apply adapter, tool builder, list enrollment, and CLI composition are all connected.
+  - kind: test
+    command: bun test tests/unit/lsp-rename-rpc-hellgate.test.ts tests/unit/lsp-default-rename-apply-hellgate.test.ts tests/unit/lsp-rename-bridge-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 17 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch21
+review_state: approved
+reviewer: codex/cross-review-wave1

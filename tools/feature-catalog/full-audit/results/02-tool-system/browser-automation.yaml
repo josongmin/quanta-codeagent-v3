@@ -1,0 +1,53 @@
+version: 1
+feature_id: browser-automation
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/browser/index.ts
+entrypoints: [src/tool/surface/gated-tools.ts]
+activation: [QUANTA_BROWSER_TOOL=on, chrome or chromium resource present]
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer: [src/browser/cdp-adapter.ts, src/tool/browser/net-guard.ts, src/tool/browser/session-holder.ts]
+consumer: [src/tool/browser/index.ts, src/tool/surface/gated-tools.ts]
+reachable: yes
+surface_findings:
+  - "Tool registration is double-gated by explicit environment opt-in and chrome resource detection; bounds, network, highlight, and tabs add independent gates."
+  - "Navigation applies SSRF and DNS-private-address denial; network collection keeps metadata only and denies bodies and headers."
+  - "Deterministic unit rails cover the adapter; real Chrome remains an explicitly environment-dependent integration path."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/browser-tool-hellgate.test.ts tests/unit/browser-edge-tool-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off and missing backend paths keep tools absent or return typed failures.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/browser-tool-hellgate.test.ts tests/unit/browser-tool-mapping-hellgate.test.ts tests/unit/browser-cdp-adapter-hellgate.test.ts tests/unit/browser-cdp-adapter-branches-hellgate.test.ts tests/unit/browser-cdp-session-hellgate.test.ts tests/unit/browser-cdp-allowlist-hellgate.test.ts tests/unit/browser-edge-ssrf-hellgate.test.ts tests/unit/browser-edge-parse-hellgate.test.ts tests/unit/browser-edge-tool-hellgate.test.ts tests/unit/browser-edge-cdp-session-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: CDP, error mapping, SSRF, allowlist, parse, and session rails pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_BROWSER_TOOL|browser_network|browser_tabs|net-guard|ssrf' src/tool/surface/gated-tools.ts src/tool/browser src/browser
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Resource and independent feature gates lead to guarded browser consumers.
+  - kind: test
+    command: bun test tests/unit/browser-tool-hellgate.test.ts tests/unit/browser-tool-mapping-hellgate.test.ts tests/unit/browser-cdp-adapter-hellgate.test.ts tests/unit/browser-cdp-adapter-branches-hellgate.test.ts tests/unit/browser-cdp-session-hellgate.test.ts tests/unit/browser-cdp-allowlist-hellgate.test.ts tests/unit/browser-edge-ssrf-hellgate.test.ts tests/unit/browser-edge-parse-hellgate.test.ts tests/unit/browser-edge-tool-hellgate.test.ts tests/unit/browser-edge-cdp-session-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused browser deterministic rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

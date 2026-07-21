@@ -1,0 +1,52 @@
+version: 1
+feature_id: assert-never-exhaustiveness
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/assert-never.ts:assertNever
+entrypoints:
+  - src/stream/adapters/jsonl-recorder.ts:AgentEvent default switch arm
+  - src/llm/retry/codex-spec-router.ts:LLM error routing default arm
+activation:
+  - Static guard invoked from closed-union switch defaults throughout runtime code.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/shared/assert-never.ts throws with an unhandled label when an unchecked value reaches a default arm.
+consumer:
+  - src/stream/adapters/jsonl-recorder.ts and provider routing consumers use assertNever as their default branch.
+reachable: yes
+surface_findings:
+  - TypeScript enforces compile-time exhaustiveness at the typed call sites.
+  - Runtime rails cover an injected non-member and a real BatchError closed union default branch.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/recovery-router-single-authority-adversarial-hellgate.test.ts tests/unit/retrieval/embed-batcher-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Adversarial non-member routing throws instead of falling through and the BatchError four-arm runtime exhaustive branch passes.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'assertNever(' 9a12f7a -- src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Closed-union router, recorder, LLM, runtime, tool, and connector paths contain live default-branch calls.
+  - kind: test
+    command: bun test tests/unit/recovery-router-single-authority-adversarial-hellgate.test.ts tests/unit/retrieval/embed-batcher-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused exhaustiveness rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

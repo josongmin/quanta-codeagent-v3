@@ -1,0 +1,60 @@
+version: 1
+feature_id: oauth-refresh-lock
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/auth/oauth-refresh-lock.ts:OAuthRefreshLockPort
+entrypoints:
+  - src/auth/lock-in-memory.ts:InMemoryLock
+  - src/auth/lock-file-based.ts:FileBasedLock
+  - src/auth/lock-redis-stub.ts:FallbackLock
+activation:
+  - A host must construct a lock implementation and inject it into an OAuth refresh lifecycle; no snapshot OAuth composition root does so.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/auth/lock-in-memory.ts:InMemoryLock
+  - src/auth/lock-file-based.ts:FileBasedLock
+  - src/auth/lock-redis-stub.ts:FallbackLock
+consumer:
+  - src/runner/session-memory-auto.ts:InMemoryLock for non-OAuth dream coordination
+reachable: no
+surface_findings:
+  - The lock implementations and fallback chain have deterministic TTL, reentrancy, wrong-holder, and error behavior in isolation.
+  - The only non-auth construction found is an in-memory lock passed to session-memory automation; no OAuth refresh or token rotation composition root constructs the fallback chain or injects the OAuth port.
+off_identity_proof:
+  kind: source
+  command: rg -n 'rotateGitHubToken\(|new (InMemoryLock|FileBasedLock|FallbackLock|RedisLockStub)\(|OAuthRefreshLockPort' src --glob '!src/auth/**' --glob '!**/__tests__/**' --glob '!tests/**'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No OAuth lifecycle construction or injection was found; the one InMemoryLock consumer is the unrelated session-memory coordinator.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/oauth-refresh-lock-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: In-memory, file, Redis-stub, and fallback behavior passed as isolated implementation rails.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: seam-only
+blocker: The distributed lock port is not wired into any live OAuth refresh lifecycle; Redis remains a deliberate stub and file or memory fallback is never composed for auth.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'rotateGitHubToken\(|new (InMemoryLock|FileBasedLock|FallbackLock|RedisLockStub)\(|OAuthRefreshLockPort' src --glob '!src/auth/**' --glob '!**/__tests__/**' --glob '!tests/**'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No live OAuth consumer was found.
+  - kind: test
+    command: bun test tests/unit/oauth-refresh-lock-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Isolated lock semantics pass but do not establish OAuth reachability.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,55 @@
+version: 1
+feature_id: recovery-router-codex-spec
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/llm/retry/codex-spec-router.ts:codexSpecRoute"
+entrypoints:
+  - "src/agent/recovery.ts:decideOnStreamError"
+  - "src/agent/retry.ts:RetryingLLM"
+  - "src/llm/fallback.ts:FallbackLLM"
+activation:
+  - "always active for typed LLMError recovery"
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: on
+  daemon: on
+producer:
+  - "src/llm/retry/codex-spec-router.ts:codexSpecRoute"
+  - "src/llm/retry/decorator-policy.ts:retryDispositionForKind and isFallbackKind"
+consumer:
+  - "src/agent/recovery.ts routes typed stream errors through codexSpecRoute"
+  - "src/agent/retry.ts and src/llm/fallback.ts derive decorator policy from the same table"
+reachable: yes
+surface_findings:
+  - "A real runAgent integration rail proves retry, compaction, fatal, and HITL outcomes at the outer turn owner."
+  - "The feature YAML says 16-kind in its purpose while the live table and decorator proof cover 18 LLMErrorKind members; its own notes already state 18-kind."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/recovery-router-hellgate.test.ts tests/unit/recovery-router-consumer-wire.test.ts tests/unit/retry-decorator-policy-hellgate.test.ts tests/integration/recovery-router-real-loop-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The selected rails cover table policy, all three live consumers, and real loop recovery outcomes."
+failure_posture: fail-loud
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg -n 'codexSpecRoute|retryDispositionForKind|isFallbackKind|decideOnStreamError' src/agent/recovery.ts src/agent/retry.ts src/llm/fallback.ts src/llm/retry"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The outer recovery owner, retry decorator, and fallback decorator consume the canonical routing authority or its direct projections."
+  - kind: test
+    command: "bun test tests/unit/recovery-router-hellgate.test.ts tests/unit/recovery-router-consumer-wire.test.ts tests/unit/retry-decorator-policy-hellgate.test.ts tests/integration/recovery-router-real-loop-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "All selected router, consumer, decorator, and live-loop rails passed with zero failures."
+audited_at: "2026-07-19"
+auditor: codex/p1-resilience-tier1
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,68 @@
+version: 1
+feature_id: at-mention-autocomplete
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/surface-compose/prompt-ux.ts:buildAtProvider
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/repl.ts:runRepl
+  - src/apps/cli/repl/session-loop-options.ts:buildSessionLoopOptions
+activation:
+  - CLI seeds QUANTA_AT_AUTOCOMPLETE=1 when unset; explicit non-1 disables it.
+  - The interactive prompt receives an AtCandidateProvider from buildPromptUx.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/at-autocomplete/provider.ts:createCompositeAtProvider
+  - src/apps/cli/at-autocomplete/state-machine.ts:classifyChar
+consumer:
+  - src/apps/cli/repl/surface-compose/prompt-ux.ts:buildAtProvider
+  - src/apps/cli/repl/prompt-pipeline.ts:defaultPromptLineReader
+  - src/apps/cli/raw-line-reader.ts:readLine
+reachable: yes
+surface_findings:
+  - The CLI seed list makes the dropdown default-on for an ordinary interactive CLI launch, while the provider stays an explicitly injectable default-off slice in non-CLI callers.
+  - buildPromptUx constructs the live file and optional symbol provider, prompt-pipeline forwards it, and raw-line-reader opens, ranks, accepts, and race-guards the dropdown.
+  - Skill, plugin, and app listers remain graceful-empty without list-capable registries; file candidates are live and symbol candidates light when the LSP dependency is present.
+off_identity_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/raw-line-reader-at-mention.hellgate.test.ts tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No provider keeps @ an ordinary character with byte-identical non-@ and slash behavior; explicit =0 is preserved by the CLI seed loop.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/apps/cli/at-autocomplete/__tests__/provider.hellgate.test.ts src/apps/cli/__tests__/raw-line-reader-at-mention.hellgate.test.ts tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Candidate discovery, jail, ranking, input acceptance, stale-result rejection, CLI seeding, and explicit opt-out pass.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'CLI_SEEDED_GATE_NAMES|QUANTA_AT_AUTOCOMPLETE|buildAtProvider|atProvider' src/apps/cli/index.ts src/apps/cli/repl src/apps/cli/raw-line-reader.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The production CLI seed, REPL composer, prompt pipeline, and raw reader form one consumer path.
+  - kind: test
+    command: bun test src/apps/cli/at-autocomplete/__tests__/provider.hellgate.test.ts src/apps/cli/__tests__/raw-line-reader-at-mention.hellgate.test.ts tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 154 focused input/provider tests plus 11 gate/default tests passed in this audit.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3 feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-repl
+review_state: approved
+reviewer: codex/cross-review-wave1

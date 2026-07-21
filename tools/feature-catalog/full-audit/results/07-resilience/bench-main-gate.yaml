@@ -1,0 +1,52 @@
+version: 1
+feature_id: bench-main-gate
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: import.meta.main guards in CLI entry modules
+entrypoints:
+  - src/apps/agent/index.ts
+  - src/apps/bench/index.ts
+  - src/apps/probe/index.ts
+  - tools/feature-catalog/cli.ts
+  - tools/swebench-matrix.ts
+activation:
+  - Each guarded main executes only when Bun starts that module as the process entrypoint.
+effective_defaults:
+  cli: na
+  web: na
+  bench: on
+  headless: on
+  daemon: na
+producer:
+  - src/apps/agent/index.ts:import.meta.main guard
+  - src/apps/bench/index.ts:import.meta.main guard
+  - src/apps/probe/index.ts:import.meta.main guard
+consumer:
+  - guarded main functions in five executable modules
+reachable: yes
+surface_findings:
+  - All five named executable roots retain an import.meta.main guard around their production main invocation.
+  - The listed probe test proves the probe entry's imported behavior, but there is no focused non-vacuous ratchet that exercises or structurally scans all five required guards.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: proof-gap
+blocker: The existing focused test evidence does not prove that every catalog-listed entry guard remains present and protects against import-side effects.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'if \(import\.meta\.main\)' src/apps/agent/index.ts src/apps/bench/index.ts src/apps/probe/index.ts tools/feature-catalog/cli.ts tools/swebench-matrix.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Every catalog-listed root has the guard in the frozen snapshot source.
+  - kind: test
+    command: bun test tests/unit/probe.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 31 probe parser and CLI cases passed within the 241-pass focused rail, but this is insufficient coverage for all five guards.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch23
+review_state: approved
+reviewer: codex/cross-review-wave1

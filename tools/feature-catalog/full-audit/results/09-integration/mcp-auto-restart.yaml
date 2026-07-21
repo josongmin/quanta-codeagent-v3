@@ -1,0 +1,61 @@
+version: 1
+feature_id: mcp-auto-restart
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/mcp/reconnect/supervisor.ts:McpReconnectSupervisor
+entrypoints:
+  - src/host/mcp-composition.ts:mcpAutoRestartEnabled
+  - src/host/mcp-composition.ts:mcpSupervisorDepsFor
+  - src/agent/mcp-bridge.ts:loadMcpTools
+activation:
+  - QUANTA_MCP_AUTORESTART=1, true, or yes wraps configured MCP servers in reconnect supervisors.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/mcp/reconnect/policy.ts:backoffDelay
+  - src/mcp/reconnect/supervisor.ts:McpReconnectSupervisor
+consumer:
+  - src/host/mcp-composition.ts:loadMcpTools option assembly
+  - src/agent/mcp-bridge.ts:supervised MCP tool bridge
+reachable: yes
+surface_findings:
+  - The host parses QUANTA_MCP_AUTORESTART default false and injects supervisor dependencies only when enabled.
+  - The supervisor replaces crashed clients behind stable bridge tools, caps restart storms at degraded, and rejects or queues work according to policy.
+  - Restart factories retain inbound wiring and supervised task calls resolve the current client rather than a stale capture.
+off_identity_proof:
+  kind: test
+  command: bun test src/agent/__tests__/mcp-autorestart-default-off.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset auto-restart keeps stable tool names, uses the single-client path, and preserves zero-subscriber exit behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/mcp/reconnect/__tests__/policy.hellgate.test.ts src/mcp/reconnect/__tests__/supervisor.hellgate.test.ts src/mcp/reconnect/__tests__/supervisor-resume-carry-hellgate.test.ts tests/unit/mcp-supervised-tasks-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Crash/restart, backoff, storm degradation, stale epoch guards, SSE resume carry, and post-restart task routing passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'QUANTA_MCP_AUTORESTART|mcpAutoRestartEnabled|McpReconnectSupervisor|supervisorDepsFor' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host src/agent src/mcp
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Host composition gates supervisor dependency injection with the env flag and agent bridge consumes supervised clients.
+  - kind: test
+    command: bun test src/agent/__tests__/mcp-autorestart-default-off.hellgate.test.ts src/mcp/reconnect/__tests__/policy.hellgate.test.ts src/mcp/reconnect/__tests__/supervisor.hellgate.test.ts src/mcp/reconnect/__tests__/supervisor-resume-carry-hellgate.test.ts tests/unit/mcp-supervised-tasks-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Default-off plus focused reconnect and supervised-task rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

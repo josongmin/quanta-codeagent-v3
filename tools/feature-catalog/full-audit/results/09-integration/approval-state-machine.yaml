@@ -1,0 +1,52 @@
+version: 1
+feature_id: approval-state-machine
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/admissibility-gate/hitl.ts:createApprovalGate
+entrypoints:
+  - src/host/runtime/agent-arg-builder/observability-wire.ts:resolveObservabilitySlots
+  - src/agent/admissibility-gate/hitl.ts:createApprovalGate
+activation:
+  - Set QUANTA_OBSERVABILITY=on; the composition root injects the state machine into AgentConfig and the HITL approval gate opens, settles, and cancels requests against it.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - admissibility-gate approval requests and decisions
+consumer:
+  - approval state store, objective and ledger attribution, and observability emitter pending approvals
+reachable: yes
+surface_findings:
+  - The state machine is now wired through the observability-gated composition root into createApprovalGate; requests and settlements create real pending and terminal records with attribution.
+  - The catalog's deliberate hold saying no code path calls the store is obsolete; the off path still omits all slots byte-identically.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability-live-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off composition omits approval state and all observability slots.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/approval-state-machine-hellgate.test.ts tests/unit/approval-gate-wire-hellgate.test.ts tests/unit/observability-live-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: State transitions, attribution, gate request-settle-cancel, and live composition slot injection passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: Catalog hold and purpose text still claim there is no producer or HITL wiring, contradicting the current observability-gated approval gate path.
+disposition: fix-claim
+receipts:
+  - kind: test
+    command: bun test tests/unit/approval-state-machine-hellgate.test.ts tests/unit/approval-gate-wire-hellgate.test.ts tests/unit/observability-live-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused state, gate, and composition rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

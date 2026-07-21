@@ -1,0 +1,62 @@
+version: 1
+feature_id: auto-dream-cross-session
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/session-memory-auto.ts:buildCrossSessionDreamTrigger
+entrypoints:
+  - src/host/runtime/internal/context-binding/base.ts:extendBaseWithMemoryAuto
+  - src/host/runtime/internal/context-binding.ts:close
+activation:
+  - QUANTA_AUTO_DREAM must be exactly "1".
+  - Runtime memory assembly creates the trigger and host close awaits its session-end hook.
+  - The CLI surface receives the same trigger instance for the manual /dream command.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/memory/dream/cross-session-trigger.ts:CrossSessionDreamTrigger
+  - src/runner/session-memory-auto.ts:buildCrossSessionDreamTrigger
+consumer:
+  - src/host/runtime/internal/context-binding/base.ts:extendBaseWithMemoryAuto
+  - src/host/runtime/internal/context-binding.ts:close
+  - src/apps/cli/repl/surface-compose/dispatch-compose.ts:composeDispatch
+reachable: yes
+surface_findings:
+  - Session teardown drives the auto trigger and the CLI manual command reuses that exact instance.
+  - The production builder injects InMemoryLock, contrary to the catalog claim of a file-capable lock that makes a second concurrent process observe would-wait.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/dream-trigger-wire-e2e-hellgate.test.ts tests/unit/cli/dream-cmd-manual-trigger-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent QUANTA_AUTO_DREAM yields no trigger and the CLI command is inert.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/auto-dream-hellgate.test.ts tests/unit/auto-dream-e2e-hellgate.test.ts tests/unit/dream-trigger-wire-e2e-hellgate.test.ts tests/unit/dream-trigger-adversarial-r2-hellgate.test.ts tests/unit/cli/dream-cmd.test.ts tests/unit/cli/dream-cmd-manual-trigger-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Session and hours cadence, team target refusal, host construction, teardown triggering, and manual same-core invocation pass.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: conditional
+blocker: Production lock scope is one process, so simultaneous CLI processes can both consolidate and last-writer-wins; the catalog's cross-process exclusion claim is not true.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg "buildCrossSessionDreamTrigger|InMemoryLock|dreamOnSessionEnd|dreamTrigger" src/runner src/host src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Host wiring is live and its builder explicitly instantiates InMemoryLock.
+  - kind: test
+    command: bun test tests/unit/auto-dream-hellgate.test.ts tests/unit/auto-dream-e2e-hellgate.test.ts tests/unit/dream-trigger-wire-e2e-hellgate.test.ts tests/unit/dream-trigger-adversarial-r2-hellgate.test.ts tests/unit/cli/dream-cmd.test.ts tests/unit/cli/dream-cmd-manual-trigger-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected focused rail passed as part of the 244-pass, 0-fail audit run.
+audited_at: "2026-07-19"
+auditor: codex/p1-context-memory
+review_state: approved
+reviewer: codex/cross-review-wave1

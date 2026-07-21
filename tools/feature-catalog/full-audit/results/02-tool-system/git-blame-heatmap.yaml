@@ -1,0 +1,45 @@
+version: 1
+feature_id: git-blame-heatmap
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/git/blame-heatmap.ts:gitBlameHeatmapTool
+entrypoints: [src/tool/git/index.ts:gitTools, src/apps/cli/internal.ts:assembleFeatures]
+activation: ["CLI constructs gitTools only when QUANTA_GIT_TOOLS is enabled; the feature catalog's configurable:n-a and web:full claims do not match this composition."]
+effective_defaults:
+  cli: off
+  web: off
+  bench: unknown
+  headless: unknown
+  daemon: off
+producer: [src/tool/git/blame-heatmap.ts:rankBlame, src/tool/git/blame-heatmap.ts:gitBlameHeatmapTool]
+consumer: [src/tool/git/index.ts:gitTools, src/apps/cli/internal.ts:gitToolList]
+reachable: conditional
+surface_findings: ["git_blame_heatmap invokes line porcelain, supports paired line ranges, and produces deterministic author rankings with typed failure results.", "It is opt-in through the CLI QUANTA_GIT_TOOLS gate and is not built by the web-daemon registry; catalog cli:web full is stale."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git-churn-blame-heatmap.test.ts tests/unit/git-tools-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused tests passed, including porcelain aggregation, paired-range validation, typed errors, and a real multi-commit git heatmap rail.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: "Catalog must state QUANTA_GIT_TOOLS-gated CLI availability and remove web:full until a web composition root consumes gitTools."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "gitBlameHeatmapTool|gitTools\(|gitToolsEnabled\(|QUANTA_GIT_TOOLS|buildDaemonToolRegistry" src/tool/git/blame-heatmap.ts src/tool/git/index.ts src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The gated CLI consumer is live; web-daemon builds only default tools and does not call gitTools.
+  - kind: test
+    command: bun test tests/unit/git-churn-blame-heatmap.test.ts tests/unit/git-tools-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused unit and real-git edge-case tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-gitimpact
+review_state: approved
+reviewer: codex/cross-review-wave1

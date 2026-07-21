@@ -1,0 +1,58 @@
+version: 1
+feature_id: review-kind-matrix
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/admissibility-gate/hitl.ts:reviewAndDecide
+entrypoints:
+  - src/agent/admissibility-gate/hitl.ts:reviewAndDecide
+activation:
+  - "A live admission escalation reaches a wired ReviewerPort; reviewAndDecide builds its context before invoking reviewAction."
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/permission/review-kind.ts:inferReviewKind
+  - src/permission/review-kind.ts:isDecisionLegalFor
+consumer:
+  - src/agent/admissibility-gate/hitl.ts:buildReviewContext
+  - src/agent/admissibility-gate/hitl.ts:denyIllegalReviewerVerb
+reachable: yes
+surface_findings:
+  - "The production hitl path attaches inferred or overridden reviewKind to ReviewContext immediately before calling the reviewer port."
+  - "A returned scoped verb is checked against that same kind and illegal verb-kind pairings deny before an action can execute."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/permission/review-kind.test.ts tests/unit/permission/review-kind-inference.test.ts tests/unit/admissibility-gate.test.ts tests/integration/review-kind-gate-hell.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The matrix, classifier precedence, verb legality cross-product, reviewer context plumbing, and live gate rejection rails pass."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'buildReviewContext|inferReviewKind|isDecisionLegalFor|denyIllegalReviewerVerb|reviewAndDecide' src/agent/admissibility-gate/hitl.ts src/permission/review-kind.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The live reviewer branch both produces the kind and enforces the returned verb against it."
+  - kind: test
+    command: "bun test tests/unit/permission/review-kind.test.ts tests/unit/permission/review-kind-inference.test.ts tests/unit/admissibility-gate.test.ts tests/integration/review-kind-gate-hell.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Focused review-kind rails passed in the audit batch, including integration-level rejection of illegal reviewer verbs."
+  - kind: source
+    command: "bun fc reachability"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "No L3+ feature reachability exception was reported."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch5
+review_state: approved
+reviewer: codex/cross-review-wave1

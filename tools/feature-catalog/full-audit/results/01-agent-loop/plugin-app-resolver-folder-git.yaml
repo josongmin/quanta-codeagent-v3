@@ -1,0 +1,56 @@
+version: 1
+feature_id: plugin-app-resolver-folder-git
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/mention-runner/default-resolver.ts:buildDefaultMentionResolver
+entrypoints:
+  - src/host/runtime/internal/mention-wire.ts:installCliMentionInjector
+  - src/host/runtime/agent-config-assembler.ts:mentionResolverDep
+activation:
+  - Submit an @folder mention in a host session; @git additionally needs a GitContextProvider, which current live composition omits.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: na
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/plugin-app-resolver/folder-resolver.ts:createFolderResolver
+  - src/agent/plugin-app-resolver/git-resolver.ts:createGitResolver
+consumer:
+  - src/agent/mention-runner/default-resolver.ts
+  - src/host/runtime/internal/mention-wire.ts
+  - src/host/runtime/agent-config-assembler.ts
+reachable: yes
+surface_findings:
+  - Folder resolution is live with cwd as jail root and defaults on unless explicitly disabled.
+  - Git resolution parses and dispatches in the composite but current host call sites supply no GitContextProvider, so it resolves null at runtime.
+  - Both resolvers no-throw on invalid input or provider failure, with bounded folder and git output behavior.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test src/agent/plugin-app-resolver/__tests__/folder-git-resolver.hellgate.test.ts tests/unit/agent/plugin-app-resolver/git-resolver-truncate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Folder jail and deterministic bounds, git validation, truncation, and no-throw rails passed through injected dependencies.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: The @git provider remains deliberately unwired at every live host composition site.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'buildDefaultMentionResolver|createFolderResolver|createGitResolver|GitContextProvider' src/agent/mention-runner src/host/runtime
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Folder composition and absent live git provider were verified.
+  - kind: test
+    command: bun test src/agent/plugin-app-resolver/__tests__/folder-git-resolver.hellgate.test.ts tests/unit/agent/plugin-app-resolver/git-resolver-truncate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused folder and git resolver rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

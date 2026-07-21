@@ -1,0 +1,52 @@
+version: 1
+feature_id: agents-fleet-panel
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/slash/registry-surface.ts:agentsCmd
+entrypoints: [src/apps/cli/index.ts, src/apps/cli/slash-commands.ts]
+activation: [/agents, TaskRegistry present in REPL surface]
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer: [src/agent/session-resource-registry, src/apps/cli/repl/slash-surface.ts]
+consumer: [src/apps/cli/slash/registry-surface.ts:agentsCmd, src/apps/cli/agents-fleet-panel.ts:renderAgentFleet]
+reachable: yes
+surface_findings:
+  - "The CLI registry always registers /agents; the live REPL supplies the getter when a TaskRegistry exists."
+  - "Without that resource the command intentionally reports not wired and exits zero; it does not fabricate fleet state."
+off_identity_proof:
+  kind: source
+  command: sed -n '322,380p' src/apps/cli/slash/registry-surface.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing ctx.agents has an explicit no-crash not-wired branch.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/agents-fleet-panel.test.ts tests/unit/cli/agents-fleet-panel-hardening-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Table, JSON, ordering, deterministic age, color policy, and hardening cases pass.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'agents: \(\) => taskRegistry.list|agentsCmd|renderAgentFleet' src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Live REPL adapter projects TaskRegistry rows to the registered command and renderer.
+  - kind: test
+    command: bun test tests/unit/cli/agents-fleet-panel.test.ts tests/unit/cli/agents-fleet-panel-hardening-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Dedicated fleet panel rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

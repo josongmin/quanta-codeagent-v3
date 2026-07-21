@@ -1,0 +1,52 @@
+version: 1
+feature_id: patch-filesystem-port
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/apply-patch.ts:FsJailFileSystemPort
+entrypoints: [src/tool/default-tool-ports.ts:defaultTools, src/tool/apply-patch.ts:applyPatchTool]
+activation: [Every apply_patch invocation constructs FsJailFileSystemPort rooted at ctx.cwd.]
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: on
+  headless: on
+  daemon: unknown
+producer: [src/patch/types.ts:PatchFileSystemPort, src/tool/apply-patch.ts:FsJailFileSystemPort]
+consumer: [src/patch/applier.ts:applyPatch, src/tool/apply-patch.ts:applyPatchTool]
+reachable: yes
+surface_findings:
+  - applyPatch receives only the five-method PatchFileSystemPort while the live tool constructs the jail-aware adapter from the invocation cwd.
+  - The applier plans every operation before commit and journals inverse actions, so filesystem failures surface after rollback rather than leaving an intended partial multi-op result.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/patch/applier.test.ts tests/unit/tool/apply-patch.test.ts tests/unit/patch/integration.test.ts tests/integration/apply-patch-tool.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All selected focused cases passed, covering in-memory port use, real jailed filesystem behavior, symlink escape denial, atomic multi-op apply, and pre-flight no-write failures.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'interface PatchFileSystemPort|applyPatch\(|class FsJailFileSystemPort|new FsJailFileSystemPort' src/patch/types.ts src/patch/applier.ts src/tool/apply-patch.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The pure applier consumes the injected port and the production apply_patch tool supplies the jail-aware adapter at execution.
+  - kind: test
+    command: bun test tests/unit/patch/applier.test.ts tests/unit/tool/apply-patch.test.ts tests/unit/patch/integration.test.ts tests/integration/apply-patch-tool.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All selected cases passed with 0 failures.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Strict reachability reported no L3-or-higher unreachable or dead-API feature claims.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-pr
+review_state: approved
+reviewer: codex/cross-review-wave1

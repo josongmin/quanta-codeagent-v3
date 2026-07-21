@@ -1,0 +1,45 @@
+version: 1
+feature_id: glob-gitignore-mtime
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/glob/index.ts:globTool
+entrypoints: [src/tool/index.ts:buildBaseDefaultTools, src/agent/dispatch/execute.ts:executeTool]
+activation: ["glob is registered unconditionally by buildBaseDefaultTools on default tool registries."]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: [src/tool/glob/index.ts:globTool, src/tool/glob/index.ts:matchSafePattern]
+consumer: [src/tool/index.ts:buildBaseDefaultTools, src/agent/dispatch/execute.ts:executeTool]
+reachable: yes
+surface_findings: ["The tool lists with rg --files, filters in-process with Bun.Glob, re-jails hits, then applies mtime-descending sort before the cap.", "Differential and hellgate rails prove .gitignore and .ignore exclusion, no pattern argv injection, jail rejection, and newest-first output."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/glob.test.ts tests/unit/tool/glob-gitignore-mtime.test.ts tests/unit/tool/glob-gitignore-mtime-hellgate.test.ts tests/unit/tool/glob-pattern-jail-escape-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused base, differential, gitignore, mtime, and jail rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "rg --files|Bun.Glob|resolveJailed|mtime|MAX_FILES|globTool|buildBaseDefaultTools" src/tool/glob/index.ts src/tool/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The production enumeration, in-process filter, confinement, ordering, and default registry seam are live.
+  - kind: test
+    command: bun test tests/unit/glob.test.ts tests/unit/tool/glob-gitignore-mtime.test.ts tests/unit/tool/glob-gitignore-mtime-hellgate.test.ts tests/unit/tool/glob-pattern-jail-escape-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Differential gitignore and newest-first behavior plus adversarial confinement rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch4
+review_state: approved
+reviewer: codex/cross-review-wave1

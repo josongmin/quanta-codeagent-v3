@@ -1,0 +1,60 @@
+version: 1
+feature_id: session-import-export
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/session/import-export.ts:exportSession and importSession
+entrypoints:
+  - src/apps/cli/session-cmd.ts:sessionCmd
+  - src/apps/cli/repl/surface-compose/mutable-wires.ts:buildDefaultSessionIo
+activation:
+  - Run /session export ID or /session import PATH in an interactive REPL session with the default sessionIo adapter.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/session/import-export.ts:exportSession importSession
+  - src/session/import-export-fs.ts:exportSessionToFile importSessionFromFile
+consumer:
+  - src/apps/cli/session-cmd.ts:sessionCmd
+  - src/apps/cli/repl/surface-compose/wire-builders.ts:buildDefaultSessionIo
+reachable: yes
+surface_findings:
+  - The interactive REPL constructs and projects buildDefaultSessionIo, so the /session import and export command is live rather than merely a caller-owned optional primitive on that surface.
+  - The slash still has a no-I/O not-wired fallback when a different host omits sessionIo; path jailing, 50 MB pre-read cap, and typed no-throw slash errors apply to the live path.
+  - Current implementation supports both v1 and v2 envelopes; v2 optionally carries canonical SHA-256 integrity data and validates tampering fail-closed.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/session-export-import-slash-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: An absent sessionIo slot prints not wired and performs no I/O.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/session-import-export-hellgate.test.ts tests/unit/session-import-export-v2-hellgate.test.ts tests/unit/session/t06-digest-canonical-hellgate.test.ts tests/unit/session-export-import-slash-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: V1/V2 round trips, shape and version checks, platform warnings, FS adapter, digest canonicality and tamper rejection, slash path safety, size cap, and host-store import/export rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: The catalog describes a v1-only caller-wired default-OFF primitive, while the current REPL always supplies sessionIo and the primitive supports v2 envelopes with optional digest verification.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'exportSession|importSession|SessionExportEnvelopeV2|sessionIo|buildDefaultSessionIo' src/session src/apps/cli/session-cmd.ts src/apps/cli/repl/surface-compose
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The pure and FS owners support both envelope versions and the REPL wires the host adapter into the slash context.
+  - kind: test
+    command: bun test tests/unit/session-import-export-hellgate.test.ts tests/unit/session-import-export-v2-hellgate.test.ts tests/unit/session/t06-digest-canonical-hellgate.test.ts tests/unit/session-export-import-slash-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused persistence and slash rails passed: 118-pass base command plus 22 slash-specific cases.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

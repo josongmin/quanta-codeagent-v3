@@ -1,0 +1,45 @@
+version: 1
+feature_id: edit-line-ranges-scoped-match
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/edit/index.ts:makeEditTool
+entrypoints: [src/tool/index.ts:buildBaseDefaultTools, src/agent/dispatch/execute.ts:executeTool]
+activation: ["edit is registered by buildDefaultTools; optional line_ranges is accepted by its input schema"]
+effective_defaults:
+  cli: on
+  web: on
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer: [src/tool/edit/index.ts:makeEditTool, src/tool/edit/exact.ts:applyExactEdit, src/tool/edit/fuzzy.ts:applyFuzzyEdit]
+consumer: [src/tool/index.ts:buildBaseDefaultTools, src/agent/dispatch/execute.ts:executeTool]
+reachable: yes
+surface_findings: ["line_ranges scopes exact and fuzzy candidate selection before matching, while omission preserves whole-file behavior.", "The default tool registry exposes edit to the normal dispatch pipeline."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/edit-line-ranges-hellgate.test.ts tests/unit/edit-line-ranges-e2e-hellgate.test.ts tests/unit/edit.test.ts tests/unit/fuzzy.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 51 focused tests passed, including real-disk repeated-anchor selection, malformed-range no-write failures, and fuzzy prefilter behavior.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "line_ranges|applyExactEditInRange|filterSpansByRange" src/tool/edit/index.ts src/tool/edit/exact.ts src/tool/edit/fuzzy.ts src/tool/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Schema, exact and fuzzy prefilters, and default-registry registration are concrete live seams.
+  - kind: test
+    command: bun test tests/unit/edit-line-ranges-hellgate.test.ts tests/unit/edit-line-ranges-e2e-hellgate.test.ts tests/unit/edit.test.ts tests/unit/fuzzy.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 51 focused unit and disk-level rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-edit
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,53 @@
+version: 1
+feature_id: dxt-user-config
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/plugin-isolation/dxt-loader.ts:launchDxt
+entrypoints: []
+activation:
+  - A caller must invoke launchDxt with a manifest declaring user_config and injected DxtUserConfigInputs.
+  - No CLI, web, daemon, or host composition root invokes launchDxt in the snapshot.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/plugin-isolation/dxt-user-config.ts:resolveFields
+  - src/plugin-isolation/dxt-user-config.ts:interpolateLaunchSpec
+consumer:
+  - src/plugin-isolation/dxt-loader.ts:launchDxt
+reachable: no
+surface_findings:
+  - DxtManifestSchema composes the optional user_config extension and launchDxt resolves/interpolates it before passing the launch spec to the injected spawner.
+  - The catalog's claimed host wiring ends at the reusable DXT loader; source search finds launchDxt exported from the plugin-isolation barrel but no production app or host caller.
+  - Sensitive values are represented through SecretStorePort at the leaf, but no production keychain provider or user-config collection surface is composed.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/dxt-user-config-hellgate.test.ts tests/unit/plugin-isolation-dxt-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Manifests without user_config preserve the ordinary DXT launch path and interpolation is byte-identical with no fields or tokens.
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: No production composition root calls launchDxt, supplies DxtUserConfigInputs, provides a SecretStorePort, or exposes a CLI/web configuration surface.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'launchDxt|DxtUserConfigInputs|DxtUserConfigExtension|resolveFields|interpolateLaunchSpec' src apps
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The loader consumes the leaf implementation and exports launchDxt, but there is no non-loader source caller in an application or host composition root.
+  - kind: test
+    command: bun test tests/unit/dxt-user-config-hellgate.test.ts tests/unit/plugin-isolation-dxt-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused leaf and DXT loader rails passed, proving the seam but not a production activation path.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-surfaces
+review_state: approved
+reviewer: codex/cross-review-wave1

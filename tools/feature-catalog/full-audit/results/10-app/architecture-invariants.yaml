@@ -1,0 +1,46 @@
+version: 1
+feature_id: architecture-invariants
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: biome.json and slice-boundary test rails
+entrypoints:
+  - lint and unit-test execution
+activation:
+  - Run static lint or architecture invariant tests.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - biome.json:restricted import rules
+  - tests/unit/runner-slice-boundary.test.ts
+consumer: []
+reachable: no
+surface_findings:
+  - This is a static/test architecture contract, not a user-facing runtime feature.
+  - Slice boundaries, process access bans, barrels, and agent-cycle detection are independently guarded.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/runner-slice-boundary.test.ts tests/unit/ipc-slice-boundary.test.ts tests/unit/agent-import-cycle.test.ts tests/unit/cross-slice-mirrors.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Runner and IPC isolation, cycle constraints, and type-level mirror rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/runner-slice-boundary.test.ts tests/unit/ipc-slice-boundary.test.ts tests/unit/agent-import-cycle.test.ts tests/unit/cross-slice-mirrors.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Architecture invariant rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

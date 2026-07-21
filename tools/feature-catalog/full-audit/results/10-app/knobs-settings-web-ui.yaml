@@ -1,0 +1,55 @@
+version: 1
+feature_id: knobs-settings-web-ui
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: apps/web-frontend/src/App.tsx:App
+entrypoints:
+  - apps/web-frontend/src/components/SlashPalette.tsx
+  - src/apps/web-daemon/server/http.ts
+activation:
+  - Open the web SlashPalette knobs entry against an authenticated web daemon.
+effective_defaults:
+  cli: na
+  web: resource
+  bench: na
+  headless: na
+  daemon: resource
+producer:
+  - src/apps/web-daemon/knob-catalog-wire.ts
+  - apps/web-frontend/src/components/slash-knobs.ts
+consumer:
+  - apps/web-frontend/src/components/KnobsPanel.tsx
+  - src/apps/web-daemon/server/http.ts
+reachable: yes
+surface_findings:
+  - App owns open and close state and renders KnobsPanel; SlashPalette dispatches the open callback.
+  - The daemon projects display-safe values for GET /api/knobs and enforces a closed POST allowlist.
+  - Backend no-leak and allowlist rails pass, while React panel execution is unavailable due missing frontend dependencies.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/web-daemon/api-knobs-no-leak-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Server redaction, red-on-injection, static routing, and write-allowlist safety rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: conditional
+blocker: The daemon contract is proven, but no frontend dependency tree is available to execute the mounted KnobsPanel and SlashPalette UI rails.
+disposition: hold
+receipts:
+  - kind: source
+    command: git grep -n -E 'KnobsPanel|openKnobsPanel|/api/knobs|CONFIG_ALLOWED_KEYS' 9a12f7a855640a8be1e4654472766bbc445696ea -- apps/web-frontend/src src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Browser open action, mounted panel, daemon catalog endpoint, and server allowlist are present.
+  - kind: test
+    command: bun test tests/unit/web-daemon/api-knobs-no-leak-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Web daemon settings security rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

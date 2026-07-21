@@ -1,0 +1,50 @@
+version: 1
+feature_id: debug-inspect
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+entrypoints: [src/apps/cli/index.ts, src/host/runtime/agent-arg-builder/gated-tool-ports.ts]
+activation: ["runtime config QUANTA_DEBUG_TOOLS=1", "tool registry DefaultToolPorts.debugTools=true"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/tool/debug/tool.ts:makeDebugInspectTool]
+consumer: [src/host/runtime/agent-arg-builder/gated-tool-ports.ts, src/tool/index.ts]
+reachable: yes
+surface_findings: ["The host composition gate supplies debugTools and the central registry installs debug_inspect; calls require always-confirm permission."]
+off_identity_proof:
+  kind: source
+  command: rg -n "cfg.debugTools|p.debugTools === true" src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/tool/index.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Both construction and registry append are conditional, leaving the default registry unchanged.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/debug/debugpy-real-e2e.test.ts tests/unit/tool/debug/debug-inspect-tool-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Live debugpy execution captured breakpoints, locals, Unicode, call stacks, and expression evaluation; the full-stack tool rail passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "cfg.debugTools|p.debugTools === true" src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/tool/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Host and registry have a concrete conditional handoff.
+  - kind: test
+    command: bun test tests/unit/tool/debug/debugpy-real-e2e.test.ts tests/unit/tool/debug/dap-codec.test.ts tests/unit/tool/debug/dap-client.test.ts tests/unit/tool/debug/dap-inspect-driver-hellgate.test.ts tests/unit/tool/debug/debug-inspect-tool-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Real debugpy and protocol/tool rails passed in the audit environment.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

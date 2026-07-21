@@ -1,0 +1,54 @@
+version: 1
+feature_id: tool-scoping
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/session-bootstrap.ts:buildSkillGate
+entrypoints:
+  - src/agent/tier1/skill.ts:buildSkillTier
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+activation:
+  - Session feature construction extracts declared skill allowlists and session bootstrap constructs the skill gate from them.
+  - The gate is resource-backed: no declared allowlist leaves the legacy unrestricted tool path intact.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/skill/skill-tool.ts:skillToolAllowlist
+  - src/agent/tier1/skill.ts:buildSkillTier
+consumer:
+  - src/agent/loop/session-bootstrap.ts:buildSkillGate
+reachable: yes
+surface_findings:
+  - Explicit empty allowedTools survives discovery as an empty allowlist, preserving no-tools semantics.
+  - The feature builder carries the map into session features and the loop consumes it as a dispatch gate.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill.test.ts tests/unit/skill-vs-extension.test.ts tests/unit/skill-overrides.test.ts tests/integration/loop-skill-override.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Allowlist parsing, enforcement behavior, and loop integration passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'skillToolAllowlist|skillAllowlists|buildSkillGate' src/agent/tier1/skill.ts src/agent/features.ts src/agent/loop/session-bootstrap.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Declared allowlists flow from skill discovery through session features into the live gate.
+  - kind: test
+    command: bun test tests/unit/skill.test.ts tests/unit/skill-vs-extension.test.ts tests/unit/skill-overrides.test.ts tests/integration/loop-skill-override.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused skill scope rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

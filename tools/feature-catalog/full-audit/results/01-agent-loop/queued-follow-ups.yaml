@@ -1,0 +1,65 @@
+version: 1
+feature_id: queued-follow-ups
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/control-poll.ts:pollFollowUpQueue
+entrypoints:
+  - src/apps/cli/repl/factories/lifecycle.ts:buildLifecycleBundle
+  - src/host/runtime/internal/context-binding/base.ts:followUpQueue AgentConfig spread
+  - src/agent/loop/turn-iteration.ts:syncQueuedTurnInputs
+activation:
+  - CLI lifecycle pills must allocate FollowUpQueue
+  - A host must enqueue a follow-up while a turn is active
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/follow-up-queue.ts:FollowUpQueue.enqueue
+consumer:
+  - src/agent/loop/control-poll.ts:pollFollowUpQueue
+  - src/agent/loop/session-snapshots.ts:restore and save snapshot
+reachable: no
+surface_findings:
+  - "CLI allocates and passes the queue to AgentConfig when lifecycle follow-up pills are enabled."
+  - "The CLI lifecycle factory explicitly documents the queue as producer-less; typed-while-running input uses a different external prompt queue, so a user follow-up never enters FollowUpQueue in production."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/follow-up-queue.test.ts tests/unit/paused-reason-enum.test.ts tests/unit/agent/control-op-handler-hellgate.test.ts tests/integration/queued-follow-ups-hell-e2e.test.ts tests/integration/plan-queue-mid-turn-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Queue absence is a turn-top no-op, and the real-loop fixture preserves the legacy path without an enqueued follow-up.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/follow-up-queue.test.ts tests/unit/paused-reason-enum.test.ts tests/unit/agent/control-op-handler-hellgate.test.ts tests/integration/queued-follow-ups-hell-e2e.test.ts tests/integration/plan-queue-mid-turn-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: A caller-wired queue is FIFO, isolates threads, snapshots safely, emits response_queued while paused, and injects a ready entry into the next real loop turn.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: "The interactive CLI has no producer that calls FollowUpQueue.enqueue; lifecycle.ts states this directly, so the real user follow-up path cannot activate the audited queue."
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'followUpQueue|pollFollowUpQueue|FollowUpQueue.enqueue|producer-less' src/apps/cli src/host src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The queue is allocated, threaded, polled, and snapshot-capable, but no production input path enqueues into it.
+  - kind: test
+    command: bun test tests/unit/follow-up-queue.test.ts tests/unit/paused-reason-enum.test.ts tests/unit/agent/control-op-handler-hellgate.test.ts tests/integration/queued-follow-ups-hell-e2e.test.ts tests/integration/plan-queue-mid-turn-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 58 pass, 0 fail; per-thread FIFO, pauses, response_queued, snapshot restore, and real-loop next-turn injection pass.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Code reachability is present; the missing link is the user-input producer.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-plan
+review_state: approved
+reviewer: codex/cross-review-wave1

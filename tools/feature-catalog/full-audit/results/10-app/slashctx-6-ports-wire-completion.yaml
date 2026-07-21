@@ -1,0 +1,53 @@
+version: 1
+feature_id: slashctx-6-ports-wire-completion
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/slash-surface.ts:buildReplSlashCtx
+entrypoints: [src/apps/cli/repl/surface-compose/composer.ts:composeSurfaceSlashCtx]
+activation: [interactive REPL composition, QUANTA_COST_PANEL, QUANTA_PLAN_STORE, QUANTA_BRANCH_SEARCH_PROGRESS, QUANTA_WORKING_STATE]
+effective_defaults:
+  cli: resource
+  web: off
+  bench: na
+  headless: off
+  daemon: na
+producer: [src/apps/cli/repl/slash-surface.ts:buildReplSlashCtx, src/apps/cli/repl/surface-compose/core-state.ts]
+consumer: [src/apps/cli/slash/registry-surface.ts]
+reachable: yes
+surface_findings:
+  - "Cost, plan, history, branch search, side, and working-state ports are all represented in current SlashContext wiring and covered by present/absent rail cases."
+  - "The catalog prose is stale: it says workingState is deliberately not wired and /state remains not-wired, while current dispatch supplies core.workingStateView."
+  - "Resource and gate absence retains the explicit not-wired sentinel rather than inventing a synthetic view."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/slashctx-ports-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All six absent-field cases retain their controlled default-OFF sentinel behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/slashctx-ports-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All six present-field smoke cases leave the not-wired path; port-specific success and failure behavior passes.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: "Update catalog purpose and notes: workingState is now wired through core.workingStateView, so the stated five-of-six deferred-wire boundary and /state not-wired claim are obsolete."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'workingState: core\.workingStateView|cost: \(\)|planSnapshot|history: \{ messages: getHistory \}|branchSearch|side:' src/apps/cli/repl
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Live composition contains the sixth working-state projection alongside the other five ports.
+  - kind: test
+    command: bun test tests/unit/apps/cli/slashctx-ports-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Port-wire hellgate passes absent and present cases for cost, plan, state, history, branches, and side.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

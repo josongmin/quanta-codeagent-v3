@@ -1,0 +1,49 @@
+version: 1
+feature_id: spec-to-test-gen-devin
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/playbook/spec-to-test/default-generator.ts:defaultSpecToTestGen
+entrypoints: []
+activation:
+  - A future playbook adapter explicitly passes declared scenarios to generateSpecTest or defaultSpecToTestGen.generate.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/skill/playbook/spec-to-test/default-generator.ts:generateSpecTest
+consumer: []
+reachable: no
+surface_findings:
+  - The pure generator produces escaped Bun test fixture text, validates syntax, fails placeholders by default, and does not mutate the filesystem.
+  - No playbook parser, CLI command, skill runner, or file-writing adapter imports this slice; generated fixtures cannot be requested or materialized in production.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill/playbook/spec-to-test-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The isolated 15-case rail passed, including 50-scenario generation in 5ms; the earlier 215ms failure occurred only in a contended nine-file bundle.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: seam-only
+blocker: No production playbook-to-spec adapter or caller invokes the generator or writes its returned fixture.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg -n 'defaultSpecToTestGen|generateSpecTest|SpecToTestGen' src --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Snapshot matches are confined to the spec-to-test slice with no caller outside it.
+  - kind: test
+    command: bun test tests/unit/skill/playbook/spec-to-test-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All 15 escaping, parse, fail-by-default, purity, and performance cases passed in standalone execution.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

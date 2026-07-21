@@ -1,0 +1,52 @@
+version: 1
+feature_id: speculative-branch-search
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/branch-search.ts:buildBranchSearchBlock
+entrypoints:
+  - src/runner/knobs/knobs/branch-search.ts:applyBranchSearch
+  - src/agent/features.ts:buildSessionFeatures
+activation:
+  - Only the bench surface applies the default-off QUANTA_BENCH_BRANCH_SEARCH knob to AgentConfig.branchSearch; the feature builder then registers branch_search.
+  - An absent config returns no tool and no candidate overhead.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/branch-search-runner.ts:buildBranchSearchTool
+consumer:
+  - src/agent/features.ts:buildSessionFeatures
+reachable: yes
+surface_findings:
+  - The implementation is reachable through bench opt-in, but no CLI composition route supplies branchSearch.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/branch-search.test.ts tests/unit/bench-branch-search-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Candidate orchestration and bench wiring passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: Catalog says CLI full and not configurable, but only bench QUANTA_BENCH_BRANCH_SEARCH applies the optional config.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg 'SURFACES|QUANTA_BENCH_BRANCH_SEARCH|branchSearch' src/runner/knobs/knobs/branch-search.ts src/agent/tier1/branch-search.ts src/agent/features.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Branch search is bench-only and absent config produces no registered tool.
+  - kind: test
+    command: bun test tests/unit/branch-search.test.ts tests/unit/bench-branch-search-wiring-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused branch search and bench wiring rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

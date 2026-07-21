@@ -1,0 +1,52 @@
+version: 1
+feature_id: shadow-verify-adapters
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/observability-wire/wire.ts:shadowVerify construction
+entrypoints:
+  - src/host/runtime/agent-arg-builder/observability-wire.ts:resolveObservabilitySlots
+  - src/agent/tier1/shadow-verify.ts:createShadowVerify
+activation:
+  - Set QUANTA_OBSERVABILITY=on in a repository; the composition wire creates adapters and the tier-1 builder registers shadow_verify.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - shadow worktree, V4A scratch apply, and LSP or test checker
+consumer:
+  - shadow_verify tier-1 tool
+reachable: yes
+surface_findings:
+  - The real adapters are now constructed by the observability composition wire and projected into AgentConfig, contradicting the catalog hold that marks composition wiring deferred.
+  - Scratch worktrees clean up on every result path and the applier rejects absolute path escapes.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability-live-wire-hellgate.test.ts tests/unit/shadow-verify-tool-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off omits the port and the tier builder returns no tool.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/shadow-verify-adapters-hellgate.test.ts tests/unit/shadow-verify-tool-hellgate.test.ts tests/unit/observability-live-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real worktree, patch, cleanup, diagnostics, tool, and live wire rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: Catalog deliberate_hold still says composition-root wiring is deferred, but current observability wiring constructs and injects the port.
+disposition: fix-claim
+receipts:
+  - kind: test
+    command: bun test tests/unit/shadow-verify-adapters-hellgate.test.ts tests/unit/shadow-verify-tool-hellgate.test.ts tests/unit/observability-live-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused adapter, tool, and live composition rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

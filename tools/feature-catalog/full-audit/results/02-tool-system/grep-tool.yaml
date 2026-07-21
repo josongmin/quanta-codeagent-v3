@@ -1,0 +1,45 @@
+version: 1
+feature_id: grep-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/grep/index.ts:grepTool
+entrypoints: [src/tool/index.ts:buildBaseDefaultTools, src/agent/dispatch/execute.ts:executeTool]
+activation: ["grep is registered unconditionally by buildBaseDefaultTools on every default tool registry."]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: [src/tool/grep/index.ts:buildGrepArgv, src/tool/grep/index.ts:grepTool]
+consumer: [src/tool/index.ts:buildBaseDefaultTools, src/agent/dispatch/execute.ts:executeTool]
+reachable: yes
+surface_findings: ["The live tool jail-resolves a supplied path before argv construction, emits a progress event, invokes rg through runShell, and caps rendered rows at 200.", "CLI, web-daemon, and agent mode presets construct default tool registries containing grep."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/grep.test.ts tests/unit/tool/grep-flags-hellgate.test.ts tests/unit/tool/grep-jail-escape-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused grep behavior, flag injection bounds, and jail-escape rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "grepTool|buildGrepArgv|resolveJailed|MAX_LINES|buildBaseDefaultTools" src/tool/grep/index.ts src/tool/index.ts src/apps/cli/internal.ts src/apps/web-daemon/runtime-factory.ts src/apps/agent/mode-presets
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The producer, confinement boundary, row cap, and default-registry consumers are live.
+  - kind: test
+    command: bun test tests/unit/grep.test.ts tests/unit/tool/grep-flags-hellgate.test.ts tests/unit/tool/grep-jail-escape-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused grep behavior and adversarial flags and path rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch4
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,59 @@
+version: 1
+feature_id: gh-pr-code-tour
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/agent/mode-presets/ci-bot.ts
+entrypoints:
+  - src/apps/agent/mode-presets/ci-bot.ts
+activation:
+  - QUANTA_GH_CODE_TOUR is enabled for ci-bot wiring
+  - buildCiBotWiring passes codeTour to ghTools
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/tool/gh/pr-code-tour.ts:ghPrCodeTourTool
+  - src/tool/gh/pr-code-tour.ts:parseDiffToTour
+consumer:
+  - src/apps/agent/mode-presets/ci-bot.ts:buildCiBotWiring
+  - src/tool/gh/index.ts:ghTools
+reachable: yes
+surface_findings:
+  - "The ci-bot composition root enables codeTour only behind QUANTA_GH_CODE_TOUR and the registry appends gh_pr_code_tour only for opts.codeTour=true."
+  - "The interactive gh factory has no codeTour option, so this is reachable only in the gated ci-bot CLI mode."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/gh-pr-code-tour.test.ts tests/integration/longtail-new-tools-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The real ghTools registry and real ci-bot wiring omit gh_pr_code_tour when the gate is absent."
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/gh-pr-code-tour.test.ts tests/integration/longtail-new-tools-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The real registry dispatch produced the expected two-stop tour and the ci-bot gate registered the read-only tool."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_GH_CODE_TOUR|opts.codeTour' src/apps/agent/mode-presets/ci-bot.ts src/tool/gh/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The production gate-to-registry handoff is present at the ci-bot composition root."
+  - kind: test
+    command: bun test tests/unit/gh-pr-code-tour.test.ts tests/integration/longtail-new-tools-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Selected parser wrapper registry and ci-bot wiring rails passed."
+audited_at: "2026-07-19"
+auditor: codex/p1-tools-surface
+review_state: approved
+reviewer: codex/cross-review-wave1

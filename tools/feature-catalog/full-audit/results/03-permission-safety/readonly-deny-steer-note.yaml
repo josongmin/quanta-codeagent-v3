@@ -1,0 +1,53 @@
+version: 1
+feature_id: readonly-deny-steer-note
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/confirm-decision.ts:buildDenySteerMessage
+entrypoints:
+  - src/agent/admissibility-gate/shared.ts:denyFromConfirm
+  - src/agent/admissibility-gate/hitl.ts:runHitlGate
+  - src/agent/admissibility-gate/gates.ts:runModePolicy
+activation:
+  - "A registry-resolved read-only tool is denied through a deny_and_steer confirmation decision."
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/confirm-decision.ts:buildDenySteerMessage
+consumer:
+  - src/agent/admissibility-gate/shared.ts:denyFromConfirm
+reachable: conditional
+surface_findings:
+  - "The gate obtains isReadOnly from its owned registry lookup, appends the fixed note only for read-only tools, and includes isReadonly in the permission_denied failure envelope."
+  - "The appended note remains only on DispatchResult.steerInjection because its parent deny-and-steer feature has no production next-turn prompt consumer."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/agent/readonly-deny-steer.test.ts tests/unit/agent/confirm-decision.test.ts tests/integration/admissibility-deny-steer-hell.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "59 tests pass for readonly/mutating/registry-miss branches, typed decision validation, and read-only gate denial emission."
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: "The note is computed and attached to the deny envelope but the agent loop does not consume steerInjection, so it is not yet a model-facing correction."
+disposition: wire
+receipts:
+  - kind: source
+    command: "rg -n 'buildDenySteerMessage|READONLY_DENY_STEER_NOTE|isReadonly|steerInjection' src/agent/confirm-decision.ts src/agent/admissibility-gate/shared.ts src/agent/loop.ts src/agent/dispatch.ts src/agent/streaming-dispatch.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Shared gate code derives readonly state from the registry and emits the note into steerInjection; no loop, dispatch, or streaming consumer reads it."
+  - kind: test
+    command: "bun test tests/unit/agent/readonly-deny-steer.test.ts tests/unit/agent/confirm-decision.test.ts tests/integration/admissibility-deny-steer-hell.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "59 pass, 0 fail; appended-note and readonly envelope paths are covered, while the integration guard documents the missing final consumer."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch6
+review_state: approved
+reviewer: codex/cross-review-wave1

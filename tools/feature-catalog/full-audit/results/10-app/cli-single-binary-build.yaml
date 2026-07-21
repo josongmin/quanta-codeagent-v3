@@ -1,0 +1,46 @@
+version: 1
+feature_id: cli-single-binary-build
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: package.json:scripts.build
+entrypoints:
+  - package.json
+activation:
+  - Run bun run build in a dependency-complete checkout.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - package.json:scripts.build
+consumer:
+  - dist/agent
+reachable: yes
+surface_findings:
+  - The build script declares bun build --compile --minify with src/apps/cli/index.ts and dist/agent output.
+  - No dist/agent artifact exists in this snapshot, and the cataloged tests cover runtime CLI behavior rather than compiled binary creation or launch.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: unknown
+security_posture: conditional
+observability: na
+verdict: proof-gap
+blocker: No compile-and-launch receipt exists for this snapshot; audit did not run the output-producing build because the scope permits result YAML changes only.
+disposition: hold
+receipts:
+  - kind: source
+    command: git grep -n -E 'bun build --compile|dist/agent' 9a12f7a855640a8be1e4654472766bbc445696ea -- package.json
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Package build script specifies the compile input and output.
+  - kind: source
+    command: ls -l dist/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: Compiled artifact is absent from the snapshot checkout.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

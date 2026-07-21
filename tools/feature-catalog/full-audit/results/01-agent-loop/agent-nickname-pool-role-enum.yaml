@@ -1,0 +1,49 @@
+version: 1
+feature_id: agent-nickname-pool-role-enum
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/identity-pool/default-minter.ts
+entrypoints: []
+activation:
+  - A future scheduler, fork-session, or subagent composition explicitly creates a minter and calls mint.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/identity-pool/default-minter.ts:defaultIdentityMinter
+consumer: []
+reachable: no
+surface_findings:
+  - The 39-name pool, four-role union, mint/release behavior, and defensive inUse snapshot are implemented and unit-tested.
+  - No source outside the slice imports or instantiates the minter, so no subagent transcript, policy, scheduler, or durable-session path receives an identity.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/identity-pool-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Pool cardinality, deterministic allocation, exhaustion, release, none sentinel, and no-leak cycle rails passed.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production caller mints or releases an identity, and no transcript/policy/durable-session consumer stores its role.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg -n 'identity-pool|defaultIdentityMinter|IdentityMinter' src --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Snapshot references are confined to the identity-pool slice itself.
+  - kind: test
+    command: bun test tests/unit/agent/identity-pool-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Fifteen identity-pool hellgate cases passed in the clean 125-pass bundle.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,58 @@
+version: 1
+feature_id: document-tools-csv-ndjson
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/document/csv-read.ts:csvReadTool and src/tool/document/ndjson-read.ts:ndjsonReadTool
+entrypoints:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+activation:
+  - "csv_read and ndjson_read are always registered by buildBaseDefaultTools."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/document/csv-parse.ts:parseCsv
+  - src/tool/document/csv-read.ts:csvReadTool
+  - src/tool/document/ndjson-parse.ts:parseNdjson
+  - src/tool/document/ndjson-read.ts:ndjsonReadTool
+consumer:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+reachable: yes
+surface_findings:
+  - "Both structured-data readers are in the base tool registry rather than deferred registration, so shared, preset, and web-daemon roots all consume them."
+  - "CSV parser and wrapper preserve quoted cells and diagnostics; NDJSON preserves valid lines and exposes malformed-line errors without aborting the entire document."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/csv-read-hellgate.test.ts tests/unit/tool/ndjson-read-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 28 focused tests passed for pure parsing, diagnostics, real-file wrappers, caps, missing paths, and traversal rejection.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "csvReadTool|ndjsonReadTool|buildBaseDefaultTools|buildToolingCore|buildDaemonToolRegistry" src/tool/document src/tool/index.ts src/runner/assemble/tooling.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Both wrappers and parsers are live and default registry consumers are concrete.
+  - kind: test
+    command: bun test tests/unit/tool/csv-read-hellgate.test.ts tests/unit/tool/ndjson-read-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 28 focused parser and wrapper rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch6
+review_state: approved
+reviewer: codex/cross-review-wave1

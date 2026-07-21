@@ -1,0 +1,62 @@
+version: 1
+feature_id: persona-slot
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/persona.ts:resolvePersona and src/agent/prompt.ts:buildSystemPrompt
+entrypoints:
+  - src/apps/cli/internal.ts:pickPersona
+  - src/apps/cli/repl.ts:bootstrapSession
+  - src/host/bootstrap/bootstrap-session.ts:buildSessionStatePorts
+activation:
+  - QUANTA_PERSONA supplies one of the supported persona literals at CLI session start.
+  - The default resolves to default and emits no persona text; a non-default value rebuilds the static prompt.
+effective_defaults:
+  cli: on
+  web: off
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/persona.ts:PERSONA_PROMPTS
+  - src/apps/cli/internal.ts:pickPersona
+consumer:
+  - src/host/bootstrap/bootstrap-session.ts:buildSessionStatePorts
+  - src/agent/prompt.ts:personaLines
+reachable: yes
+surface_findings:
+  - CLI resolves QUANTA_PERSONA once and bootstrap passes the value into the system-prompt construction path.
+  - Default OFF identity is live and byte-identical, and invalid values throw PersonaInvalidError instead of silently falling back.
+  - The catalog claim is stale: the current closed enum has four arms, default, friendly, pragmatic, and codex, not the documented three arms.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/persona.test.ts tests/unit/runner/knobs/persona.test.ts tests/unit/prompt-system.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default returns no persona lines and the rebuilt default prompt is byte-identical to the no-persona baseline.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/persona.test.ts tests/unit/runner/knobs/persona.test.ts tests/unit/prompt-system.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All four literal arms, strict invalid-value rejection, prompt splice ordering, and runner-knob application passed.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: The catalog purpose and notes still describe a three-arm PersonaKind while ALL_PERSONAS and both runtime and knob parsers accept codex as a fourth arm.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'ALL_PERSONAS|resolvePersona|personaLines|pickPersona|buildSystemPrompt\(' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent/persona.ts src/agent/prompt.ts src/apps/cli src/host/bootstrap src/runner/knobs/knobs/persona.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live CLI-to-bootstrap consumer path is present and ALL_PERSONAS includes codex alongside default, friendly, and pragmatic.
+  - kind: test
+    command: bun test tests/unit/agent/persona.test.ts tests/unit/runner/knobs/persona.test.ts tests/unit/prompt-system.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected persona rail was part of the 283-pass, 0-fail focused audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-prompt
+review_state: approved
+reviewer: codex/cross-review-wave1

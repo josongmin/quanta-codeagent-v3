@@ -1,0 +1,57 @@
+version: 1
+feature_id: post-denial-precedence
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/permission-store.ts:createDenialLedger
+entrypoints:
+  - src/permission/post-denial.ts:recordDenial
+  - src/agent/admissibility-gate/gates.ts:runPermissionStack
+activation:
+  - Requires a complete recordDenial to recordRiskSeen to recordUserOverride sequence for one thread/action signature.
+  - Stack consultation additionally requires AgentConfig.permissionStack.enabled=true and a sessionId.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/permission/post-denial.ts:recordDenial
+  - src/permission/post-denial.ts:recordRiskSeen
+  - src/permission/post-denial.ts:recordUserOverride
+consumer:
+  - src/permission/policy.ts:evaluateStack
+  - src/agent/sandbox-escalation/orchestrator.ts:runSandboxEscalation
+reachable: no
+surface_findings:
+  - The store enforces ordered timestamps and isolates records by thread/action signature; HARD_DENY remains higher precedence in evaluateStack.
+  - The gate integration proof directly injects permissionStack.enabled=true.
+  - No production config constructor supplies that enabled stack field, so the catalog's interactive-CLI reachability claim is unproven.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission-post-denial.test.ts tests/integration/permission-stack-gate-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused 116-pass audit rail proves ordered override, isolation, gate allow, and HARD_DENY precedence when the seam is explicitly enabled.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: seam-only
+blocker: Post-denial state is durable and correctly consumed by the optional gate, but no shipped composition-root enables permissionStack for CLI turns.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg "permissionStack" src --glob '!**/*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The only production activation check is in runPermissionStack; there is no production writer of enabled=true.
+  - kind: test
+    command: bun test tests/unit/permission-post-denial.test.ts tests/integration/permission-stack-gate-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused state-machine and admissibility integration rail passed with 116 tests and 0 failures in the combined audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch4
+review_state: approved
+reviewer: codex/cross-review-wave1

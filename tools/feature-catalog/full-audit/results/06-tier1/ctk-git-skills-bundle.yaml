@@ -1,0 +1,61 @@
+version: 1
+feature_id: ctk-git-skills-bundle
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/system-skills/index.ts:discoverSystemSkills
+entrypoints:
+  - src/apps/cli/internal.ts:buildSkillsConfig
+  - src/agent/tier1/skill.ts:buildSkillBlock
+  - src/skill/system-skills/index.ts:discoverSystemSkills
+activation:
+  - CLI skills are enabled by default and the session skill block discovers bundled system skills.
+  - Each CTK prompt remains trigger-gated by explicit invocation or skill description matching.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/skill/system-skills/babysit/SKILL.md
+  - src/skill/system-skills/review-and-ship/SKILL.md
+consumer:
+  - src/skill/system-skills/index.ts:discoverSystemSkills
+  - src/agent/tier1/skill.ts:buildSkillBlock
+reachable: yes
+surface_findings:
+  - The eight assets are shipped in the discovered system directory and enter the active-skill inventory of the default CLI skill configuration.
+  - They are not individual slash handlers; their activation remains the existing Skill-tool description or explicit-invocation path.
+off_identity_proof:
+  kind: source
+  command: rg -n 'description-match|explicit invoke|Skill tool|trigger' src/agent/tier1/skill.ts src/skill/system-skills
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Discovery publishes metadata, while each prompt body remains lazily selected rather than unconditionally injected.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/ctk-git-skills-hellgate.test.ts tests/unit/ctk-git-skills-router-hellgate.test.ts tests/unit/skill-git-bundle.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Asset discovery, frontmatter and router agreement, trigger lookup, and body guardrails passed.
+failure_posture: na
+security_posture: conditional
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildSkillsConfig|discoverSystemSkills|buildSkillBlock' src/apps/cli/internal.ts src/agent/tier1/skill.ts src/skill/system-skills/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Default CLI skill configuration reaches the system-skill discovery consumer and session skill inventory.
+  - kind: test
+    command: bun test tests/unit/ctk-git-skills-hellgate.test.ts tests/unit/ctk-git-skills-router-hellgate.test.ts tests/unit/skill-git-bundle.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused CTK rails passed within the 216-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch17
+review_state: approved
+reviewer: codex/cross-review-wave1

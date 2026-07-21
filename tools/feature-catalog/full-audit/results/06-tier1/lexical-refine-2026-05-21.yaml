@@ -1,0 +1,53 @@
+version: 1
+feature_id: lexical-refine-2026-05-21
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/skill.ts:buildSkillTier
+entrypoints:
+  - src/agent/tier1/skill.ts:buildSkillTier
+  - src/agent/features.ts:buildSessionFeatures
+activation:
+  - When a session has the skills tier configured, buildSkillTier registers ToolSearch using the live registry spec catalog.
+  - The search tool is resource-backed by the optional skills session configuration; it has no separate environment gate.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/skill/tool-search.ts:createToolSearchTool
+consumer:
+  - src/agent/tier1/skill.ts:buildSkillTier
+reachable: yes
+surface_findings:
+  - The producer is registered beside the Skill tool and receives a live catalog closure over registry specs.
+  - Unit coverage exercises lexical tokenization and ranking, including aliases.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool-search.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: ToolSearch lexical ranking and schema behavior passed.
+failure_posture: na
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'createToolSearchTool|buildSkillTier' src/agent/tier1/skill.ts src/skill/tool-search.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The session skills builder registers ToolSearch against registry.specs.
+  - kind: test
+    command: bun test tests/unit/tool-search.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused lexical ranking rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

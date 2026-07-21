@@ -1,0 +1,60 @@
+version: 1
+feature_id: memory-vector-math
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/memory/vector.ts:cosine and serializeVec
+entrypoints:
+  - src/memory/adapters/sqlite.ts:SqliteStore
+  - src/memory/ranking.ts:rankEntries
+  - src/memory/dedup.ts:findDuplicates
+activation:
+  - SQLite writes embeddings through serializeVec and reads them through deserializeVec.
+  - Ranking and dedup invoke cosine only when embedding-bearing entries are supplied; absent vectors fall back to non-vector signals.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/memory/vector.ts:dot
+  - src/memory/vector.ts:cosine
+  - src/memory/vector.ts:normalize
+  - src/memory/vector.ts:serializeVec
+  - src/memory/vector.ts:deserializeVec
+consumer:
+  - src/memory/adapters/sqlite.ts:SqliteStore
+  - src/memory/ranking.ts:rankEntries
+  - src/memory/dedup.ts:findDuplicates
+reachable: yes
+surface_findings:
+  - The same vector module is consumed by durable serialization, recall ranking, and duplicate arbitration, rather than only exported from the memory barrel.
+  - Invalid or mismatched vectors become zero semantic signal or undefined embedding, preserving total ranking and allowing lexical fallback.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-adapters.test.ts tests/unit/dedup.test.ts tests/integration/memory-sqlite.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Float32 round trips, SQLite and in-memory ranking parity, and cosine-based duplicate matching passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "cosine\\(|serializeVec\\(|deserializeVec\\(" src/memory --glob '!src/memory/vector.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: SqliteStore uses serde and ranking plus dedup use cosine in live memory paths.
+  - kind: test
+    command: bun test tests/unit/memory-adapters.test.ts tests/unit/dedup.test.ts tests/integration/memory-sqlite.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused vector consumers passed as part of the 141-pass audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch9
+review_state: approved
+reviewer: codex/cross-review-wave1

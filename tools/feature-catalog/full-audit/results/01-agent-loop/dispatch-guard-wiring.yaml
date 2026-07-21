@@ -1,0 +1,59 @@
+version: 1
+feature_id: dispatch-guard-wiring
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/dispatch/preflight-consults.ts:consultDispatchGuard
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:networkDispatchGuardFor
+  - src/agent/dispatch.ts:dispatchTool
+activation:
+  - Assemble an agent under a non-open network policy and dispatch a guarded tool request.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/dispatch-guard/default-guard.ts:defaultDispatchGuard
+  - src/agent/dispatch-guard/network-guard.ts:buildNetworkDispatchGuard
+consumer:
+  - src/host/runtime/agent-config-assembler.ts
+  - src/agent/dispatch/preflight-consults.ts
+reachable: yes
+surface_findings:
+  - Host runtime derives and injects a network dispatch guard for allowlist/denied policy; open policy deliberately leaves the optional slot unset.
+  - Dispatch preflight calls the guard before execution, with hard denies terminal and ask outcomes collapsed to non-egress denial.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/dispatch-guard-hellgate.test.ts tests/integration/network-egress-enforcement-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Open policy omits the guard and ordinary no-guard tool dispatch preserves legacy execution.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/dispatch-guard-hellgate.test.ts tests/integration/network-egress-enforcement-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Composer precedence plus real-loop allowlist deny, ask, on-list allow, and open control cases passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildNetworkDispatchGuard|dispatchGuard|consultDispatchGuard' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host/runtime/agent-config-assembler.ts src/agent/dispatch src/agent/dispatch-guard
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Host assembly injects a concrete guard and dispatch preflight consumes it before tools execute.
+  - kind: test
+    command: bun test tests/unit/agent/dispatch-guard-hellgate.test.ts tests/integration/network-egress-enforcement-real-loop-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Guard unit and real-loop egress rails passed in the clean 125-pass bundle.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

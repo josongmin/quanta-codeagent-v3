@@ -1,0 +1,65 @@
+version: 1
+feature_id: sectioned-system-prompt
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt.ts:compile and buildSystemSections
+entrypoints:
+  - src/agent/loop/context-assembler.ts:buildTurnContext
+  - src/agent/prompt.ts:buildTurnContext
+activation:
+  - buildTurnContext always uses the prompt compiler.
+  - Four-section layout activates when repo rules, session context, memory summary, or user append is non-empty; otherwise the single-block legacy layout is retained.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/prompt-sections.ts:fourSectionPreset
+  - src/agent/prompt-sections.ts:buildSectionedSystemBlocks
+consumer:
+  - src/agent/prompt.ts:compile and buildTurnContext
+  - src/agent/loop/context-assembler.ts
+reachable: yes
+surface_findings:
+  - The compiler reaches fourSectionPreset from every normal turn-context assembly, based on non-empty static inputs.
+  - Empty optional inputs collapse to the legacy single cached SystemBlock, preserving default prompt bytes.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/prompt-sections.test.ts tests/unit/prompt-sections-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 42 pass, 0 fail; no static section inputs retain one base cached block and empty inputs emit no empty sections.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/prompt-sections.test.ts tests/unit/prompt-sections-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 42 pass, 0 fail; compiler auto-wires ordered sections, coalesces memory summary into session context, and enforces the four-breakpoint cap.
+failure_posture: fail-loud
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildSystemSections|fourSectionPreset|buildSectionedSystemBlocks|buildTurnContext' src/agent/prompt.ts src/agent/loop/context-assembler.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: compile calls fourSectionPreset and buildTurnContext renders its sections; context assembler calls buildTurnContext for loop turns.
+  - kind: test
+    command: bun test tests/unit/agent/prompt-sections.test.ts tests/unit/prompt-sections-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 42 pass, 0 fail; covers active four-section composition, legacy identity, cap, whitespace collapse, and memory-summary boundaries.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: no reachability exception is reported for sectioned-system-prompt.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-side
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,61 @@
+version: 1
+feature_id: lsp-bridge
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/lsp-bridge/nav.ts:lspNavProvider
+entrypoints:
+  - src/apps/cli/internal.ts:LSP tool composition
+  - src/agent/loop/entry.ts:attachLspDiagnosticsHookIfEnabled
+activation:
+  - QUANTA_LSP enables diagnostics or --lsp requests it
+  - QUANTA_LSP_TOOLS=full enables mutating LSP navigation tools
+  - A server binary on PATH resource-enables the read-only navigation subset
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/agent/lsp-bridge/nav.ts:lspNavProvider
+  - src/agent/lsp-bridge/tools.ts:lspNavToolList
+consumer:
+  - src/apps/cli/internal.ts:selectLspNavTools
+  - src/agent/loop/entry.ts:attachLspDiagnosticsHookIfEnabled
+reachable: yes
+surface_findings:
+  - CLI registers read-only navigation tools only when an installed language-server binary is detected; QUANTA_LSP_TOOLS=full is required for mutating tools.
+  - Missing, hung, or failed servers degrade to unavailable results without crashing the session; path-jail checks reject out-of-workspace navigation.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/lsp-nav-server-present-gate-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit falsy values select no navigation tools even when a server is present.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/lsp-bridge-probe.test.ts tests/unit/lsp-bridge-evidence-static-hellgate.test.ts tests/unit/lsp-nav-tools.test.ts tests/unit/apps/cli/lsp-nav-server-present-gate-hellgate.test.ts tests/unit/apps/cli/lsp-mcp-bridge-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Tool registration, server routing, real bridge projection, scripted calls, retry behavior, graceful unavailability, and jail refusal all pass.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'lspNavProvider|selectLspNavTools|QUANTA_LSP_TOOLS|attachLspDiagnosticsHookIfEnabled' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI tool composition consumes the bridge and the loop consumes diagnostics wiring through the exported bridge API.
+  - kind: test
+    command: bun test tests/unit/lsp-bridge-probe.test.ts tests/unit/lsp-bridge-evidence-static-hellgate.test.ts tests/unit/lsp-nav-tools.test.ts tests/unit/apps/cli/lsp-nav-server-present-gate-hellgate.test.ts tests/unit/apps/cli/lsp-mcp-bridge-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused availability, registration, static-evidence, and real bridge rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

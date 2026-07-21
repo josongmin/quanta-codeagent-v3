@@ -1,0 +1,58 @@
+version: 1
+feature_id: live-usage-output-token-counter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/live-usage/index.ts:withLiveUsage
+entrypoints:
+  - src/apps/cli/internal.ts:composeLLM
+  - src/runner/assemble/llm.ts:composeLLMCore outermost decorator
+  - src/apps/cli/repl/factories/indicator-stream-port.ts:output_progress consumer
+activation:
+  - Run the interactive CLI on a TTY with the turn indicator enabled; composeLLM passes liveUsage true and the indicator consumes output_progress.
+effective_defaults:
+  cli: on
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - normalized LLM text, thinking, tool-use, usage, and stream-reset events
+consumer:
+  - interactive CLI turn indicator updateUsage
+reachable: yes
+surface_findings:
+  - The CLI gates the outermost decorator on interactive-TTY indicator availability, then streamConsume forwards transient output_progress without touching budget or trajectory accounting.
+  - The indicator renders cumulative estimated or provider-exact output while the terminal usage event remains the sole accounting owner.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/llm/live-usage.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent and disabled knobs return the original port or byte-identical stream without output_progress events.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm/live-usage.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed event transparency, estimated and authoritative progression, exactness upgrades, stream-reset behavior, tool JSON counting, and no usage-event duplication.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'liveUsage|withLiveUsage|output_progress|updateUsage' src/apps/cli/internal.ts src/runner/assemble/llm.ts src/agent/loop/stream-consume.ts src/apps/cli/repl/factories/indicator-stream-port.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Interactive CLI gate, outermost LLM wrap, loop forwarding, and indicator consumption form one production path.
+  - kind: test
+    command: bun test tests/unit/llm/live-usage.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All focused default-OFF and enabled decorator rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

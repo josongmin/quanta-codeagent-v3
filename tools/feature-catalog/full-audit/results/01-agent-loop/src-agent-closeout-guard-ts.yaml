@@ -1,0 +1,63 @@
+version: 1
+feature_id: src-agent-closeout-guard-ts
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/closeout-guard.ts:decideCloseoutGuard
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:bootstrapSession
+  - src/agent/guards/build.ts:buildGuardChain
+activation:
+  - Any host that supplies AgentConfig.closeoutGuard.enabled true allocates CloseoutGuardState and adds createCloseoutGuard to the shared loop guard chain.
+  - The normal interactive knob path additionally supplies that config from QUANTA_BENCH_CLOSEOUT, including the 4rule variant.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/agent/closeout-guard.ts:createCloseoutGuardState
+  - src/agent/closeout-guard.ts:decideCloseoutGuard
+consumer:
+  - src/agent/session-resources.ts:buildCloseoutGuard
+  - src/agent/guards/build.ts:buildGuardChain
+  - src/agent/guards/closeout-guard.ts:createCloseoutGuard
+  - src/agent/loop/recovery-executor.ts:runGuardChain
+reachable: yes
+surface_findings:
+  - "The policy module is a live loop dependency, not merely a prompt scaffold: it owns the trip state and selected reminder text."
+  - "Enabled closeout blocks the first eligible finish and appends a meta-user reminder; the re-entry has tool_choice none."
+  - "The default path has no state allocation or guard-chain entry, preserving pass-through behavior."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/closeout-guard.test.ts tests/integration/closeout-forces-none.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Undefined or disabled config does not block, and the real loop retains automatic tool choice when the guard is disabled.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/closeout-guard.test.ts tests/unit/code-mod-closeout.test.ts tests/integration/closeout-forces-none.test.ts tests/integration/sota-codex-full.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Policy selection, single-shot state, union and four-rule reminders, recovery emission, and forced re-entry all pass through the actual loop.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildCloseoutGuard|decideCloseoutGuard|createCloseoutGuard|runGuardChain' src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Bootstrap creates the state, buildGuardChain installs the adapter, and the normal turn path runs it at completion.
+  - kind: test
+    command: bun test tests/unit/closeout-guard.test.ts tests/unit/code-mod-closeout.test.ts tests/integration/closeout-forces-none.test.ts tests/integration/sota-codex-full.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 0 failures across policy, regression, forced-loop, and full composition tests.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-guard
+review_state: approved
+reviewer: codex/cross-review-wave1

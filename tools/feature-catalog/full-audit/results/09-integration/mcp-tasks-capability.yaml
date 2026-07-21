@@ -1,0 +1,57 @@
+version: 1
+feature_id: mcp-tasks-capability
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/mcp-bridge.ts:tasksToolsFor and supervisedTasksToolsFor
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:pickMcpNegotiator
+  - src/agent/mcp-bridge.ts:loadSingle and supervised task tool binding
+activation:
+  - Configure QUANTA_MCP_CAPS=full for client task capability advertisement and connect an MCP server that advertises tasks; loadMcpTools then binds list, get, and cancel task tools.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - server tasks/list, tasks/getInfo, tasks/getResult, and tasks/cancel RPC responses
+consumer:
+  - mcp task list, get, cancel tools and optional poller
+reachable: yes
+surface_findings:
+  - The host selects a full negotiator only under its explicit capability gate, while the bridge independently exposes task tools only for a server advertising tasks and preserves those tools across supervised client restart.
+  - Tools map malformed, unavailable, and timeout outcomes to typed non-throw results; cancel remains always-confirm and read operations remain concurrency-safe.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mcp/capabilities-hellgate.test.ts tests/unit/mcp/tasks-live-binding-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default negotiator emits an empty object and a server without tasks registers no task tools.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp/capabilities-hellgate.test.ts tests/unit/mcp/tasks-hellgate.test.ts tests/unit/mcp/tasks-tools-hellgate.test.ts tests/unit/mcp/tasks-live-binding-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed canonical capability negotiation, live RPC dispatch, tool registration, cancellation confirmation, state handling, polling, and default-off server-capability controls.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'pickMcpNegotiator|tasksToolsFor|supervisedTasksToolsFor|serverSupportsTasks' src/host/runtime/agent-arg-builder.ts src/agent/mcp-bridge.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Capability selection and both normal and supervised tool bindings are live code paths.
+  - kind: test
+    command: bun test tests/unit/mcp/capabilities-hellgate.test.ts tests/unit/mcp/tasks-hellgate.test.ts tests/unit/mcp/tasks-tools-hellgate.test.ts tests/unit/mcp/tasks-live-binding-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All focused capability, RPC, tool, and poller rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

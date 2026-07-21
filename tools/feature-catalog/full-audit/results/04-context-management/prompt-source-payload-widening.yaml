@@ -1,0 +1,60 @@
+version: 1
+feature_id: prompt-source-payload-widening
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/prompt-pipeline.ts:localPayload
+entrypoints:
+  - src/apps/cli/repl/session-loop.ts:composePromptPipeline
+  - src/apps/cli/repl/session-loop.ts:runSessionTurn
+  - src/runner/orchestrate/run-once.ts:normalizePromptPayload
+activation:
+  - A queued image makes the CLI prompt pipeline return the structured payload form for that accepted turn.
+  - Text-only prompts retain the string form and run through the same interactive loop.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/repl/prompt-pipeline.ts:localPayload drains ImageQueue into CliPromptInput
+consumer:
+  - src/apps/cli/repl/session-loop.ts normalizes CliPromptInput and passes images to driveSessionTurn
+  - src/runner/orchestrate/run-once.ts supports PromptPayload for direct one-shot callers
+reachable: yes
+surface_findings:
+  - The interactive CLI has a live string-or-structured prompt payload path with exactly-once image draining and turn-local image attachment.
+  - The catalog's claimed live chain through runner runOnce is stale: the interactive loop uses its own CliPromptInput type and driveSessionTurn, while no production source calls the exported runner runOnce.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts tests/unit/runner/run-once-multimodal.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The CLI pipeline preserves text-only behavior, drains queued images once, and the runner one-shot payload normalization preserves image order.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "composePromptPipeline|normalizeCliPromptInput|runSessionTurn|driveSessionTurn" src/apps/cli/repl
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The active interactive chain stays in the CLI adapter and passes prompt images directly to driveSessionTurn.
+  - kind: source
+    command: rg -n "runOnce\\(" src --glob '!src/runner/orchestrate/run-once.ts' --glob '!**/*.test.*'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: No production call to the exported runner runOnce orchestrator was found.
+  - kind: test
+    command: bun test tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts tests/unit/runner/run-once-multimodal.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused prompt shape and multimodal rails passed within the 496-pass audit command.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch5
+review_state: approved
+reviewer: codex/cross-review-wave1

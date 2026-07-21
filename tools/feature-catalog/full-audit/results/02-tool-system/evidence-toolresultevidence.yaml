@@ -1,0 +1,45 @@
+version: 1
+feature_id: evidence-toolresultevidence
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/types/tool-result.ts:ToolResultEvidence
+entrypoints: [src/tool/registry.ts:ToolRegistry.run, src/agent/dispatch/execute.ts:evidenceOf]
+activation: ["Tool producers may attach evidence; registry spill handling and dispatch flattening consume it on the normal tool-result path."]
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer: [src/tool/bash/index.ts:bashTool, src/tool/test-runner/index.ts:runTestsTool, src/tool/registry.ts:ToolRegistry.run]
+consumer: [src/tool/registry.ts:ToolRegistry.run, src/agent/dispatch/execute.ts:evidenceOf, src/agent/stream-callbacks.ts:tool_result]
+reachable: yes
+surface_findings: ["The typed ToolResult evidence field is populated by shell/test producers and by output-spill handling, then flattened into DispatchResult and trajectory tool_result fields.", "The catalog's cited output-schema test is not the primary evidence rail, but registry, dispatch, and real loop spill tests cover the actual evidence path."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool-output-schema-hellgate.test.ts tests/unit/registry.test.ts tests/unit/dispatch.test.ts tests/integration/tool-spill-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 56 tests passed, including evidence merge, dispatch stderr/exit-code flattening, and real registry-to-loop spill-path propagation.
+failure_posture: fail-loud
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "ToolResultEvidence|evidence\.fullLogPath|evidenceOf|stderrTail" src/tool/types/tool-result.ts src/tool/registry.ts src/tool/bash/index.ts src/tool/test-runner/index.ts src/agent/dispatch/execute.ts src/agent/stream-callbacks.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Typed producer fields, spill merge, dispatch flattening, and stream serialization form a concrete consumer chain.
+  - kind: test
+    command: bun test tests/unit/tool-output-schema-hellgate.test.ts tests/unit/registry.test.ts tests/unit/dispatch.test.ts tests/integration/tool-spill-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 56 focused registry dispatch and real-loop rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-edit
+review_state: approved
+reviewer: codex/cross-review-wave1

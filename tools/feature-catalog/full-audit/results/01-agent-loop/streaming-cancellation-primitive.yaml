@@ -1,0 +1,51 @@
+version: 1
+feature_id: streaming-cancellation-primitive
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/streaming-cancellation/default.ts:createCancellationController
+entrypoints: []
+activation:
+  - A future caller must construct a controller and thread toAbortSignal(controller.signal) into the live StreamInput.signal path.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer:
+  - src/agent/streaming-cancellation/default.ts:createCancellationController
+  - src/agent/streaming-cancellation/llm-stream-cancel.ts:cancellableStream
+consumer: []
+reachable: no
+surface_findings:
+  - "No production src import constructs the controller, calls cancellableStream, or bridges its signal into an LLM stream."
+  - "The live abort path uses ordinary AbortSignal wiring; sibling mentions are comments only."
+  - "The primitive is an executable and well-tested seam, but it has no runtime activation surface."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/streaming-cancellation-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 26 passing cases cover typed causes, AbortSignal conversion, cleanup idempotency, error capture, partial salvage, reset, and cancellation.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: No production composition root constructs this controller or consumes its typed cause, cleanup outcome, or salvaged stream result.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n '@/agent/streaming-cancellation|agent/streaming-cancellation|createCancellationController|cancellableStream|toAbortSignal\\(' src --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Search finds only the owner slice and comment references; there is no production consumer.
+  - kind: test
+    command: bun test tests/unit/streaming-cancellation-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 26 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-agentloop-ops
+review_state: approved
+reviewer: codex/cross-review-wave1

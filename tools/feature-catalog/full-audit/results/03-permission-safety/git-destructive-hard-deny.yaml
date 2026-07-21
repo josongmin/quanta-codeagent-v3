@@ -1,0 +1,54 @@
+version: 1
+feature_id: git-destructive-hard-deny
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/permission/policy-rules.ts:HARD_DENY_RULES"
+entrypoints:
+  - "src/agent/dispatch.ts:dispatchToolInner"
+  - "src/agent/admissibility-gate.ts:runAdmissibilityGate"
+activation:
+  - "Every dispatch that reaches admissibility evaluates the static HARD_DENY corpus before an allow-capable bypass can admit it."
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: on
+  headless: on
+  daemon: unknown
+producer:
+  - "src/permission/policy-rules.ts:HARD_DENY_RULES"
+  - "src/permission/policy.ts:hardDenyReason"
+consumer:
+  - "src/agent/admissibility-gate/gates.ts:earlyHardDeny"
+  - "src/agent/admissibility-gate/gates.ts:runPermissionStackGate"
+reachable: yes
+surface_findings:
+  - "The rule corpus includes forced push, reset/checkout/rebase/clean, mirror, force-delete, and multi-branch-delete patterns."
+  - "Admissibility invokes the deny floor before pattern grants, reviewer, and rule allow paths; the stack path also carries registry-derived shell commands."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/permission-rules.test.ts tests/unit/permission/branch-only.test.ts tests/unit/permission/branch-only-bypass-hellgate.test.ts tests/unit/apps/agent/mode-presets/ci-bot.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "297 tests pass, including must-block and must-allow fixtures for every HARD_DENY rule and a live guarded ci-bot runner."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'HARD_DENY_RULES|earlyHardDeny|hardDenyReason|shellCommand' src/permission/policy-rules.ts src/agent/admissibility-gate/gates.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Static rules feed both early and policy-stack hard-deny checks before allow-capable gates."
+  - kind: test
+    command: "bun test tests/unit/permission-rules.test.ts tests/unit/permission/branch-only.test.ts tests/unit/permission/branch-only-bypass-hellgate.test.ts tests/unit/apps/agent/mode-presets/ci-bot.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "297 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch9
+review_state: approved
+reviewer: codex/cross-review-wave1

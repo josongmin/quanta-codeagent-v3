@@ -1,0 +1,45 @@
+version: 1
+feature_id: syntax-aware-chunking
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/retrieval/code-parser/tree-sitter.ts:createTreeSitterParser
+entrypoints: [src/runner/assemble/tooling.ts]
+activation: ["QUANTA_SYNTAX_CHUNK=1 or QUANTA_READ_OUTLINE=1"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/retrieval/indexer/chunker-syntactic.ts:chunkFileSyntactic, src/tool/read/outline.ts]
+consumer: [src/retrieval/indexer/default-scanner.ts, src/runner/assemble/tooling.ts, src/tool/read/index.ts]
+reachable: yes
+surface_findings: ["The runner composition root injects the real parser only for the enabled outline path; unsupported or error paths visibly degrade to line-window behavior."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/syntax-chunk-hellgate.test.ts tests/unit/read-outline-tool-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off yields byte-identical line-window/read behavior and does not call the parser.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/syntax-chunk-hellgate.test.ts tests/unit/read-outline-hellgate.test.ts tests/unit/read-outline-tool-wire-hellgate.test.ts tests/integration/syntax-chunk-real-wasm-code-parser.test.ts tests/integration/read-outline-production-wire.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real WASM parsing and production outline composition pass.
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/syntax-chunk-hellgate.test.ts tests/unit/read-outline-hellgate.test.ts tests/unit/read-outline-tool-wire-hellgate.test.ts tests/integration/syntax-chunk-real-wasm-code-parser.test.ts tests/integration/read-outline-production-wire.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 37 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

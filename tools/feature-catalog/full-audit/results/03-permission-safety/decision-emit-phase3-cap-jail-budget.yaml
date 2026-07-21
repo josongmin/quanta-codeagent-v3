@@ -1,0 +1,57 @@
+version: 1
+feature_id: decision-emit-phase3-cap-jail-budget
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/session-setup.ts:setupSession
+entrypoints:
+  - src/apps/cli/index.ts CLI REPL session setup
+  - src/apps/cli/repl/session-setup.ts installs the fs-jail sink from runtimeContext.decisionEmitter
+activation:
+  - CLI composition unconditionally supplies the decision emitter; cap reminder, fs-jail escape, and budget exhaustion emit their respective decision rows when their gate fires.
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/dispatch.ts:handleCapReminder
+  - src/storage/service.ts:enforceJail
+  - src/agent/loop/stop-conditions.ts and src/agent/loop/turn-outcome.ts emit budget exhaustion
+consumer:
+  - src/apps/cli/repl/session-setup.ts installs and tears down the jail sink
+  - src/stream/adapters/stdout.ts renders decision events
+  - src/stream/adapters/jsonl-recorder.ts persists decision events
+reachable: yes
+surface_findings:
+  - The focused Phase 3 rail proves cap, jail, and budget event shapes, silence on allow paths, direct-emitter OFF behavior, sink lifecycle, metadata restriction, and throw isolation.
+  - The catalog claimed developer-only/default-OFF composition is stale because CLI always creates a decision emitter over turnStream and installs it as the jail sink.
+  - Budget emission moved into loop stop-condition/outcome modules, so the catalog loop.ts-only location is also stale though the production behavior remains reachable.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/decision-emit-phase3-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 17 focused cases prove each gate event and silence behavior, absent-emitter behavior, poison-sink isolation, and metadata boundaries.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: The catalog says the shared emitter is wired only when QUANTA_DEBUG is on and lists src/agent/loop.ts as its budget site; the frozen CLI always wires it and budget sites now live in loop stop-condition/outcome modules.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'decisionEmitter: decisionEmitterFromStream|setFsJailDecisionSink|handleCapReminder|emitBudgetExhaustedDecision|case "decision"' src/apps/cli/repl src/agent src/storage src/stream/adapters
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI composition feeds the cap, jail, and budget emit sites into stdout and JSONL consumers, with no QUANTA_DEBUG gate around emitter creation.
+  - kind: test
+    command: bun test tests/unit/agent/decision-emit-phase3-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 17 focused Phase 3 cap/jail/budget cases pass.
+audited_at: "2026-07-19"
+auditor: codex/p2-boundary-batch11
+review_state: approved
+reviewer: codex/cross-review-wave1

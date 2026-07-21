@@ -1,0 +1,46 @@
+version: 1
+feature_id: quantamodelfallback
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/runner/assemble/llm.ts:model fallback assembly"
+entrypoints: ["src/apps/cli/internal.ts", "src/runner/assemble/llm.ts"]
+activation: ["QUANTA_MODEL_FALLBACK provides an ordered alternate-model list."]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: ["src/runner/assemble/llm.ts model fallback parse", "src/llm/fallback.ts:FallbackLLM"]
+consumer: ["src/runner/assemble/llm.ts assembled LLM chain"]
+reachable: yes
+surface_findings:
+  - "An unset fallback environment leaves the primary chain unchanged; configured alternatives feed the fallback decorator."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/fallback.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Primary success uses no fallback provider."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/fallback.test.ts tests/unit/fallback-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Configured fallback handles eligible pre-stream and post-stream failures with the documented reset boundary."
+failure_posture: fail-loud
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: "bun test tests/unit/fallback.test.ts tests/unit/fallback-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 96-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

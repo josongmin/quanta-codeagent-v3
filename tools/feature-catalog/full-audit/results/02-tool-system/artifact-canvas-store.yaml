@@ -1,0 +1,56 @@
+version: 1
+feature_id: artifact-canvas-store
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts:resolveArtifactRegistrySlice
+entrypoints:
+  - src/tool/index.ts:buildDefaultTools
+  - src/apps/web-daemon/runtime-factory.ts:resolveArtifactSlots
+activation:
+  - Set QUANTA_ARTIFACT_STORE=1 before session construction; the composition root mints one registry shared by artifact tools, generation auto-registration, drain, and preview resolution.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/image-gen/tool.ts:image generation auto-registration
+  - src/tool/document/authoring/artifact-register.ts:office-output auto-registration
+  - src/host/runtime/artifact-drain.ts:drainArtifactRefs
+consumer:
+  - src/tool/artifact/index.ts:artifact register/list/get/destroy tools
+  - src/apps/web-daemon/server/canvas-artifact-bridge.ts:setupCanvasArtifactBridge
+  - src/apps/web-daemon/server/fetch-handler.ts:GET /artifact/:id resolver
+reachable: yes
+surface_findings:
+  - One per-session registry is passed to both generation tools and artifact tools; focused cross-tool tests prove generated image and office outputs can be listed from that same instance.
+  - The web daemon creates the preview resolver and Canvas bridge only under QUANTA_ARTIFACT_STORE; the preview route is absent when the resolver is not supplied.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/artifact-store-e2e-hellgate.test.ts tests/unit/artifact-auto-register-c1-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: With no registry port, artifact tools are absent and image/office writes retain their previous output without registration side effects.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/artifact-registry-hellgate.test.ts tests/unit/artifact-auto-register-cross-tool-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Registry boundedness, tool CRUD, shared-registry auto-registration, multi-image registration, and generated office artifact listing all passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/artifact-registry-hellgate.test.ts tests/unit/artifact-auto-register-c1-hellgate.test.ts tests/unit/artifact-auto-register-cross-tool-e2e-hellgate.test.ts tests/unit/artifact-store-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The combined 12-file audit command passed 156 tests; artifact store, side-channel failure, default-off, and cross-tool rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

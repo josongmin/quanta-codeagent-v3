@@ -1,0 +1,45 @@
+version: 1
+feature_id: external-agent-import
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/migration/importer.ts:runImport
+entrypoints:
+  - src/apps/cli/session-import-handler.ts
+activation:
+  - CLI session import invokes strict provider detection, staged import, Claude transcript translation, and persistent log append.
+effective_defaults:
+  cli: off
+  web: off
+  bench: na
+  headless: off
+  daemon: off
+producer:
+  - src/migration/importer.ts:runImport
+consumer:
+  - src/apps/cli/session-import-handler.ts
+reachable: yes
+surface_findings:
+  - Claude Code translation is live; cursor and aider translator stubs plus non-persistent translated messages are accurately documented holds.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/migration-detector.test.ts tests/unit/migration-stages.test.ts tests/unit/migration-persistence.test.ts tests/unit/cli-session-commands.test.ts tests/integration/migration-claude-code-fixture.test.ts tests/integration/migration-claude-code-translator.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Detection, lifecycle, persistence, CLI, and real Claude fixture rails passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: verified
+verdict: conditional
+blocker: Cursor and Aider translation and writing translated messages into v3 sessions remain explicit holds.
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/migration-detector.test.ts tests/unit/migration-stages.test.ts tests/unit/migration-persistence.test.ts tests/unit/cli-session-commands.test.ts tests/integration/migration-claude-code-fixture.test.ts tests/integration/migration-claude-code-translator.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: External import rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

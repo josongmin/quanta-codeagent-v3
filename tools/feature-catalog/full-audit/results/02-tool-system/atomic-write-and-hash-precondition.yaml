@@ -1,0 +1,48 @@
+version: 1
+feature_id: atomic-write-and-hash-precondition
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/storage/atomic-write.ts:writeFileAtomic and src/tool/edit/index.ts:planEdit/commitEdit
+entrypoints: [src/tool/index.ts:buildBaseDefaultTools, src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildBaseRegistry, src/apps/web-daemon/runtime-factory.ts]
+activation: [edit and write are base tools; expected_hash is an optional input precondition and the default filesystem port supplies writeFileAtomic.]
+effective_defaults:
+  cli: on
+  web: on
+  bench: unknown
+  headless: unknown
+  daemon: on
+producer: [src/storage/atomic-write.ts:writeFileAtomic, src/tool/edit/index.ts:planEdit, src/tool/edit/index.ts:commitEdit]
+consumer: [src/storage/service.ts:defaultFileSystemPort, src/tool/index.ts:buildBaseDefaultTools, src/apps/web-daemon/runtime-factory.ts]
+reachable: yes
+surface_findings:
+  - The default storage port exposes temp-plus-fsync-plus-rename writes, and the base edit/write tools use that port on normal CLI and daemon registries.
+  - expected_hash is checked before either write method; a mismatch returns typed stale_precondition and leaves the target untouched.
+  - Atomic commits are now default whenever the port supports them, while legacy ports safely fall back to writeFile; catalog language about optional expected_hash remains accurate for the optimistic-lock part.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/edit-atomic-precondition-hellgate.test.ts src/storage/__tests__/atomic-write-fsync-hellgate.test.ts tests/unit/storage-atomic-mode-preserve.test.ts tests/unit/edit-write-atomic-default.test.ts tests/unit/edit-write-atomic-default-e2e.hellgate.test.ts tests/unit/scripted-replace-atomic-stale-hellgate.test.ts tests/unit/edittrace-real-edit-vocabulary-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 34 focused real-filesystem and injected-port assertions passed for precondition denial, fsync ordering, crash preservation, mode preservation, default atomic commits, and stale output vocabulary.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'writeFileAtomic|expected_hash|stale_precondition|commitEdit|buildBaseDefaultTools' src/storage/atomic-write.ts src/storage/service.ts src/tool/edit/index.ts src/tool/index.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The default port, base-tool factory, optimistic precondition, and commit route are concrete production seams.
+  - kind: test
+    command: bun test tests/unit/edit-atomic-precondition-hellgate.test.ts src/storage/__tests__/atomic-write-fsync-hellgate.test.ts tests/unit/storage-atomic-mode-preserve.test.ts tests/unit/edit-write-atomic-default.test.ts tests/unit/edit-write-atomic-default-e2e.hellgate.test.ts tests/unit/scripted-replace-atomic-stale-hellgate.test.ts tests/unit/edittrace-real-edit-vocabulary-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 34 focused rails passed across the atomic adapter and its real tool consumers.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch9
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,66 @@
+version: 1
+feature_id: response-in-progress
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/streaming-dispatch.ts:streamingTurn response_in_progress branch
+entrypoints:
+  - src/agent/loop/stream-consume.ts:streamingTurn callback spread
+  - src/agent/stream-callbacks.ts:onInProgress
+activation:
+  - provider stream must yield response_in_progress
+  - configured StreamPort must consume the emitted in_progress AgentEvent for a rendered or persisted effect
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/streaming-events.ts:decodeSseEvent and decodeWsEvent
+  - src/agent/streaming-dispatch.ts:handleInProgress
+consumer:
+  - src/agent/stream-callbacks.ts:onInProgress
+  - src/stream/adapters/stdout.ts:renderInProgress
+  - src/stream/adapters/jsonl-recorder.ts:in_progress recovery projection
+reachable: yes
+surface_findings:
+  - "CLI: the loop emits in_progress to its StreamPort; StdoutStream renders the thinking line and JsonlRecorder retains the recovery-tagged event."
+  - "Web: catalog evidence records that the event is outside the browser bridge whitelist, so no verified browser rendering path exists."
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/streaming-dispatch-in-progress-e2e.test.ts tests/integration/loop-in-progress.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No handler absorbs heartbeat without changing assembly; a provider stream with no heartbeat emits no in_progress AgentEvent.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/streaming-events-in-progress.test.ts tests/integration/streaming-dispatch-in-progress-e2e.test.ts tests/integration/loop-in-progress.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: SSE and WS decoding preserve the event; streaming dispatch forwards metadata and the real loop round-trips response_in_progress to AgentEvent.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg response_in_progress and onInProgress in src/llm src/agent src/stream
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Decoder, streaming dispatch, loop callback, stdout renderer, and JsonlRecorder consumer chain are present.
+  - kind: test
+    command: bun test tests/unit/streaming-events-in-progress.test.ts tests/integration/streaming-dispatch-in-progress-e2e.test.ts tests/integration/loop-in-progress.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 17 pass, 0 fail; fragmented SSE and WS decoding plus dispatch and loop metadata round-trip are covered.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No reachability exception was reported for response-in-progress.
+audited_at: "2026-07-19"
+auditor: codex/p1-agentloop-core
+review_state: approved
+reviewer: codex/cross-review-wave1

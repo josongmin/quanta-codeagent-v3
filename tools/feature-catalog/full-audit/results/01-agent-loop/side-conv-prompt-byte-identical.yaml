@@ -1,0 +1,65 @@
+version: 1
+feature_id: side-conv-prompt-byte-identical
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/side-conversation/prompt.ts:SIDE_CONVERSATION_PROMPT
+entrypoints:
+  - src/agent/side-conversation/run.ts:runSideConversation
+  - src/agent/optional-ports.ts fast-apply fallback adapter
+activation:
+  - QUANTA_FAST_APPLY must be enabled and fast-apply fallback must select the side-conversation adapter.
+  - The active CLI /side route does not consume these constants; it uses RuntimeSession and host context binding.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/side-conversation/prompt.ts:SIDE_CONVERSATION_PROMPT_BASE
+  - src/agent/side-conversation/prompt.ts:SIDE_CONVERSATION_PROMPT
+consumer:
+  - src/agent/side-conversation/run.ts:invokeSideLlm
+  - src/agent/optional-ports.ts fast-apply fallback adapter when QUANTA_FAST_APPLY is enabled
+reachable: conditional
+surface_findings:
+  - Exact-base, delimiter, addendum, tool and abort invariants are tested for the isolated legacy runner.
+  - The catalog's CLI-full claim is stale: live /side starts a regular isolated agent loop from host context binding and never imports this prompt module.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/side-conversation.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 16 pass, 0 fail; prompt assembly and isolated runner error paths are deterministic.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/side-conversation.test.ts tests/integration/side-conversation-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 18 pass, 0 fail; legacy router sends the frozen prompt and propagates abort, but does not prove the live CLI route consumes it.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: The described CLI side-conversation prompt is not on the current CLI route; only a default-off fast-apply fallback can reach this legacy prompt.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'SIDE_CONVERSATION_PROMPT|runSideConversation' src/agent/side-conversation src/agent/optional-ports.ts src/apps/cli src/host/runtime
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: prompt feeds runSideConversation; optional-ports is its only production adapter, while CLI and host runtime use a separate side path.
+  - kind: test
+    command: bun test tests/unit/side-conversation.test.ts tests/integration/side-conversation-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 18 pass, 0 fail; literal pin, delimiter, tool filtering, budget, telemetry, and cancellation all pass for the owner-local runner.
+  - kind: source
+    command: rg -n 'startSideConversation|buildIsolatedSideConversationConfig' src/host/runtime/internal/context-binding/side-conversation.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: live host side chat builds an AgentConfig from base.system and does not reference SIDE_CONVERSATION_PROMPT.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-side
+review_state: approved
+reviewer: codex/cross-review-wave1

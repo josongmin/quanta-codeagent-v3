@@ -1,0 +1,59 @@
+version: 1
+feature_id: slash-working-state-panel
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/working-state-panel.ts:renderWorkingStatePanel
+entrypoints:
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts:stateHookOptions
+  - src/apps/cli/slash/registry-surface.ts:stateCmd
+activation:
+  - Set QUANTA_WORKING_STATE to a truthy value in the interactive CLI, then run /state after the runtime facade installs its WorkingState getter.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/repl/surface-compose/core-state.ts:workingStateView
+consumer:
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts:onWorkingStateReady
+  - src/apps/cli/slash/registry-surface.ts:stateCmd
+reachable: yes
+surface_findings:
+  - The slash dispatch always receives a getter, but the runtime facade only creates and installs WorkingState when QUANTA_WORKING_STATE is truthy.
+  - With the gate off, /state renders the defined empty panel rather than exposing a model-mutated scratchpad.
+  - The panel is read-only and pure; wiring and rendering behavior are separately covered by port and renderer rails.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/working-state-panel.test.ts tests/unit/apps/cli/slashctx-ports-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent or undefined WorkingState inputs render the controlled empty/not-wired paths without mutation.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/working-state-panel.test.ts tests/unit/apps/cli/slashctx-ports-wire-hellgate.test.ts src/apps/cli/__tests__/state-skill-scope-e2e.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Full panel rows, /state alias dispatch, wired snapshot rendering, and skill-scope extension rails passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: na
+verdict: conditional
+blocker: "QUANTA_WORKING_STATE is opt-in; when unset the runtime facade omits the state hook and /state only renders an empty view."
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_WORKING_STATE|workingStateEnabled|onWorkingStateReady|workingStateView|renderWorkingStatePanel' src/apps/cli/repl src/apps/cli/working-state-panel.ts src/apps/cli/slash
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The truthy environment gate controls runtime state installation and the slash command consumes the retained getter.
+  - kind: test
+    command: bun test tests/unit/cli/working-state-panel.test.ts tests/unit/apps/cli/slashctx-ports-wire-hellgate.test.ts src/apps/cli/__tests__/state-skill-scope-e2e.hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused working-state renderer, port wiring, and e2e extension rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch24
+review_state: approved
+reviewer: codex/cross-review-wave1

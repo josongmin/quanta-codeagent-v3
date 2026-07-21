@@ -1,0 +1,56 @@
+version: 1
+feature_id: connector-marketplace
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/connectors/connector-marketplace.ts:createConnectorMarketplace
+entrypoints:
+  - src/connectors/index.ts:export barrel
+activation:
+  - A future host must construct the marketplace under QUANTA_CONNECTOR_MARKETPLACE and enforce marketplace policy before a source clone or download.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - DirectoryApp descriptors and marketplace source policy decisions
+consumer:
+  - injected InstalledAppStorePort lifecycle state
+reachable: no
+surface_findings:
+  - The pure lifecycle and policy modules enforce strict directory descriptors, http(s)-only install URLs, deterministic state transitions, default-off gates, and blocklist-first source decisions.
+  - No non-connectors production source constructs createConnectorMarketplace, calls enforceMarketplacePolicy, or reads its gates; no browse, remote registry, install URL, or persistent-store host surface exists.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/connector-marketplace-v1.test.ts tests/unit/marketplace-policy.test.ts tests/integration/connector-marketplace-lifecycle-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off marketplace construction is absent and policy enforcement allows the legacy path byte-identically.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/connector-marketplace-v1.test.ts tests/unit/marketplace-policy.test.ts tests/integration/connector-marketplace-lifecycle-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed lifecycle persistence across reload, typed errors, invalid URL red-on-injection, and policy allowlist/blocklist enforcement.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: seam-only
+blocker: Marketplace is export-only; no production host creates its store or wires the policy verdict before download or clone.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'createConnectorMarketplace|enforceMarketplacePolicy|isConnectorMarketplaceEnabled' src --glob '!src/connectors/**' --glob '!**/*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No non-connectors production consumer was found.
+  - kind: test
+    command: bun test tests/unit/connector-marketplace-v1.test.ts tests/unit/marketplace-policy.test.ts tests/integration/connector-marketplace-lifecycle-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All focused lifecycle, persistence, gate, policy, and injection rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,50 @@
+version: 1
+feature_id: update-working-state
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/working-state.ts:buildWorkingStateBlock plus src/tool/update-working-state.ts:createUpdateWorkingStateTool
+entrypoints: [src/runner/knobs/knobs/working-state.ts:applyWorkingState, src/agent/tier1/features.ts:buildSessionFeatures]
+activation: [QUANTA_WORKING_STATE truthy on supported CLI or agent surfaces, or explicit AgentConfig.workingState.enabled=true.]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/tool/update-working-state.ts:createUpdateWorkingStateTool, src/agent/working-state.ts:createWorkingStateSession]
+consumer: [src/agent/tier1/working-state.ts:buildWorkingStateBlock, src/agent/dispatch/tool-context.ts:buildToolContext, src/agent/loop/session-bootstrap.ts:buildSessionBootstrap]
+reachable: yes
+surface_findings: ["The enabled session owns one closure-captured WorkingState handle, registers update_working_state, threads it through dispatch context, and renders the next-turn reminder.", "Absent or disabled configuration leaves the tool and state block out of the registry; the CLI /state panel is only a projection, not the activation owner."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/features.test.ts tests/integration/agent-features.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent and enabled=false configurations omit the tool and session; the agent feature control preserves the legacy loop.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/update-working-state.test.ts tests/unit/features.test.ts tests/integration/agent-features.test.ts tests/integration/sota-codex-full.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 60 focused cases passed, including replacement semantics, caps, registry composition, dispatch mutation, and cross-turn reminder rendering.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'applyWorkingState|createUpdateWorkingStateTool|buildWorkingStateBlock|workingState' src/runner/knobs/knobs/working-state.ts src/agent/tier1/working-state.ts src/agent/dispatch/tool-context.ts src/agent/loop/session-bootstrap.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Gate/config projection, session mint, tool registration, context propagation, and loop consumption form one production path.
+  - kind: test
+    command: bun test tests/unit/update-working-state.test.ts tests/unit/features.test.ts tests/integration/agent-features.test.ts tests/integration/sota-codex-full.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 60 pass, 0 fail; the final rail includes a real turn-N mutation to turn-N+1 reminder receipt.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-registry
+review_state: approved
+reviewer: codex/cross-review-wave1

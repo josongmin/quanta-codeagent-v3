@@ -1,0 +1,50 @@
+version: 1
+feature_id: infertooltier-secure-by-default-fallback
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/policy.ts:inferToolTier
+entrypoints: [src/apps/cli/index.ts]
+activation: ["normal agent dispatch and stream callbacks"]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: [src/permission/policy.ts:inferToolTier]
+consumer: [src/agent/admissibility-gate/shared.ts, src/agent/stream-callbacks.ts, src/apps/cli/permission-explain.ts]
+reachable: yes
+surface_findings: ["The fallback is a live dispatch classification policy; unannotated mutating tools are forced to always-confirm."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/hitl-tier-dispatch.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The explicit hitl-absent legacy controls preserve the ungated dispatch path; fallback classification still remains conservative when invoked.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/hitl-tier-classifier.test.ts tests/unit/hitl-tier-dispatch.test.ts tests/unit/hitl-tier-gate.test.ts tests/unit/hitl-tier-registry.test.ts tests/integration/hitl-tier-dispatch-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 111 policy, dispatch, bypass, handoff, override, and integration rails pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "inferToolTier" src/agent src/apps/cli src/permission
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Multiple production dispatch consumers call the policy.
+  - kind: test
+    command: bun test tests/unit/hitl-tier-classifier.test.ts tests/unit/hitl-tier-dispatch.test.ts tests/unit/hitl-tier-gate.test.ts tests/unit/hitl-tier-registry.test.ts tests/integration/hitl-tier-dispatch-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 111 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

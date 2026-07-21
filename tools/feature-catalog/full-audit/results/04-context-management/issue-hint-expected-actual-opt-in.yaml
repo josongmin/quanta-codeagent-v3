@@ -1,0 +1,45 @@
+version: 1
+feature_id: issue-hint-expected-actual-opt-in
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/knobs/knobs/issue-hint-expected-actual.ts
+entrypoints: [src/runner/batch/eval]
+activation: ["QUANTA_BENCH_ISSUE_HINT=1 plus QUANTA_BENCH_ISSUE_HINT_EXPECTED_ACTUAL=1"]
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer: [src/agent/issue-hint/extract-expected-actual.ts:extractExpectedActual]
+consumer: [src/agent/issue-hint/compose.ts, src/runner/knobs/knobs/issue-hint-expected-actual.ts]
+reachable: yes
+surface_findings: ["This is a bench-local opt-in below the parent issue-hint gate, not an interactive CLI prompt surface."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/bench-issue-hint-agentless-wiring.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Off mode yields the empty byte-identical hint sentinel.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/issue-hint/extract-expected-actual.test.ts tests/unit/bench-issue-hint-agentless-wiring.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Sentence extraction and caller-owned posture tests pass.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/issue-hint/extract-expected-actual.test.ts tests/unit/bench-issue-hint-agentless-wiring.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 34 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,61 @@
+version: 1
+feature_id: radar-cards-proposal-queue
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/apps/cli/repl/surface-compose/core-state.ts:buildCoreState"
+entrypoints:
+  - "src/apps/cli/repl/surface-compose/core-state.ts:buildCoreState"
+  - "src/apps/cli/repl/surface-compose/runtime-compose.ts:buildRadarRuntimeOptions"
+  - "src/agent/loop/turn-loop.ts:flushTurn"
+activation:
+  - "CLI operator sets QUANTA_RADAR=1."
+  - "surface-compose builds one RadarStore and threads that same instance to AgentConfig.radar and slash context."
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - "src/agent/radar-producer-hook.ts:maybeProposeRadarCard"
+  - "src/agent/loop/turn-loop.ts:completed-turn finally hook"
+consumer:
+  - "src/apps/cli/repl/surface-compose/runtime-compose.ts:AgentConfig.radar"
+  - "src/apps/cli/slash/registry-surface.ts:radarCmd"
+reachable: yes
+surface_findings:
+  - "The interactive CLI is the sole production surface; its shared store receives completed-turn proposals and backs /radar lifecycle operations."
+  - "QUANTA_RADAR unset omits the producer block and slash store; /radar returns the not-wired response."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/radar/radar-e2e-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "HELL-RW-02 proves cfg.radar undefined mints no card, and the absent slash slot returns not wired."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/radar/radar-hellgate.test.ts tests/unit/radar/radar-e2e-hellgate.test.ts tests/unit/radar/bug-fix-card-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "36 pass: completed-turn producer, shared /radar store, lifecycle operations, JSONL persistence, 0600 mode, and replay behavior."
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'buildRadarStore|maybeProposeRadarCard|radarCmd' src/apps/cli src/agent"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The CLI composition creates the store once, attaches it to the agent runtime and slash context, and the turn loop calls the producer only when the block exists."
+  - kind: test
+    command: "bun test tests/unit/radar/radar-hellgate.test.ts tests/unit/radar/radar-e2e-hellgate.test.ts tests/unit/radar/bug-fix-card-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "36 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p1-tools-runtime
+review_state: approved
+reviewer: codex/cross-review-wave1

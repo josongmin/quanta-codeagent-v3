@@ -1,0 +1,51 @@
+version: 1
+feature_id: skill-audit-log
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/audit-log.ts:appendAuditEntry
+entrypoints: []
+activation:
+  - No production host calls appendAuditEntry; it can only write when a future install/remove host supplies an audit event and repository log path.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/skill/audit-log.ts:appendAuditEntry
+  - src/skill/install-enforcement.ts:decideInstall auditEvent classification
+consumer: []
+reachable: no
+surface_findings:
+  - appendAuditEntry is a tested append-only primitive with the production node writer, but no non-test source calls it.
+  - decideInstall emits an auditEvent value only; it does not turn that value into an append operation.
+  - The catalog deliberate hold is accurate: no CLI install/remove command or host audit composition exists.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill-admin-enforcement.test.ts tests/unit/skill-migration.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Decision classification, append-only memory-writer rows, canonical path formation, and migration behavior passed in the focused rail.
+failure_posture: fail-loud
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: No production skill install/remove/disable command translates InstallDecision.auditEvent into appendAuditEntry.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n "appendAuditEntry|decideInstall|auditEvent" src apps --glob '!**/*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: appendAuditEntry has only its definition and barrel export; the enforcement module returns auditEvent but contains no writer consumer.
+  - kind: test
+    command: bun test tests/unit/skill-admin-enforcement.test.ts tests/unit/skill-migration.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused primitive and policy rail passed as part of the 183-test combined run.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch15
+review_state: approved
+reviewer: codex/cross-review-wave1

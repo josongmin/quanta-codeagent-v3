@@ -1,0 +1,45 @@
+version: 1
+feature_id: llm-0
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/bench/dry-run.ts:buildDryRunPlan
+entrypoints:
+  - src/apps/bench/index.ts:--dry-run CLI path
+activation:
+  - Run bench eval with --dry-run.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - loaded corpus instances and plan options
+consumer:
+  - rendered zero-LLM dry-run plan
+reachable: yes
+surface_findings:
+  - Bench dry run loads and filters the corpus then renders the selected plan without invoking an LLM.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/bench-eval.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Dry-run plan shape, limits, corpus rendering, and empty corpus rails passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/integration/bench-eval.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused dry-run bench rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

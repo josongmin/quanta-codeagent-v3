@@ -1,0 +1,50 @@
+version: 1
+feature_id: circumvention-detector
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/runtime-context-compose.ts:buildRuntimeContext
+entrypoints: [src/apps/cli/index.ts]
+activation: ["QUANTA_CIRCUMVENT_DETECT=1", "CLI runtime context constructs CircumventionTracker"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/permission/circumvention.ts:CircumventionTracker]
+consumer: [src/apps/cli/repl/runtime-context-compose.ts, src/agent/admissibility-gate/gates.ts]
+reachable: yes
+surface_findings: ["The CLI composition root creates the tracker under the strict gate and passes it to the gate; the default policy remains advisory-only."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/auto-mode-rules-gate-off-byte-identity-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset gate leaves prompt and tracker behavior byte-identical.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/circumvention-detector-hellgate.test.ts tests/unit/auto-mode-circumvention-wire-hellgate.test.ts tests/unit/circumvention-fd-redirect-hellgate.test.ts tests/unit/circumvention-dd-of-hellgate.test.ts tests/unit/circumvention-noclobber-redirect-hellgate.test.ts tests/unit/circumvention-readonly-noneffect-hellgate.test.ts tests/unit/auto-mode-circumvention-advisory-only-live-hellgate.test.ts tests/unit/circumvention-multipath-decoy-hellgate.test.ts tests/unit/circumvention-cp-target-dir-hellgate.test.ts tests/unit/circumvention-symlink-symmetry-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 71 extraction, tracker, false-positive boundary, advisory, and strict-escalation rails pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "CircumventionTracker|circumventionTracker" src/apps/cli/repl src/agent/admissibility-gate
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI context construction and gate consumers are concrete.
+  - kind: test
+    command: bun test tests/unit/circumvention-detector-hellgate.test.ts tests/unit/auto-mode-circumvention-wire-hellgate.test.ts tests/unit/circumvention-fd-redirect-hellgate.test.ts tests/unit/circumvention-dd-of-hellgate.test.ts tests/unit/circumvention-noclobber-redirect-hellgate.test.ts tests/unit/circumvention-readonly-noneffect-hellgate.test.ts tests/unit/auto-mode-circumvention-advisory-only-live-hellgate.test.ts tests/unit/circumvention-multipath-decoy-hellgate.test.ts tests/unit/circumvention-cp-target-dir-hellgate.test.ts tests/unit/circumvention-symlink-symmetry-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 71 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

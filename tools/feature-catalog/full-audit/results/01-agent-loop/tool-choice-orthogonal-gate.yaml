@@ -1,0 +1,62 @@
+version: 1
+feature_id: tool-choice-orthogonal-gate
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tool-choice.ts:resolveToolChoice and src/agent/loop/stream-consume.ts:streamConsume
+entrypoints:
+  - src/agent/loop/entry.ts:runAgent
+  - src/apps/cli/repl.ts:bootstrapSession
+activation:
+  - Every live LLM call consumes the session ToolChoiceTurnState.
+  - A closeout guard arms none for one following call; an explicit ToolChoiceSignals override can force a named tool.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/guards/closeout-guard.ts:closeoutAttempted arm
+  - src/agent/tool-choice.ts:consumeTurnSignals
+consumer:
+  - src/agent/loop/stream-consume.ts:StreamInput.toolChoice
+  - src/llm/adapters/anthropic.ts:toAnthropicToolChoice
+  - src/llm/adapters/openai.ts:toOpenAIToolChoice
+reachable: yes
+surface_findings:
+  - The live loop consumes and clears ToolChoiceTurnState once per call, passes non-auto choice to LLM input, and both adapters reject unknown forced tool names.
+  - Empty signals resolve to auto and omit the provider wire field, preserving default payload identity.
+  - The catalog's central precedence claim is stale: verifyGuardViolated no longer forces any; it intentionally resolves to auto, while closeoutAttempted still forces none and explicit remains highest priority.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/tool-choice-resolve.test.ts tests/unit/llm/tool-choice-adapter.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Empty signals yield auto and both provider codecs omit tool_choice; consuming flags clears them for the next call.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/tool-choice-resolve.test.ts tests/unit/llm/tool-choice-adapter.test.ts tests/integration/verify-guard-forces-any.test.ts tests/integration/closeout-forces-none.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The real-loop closeout rail observes toolChoice none on the following LLM call; the verify-guard rail pins the newer auto behavior rather than the obsolete any behavior.
+failure_posture: fail-loud
+security_posture: conditional
+observability: verified
+verdict: stale-claim
+blocker: The catalog says verifyGuardViolated maps to {kind:any}, but the frozen source and regression tests deliberately map it to {kind:auto}.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'resolveToolChoice|consumeTurnSignals|verifyGuardViolated|closeoutAttempted|toolChoice' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent/loop src/agent/tool-choice.ts src/agent/guards src/llm/adapters
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The frozen source shows stream-consume as the live consumer, closeout arming, one-turn clear semantics, and the explicit no-longer-forces-any decision.
+  - kind: test
+    command: bun test tests/unit/agent/tool-choice-resolve.test.ts tests/unit/llm/tool-choice-adapter.test.ts tests/integration/verify-guard-forces-any.test.ts tests/integration/closeout-forces-none.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected tool-choice rail was part of the 283-pass, 0-fail focused audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-prompt
+review_state: approved
+reviewer: codex/cross-review-wave1

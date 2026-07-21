@@ -1,0 +1,51 @@
+version: 1
+feature_id: plugin-loader
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/plugin-loader.ts:loadPluginManifest and discoverPlugins
+entrypoints: []
+activation:
+  - No production source imports the async src/skill/plugin-loader.ts loader; live plugin activation uses the distinct src/agent/plugin-discovery scanner.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/skill/plugin-loader.ts:loadPluginManifest
+  - src/skill/plugin-loader.ts:discoverPlugins
+consumer: []
+reachable: no
+surface_findings:
+  - The async .quanta-plugin loader, manifest validation, skill enumeration, and depth-bounded walker are tested implementations.
+  - Production autoWirePluginActivation and mention dependencies import src/agent/plugin-discovery instead, which has a separate manifest shape and scanner.
+  - The catalog deliberate hold is accurate for this particular loader: no host enrollment of its MCP or skill results exists.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/plugin-loader.test.ts tests/integration/plugin-discovery.test.ts tests/integration/plugin-discovery-hell-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Manifest failure modes, deterministic depth-bounded discovery, concurrency, symlink handling, and MCP/skill entries passed in the focused rail.
+failure_posture: fail-loud
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: No production consumer imports src/skill/plugin-loader.ts or turns its discovered manifests into ToolRegistry and Skill registry enrollment.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n "from .*skill/plugin-loader|from .*\\./plugin-loader|loadPluginManifest\\(|discoverPlugins\\(" src apps --glob '!**/*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Only the loader definition itself owns these async calls; production plugin consumers import the distinct agent/plugin-discovery module.
+  - kind: test
+    command: bun test tests/unit/plugin-loader.test.ts tests/integration/plugin-discovery.test.ts tests/integration/plugin-discovery-hell-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The loader and walker contracts passed in the 183-test combined run.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch15
+review_state: approved
+reviewer: codex/cross-review-wave1

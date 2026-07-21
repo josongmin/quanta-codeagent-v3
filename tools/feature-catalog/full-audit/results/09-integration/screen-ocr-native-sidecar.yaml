@@ -1,0 +1,54 @@
+version: 1
+feature_id: screen-ocr-native-sidecar
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: apps/tauri-shell/src/ocr.rs:run_sidecar
+entrypoints:
+  - apps/tauri-shell/src/main.rs:invoke_handler
+  - apps/tauri-shell/src/commands.rs:list_windows
+  - apps/tauri-shell/src/commands.rs:capture_window
+  - apps/tauri-shell/src/hotkey.rs
+activation:
+  - Tauri invokes the bundled screen-ocr sidecar through the shell capability allowlist.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - The Swift sidecar emits one-shot JSON for permission, window listing, and capture/OCR operations.
+consumer:
+  - The Tauri OCR driver launches the sidecar; Tauri commands and the hotkey path consume list_windows and capture_window.
+reachable: yes
+surface_findings:
+  - The catalog claim that Worker D had not wired the sidecar is stale: the Tauri command registry, hotkey path, signed bundle recipe, and staged sidecar binary are present.
+  - This audit only ran version and non-prompting permission checks; live window capture/OCR quality remains host/TCC/display dependent.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: runtime
+  command: apps/tauri-shell/binaries/screen-ocr --version && apps/tauri-shell/binaries/screen-ocr check-permission
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The staged sidecar reported version 0.1.0 and a granted non-prompting screen-recording permission response.
+failure_posture: fail-loud
+security_posture: conditional
+observability: na
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "ocr::install|commands::list_windows|commands::capture_window|ocr::list_windows|ocr::capture_window" apps/tauri-shell/src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The Tauri lifecycle, command handler, and hotkey path have live sidecar consumers.
+  - kind: runtime
+    command: apps/tauri-shell/binaries/screen-ocr --version && apps/tauri-shell/binaries/screen-ocr check-permission
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Staged binary executed and returned JSON permission status without triggering a prompt.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

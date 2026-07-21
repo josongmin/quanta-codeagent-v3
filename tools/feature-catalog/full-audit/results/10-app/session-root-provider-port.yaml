@@ -1,0 +1,59 @@
+version: 1
+feature_id: session-root-provider-port
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/session/root-port.ts:SessionRootProvider
+entrypoints:
+  - src/session/paths.ts:async path helpers
+  - src/session/store.ts:provider-aware persistence
+activation:
+  - Use async session helpers with a caller-supplied tenant root; omission uses the default CLI root.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/session/root-port.ts:defaultSessionRootProvider
+  - src/session/root-port.ts:staticSessionRootProvider
+consumer:
+  - src/session/paths.ts:sessionsRootAsync
+  - src/session/store.ts:async operations
+reachable: yes
+surface_findings:
+  - Async path helpers and provider-aware store mutators consume the port; session import supplies a static provider.
+  - Omitted provider preserves legacy synchronous root behavior, while injected providers isolate tenant roots.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/session/root-port.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Provider omission and default provider remain byte-identical to legacy paths.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/session/root-port.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Injection, async resolver, traversal guard, and two-tenant isolation rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'defaultSessionRootProvider|staticSessionRootProvider|sessionsRootAsync' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/session src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Session path/store and CLI import composition consume the root-provider port.
+  - kind: test
+    command: bun test tests/unit/session/root-port.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused root-provider rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

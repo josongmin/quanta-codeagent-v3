@@ -1,0 +1,52 @@
+version: 1
+feature_id: trust-scope-wire-up
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/runtime-context-compose.ts:composeCliRuntimeContext
+entrypoints:
+  - src/agent/admissibility-gate/gates.ts:trustScopeGrants
+activation:
+  - Set QUANTA_TRUST_SCOPE truthy before starting a CLI session with persistent grant files.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/permission/trust-scope-store.ts:createPersistentTrustScopeRegistry
+consumer:
+  - src/apps/cli/repl/runtime-context-compose.ts
+  - src/agent/admissibility-gate/gates.ts
+reachable: yes
+surface_findings:
+  - CLI composition hydrates a persistent registry only when QUANTA_TRUST_SCOPE is enabled and projects it into the admissibility gate.
+  - Positive grants can skip ask, deny grants cannot, and once-only grants are consumed on their first hit.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/permission/trust-scope-wire.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent trustScope slot uses the legacy confirmation path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission/trust-scope-wire.test.ts tests/unit/permission/trust-scope-store-hell.test.ts tests/unit/admissibility-gate.test.ts tests/integration/trust-scope-e2e.test.ts tests/integration/trust-scope-persistent-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Grant wire, persistence, precedence, and end-to-end trust scope rails passed.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: conditional
+blocker: Durable grant behavior is a deliberate QUANTA_TRUST_SCOPE opt-in and the stored grant files are not encrypted at rest.
+disposition: hold
+receipts:
+  - kind: test
+    command: bun test tests/unit/permission/trust-scope-wire.test.ts tests/unit/permission/trust-scope-store-hell.test.ts tests/unit/admissibility-gate.test.ts tests/integration/trust-scope-e2e.test.ts tests/integration/trust-scope-persistent-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused trust-scope rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

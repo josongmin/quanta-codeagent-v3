@@ -1,0 +1,47 @@
+version: 1
+feature_id: runner-run-once
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/orchestrate/run-once.ts:runOnce
+entrypoints: [src/apps/headless/index.ts, src/apps/cli/repl/turn-runner.ts]
+activation: [one-shot prompt]
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer: [src/runner/orchestrate/run-once.ts]
+consumer: [src/apps/headless/index.ts, src/apps/cli/repl/turn-runner.ts]
+reachable: yes
+surface_findings:
+  - "Headless and CLI one-shot consumers use the extracted orchestration owner."
+  - "Catalog has stale L2/no-test wording; a dedicated multimodal runOnce rail exists."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/runner/run-once-multimodal.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Prompt payload widening and pending-image concatenation pass through runOnce.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: Update catalog testing/maturity claim to include current runOnce multimodal proof.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'runOnce' src/apps/headless src/apps/cli/repl/turn-runner.ts src/runner/orchestrate/run-once.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production one-shot consumers are present.
+  - kind: test
+    command: bun test tests/unit/runner/run-once-multimodal.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Dedicated runOnce rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,63 @@
+version: 1
+feature_id: subagent-introspect-tools
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/subagent-introspect.ts:buildSubagentIntrospectBlock
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+  - src/agent/loop/session-bootstrap.ts:session bootstrap
+activation:
+  - CLI host seeds QUANTA_SUBAGENT_INTROSPECT and QUANTA_SUBAGENT_FOLLOWUP unless explicitly overridden.
+  - Other host surfaces opt in through wireOptionalAgentPorts with the two env gates.
+effective_defaults:
+  cli: on
+  web: off
+  bench: na
+  headless: off
+  daemon: off
+producer:
+  - src/agent/optional-ports.ts:wireSubagentToolGates
+  - src/agent/tier1/subagent-introspect.ts:buildSubagentIntrospectBlock
+  - src/subagent/introspect-tools.ts:createIntrospectTools
+consumer:
+  - src/agent/features.ts:buildSessionFeatures
+  - src/agent/loop/session-bootstrap.ts:session bootstrap merges feature tools into the live registry
+  - src/agent/subagent-runner.ts:createSubagentRunner registers the targeted child turn endpoint
+reachable: yes
+surface_findings:
+  - "The CLI feature-gate seed and interactive knob path make list_agents available by default under the CLI subagent surface; an explicit gate override remains an OFF escape hatch."
+  - "followup_task is only materialized with a shared TaskRegistry, mailbox, and TurnWakeRegistry; a split registry fails visibly by withholding the tool instead of exposing an empty view."
+  - "Real child-loop tests cover idle wake, queued busy wake, and interrupt; the controller enforces lineage and self-target checks."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/subagent-knobs-wire-hellgate.test.ts tests/unit/subagent-introspect-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 41 passing cases include every gate unset returning the base unchanged and no introspection tools.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-introspect-hellgate.test.ts tests/unit/subagent-turn-wake-gate-hellgate.test.ts tests/unit/subagent-turn-interrupt-hellgate.test.ts tests/unit/subagent-knobs-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 67 passing cases cover registry enumeration, delivery, real child second-turn wake, busy queued wake, and in-flight interrupt abort plus fresh-turn resume.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'wireSubagentToolGates|buildSubagentIntrospectBlock|buildSessionFeatures' src/agent src/host src/apps
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The composition roots wire both gates and the session bootstrap materializes the resulting feature tools into the runtime registry.
+  - kind: test
+    command: bun test tests/unit/subagent-introspect-hellgate.test.ts tests/unit/subagent-turn-wake-gate-hellgate.test.ts tests/unit/subagent-turn-interrupt-hellgate.test.ts tests/unit/subagent-knobs-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 67 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-agentloop-ops
+review_state: approved
+reviewer: codex/cross-review-wave1

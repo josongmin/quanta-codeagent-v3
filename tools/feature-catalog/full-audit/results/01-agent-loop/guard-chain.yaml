@@ -1,0 +1,63 @@
+version: 1
+feature_id: guard-chain
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/guards/build.ts:buildGuardChain
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+  - src/agent/loop/turn-loop.ts:runTurn
+activation:
+  - AgentConfig.verifyGuard and/or AgentConfig.closeoutGuard is configured
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/loop/session-bootstrap.ts:buildVerifyGuard and buildCloseoutGuard
+  - src/agent/guards/build.ts:buildGuardChain
+consumer:
+  - src/agent/loop/turn-loop.ts:runGuardChain
+reachable: yes
+surface_findings:
+  - "CLI: session bootstrap composes the chain and the real turn loop evaluates it at finish attempts."
+  - "Web: no distinct surface exists for this internal turn-exit composer; catalog web-na is accurate."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/guard-chain.test.ts tests/unit/verify-checkpoint-bridge-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent guard configuration builds an empty chain and runGuardChain returns undefined.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/guard-chain.test.ts tests/unit/verify-checkpoint-bridge-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Verify-before-closeout ordering, blocking behavior, and optional checkpoint bridge propagation are exercised.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildGuardChain|runGuardChain|createVerifyGuard|createCloseoutGuard' src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Session bootstrap builds the chain and the turn loop invokes it on the production finish path.
+  - kind: test
+    command: bun test tests/unit/agent/guard-chain.test.ts tests/unit/verify-checkpoint-bridge-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Empty-chain parity, first-guard precedence, configured guards, and bridge gate controls passed.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception was reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-context
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,46 @@
+version: 1
+feature_id: bench-observe-non-agent-evidence
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/bench/observe.ts:non-agent trajectory append
+entrypoints:
+  - src/apps/bench/eval/driver.ts:attempt lifecycle
+activation:
+  - Run a bench attempt with observation output enabled.
+effective_defaults:
+  cli: na
+  web: na
+  bench: resource
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/bench/observe.ts
+consumer:
+  - src/apps/bench/eval/driver.ts
+reachable: yes
+surface_findings:
+  - Bench driver appends sandbox, patch_generated, and verify evidence into the attempt trajectory alongside agent records.
+  - These are intentionally non-AgentEvent types and do not bridge to web turn events.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/bench-write-artifacts.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Bench artifact and trajectory evidence output rail passed.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/bench-write-artifacts.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused non-agent evidence rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

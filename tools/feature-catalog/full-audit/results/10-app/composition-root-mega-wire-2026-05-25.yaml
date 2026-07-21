@@ -1,0 +1,55 @@
+version: 1
+feature_id: composition-root-mega-wire-2026-05-25
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+entrypoints:
+  - src/apps/agent/index.ts:runMain
+  - src/apps/agent/mode-presets/interactive.ts:runMode
+  - src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+activation:
+  - Run a unified-agent mode with the relevant composition flag or surface slot enabled.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+consumer:
+  - src/apps/agent/index.ts:runMain
+  - src/apps/agent/mode-presets/interactive.ts:runMode
+reachable: yes
+surface_findings:
+  - The former apps-agent argument builder is now host-owned and re-exported by the unified-agent entry; mode presets build AgentConfig through the host assembler.
+  - Catalog evidence paths describe the old source location, while the present implementation splits wiring between host arg builder, assembler, mode presets, and downstream REPL surface composition.
+  - The cited integration test validates slots, flags, slash routes, and focus-chain primitives but does not drive the full argv-to-production-surface assembly path.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/composition-root-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Optional slot and absent-flag cases remain omitted.
+on_efficacy_proof: null
+failure_posture: unknown
+security_posture: na
+observability: na
+verdict: proof-gap
+blocker: No owner-local end-to-end rail proves all eleven current host-owned wiring decisions from parsed argv through a real mode preset and consumer surface.
+disposition: hold
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildBaseFromArgs|assembleAgentConfig|defaultFocusChainTracker|resolveAutomation' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/agent src/host/runtime
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live ownership is host runtime plus mode presets, not the catalog's original narrow apps-agent file set.
+  - kind: test
+    command: bun test tests/integration/composition-root-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The cited 21-case rail passes but is component and contract coverage rather than full composition proof.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

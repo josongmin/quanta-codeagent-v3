@@ -1,0 +1,64 @@
+version: 1
+feature_id: repo-rules-tree
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/agent/mode-presets/system.ts:resolveModePresetRepoRules
+entrypoints:
+  - src/apps/agent/mode-presets/interactive.ts:buildInteractiveBase
+  - src/apps/agent/mode-presets/headless.ts:buildHeadlessBase
+  - src/apps/agent/mode-presets/ide.ts:buildIdeBase
+  - src/apps/web-daemon/runtime-factory.ts
+activation:
+  - "Interactive, headless, IDE, and trusted web sessions resolve the cwd rule tree through modeLoadsRepoRules."
+  - "A discovered non-empty rule layer is attached as AgentConfig.repoRules and enters the prompt context."
+effective_defaults:
+  cli: on
+  web: on
+  bench: off
+  headless: on
+  daemon: off
+producer:
+  - src/agent/repo-rules.ts:loadRepoRules
+  - src/agent/run-mode/policy.ts:modeLoadsRepoRules
+consumer:
+  - src/apps/agent/mode-presets/system.ts:resolveModePresetRepoRules
+  - src/agent/loop/context-assembler.ts:buildTurnContext
+  - src/apps/web-daemon/runtime-factory.ts
+reachable: yes
+surface_findings:
+  - "Trusted user-repo modes automatically load rules; batch is hermetic and daemon or ci-bot do not auto-load untrusted worktree rules."
+  - "The loader keeps same-directory priority, root-to-cwd ordering, symlink rejection, a home boundary, and a per-layer byte cap."
+  - "Absent rules preserve the former prompt shape; unreadable files fail open by omitting the layer rather than preventing session startup."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/repo-rules.test.ts tests/unit/repo-rules-tree-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "No-rule and single-layer cases preserve the legacy absent/raw behavior."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/mode-preset-repo-rules-wire-hellgate.test.ts tests/unit/repo-rules-policy-security-pin-hellgate.test.ts tests/unit/repo-rules-walkup-security-hellgate.test.ts tests/unit/apps/web-daemon/repo-rules-wiring-hellgate.test.ts tests/integration/agents-md-scope-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "35 selected rails passed: tree loading, trusted-mode injection, rule-less untrusted modes, web wiring, and prompt end-to-end propagation."
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'resolveModePresetRepoRules|modeLoadsRepoRules|loadRepoRules|repoRules' src/apps/agent/mode-presets src/apps/web-daemon/runtime-factory.ts src/agent/repo-rules.ts src/agent/loop/context-assembler.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Production presets and web daemon load rules through the shared policy and the loop context consumes the attached value."
+  - kind: test
+    command: "bun test tests/unit/repo-rules.test.ts tests/unit/repo-rules-tree-hellgate.test.ts tests/unit/mode-preset-repo-rules-wire-hellgate.test.ts tests/unit/repo-rules-policy-security-pin-hellgate.test.ts tests/unit/repo-rules-walkup-security-hellgate.test.ts tests/unit/apps/web-daemon/repo-rules-wiring-hellgate.test.ts tests/integration/agents-md-scope-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "58 focused unit and integration tests passed."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch10
+review_state: approved
+reviewer: codex/cross-review-wave1

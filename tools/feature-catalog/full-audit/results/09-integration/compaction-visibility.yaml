@@ -1,0 +1,62 @@
+version: 1
+feature_id: compaction-visibility
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/compaction-wire.ts:buildCompactIfNeededOptions
+entrypoints:
+  - src/agent/loop/compaction-wire.ts:maybeCompact
+  - src/agent/loop/recovery-executor.ts:executeReactiveRecovery
+activation:
+  - A configured compaction pass reaches compactIfNeeded.
+  - HookBus and/or ObjectivePort enable post_compact emission and resume-action visibility.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/compaction.ts:compactIfNeeded
+  - src/agent/recovery-reason/types.ts:RecoveryProvenance
+consumer:
+  - src/agent/loop/compaction-wire.ts:buildCompactIfNeededOptions
+  - src/agent/loop-helpers.ts:buildPostCompactEmit
+  - src/agent/loop/emit-helpers.ts:emitRecovery
+reachable: yes
+surface_findings:
+  - The loop now supplies postCompactEmit, objectiveSetNextActions, and the DOF-40 stamped attribution fields to compactIfNeeded.
+  - A rejected post_compact emission routes a compact attribution-failed recovery event instead of silently dropping the failure.
+  - The purpose text saying loop wiring is deferred is stale; the later notes describe the now-live wire.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/compaction-post-event-hellgate.test.ts tests/unit/compaction-wire-attribution-wired-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: With no hooks or objective consumer, no post-compact or attribution-failed event is emitted and compaction succeeds on the legacy path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/recovery-reason-hellgate.test.ts tests/unit/compaction-post-event-hellgate.test.ts tests/unit/compaction-archive-loop.test.ts tests/unit/compaction-attribution-race-failclosed-hellgate.test.ts tests/unit/compaction-wire-attribution-wired-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed for typed provenance, post_compact delivery, recovery-loop integration, deterministic turn attribution, and failure routing.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'buildCompactIfNeededOptions|postCompactEmit|objectiveSetNextActions|attributedTurnId|onAttributionFailure|emitRecovery' src/agent/loop src/agent/compaction.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production compaction construction consumes both visibility consumers and the attribution failure sink.
+  - kind: test
+    command: bun test tests/unit/recovery-reason-hellgate.test.ts tests/unit/compaction-post-event-hellgate.test.ts tests/unit/compaction-archive-loop.test.ts tests/unit/compaction-attribution-race-failclosed-hellgate.test.ts tests/unit/compaction-wire-attribution-wired-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused proof completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-core
+review_state: approved
+reviewer: codex/cross-review-wave1

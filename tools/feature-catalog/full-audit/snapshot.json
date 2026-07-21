@@ -1,13 +1,18 @@
 {
-  "version": 1,
-  "snapshot_head": "9a12f7a855640a8be1e4654472766bbc445696ea",
-  "created_at": "2026-07-19",
+  "version": 2,
+  "snapshot_head": "01f02dbbac807a9bad0420cd509fa3e75a930037",
+  "created_at": "2026-07-21",
+  "input_digests": {
+    "catalog_yaml": "991e1cd737b41e4a87138f8e600bb3c1224764c133f68954743f3cd8414c9b4f",
+    "default_off_ledger": "7cac41e8a42e592fe9980b29c0d3e3b0c2390a2342ad73040c133ad7a46a7f94",
+    "baseline": "e25e0e70b0ed2f89fd7ca544d3ae46646b731a95a0321376e25330a30e88ee4c"
+  },
   "catalog_total": 1028,
   "priority_counts": {
-    "P0": 28,
-    "P1": 164,
+    "P0": 4,
+    "P1": 176,
     "P2": 551,
-    "P3": 285
+    "P3": 297
   },
   "entries": [
     {
@@ -724,11 +729,11 @@
       "feature_id": "n-phase-hitl",
       "source_path": "tools/feature-catalog/features/01-agent-loop/n-phase-hitl.yaml",
       "section": 1,
-      "maturity": "L3",
-      "priority": "P0",
-      "proof_scope": "dynamic",
+      "maturity": "L2",
+      "priority": "P3",
+      "proof_scope": "static",
       "default_off_eligible": false,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "agent-nickname-pool-role-enum",
@@ -744,21 +749,21 @@
       "feature_id": "inline-trigger-wiring",
       "source_path": "tools/feature-catalog/features/01-agent-loop/inline-trigger-wiring.yaml",
       "section": 1,
-      "maturity": "L3",
-      "priority": "P0",
-      "proof_scope": "dynamic",
+      "maturity": "L2",
+      "priority": "P3",
+      "proof_scope": "static",
       "default_off_eligible": false,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "streaming-boomerang",
       "source_path": "tools/feature-catalog/features/01-agent-loop/streaming-boomerang.yaml",
       "section": 1,
-      "maturity": "L3",
-      "priority": "P0",
+      "maturity": "L2",
+      "priority": "P1",
       "proof_scope": "dynamic",
       "default_off_eligible": true,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "template-literal-windsurf",
@@ -784,11 +789,11 @@
       "feature_id": "cross-subagent-todo-readback",
       "source_path": "tools/feature-catalog/features/01-agent-loop/cross-subagent-todo-readback.yaml",
       "section": 1,
-      "maturity": "L3",
-      "priority": "P0",
-      "proof_scope": "dynamic",
+      "maturity": "L2",
+      "priority": "P3",
+      "proof_scope": "static",
       "default_off_eligible": false,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "playbook-nesting",
@@ -2954,11 +2959,11 @@
       "feature_id": "bridge-attestation",
       "source_path": "tools/feature-catalog/features/03-permission-safety/bridge-attestation.yaml",
       "section": 3,
-      "maturity": "L3",
-      "priority": "P0",
+      "maturity": "L2",
+      "priority": "P1",
       "proof_scope": "dynamic",
       "default_off_eligible": true,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "jwks-agent-identity",
@@ -3854,21 +3859,21 @@
       "feature_id": "model-tag-versioning",
       "source_path": "tools/feature-catalog/features/04-context-management/model-tag-versioning.yaml",
       "section": 4,
-      "maturity": "L3",
-      "priority": "P0",
+      "maturity": "L2",
+      "priority": "P1",
       "proof_scope": "dynamic",
       "default_off_eligible": true,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "model-tag-auto-hook",
       "source_path": "tools/feature-catalog/features/04-context-management/model-tag-auto-hook.yaml",
       "section": 4,
-      "maturity": "L3",
-      "priority": "P0",
+      "maturity": "L2",
+      "priority": "P1",
       "proof_scope": "dynamic",
       "default_off_eligible": true,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "env-build-dynamic-context",
@@ -6184,11 +6189,11 @@
       "feature_id": "health-snapshot-watcher",
       "source_path": "tools/feature-catalog/features/08-observability/health-snapshot-watcher.yaml",
       "section": 8,
-      "maturity": "L3",
-      "priority": "P0",
-      "proof_scope": "dynamic",
+      "maturity": "L2",
+      "priority": "P3",
+      "proof_scope": "static",
       "default_off_eligible": false,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "codex-r2-system-prompt-cache-and-audit",
@@ -6274,11 +6279,11 @@
       "feature_id": "otlp-helper",
       "source_path": "tools/feature-catalog/features/08-observability/114-otlp-helper.yaml",
       "section": 8,
-      "maturity": "L3",
-      "priority": "P0",
-      "proof_scope": "dynamic",
+      "maturity": "L2",
+      "priority": "P3",
+      "proof_scope": "static",
       "default_off_eligible": false,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "instrument-wrap",
@@ -7935,10 +7940,10 @@
       "source_path": "tools/feature-catalog/features/09-integration/0313-pr-output-sink-redaction.yaml",
       "section": 9,
       "maturity": "L3",
-      "priority": "P0",
-      "proof_scope": "dynamic",
+      "priority": "P3",
+      "proof_scope": "static",
       "default_off_eligible": false,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "mention-filter-trust-scope",
@@ -9674,21 +9679,21 @@
       "feature_id": "tool-dedup-drift",
       "source_path": "tools/feature-catalog/features/10-app/0189-tool-dedup-drift.yaml",
       "section": 10,
-      "maturity": "L3",
-      "priority": "P0",
-      "proof_scope": "dynamic",
+      "maturity": "L2",
+      "priority": "P3",
+      "proof_scope": "static",
       "default_off_eligible": false,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "darwin-vz-native-scaffold",
       "source_path": "tools/feature-catalog/features/10-app/0190-darwin-vz-native-scaffold.yaml",
       "section": 10,
-      "maturity": "L3",
-      "priority": "P0",
-      "proof_scope": "dynamic",
+      "maturity": "L2",
+      "priority": "P3",
+      "proof_scope": "static",
       "default_off_eligible": false,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "architecture-generator",
@@ -9764,11 +9769,11 @@
       "feature_id": "color-palettes",
       "source_path": "tools/feature-catalog/features/10-app/color-palettes.yaml",
       "section": 10,
-      "maturity": "L3",
-      "priority": "P0",
-      "proof_scope": "dynamic",
+      "maturity": "L2",
+      "priority": "P3",
+      "proof_scope": "static",
       "default_off_eligible": false,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "shadow-odb-rewind",
@@ -10015,10 +10020,10 @@
       "source_path": "tools/feature-catalog/features/10-app/retry-transient-knob.yaml",
       "section": 10,
       "maturity": "L3",
-      "priority": "P0",
+      "priority": "P1",
       "proof_scope": "dynamic",
       "default_off_eligible": true,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "localize-phase-knob",
@@ -10095,10 +10100,10 @@
       "source_path": "tools/feature-catalog/features/10-app/bench-full-remote-ami.yaml",
       "section": 10,
       "maturity": "L3",
-      "priority": "P0",
-      "proof_scope": "dynamic",
+      "priority": "P3",
+      "proof_scope": "static",
       "default_off_eligible": false,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "bench-stream-tap",
@@ -10115,10 +10120,10 @@
       "source_path": "tools/feature-catalog/features/10-app/lsp-steer-knob.yaml",
       "section": 10,
       "maturity": "L3",
-      "priority": "P0",
-      "proof_scope": "dynamic",
+      "priority": "P3",
+      "proof_scope": "static",
       "default_off_eligible": false,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "bench-trajectory-record",
@@ -10135,40 +10140,40 @@
       "source_path": "tools/feature-catalog/features/10-app/fault-evidence-knob.yaml",
       "section": 10,
       "maturity": "L3",
-      "priority": "P0",
+      "priority": "P1",
       "proof_scope": "dynamic",
       "default_off_eligible": true,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "verification-plan-knob",
       "source_path": "tools/feature-catalog/features/10-app/verification-plan-knob.yaml",
       "section": 10,
       "maturity": "L3",
-      "priority": "P0",
+      "priority": "P1",
       "proof_scope": "dynamic",
       "default_off_eligible": true,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "primary-rail-knob",
       "source_path": "tools/feature-catalog/features/10-app/primary-rail-knob.yaml",
       "section": 10,
       "maturity": "L3",
-      "priority": "P0",
+      "priority": "P1",
       "proof_scope": "dynamic",
       "default_off_eligible": true,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "patch-hygiene-knob",
       "source_path": "tools/feature-catalog/features/10-app/patch-hygiene-knob.yaml",
       "section": 10,
       "maturity": "L3",
-      "priority": "P0",
+      "priority": "P1",
       "proof_scope": "dynamic",
       "default_off_eligible": true,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "no-patch-breaker-knob",
@@ -10185,20 +10190,20 @@
       "source_path": "tools/feature-catalog/features/10-app/repair-escalation-knob.yaml",
       "section": 10,
       "maturity": "L3",
-      "priority": "P0",
+      "priority": "P1",
       "proof_scope": "dynamic",
       "default_off_eligible": true,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "spec-fidelity-steer-knob",
       "source_path": "tools/feature-catalog/features/10-app/spec-fidelity-steer-knob.yaml",
       "section": 10,
       "maturity": "L3",
-      "priority": "P0",
+      "priority": "P1",
       "proof_scope": "dynamic",
       "default_off_eligible": true,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "bench-in-loop-exec-knob",
@@ -10215,10 +10220,10 @@
       "source_path": "tools/feature-catalog/features/10-app/adversarial-repro-knob.yaml",
       "section": 10,
       "maturity": "L3",
-      "priority": "P0",
+      "priority": "P1",
       "proof_scope": "dynamic",
       "default_off_eligible": true,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "bench-knob-presets-registry",
@@ -10275,10 +10280,10 @@
       "source_path": "tools/feature-catalog/features/10-app/bench-leaderboard-analyze.yaml",
       "section": 10,
       "maturity": "L3",
-      "priority": "P0",
-      "proof_scope": "dynamic",
+      "priority": "P3",
+      "proof_scope": "static",
       "default_off_eligible": false,
-      "reachability_grandfathered": true
+      "reachability_grandfathered": false
     },
     {
       "feature_id": "god-code-ratchet",

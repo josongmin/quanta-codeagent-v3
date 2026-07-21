@@ -1,0 +1,63 @@
+version: 1
+feature_id: memory-learning-default-on
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/memory-factory.ts:buildMemoryForSession
+entrypoints:
+  - src/apps/cli/internal.ts:buildStore
+  - src/apps/web-daemon/runtime-factory.ts:buildWebSurfaceWiring
+activation:
+  - Unset QUANTA_MEMORY resolves a volatile InMemoryStore, a memory config, and a default-on auto-trigger policy.
+  - QUANTA_MEMORY=off and override.storeDisabled true collapse the factory result to an empty slot bundle.
+  - QUANTA_MEMORY=sqlite remains the explicit persistent-store opt-in.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: off
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/runner/assemble/memory-factory.ts:buildMemoryForSession
+  - src/runner/assemble/memory-factory.ts:resolveMemoryConfigFromEnv
+consumer:
+  - src/apps/cli/internal.ts:buildStore
+  - src/agent/loop/context-assembler.ts:resolveMemoryContext
+  - src/apps/web-daemon/runtime-factory.ts:buildWebSurfaceWiring
+reachable: yes
+surface_findings:
+  - CLI assembly consumes the factory store and reaches default-on save and recall through a real runAgent session.
+  - The unset default is volatile and the focused e2e proves no sqlite file is created; persistent memory is explicitly selected.
+  - Web daemon consumes only the returned store for a readout and does not activate memory recall/write in turns, so its effective default is not claimed.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/memory-factory-hellgate.test.ts tests/integration/memory-default-on-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: QUANTA_MEMORY=off and storeDisabled both yield an empty bundle and the no-memory AgentConfig transcript control.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-factory-hellgate.test.ts tests/integration/memory-default-on-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset env builds all slots, CLI assembly carries the store, and a saved fact is recalled by a real runAgent session.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'buildMemoryForSession\\(' src/apps src/runner --glob '*.ts'"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI and web-daemon production paths call the canonical factory, while the factory itself owns the default and escape hatch.
+  - kind: test
+    command: bun test tests/unit/memory-factory-hellgate.test.ts tests/integration/memory-default-on-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 57 focused factory and e2e tests passed for volatile defaults, persistence opt-in, escape hatches, and recalled output.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch12
+review_state: approved
+reviewer: codex/cross-review-wave1

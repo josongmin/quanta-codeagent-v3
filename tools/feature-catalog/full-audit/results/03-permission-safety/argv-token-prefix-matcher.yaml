@@ -1,0 +1,53 @@
+version: 1
+feature_id: argv-token-prefix-matcher
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/rules/argv.ts:matchArgvRule
+entrypoints:
+  - src/rules/matcher.ts:matchArgvRule
+  - src/rules/parser.ts:parseArgvArrayLiteral
+activation:
+  - Load a permission rule containing an argv token array.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/rules/argv.ts
+consumer:
+  - src/rules/matcher.ts
+  - src/rules/parser.ts
+reachable: yes
+surface_findings:
+  - Token matcher applies only to argv-form rules; legacy byte-prefix rules retain their original path.
+  - Invalid array syntax raises parse failure instead of silently degrading to a less strict matcher.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/rules/argv-byte-identity-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Rules without argv arrays retain byte-identical legacy matching.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/rules/argv-tokenize.test.ts tests/unit/rules/argv-rule.test.ts tests/unit/rules/argv-byte-identity-hellgate.test.ts tests/integration/rules-argv-array-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Tokenization, parser rejection, glob suffix matching, legacy identity, and e2e rule handling passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/rules/argv-tokenize.test.ts tests/unit/rules/argv-rule.test.ts tests/unit/rules/argv-byte-identity-hellgate.test.ts tests/integration/rules-argv-array-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused argv matching rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

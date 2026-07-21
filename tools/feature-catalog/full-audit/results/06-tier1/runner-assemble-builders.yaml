@@ -1,0 +1,50 @@
+version: 1
+feature_id: runner-assemble-builders
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/config.ts:assembleConfig
+entrypoints:
+  - src/apps/cli/internal.ts:buildTooling
+activation:
+  - CLI maps environment and surface inputs once, then invokes the runner builders and compose function to form AgentConfig.
+effective_defaults:
+  cli: on
+  web: resource
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/runner/assemble/index.ts
+consumer:
+  - src/apps/cli/internal.ts:buildTooling
+reachable: yes
+surface_findings:
+  - CLI export assembly proves core and optional collaborator propagation through the actual composition root.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/assemble.test.ts tests/unit/apps/agent/assemble.test.ts tests/unit/runner-slice-boundary.test.ts tests/unit/defaults-registration-hellgate.test.ts tests/integration/cli-export-assembly.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Assembly and surface isolation rails passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'assembleConfig|buildTooling' src/runner/assemble src/apps/cli/internal.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI composition consumes the runner builder family.
+  - kind: test
+    command: bun test tests/unit/assemble.test.ts tests/unit/apps/agent/assemble.test.ts tests/unit/runner-slice-boundary.test.ts tests/unit/defaults-registration-hellgate.test.ts tests/integration/cli-export-assembly.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused assembly rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

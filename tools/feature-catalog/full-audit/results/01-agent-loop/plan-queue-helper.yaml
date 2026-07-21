@@ -1,0 +1,55 @@
+version: 1
+feature_id: plan-queue-helper
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/plan-queue.ts:defaultPlanQueueStore
+entrypoints:
+  - src/apps/cli/repl/surface-compose/mutable-wires.ts:buildMutableWires
+  - src/apps/cli/repl/surface-compose/dispatch-compose.ts:buildDispatch
+activation:
+  - Interactive CLI REPL composition creates a PlanQueueStore, exposes it to /queue, and passes it into the per-turn AgentConfig planQueue slot.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/agent/plan-queue.ts:defaultPlanQueueStore
+  - src/apps/cli/queue-cmd.ts:queueCommand
+consumer:
+  - src/agent/mid-turn-interruption/default.ts:defaultMidTurnCapture
+  - src/agent/loop/turn-iteration.ts
+reachable: yes
+surface_findings:
+  - CLI mutable-wire composition creates the store and dispatch composition threads it into the real run config; /queue has a registered CLI command surface.
+  - Captured follow-ups are typed, per-thread, deduplicated, and drained at the next-turn boundary; send-now uses the separately late-bound external sink.
+  - Real runAgent mid-turn tests prove queued input becomes the following turn prompt and that abort, FIFO, and no-callback parity stay bounded.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/plan-queue-hellgate.test.ts tests/unit/plan-queue-mutator-hellgate.test.ts tests/unit/mid-turn-capture-wire-hellgate.test.ts tests/unit/cli/queue-cmd-hellgate.test.ts tests/integration/plan-queue-mid-turn-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 72 pass, 0 fail; store invariants, CLI command behavior, capture wire, and real next-turn injection are covered.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'planQueueStore|defaultPlanQueueStore|planQueue: mutable|defaultMidTurnCapture' src/apps/cli/repl/surface-compose src/apps/cli/repl/session-loop.ts src/agent/mid-turn-interruption/default.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI composition owns the store and passes it into session/dispatch wiring, while the mid-turn primitive captures and drains typed entries.
+  - kind: test
+    command: bun test tests/unit/plan-queue-hellgate.test.ts tests/unit/plan-queue-mutator-hellgate.test.ts tests/unit/mid-turn-capture-wire-hellgate.test.ts tests/unit/cli/queue-cmd-hellgate.test.ts tests/integration/plan-queue-mid-turn-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 72 pass, 0 fail across store, command, capture, and real loop rails.
+audited_at: "2026-07-19"
+auditor: codex/root-p3-agent-loop
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,56 @@
+version: 1
+feature_id: cloud-agent-branch-snapshot
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/git/cloud-branch-snapshot.ts:snapshotDirtyToCloudBranch
+entrypoints:
+  - src/git/index.ts:export barrel
+activation:
+  - A future CLI or host surface must inject a GitProcessPort, lock, and file-stat port then invoke snapshotDirtyToCloudBranch.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - dirty worktree snapshot branch, stash, commit, and lease-protected push
+consumer:
+  - injected GitProcessPort and remote branch
+reachable: no
+surface_findings:
+  - The helper implements a guarded snapshot transaction with abort unwind, lock release, diff-size refusal, and force-with-lease-only push arguments.
+  - No production source outside the owner module invokes snapshotDirtyToCloudBranch; the public git barrel is the only non-test exposure.
+off_identity_proof:
+  kind: source
+  command: rg -n 'snapshotDirtyToCloudBranch\\(' src --glob '!src/git/cloud-branch-snapshot.ts' --glob '!**/*.test.ts'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No production call site was found, so no branch, stash, checkout, or push occurs by default.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git-cloud-branch-snapshot.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed happy snapshot, restore and unwind, all refusal arms, diff and untracked-size caps, locking, abort, and force-with-lease-only enforcement.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: seam-only
+blocker: No CLI, host, scheduler, or agent-loop composition root invokes the exported snapshot helper.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'snapshotDirtyToCloudBranch\\(' src --glob '!src/git/cloud-branch-snapshot.ts' --glob '!**/*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The production caller search returned no invocation.
+  - kind: test
+    command: bun test tests/unit/git-cloud-branch-snapshot.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All focused transactional and hard-deny rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

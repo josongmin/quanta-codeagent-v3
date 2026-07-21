@@ -1,0 +1,61 @@
+version: 1
+feature_id: conversation-checkpoint
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/conv-checkpoint-wire.ts:startConvCheckpointWire
+entrypoints:
+  - src/apps/cli/repl/surface-compose/mutable-wires.ts:buildMutableSurfaceWires
+  - src/apps/cli/repl/session-loop.ts:runReplSession
+  - src/apps/cli/rewind-conv-cmd.ts:rewindConvCmd
+activation:
+  - QUANTA_CHECKPOINT_CONV=on creates the REPL turn-end record and rewind wire.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/conversation-checkpoint.ts:defaultConversationCheckpointStore
+  - src/apps/cli/repl/conv-checkpoint-wire.ts:startConvCheckpointWire
+consumer:
+  - src/apps/cli/repl/session-loop.ts:recordTurnSnapshot
+  - src/apps/cli/rewind-conv-cmd.ts:rewindConvCmd
+reachable: yes
+surface_findings:
+  - The enabled CLI path records successful turns and swaps live history only after explicit rewind confirmation.
+  - The catalog claims AgentLoop emits checkpoints around destructive dispatch and presents a browser gap; snapshot code actually lives in the optional REPL turn-end wire.
+  - The store is in-memory per REPL session, so the advertised crash and cancel resume wording overstates the durable behavior.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/repl-surface-wire-hellgate.test.ts tests/unit/conv-checkpoint-auto-record-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent gate leaves the wire null and the slash surface reports not wired.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/conversation-checkpoint-hellgate.test.ts tests/unit/conv-checkpoint-auto-record-hellgate.test.ts tests/unit/cli/repl-surface-wire-hellgate.test.ts tests/unit/cli/rewind-live-swap-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Store snapshots, enabled composition, protected rewind, and exact live-history replacement all pass.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_CHECKPOINT_CONV|recordTurnSnapshot|recordTurn\(|rewindConvCmd|replaceMessages' src/apps/cli/repl src/apps/cli/rewind-conv-cmd.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Only the env-gated REPL turn-end wire records snapshots and the command consumes the same wire.
+  - kind: test
+    command: bun test tests/unit/conversation-checkpoint-hellgate.test.ts tests/unit/conv-checkpoint-auto-record-hellgate.test.ts tests/unit/cli/repl-surface-wire-hellgate.test.ts tests/unit/cli/rewind-live-swap-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 84 checkpoint and live-swap cases passed across the focused rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch23
+review_state: approved
+reviewer: codex/cross-review-wave1

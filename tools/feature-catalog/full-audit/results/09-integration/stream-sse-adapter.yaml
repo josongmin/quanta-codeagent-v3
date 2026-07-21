@@ -1,0 +1,49 @@
+version: 1
+feature_id: stream-sse-adapter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/stream/adapters/sse.ts:SseStream
+entrypoints:
+  - src/stream/index.ts:barrel export
+activation: []
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/stream/adapters/sse.ts:SseStream
+consumer: []
+reachable: no
+surface_findings:
+  - SseStream is exported from the stream barrel but no frozen non-test source constructs it.
+  - The stated CLI and web TeeStream wiring is absent from the frozen source, despite serializer and redaction unit coverage.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/sse.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: SSE framing, monotonic ids, close behavior, and recursive redaction passed at the owner seam.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: seam-only
+blocker: "No production new SseStream call site exists; the claimed interactive CLI and web transport integration is not wired."
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'new SseStream|SseStream\\(' 9a12f7a855640a8be1e4654472766bbc445696ea -- src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production construction call exists; only the class definition and barrel export match.
+  - kind: test
+    command: bun test tests/unit/sse.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused serializer and redaction rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

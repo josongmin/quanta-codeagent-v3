@@ -1,0 +1,55 @@
+version: 1
+feature_id: outcome-exit-code-table
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/agent/run.ts:exitCodeForOutcome
+entrypoints:
+  - src/apps/agent/mode-presets/interactive.ts:runMode
+  - src/apps/agent/mode-presets/headless.ts:runMode
+  - src/apps/agent/mode-presets/daemon.ts:runMode
+activation:
+  - Agent mode presets map every completed lifecycle outcome through the canonical table.
+effective_defaults:
+  cli: off
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/apps/agent/run.ts:exitCodeForOutcome
+  - src/apps/agent/run.ts:runAgentLifecycleWith
+consumer:
+  - src/apps/agent/mode-presets/interactive.ts
+  - src/apps/agent/mode-presets/headless.ts
+  - src/apps/agent/mode-presets/daemon.ts
+reachable: yes
+surface_findings:
+  - The catalog accurately marks the interactive CLI entry as missing; the policy is live in the separate agent-mode applications.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/agent/run.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Every outcome code and SIGINT handler lifecycle branch passed.
+failure_posture: fail-loud
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'exitCodeForOutcome|runAgentLifecycleWith' src/apps/agent/run.ts src/apps/agent/mode-presets
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The canonical mapping and mode-preset consumers are present.
+  - kind: test
+    command: bun test tests/unit/apps/agent/run.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused outcome mapping rail passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

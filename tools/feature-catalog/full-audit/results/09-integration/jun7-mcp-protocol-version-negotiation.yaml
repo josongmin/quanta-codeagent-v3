@@ -1,0 +1,54 @@
+version: 1
+feature_id: jun7-mcp-protocol-version-negotiation
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/mcp/client.ts:McpClient.start
+entrypoints:
+  - src/mcp/client.ts:initialize negotiation
+  - src/mcp/isolated-client.ts:isolated initialize negotiation
+activation:
+  - Starts automatically for every MCP client initialization; QUANTA_MCP_PROTOCOL_MAX optionally limits the offer.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/mcp/protocol-version.ts:resolveOfferedVersion
+consumer:
+  - src/mcp/client.ts:McpClient.start
+  - src/mcp/isolated-client.ts:IsolatedMcpClient.start
+  - src/mcp/transports/http-sse.ts:setProtocolVersion
+reachable: yes
+surface_findings:
+  - Both in-process and isolated clients consume the same offered-version SSOT during every initialize.
+  - Accepted server downgrade pins later HTTP headers; unsupported chosen versions close the carrier and fail closed.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp/protocol-version-negotiation-hellgate.test.ts tests/unit/mcp/protocol-version-http-header-hellgate.test.ts tests/unit/mcp/protocol-version-isolated-hellgate.test.ts tests/unit/mcp/protocol-version-failclosed-teardown-hellgate.test.ts tests/unit/mcp/protocol-version-edge-strings-hellgate.test.ts tests/unit/mcp/protocol-version-reoffer-scope-hellgate.test.ts tests/unit/mcp/protocol-version-reoffer-pin-hellgate.test.ts tests/unit/mcp/protocol-version-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Offer, pin, downgrade re-offer, isolated parity, malformed peers, and fail-closed teardown rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'resolveOfferedVersion|setProtocolVersion|SUPPORTED_PROTOCOL_VERSIONS' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/mcp
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Both clients and HTTP transport consume the negotiated protocol version.
+  - kind: test
+    command: bun test tests/unit/mcp/protocol-version-negotiation-hellgate.test.ts tests/unit/mcp/protocol-version-http-header-hellgate.test.ts tests/unit/mcp/protocol-version-isolated-hellgate.test.ts tests/unit/mcp/protocol-version-failclosed-teardown-hellgate.test.ts tests/unit/mcp/protocol-version-edge-strings-hellgate.test.ts tests/unit/mcp/protocol-version-reoffer-scope-hellgate.test.ts tests/unit/mcp/protocol-version-reoffer-pin-hellgate.test.ts tests/unit/mcp/protocol-version-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused protocol negotiation rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

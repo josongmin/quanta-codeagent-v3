@@ -1,0 +1,66 @@
+version: 1
+feature_id: agent-features-tier1
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/features.ts:buildSessionFeatures
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:bootstrapSession
+  - src/agent/loop/entry.ts:runAgent
+activation:
+  - Every agent session calls buildSessionFeatures once during bootstrap.
+  - Individual tier-one blocks materialize only when their corresponding AgentConfig slot is present.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/tier1/index.ts:builder exports
+  - src/agent/features.ts:SESSION_FEATURE_BLOCKS
+consumer:
+  - src/agent/loop/session-bootstrap.ts:bootstrapSession
+  - src/agent/loop/session-lifecycle.ts:SessionFeatures lifecycle consumers
+reachable: yes
+surface_findings:
+  - Session bootstrap invokes the composer in the real loop, and builder outputs are merged into finalized feature state before tool/loop consumers execute.
+  - Unit tests prove absent config yields an empty feature result and configured subagent, skill, classifier, and working-state blocks materialize through the composer.
+  - Catalog title says nine builders but enumerates ten historical leaves; current composer has expanded beyond that set and is 328 lines, so the exact structural claim is stale.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/features.test.ts tests/integration/hexagonal-ports-closeout.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No Tier-1 config returns extraTools empty, while unrelated configured port controls remain isolated.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/features.test.ts tests/integration/hexagonal-ports-closeout.test.ts tests/unit/agent-import-cycle.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Configured blocks produce concrete tools and state, cross-port integration passes, and the refactor's import-cycle contract passes.
+failure_posture: degraded
+security_posture: conditional
+observability: na
+verdict: stale-claim
+blocker: Catalog's nine-builder and approximately-200-line composer description no longer matches the ten-item list and current 328-line expanded composer.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'buildSessionFeatures|SESSION_FEATURE_BLOCKS|build[A-Za-z]+Block' src/agent/features.ts src/agent/loop/session-bootstrap.ts src/agent/tier1
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The loop bootstrap imports and invokes the composer; source shows the builder-table and lifecycle block consumers.
+  - kind: test
+    command: bun test tests/unit/features.test.ts tests/integration/hexagonal-ports-closeout.test.ts tests/unit/agent-import-cycle.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused audit run plus import-cycle rail prove default absence, configured materialization, port coexistence, and cycle-safe refactor structure.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception is reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-cliux
+review_state: approved
+reviewer: codex/cross-review-wave1

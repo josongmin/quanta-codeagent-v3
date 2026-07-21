@@ -1,0 +1,58 @@
+version: 1
+feature_id: instrument-extra-and-helper
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/metrics/observability-helper.ts:withFullObservability
+entrypoints:
+  - src/observability/metrics/observability-helper.ts:withFullObservability
+activation:
+  - A composition root must import withFullObservability and pass concrete PlanQueue, BudgetLedger, or LspClient instances with a MetricsRegistry.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/observability/metrics/instrument-plan-queue.ts:instrumentPlanQueue
+  - src/observability/metrics/instrument-budget.ts:instrumentBudgetLedger
+  - src/observability/metrics/instrument-lsp.ts:instrumentLspClient
+consumer:
+  - src/observability/metrics/observability-helper.ts:withFullObservability test-only composition
+reachable: no
+surface_findings:
+  - The three wrappers and helper correctly instrument supplied objects, preserve omitted bag fields, and contain metrics-sink failures.
+  - No non-observability production source imports withFullObservability or any of the three wrapper factories; the full seven-wrap flow is exercised only by tests.
+off_identity_proof:
+  kind: source
+  command: rg -n 'observability-helper|withFullObservability|instrumentPlanQueue|instrumentBudgetLedger|instrumentLspClient' src --glob '!src/observability/**' --glob '!**/*.test.ts'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The production import search returned no caller, so default runtime behavior has no wrapper allocation or metric emission.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-metrics-instrument-extra-hellgate.test.ts tests/integration/instrumentation-coverage-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unit and integration rails passed PlanQueue, BudgetLedger, LSP, helper partial/full-bag, sink-failure, and seven-wrap metric-flow cases.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: No production composition root constructs the helper or injects its wrappers into live PlanQueue, BudgetLedger, or LSP consumers.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'observability-helper|withFullObservability|instrumentPlanQueue|instrumentBudgetLedger|instrumentLspClient' src --glob '!src/observability/**' --glob '!**/*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production consumer exists outside the implementation slice.
+  - kind: test
+    command: bun test tests/unit/observability-metrics-instrument-extra-hellgate.test.ts tests/integration/instrumentation-coverage-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All focused wrapper and helper rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

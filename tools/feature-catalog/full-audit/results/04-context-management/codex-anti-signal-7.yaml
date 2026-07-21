@@ -1,0 +1,53 @@
+version: 1
+feature_id: codex-anti-signal-7
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt-body.ts:trust-ladder weak-signal atom rendered by buildSystemPrompt
+entrypoints:
+  - src/host/bootstrap/bootstrap-session.ts:buildSystemPrompt
+  - src/agent/prompt.ts:buildSystemPrompt
+activation:
+  - Every live bootstrap renders the static system prompt, including the folded weak-signal rule.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/prompt-body.ts defines the grep, naming, snapshot, quick-fix, single-green, and screenshot weak-signal language
+consumer:
+  - src/agent/prompt.ts:buildSystemPrompt renders the static prompt
+  - src/host/bootstrap/bootstrap-session.ts passes the rendered prompt into the live session
+reachable: yes
+surface_findings:
+  - The original seven ideas are folded into a compact Trust ladder bullet rather than a standalone heading.
+  - The static prompt is a live bootstrap input and the focused rail pins 100-call byte stability.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/prompt-system.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Prompt-system tests passed the weak-signal content, placement, and 100-call cache-prefix stability cases.
+failure_posture: na
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'nice file or symbol|passing shape/snapshot|quick-fix|ONE green command|screenshot pass|buildSystemPrompt' src/agent/prompt-body.ts src/agent/prompt.ts src/host/bootstrap/bootstrap-session.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All folded anti-signal concepts are in prompt-body and flow through buildSystemPrompt into session bootstrap.
+  - kind: test
+    command: bun test tests/unit/prompt-system.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused system-prompt rail passed as part of the 236-pass audit command.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch1
+review_state: approved
+reviewer: codex/cross-review-wave1

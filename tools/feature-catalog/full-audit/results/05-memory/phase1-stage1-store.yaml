@@ -1,0 +1,59 @@
+version: 1
+feature_id: phase1-stage1-store
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/session-memory-auto.ts:buildSessionMemoryAutoWires
+entrypoints:
+  - src/host/runtime/internal/context-binding/base.ts:extendBaseWithMemoryAuto
+  - src/runner/session-memory-auto.ts:buildSessionMemoryAutoWires
+activation:
+  - The CLI runtime compose always supplies memoryAuto; default-on assembleMemoryAuto builds a WAL SQLite Stage1Store and injects it as memoryConsolidator.store.
+  - QUANTA_MEMORY_AUTO=off returns no wire bundle and avoids opening the SQLite database.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: off
+  daemon: unknown
+producer:
+  - src/memory/consolidate/store.ts:Stage1Store
+consumer:
+  - src/runner/session-memory-auto.ts:buildSessionMemoryAutoWires
+  - src/agent/memory-consolidator-hook.ts:runMemoryConsolidatorHook
+reachable: yes
+surface_findings:
+  - The runtime context persists the auto bundle through AgentConfig and drains it before closing the SQLite handle at session close.
+  - Default-on CLI e2e writes a durable Stage1 SQLite row; the off control has no auto wires or session-end write.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/memory-auto-trigger-session-end-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: QUANTA_MEMORY_AUTO=off yields no assembled wires and no session-end distillation.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory/consolidate-store.test.ts tests/integration/memory-auto-trigger-session-end-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: SQLite store conformance and default-on CLI session-end durable-row e2e passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'buildSessionMemoryAutoWires|memoryAuto|new SqliteStage1Store' src/host/runtime src/runner src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI compose supplies memoryAuto, context binding injects the returned store, and the builder opens the WAL SQLite Stage1Store.
+  - kind: test
+    command: bun test tests/unit/memory/consolidate-store.test.ts tests/integration/memory-auto-trigger-session-end-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Store contract and live default-on/off session behavior passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

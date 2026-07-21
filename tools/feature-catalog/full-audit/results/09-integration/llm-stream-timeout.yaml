@@ -1,0 +1,56 @@
+version: 1
+feature_id: llm-stream-timeout
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/stream-timeout.ts:withStreamTimeout
+entrypoints:
+  - src/llm/adapters/anthropic.ts:AnthropicAdapter.stream
+  - src/llm/adapters/openai.ts:OpenAIAdapter.stream
+  - src/llm/responses-stream.ts:streamResponses
+activation:
+  - Applied automatically to provider streams using default first-chunk and idle budgets
+  - Adapter streamFirstChunkMs and streamIdleMs overrides tune the budgets
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/llm/stream-timeout.ts:withStreamTimeout
+consumer:
+  - src/llm/adapters/anthropic.ts:AnthropicAdapter.stream
+  - src/llm/adapters/openai.ts:OpenAIAdapter.stream
+  - src/llm/responses-stream.ts:streamResponses
+reachable: yes
+surface_findings:
+  - First-chunk and inter-chunk deadlines wrap live provider iterators and abort their upstream handle on timeout or caller cancellation.
+  - The catalog's stream_corrupt error claim is stale: current timeout errors are kind network so the bounded retry classifier accepts them.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/stream-timeout.test.ts tests/unit/stream-timeout-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: First-chunk and idle stalls throw retryable network errors, abort upstream streams, and adapters apply the wrapper.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: "Catalog purpose says timeouts throw stream_corrupt, but frozen source intentionally changed them to retryable network errors because stream_corrupt is fatal."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n 'withStreamTimeout|streamFirstChunkMs|streamIdleMs' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/llm
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Anthropic, OpenAI, Responses, and multicloud adapter paths apply the shared timeout wrapper.
+  - kind: test
+    command: bun test tests/unit/stream-timeout.test.ts tests/unit/stream-timeout-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused deadline, upstream-abort, adapter-wire, watchdog, and identity rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

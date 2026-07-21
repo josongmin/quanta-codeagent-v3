@@ -1,0 +1,47 @@
+version: 1
+feature_id: subagent-spawn-depth-policy
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/spawn-depth.ts
+entrypoints: [src/agent/subagent-runner.ts, src/agent/subagent-runner-child-config.ts]
+activation: [QUANTA_MAX_DESCENDANT_DEPTH default 1]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: [src/agent/spawn-depth.ts:childDepthOf]
+consumer: [src/agent/subagent-runner.ts, src/agent/tier1/side-agent.ts]
+reachable: yes
+surface_findings:
+  - "Child depth derives from real parent config and policy min-cap only tightens requested max depth."
+  - "Malformed lineage fails closed and leaves cannot expose spawn tools at default cap 1."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/spawn-depth-hellgate.test.ts tests/unit/max-descendant-depth-config-pin.test.ts tests/unit/side-agent-spawn-depth-authority-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Depth authority, default/root-only cap, min-cap, resume, and runner wiring pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'childDepthOf|effectiveCap|spawnToolsAvailable' src/agent/subagent-runner.ts src/agent/spawn-depth.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Policy authority and runtime runner consumer are present.
+  - kind: test
+    command: bun test tests/unit/spawn-depth-hellgate.test.ts tests/unit/max-descendant-depth-config-pin.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Spawn-depth rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

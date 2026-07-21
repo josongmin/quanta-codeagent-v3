@@ -1,0 +1,55 @@
+version: 1
+feature_id: source-runtime-tests-docs-memory
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt.ts:buildSystemPrompt
+entrypoints:
+  - src/apps/cli/index.ts agent bootstrap prompt construction
+  - src/agent/loop/context-assembler.ts resolves the cached system prompt for live model calls
+activation:
+  - The baseline buildSystemPrompt unconditionally renders the evidence and trust atom into the cached system prefix.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: na
+producer:
+  - src/agent/prompt-body.ts:BODY_AFTER_PERSONA_EVIDENCE_AND_TRUST
+  - src/agent/prompt-graph atoms select the static body order
+consumer:
+  - src/agent/prompt.ts:buildSystemPrompt
+  - src/agent/prompt.ts:buildTurnContext sends cached system blocks to the LLM port
+reachable: yes
+surface_findings:
+  - The rendered policy states FACT, INFERENCE, and UNKNOWN handling and the source/runtime-build-output, tests, then docs/comments/memory precedence exactly as claimed.
+  - buildSystemPrompt is byte-stable across calls; per-turn data remains outside the cache prefix.
+  - The policy is prompt guidance rather than runtime enforcement, but it is present in the actual model-facing system block.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/prompt-system.test.ts tests/unit/prompt-sections-hellgate.test.ts tests/unit/prompt-rules-snapshot.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 76 focused cases prove the trust and claim ladders, static placement, cache-prefix stability, and turn-context cache marker behavior.
+failure_posture: na
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'BODY_AFTER_PERSONA_EVIDENCE_AND_TRUST|FACT|INFERENCE|UNKNOWN|Source files and runtime|Docs, comments, prior memory hints|buildSystemPrompt|buildTurnContext' src/agent/prompt.ts src/agent/prompt-body.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The static evidence-and-trust atom is selected by buildSystemPrompt and forwarded as the cached system block by buildTurnContext.
+  - kind: test
+    command: bun test tests/unit/prompt-system.test.ts tests/unit/prompt-sections-hellgate.test.ts tests/unit/prompt-rules-snapshot.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 76 focused prompt policy, ordering, and cache-stability cases pass.
+audited_at: "2026-07-19"
+auditor: codex/p2-boundary-batch11
+review_state: approved
+reviewer: codex/cross-review-wave1

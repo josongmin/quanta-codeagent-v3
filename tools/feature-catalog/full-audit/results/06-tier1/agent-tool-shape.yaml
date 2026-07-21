@@ -1,0 +1,57 @@
+version: 1
+feature_id: agent-tool-shape
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/subagent/agent-tool.ts:createAgentTool
+entrypoints:
+  - src/agent/tier1/subagent.ts:buildSubagentBlock
+  - src/apps/cli/internal.ts:buildSubagentConfig
+activation:
+  - CLI default-on subagent configuration registers the agent tool and derives task-kind filters, seed augmentation, continuation lineage, and checkpoint behavior.
+  - Disabling QUANTA_SUBAGENT removes the tool.
+effective_defaults:
+  cli: on
+  web: na
+  bench: off
+  headless: resource
+  daemon: resource
+producer:
+  - src/subagent/agent-tool.ts:createAgentTool
+consumer:
+  - src/agent/tier1/subagent.ts:buildSubagentBlock
+reachable: yes
+surface_findings:
+  - Real e2e confirms result-shape and owned-surface seed augmentation, checkpoint delivery, and continuation text with ownership checks.
+off_identity_proof:
+  kind: source
+  command: rg 'QUANTA_SUBAGENT|buildSubagentConfig' src/apps/cli/internal.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit subagent disable omits the parent tool surface.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-task-kind.test.ts tests/unit/subagent-continue-from.test.ts tests/unit/subagent-checkpoint.test.ts tests/unit/subagent-seed-augmentation.test.ts tests/unit/subagent-runner.test.ts tests/integration/subagent-checkpoint-e2e.test.ts tests/integration/subagent-continue-from-e2e.test.ts tests/integration/subagent-seed-augmentation-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Contract and live child-seed behavior passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'taskKind|continueFrom|checkpoint|createAgentTool' src/subagent/agent-tool.ts src/agent/tier1/subagent.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Parent schema fields are converted into runner input and child seed material.
+  - kind: test
+    command: bun test tests/unit/subagent-task-kind.test.ts tests/unit/subagent-continue-from.test.ts tests/unit/subagent-checkpoint.test.ts tests/unit/subagent-seed-augmentation.test.ts tests/unit/subagent-runner.test.ts tests/integration/subagent-checkpoint-e2e.test.ts tests/integration/subagent-continue-from-e2e.test.ts tests/integration/subagent-seed-augmentation-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused field propagation rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

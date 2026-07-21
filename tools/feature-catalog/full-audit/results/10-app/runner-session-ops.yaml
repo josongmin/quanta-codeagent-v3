@@ -1,0 +1,48 @@
+version: 1
+feature_id: runner-session-ops
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/session-ops/index.ts:runSessionCommand
+entrypoints: [src/apps/cli/index.ts, src/apps/cli/repl.ts:runSessionMain]
+activation: ["quanta session <subcommand>"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: na
+  headless: off
+  daemon: na
+producer: [src/runner/session-ops/index.ts, src/runner/session-ops/list-tui.ts]
+consumer: [src/apps/cli/repl.ts:runSessionMain]
+reachable: yes
+surface_findings:
+  - "CLI index routes the session argv branch to runSessionMain, which injects terminal IO, confirm, migration handler, and list environment adapters."
+  - "Current dispatcher supports ls, show, rename, archive, unarchive, fork, rewind, delete, path, and import; catalog prose's eight-command list and list spelling are stale."
+  - "SessionIdError is caught before writes and an absent migration handler fails import explicitly."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/session-ops/list-tui.test.ts tests/unit/session-ops/ls-turns-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: List rendering and session turn listing hellgate cases pass.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: "Update the catalog command inventory: production dispatch is ls/show/rename/archive/unarchive/fork/rewind/delete/path/import, not the stated eight including list."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: sed -n '110,175p' src/apps/cli/repl.ts && sed -n '643,735p' src/runner/session-ops/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI subcommand route and current dispatcher switch are live.
+  - kind: test
+    command: bun test tests/unit/session-ops/list-tui.test.ts tests/unit/session-ops/ls-turns-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused session operation presentation rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

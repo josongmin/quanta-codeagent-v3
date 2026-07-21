@@ -1,0 +1,56 @@
+version: 1
+feature_id: plan-stream-mirror
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/plan-exit-wire.ts:applyPendingPlanExit
+entrypoints:
+  - src/apps/cli/repl/factories/plan-store.ts:buildPlanStoreOrUndefined
+  - src/agent/loop/plan-exit-wire.ts:applyPendingPlanExit
+  - src/agent/loop/session-snapshots.ts:restorePlanSnapshot
+activation:
+  - Default CLI plan-store composition supplies a plan to lifecycle handling.
+  - Approval freeze and snapshot restore project canonical plans through the by-value mirror before emitting plan_snapshot.
+effective_defaults:
+  cli: on
+  web: off
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/plan/stream-mirror.ts:planToStreamMirror
+consumer:
+  - src/agent/loop/plan-exit-wire.ts:applyPendingPlanExit
+  - src/agent/loop/session-snapshots.ts:restorePlanSnapshot
+  - src/stream/item-projector.ts:projectAgentEvent
+reachable: yes
+surface_findings:
+  - The projector has two production loop consumers that emit plan_snapshot and downstream stream projection keeps the event as a plan item.
+  - The web frontend has no plan event bridge or plan UI, so its catalog missing surface is accurate.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/request-plan-exit-lifecycle-e2e.test.ts tests/unit/agent/loop/plan-exit-wire.test.ts tests/unit/item-stream-s2-unification-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Plan exit emits a frozen snapshot and the downstream item stream projects plan_snapshot rather than dropping it.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'planToStreamMirror|plan_snapshot|buildPlanStoreOrUndefined' src/apps/cli src/agent src/stream
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI creates the store, loop lifecycle and snapshot restore call the mirror, and stream projection consumes the emitted event.
+  - kind: test
+    command: bun test tests/integration/request-plan-exit-lifecycle-e2e.test.ts tests/unit/agent/loop/plan-exit-wire.test.ts tests/unit/item-stream-s2-unification-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Exit lifecycle, reject observability, and plan snapshot item projection rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch16
+review_state: approved
+reviewer: codex/cross-review-wave1

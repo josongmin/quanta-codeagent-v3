@@ -1,0 +1,66 @@
+version: 1
+feature_id: team-dag-coordination
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/subagent-batch.ts:buildSubagentBatchBlock
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/agent/features.ts:buildSessionFeatures
+activation:
+  - AgentConfig.subagent.enableBatchSpawn is true.
+  - QUANTA_TEAM_DAG is enabled and spawn_batch receives dependency edges.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/subagent/coordination/dag.ts:createDagGate
+  - src/tool/subagent-batch/run-batch.ts:runBatch
+consumer:
+  - src/agent/tier1/subagent-batch.ts:buildSubagentBatchBlock
+  - src/tool/subagent-batch/run-batch.ts:runBatch
+reachable: yes
+surface_findings:
+  - The tier-1 builder injects the real gate factory only when runtimeConfig().teamDag is enabled.
+  - runBatch waits outside the semaphore, rejects invalid graphs before dispatch, and marks each terminal item to release or block dependents.
+  - The absent-factory and no-edge paths retain flat fan-out.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/coordination/team-dag-spawn-batch-live-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Factory-absent and no-dependencies controls preserve flat fan-out.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/coordination/team-dag-hellgate.test.ts tests/unit/coordination/team-dag-batch-e2e-hellgate.test.ts tests/unit/coordination/team-dag-spawn-batch-live-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 51 focused cases pass, including real runBatch ordering, dead branches, and whole-batch rejection.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'teamDag|dagGateFactory|createDagGate|awaitReady|markComplete|markFailed' src/agent/tier1/subagent-batch.ts src/tool/subagent-batch/run-batch.ts src/shared/runtime-config.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production tier-1 composition gates the factory and the live batch runner consumes it before dispatch.
+  - kind: test
+    command: bun test tests/unit/coordination/team-dag-hellgate.test.ts tests/unit/coordination/team-dag-batch-e2e-hellgate.test.ts tests/unit/coordination/team-dag-spawn-batch-live-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 51 pass, 0 fail.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3 feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-team
+review_state: approved
+reviewer: codex/cross-review-wave1

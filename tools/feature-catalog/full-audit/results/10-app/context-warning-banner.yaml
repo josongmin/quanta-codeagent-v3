@@ -1,0 +1,50 @@
+version: 1
+feature_id: context-warning-banner
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/prompt-pipeline.ts:contextWarning preamble
+entrypoints:
+  - src/apps/cli/repl/factories/notify-and-warning.ts:context warning factory
+activation:
+  - Run interactive CLI with stderr TTY and a retained token view crossing the configured warning ratio.
+effective_defaults:
+  cli: on
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - retained context usage and compaction threshold
+consumer:
+  - stderr prompt preamble
+reachable: yes
+surface_findings:
+  - Prompt pipeline writes a warning only for a non-empty computed warning and reuses the loop retained-token source.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Empty or absent contextWarning preserves stderr byte identity.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/context-warning.hellgate.test.ts tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Threshold, real-token-source, and prompt preamble rails passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test src/apps/cli/__tests__/context-warning.hellgate.test.ts tests/unit/apps/cli/prompt-pipeline-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused warning rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

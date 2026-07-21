@@ -1,0 +1,45 @@
+version: 1
+feature_id: lsp-gopls-adapter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/lsp/adapters/gopls.ts:GoplsAdapter
+entrypoints:
+  - src/agent/lsp-bridge.ts
+activation:
+  - .go extension routing selects gopls when its binary is available.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: resource
+producer:
+  - src/lsp/adapters/gopls.ts:GoplsAdapter
+consumer:
+  - src/agent/lsp-bridge.ts
+reachable: yes
+surface_findings:
+  - Registry probe passes, while real gopls evidence rails skip in this environment.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/lsp-bridge-probe.test.ts tests/unit/evidence-lsp-bridge-go-real-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Registry proof passed; real gopls tests skipped due unavailable binary.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: conditional
+blocker: gopls binary unavailable in audit environment.
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/lsp-bridge-probe.test.ts tests/unit/evidence-lsp-bridge-go-real-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Registry proof passed; external real rail skipped.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

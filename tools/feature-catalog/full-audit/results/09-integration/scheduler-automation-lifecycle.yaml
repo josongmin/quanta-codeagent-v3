@@ -1,0 +1,59 @@
+version: 1
+feature_id: scheduler-automation-lifecycle
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/scheduler/automation-engine/sqlite.ts:sqliteAutomationEngine
+entrypoints:
+  - src/scheduler/runtime-wire.ts:assembleAutomation
+  - src/apps/cli/repl/session-loop.ts:startAutomationEngineTicker
+activation:
+  - Set QUANTA_AUTOMATION=on; optionally set QUANTA_AUTOMATION_STORE=sqlite for durable lifecycle state.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/scheduler/automation-engine/sqlite.ts:sqliteAutomationEngine
+  - src/scheduler/automation-engine/ticker.ts:tickScheduler
+consumer:
+  - src/scheduler/runtime-wire.ts:assembleAutomation
+  - src/apps/cli/repl/session-loop.ts:startAutomationEngineTicker
+reachable: yes
+surface_findings:
+  - CLI session-loop and host runtime consume the automation slot, but runtime-wire returns null unless QUANTA_AUTOMATION is exactly on.
+  - SQLite and in-memory engines own lifecycle transitions and claim/finalize behavior under the enabled path.
+off_identity_proof:
+  kind: source
+  command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/scheduler/runtime-wire.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: assembleAutomation returns null unless QUANTA_AUTOMATION equals on.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/scheduler/runtime-correctness-hellgate.test.ts tests/unit/scheduler/b2-wiring-closeout-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused lifecycle, durable SQLite, retry, restart, claim isolation, and live ticker wiring rails passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: "The engine is reachable but default-off behind QUANTA_AUTOMATION=on."
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'assembleAutomation|startAutomationEngineTicker|QUANTA_AUTOMATION' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/scheduler src/apps/cli src/host/runtime
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime composition and CLI session loop consume the canonical engine after the environment gate.
+  - kind: test
+    command: bun test tests/unit/scheduler/runtime-correctness-hellgate.test.ts tests/unit/scheduler/b2-wiring-closeout-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused lifecycle and wiring rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

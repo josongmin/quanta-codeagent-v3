@@ -1,0 +1,57 @@
+version: 1
+feature_id: tool-dedup-drift-detector
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/metrics/instrument-tool-dedup.ts:defaultToolCallCache
+entrypoints:
+  - src/observability/metrics/instrument-tool-dedup.ts:defaultToolCallCache
+activation:
+  - A caller must construct defaultToolCallCache with checkRecommendedDrift true, perToolTtlMs, and optionally metrics or onDriftWarn.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - defaultToolCallCache construction-time per-tool TTL comparison
+consumer:
+  - MetricsRegistry counter tool.dedup.config_drift.total
+  - optional operator warning callback
+reachable: no
+surface_findings:
+  - The detector classifies all four drift kinds deterministically and independently degrades to metrics-only or warning-only when one sink is absent or throws.
+  - No production source outside instrument-tool-dedup.ts constructs defaultToolCallCache, so no live configuration activates the opt-in detector.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability-tool-dedup-drift-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Omitted and explicit-false checkRecommendedDrift controls emitted zero drift rows and retains cache behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-tool-dedup-drift-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed four classification arms, dual-channel reporting, no-throw sinks, deterministic grouping, and post-report cache operation.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: The cache factory has no production caller, and no composition root supplies checkRecommendedDrift or a metric/warning sink.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'defaultToolCallCache\\(' src --glob '!src/observability/metrics/instrument-tool-dedup.ts' --glob '!**/*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The production caller search returned no cache construction outside the owner module.
+  - kind: test
+    command: bun test tests/unit/observability-tool-dedup-drift-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All focused default-OFF, active, degradation, and cache-continuity rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,51 @@
+version: 1
+feature_id: diff-hunk-headers
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/diff-preview.ts:renderUnified
+entrypoints:
+  - src/apps/cli/diff-preview.ts:renderActionDiff
+activation:
+  - Set QUANTA_DIFF_HUNKS=1 for CLI diff preview rendering.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/diff-preview.ts:renderUnified
+consumer:
+  - src/apps/cli/diff-preview.ts:renderActionDiff
+reachable: yes
+surface_findings:
+  - Hunk render is an explicit option and runtime environment gate; default uses byte-identical legacy plus/minus output.
+  - Hunk clipping removes trailing headers rather than emitting invalid orphan headers.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/diff-preview.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Hunk option and QUANTA_DIFF_HUNKS are off by default and legacy rendering remains unchanged.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/diff-preview.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Git-style headers, gutters, clipping, and write/scripted-replace render paths passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: conditional
+blocker: Hunk presentation is an explicit default-off CLI display option and has no web panel.
+disposition: hold
+receipts:
+  - kind: test
+    command: bun test tests/unit/cli/diff-preview.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused diff hunk rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

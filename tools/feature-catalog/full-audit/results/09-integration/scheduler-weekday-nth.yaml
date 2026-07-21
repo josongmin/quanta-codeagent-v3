@@ -1,0 +1,54 @@
+version: 1
+feature_id: scheduler-weekday-nth
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/scheduler/weekday.ts:nthWeekdayOfMonth
+entrypoints:
+  - src/scheduler/rrule-parser.ts:BYDAY parsing
+  - src/scheduler/next-fire.ts:rule evaluation
+activation:
+  - Enable automation and create a schedule with a BYDAY ordinal.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/scheduler/weekday.ts:parseWeekday
+  - src/scheduler/weekday.ts:nthWeekdayOfMonth
+consumer:
+  - src/scheduler/rrule-parser.ts:parseRRule
+  - src/scheduler/next-fire.ts:next-fire evaluation
+reachable: yes
+surface_findings:
+  - RRULE parsing consumes the weekday DSL and next-fire consumes its ordinal date calculation.
+  - The live use is inside the environment-gated automation path.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/scheduler-weekday.test.ts tests/unit/scheduler-weekday-nth-hellgate.test.ts tests/unit/scheduler-rrule-parser-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Ordinal boundaries, leap-month behavior, UTC normalization, parsing, and RRULE consumer behavior passed.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: conditional
+blocker: "The DSL is production-consumed through RRULE scheduling, which is default-off with automation."
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'parseWeekday|nthWeekdayOfMonth' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/scheduler
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: RRULE parser and next-fire evaluator both consume the weekday owner seam.
+  - kind: test
+    command: bun test tests/unit/scheduler-weekday.test.ts tests/unit/scheduler-weekday-nth-hellgate.test.ts tests/unit/scheduler-rrule-parser-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused weekday and RRULE rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

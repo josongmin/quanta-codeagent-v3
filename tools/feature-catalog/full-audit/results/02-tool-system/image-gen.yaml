@@ -1,0 +1,60 @@
+version: 1
+feature_id: image-gen
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+activation:
+  - QUANTA_IMAGE_GEN is enabled in runtimeConfig
+  - buildGatedToolPorts binds openAiImagePort to DefaultToolPorts.imageGen
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/image-gen/tool.ts:imageGenTool
+  - src/tool/image-gen/port.ts:openAiImagePort
+consumer:
+  - src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+  - src/tool/index.ts:buildDefaultTools
+reachable: yes
+surface_findings:
+  - "The host configuration binds the key-scoped OpenAI adapter only when QUANTA_IMAGE_GEN is enabled."
+  - "The central registry appends image_gen only for a non-undefined imageGen port and can additionally register output artifacts."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/image-gen-e2e-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts tests/unit/session-knobs-default-off-byte-identity-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Gate-off omits image_gen from both the root registry and default menu."
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/image-gen-hellgate.test.ts tests/unit/image-gen-e2e-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "A wired port wrote a valid PNG through the jail and the root dispatch reached the real key-bound adapter."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'imageGen: gateOn|cfg.imageGen|p.imageGen !== undefined' src/shared/runtime-config.ts src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/tool/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The config gate maps to a concrete adapter port and central tool registration."
+  - kind: test
+    command: bun test tests/unit/image-gen-hellgate.test.ts tests/unit/image-gen-e2e-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts tests/unit/session-knobs-default-off-byte-identity-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Selected generation jail versioning typed-failure default-off and composition-root rails passed."
+audited_at: "2026-07-19"
+auditor: codex/p1-tools-surface
+review_state: approved
+reviewer: codex/cross-review-wave1

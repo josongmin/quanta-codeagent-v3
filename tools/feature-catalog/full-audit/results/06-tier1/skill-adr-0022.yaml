@@ -1,0 +1,50 @@
+version: 1
+feature_id: skill-adr-0022
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/prompt-reminders.ts:renderActiveSkillsBlock via src/agent/loop/context-assembler.ts:prepareTurnContext"
+entrypoints: ["src/apps/cli/internal.ts:buildSkillsConfig", "src/apps/web-daemon/runtime-factory.ts:buildSurfaceCapabilityBlocks"]
+activation: ["AgentConfig.skills is present and discovery yields at least one skill"]
+effective_defaults:
+  cli: on
+  web: on
+  bench: off
+  headless: on
+  daemon: on
+producer: ["src/agent/tier1/skill.ts:buildSkillBlock inventory"]
+consumer: ["src/agent/loop/context-assembler.ts:prepareTurnContext", "src/agent/prompt-reminders.ts:renderActiveSkillsCatalogue"]
+reachable: yes
+surface_findings: ["The active-skill catalogue is cached at session setup and placed in the dynamic per-turn reminder, preserving the cached static prefix.", "The current implementation renders the advertised catalogue and trigger rules; it does not use description matching to autonomously invoke a Skill tool. The wording is instruction to the model, not deterministic dispatch."]
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/skill-trigger-rules.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Absent or empty activeSkills emits no reminder block and leaves the static prefix unchanged."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/skill-trigger-rules.test.ts tests/integration/skill-paths-activation-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "13 tests pass: the live runAgent path renders the selected inventory and the unit rail proves header, first-line descriptions, rules, ordering, and cache-prefix invariance."
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'activeSkills|prepareTurnContext|renderActiveSkillsBlock' src/agent/tier1/skill.ts src/agent/loop/session-bootstrap.ts src/agent/loop/context-assembler.ts src/agent/prompt-reminders.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Session inventory is copied into TurnSession, then passed to the per-turn context and renderer."
+  - kind: test
+    command: "bun test tests/unit/skill-trigger-rules.test.ts tests/integration/skill-paths-activation-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "All 13 focused active-skill rendering and live-loop tests passed."
+audited_at: "2026-07-19"
+auditor: "codex/p2-tier1-batch13"
+review_state: approved
+reviewer: codex/cross-review-wave1

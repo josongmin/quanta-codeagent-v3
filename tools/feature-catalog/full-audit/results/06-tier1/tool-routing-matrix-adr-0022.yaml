@@ -1,0 +1,45 @@
+version: 1
+feature_id: tool-routing-matrix-adr-0022
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/prompt-body.ts:BODY_AFTER_PERSONA_TOOL_ROUTING selected by src/agent/prompt.ts:buildSystemPrompt"
+entrypoints: ["src/agent/loop/context-assembler.ts:prepareTurnContext", "src/agent/prompt.ts:buildSystemPrompt"]
+activation: ["Every runAgent session builds the static system prompt"]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: ["src/agent/prompt-body.ts routing instruction atom"]
+consumer: ["src/agent/prompt.ts:buildSystemPrompt", "src/agent/loop/context-assembler.ts:prepareTurnContext"]
+reachable: yes
+surface_findings: ["The routing matrix is a static prompt atom, not a separate browser control; it reaches the model on every normal loop surface that uses buildSystemPrompt.", "The code now has a delegation-suppressed variant under a runtime knob, but the base matrix remains the default rendering."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/prompt-system.test.ts tests/unit/tool-steering-and-prompt-examples-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "70 tests pass: the complete truth-condition matrix, example ordering, and static-prompt byte stability are asserted."
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'BODY_AFTER_PERSONA_TOOL_ROUTING|buildSystemPrompt|prepareTurnContext' src/agent/prompt-body.ts src/agent/prompt.ts src/agent/loop/context-assembler.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The static routing atom is selected by buildSystemPrompt and supplied by the normal turn-context path."
+  - kind: test
+    command: "bun test tests/unit/prompt-system.test.ts tests/unit/tool-steering-and-prompt-examples-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "All 70 focused prompt and routing-steering tests passed."
+audited_at: "2026-07-19"
+auditor: "codex/p2-tier1-batch13"
+review_state: approved
+reviewer: codex/cross-review-wave1

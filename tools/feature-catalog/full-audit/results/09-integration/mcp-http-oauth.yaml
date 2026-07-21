@@ -1,0 +1,59 @@
+version: 1
+feature_id: mcp-http-oauth
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/mcp-composition.ts:resolveMcpOAuthProvider
+entrypoints:
+  - src/apps/cli/internal.ts:loadFeatures
+  - src/apps/web-daemon/runtime-factory.ts:loadDaemonMcp
+  - src/agent/mcp-bridge.ts:applyMcpClientWiring
+activation:
+  - Set QUANTA_MCP_OAUTH=1 and configure an HTTP MCP server with oauth: true.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/runtime/mcp-oauth-provider.ts:createConnectorsMcpOAuthProvider
+consumer:
+  - src/host/mcp-composition.ts:resolveMcpOAuthProvider
+  - src/agent/mcp-bridge.ts:applyMcpClientWiring
+reachable: yes
+surface_findings:
+  - CLI and web-daemon MCP composition resolve the connector-backed provider and pass it through single-client and supervised bridge paths.
+  - Client OAuth remains double-gated by the global runtime knob and each server oauth:true flag; unavailable or rejected login resolves without a bearer rather than crashing load.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mcp-oauth-hellgate.test.ts tests/unit/mcp-oauth-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Disabled or unwired cases produce no provider and no Authorization header.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp-oauth-hellgate.test.ts tests/unit/mcp-oauth-e2e-hellgate.test.ts tests/unit/mcp-oauth-keyring-reachability-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Discovery and token flow, bearer attachment on all requests, 401 reauthorization, and live keyring-backed provider rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'resolveMcpOAuthProvider|oauthProvider|applyMcpClientWiring' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/internal.ts src/apps/web-daemon/runtime-factory.ts src/host/mcp-composition.ts src/agent/mcp-bridge.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI and web-daemon surface composition create the provider and the bridge installs it into clients.
+  - kind: test
+    command: bun test tests/unit/mcp-oauth-hellgate.test.ts tests/unit/mcp-oauth-e2e-hellgate.test.ts tests/unit/mcp-oauth-keyring-reachability-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: MCP OAuth focused rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

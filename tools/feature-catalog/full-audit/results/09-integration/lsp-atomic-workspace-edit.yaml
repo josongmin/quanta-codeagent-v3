@@ -1,0 +1,56 @@
+version: 1
+feature_id: lsp-atomic-workspace-edit
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/lsp/adapters/base/atomic-edit.ts:applyWorkspaceEditAtomic
+entrypoints:
+  - src/lsp/adapters/base.ts:LspClient.applyWorkspaceEdit
+  - src/lsp/adapters/default-code-action.ts:DefaultCodeActionAdapter.applyEdit
+  - src/lsp/adapters/default-rename-apply.ts:DefaultRenameApplyAdapter.applyEdit
+activation:
+  - A configured LSP server returns a code action or rename workspace edit and the caller applies it.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/lsp/adapters/base/atomic-edit.ts:applyWorkspaceEditAtomic
+consumer:
+  - src/lsp/adapters/base.ts:LspClient.applyWorkspaceEdit
+  - src/lsp/adapters/default-code-action.ts:DefaultCodeActionAdapter.applyEdit
+  - src/lsp/adapters/default-rename-apply.ts:DefaultRenameApplyAdapter.applyEdit
+reachable: yes
+surface_findings:
+  - Live LspClient workspace edits use the 2-phase sibling-temp and rename core, with cleanup before prepare and typed partial-commit errors.
+  - The separately implemented atomicFileWriteStrategy has an EXDEV copyFile fallback, but no production source consumes that strategy.
+  - The live applyWorkspaceEditAtomic path rethrows EXDEV; its own source explicitly describes copy-and-delete fallback as a follow-up.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/lsp-applyworkspaceedit-atomicity-hellgate.test.ts tests/unit/lsp-atomic-write-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Live workspace-edit prepare, cleanup, partial-commit behavior and the isolated strategy EXDEV fallback rails passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: Catalog claims applyWorkspaceEdit includes EXDEV fallback, but the live LspClient path uses applyWorkspaceEditAtomic, which rethrows EXDEV; the fallback strategy has no production consumer.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'applyWorkspaceEditAtomic|atomicFileWriteStrategy|EXDEV|copyFile' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/lsp
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: LspClient calls applyWorkspaceEditAtomic only; the atomic strategy is unconsumed and atomic-edit documents EXDEV as a follow-up.
+  - kind: test
+    command: bun test tests/unit/lsp-applyworkspaceedit-atomicity-hellgate.test.ts tests/unit/lsp-atomic-write-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused legacy workspace-edit and standalone file-write strategy rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

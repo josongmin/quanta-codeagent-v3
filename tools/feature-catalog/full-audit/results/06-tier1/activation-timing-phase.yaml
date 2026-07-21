@@ -1,0 +1,53 @@
+version: 1
+feature_id: activation-timing-phase
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/activation.ts:skillsActivatedFor
+entrypoints:
+  - src/agent/tier1/skill.ts:buildSkillBlock
+  - src/agent/features.ts:buildSessionFeatures
+activation:
+  - No activation-timing phase machine exists; live behavior is session-start inventory construction and optional changedPaths suggestion filtering.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/skill/activation.ts:skillsActivatedFor
+consumer:
+  - src/agent/tier1/skill.ts active-skill inventory
+  - src/agent/features.ts session feature construction
+reachable: no
+surface_findings:
+  - The live precursor builds a session inventory once and optionally narrows per-turn suggestions when a host supplies changedPaths.
+  - No time-sliced phase state, transition mechanism, or phase-specific consumer exists beyond that inventory/filter behavior.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill-trigger-rules.test.ts tests/integration/skill-paths-activation-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Existing session inventory rendering and changedPaths suggestion filtering rails pass.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: The planned per-moment activation-timing phase machine has no state model, transition owner, or production consumer; only the explicitly documented inventory and changedPaths precursor is live.
+disposition: hold
+receipts:
+  - kind: source
+    command: git grep -n -E 'skillsActivatedFor|changedPaths|buildSkillBlock|buildSessionFeatures' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/skill/activation.ts src/agent/tier1/skill.ts src/agent/features.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Source contains the session inventory and changed-path filter, not a timing phase machine.
+  - kind: test
+    command: bun test tests/unit/skill-trigger-rules.test.ts tests/integration/skill-paths-activation-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused precursor rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

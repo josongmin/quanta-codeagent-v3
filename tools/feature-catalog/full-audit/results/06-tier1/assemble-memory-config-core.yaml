@@ -1,0 +1,55 @@
+version: 1
+feature_id: assemble-memory-config-core
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/memory.ts:buildMemoryConfigCore
+entrypoints:
+  - src/runner/assemble/memory-factory.ts:resolveMemoryConfigFromEnv
+  - src/apps/cli/internal.ts:buildMemoryConfig
+activation:
+  - QUANTA_MEMORY_RECALL_LIMIT, QUANTA_MEMORY_DISTILL, QUANTA_MEMORY_CONSOLIDATE, QUANTA_MEMORY_SELF_EDIT, and QUANTA_MEMORY_RECALL_TIERS project into the memory block.
+effective_defaults:
+  cli: on
+  web: on
+  bench: resource
+  headless: on
+  daemon: on
+producer:
+  - src/runner/assemble/memory.ts:parseRecallTiers
+  - src/runner/assemble/memory.ts:buildMemoryConfigCore
+consumer:
+  - src/runner/assemble/memory-factory.ts:resolveMemoryConfigFromEnv
+  - src/apps/cli/internal.ts:buildMemoryConfig
+  - src/runner/assemble/tooling.ts:buildToolingCore
+reachable: yes
+surface_findings:
+  - The session memory factory resolves the typed config through buildMemoryConfigCore, and CLI buildMemoryConfig delegates to that same resolver rather than maintaining an independent projection.
+  - Config reaches Tooling and AgentConfig, where the live memory tools and loop consume it.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/build-memory-config-delegation-hellgate.test.ts tests/unit/memory-factory-hellgate.test.ts tests/unit/env-knob-branches.test.ts tests/integration/memory-default-on-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Parser validity, opt-out fields, CLI delegation, config identity, memory tool wiring, and loop recall all pass.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/runner/assemble/memory-factory.ts | rg -n -C 2 'return buildMemoryConfigCore\\(input\\)'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The canonical environment resolver ends by calling the core; the CLI wrapper delegates to that resolver.
+  - kind: test
+    command: bun test tests/unit/build-memory-config-delegation-hellgate.test.ts tests/unit/memory-factory-hellgate.test.ts tests/unit/env-knob-branches.test.ts tests/integration/memory-default-on-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused parser, factory, delegation, and real-loop rails passed in the snapshot-equivalent source set.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch20
+review_state: approved
+reviewer: codex/cross-review-wave1

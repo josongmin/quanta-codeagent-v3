@@ -1,0 +1,52 @@
+version: 1
+feature_id: assemble-compaction-core
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/compaction.ts:buildCompactionBreakerConfigCore
+entrypoints:
+  - src/apps/cli/internal.ts:buildCompactionBreakerConfig
+  - src/apps/cli/internal.ts:buildSummarizerLlm
+  - src/apps/cli/repl/runtime-context-compose.ts:buildSessionMemoryAutoSummarizer
+activation:
+  - QUANTA_COMPACT_BREAKER and cap knobs build an optional breaker config.
+  - QUANTA_COMPACT_MODEL optionally builds a separate retrying summarizer LLM; QUANTA_COMPACT_PROVIDER can override the main provider.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: unknown
+  headless: on
+  daemon: unknown
+producer:
+  - src/runner/assemble/compaction.ts:buildCompactionBreakerConfigCore
+  - src/runner/assemble/compaction.ts:buildSummarizerLlmCore
+consumer:
+  - src/apps/cli/internal.ts:buildCompactionBreakerConfig
+  - src/apps/cli/internal.ts:buildSummarizerLlm
+  - src/runner/assemble/config.ts:assembleConfig
+reachable: yes
+surface_findings:
+  - Both CLI wrappers are live and the summarizer is passed into runtime context composition.
+  - cli-summarizer.test proves the dedicated summarizer branch, while compaction-breaker-hellgate proves breaker behavior but not the CLI knob-to-config-to-loop wire.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: proof-gap
+blocker: No focused rail activates QUANTA_COMPACT_BREAKER or either cap knob through buildCompactionBreakerConfig and observes the resulting AgentConfig at the executing loop; existing tests cover the breaker class and summarizer factory separately.
+disposition: hold
+receipts:
+  - kind: source
+    command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/apps/cli/internal.ts | rg -n -C 3 'buildCompactionBreakerConfigCore|buildSummarizerLlmCore'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI wrappers pass parsed env values into both cores, and assembleConfig conditionally carries breaker config into AgentConfig.
+  - kind: test
+    command: bun test tests/unit/cli-summarizer.test.ts tests/unit/compaction-breaker-hellgate.test.ts tests/integration/cli-export-assembly.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Dedicated summarizer and breaker behavior pass, but the breaker assembly wire remains unexercised.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch20
+review_state: approved
+reviewer: codex/cross-review-wave1

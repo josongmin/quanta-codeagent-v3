@@ -1,0 +1,63 @@
+version: 1
+feature_id: verifyguard
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/verify-guard.ts:decideVerifyGuard
+entrypoints:
+  - src/apps/cli/internal.ts:buildVerifyGuardConfig
+  - src/agent/loop/session-bootstrap.ts:bootstrapSession
+activation:
+  - QUANTA_VERIFY_GUARD present produces AgentConfig.verifyGuard; QUANTA_VERIFY_GUARD_MAX_TRIPS optionally overrides the trip cap.
+  - The session bootstrap allocates VerifyGuardState, constructs the guard chain, and the adapter intercepts unverified finish attempts.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/internal.ts:buildVerifyGuardConfig
+  - src/agent/verify-guard.ts:decideVerifyGuard
+consumer:
+  - src/runner/assemble/config.ts:assembleAgentConfig
+  - src/agent/loop/session-bootstrap.ts:bootstrapSession
+  - src/agent/guards/build.ts:buildGuardChain
+  - src/agent/guards/verify-guard.ts:createVerifyGuard
+reachable: yes
+surface_findings:
+  - "CLI environment parsing reaches the shared assembled AgentConfig and the loop-level guard chain."
+  - "The gate is intentionally heuristic and single-budgeted; it can nudge an unverified finish but cannot establish that arbitrary custom verification actually ran."
+  - "Recovery emits unverified and the CLI summary counts verify-guard trips."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/env-knob-branches.test.ts tests/integration/verify-guard-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset QUANTA_VERIFY_GUARD omits the config and a real edit-then-finish loop completes without a verify-guard re-entry.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/verify-guard-hellgate.test.ts tests/unit/verify-guard-must-pass-hellgate.test.ts tests/integration/verify-guard-e2e.test.ts tests/integration/verify-guard-hellgate-e2e.test.ts tests/integration/verify-guard-forces-any.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The actual policy and loop block unverified or failed verification closes, distinguish noise shell calls from real verification, and resume with auto tool choice.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildVerifyGuardConfig|verifyGuard|buildGuardChain|createVerifyGuard' src/apps/cli src/runner src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI config builder forwards the opt-in through assembly to bootstrap, which constructs and invokes the verify guard.
+  - kind: test
+    command: bun test tests/unit/env-knob-branches.test.ts tests/unit/verify-guard-hellgate.test.ts tests/unit/verify-guard-must-pass-hellgate.test.ts tests/integration/verify-guard-e2e.test.ts tests/integration/verify-guard-hellgate-e2e.test.ts tests/integration/verify-guard-forces-any.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 0 failures across environment OFF/ON routing, policy safety cases, and real-loop enforcement cases.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-guard
+review_state: approved
+reviewer: codex/cross-review-wave1

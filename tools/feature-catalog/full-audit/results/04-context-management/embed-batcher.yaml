@@ -1,0 +1,50 @@
+version: 1
+feature_id: embed-batcher
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/retrieval/batching/default-batcher.ts:createDefaultBatcher
+entrypoints: [src/retrieval/batching/index.ts public closed port]
+activation: [No production retrieval composition calls createDefaultBatcher; callers must explicitly adopt the closed port.]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/retrieval/batching/default-batcher.ts:createDefaultBatcher]
+consumer: []
+reachable: no
+surface_findings: [The factory and barrel are complete but rg finds no production consumer outside the batching slice; the catalog's deliberate hold remains accurate.]
+off_identity_proof:
+  kind: source
+  command: "rg -n 'createDefaultBatcher' src --glob '!src/retrieval/batching/**'"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "No production adoption exists outside the feature slice."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/retrieval/embed-batcher-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Window coalescing, single-flight, abort, chunking, and config-invalid arms pass."
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No retriever composition adopts the batcher.
+disposition: wire
+receipts:
+  - kind: source
+    command: "rg -n 'createDefaultBatcher' src --glob '!src/retrieval/batching/**'"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The only production definitions are inside the batching slice."
+  - kind: test
+    command: "bun test tests/unit/retrieval/embed-batcher-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 325-pass focused batch."
+audited_at: '2026-07-19'
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

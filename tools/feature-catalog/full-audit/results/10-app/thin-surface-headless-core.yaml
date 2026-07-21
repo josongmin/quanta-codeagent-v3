@@ -1,0 +1,46 @@
+version: 1
+feature_id: thin-surface-headless-core
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tests/unit/surface-coupling-ratchet.test.ts:collectCrossSurfaceImports
+entrypoints:
+  - tests/unit/surface-coupling-ratchet.test.ts
+activation:
+  - The architecture test scans every runtime import under src/apps and rejects cross-surface edges outside its allowlist.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - tests/unit/surface-coupling-ratchet.test.ts:collectCrossSurfaceImports
+consumer:
+  - CI unit-test execution
+reachable: no
+surface_findings:
+  - The catalog claims a hard ceiling that prevents new cross-surface imports.
+  - The snapshot contains an unallowlisted runtime edge from cli/serve-stdio-cmd.ts to @/apps/headless, so both ratchet assertions fail.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: The claimed enforcement is not green at the audit snapshot because cli/serve-stdio-cmd.ts dynamically imports @/apps/headless without a reviewed allowlist entry.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/apps/cli/serve-stdio-cmd.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The snapshot production source dynamically imports @/apps/headless.
+  - kind: test
+    command: bun test tests/unit/surface-coupling-ratchet.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: The no-new-cross-surface-import and debt-ceiling assertions both report cli/serve-stdio-cmd.ts -> @/apps/headless.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

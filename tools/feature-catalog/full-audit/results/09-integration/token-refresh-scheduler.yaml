@@ -1,0 +1,52 @@
+version: 1
+feature_id: token-refresh-scheduler
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/connectors/token-refresh-scheduler.ts:createTokenRefreshScheduler
+entrypoints:
+  - src/connectors/token-refresh-scheduler.ts:createTokenRefreshScheduler
+  - src/connectors/index.ts
+activation:
+  - A connector composition root must construct the scheduler with a live TokenRotator and schedule loaded expiring records.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - The scheduler derives timers from expiresAt and delegates refreshes to TokenRotator.rotate.
+consumer:
+  - No production source constructs createTokenRefreshScheduler; the connector rotator itself has no production composition owner.
+reachable: no
+surface_findings:
+  - ChatGPT OAuth already refreshes before stream calls with its own coordinator, so it is not an eligible scheduler target.
+  - The standalone implementation is deterministic under injected clock and timer ports, but has no live token lifecycle to schedule.
+off_identity_proof:
+  kind: test
+  command: bun test src/connectors/__tests__/token-refresh-scheduler-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: A rotator without a scheduler remains caller-driven and byte-identical.
+on_efficacy_proof: null
+failure_posture: na
+security_posture: na
+observability: na
+verdict: not-activatable
+blocker: There is no production TokenRotator/connector composition root to construct the scheduler, while ChatGPT OAuth already owns pre-call refresh and must not be double-scheduled.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n "TokenRefreshScheduler|createTokenRefreshScheduler|token-refresh-scheduler|schedule\(connector" src --glob '!src/connectors/token-refresh-scheduler.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Only the barrel and test suite refer to the scheduler; no production constructor call exists.
+  - kind: test
+    command: bun test src/connectors/__tests__/token-refresh-scheduler-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 16 deterministic timing, backoff, cancellation, and default-off tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

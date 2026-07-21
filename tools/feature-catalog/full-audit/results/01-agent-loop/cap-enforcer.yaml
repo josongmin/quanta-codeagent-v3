@@ -1,0 +1,67 @@
+version: 1
+feature_id: cap-enforcer
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/cap-enforcer.ts:buildCapEnforcer and CapEnforcer
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+  - src/agent/loop-helpers.ts:attachCapEnforcer
+  - src/agent/dispatch.ts:dispatchToolInner
+activation:
+  - QUANTA_CAP_ENFORCE=1
+  - AgentConfig.capEnforce=true
+  - caller-provided AgentConfig.capEnforcer
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/loop-helpers.ts:attachCapEnforcer
+  - src/agent/cap-enforcer.ts:buildCapEnforcer
+consumer:
+  - src/agent/dispatch.ts:dispatchToolInner
+  - src/agent/dispatch/execute.ts:record nextAction
+reachable: yes
+surface_findings:
+  - "CLI: session bootstrap attaches the env/config-gated enforcer and dispatch consumes it before execution and records hints after execution."
+  - "Web: no independent UI surface; catalog web-na is accurate for the internal dispatch feature."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/next-action-cap-enforce.test.ts tests/integration/dof22-cap-enforcer-env-gate-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset env leaves no enforcer and the identical ignored-hint script emits no reminder.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/cap-enforcer-real-loop-e2e.test.ts tests/integration/dof22-cap-enforcer-env-gate-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real runAgent builds from QUANTA_CAP_ENFORCE and injects a reminder only when a hint is ignored.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'attachCapEnforcer|buildCapEnforcer|capEnforcer\?\.check|capEnforcer\?\.record' src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Bootstrap attaches once, dispatch checks before execution, and execute records each returned nextAction.
+  - kind: test
+    command: bun test tests/unit/next-action-cap-enforce.test.ts tests/integration/cap-enforcer-real-loop-e2e.test.ts tests/integration/dof22-cap-enforcer-env-gate-real-loop-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Unit state machine, real loop ON/OFF controls, env gate reading, and red-on-injection behavior passed.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception was reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-context
+review_state: approved
+reviewer: codex/cross-review-wave1

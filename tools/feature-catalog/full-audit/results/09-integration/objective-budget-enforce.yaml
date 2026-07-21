@@ -1,0 +1,60 @@
+version: 1
+feature_id: objective-budget-enforce
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/emit-helpers.ts:objectiveBudgetExhausted
+entrypoints:
+  - src/shared/runtime-config.ts:runtimeConfig
+  - src/agent/objective/store.ts:createObjectiveStore
+  - src/agent/loop/emit-helpers.ts:objectiveBudgetExhausted
+  - src/agent/loop/compaction-wire.ts
+  - src/agent/loop/recovery-executor.ts
+activation:
+  - QUANTA_OBJECTIVE_BUDGET_ENFORCE enables the loop read gate, but a store must also have been constructed with enforceBudget:true to derive budget_limited.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - runtimeConfig exposes objectiveBudgetEnforce and the loop checks derived budget_limited status at continuation sites.
+consumer:
+  - Current CLI, host assembler, and observability constructors call createObjectiveStore without enforceBudget, so the read gate cannot observe budget_limited from their stores.
+reachable: no
+surface_findings:
+  - The advertised env knob reaches runtimeConfig, but no production constructor propagates it into createObjectiveStore({ enforceBudget: true }).
+  - The focused E2E passes by injecting an enforcing store; it does not prove activation through the production env-to-store composition path.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/objective-budget-enforce-hellgate.test.ts tests/unit/objective-budget-enforce-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Non-enforcing stores remain informational and the synthetic knob-off continuation path fires.
+on_efficacy_proof: null
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: not-activatable
+blocker: QUANTA_OBJECTIVE_BUDGET_ENFORCE is never projected into createObjectiveStore({ enforceBudget: true }) by any production composition root, so the advertised knob cannot produce budget_limited.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n "createObjectiveStore\(" src apps
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All production store constructions omit enforceBudget despite runtimeConfig exposing the env gate.
+  - kind: source
+    command: rg -n "objectiveBudgetEnforce|enforceBudget" src apps --glob '!src/agent/objective/store.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The env is read by runtime config and loop gating, but no source construction passes it to the store.
+  - kind: test
+    command: bun test tests/unit/objective-budget-enforce-hellgate.test.ts tests/unit/objective-budget-enforce-e2e-hellgate.test.ts tests/unit/thread-goals-enforce-hellgate.test.ts tests/unit/thread-goals-enforce-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 32 unit and injected-store E2E cases passed; they establish semantics, not production env-to-store activation.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

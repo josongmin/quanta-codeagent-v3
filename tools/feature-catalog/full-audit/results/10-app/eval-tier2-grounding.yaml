@@ -1,0 +1,62 @@
+version: 1
+feature_id: eval-tier2-grounding
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/grounding/index.ts:runGrounding and loader.ts:loadGroundingCases
+entrypoints:
+  - package.json:eval:grounding
+  - src/apps/eval/index.ts:groundingCommand
+  - .github/workflows/grounding-live-gate.yml
+activation:
+  - Run eval grounding against canary/nightly or a supplied corpus with a configured provider route.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/eval/grounding/loader.ts:loadGroundingCases
+  - src/apps/eval/grounding/index.ts:runGrounding
+  - src/apps/eval/grounding/probe.ts:runGroundingProbe
+consumer:
+  - src/apps/eval/index.ts:groundingCommand
+  - .github/workflows/grounding-live-gate.yml
+reachable: no
+surface_findings:
+  - The eval app and the labeled/manual/nightly workflow own the grounding run, report, gate, comparison, and regression surfaces.
+  - Snapshot loader fail-closes before execution: canary fixture feature-catalog-stale-cleanup is stale_context_trap with severity high, while loader requires a critical stale_context_trap case.
+  - The focused CLI child tests additionally hard-code the shared primary worktree and currently hit an external branch-search initialization TDZ; that contamination is not used as the feature verdict.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-grounding-schema.test.ts tests/unit/eval-grounding-baseline.test.ts tests/unit/eval-grounding-parser.test.ts tests/unit/eval-grounding-diagnostics.test.ts tests/unit/eval-grounding-scorer-hellgate.test.ts tests/unit/eval-grounding-report.test.ts tests/unit/eval-grounding-compare.test.ts tests/unit/eval-grounding-storage-roundtrip.test.ts tests/unit/eval-grounding-cli.test.ts tests/unit/eval-grounding-corpus.test.ts tests/unit/workflows/yaml-validity.test.ts tests/unit/workflows/permission-bounds.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: 78 pass and 10 fail; direct loader rails reject the built-in canary corpus because a required critical stale_context_trap bucket is absent.
+failure_posture: fail-closed
+security_posture: conditional
+observability: verified
+verdict: not-activatable
+blocker: Built-in canary/nightly corpus cannot load under the snapshot's own required-critical-bucket invariant; promote or add a reviewed critical stale_context_trap fixture, then rerun the grounding corpus and CLI rails.
+disposition: hold
+receipts:
+  - kind: source
+    command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/apps/eval/grounding/cases/canary/feature-catalog-stale-cleanup.json
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: The only snapshot canary stale_context_trap fixture is severity high, not critical.
+  - kind: source
+    command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/apps/eval/grounding/loader.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: validateCriticalBucketGovernance requires every canary critical bucket, including stale_context_trap, before runs proceed.
+  - kind: test
+    command: bun test tests/unit/eval-grounding-schema.test.ts tests/unit/eval-grounding-baseline.test.ts tests/unit/eval-grounding-parser.test.ts tests/unit/eval-grounding-diagnostics.test.ts tests/unit/eval-grounding-scorer-hellgate.test.ts tests/unit/eval-grounding-report.test.ts tests/unit/eval-grounding-compare.test.ts tests/unit/eval-grounding-storage-roundtrip.test.ts tests/unit/eval-grounding-cli.test.ts tests/unit/eval-grounding-corpus.test.ts tests/unit/workflows/yaml-validity.test.ts tests/unit/workflows/permission-bounds.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: Built-in corpus governance and bounded-concurrency tests fail at the loader; workflow structural and other isolated rails pass.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

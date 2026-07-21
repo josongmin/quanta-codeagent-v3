@@ -1,0 +1,60 @@
+version: 1
+feature_id: background-compaction
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/session-bootstrap.ts:buildSessionBootstrap
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:buildSessionBootstrap
+activation:
+  - QUANTA_BG_COMPACTION must be exactly "1".
+  - Session bootstrap creates the controller and compaction-wire starts and reconciles it.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/compaction/background.ts:BackgroundSummarizationController
+  - src/agent/compaction.ts:makeBgCompactionController
+consumer:
+  - src/agent/loop/session-bootstrap.ts:buildSessionBootstrap
+  - src/agent/loop/compaction-wire.ts:maybeCompact
+  - src/agent/loop/same-turn-engine.ts:runTurn
+reachable: yes
+surface_findings:
+  - The controller is built only under the strict runtime gate, starts after compaction context assembly, reconciles at the turn boundary, and is cancelled on abort paths.
+  - The catalog evidence paths are partly stale after loop decomposition, but the claimed live integration remains present.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/background-compaction-hellgate.test.ts tests/unit/agent/loop/same-turn-engine.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Strict falsey values do not construct the controller, and the normal loop preserves the synchronous path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/background-compaction-hellgate.test.ts tests/unit/agent/loop/same-turn-engine.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Start, two-phase install or discard, errors, cancellation, and stream-abort cancellation rails pass.
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "makeBgCompactionController|reconcileAtTurnBoundary|maybeStart|cancelIfPending" src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live session bootstrap, compaction boundary, and early-exit paths are connected.
+  - kind: test
+    command: bun test tests/unit/background-compaction-hellgate.test.ts tests/unit/agent/loop/same-turn-engine.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected focused rail passed as part of the 244-pass, 0-fail audit run.
+audited_at: "2026-07-19"
+auditor: codex/p1-context-memory
+review_state: approved
+reviewer: codex/cross-review-wave1

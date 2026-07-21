@@ -1,0 +1,63 @@
+version: 1
+feature_id: otlp-http-exporter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/otel-span-export.ts:installOtelSpanExportFromEnv
+entrypoints:
+  - src/apps/cli/index.ts:wireOtelSpanExport
+  - src/apps/agent/index.ts:import.meta.main boot
+  - src/apps/web-daemon/index.ts:main
+activation:
+  - QUANTA_OTEL_ENDPOINT supplies a collector endpoint
+  - QUANTA_OTEL_SERVICE_NAME, QUANTA_OTEL_BATCH_SIZE, and QUANTA_OTEL_FLUSH_MS tune the exporter
+effective_defaults:
+  cli: off
+  web: na
+  bench: on
+  headless: off
+  daemon: off
+producer:
+  - src/observability/otel-exporter.ts:attachOtelExporterFromEnv
+  - src/observability/otel-span-export.ts:createExporterSpanSink
+consumer:
+  - src/apps/cli/index.ts:wireOtelSpanExport
+  - src/apps/agent/index.ts:installOtelSpanExportFromEnv
+  - src/apps/web-daemon/index.ts:installOtelSpanExportFromEnv
+  - src/host/runtime/agent-arg-builder/gated-tool-ports.ts:instrumentToolsForExport
+reachable: yes
+surface_findings:
+  - CLI, headless agent, and web daemon invoke the same install seam at their process roots.
+  - Bench direct entry is default-off, but its normal trace sink boot mints a localhost endpoint unless explicitly opted out.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability/otel-span-export-wiring-hellgate.test.ts tests/unit/observability/instrument-tools-for-export-hellgate.test.ts tests/integration/spans-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset endpoint installs no sink or tool wrapper and the e2e span run records zero sink events.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability/otel-exporter-hellgate.test.ts tests/unit/observability/otel-span-export-wiring-hellgate.test.ts tests/unit/observability/instrument-tools-for-export-hellgate.test.ts tests/integration/spans-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: ON posts spans and metrics to OTLP JSON endpoints, retains failed batches for retry, and exports instrumented tool calls.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'installOtelSpanExportFromEnv|QUANTA_OTEL_ENDPOINT|instrumentToolsForExport' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps src/host src/observability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All three production process roots install the shared exporter; tool assembly conditionally instruments only when an export sink exists.
+  - kind: test
+    command: bun test tests/unit/observability/otel-exporter-hellgate.test.ts tests/unit/observability/otel-span-export-wiring-hellgate.test.ts tests/unit/observability/instrument-tools-for-export-hellgate.test.ts tests/integration/spans-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 40 focused tests passed for transport, wiring, OFF identity, retry retention, parent linkage, metrics, and tool instrumentation.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

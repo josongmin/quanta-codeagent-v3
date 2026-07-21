@@ -1,0 +1,50 @@
+version: 1
+feature_id: auto-mode-rule-overlay
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/admissibility-gate/gates.ts:withAutoModeOverlay
+entrypoints: []
+activation: ["QUANTA_AUTO_MODE_RULES=1 and an injected RulesStore"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/permission/classifier.ts:withUserRuleOverlay, src/permission/circumvention.ts:buildAutoModeOverlay]
+consumer: []
+reachable: no
+surface_findings: ["Overlay logic is present in the admissibility gate but its required RulesStore has no production construction/injection at this snapshot."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/auto-mode-rules-gate-off-byte-identity-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset gate preserves the canonical classifier prompt byte-for-byte.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/auto-mode-overlay-hellgate.test.ts tests/unit/auto-mode-rules-gate-off-byte-identity-hellgate.test.ts tests/unit/auto-mode-rule-overlay-circumvention-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 44 overlay, source-fence, gate, and injected real-gate e2e cases pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: seam-only
+blocker: Live activation requires a RulesStore, but no production composition root supplies one.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg -n "new RulesStore|rulesStore" src/apps src/host src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Gate accepts an optional store but no application owner constructs it.
+  - kind: test
+    command: bun test tests/unit/auto-mode-overlay-hellgate.test.ts tests/unit/auto-mode-rules-gate-off-byte-identity-hellgate.test.ts tests/unit/auto-mode-rule-overlay-circumvention-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 44 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

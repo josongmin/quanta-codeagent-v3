@@ -1,0 +1,55 @@
+version: 1
+feature_id: linux-sandbox-native-impl
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/os-sandbox/default.ts:defaultOsSandbox
+entrypoints:
+  - src/runtime/os-sandbox/default.ts:defaultOsSandbox
+  - src/runtime/os-sandbox/landlock-native.ts:nativeLandlockOsSandbox
+activation:
+  - On Linux, a requested sandbox uses the optional native binding when its Landlock availability probe succeeds; otherwise it falls back to bubblewrap or a typed refusal.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - crates/linux-sandbox-native/src/lib.rs:spawn_sandboxed
+  - crates/linux-sandbox-native/src/policy.rs:compile_ruleset
+  - crates/linux-sandbox-native/src/seccomp.rs:build_and_apply_strict_seccomp
+consumer:
+  - src/runtime/os-sandbox/landlock-native.ts:nativeLandlockOsSandbox
+  - src/runtime/os-sandbox/default.ts:defaultOsSandbox
+reachable: yes
+surface_findings:
+  - The TypeScript router probes the optional binding first, uses it when available, then falls back to bubblewrap and refuses a requested unenforceable sandbox.
+  - The Rust policy defaults seccompMode to strict and routes lax only when explicitly requested; this contradicts the catalog's lax-only Phase 3.1 description.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/os-sandbox-landlock-native-hellgate.test.ts && cargo build -p linux-sandbox-native
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Adapter probe, native dispatch, policy projection, Linux fallback chain, and the crate build all pass.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: The catalog describes lax-only seccomp with strict filtering deferred, but the native Rust policy defaults to strict and compiles the strict filter path. Native Linux runtime/published-artifact proof remains outside this macOS audit.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'detectNativeLandlock|nativeLandlockOsSandbox|build_and_apply_strict_seccomp|seccomp_mode' src/runtime/os-sandbox/default.ts src/runtime/os-sandbox/landlock-native.ts crates/linux-sandbox-native/src/lib.rs crates/linux-sandbox-native/src/seccomp.rs
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Router fallback and strict-by-default native policy are present in the snapshot.
+  - kind: test
+    command: bun test tests/unit/os-sandbox-landlock-native-hellgate.test.ts && cargo build -p linux-sandbox-native
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Twenty adapter/fallback cases passed and cargo built the native package from crates/.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

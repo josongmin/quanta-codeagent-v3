@@ -1,0 +1,51 @@
+version: 1
+feature_id: jsonrpc-codec
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/jsonrpc/codec.ts:decodeFrame
+entrypoints:
+  - src/shared/jsonrpc/index.ts
+activation:
+  - A future IPC, MCP, or LSP transport imports and invokes the JSON-RPC codec.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/shared/jsonrpc/codec.ts:encodeRequest
+  - src/shared/jsonrpc/codec.ts:decodeFrame
+consumer: []
+reachable: no
+surface_findings:
+  - Codec and envelope functions are implemented with Result-based decode failure and strict encoder re-parse behavior.
+  - Production source references are confined to the shared JSON-RPC slice exports; no transport composition invokes codec encode or decode functions.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/jsonrpc-codec.test.ts tests/unit/jsonrpc-envelope.test.ts tests/integration/jsonrpc-envelope-hell-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Frame round-trips, malformed decode safety, envelope schema, concurrency, timeout, and fuzz rails passed under test callers.
+failure_posture: unknown
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production IPC, MCP, LSP, CLI, web, or daemon transport imports and invokes the codec.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'encodeRequest|decodeRequest|decodeFrame' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/shared/jsonrpc src/apps src/host src/mcp src/lsp
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Executable codec references are confined to the shared JSON-RPC module itself.
+  - kind: test
+    command: bun test tests/unit/jsonrpc-codec.test.ts tests/unit/jsonrpc-envelope.test.ts tests/integration/jsonrpc-envelope-hell-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused JSON-RPC codec rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

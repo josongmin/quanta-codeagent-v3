@@ -1,0 +1,47 @@
+version: 1
+feature_id: fc-prose-bundles
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tools/feature-catalog/render.ts:loadProse
+entrypoints: [tools/feature-catalog/cli.ts]
+activation: [bun fc build]
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer: [tools/feature-catalog/prose/00-intro.md, tools/feature-catalog/prose/50-codex-non-absorption.md, tools/feature-catalog/prose/99-policy-non-absorption.md]
+consumer: [tools/feature-catalog/render.ts:loadProse, tools/feature-catalog/render.ts:renderCatalog]
+reachable: no
+surface_findings:
+  - "This is standalone catalog-build tooling, not an interactive CLI runtime feature despite the catalog surface label."
+  - "The renderer loads prefix-sorted prose and places intro and trailers in deterministic render positions."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/feature-catalog-render.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Render structure, intro insertion, trailer placement, and golden fixture cases pass.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'loadProse|00-|50-|99-' tools/feature-catalog/render.ts tools/feature-catalog/cli.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Catalog CLI loads prose through the renderer, which classifies intro and trailer files by prefix.
+  - kind: test
+    command: bun test tests/unit/feature-catalog-render.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused catalog render rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

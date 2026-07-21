@@ -1,0 +1,64 @@
+version: 1
+feature_id: cfg-fourrule-true
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/closeout-guard.ts:decideCloseoutGuard
+entrypoints:
+  - src/host/runtime/internal/context-binding/base.ts:buildRuntimeBase
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+  - src/agent/loop/session-bootstrap.ts:bootstrapSession
+activation:
+  - QUANTA_BENCH_CLOSEOUT=4rule parses to { fourRule: true } and the interactive composition roots fold it into AgentConfig.closeoutGuard.
+  - The session bootstrap creates a closeout state and guard-chain entry; the first finish attempt injects CLOSEOUT_4RULE_REMINDER.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/runner/knobs/knobs/closeout-guard.ts:applyCloseoutGuard
+  - src/agent/closeout-guard.ts:decideCloseoutGuard
+consumer:
+  - src/runner/assemble/interactive-knobs.ts:wireInteractiveKnobs
+  - src/agent/loop/session-bootstrap.ts:bootstrapSession
+  - src/agent/guards/build.ts:buildGuardChain
+  - src/agent/guards/closeout-guard.ts:createCloseoutGuard
+reachable: yes
+surface_findings:
+  - "CLI and unified-agent composition roots call wireInteractiveKnobs; the closeout knob accepts the strict 4rule value and sets enabled plus fourRule."
+  - "The bench surface is deliberately excluded by the knob's surface guard; this is not a bench runtime feature."
+  - "The guard is single-shot and forces tool_choice none for its re-entry, so efficacy is visible in the real loop."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/runner/knobs/closeout-guard.test.ts tests/integration/closeout-forces-none.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset or invalid knob input does not construct closeoutGuard, and disabled closeoutGuard leaves every real-loop tool choice auto.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/runner/knobs/closeout-guard.test.ts tests/unit/closeout-guard.test.ts tests/integration/closeout-forces-none.test.ts tests/integration/sota-codex-full.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Strict 4rule parsing produces the fourRule config shape; policy selects the four-rule reminder; a full run records closeout recovery and forces the re-entry.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'closeoutGuard|fourRule|wireInteractiveKnobs|buildGuardChain' src/runner src/host src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The interactive composition roots apply the knob, then session bootstrap builds the guard chain and its closeout adapter consumes the config.
+  - kind: test
+    command: bun test tests/unit/runner/knobs/closeout-guard.test.ts tests/unit/closeout-guard.test.ts tests/integration/closeout-forces-none.test.ts tests/integration/sota-codex-full.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 0 failures across parser, policy, forced-loop, and full composition tests.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-guard
+review_state: approved
+reviewer: codex/cross-review-wave1

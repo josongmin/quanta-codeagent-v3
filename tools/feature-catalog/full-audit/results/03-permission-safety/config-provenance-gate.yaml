@@ -1,0 +1,52 @@
+version: 1
+feature_id: config-provenance-gate
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/policy-layers/provenance-guard.ts:guardProvenance
+entrypoints: [src/permission/profile-layer-merge.ts:mergeProfileLayers]
+activation: [default-on provenance filtering, acknowledgedRisk true only]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: [src/permission/policy-layers/provenance-guard.ts]
+consumer: [src/permission/profile-layer-merge.ts]
+reachable: yes
+surface_findings:
+  - "Source-precedence profile merge calls guardProvenance after repo filesystem filtering and before mergeLayered."
+  - "Repo/frontmatter can narrow but cannot widen approval, network, sandbox, or trusted filesystem boundaries; exact acknowledgedRisk opt-out is explicit."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/config-provenance-gate-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No-widen trusted and narrowing layers preserve reference/behavior; acknowledged risk passes through only when exactly true.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/config-provenance-gate-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Approval, network, allowlist, sandbox, and source matrix widen attempts are dropped with records.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'guardProvenance|mergeLayered' src/permission/profile-layer-merge.ts src/permission/policy-layers/provenance-guard.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Guard is on the production source-precedence merge path.
+  - kind: test
+    command: bun test tests/unit/config-provenance-gate-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Provenance gate hellgate passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

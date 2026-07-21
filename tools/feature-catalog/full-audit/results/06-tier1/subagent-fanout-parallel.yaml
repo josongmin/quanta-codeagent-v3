@@ -1,0 +1,52 @@
+version: 1
+feature_id: subagent-fanout-parallel
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/streaming-dispatch.ts:scheduleResolvedCall
+entrypoints:
+  - src/agent/loop/stream-consume.ts:streamingTurn wiring
+activation:
+  - The agent tool accepts parallel_worker on the normal subagent surface, but the dispatcher only early-starts read-only tools.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/subagent/agent-tool.ts:createAgentTool
+consumer:
+  - src/agent/streaming-dispatch.ts:scheduleResolvedCall
+reachable: yes
+surface_findings:
+  - agent declares isConcurrencySafe true and accepts parallel_worker, but remains isReadOnly false because a child can mutate.
+  - The live dispatcher deliberately ignores isEarlyDispatchSafe and admits only read-only calls to the in-flight phase; agent calls are deferred to the Phase-3 serial drain.
+  - The focused hellgate is explicitly post-FIX-6 and proves peak in-flight one, serial order, and abort-hole closure. The catalog statement that agent fanout dispatches in parallel is no longer true.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-fanout-hellgate.test.ts tests/unit/streaming-dispatch-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The 23 focused tests prove declarative input support and the shipped serial-deferred execution posture.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog purpose and notes promise parallel in-flight dispatch, whereas the current abort-safety authority forces all non-read-only agent calls into serial Phase-3 dispatch.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "isConcurrencySafe|isEarlyDispatchSafe|isReadOnly|void isEarlyDispatchSafe" src/subagent/agent-tool.ts src/agent/streaming-dispatch.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The tool retains the declarative flags, but scheduleResolvedCall checks only read-only eligibility before early dispatch.
+  - kind: test
+    command: bun test tests/unit/subagent-fanout-hellgate.test.ts tests/unit/streaming-dispatch-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 23 pass, 0 fail; the fanout suite asserts serial-deferred agent calls as the intended post-FIX-6 behavior.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch21
+review_state: approved
+reviewer: codex/cross-review-wave1

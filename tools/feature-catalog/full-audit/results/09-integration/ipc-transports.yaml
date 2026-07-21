@@ -1,0 +1,50 @@
+version: 1
+feature_id: ipc-transports
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/ipc/transports/stdio.ts:createStdioTransport
+entrypoints:
+  - src/ipc/transports/in-memory.ts:createInMemoryHub
+  - src/ipc/transports/stdio.ts:createStdioTransport
+  - src/ipc/transports/uds.ts:wrapDuplexAsUdsTransport
+  - src/ipc/transports/websocket.ts:wrapWebSocketLikeAsTransport
+activation:
+  - A surface must construct an EventBridge transport; no production caller currently does so.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - In-memory and stdio adapters implement BridgeTransport framing.
+  - UDS is a duplex adapter without node:net connect/listen ownership; websocket server creation intentionally throws.
+consumer:
+  - No application source consumes these EventBridge transports.
+reachable: no
+surface_findings:
+  - The stdio adapter has bounded-frame and lifecycle handling but remains unwired to a CLI or daemon EventBridge.
+  - UDS and server-side websocket are explicitly incomplete, so the advertised four-transport set cannot be promoted as operable.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: na
+security_posture: na
+observability: na
+verdict: not-activatable
+blocker: EventBridge has no production consumer, UDS lacks node:net connect/listen/accept, and createWebSocketServerTransport intentionally throws pending server implementation.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n "createStdioTransport|wrapDuplexAsUdsTransport|wrapWebSocketLikeAsTransport|createWebSocketServerTransport" src/ipc/transports
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Source confirms stdio adapter implementation, UDS adapter-only scope, and deliberately throwing websocket server placeholder.
+  - kind: source
+    command: rg -n "BridgeTransport|createStdioTransport|createInMemoryHub" src apps --glob '!src/ipc/**'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production EventBridge transport installation was found.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

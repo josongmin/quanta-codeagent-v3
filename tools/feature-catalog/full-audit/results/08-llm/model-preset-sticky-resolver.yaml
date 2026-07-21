@@ -1,0 +1,60 @@
+version: 1
+feature_id: model-preset-sticky-resolver
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/surface-compose/runtime-compose.ts:buildPresetRoleModelResolver
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/slash/registry-session.ts:/presets
+activation:
+  - Interactive CLI session executes /presets opusplan; the shared resolver is consulted on the next role-model resolution.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/model-preset.ts:createStickyPresetResolver
+  - src/apps/cli/repl/ctx-adapters/preset-role-resolver-adapter.ts:buildPresetRoleModelResolver
+consumer:
+  - src/apps/cli/slash/presets-cmd.ts:presetsCmd
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts
+  - src/agent/loop/skill-gate.ts:resolveChildLlm
+reachable: yes
+surface_findings:
+  - Core state owns one resolver instance and composition passes that same instance to both /presets and AgentConfig.roleModelResolver.
+  - With no selected preset, role resolution returns the supplied LLM unchanged; selection changes the reviewer or executor candidate on the next role resolution.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/llm/model-preset-hellgate.test.ts tests/unit/apps/cli/presets-role-model-compose-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unselected and absent-resolver controls retain the fallback LLM verbatim.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm/model-preset-hellgate.test.ts tests/unit/apps/cli/presets-role-model-compose-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 22 resolver and composition cases prove /presets-selected opusplan changes reviewer and executor model candidates through the live compose chain.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'createStickyPresetResolver|buildPresetRoleModelResolver|presetResolver|presetsCmd|roleModelResolver' src/apps/cli/repl src/apps/cli/slash src/agent/loop/skill-gate.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI core-state, slash command, adapter, runtime compose, and child-LLM consumer share one resolver seam.
+  - kind: test
+    command: bun test tests/unit/llm/model-preset-hellgate.test.ts tests/unit/apps/cli/presets-role-model-compose-wiring-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 22 focused resolver, byte-identity, identity-pass-through, and selected-role-swap cases pass.
+audited_at: "2026-07-19"
+auditor: codex/p1-llm-extended
+review_state: approved
+reviewer: codex/cross-review-wave1

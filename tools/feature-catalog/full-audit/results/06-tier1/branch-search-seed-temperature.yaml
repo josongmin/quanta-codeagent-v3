@@ -1,0 +1,55 @@
+version: 1
+feature_id: branch-search-seed-temperature
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/branch-search/seed.ts:buildSeeds"
+entrypoints:
+  - "src/agent/branch-search/tool.ts:branchSearchTool"
+activation:
+  - "A configured branch_search tool invokes buildSeeds for each N-candidate execution."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/agent/branch-search/seed.ts:buildSeeds"
+consumer:
+  - "src/agent/branch-search/tool.ts:branchSearchTool"
+reachable: yes
+surface_findings:
+  - "The production tool passes model candidates into buildSeeds before runBranchSearch; default session composition remains opt-in through AgentConfig.branchSearch."
+off_identity_proof:
+  kind: source
+  command: "rg -n 'branchSearch' src/agent/features.ts src/agent --glob '!src/agent/branch-search/**'"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The tool is registered only when the optional branchSearch configuration is supplied."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/branch-search.test.ts tests/unit/branch-search-seed-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Temperature spread, deterministic hints, model round-robin, and branch execution rails pass."
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'buildSeeds\\(' src/agent/branch-search/tool.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The production branch_search tool supplies the seed set to runBranchSearch."
+  - kind: test
+    command: "bun test tests/unit/branch-search.test.ts tests/unit/branch-search-seed-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 502-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

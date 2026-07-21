@@ -1,0 +1,58 @@
+version: 1
+feature_id: agent-loop-branch-hardening
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/stream-consume.ts:streamConsume and src/agent/admissibility-gate/shared.ts:denyFromConfirm
+entrypoints:
+  - src/agent/loop/entry.ts:runAgent
+  - src/apps/cli/repl.ts:bootstrapSession
+activation:
+  - Every normal agent stream reaches assembly, recovery decision, and deferred-dispatch handling.
+  - A refusal stop reason exercises the terminal refusal path; a structured confirmer can exercise deny_and_steer.
+effective_defaults:
+  cli: on
+  web: off
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/recovery.ts:decideOnAssembled
+  - src/llm/assemble.ts:assembleFromEvents
+  - src/agent/admissibility-gate/shared.ts:denyFromConfirm
+consumer:
+  - src/agent/loop/same-turn-engine.ts:resolveTurnAction
+  - src/agent/streaming-dispatch.ts:deferred dispatch refusal short-circuit
+  - src/agent/admissibility-gate/gates.ts:HITL and mode-policy confirmation branches
+reachable: yes
+surface_findings:
+  - Refusal is terminal before recovery-budget consumption, and refusal after deferred unsafe tool calls suppresses Phase-3 dispatch.
+  - Anthropic and OpenAI reasoning deltas reach assembleFromEvents and become ordered ThinkingBlocks.
+  - deny_and_steer is production-reachable through the admission gate as a typed DispatchResult envelope; the catalog itself accurately records that the general loop does not yet consume steerInjection on a following turn.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/recovery-hellgate.test.ts tests/unit/llm/assemble-thinking.test.ts tests/unit/agent/confirm-decision.test.ts tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts tests/integration/admissibility-deny-steer.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails prove refusal terminality and no unsafe deferred dispatch, thinking/signature assembly, strict ConfirmDecision validation, and live admission-gate steer envelopes.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'stopReason === "refusal"|thinking_delta|signature_delta|deny_and_steer|steerInjection' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent src/llm
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The frozen source contains the stream-to-assembly and admission-gate producer/consumer chain; steerInjection has no general loop consumer, matching the catalog's explicit partial-wiring note.
+  - kind: test
+    command: bun test tests/unit/recovery-hellgate.test.ts tests/unit/llm/assemble-thinking.test.ts tests/unit/agent/confirm-decision.test.ts tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts tests/integration/admissibility-deny-steer.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected branch-hardening rail was part of the 283-pass, 0-fail focused audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-prompt
+review_state: approved
+reviewer: codex/cross-review-wave1

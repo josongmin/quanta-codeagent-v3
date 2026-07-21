@@ -1,0 +1,53 @@
+version: 1
+feature_id: shadow-odb-port
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/storage/shadow-odb/default.ts:defaultShadowOdb
+entrypoints: [src/apps/cli/repl/surface-compose/core-state.ts:buildSurfaceCoreState, src/apps/cli/snapshot-cmd.ts:runSnapshotCommand]
+activation: ["QUANTA_SHADOW truthy causes the interactive CLI surface to mint defaultShadowOdb, thread it to shadow tools and /snapshot, and optionally enable per-tool checkpointing."]
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer: [src/storage/shadow-odb/default.ts:defaultShadowOdb, src/storage/shadow-odb/cleanup.ts:evictLru, src/storage/shadow-odb/default/ops.ts:rewindToRef]
+consumer: [src/apps/cli/repl/surface-compose/core-state.ts:buildSurfaceCoreState, src/agent/tier1/shadow.ts:buildShadowBlock, src/apps/cli/snapshot-cmd.ts:runSnapshotCommand]
+reachable: yes
+surface_findings:
+  - The interactive surface creates the concrete ODB only under QUANTA_SHADOW, then sends the same instance to agent shadow tools, /snapshot, and optional checkpoint composition.
+  - Direct implementation rails exercise a real shadow Git store, ordinal restore and diff, typed failures, workspace isolation, and bounded LRU cleanup without writing the user's .git.
+  - The primary off path omits the slot entirely; /snapshot reports the typed not-configured posture rather than constructing a store.
+off_identity_proof:
+  kind: source
+  command: rg -n "QUANTA_SHADOW|defaultShadowOdb|shadowOdb" src/apps/cli/repl/surface-compose/core-state.ts src/apps/cli/repl/surface-compose/dispatch-compose.ts src/agent/tier1/shadow.ts src/apps/cli/snapshot-cmd.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: With the environment gate absent, no defaultShadowOdb instance or AgentConfig shadowOdb slot is created.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/shadow-odb-hellgate.test.ts tests/unit/shadow-odb-rewind-extensions-hellgate.test.ts tests/unit/cli-rewind-slash-hellgate.test.ts tests/unit/cli/snapshot-cmd-ordinal-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 102 direct ODB and CLI rewind tests plus the ordinal /snapshot rail passed, including real Git snapshot effects and failure-closed restoration.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "defaultShadowOdb|QUANTA_SHADOW|shadowOdb|runSnapshotCommand|buildShadowBlock" src/storage/shadow-odb src/apps/cli/repl/surface-compose src/apps/cli/snapshot-cmd.ts src/agent/tier1/shadow.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The actual factory, default-off CLI composition, slash consumer, and agent shadow-tool consumer are connected.
+  - kind: test
+    command: bun test tests/unit/shadow-odb-hellgate.test.ts tests/unit/shadow-odb-rewind-extensions-hellgate.test.ts tests/unit/cli-rewind-slash-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 102 selected direct implementation and consumer tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-multimodal
+review_state: approved
+reviewer: codex/cross-review-wave1

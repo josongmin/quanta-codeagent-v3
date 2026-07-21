@@ -1,0 +1,60 @@
+version: 1
+feature_id: issue-hint-extraction
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/eval/driver/localize-prep.ts:prepareIssueHint
+entrypoints:
+  - src/apps/bench/eval/driver.ts:prepareIssueHint
+  - src/runner/batch/eval/driver/attempt-context.ts:prepareIssueHint
+activation:
+  - Bench posture defaults issueHintMode to off.
+  - QUANTA_BENCH_ISSUE_HINT selects regex or agentless preparation for a bench run.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/issue-hint/index.ts:extractIssueHint
+  - src/agent/issue-hint/agentless-localize.ts:agentlessLocalize
+consumer:
+  - src/runner/batch/eval/driver/localize-prep.ts:prepareIssueHint
+  - src/runner/batch/eval/driver/config-build.ts composes the result into the bench prompt
+reachable: yes
+surface_findings:
+  - Regex and Agentless extractors are live in the bench evaluation driver behind the default-off bench knob.
+  - The catalog incorrectly labels the feature CLI-full and advertises interactive, daemon, IDE, and CI-bot modes; the traced consumer is the bench evaluation path, not the interactive CLI loop.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/bench-issue-hint-wiring.test.ts tests/unit/bench-issue-hint-agentless-wiring.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset or off issue-hint mode leaves the generated bench prompt byte-identical.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/issue-hint tests/unit/issue-hint-hellgate.test.ts tests/unit/issue-hint-agentless-hellgate.test.ts tests/unit/bench-issue-hint-wiring.test.ts tests/unit/bench-issue-hint-agentless-wiring.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Extraction, Agentless fallback, adversarial inputs, and bench prompt injection passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "prepareIssueHint|issueHintMode|composeIssueHint" src/apps/bench src/runner/batch/eval
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live producer-to-consumer chain is confined to the bench driver and its runner implementation.
+  - kind: test
+    command: bun test tests/unit/issue-hint tests/unit/issue-hint-hellgate.test.ts tests/unit/issue-hint-agentless-hellgate.test.ts tests/unit/bench-issue-hint-wiring.test.ts tests/unit/bench-issue-hint-agentless-wiring.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused rails passed within the 496-pass audit command.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch5
+review_state: approved
+reviewer: codex/cross-review-wave1

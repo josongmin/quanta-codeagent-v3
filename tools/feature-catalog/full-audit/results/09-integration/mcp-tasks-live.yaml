@@ -1,0 +1,63 @@
+version: 1
+feature_id: mcp-tasks-live
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/mcp-bridge.ts:tasksToolsFor
+entrypoints:
+  - src/host/mcp-composition.ts:loadMcpToolsOrEmpty
+  - src/apps/cli/internal.ts:loadFeatures
+  - src/apps/web-daemon/runtime-factory.ts:loadDaemonMcp
+activation:
+  - A configured MCP client starts and advertises capabilities.tasks in its initialize response.
+  - The bridge registers three model-facing mcp_tasks tools only for that negotiated capability; no environment gate is involved.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/mcp/tasks/client-port.ts:clientTasksPort
+  - src/mcp/tasks/client-port.ts:tasksPortOver
+consumer:
+  - src/agent/mcp-bridge.ts:tasksToolsFor
+  - src/agent/mcp-bridge.ts:loadMcpTools
+  - src/tool/mcp-tasks.ts:mcpTasksTools
+reachable: yes
+surface_findings:
+  - loadMcpTools starts the concrete client, obtains ordinary tools, and appends the three mcp_tasks tools only after serverSupportsTasks succeeds.
+  - Each tool dispatches tasks/list, tasks/getInfo or tasks/getResult, and tasks/cancel through requestRaw; hostile successful payloads normalize to typed conservative outcomes while transport errors propagate as McpError.
+  - Both CLI and web-daemon use the shared MCP composition, and generic tool-call rendering carries registered tool activity to the web session surface.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mcp/tasks-live-binding-hellgate.test.ts tests/unit/mcp/tasks-live-binding-adversarial.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: A server lacking capabilities.tasks adds zero mcp_tasks tools, including malformed capability slots.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp/tasks-live-binding-hellgate.test.ts tests/unit/mcp/tasks-live-binding-adversarial.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 48 focused cases passed for exact RPC methods and params, capability-gated registration, cursor paging, codecs, conservative hostile-response handling, and transport failures.
+failure_posture: degraded
+security_posture: conditional
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'clientTasksPort|tasksPortOver|serverSupportsTasks|tasksToolsFor|tools\.push\(\.\.\.tasksToolsFor|mcpTasksTools' src/mcp/tasks src/agent/mcp-bridge.ts src/host src/apps
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The client port, negotiated bridge gate, tool registration, and shared CLI/web MCP composition consumers are present.
+  - kind: test
+    command: bun test tests/unit/mcp/tasks-live-binding-hellgate.test.ts tests/unit/mcp/tasks-live-binding-adversarial.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 48 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-observability
+review_state: approved
+reviewer: codex/cross-review-wave1

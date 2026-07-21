@@ -1,0 +1,47 @@
+version: 1
+feature_id: env-build-dynamic-context
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/env-context.ts:probeTurnEnv
+entrypoints: [src/agent/prompt.ts:buildDynamicContext]
+activation: [caller supplies TurnContextInput.env]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/agent/env-context.ts:probeTurnEnv]
+consumer: [tests/unit/prompt-env-context-hellgate.test.ts]
+reachable: no
+surface_findings:
+  - "Renderer and probe are implemented, deterministic, and default-off when env is absent."
+  - "Live context assembler builds TurnContextInput without env and no production caller invokes probeTurnEnv."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/prompt-env-context-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent env yields byte-identical dynamic context.
+on_efficacy_proof: null
+failure_posture: na
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: "No production context-assembly call invokes probeTurnEnv or passes env into TurnContextInput."
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'probeTurnEnv|env:' src/agent/loop/context-assembler.ts src/agent/env-context.ts src/agent/prompt.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Probe only exists as an exported seam; live turn input omits env.
+  - kind: test
+    command: bun test tests/unit/prompt-env-context-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Pure renderer/probe rail passes but does not establish runtime reachability.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

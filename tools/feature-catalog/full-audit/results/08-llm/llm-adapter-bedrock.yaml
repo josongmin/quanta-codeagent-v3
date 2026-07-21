@@ -1,0 +1,55 @@
+version: 1
+feature_id: llm-adapter-bedrock
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/providers/bedrock-adapter.ts:BedrockProviderAdapter
+entrypoints:
+  - src/llm/providers/registry.ts:resolveProvider
+activation:
+  - Provider registry selects Bedrock only for explicit provider choice or Bedrock environment conventions.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/providers/bedrock-adapter.ts:BedrockProviderAdapter
+consumer:
+  - src/llm/providers/registry.ts:FACTORIES.bedrock
+reachable: yes
+surface_findings:
+  - Lazy SDK transport, default AWS credential-chain behavior, typed dependency failures, and stream cancellation are covered without a live AWS endpoint.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/llm-providers/registry-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Empty provider configuration selects the default provider rather than Bedrock.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm-providers/bedrock-adapter-hellgate.test.ts tests/unit/llm-providers/registry-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Adapter contract and registry selection rails passed; live AWS exchange remains the documented hold.
+failure_posture: fail-loud
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'BedrockProviderAdapter|FACTORIES.bedrock|CLAUDE_CODE_USE_BEDROCK' src/llm/providers/bedrock-adapter.ts src/llm/providers/registry.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Registry owns opt-in selection and constructs the adapter lazily.
+  - kind: test
+    command: bun test tests/unit/llm-providers/bedrock-adapter-hellgate.test.ts tests/unit/llm-providers/registry-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused Bedrock and registry rails passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

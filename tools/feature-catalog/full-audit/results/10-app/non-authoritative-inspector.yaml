@@ -1,0 +1,51 @@
+version: 1
+feature_id: non-authoritative-inspector
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/probe/index.ts:main
+entrypoints:
+  - package.json:probe command
+activation:
+  - Run the standalone probe CLI with a JSONL trajectory or run directory.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/probe/parse.ts:loadTrajectory and loadRun
+consumer:
+  - src/apps/probe/index.ts:main
+reachable: no
+surface_findings:
+  - This is a separate probe application, correctly marked missing from interactive CLI and web surfaces.
+  - Parser, triage, and render paths are read-only and tolerate malformed or missing input.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/probe-parse.test.ts tests/unit/probe-triage.test.ts tests/unit/probe.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Tolerant ingestion, deterministic bounded triage, render views, and no-authority language rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'main\(process.argv|export.*main' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/probe
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Probe owns an independent CLI main and has no interactive CLI import path.
+  - kind: test
+    command: bun test tests/unit/probe-parse.test.ts tests/unit/probe-triage.test.ts tests/unit/probe.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused probe rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

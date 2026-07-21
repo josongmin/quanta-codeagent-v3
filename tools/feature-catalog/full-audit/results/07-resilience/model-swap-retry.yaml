@@ -1,0 +1,59 @@
+version: 1
+feature_id: model-swap-retry
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/retry-with.ts:retryWithCmd and src/llm/model-swap.ts
+entrypoints:
+  - src/apps/cli/repl/surface-compose/core-state.ts:buildSurfaceCoreState
+  - src/apps/cli/repl/surface-compose/dispatch-compose.ts
+activation:
+  - QUANTA_RETRY_MODELS with at least one usable alternate creates retry candidates.
+  - A streamed turn then exposes a live retry slash state through the surface dispatcher.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/llm/model-swap.ts resolves a distinct candidate and emits a leading stream_reset during re-stream.
+consumer:
+  - src/apps/cli/retry-with.ts runs the selected stream and replaces the preceding assistant message.
+  - src/apps/cli/repl/surface-compose/dispatch-compose.ts supplies live candidates and last stream input to SlashContext.
+reachable: yes
+surface_findings:
+  - Empty or unset QUANTA_RETRY_MODELS omits the retry state and returns a user-visible activation hint.
+  - The session dispatcher requires both enabled candidates and a previously captured stream input, preventing a retry before any turn exists.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli-retry-with.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No session state or empty candidates returns the configured-off diagnostic without stream mutation.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/model-swap-retry.test.ts tests/unit/cli-retry-with.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Candidate resolution, leading stream_reset, slash registration, replacement, cancellation, and mid-stream failure behavior pass.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'buildRetryCandidates\|retryEnabled\|retryWithCmd\|streamWithModel' 9a12f7a -- src/apps/cli/repl src/apps/cli/retry-with.ts src/llm/model-swap.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI env gate builds candidates at session composition and dispatch supplies the live replay state to the slash command.
+  - kind: test
+    command: bun test tests/unit/model-swap-retry.test.ts tests/unit/cli-retry-with.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 30 pass and 0 fail across model selection, stream reset, command routing, OFF behavior, and successful replacement.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

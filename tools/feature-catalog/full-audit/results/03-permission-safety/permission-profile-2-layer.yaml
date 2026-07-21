@@ -1,0 +1,55 @@
+version: 1
+feature_id: permission-profile-2-layer
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/two-layer-manager.ts:createTwoLayerManager
+entrypoints:
+  - src/host/runtime/agent-arg-builder/permission-profile.ts:resolvePermissionProfileManager
+activation:
+  - QUANTA_PERMISSION_PROFILE or --permission-profile creates a manager and registers a profile under session.
+  - Enforcing filesystem access requires a production caller of TwoLayerManager.getEffectiveAccess; none was found.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/permission/access-check.ts:canAccess
+  - src/permission/two-layer-manager.ts:getEffectiveAccess
+  - src/host/runtime/agent-arg-builder/permission-profile.ts:resolvePermissionProfileManager
+consumer:
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+reachable: no
+surface_findings:
+  - The manager is constructed from the CLI/env profile selection and published as permissionProfileManager.
+  - A source-wide production search finds no invocation of getEffectiveAccess, setFileSystemSandboxPolicy, or a reader of permissionProfileManager outside its composition publication.
+  - The two-layer truth table and path traversal hellgate are nonvacuous unit rails, but prove an unconsumed enforcement seam.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission-access-check.test.ts tests/unit/permission-stack-2-layer.test.ts tests/unit/permission/two-layer-path-traversal-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused 116-pass audit rail proves AND semantics, partial-config denial, and traversal fail-closed behavior when the manager is directly invoked.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: seam-only
+blocker: The profile manager is emitted by the CLI composition path but no shipped tool or loop consults getEffectiveAccess, so the advertised two-layer filesystem boundary does not enforce access.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg "createTwoLayerManager|setPermissionProfile\\(|setFileSystemSandboxPolicy\\(|getEffectiveAccess\\(" src --glob '!**/*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production results contain manager construction and its own declarations only; getEffectiveAccess has no external caller.
+  - kind: test
+    command: bun test tests/unit/permission-access-check.test.ts tests/unit/permission-stack-2-layer.test.ts tests/unit/permission/two-layer-path-traversal-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: AND-condition, manager, and traversal regression rails passed as part of the 116-pass focused run.
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch4
+review_state: approved
+reviewer: codex/cross-review-wave1

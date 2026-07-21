@@ -1,0 +1,45 @@
+version: 1
+feature_id: bun-run-dev-start
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/index.ts:CLI launcher
+entrypoints:
+  - package.json:dev and start scripts
+activation:
+  - Run bun run dev or bun run start.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: on
+  daemon: na
+producer:
+  - process arguments and dotenv files
+consumer:
+  - CLI main and REPL
+reachable: yes
+surface_findings:
+  - Package scripts and CLI launcher provide the interactive and headless entry path; dotenv parsing preserves pre-existing environment precedence.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/dotenv.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Dotenv parsing, ordering, quoting, missing-file, and override rails passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/dotenv.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused launcher dotenv rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,53 @@
+version: 1
+feature_id: memory-line-citation-mode-guard
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/tooling.ts:buildMemoryExtras
+entrypoints:
+  - src/runner/assemble/memory-factory.ts:resolveMemoryConfigFromEnv
+  - src/agent/memory-tools.ts:memoryTools
+activation:
+  - Set QUANTA_MEMORY_LINE_CITATIONS=1, QUANTA_MEMORY_MODE to enabled, read-only, or disabled, and or QUANTA_MEMORY_WRITE_GUARD_PCT to a valid percentage.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/runner/knobs/memory-mode-parse.ts:parse memory settings
+  - src/agent/budget/meter.ts:remainingPercent closure
+consumer:
+  - src/agent/memory-tools.ts:search, write, and update tools
+reachable: yes
+surface_findings:
+  - Disabled mode short-circuits read and writes before store I/O; read-only preserves recall while returning typed write denials.
+  - Citation spans are 1-based, bounded to the matched record, and absent by default. The budget guard blocks only strictly below its threshold and is intentionally inert if no live meter closure is supplied.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/memory-tools-citation-mode-guard-hellgate.test.ts tests/integration/memory-mode-knob-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent environment fields retain normal recall and writes without citation spans, and the config block omits all three extras.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-tools-citation-mode-guard-hellgate.test.ts tests/unit/memory-tools-mode-guard-spy-hellgate.test.ts tests/integration/memory-mode-knob-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real tool dispatch proved disabled zero-I/O, typed write blocking, matched line spans, exact threshold behavior, and the live budget-meter closure wire.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/memory-tools-citation-mode-guard-hellgate.test.ts tests/unit/memory-tools-mode-guard-spy-hellgate.test.ts tests/integration/memory-mode-knob-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused command passed 51 line-citation, mode, guard, wire, and BudgetMeter rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

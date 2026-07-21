@@ -1,0 +1,53 @@
+version: 1
+feature_id: durable-state-belongs-in-workspace-files
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt-graph/atoms-body.ts:A_DURABLE_STATE
+entrypoints:
+  - src/agent/prompt.ts:buildSystemPrompt
+activation:
+  - The durable-state instruction atom is a normal static prompt-body atom in the default system-prompt assembly.
+  - The grader-only verify strategy intentionally suppresses local verification body rules, including this instruction, for that specialized prompt profile.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/prompt-body.ts:BODY_AFTER_PERSONA_DURABLE_STATE
+  - src/agent/prompt-graph/atoms-body.ts:A_DURABLE_STATE
+consumer:
+  - src/agent/prompt.ts:buildSystemPrompt
+reachable: yes
+surface_findings:
+  - The literal durable-state paragraph is modeled as an instruction atom and rendered by the system prompt builder for the normal prompt profile.
+  - It is a production prompt-content invariant rather than an independently executable runtime subsystem.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test src/agent/prompt-rules/verify-strategy.test.ts tests/unit/prompt-sections-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Prompt assembly rail passed, including the explicit control that normal batch output contains the durable-state instruction and grader-only suppresses it.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "BODY_AFTER_PERSONA_DURABLE_STATE|A_DURABLE_STATE|buildSystemPrompt" src/agent/prompt-body.ts src/agent/prompt-graph/atoms-body.ts src/agent/prompt.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The literal instruction is registered in the body atom graph and consumed by system-prompt construction.
+  - kind: test
+    command: bun test src/agent/prompt-rules/verify-strategy.test.ts tests/unit/prompt-sections-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused prompt assembly rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-memory-batch6
+review_state: approved
+reviewer: codex/cross-review-wave1

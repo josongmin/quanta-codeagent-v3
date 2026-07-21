@@ -1,0 +1,54 @@
+version: 1
+feature_id: realtime-voice-session
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/voice-live-wire.ts:buildVoiceLiveCtx
+entrypoints:
+  - src/apps/cli/slash/registry-surface.ts:/voice-live
+activation:
+  - Set QUANTA_VOICE_LIVE truthy in an interactive terminal with a usable realtime bearer and audio dependencies, then invoke /voice-live.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/realtime/voice-session/default-session.ts
+  - src/apps/cli/repl/voice-live-wire.ts
+consumer:
+  - src/apps/cli/repl/surface-compose/dispatch.ts
+  - src/apps/cli/slash/registry-surface.ts
+reachable: yes
+surface_findings:
+  - The slash command is registered, but the session builder is omitted until QUANTA_VOICE_LIVE is enabled.
+  - Non-TTY and unavailable session states decline without opening audio resources; live wiring resolves bearer and audio collaborators lazily on slash use.
+  - State transitions cover interruption, mute, VAD/push-to-talk, transport failure, and transcript degradation.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/voice-live-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off leaves the voice builder absent and the REPL does not construct realtime resources.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/realtime/voice-session-hellgate.test.ts tests/unit/realtime/voice-session-connect-race-hellgate.test.ts tests/unit/cli/voice-live-cmd-hellgate.test.ts tests/unit/cli/voice-live-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Session state, connection races, command behavior, and composition wire rails passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: conditional
+blocker: Requires an explicit gate, TTY, bearer, microphone, and playback resources; no browser surface exists.
+disposition: hold
+receipts:
+  - kind: test
+    command: bun test tests/unit/realtime/voice-session-hellgate.test.ts tests/unit/realtime/voice-session-connect-race-hellgate.test.ts tests/unit/cli/voice-live-cmd-hellgate.test.ts tests/unit/cli/voice-live-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused voice-session rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,55 @@
+version: 1
+feature_id: cli-repl-solid-split
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl.ts:runRepl
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/repl.ts:runRepl
+activation:
+  - The interactive CLI imports the REPL host, which now imports extracted surface-compose and factory modules rather than retaining the held all-inline implementation.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/repl/factories/index.ts
+  - src/apps/cli/repl/surface-compose.ts
+consumer:
+  - src/apps/cli/repl.ts:runRepl
+  - src/apps/cli/repl/session-loop.ts
+reachable: yes
+surface_findings:
+  - repl.ts imports the factories barrel and the surface-compose seam; extracted helpers are no longer defined inline in the host.
+  - Current source includes a live multi-module REPL composition tree, contradicting the catalog's statement that only mcp-surface-wire.ts remains and SOLID restore is deferred.
+  - Shape and host-slim ratchets pin the extraction, single-owner factories, feature-config fence, and default-off factory invocation.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/repl-extract-shape.test.ts tests/unit/apps/cli/repl-host-slim-hellgate.test.ts tests/unit/apps/cli/repl-orphan-resolution-hellgate.test.ts tests/unit/apps/cli/cli-feature-config-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 100 pass, 0 fail; live extraction, unique factory ownership, orphan guard, and CLI configuration fences are covered.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: Catalog status/purpose/hold text must be rewritten for the live post-restore REPL composition instead of the historical abandoned-split state.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'from "./repl/factories"|from "./repl/surface-compose"|export .*buildLifecycleBundle' src/apps/cli/repl.ts src/apps/cli/repl/factories src/apps/cli/repl/surface-compose.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live REPL host consumes extracted factory and surface-compose modules, not the historical all-inline implementation described by the catalog.
+  - kind: test
+    command: bun test tests/unit/cli/repl-extract-shape.test.ts tests/unit/apps/cli/repl-host-slim-hellgate.test.ts tests/unit/apps/cli/repl-orphan-resolution-hellgate.test.ts tests/unit/apps/cli/cli-feature-config-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 100 pass, 0 fail across structural extraction and composition guards.
+audited_at: "2026-07-19"
+auditor: codex/root-p3-agent-loop
+review_state: approved
+reviewer: codex/cross-review-wave1

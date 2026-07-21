@@ -1,0 +1,51 @@
+version: 1
+feature_id: scheduler-model-reroute
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/scheduler/runtime-wire.ts:resolveFireModel
+entrypoints:
+  - src/scheduler/runtime-wire.ts:assembleAutomation handler
+activation:
+  - Enable QUANTA_AUTOMATION and schedule an automation with model or modelFallbacks.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/scheduler/model-reroute.ts:chooseModel
+consumer:
+  - src/scheduler/runtime-wire.ts:resolveFireModel
+reachable: yes
+surface_findings:
+  - Enabled automation fires call resolveFireModel lazily before enqueue and pass modelOverride to the loop.
+  - No task model preserves legacy host-default routing; all unavailable candidates deliberately produce an errored fire.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/scheduler-model-reroute-hellgate.test.ts tests/unit/scheduler/b2-wiring-closeout-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Preference, ordered fallback, lazy fire-time resolution, and all-unavailable error rails passed.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: conditional
+blocker: "Model rerouting is a live automation-fire behavior behind the default-off QUANTA_AUTOMATION gate."
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'chooseModel|resolveFireModel|modelOverride' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/scheduler/runtime-wire.ts src/scheduler/model-reroute.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime fire handler consumes the pure selector and forwards the chosen override.
+  - kind: test
+    command: bun test tests/unit/scheduler-model-reroute-hellgate.test.ts tests/unit/scheduler/b2-wiring-closeout-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused reroute and production wiring rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

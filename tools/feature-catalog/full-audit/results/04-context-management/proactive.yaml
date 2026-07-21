@@ -1,0 +1,52 @@
+version: 1
+feature_id: proactive
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/compaction-wire.ts:maybeCompact
+entrypoints: [src/agent/loop/turn-iteration.ts, src/agent/loop/recovery-executor.ts]
+activation: [context threshold, QUANTA_COMPACT_TOKENS optional override]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: [src/agent/compaction.ts]
+consumer: [src/agent/loop/compaction-wire.ts, src/agent/loop/recovery-executor.ts]
+reachable: yes
+surface_findings:
+  - "Loop executes proactive threshold compaction and reactive PTL recovery with orphan-safe boundary handling."
+  - "Preflight deferral and compaction failures preserve history and degrade through recovery events instead of corrupting the transcript."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/compaction.test.ts tests/unit/compaction-precompact.test.ts tests/integration/background-compaction-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Under-threshold, defer, and background knob-off paths preserve messages without summary calls.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/compaction.test.ts tests/unit/compaction-precompact.test.ts tests/unit/compaction-archive-loop.test.ts tests/integration/compaction-emit-e2e.test.ts tests/integration/background-compaction-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Proactive/recovery compaction, archive emit, no-throw event handling, and background reconciliation pass.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'maybeCompact|reactiveCompact|summarizerLlm|compactTokens' src/agent/loop src/agent/compaction.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Proactive and reactive loop consumers resolve the same compaction authority.
+  - kind: test
+    command: bun test tests/unit/compaction.test.ts tests/unit/compaction-precompact.test.ts tests/unit/compaction-archive-loop.test.ts tests/integration/compaction-emit-e2e.test.ts tests/integration/background-compaction-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Compaction focused rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

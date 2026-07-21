@@ -1,0 +1,57 @@
+version: 1
+feature_id: github-token-rotation
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/auth/github-token-rotation.ts:rotateGitHubToken
+entrypoints:
+  - src/auth/github-token-rotation.ts:rotateGitHubToken
+  - src/auth/oauth-refresh-lock.ts:OAuthRefreshLockPort
+activation:
+  - A host must provide a current token pair, OAuth client credentials, HTTP port, clock, lock, and holder identity; no snapshot GitHub client lifecycle invokes this function.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/auth/github-token-rotation.ts:rotateGitHubToken
+consumer:
+  - none in production source
+reachable: no
+surface_findings:
+  - The pure call path validates arguments, acquires the user-keyed lock, differentiates response classes, uses post-call clock time, and releases in finally.
+  - No source outside the auth slice invokes rotateGitHubToken or supplies credentials and an HTTP port, so no mid-session GitHub client can rotate in the snapshot.
+off_identity_proof:
+  kind: source
+  command: rg -n 'rotateGitHubToken\(' src --glob '!src/auth/**' --glob '!**/__tests__/**' --glob '!tests/**'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No production caller exists outside the function definition slice.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/github-token-rotation-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Threshold, lock contention, response handling, malformed payload, race, and release-in-finally rails passed in the pure function seam.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: seam-only
+blocker: No GitHub authentication or gh client composition root calls the rotation function, so its lock-protected behavior is unreachable in production.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'rotateGitHubToken\(' src --glob '!src/auth/**' --glob '!**/__tests__/**' --glob '!tests/**'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No live caller was found.
+  - kind: test
+    command: bun test tests/unit/github-token-rotation-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The function contract passes in isolation but does not establish client lifecycle wiring.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

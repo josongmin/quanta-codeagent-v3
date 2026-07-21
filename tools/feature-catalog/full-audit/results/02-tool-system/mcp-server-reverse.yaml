@@ -1,0 +1,54 @@
+version: 1
+feature_id: mcp-server-reverse
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/mcp-server-setup.ts:runMcpServerCmd
+entrypoints:
+  - src/apps/cli/index.ts:mcp-server subcommand
+activation:
+  - Run QUANTA_MCP_SERVER=1 quanta mcp-server; optionally name extra tools in QUANTA_MCP_SERVER_EXPOSE.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/mcp/server-builder.ts:buildMcpServer
+  - src/mcp/server.ts:McpServer
+consumer:
+  - src/apps/cli/mcp-server-setup.ts
+  - src/apps/cli/index.ts
+reachable: yes
+surface_findings:
+  - CLI routing reaches the command, whose strict exact-value gate exits before assembly when disabled.
+  - Builder intersects read-only plus explicit names with known tools; inbound calls recheck the frozen allowlist before dispatch.
+  - Gate-on composition integration exists, but its two live-pump tests were skipped in this environment; pure server and builder rails remain green.
+off_identity_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/mcp-server-setup.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset or loose gate exits 64 with empty stdout before agent assembly.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/mcp/__tests__/server.test.ts src/mcp/__tests__/server-builder.test.ts src/apps/cli/__tests__/mcp-server-setup.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Builder/server rails passed; the two gate-on composition cases were skipped because their live pump environment was unavailable.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: Default-off activation requires strict QUANTA_MCP_SERVER=1; this audit run has a gate-on composition proof skip.
+disposition: hold
+receipts:
+  - kind: test
+    command: bun test src/mcp/__tests__/server.test.ts src/mcp/__tests__/server-builder.test.ts src/apps/cli/__tests__/mcp-server-setup.hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Reverse-MCP focused rails passed with two environment-skipped gate-on cases.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

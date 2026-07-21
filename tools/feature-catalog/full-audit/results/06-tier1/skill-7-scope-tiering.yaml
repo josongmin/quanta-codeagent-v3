@@ -1,0 +1,56 @@
+version: 1
+feature_id: skill-7-scope-tiering
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/types.ts:SKILL_SCOPES_PRECEDENCE_DESC
+entrypoints:
+  - src/skill/discover.ts:discoverSkills
+  - src/agent/tier1/skill.ts:buildSkillBlock
+activation:
+  - Discovery assigns an explicit or path-inferred scope to each loaded skill.
+  - The live CLI builder merges only user and system arrays directly and does not consume seven-scope precedence or install state.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: unknown
+  daemon: on
+producer:
+  - src/skill/types.ts:SkillScope
+  - src/skill/discover.ts:resolveScope
+  - src/skill/skill-frontmatter.ts:parseSkillMarkdown
+consumer:
+  - src/skill/discover.ts:toSkill attaches scope metadata to a discovered Skill
+reachable: no
+surface_findings:
+  - Scope tags and admin required-state backfill are implemented and tested.
+  - No production host consumes Skill.scope or installState to select, override, require, or deny a skill.
+  - buildSkillBlock's system-over-user collision rule is not the documented seven-scope precedence resolver.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill-scope-types.test.ts tests/unit/skill-registry-precedence.test.ts tests/integration/skill-scope-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Scope parsing and precedence resolver rails pass, but the integration cases exercise tool scoping rather than a host seven-source registry.
+failure_posture: na
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: The live composition root never builds or consumes the seven-scope registry, so scope metadata has no runtime selection or install-state effect.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg 'buildSkillRegistry|Skill.scope|installState|discoverSkills' src/skill src/agent/tier1/skill.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Discovery tags skills, but buildSkillBlock loads user and system arrays directly without a scope-aware consumer.
+  - kind: test
+    command: bun test tests/unit/skill-scope-types.test.ts tests/unit/skill-registry-precedence.test.ts tests/integration/skill-scope-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Scope and resolver unit rails passed; no host composition efficacy rail exists.
+audited_at: "2026-07-19"
+auditor: codex/p2_tier1_batch14
+review_state: approved
+reviewer: codex/cross-review-wave1

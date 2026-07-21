@@ -1,0 +1,54 @@
+version: 1
+feature_id: localize-signal-hardening
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/localize/index.ts:localizeTool
+entrypoints:
+  - src/tool/index.ts:buildDefaultTools
+  - src/apps/web-daemon/runtime-factory.ts
+activation:
+  - localizeTool is unconditionally included in buildBaseDefaultTools and default tool registries are built by CLI, batch, daemon, headless, and web-daemon roots.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/localize/index.ts:localizeTool
+  - src/skill/system-skills/localize-fault/index.ts:triggerLocalizeFault
+consumer:
+  - src/tool/index.ts:buildDefaultTools
+  - src/apps/web-daemon/runtime-factory.ts
+reachable: yes
+surface_findings:
+  - The ranker is a base default tool, rather than a QUANTA_BENCH_LOCALIZE_PHASE-only feature; the latter knob governs the separate phase guard.
+  - The shipped web-daemon factory and every standard mode-preset default registry include buildDefaultTools, making the catalog CLI and web surface claims reachable.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/localize.test.ts tests/unit/localize-measure.test.ts tests/unit/localize-phase-guard-hellgate.test.ts tests/unit/skill-localize-fault.test.ts tests/unit/loop-localize-phase.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Localizer ranking, measured corpus, skill packaging, default-off phase guard identity, and enabled phase enforcement rails passed in the 251-test combined run.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'localizeTool as Tool\|buildDefaultTools(' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/tool/index.ts src/apps src/host
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: localizeTool is in the unconditional base tool list and the CLI, mode presets, and web daemon build that list.
+  - kind: test
+    command: bun test tests/unit/localize.test.ts tests/unit/localize-measure.test.ts tests/unit/localize-phase-guard-hellgate.test.ts tests/unit/skill-localize-fault.test.ts tests/unit/loop-localize-phase.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused localize and phase guard rail passed with zero failures.
+audited_at: '2026-07-19'
+auditor: codex/p2-tier1-batch18
+review_state: approved
+reviewer: codex/cross-review-wave1

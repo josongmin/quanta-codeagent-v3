@@ -1,0 +1,50 @@
+version: 1
+feature_id: seam
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/tier1/skill.ts:buildSkillBlock -> src/agent/loop/skill-gate.ts:resolveSkillTurnOverride"
+entrypoints: ["src/apps/cli/internal.ts:buildSkillsConfig", "src/apps/web-daemon/runtime-factory.ts:buildSurfaceCapabilityBlocks"]
+activation: ["A discovered skill declares model and/or effort frontmatter", "The Skill tool activates that skill before the next stream"]
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: unknown
+  headless: resource
+  daemon: resource
+producer: ["src/agent/tier1/skill.ts:buildSkillBlock materializes skillOverrides"]
+consumer: ["src/agent/loop/session-bootstrap.ts:createRunAgentContext creates SkillGate", "src/agent/loop/stream-consume.ts:streamConsume resolves the active override before streaming"]
+reachable: yes
+surface_findings: ["CLI and web-daemon default-enable the skill catalogue, but an override only exists when a discovered skill declares model or effort metadata.", "The session bootstrap carries the map into SkillGate; streamConsume selects the candidate port and applies the thinking budget for the following stream."]
+off_identity_proof:
+  kind: test
+  command: "bun test tests/integration/loop-skill-override.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The no-override control keeps every turn on the base port with no thinking override."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/skill-overrides.test.ts tests/integration/loop-skill-override.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "12 tests pass: model plus effort selects the candidate LLM and thinking budget, and a sibling skill clears the override."
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'buildSkillBlock|skillOverrides|buildSkillGate|resolveSkillTurnOverride' src/agent/tier1/skill.ts src/agent/loop/session-bootstrap.ts src/agent/loop/stream-consume.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The override map is produced from skill metadata, retained in the session gate, and consumed at the stream boundary."
+  - kind: test
+    command: "bun test tests/unit/skill-overrides.test.ts tests/integration/loop-skill-override.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "All 12 focused override tests passed."
+audited_at: "2026-07-19"
+auditor: "codex/p2-tier1-batch13"
+review_state: approved
+reviewer: codex/cross-review-wave1

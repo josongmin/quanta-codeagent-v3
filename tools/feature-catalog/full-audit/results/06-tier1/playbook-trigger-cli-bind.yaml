@@ -1,0 +1,50 @@
+version: 1
+feature_id: playbook-trigger-cli-bind
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/apps/cli/repl/playbook-trigger-wire.ts:maybeStartPlaybookTriggerWire"
+entrypoints: [src/apps/cli/index.ts]
+activation: ["QUANTA_PLAYBOOK_TRIGGER=on", "--playbook-trigger"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: ["src/apps/cli/repl/playbook-trigger-wire.ts:maybeStartPlaybookTriggerWire", "src/skill/playbook/disk-registry.ts:createDiskPlaybookRegistry"]
+consumer: ["src/apps/cli/repl/session-loop.ts:runSessionLoop", "src/apps/cli/repl/playbook-trigger-surface-seam.ts:createPlaybookTriggerSurfaceSeam"]
+reachable: yes
+surface_findings: ["The session loop creates the wire after it owns the external prompt queue, attaches the handle to the lifecycle seam, and registers detach on close.", "Opt-in loads a confined disk registry and starts the watcher; no opt-in returns a shared no-op before root access or watcher allocation."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/playbook-trigger-cli-bind-hellgate.test.ts tests/unit/apps/cli/playbook-trigger-empty-registry-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default-OFF returns the shared no-op and emits neither root reads nor operator notices.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/playbook-trigger-cli-bind-hellgate.test.ts tests/unit/skill/playbook/disk-registry-hellgate.test.ts tests/unit/apps/cli/playbook-trigger-empty-registry-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 26 watcher, trigger dispatch, atomic disk-reload, confinement, missing-root, and empty-registry behavior tests pass.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'maybeStartPlaybookTriggerWire|playbookSeam.attach|playbookSeam.detach|createDiskPlaybookRegistry' src/apps/cli/repl src/skill/playbook
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live session-loop consumer builds and lifecycle-owns the watcher, while the disk registry is its concrete source of dispatchable playbooks.
+  - kind: test
+    command: bun test tests/unit/playbook-trigger-cli-bind-hellgate.test.ts tests/unit/skill/playbook/disk-registry-hellgate.test.ts tests/unit/apps/cli/playbook-trigger-empty-registry-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 26 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-tier1-core
+review_state: approved
+reviewer: codex/cross-review-wave1

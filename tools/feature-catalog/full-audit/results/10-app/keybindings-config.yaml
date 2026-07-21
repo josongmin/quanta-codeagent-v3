@@ -1,0 +1,68 @@
+version: 1
+feature_id: keybindings-config
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/keybindings/load.ts:loadKeybindings
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/repl/session-loop-options.ts:buildSessionLoopOptions
+  - src/apps/cli/repl/prompt-pipeline.ts:defaultPromptLineReader
+activation:
+  - The CLI seeds QUANTA_KEYBINDINGS=1 when unset; explicit non-1 skips the map.
+  - buildPromptUx loads ~/.quanta/keybindings.json and raw-line-reader maps a key event through the normalized action map.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/keybindings/load.ts:loadKeybindings
+  - src/apps/cli/keybindings/normalize.ts:keyOf
+consumer:
+  - src/apps/cli/repl/surface-compose/prompt-ux.ts:buildKeybindingMap
+  - src/apps/cli/repl/prompt-pipeline.ts:defaultPromptLineReader
+  - src/apps/cli/raw-line-reader.ts:readLine
+reachable: yes
+surface_findings:
+  - The interactive CLI loads a no-throw map and forwards it into the live raw input handler, which rewrites known actions to canonical key events.
+  - The catalog's unset/off and default-OFF claim is false for the shipped CLI because CLI_FEATURE_GATES seeds QUANTA_KEYBINDINGS=1. Absence of the config file safely supplies the identity default map.
+  - Invalid files and prototype keys fail open to defaults with warnings; Shift+Tab remains outside the remap layer.
+off_identity_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/keybindings.hellgate.test.ts src/apps/cli/__tests__/raw-line-reader-editor.hellgate.test.ts tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing or invalid configuration produces defaults, default maps preserve the legacy reader behavior, and explicit =0 is preserved by the seed loop.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/keybindings.hellgate.test.ts src/apps/cli/__tests__/raw-line-reader-editor.hellgate.test.ts tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Valid remaps, normalization, per-entry failures, pollution rejection, file loading, and actual reader dispatch cases pass.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: The feature YAML says QUANTA_KEYBINDINGS unset is off/default-OFF, while the shipped CLI seed loop enables it when unset.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_KEYBINDINGS|buildKeybindingMap|loadKeybindings|opts.keybindings' src/apps/cli/index.ts src/apps/cli/repl src/apps/cli/raw-line-reader.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The production seed, config loader, REPL projection, and keypress consumer are all present.
+  - kind: test
+    command: bun test src/apps/cli/__tests__/keybindings.hellgate.test.ts src/apps/cli/__tests__/raw-line-reader-editor.hellgate.test.ts tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 23 keybinding loader cases, 4 reader remap cases, and CLI seed/opt-out cases passed.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3 feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-repl
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,65 @@
+version: 1
+feature_id: plan-exit-flow
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/plan-exit-wire.ts:applyPendingPlanExit
+entrypoints:
+  - src/apps/cli/repl/runtime-context-compose.ts:createCliPlanExitPort
+  - src/agent/features.ts:buildSessionFeatures
+  - src/agent/loop/turn-outcome.ts:applyQueuedPlanLifecycle
+activation:
+  - "CLI session injects AgentConfig.planExitPort and model calls request_plan_exit while in plan mode."
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/request-plan-exit.ts:requestPlanExitTool
+  - src/agent/dispatch/tool-context.ts:buildRequestPlanExit
+consumer:
+  - src/agent/loop/session-bootstrap.ts:onPlanExitOutcome queue
+  - src/agent/loop/plan-exit-wire.ts:applyPendingPlanExit
+reachable: yes
+surface_findings:
+  - "CLI composes createCliPlanExitPort into AgentConfig; the feature tool is registered only with that port."
+  - "Approved, rejected, and changes_requested are consumed at the next turn boundary; approved snapshots then clears the mutable store."
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/request-plan-exit-lifecycle-e2e.test.ts tests/unit/agent/loop/plan-exit-wire.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent planExitPort leaves the tool unregistered; lifecycle wiring tests retain the legacy path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/request-plan-exit-lifecycle-e2e.test.ts tests/unit/agent/loop/plan-exit-wire.test.ts tests/unit/agent/loop/turn-outcome.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 23 pass, 0 fail; all three decisions apply at a turn boundary, with approved writes, rejected store-clear, and requested-change feedback verified.
+failure_posture: fail-loud
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'planExitPort|runPlanExitFlow|onPlanExitOutcome|applyPendingPlanExit' src/agent src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI composition, feature registration, dispatch callback queue, and next-turn lifecycle consumer form a continuous path.
+  - kind: test
+    command: bun test tests/integration/request-plan-exit-lifecycle-e2e.test.ts tests/unit/agent/loop/plan-exit-wire.test.ts tests/unit/agent/loop/turn-outcome.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 23 pass, 0 fail; approved/rejected/changes_requested behavior and conflicting same-turn outcome ordering are covered.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ feature reachability exception is reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-exit
+review_state: approved
+reviewer: codex/cross-review-wave1

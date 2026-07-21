@@ -1,0 +1,48 @@
+version: 1
+feature_id: typed-tool-failure-modes
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/types/tool-result.ts:ToolFailure through src/agent/dispatch/execute.ts:shapeDispatchResult
+entrypoints: [src/tool/index.ts:buildBaseDefaultTools, src/agent/dispatch.ts:dispatchTool]
+activation: ["Core read, edit, write, scripted_replace, and bash tools emit typed failures on classified error paths; dispatch forwards them on DispatchResult.failure."]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: [src/tool/types/tool-result.ts:ToolFailure, src/tool/bash/index.ts:deriveBashFailure, src/tool/read/index.ts:readTool, src/tool/edit/index.ts:editTool]
+consumer: [src/tool/registry.ts:ToolRegistry.run, src/agent/dispatch/execute.ts:shapeDispatchResult, src/agent/dispatch-types.ts:DispatchResult]
+reachable: yes
+surface_findings:
+  - "Real core tools produce and dispatch preserves typed failure fields without changing the human-readable result path."
+  - "The catalog title and purpose say a six-mode union, but the frozen union has nine modes: the original six plus sandbox_violation, sandbox_unavailable, and stale_precondition."
+  - "The current exhaustive unit rail covers all current union arms and real-tool E2E covers timeout, not_found, and permission_denied propagation."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/tool-failure-mode.test.ts tests/integration/typed-failures-e2e.test.ts tests/unit/read.test.ts tests/unit/edit.test.ts tests/unit/write.test.ts tests/unit/scripted-replace.test.ts tests/unit/bash.test.ts tests/unit/bash-mode-hellgate.test.ts tests/unit/edit-atomic-precondition-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unit exhaustiveness, dispatch normalization, real tool E2E, OS sandbox, and stale-precondition rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog must update the six-mode title, purpose, and enumeration to reflect the current nine-arm ToolFailure union.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'export type ToolFailure|sandbox_violation|sandbox_unavailable|stale_precondition|result\.failure|finalFailure' src/tool/types/tool-result.ts src/tool/bash/index.ts src/tool/read/index.ts src/tool/edit/index.ts src/tool/write/index.ts src/tool/scripted-replace.ts src/agent/dispatch/execute.ts src/agent/dispatch-types.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live union contains nine arms and the dispatch result conditionally forwards the typed field.
+  - kind: test
+    command: bun test tests/unit/agent/tool-failure-mode.test.ts tests/integration/typed-failures-e2e.test.ts tests/unit/bash-mode-hellgate.test.ts tests/unit/edit-atomic-precondition-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 42 selected current-union, real dispatch, sandbox, and precondition cases passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-mutating
+review_state: approved
+reviewer: codex/cross-review-wave1

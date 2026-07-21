@@ -1,0 +1,48 @@
+version: 1
+feature_id: ipynb-cell-read
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/read/ipynb.ts:renderNotebook and src/tool/read/index.ts:maybeRenderNotebook
+entrypoints: [src/tool/index.ts:buildBaseDefaultTools, src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildBaseRegistry, src/apps/web-daemon/runtime-factory.ts]
+activation: [.ipynb paths take the notebook renderer through the default read tool; QUANTA_IPYNB_OUTPUTS only controls textual output inclusion and defaults on.]
+effective_defaults:
+  cli: on
+  web: on
+  bench: unknown
+  headless: unknown
+  daemon: on
+producer: [src/tool/read/ipynb.ts:isNotebook, src/tool/read/ipynb.ts:renderNotebook, src/shared/runtime-config.ts:runtimeConfig]
+consumer: [src/tool/read/index.ts:maybeRenderNotebook, src/tool/index.ts:buildBaseDefaultTools]
+reachable: yes
+surface_findings:
+  - The extension gate leaves every non-notebook raw read unchanged; valid notebooks route into a pure, cell-numbered renderer and malformed notebooks fall back to raw text.
+  - Image base64 is never emitted, textual outputs honor the default-on knob, and cell/output caps bound adversarial notebook render size.
+  - The normal agent and web daemon base registries register read, so notebook rendering is reachable through the ordinary tool path.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/ipynb-cell-read-render-hellgate.test.ts tests/unit/ipynb-cell-read-pipeline-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 31 focused renderer and pipeline assertions passed for extension gating, base64 stripping, output toggling, corrupt fallback, and document-level caps.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'isNotebook|renderNotebook|MAX_NOTEBOOK_CELLS|MAX_OUTPUTS_PER_CELL|ipynbIncludeOutputs|buildBaseDefaultTools' src/tool/read/ipynb.ts src/tool/read/index.ts src/shared/runtime-config.ts src/tool/index.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The extension gate, pure render, default-on configuration, defensive caps, and base registry consumer are all concrete.
+  - kind: test
+    command: bun test tests/unit/ipynb-cell-read-render-hellgate.test.ts tests/unit/ipynb-cell-read-pipeline-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 31 focused rendering, fallback, toggle, and cap rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch9
+review_state: approved
+reviewer: codex/cross-review-wave1

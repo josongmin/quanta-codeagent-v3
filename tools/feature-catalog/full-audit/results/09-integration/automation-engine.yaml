@@ -1,0 +1,59 @@
+version: 1
+feature_id: automation-engine
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/scheduler/runtime-wire.ts:assembleAutomationRuntime
+entrypoints:
+  - src/scheduler/runtime-wire.ts:assembleAutomationRuntime
+  - src/agent/loop-helpers.ts:startAutomationEngineTicker
+  - src/tool/automation_update.ts:automationUpdateTool
+activation:
+  - QUANTA_AUTOMATION enables runtime assembly; a valid positive interval arms the ticker.
+  - QUANTA_AUTOMATION_STORE=sqlite selects durable storage, otherwise the engine is in-memory.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - Runtime wire selects an engine and supplies the due-automation handler to tickScheduler.
+consumer:
+  - Loop helper drives scheduled ticks and the automation tool exposes engine operations when the slot is present.
+reachable: yes
+surface_findings:
+  - The catalog's pure-host-supplied framing is outdated: current runtime wire owns engine selection and ticker assembly.
+  - Invalid interval or absent gate yields no slot and no timer.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/dof21-automation-engine-gate-driver-proof.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset gate produces no slot, timer, dispatch, or state change.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/automation-engine-hellgate.test.ts tests/integration/automation-engine-tick-wire-hellgate.test.ts tests/integration/dof21-automation-engine-gate-driver-proof.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Engine transactions, tick outcomes, gate-to-assembler-to-driver flow, and recurring re-arm passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "inMemoryAutomationEngine|sqliteAutomationEngine|tickScheduler|AutomationEnginePort" src/scheduler/runtime-wire.ts src/agent/loop-helpers.ts src/tool/automation_update.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime selection, loop ticker, and tool registration consume the engine port.
+  - kind: test
+    command: bun test tests/unit/automation-engine-hellgate.test.ts tests/integration/automation-engine-tick-wire-hellgate.test.ts tests/integration/dof21-automation-engine-gate-driver-proof.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 31 focused engine, tick-wire, and gate-driver tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

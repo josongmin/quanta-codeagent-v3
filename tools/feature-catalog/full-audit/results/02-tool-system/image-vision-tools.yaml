@@ -1,0 +1,48 @@
+version: 1
+feature_id: image-vision-tools
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/image/read.ts:makeReadImageTool
+entrypoints: [src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildBaseRegistry, src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry]
+activation: ["buildDefaultTools registers read_image and read_image_url in the standard registry; a caller invokes either read-only tool and dispatch composes ToolResult.images at the model-message boundary."]
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer: [src/tool/image/read.ts:makeReadImageTool, src/tool/image/from-url.ts:readImageUrlTool, src/tool/image/compose.ts:composeToolResultContent]
+consumer: [src/tool/index.ts:buildDefaultTools, src/agent/dispatch/execute.ts:shapeDispatchResult, src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildBaseRegistry]
+reachable: yes
+surface_findings:
+  - Both read tools are in buildDefaultTools, which the CLI host, agent presets, and web daemon construct; dispatch turns image-bearing results into structured content blocks.
+  - Disk input uses the FS jail and magic-byte validation; URL input is HTTPS-only with SSRF and redirect denial plus the same media and size validation.
+  - The compose helper keeps text-only results as the legacy string and adds images only when the tool supplied them.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/read-image-hellgate.test.ts tests/unit/tool/read-image-url-hellgate.test.ts tests/unit/dispatch-wires-checkpoint-and-image-hellgate.test.ts tests/unit/wire-closeout-final-hellgate.test.ts tests/unit/tool/image-read-fsjail-unify-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Image and URL ingestion, security rejections, default registry membership, dispatch composition, and FS-jail integration passed in focused rails.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "makeReadImageTool|readImageUrlTool|composeToolResultContent|buildDefaultTools" src/tool/index.ts src/tool/image src/agent/dispatch/execute.ts src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Standard registry construction and the dispatch consumer are live on CLI and web-daemon paths.
+  - kind: test
+    command: bun test tests/unit/tool/read-image-hellgate.test.ts tests/unit/tool/read-image-url-hellgate.test.ts tests/unit/dispatch-wires-checkpoint-and-image-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 51 focused read-image, read-image-url, and dispatch tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-multimodal
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,62 @@
+version: 1
+feature_id: untrusted-source-envelope
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/dispatch/execute.ts:decorateToolOutput"
+entrypoints:
+  - src/apps/cli/index.ts
+  - "src/agent/loop/context-assembler.ts:assembleTurnContext"
+activation:
+  - "QUANTA_UNTRUSTED_ENVELOPE=1, seeded by the interactive CLI when unset."
+  - "A tool result reaches dispatch output decoration and the corresponding turn context is assembled."
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/agent/untrusted-envelope/wrap.ts:wrapToolResult"
+  - "src/tool/origin.ts:deriveProvenance"
+consumer:
+  - "src/agent/dispatch/execute.ts:decorateToolOutput"
+  - "src/agent/loop/context-assembler.ts:assembleTurnContext"
+  - "src/agent/prompt.ts:resolveStaticBase"
+reachable: yes
+surface_findings:
+  - "Dispatch redacts first, derives call-site provenance, then wraps model-facing external output."
+  - "The same runtime gate adds exactly one standing DATA-not-instructions rule to the turn context."
+  - "The CLI seed makes this active for an unset interactive CLI environment; non-CLI hosts remain strict-opt-in."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/source-tag-injection-defense-e2e-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Gate-off model messages retain raw output and omit the standing rule byte-for-byte."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/untrusted-source-envelope-hellgate.test.ts tests/unit/tool-origin-substrate-hellgate.test.ts tests/unit/dispatch-untrusted-envelope-hellgate.test.ts tests/unit/source-tag-injection-defense-hellgate.test.ts tests/unit/source-tag-injection-defense-e2e-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "78 provenance, redaction-order, forged-tag defang, prompt-rule, and end-to-end source-defense cases pass."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n '(wrapToolResult|deriveProvenance|untrustedEnvelope|UNTRUSTED_ENVELOPE_RULE|QUANTA_UNTRUSTED_ENVELOPE)' src/agent/dispatch/execute.ts src/agent/loop/context-assembler.ts src/agent/prompt.ts src/apps/cli/cli-feature-gates.ts src/shared/runtime-config.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The CLI seed, strict runtime gate, dispatch decorator, and prompt rule are joined by the same live setting."
+  - kind: test
+    command: "bun test tests/unit/untrusted-source-envelope-hellgate.test.ts tests/unit/tool-origin-substrate-hellgate.test.ts tests/unit/dispatch-untrusted-envelope-hellgate.test.ts tests/unit/source-tag-injection-defense-hellgate.test.ts tests/unit/source-tag-injection-defense-e2e-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "78 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p1-security-policy
+review_state: approved
+reviewer: codex/cross-review-wave1

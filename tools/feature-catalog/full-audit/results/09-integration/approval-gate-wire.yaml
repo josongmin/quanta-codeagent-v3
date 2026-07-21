@@ -1,0 +1,62 @@
+version: 1
+feature_id: approval-gate-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/admissibility-gate/hitl.ts:reviewAndDecide
+entrypoints:
+  - src/agent/dispatch.ts:runAdmissibilityGate
+  - src/host/runtime/agent-arg-builder/observability-wire.ts:projectObservabilityWire
+activation:
+  - A host supplies AgentConfig.approvalStateMachine through the observability wire.
+  - reviewAndDecide constructs createApprovalGate and routes the HITL resolver through gate.open.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/approval-gate-wire/wire.ts:createApprovalGate
+  - src/agent/approval-state-machine/store.ts:createApprovalStateMachine
+consumer:
+  - src/agent/admissibility-gate/hitl.ts:reviewAndDecide
+  - src/agent/dispatch.ts:runAdmissibilityGate
+  - src/host/runtime/internal/context-binding/approval-protocol.ts:resolveApprovalDecision
+reachable: yes
+surface_findings:
+  - The admissibility HITL path wraps reviewAction in gate.open when approvalStateMachine is present.
+  - Deferred RuntimeApprovalRequiredError retains its kernel approval id until the host resolves and settles that same state-machine record.
+  - The catalog already records the separate always-confirm unattributed gap and the observability wire surfaces it through onUnattributed.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/approval-gate-wire-hellgate.test.ts tests/unit/admissibility-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No state machine preserves the legacy resolver result and the gate does not mint an approval id.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/approval-gate-wire-hellgate.test.ts tests/unit/admissibility-gate.test.ts tests/unit/approval-attribution-gap-hellgate.test.ts tests/unit/host/runtime-approval-pending-leak-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 89 focused assertions passed, covering request-settle attribution, deferred kernel-id lifecycle, resolver errors, and surfaced unattributed settlement.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'createApprovalGate|approvalStateMachine|reviewAndDecide|gate\.open|RuntimeApprovalRequiredError|onUnattributed' src/agent src/host
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Live dispatch, host projection, gate wrapping, deferred settlement, and gap observer consumers are present.
+  - kind: test
+    command: bun test tests/unit/approval-gate-wire-hellgate.test.ts tests/unit/admissibility-gate.test.ts tests/unit/approval-attribution-gap-hellgate.test.ts tests/unit/host/runtime-approval-pending-leak-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused proof completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-core
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,61 @@
+version: 1
+feature_id: chatgpt-responses-adapter
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/adapters/chatgpt-oauth.ts:ChatGPTOAuthAdapter.stream
+entrypoints:
+  - src/llm/factory.ts:createLLM
+  - src/host/runtime/agent-config-assembler.ts:LLM factory configuration
+activation:
+  - QUANTA_PROVIDER=chatgpt-oauth selects the subscription adapter
+  - A usable persisted OAuth token selects the adapter in provider resolution
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/auth/chatgpt-oauth/token-store.ts:readResolvedToken
+  - src/auth/chatgpt-oauth/refresh.ts:refreshToken
+  - src/llm/adapters/chatgpt-oauth.ts:ChatGPTOAuthAdapter
+consumer:
+  - src/llm/factory.ts:createLLM
+  - src/llm/provider-router.ts:provider selection
+reachable: yes
+surface_findings:
+  - Factory construction selects the OAuth adapter only through explicit provider configuration or an available persisted subscription token.
+  - The adapter refreshes expiring credentials before requests, emits typed auth errors on 401, and carries Responses continuation state when wired.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/auth/chatgpt-oauth-adapter.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No token produces a typed auth error and does not select an implicit provider fallback.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/auth/chatgpt-oauth-adapter.test.ts tests/unit/auth/refresh.test.ts tests/unit/auth/token-store.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: OAuth bearer requests, required account headers, refresh persistence, Responses SSE tool calls, continuation healing, and auth failure handling pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'ChatGPTOAuthAdapter|chatgpt-oauth|createLLM|previous_response_id' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/auth src/llm src/host
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Factory and provider router consume the adapter, whose token and continuation paths are implemented in the live LLM slice.
+  - kind: test
+    command: bun test tests/unit/auth/chatgpt-oauth-adapter.test.ts tests/unit/auth/refresh.test.ts tests/unit/auth/token-store.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused OAuth transport, refresh, durable token-store, and typed-failure rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

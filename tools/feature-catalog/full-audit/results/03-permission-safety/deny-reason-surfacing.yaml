@@ -1,0 +1,60 @@
+version: 1
+feature_id: deny-reason-surfacing
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/dispatch-helpers.ts:deny
+entrypoints:
+  - src/apps/cli/index.ts CLI dispatch path
+  - src/agent/dispatch.ts:dispatchTool
+activation:
+  - QUANTA_DENY_REASON=1 attaches a structured denyReason and categorical content prefix at the real dispatch deny boundary; unset omits both additions.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/admissibility-gate supplies StructuredDenyReason at permission deny sites
+  - src/permission/deny-reason.ts:structuredDenyReason and hardDenySafeReason
+consumer:
+  - src/agent/dispatch-helpers.ts:deny attaches ToolFailure.permission_denied.denyReason
+  - src/tool/types.ts:DenyReasonValue model-facing failure envelope
+reachable: yes
+surface_findings:
+  - The real public dispatchTool path reaches both the early plan-mode and guard seams as well as admissibility-gate deny sites.
+  - ON attaches typed layer/pillar metadata and a categorical prefix; OFF keeps the legacy envelope without the denyReason key or prefix.
+  - HARD_DENY uses a constant safe reason and the prefix is derived only from categorical fields, preventing command, regex, and secret echo.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/deny-reason-structure-hellgate.test.ts tests/unit/deny-reason-noleak-hellgate.test.ts tests/unit/deny-reason-reachability-hellgate.test.ts tests/unit/deny-reason-wire-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused OFF cases prove no denyReason field and no content prefix through direct and public dispatch paths.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/deny-reason-structure-hellgate.test.ts tests/unit/deny-reason-noleak-hellgate.test.ts tests/unit/deny-reason-reachability-hellgate.test.ts tests/unit/deny-reason-wire-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 57 focused cases prove all deny classifications, real gate and public-dispatch reachability, no-leak behavior, and knob-on additive payloads.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_DENY_REASON|surfaceDenyReason|structuredDenyReason|hardDenySafeReason|denyReason' src/shared/runtime-config.ts src/permission src/agent/admissibility-gate.ts src/agent/dispatch.ts src/agent/dispatch-helpers.ts src/tool/types.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime knob, typed producer, deny-site propagation, public dispatch consumer, and tool failure field are joined.
+  - kind: test
+    command: bun test tests/unit/deny-reason-structure-hellgate.test.ts tests/unit/deny-reason-noleak-hellgate.test.ts tests/unit/deny-reason-reachability-hellgate.test.ts tests/unit/deny-reason-wire-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 57 focused structure, no-leak, reachability, and public-dispatch e2e cases pass.
+audited_at: "2026-07-19"
+auditor: codex/p2-boundary-batch11
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,50 @@
+version: 1
+feature_id: plugin-lifecycle-manager
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/plugin-isolation/lifecycle/index.ts:PluginLifecycleManager
+entrypoints:
+  - src/plugin-isolation/index.ts:PluginLifecycleManager export
+activation:
+  - No production source constructs PluginLifecycleManager.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/plugin-isolation/lifecycle/index.ts:PluginLifecycleManager
+consumer: []
+reachable: no
+surface_findings:
+  - The manager implements lifecycle transitions over PluginHost instances and has focused tests.
+  - Production source exposes the manager only through the plugin-isolation barrel; no instantiation or lifecycle owner consumes it.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/plugin-isolation-lifecycle-hellgate.test.ts tests/unit/plugin-isolation-lifecycle.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Lifecycle creation, transitions, restart behavior, and failure guards passed.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: PluginLifecycleManager has no production construction or consumer beyond its barrel export.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n 'PluginLifecycleManager' 9a12f7a855640a8be1e4654472766bbc445696ea -- src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Source contains the manager implementation and barrel export only; no production instantiation appears.
+  - kind: test
+    command: bun test tests/unit/plugin-isolation-lifecycle-hellgate.test.ts tests/unit/plugin-isolation-lifecycle.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused lifecycle rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

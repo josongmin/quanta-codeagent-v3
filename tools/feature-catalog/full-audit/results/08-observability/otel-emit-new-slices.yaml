@@ -1,0 +1,57 @@
+version: 1
+feature_id: otel-emit-new-slices
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/metrics/wire-new-slices.ts:wireNewSlices
+entrypoints:
+  - src/observability/metrics/wire-new-slices.ts:wireNewSlices
+  - src/apps/cli/internal/shell-snapshot.ts:buildShellSnapshotConfig optional metric slot
+activation:
+  - A composition root must create a MetricsRegistry, call wireNewSlices or an individual factory, and inject every resulting narrow port into its corresponding slice.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - error-routing, stream-timeout, shell-snapshot, and git-directives narrow metric ports
+consumer:
+  - MetricsRegistry canonical six-key metric pipeline
+reachable: no
+surface_findings:
+  - Vocabulary, instrument functions, narrow port adapters, and frozen no-op ports are coherent and safely unit-tested.
+  - wireNewSlices has no production caller; the CLI shell-snapshot builder exposes an optional metric parameter but runtime-context-compose calls it with no argument, and the other three ports have no non-test injection.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability/new-slice-metrics-hellgate.test.ts tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No-op ports are frozen and silent, and a shell snapshot built without a metric records nothing.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability/new-slice-metrics-hellgate.test.ts tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails passed all six canonical keys, all four adapters, individual and aggregate wiring, and active shell-snapshot metric emission.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: No production composition root instantiates wireNewSlices or injects the four returned metric ports; the only CLI slot is omitted at its live call site.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'wireNewSlices|wire(ErrorRouting|StreamTimeout|ShellSnapshot|GitDirective)Metric' src --glob '!**/*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The factories appear only in their owner module and documentation comments, with no live construction caller.
+  - kind: test
+    command: bun test tests/unit/observability/new-slice-metrics-hellgate.test.ts tests/unit/wire-batch-mode-focus-fork-otel-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All focused vocabulary, no-op, adapter, and active-wiring rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

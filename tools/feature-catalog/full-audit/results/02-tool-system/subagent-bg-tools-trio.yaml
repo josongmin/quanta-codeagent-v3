@@ -1,0 +1,52 @@
+version: 1
+feature_id: subagent-bg-tools-trio
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/subagent-bg.ts:buildSubagentBgBlock
+entrypoints: [src/agent/features.ts:buildFeatureBlocks, src/host/runtime/agent-config-assembler.ts:maybeWireBackgroundSubagent]
+activation: ["QUANTA_SUBAGENT_BG=1 constructs a BackgroundSubagentScheduler and wires subagent_fork, subagent_poll, and subagent_await; the default menu has none of the trio."]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/tool/subagent-bg/index.ts:subagentBgTools, src/agent/subagent-background.ts:defaultBackgroundSubagentScheduler]
+consumer: [src/agent/tier1/subagent-bg.ts:buildSubagentBgBlock, src/host/runtime/agent-config-assembler.ts:maybeWireBackgroundSubagent]
+reachable: conditional
+surface_findings:
+  - "The feature block adds the exact fork, poll, and await tool trio only when AgentConfig.subagentBackground contains a scheduler."
+  - "The normal composition root fills that slot only behind QUANTA_SUBAGENT_BG, so catalog cli:full and web:full claims are not default-surface facts."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/subagent-background-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The slot-absent case proves all three tools are absent; the slot-wired case proves the same scheduler backs the trio.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-background-hellgate.test.ts tests/unit/subagent-background-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 35 cases passed across scheduler lifecycle, tool dispatch, default-off wiring, and admission-queue behavior.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: Catalog must report default-off conditional reachability instead of cli:full and web:full, and name QUANTA_SUBAGENT_BG as the activation gate.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'subagentBackground|QUANTA_SUBAGENT_BG|buildSubagentBgBlock|subagentBgTools' src/agent/features.ts src/agent/tier1/subagent-bg.ts src/host/runtime/agent-config-assembler.ts src/tool/subagent-bg
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The gate constructs the scheduler and feature block, and the absent slot produces no extra tools.
+  - kind: test
+    command: bun test tests/unit/subagent-background-hellgate.test.ts tests/unit/subagent-background-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 35 focused cases passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-next
+review_state: approved
+reviewer: codex/cross-review-wave1

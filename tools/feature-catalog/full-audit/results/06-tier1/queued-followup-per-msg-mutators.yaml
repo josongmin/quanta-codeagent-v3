@@ -1,0 +1,53 @@
+version: 1
+feature_id: queued-followup-per-msg-mutators
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/plan-queue/internals.ts:sendNowMethod
+entrypoints:
+  - src/apps/cli/queue-cmd.ts:queue command
+  - src/apps/cli/repl/session-loop.ts:registerPlanQueueSendNow
+activation:
+  - Enqueue a follow-up in the CLI REPL plan queue, then invoke /queue retry, edit, delete, or send-now.
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/plan-queue.ts:defaultPlanQueueStore
+consumer:
+  - src/apps/cli/queue-cmd.ts:slash subcommands
+  - src/apps/cli/repl/session-loop.ts:external prompt queue
+reachable: yes
+surface_findings:
+  - The CLI composition retains one mutable sendNow target, so its early timing window returns send-not-ready and preserves the entry until session-loop installation.
+  - send-now pushes one external prompt without interrupting the active turn; terminal sink failures remove the entry while retryable failures retain it.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/queue-per-msg-mutators-hellgate.test.ts tests/unit/plan-queue-sendnow-failclosed-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: A queue whose mutators are never called remains byte-identical, and absent CLI wiring reports not wired without mutating a store.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/queue-per-msg-mutators-hellgate.test.ts tests/unit/cli/queue-cmd-hellgate.test.ts tests/unit/plan-queue-sendnow-failclosed-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: CLI command parsing, all four mutations, prefix resolution, transient retention, terminal removal, and one-shot sink delivery passed.
+failure_posture: fail-closed
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/queue-per-msg-mutators-hellgate.test.ts tests/unit/cli/queue-cmd-hellgate.test.ts tests/unit/plan-queue-sendnow-failclosed-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused queue command passed 54 mutation, timing-window, and CLI rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,48 @@
+version: 1
+feature_id: retrieval-chunk-bucket
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/retrieval/chunk-bucket.ts:rechunk
+entrypoints:
+  - src/retrieval/index.ts:rechunk export
+activation:
+  - rechunk is an exported pure primitive and requires a caller-supplied TokenizerPort.
+  - No production source file invokes rechunk; the catalog's cited retrieval assembler imports neither rechunk nor TokenizerPort.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/retrieval/chunk-bucket.ts:rechunk
+consumer:
+  - src/retrieval/index.ts:public export
+reachable: no
+surface_findings:
+  - The pure implementation validates overlap, maintains forward progress, and has adversarial budget and determinism coverage.
+  - It has no production call site or tokenizer composition; exporting a primitive is not an interactive CLI integration.
+  - The catalog full-CLI claim is stale until a live indexing or ingestion owner calls rechunk with an actual tokenizer.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: No production consumer invokes rechunk or supplies its TokenizerPort dependency.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "rechunk\\(" src --glob '!src/retrieval/chunk-bucket.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The search finds no production invocation outside the primitive definition; only the public barrel exports it.
+  - kind: test
+    command: bun test tests/unit/retrieval-chunk-bucket-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 23 focused unit and adversarial chunking tests passed, but they do not establish a production consumer.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch11
+review_state: approved
+reviewer: codex/cross-review-wave1

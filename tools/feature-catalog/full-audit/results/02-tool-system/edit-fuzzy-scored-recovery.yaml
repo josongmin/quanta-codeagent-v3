@@ -1,0 +1,46 @@
+version: 1
+feature_id: edit-fuzzy-scored-recovery
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/edit/fuzzy.ts:scored ambiguous recovery
+entrypoints:
+  - src/tool/edit/index.ts:edit tool
+activation:
+  - Submit an edit whose fuzzy matching reaches the ambiguous candidate rung.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/tool/edit/fuzzy.ts
+consumer:
+  - src/tool/edit/index.ts
+reachable: yes
+surface_findings:
+  - Scoring runs only after existing fuzzy matching is ambiguous and accepts only a unique strict maximum.
+  - Ties preserve failure, so the recovery cannot select between co-maximal candidate windows.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/fuzzy.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Ambiguous unique-winner recovery and tie refusal rails passed with the broader fuzzy matcher.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/fuzzy.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused fuzzy recovery rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

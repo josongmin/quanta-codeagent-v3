@@ -1,0 +1,57 @@
+version: 1
+feature_id: side-conv-dispatch-router
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/side-conversation/dispatch.ts:dispatchSideConversation
+entrypoints:
+  - src/agent/optional-ports.ts:wireOptionalAgentPorts fast-apply fallback adapter
+activation:
+  - QUANTA_FAST_APPLY must be enabled.
+  - A configured default model and fast-apply fallback selection are required before the adapter dispatches a side conversation.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/side-conversation/dispatch.ts:dispatchSideConversation
+consumer:
+  - src/agent/optional-ports.ts:createFastApplyFallback sideConversation.dispatch
+reachable: conditional
+surface_findings:
+  - Router validates effort at the request boundary, resolves an LLM and optional tools, and delegates to runSideConversation.
+  - No current CLI, UI or RPC caller routes /side through this router; RuntimeSession plus host context binding owns that public route.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/side-conversation-e2e.test.ts tests/unit/side-conversation.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 18 pass, 0 fail; direct router preserves parent isolation and cancellation, but no enabled fast-apply composition test proves the conditional production adapter.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog calls this the UI/CLI/RPC-facing router, but its sole production consumer is the default-off fast-apply fallback adapter.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'dispatchSideConversation' src --glob '!src/agent/side-conversation/**'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: optional-ports is the only production adapter; app CLI and host runtime side routes have no dispatcher consumer.
+  - kind: source
+    command: sed -n '80,150p' src/agent/optional-ports.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: adapter is allocated only in the QUANTA_FAST_APPLY branch and delegates with an injected LLM and parent signal.
+  - kind: test
+    command: bun test tests/integration/side-conversation-e2e.test.ts tests/unit/side-conversation.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 18 pass, 0 fail; direct router functionality, boundary validation, and cancellation pass.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-side
+review_state: approved
+reviewer: codex/cross-review-wave1

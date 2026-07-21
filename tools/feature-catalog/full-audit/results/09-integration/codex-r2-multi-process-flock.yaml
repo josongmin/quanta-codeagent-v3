@@ -1,0 +1,66 @@
+version: 1
+feature_id: codex-r2-multi-process-flock
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/session-resource-registry/global.ts:buildDefaultRegistry
+entrypoints:
+  - src/apps/cli/index.ts:runCli
+  - src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+activation:
+  - QUANTA_SESSION_REGISTRY_DISK_DIR is a non-empty writable directory.
+  - QUANTA_SESSION_REGISTRY_SQLITE_PATH is absent, empty, or unavailable because SQLite has precedence.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/session-resource-registry/disk-adapter/file-lock.ts:acquireSessionLock
+  - src/agent/session-resource-registry/disk-adapter/disk-store.ts:createDiskSessionResourceRegistry
+consumer:
+  - src/agent/session-resource-registry/global.ts:buildDefaultRegistry
+  - src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+reachable: yes
+surface_findings:
+  - The global registry selects the disk adapter from runtimeConfig().sessionRegistryDiskDir, and the live host assembler obtains session resources through that registry.
+  - The catalog deliberate_hold is stale: QUANTA_SESSION_REGISTRY_DISK_DIR is already an env-swap composition path; it is no longer a direct-factory-only seam.
+  - Contention, filesystem failure, or lock timeout preserves usable in-memory resources and suppresses the disk mirror; stale locks are reclaimed and releases are idempotent.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/session-registry-env-swap-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset or empty disk-path environment selects the in-memory singleton, and post-mint environment mutation does not change the selected backend.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/agent/session-resource-registry/disk-adapter/__tests__/file-lock.hellgate.test.ts src/agent/session-resource-registry/disk-adapter/__tests__/file-lock-telemetry.hellgate.test.ts src/agent/session-resource-registry/disk-adapter/__tests__/disk-store-flock.hellgate.test.ts tests/unit/session-registry-env-swap-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 42 focused cases passed, including env-selected live adapter, cross-process contention, stale reclamation, memory-only fallback, release, and telemetry behavior.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'sessionRegistryDiskDir|createDiskSessionResourceRegistry|getGlobalSessionResourceRegistry|buildCallerOwnedRegistryWithTelemetry' src/agent/session-resource-registry/global.ts src/agent/session-resource-registry/caller-owned-builder.ts src/host/runtime/agent-config-assembler.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The runtime config selects the disk adapter and the production assembler consumes the resulting registry for session resources.
+  - kind: test
+    command: bun test src/agent/session-resource-registry/disk-adapter/__tests__/file-lock.hellgate.test.ts src/agent/session-resource-registry/disk-adapter/__tests__/file-lock-telemetry.hellgate.test.ts src/agent/session-resource-registry/disk-adapter/__tests__/disk-store-flock.hellgate.test.ts tests/unit/session-registry-env-swap-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 42 pass, 0 fail.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3 feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-persistence
+review_state: approved
+reviewer: codex/cross-review-wave1

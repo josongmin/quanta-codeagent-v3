@@ -1,0 +1,61 @@
+version: 1
+feature_id: message-id-rewind
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/session/store.ts:assignMessageIds and rewindToMessage
+entrypoints:
+  - src/apps/cli/rewind-cmd.ts:rewindCommands
+  - src/session/rewind.ts:rewindSession
+  - src/session/store.ts:rewindToMessage
+activation:
+  - QUANTA_REWIND defaults to 1, so /rewind and /fork are registered in the CLI slash registry.
+  - A persisted transcript needs Message.id values for a rewind target to resolve.
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/session/store.ts:assignMessageIds can mint ids for a supplied Message array
+consumer:
+  - src/apps/cli/rewind-cmd.ts invokes rewindSession from the registered /rewind command
+  - src/session/store.ts:rewindToMessage truncates a persisted snapshot at a matched id
+reachable: conditional
+surface_findings:
+  - The CLI command is registered by default, contrary to the feature prose that calls this default-OFF.
+  - No production source call to assignMessageIds exists outside its declaration, so ordinary saved transcripts are not proven to receive ids and /rewind cannot resolve a target for those sessions.
+  - Synthetic id-bearing sessions have correct truncate, prefix-resolution, fork, and pair-reconciliation behavior.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/session/rewind.test.ts tests/unit/session/rewind-wrapper.test.ts tests/integration/session-rewind-e2e.test.ts tests/unit/cli/rewind-cmd.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Synthetic id-bearing session fixtures prove truncation and CLI handling, but do not prove id minting in the production save path.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: conditional
+blocker: Production session persistence never calls assignMessageIds, leaving the registered command ineffective for normal id-less transcripts.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n "assignMessageIds\\(" src --glob '!src/session/store.ts' --glob '!**/*.test.*'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: No production caller assigns ids before snapshot persistence.
+  - kind: source
+    command: rg -n "QUANTA_REWIND|isRewindEnabled|REWIND_COMMANDS" src/apps/cli/rewind-cmd.ts src/apps/cli/slash/registry-app.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The default fallback is 1 and the registry appends rewind commands at module load.
+  - kind: test
+    command: bun test tests/unit/session/rewind.test.ts tests/unit/session/rewind-wrapper.test.ts tests/integration/session-rewind-e2e.test.ts tests/unit/cli/rewind-cmd.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused positive rails passed within the 496-pass audit command.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch5
+review_state: approved
+reviewer: codex/cross-review-wave1

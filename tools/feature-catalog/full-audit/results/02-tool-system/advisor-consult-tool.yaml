@@ -1,0 +1,52 @@
+version: 1
+feature_id: advisor-consult-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/advisor.ts:buildAdvisorBlock
+entrypoints: [src/agent/features.ts]
+activation: [QUANTA_ADVISOR_MODEL allowlisted, QUANTA_ADVISOR_FORWARD_HISTORY=1 optional]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/runner/knobs/knobs/advisor.ts, src/agent/tier1/advisor.ts:advisorConsultFromLLM]
+consumer: [src/agent/tier1/advisor.ts:buildAdvisorBlock, src/tool/advisor/advisor.ts]
+reachable: yes
+surface_findings:
+  - "Absent advisor config produces an empty tool block; closed model allowlist rejects unsupported explicit models before port invocation."
+  - "Forward history is separately gated and scrubs secrets and PII before bounded transcript composition; advisor receives no tools."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/advisor-knob-hellgate.test.ts tests/unit/advisor-forward-history.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent config keeps registry empty and absent transcript source makes forwarding a no-op.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/advisor-tool-hellgate.test.ts tests/unit/advisor-knob-hellgate.test.ts tests/unit/advisor-forward-history.test.ts tests/unit/advisor-forward-schema.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Typed error mapping, allowlist, zero-tool consult, transcript scrubbing, and schema rails pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildAdvisorBlock|advisorConsultFromLLM|redactTranscript|QUANTA_ADVISOR' src/agent/tier1/advisor.ts src/runner/knobs/knobs/advisor.ts src/tool/advisor
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Config slot, transcript scrubber, and tool block form the reachable production chain.
+  - kind: test
+    command: bun test tests/unit/advisor-tool-hellgate.test.ts tests/unit/advisor-knob-hellgate.test.ts tests/unit/advisor-forward-history.test.ts tests/unit/advisor-forward-schema.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused advisor rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

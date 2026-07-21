@@ -1,0 +1,56 @@
+version: 1
+feature_id: jsonl-span-correlation
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/stream/adapters/jsonl-recorder.ts:spanOf and JsonlRecorder.record
+entrypoints:
+  - src/runner/assemble/streaming.ts:JsonlRecorder stream composition
+activation:
+  - A recorder-enabled stream uses deterministic fallback spans or active trace-reference override IDs.
+effective_defaults:
+  cli: unknown
+  web: na
+  bench: on
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/stream/adapters/jsonl-recorder.ts derives turn, tool, and LLM spans per emitted AgentEvent.
+consumer:
+  - src/runner/assemble/streaming.ts feeds the recorder through TeeStream.
+reachable: yes
+surface_findings:
+  - Deterministic IDs are the fallback; a live active trace reference intentionally overrides all derived IDs.
+  - Missing expected trace context produces a bounded degraded marker rather than silently claiming correlation.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/jsonl-recorder.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent getActiveTraceRef retains deterministic turn, tool, and LLM span ids.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/jsonl-recorder.test.ts tests/unit/jsonl-recorder-retention.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Request and usage share LLM span ids, tool event groups share tool ids, trace overrides work, and retention behavior passes.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'spanOf\|turnSpanId\|getActiveTraceRef' 9a12f7a -- src/stream/adapters/jsonl-recorder.ts src/runner/assemble/streaming.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Recorder derives deterministic correlation IDs and the streaming assembler wires its output consumer.
+  - kind: test
+    command: bun test tests/unit/jsonl-recorder.test.ts tests/unit/jsonl-recorder-retention.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused recorder correlation and retention rail passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

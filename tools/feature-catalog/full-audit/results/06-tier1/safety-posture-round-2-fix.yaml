@@ -1,0 +1,55 @@
+version: 1
+feature_id: safety-posture-round-2-fix
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/subagent-runner-child-config.ts:buildChildInheritedConfig"
+entrypoints:
+  - "src/agent/subagent-runner.ts:buildChildConfig"
+activation:
+  - "A configured subagent runner spawns a child; verifyGuard, closeoutGuard, hitl, and parent mode are copied into that child."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/agent/subagent-runner-child-config.ts:buildChildInheritedConfig"
+consumer:
+  - "src/agent/subagent-runner.ts:executeChild"
+reachable: yes
+surface_findings:
+  - "Safety posture is inherited only when the optional parent fields exist; absent fields preserve the pre-subagent child shape."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/subagent-runner.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Absent child posture fields are omitted by the builder."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/subagent-runner.test.ts tests/unit/subagent-6-tools-hellgate.test.ts tests/integration/subagent-6tool-hell-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Focused spawn and six-tool rails pass including propagated request controls."
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'verifyGuard|closeoutGuard|hitl|resolveChildMode' src/agent/subagent-runner-child-config.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The child config copies every named guard and prevents mutating mode escalation."
+  - kind: test
+    command: "bun test tests/unit/subagent-runner.test.ts tests/unit/subagent-6-tools-hellgate.test.ts tests/integration/subagent-6tool-hell-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 502-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

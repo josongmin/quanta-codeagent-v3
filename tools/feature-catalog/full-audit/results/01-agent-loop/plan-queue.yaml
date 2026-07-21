@@ -1,0 +1,61 @@
+version: 1
+feature_id: plan-queue
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/session-loop.ts:runSessionLoop mid-turn capture composition
+entrypoints:
+  - src/apps/cli/repl/surface-compose/mutable-wires.ts:buildMutableSurfaceWires
+  - src/apps/cli/repl/session-loop.ts:maybeCreateMidTurnCaptureWire
+  - src/apps/cli/repl/session-loop/turn-helpers.ts:makeInTurnCaptureWrapper
+activation:
+  - "Interactive CLI seeds QUANTA_MIDTURN_CAPTURE when unset; the session owns one PlanQueueStore and binds process.stdin to the concurrent in-turn reader."
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/cli/repl/session-loop/turn-helpers.ts:routeMidTurnLine capture callback
+  - src/agent/mid-turn-interruption/default.ts:defaultMidTurnCapture
+consumer:
+  - src/agent/plan-queue.ts:PlanQueueStore.enqueue and drain
+  - src/apps/cli/queue-cmd.ts:/queue slash consumer
+  - src/apps/cli/repl/mid-turn-capture-wire.ts:pushExternal turn-boundary mirror
+reachable: yes
+surface_findings:
+  - "The CLI owns defaultPlanQueueStore, starts an in-turn stdin reader, enqueues a captured line, and mirrors it to externalPromptQueue for the next turn."
+  - "The catalog's helper-only/default-OFF/future-keystroke-source wording is stale: CLI feature-gate seeding and repl.ts now make the source live by default."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/plan-queue-hellgate.test.ts tests/unit/plan-queue-hardening-hellgate.test.ts tests/unit/plan-queue-mutator-hellgate.test.ts tests/unit/plan-queue-sendnow-failclosed-hellgate.test.ts tests/integration/plan-queue-mid-turn-e2e.test.ts tests/integration/plan-queue-x-microcompact-hell-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Store semantics, fail-closed sendNow, live turn timing, queued replay, and compaction interaction all pass."
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: "Catalog claims the queue and in-turn producer are deferred/default-OFF, but the frozen interactive CLI creates the store and seeds the capture gate on."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'defaultPlanQueueStore|QUANTA_MIDTURN_CAPTURE|maybeCreateMidTurnCaptureWire|startInTurnLineReader|captureLine' src/apps/cli src/shared/runtime-config.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Surface construction, CLI default gate seeding, stdin reader, queue capture, and next-turn mirror are a continuous production path."
+  - kind: test
+    command: bun test tests/unit/plan-queue-hellgate.test.ts tests/unit/plan-queue-hardening-hellgate.test.ts tests/unit/plan-queue-mutator-hellgate.test.ts tests/unit/plan-queue-sendnow-failclosed-hellgate.test.ts tests/integration/plan-queue-mid-turn-e2e.test.ts tests/integration/plan-queue-x-microcompact-hell-e2e.test.ts tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The focused audit run passed 92 queue, live replay, compaction, and CLI default-gate cases."
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Strict reachability reported zero L3+ unreachable or dead-API feature claims."
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-compaction
+review_state: approved
+reviewer: codex/cross-review-wave1

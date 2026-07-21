@@ -1,0 +1,53 @@
+version: 1
+feature_id: resume-tool-pairing-reconcile
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/reconcile-tool-pairing.ts:reconcileToolPairing
+entrypoints:
+  - src/session/store.ts:reconcileMessages
+  - src/runner/orchestrate/resume-fsm.ts:reconcileLoadedHistory
+activation:
+  - Always runs at session rewind or fork persistence and at runner resume history loading.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: on
+  daemon: na
+producer:
+  - src/shared/reconcile-tool-pairing.ts:reconcileToolPairing
+consumer:
+  - src/session/store.ts:reconcileMessages
+  - src/runner/orchestrate/resume-fsm.ts:reconcileLoadedHistory
+reachable: yes
+surface_findings:
+  - Rewind and fork persist repaired message arrays, while resume-fsm repairs loaded histories before they enter the continuing turn.
+  - Valid transcripts preserve their top-level identity at the leaf; the resume adapter only clones afterward because its mutable history contract requires it.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/history-tool-pairing-reconcile-hellgate.test.ts tests/unit/session-rewind-reconcile-hellgate.test.ts tests/unit/session-rewind-reconcile-e2e-hellgate.test.ts tests/unit/session-tool-result-content-blocks-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Orphan uses synthesize portable results, orphan results drop safely, clean histories stay unchanged, and persisted rewind/fork output remains model-valid.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'reconcileToolPairing\(' src/shared/reconcile-tool-pairing.ts src/session/store.ts src/runner/orchestrate/resume-fsm.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Both persistence and resume consumers call the shared owner seam.
+  - kind: test
+    command: bun test tests/unit/history-tool-pairing-reconcile-hellgate.test.ts tests/unit/session-rewind-reconcile-hellgate.test.ts tests/unit/session-rewind-reconcile-e2e-hellgate.test.ts tests/unit/session-tool-result-content-blocks-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 26 reconciliation and content-block persistence cases passed in the 241-pass focused rail.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch23
+review_state: approved
+reviewer: codex/cross-review-wave1

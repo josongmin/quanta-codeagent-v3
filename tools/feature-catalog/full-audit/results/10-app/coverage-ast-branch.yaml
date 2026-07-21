@@ -1,0 +1,50 @@
+version: 1
+feature_id: coverage-ast-branch
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/coverage/ast-source.ts:astCoverageSource
+entrypoints:
+  - src/observability/coverage/index.ts
+activation:
+  - A future coverage composition imports astCoverageSource and selects it as the CoverageSource port implementation.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/observability/coverage/ast-source.ts:astCoverageSource
+consumer: []
+reachable: no
+surface_findings:
+  - The AST adapter provides precise branch counting behind the CoverageSource port.
+  - No application, bench, coverage reporter, or host composition invokes astCoverageSource outside its implementation and unit rail.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/coverage-ast-source-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Twenty-two AST branch, false-positive, port, and report-shape rails passed under test callers.
+failure_posture: unknown
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production coverage-source selection imports or invokes the AST adapter.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'astCoverageSource\(' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps src/host src/observability tools
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Executable reference is confined to adapter implementation and test-facing coverage exports.
+  - kind: test
+    command: bun test tests/unit/coverage-ast-source-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused AST coverage rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,51 @@
+version: 1
+feature_id: slash-memory-browse
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/memory-cmd.ts:memoryCmd
+entrypoints:
+  - src/apps/cli/slash-commands.ts:BUILTINS
+activation:
+  - Keep QUANTA_MEMORY_SLASH enabled and supply MemorySlashState in the interactive REPL.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/memory-cmd.ts:memoryCmd
+consumer:
+  - src/apps/cli/slash-commands.ts:BUILTINS
+reachable: yes
+surface_findings:
+  - /memory is registered by default but its storage behavior requires the optional SlashContext.memory state.
+  - Missing state returns the explicit not-wired result, while injected stores support recall, browse, and confirmed delete.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/memory-cmd.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing memory state returns no-op not-wired behavior and QUANTA_MEMORY_SLASH can remove registration.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-cmd.test.ts tests/unit/slash-commands.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Recent/list/search/embedder fallback/show/delete/stats rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: "Slash registration is default-on, but durable memory operations require an injected MemorySlashState and are absent on the default-unwired surface."
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/memory-cmd.test.ts tests/unit/slash-commands.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused memory slash rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

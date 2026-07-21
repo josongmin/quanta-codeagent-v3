@@ -1,0 +1,64 @@
+version: 1
+feature_id: loadreporules-cwd
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/agent/mode-presets/system.ts:resolveModePresetRepoRules
+entrypoints:
+  - src/apps/agent/mode-presets/interactive.ts:buildInteractiveBase
+  - src/apps/agent/mode-presets/headless.ts:buildHeadlessBase
+  - src/apps/agent/mode-presets/ide.ts:buildIdeBase
+  - src/apps/web-daemon/runtime-factory.ts:createWebDaemonRuntime
+activation:
+  - Trusted interactive, headless, and IDE modes call loadRepoRules when no host override is supplied.
+  - Batch, ci-bot, and daemon stay rule-less unless a trusted host explicitly supplies repoRules.
+effective_defaults:
+  cli: on
+  web: on
+  bench: off
+  headless: on
+  daemon: off
+producer:
+  - src/agent/repo-rules.ts:loadRepoRules
+  - src/agent/repo-rules.ts:renderRepoRulesBlock
+consumer:
+  - src/apps/agent/mode-presets/system.ts:resolveModePresetRepoRules
+  - src/agent/loop/context-assembler.ts:buildTurnContext
+  - src/agent/prompt.ts:renderRepoRulesBlock
+reachable: yes
+surface_findings:
+  - "CLI interactive, headless, and IDE presets load trusted repository rules; the real interactive e2e observes AGENTS.md and CLAUDE.md in the LLM system prompt."
+  - "Web daemon uses the same shared mode policy and passes loaded rules into its assembled base config."
+  - "The catalog's default-off label only applies to a rule-less workspace or rule-less mode; trusted interactive modes auto-load a present rule file."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/repo-rules.test.ts tests/unit/interactive-repo-rules-wire-hellgate.test.ts tests/unit/mode-preset-repo-rules-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Rule-less repositories leave repoRules absent, while batch, ci-bot, and daemon remain rule-less under the shared policy.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/interactive-repo-rules-e2e-hellgate.test.ts tests/unit/apps/web-daemon/repo-rules-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real interactive assembly carries AGENTS.md and CLAUDE.md through to StreamInput.system; the web daemon loader and config handoff are pinned.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg resolveModePresetRepoRules and loadRepoRules in src/apps/agent src/apps/web-daemon src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Trusted mode presets and the web daemon are production consumers; context assembly renders the loaded rules.
+  - kind: test
+    command: bun test tests/unit/repo-rules.test.ts tests/unit/repo-rules-tree-hellgate.test.ts tests/unit/repo-rules-walkup-security-hellgate.test.ts tests/unit/interactive-repo-rules-wire-hellgate.test.ts tests/unit/interactive-repo-rules-e2e-hellgate.test.ts tests/unit/mode-preset-repo-rules-wire-hellgate.test.ts tests/unit/apps/web-daemon/repo-rules-wiring-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 176 selected focused tests passed in the shared audit rail; this subset proves loader priority, boundaries, trusted-mode assembly, system-prompt efficacy, and web handoff.
+audited_at: "2026-07-19"
+auditor: codex/p1-context-core
+review_state: approved
+reviewer: codex/cross-review-wave1

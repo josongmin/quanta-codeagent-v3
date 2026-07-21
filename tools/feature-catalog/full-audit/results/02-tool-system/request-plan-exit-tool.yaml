@@ -1,0 +1,55 @@
+version: 1
+feature_id: request-plan-exit-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/tier1/plan-exit.ts:buildPlanExitBlock"
+entrypoints:
+  - "src/apps/cli/repl/runtime-context-compose.ts:composeInteractiveRuntimeContext"
+  - "src/agent/features.ts:buildSessionFeatures"
+activation:
+  - "Interactive CLI always constructs createCliPlanExitPort for its runtime context."
+  - "The feature builder registers request_plan_exit only when AgentConfig.planExitPort is present."
+effective_defaults:
+  cli: on
+  web: off
+  bench: unknown
+  headless: unknown
+  daemon: off
+producer:
+  - "src/tool/request-plan-exit.ts:requestPlanExitTool"
+  - "src/apps/cli/repl/session-host-ports.ts:createCliPlanExitPort"
+consumer:
+  - "src/agent/features.ts:buildSessionFeatures"
+  - "src/agent/loop/plan-exit-lifecycle.ts:applyPlanExitOutcome"
+reachable: yes
+surface_findings:
+  - "The CLI's typed port registers the tool; approved moves the next turn to default mode, rejected clears the plan, and changes_requested retains plan mode with feedback."
+  - "No web plan-exit port is composed, matching the catalog's web:missing statement."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/request-plan-exit-tool.test.ts tests/integration/request-plan-exit-lifecycle-e2e.test.ts tests/unit/apps/cli/session-host-ports.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The focused rails passed for all three decisions, next-turn mode transition, PlanStore cleanup, focus-chain behavior, and bounded CLI prompt handling."
+failure_posture: fail-closed
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'createCliPlanExitPort|planExitPort|buildPlanExitBlock|applyPlanExitOutcome' src/apps/cli/repl src/agent"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The interactive CLI builds the port, the feature builder conditionally registers the tool, and loop lifecycle consumes its typed outcome."
+  - kind: test
+    command: "bun test tests/unit/request-plan-exit-tool.test.ts tests/integration/request-plan-exit-lifecycle-e2e.test.ts tests/unit/apps/cli/session-host-ports.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "24 selected tool, lifecycle, and CLI host-port checks passed."
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch3
+review_state: approved
+reviewer: codex/cross-review-wave1

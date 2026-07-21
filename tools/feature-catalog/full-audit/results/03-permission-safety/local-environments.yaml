@@ -1,0 +1,52 @@
+version: 1
+feature_id: local-environments
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/local-env/apply.ts:applyLocalEnv
+entrypoints: [src/apps/agent/index.ts, src/runtime/shell.ts]
+activation: [.quanta/environment.toml or Codex-compatible config, QUANTA_LOCAL_ENV optional]
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer: [src/runtime/local-env/parse.ts, src/runtime/local-env/load.ts]
+consumer: [src/apps/agent/index.ts, src/runtime/shell.ts, src/tool/bash/index.ts, src/tool/testrun/tool.ts]
+reachable: yes
+surface_findings:
+  - "Agent composition resolves declared config before assembly and ToolContext carries the selection into shell and test-runner environment construction."
+  - "No config or empty selection preserves the exact scrubbed-base object; only allowlisted names survive overlay and PATH fragments are parse-validated."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/local-environments-hellgate.test.ts tests/unit/apps/agent/local-env-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No config, absent selection, and malformed config retain a controlled ambient/no-apply path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/local-environments-hellgate.test.ts tests/unit/apps/agent/local-env-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Parse, selection, allowlist overlay, declared-only loader, shell child, and agent wire cases pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'resolveLocalEnvSelection|applyLocalEnv|localEnv' src/apps/agent/index.ts src/runtime/shell.ts src/tool/bash/index.ts src/tool/testrun/tool.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Configuration resolution and shell/test execution consumers form a live path.
+  - kind: test
+    command: bun test tests/unit/local-environments-hellgate.test.ts tests/unit/apps/agent/local-env-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused local environment rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

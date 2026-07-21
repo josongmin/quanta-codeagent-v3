@@ -1,0 +1,60 @@
+version: 1
+feature_id: jun7-skill-args-template
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/skill-tool.ts:createSkillTool
+entrypoints:
+  - src/agent/tier1/skill.ts:buildSkillBlock
+  - src/agent/features.ts:buildSessionFeatures
+activation:
+  - A configured skills block registers the Skill tool; passing the optional args field activates positional interpolation for that invocation.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/skill/skill-tool.ts:interpolateSkillArgs
+  - src/skill/skill-tool.ts:createSkillTool
+consumer:
+  - src/agent/tier1/skill.ts:buildSkillBlock
+  - src/agent/features.ts:buildSessionFeatures
+reachable: yes
+surface_findings:
+  - createSkillTool invokes interpolation only when args is present; omitted args returns the original body verbatim.
+  - The single function-replacer pass prevents replacement-string expansion and prevents inserted values from being scanned again.
+  - Shell metacharacters remain prompt text; this feature does not execute an interpolated value.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/skill/skill-args-hellgate.test.ts tests/unit/skill/skill-args-hardening-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent args leaves literal placeholders verbatim in both the pure function contract and the live Skill tool result.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill/skill-args-hellgate.test.ts tests/unit/skill/skill-args-hardening-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 29 focused cases passed for whole args, numbered arguments, empty args, unicode, one-pass semantics, and replacement metacharacter inertness.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'interpolateSkillArgs|input.args !== undefined|createSkillTool|buildSkillBlock' src/skill/skill-tool.ts src/agent/tier1/skill.ts src/agent/features.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The tool's optional input passes through the live skill builder and uses one function-replacer interpolation only on an explicit args value.
+  - kind: test
+    command: bun test tests/unit/skill/skill-args-hellgate.test.ts tests/unit/skill/skill-args-hardening-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 29 focused interpolation and adversarial replacement cases passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-shadow
+review_state: approved
+reviewer: codex/cross-review-wave1

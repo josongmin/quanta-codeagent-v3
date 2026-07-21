@@ -1,0 +1,67 @@
+version: 1
+feature_id: quantaverifyguard
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/guards/verify-guard.ts:buildVerifyGuardStep
+entrypoints:
+  - src/apps/cli/internal.ts:buildVerifyGuardConfig
+  - src/runner/assemble/config.ts:buildAgentConfig
+  - src/agent/loop/session-bootstrap.ts:buildVerifyGuard
+activation:
+  - QUANTA_VERIFY_GUARD must be present in the interactive CLI environment
+  - QUANTA_VERIFY_GUARD_MAX_TRIPS optionally bounds enforced re-entry
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/cli/internal.ts:buildVerifyGuardConfig
+  - src/agent/verify-guard.ts:decideVerifyGuard
+consumer:
+  - src/runner/assemble/config.ts:verifyGuard AgentConfig spread
+  - src/agent/guards/build.ts:buildGuardChain
+  - src/agent/loop/same-turn-engine.ts:guard chain execution
+reachable: yes
+surface_findings:
+  - "CLI: the env parser constructs the optional config, config assembly preserves it, and the loop creates state only when configured."
+  - "Web: QUANTA_VERIFY_GUARD is deliberately excluded from the web knob catalog; no browser activation surface exists."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/verify-guard-hellgate.test.ts tests/unit/verify-guard-must-pass-hellgate.test.ts tests/integration/verify-guard-e2e.test.ts tests/integration/verify-guard-forces-any.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent verifyGuard config completes edit-then-finish without a forced re-entry and preserves automatic tool choice.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/verify-guard-hellgate.test.ts tests/unit/verify-guard-must-pass-hellgate.test.ts tests/integration/verify-guard-e2e.test.ts tests/integration/verify-guard-forces-any.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The real loop blocks an unverified edit, emits recovery:unverified, accepts a post-edit verification, and obeys the trip bound.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'verifyGuard|QUANTA_VERIFY_GUARD|buildGuardChain' src/apps/cli src/runner/assemble src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI config, assembled AgentConfig, session state, and the same-turn guard chain form a continuous production path.
+  - kind: test
+    command: bun test tests/unit/verify-guard-hellgate.test.ts tests/unit/verify-guard-must-pass-hellgate.test.ts tests/integration/verify-guard-e2e.test.ts tests/integration/verify-guard-forces-any.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 119 pass, 0 fail; false-success, default-OFF, re-entry, and real-loop controls pass.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception was reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-plan
+review_state: approved
+reviewer: codex/cross-review-wave1

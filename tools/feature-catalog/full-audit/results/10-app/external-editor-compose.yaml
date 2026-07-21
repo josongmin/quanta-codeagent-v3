@@ -1,0 +1,68 @@
+version: 1
+feature_id: external-editor-compose
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/raw-line-reader.ts:runExternalEdit
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/repl/session-loop-options.ts:buildSessionLoopOptions
+  - src/apps/cli/repl/prompt-pipeline.ts:defaultPromptLineReader
+activation:
+  - The CLI seeds QUANTA_EXTERNAL_EDITOR=1 when unset; explicit non-1 leaves the editor port absent.
+  - The raw reader receives openEditor and processes Ctrl+X Ctrl+E or a mapped open-editor action.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/raw-line-reader-editor.ts:buildExternalEditor
+  - src/apps/cli/edit-plan-cmd.ts:editInTemp
+consumer:
+  - src/apps/cli/repl/surface-compose/prompt-ux.ts:buildPromptUx
+  - src/apps/cli/repl/prompt-pipeline.ts:defaultPromptLineReader
+  - src/apps/cli/raw-line-reader.ts:runExternalEdit
+reachable: yes
+surface_findings:
+  - The real REPL builds and forwards the port to raw-line-reader, which suspends raw mode, runs the no-throw editor port, and restores TTY/key listeners in finally.
+  - The catalog's unset/off and default-OFF claim is false for the shipped CLI because CLI_FEATURE_GATES seeds QUANTA_EXTERNAL_EDITOR=1. An explicit opt-out still works.
+  - Editor failure is a no-op with a warning; a misbehaving editor port cannot strand raw mode.
+off_identity_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/raw-line-reader-editor.hellgate.test.ts tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: An absent port keeps Ctrl+X/Ctrl+E inert and byte-identical; the CLI seed test proves explicit =0 is not overwritten.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/raw-line-reader-editor.hellgate.test.ts tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Edited drafts fold back without submit; throw, nonzero, missing editor, chord abort, and terminal restoration cases pass.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: The feature YAML says QUANTA_EXTERNAL_EDITOR unset is off/default-OFF, while the shipped CLI seed loop enables it when unset.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_EXTERNAL_EDITOR|openEditor|runExternalEdit|buildExternalEditor' src/apps/cli/index.ts src/apps/cli/repl src/apps/cli/raw-line-reader.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Startup seed, prompt composition, prompt projection, and raw-terminal owner are connected in the production CLI path.
+  - kind: test
+    command: bun test src/apps/cli/__tests__/raw-line-reader-editor.hellgate.test.ts tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 10 editor/keymap terminal-state cases and CLI seed/opt-out cases passed.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3 feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-repl
+review_state: approved
+reviewer: codex/cross-review-wave1

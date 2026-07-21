@@ -1,0 +1,57 @@
+version: 1
+feature_id: quantamemory-path-embed-embedmodel-recalllimit-distill-conso
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/memory-factory.ts:buildMemoryForSession
+entrypoints:
+  - src/apps/cli/internal.ts:assembleConfig
+  - src/runner/assemble/memory-factory.ts:resolveMemoryConfigFromEnv
+  - src/agent/loop/context-assembler.ts:resolveMemoryContext
+activation:
+  - The CLI passes process.env to buildMemoryForSession during session assembly.
+  - QUANTA_MEMORY=off cascades to no store and no memory bundle; sqlite is explicit persistence opt-in.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: off
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/runner/assemble/memory-factory.ts:buildMemoryForSession
+  - src/apps/cli/internal.ts:buildEmbedder
+consumer:
+  - src/apps/cli/internal.ts:assembleConfig places the resolved store, embedder, and memory config in AgentConfig.
+  - src/agent/loop/context-assembler.ts consumes recallLimit and recallTiers for each recall call.
+reachable: yes
+surface_findings:
+  - Unset QUANTA_MEMORY supplies volatile in-process memory; explicit falsey values restore the no-memory path without disk writes.
+  - QUANTA_MEMORY_PATH affects only sqlite, while embedding remains resource-dependent on an OpenAI key and can degrade to lexical recall.
+  - Recall-limit, distill, consolidate, self-edit, and tier knobs have one env-to-config owner in resolveMemoryConfigFromEnv.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/env-knob-branches.test.ts tests/integration/cli-export-assembly.test.ts tests/integration/memory-default-on-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The focused env, assembly, and default-on rails passed for knob parsing, sqlite persistence, and the explicit off escape hatch.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "QUANTA_MEMORY|buildMemoryForSession|resolveMemoryConfigFromEnv|buildEmbedder" src/apps/cli/internal.ts src/runner/assemble/memory-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: One factory owns the env projection and CLI assembly consumes its resolved slots.
+  - kind: test
+    command: bun test tests/unit/env-knob-branches.test.ts tests/integration/cli-export-assembly.test.ts tests/integration/memory-default-on-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused env, assembly, and default-on rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch7
+review_state: approved
+reviewer: codex/cross-review-wave1

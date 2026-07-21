@@ -1,0 +1,60 @@
+version: 1
+feature_id: thread-follower-cocontrol
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/web-daemon/server/ws-handlers.ts
+entrypoints:
+  - src/apps/web-daemon/runtime-factory.ts
+  - src/apps/web-daemon/server/follower-approval.ts
+  - src/apps/cli/slash/registry-session.ts
+activation:
+  - Set QUANTA_THIN_CLIENT_DISPATCH=1 and send follower verb frames through an active web daemon thread.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/thread-follower/dispatch.ts:FollowerCoControlDispatcher
+  - src/agent/thread-follower/approval-coordinator.ts:createFollowerApprovalCoordinator
+consumer:
+  - src/apps/web-daemon/runtime-factory.ts
+  - src/apps/web-daemon/server/ws-handlers.ts
+reachable: yes
+surface_findings:
+  - Web daemon creates the action dispatcher behind the shared gate, peeks followerVerb frames, and routes approval decisions through the timeout coordinator.
+  - CLI session slash routes provide steer and interrupt while approval relay rechecks HARD_DENY at the resolver boundary.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/thread-follower-cocontrol-hellgate.test.ts tests/unit/thread-follower-approval-coordinator-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Shared gate off and timeout-disabled paths retain safe local or pass-through behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/thread-follower-cocontrol-hellgate.test.ts tests/unit/thread-follower-dispatch-live-hellgate.test.ts tests/unit/thread-follower-approval-coordinator-hellgate.test.ts tests/unit/apps/cli/thread-follower-surface-integration-hellgate.test.ts tests/unit/apps/web-daemon/follower-verb-frame-hellgate.test.ts tests/unit/host/runtime-approval-harddeny-relay-recheck-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Follower framing, real action dispatch, timeout stale handling, CLI surface injection, and HARD_DENY relay recheck rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'isFollowerCoControlEnabled|peekFollowerVerb|createFollowerApprovalCoordinator' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/web-daemon src/agent/thread-follower
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Daemon runtime and websocket handlers consume the follower gate, frame parser, dispatcher, and approval coordinator.
+  - kind: test
+    command: bun test tests/unit/thread-follower-cocontrol-hellgate.test.ts tests/unit/thread-follower-dispatch-live-hellgate.test.ts tests/unit/thread-follower-approval-coordinator-hellgate.test.ts tests/unit/apps/cli/thread-follower-surface-integration-hellgate.test.ts tests/unit/apps/web-daemon/follower-verb-frame-hellgate.test.ts tests/unit/host/runtime-approval-harddeny-relay-recheck-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused co-control rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

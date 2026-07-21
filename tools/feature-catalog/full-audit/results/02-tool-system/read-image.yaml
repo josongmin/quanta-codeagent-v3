@@ -1,0 +1,56 @@
+version: 1
+feature_id: read-image
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/image/read.ts:makeReadImageTool and src/tool/image/compose.ts:composeToolResultContent
+entrypoints:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+activation:
+  - "read_image is always registered by buildBaseDefaultTools; an optional image downsample port changes only oversized-image handling."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/image/read.ts:makeReadImageTool
+  - src/tool/image/compose.ts:composeToolResultContent
+consumer:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/agent/dispatch/execute.ts:shapeDispatchResult
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+reachable: yes
+surface_findings:
+  - "The default registry builds read_image in every product composition; dispatch converts ToolResult.images into content blocks for the next provider request."
+  - "The owner enforces jailed paths, leaf-symlink rejection, a five-megabyte cap, and magic-byte media-type validation before emitting image bytes."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/read-image-hellgate.test.ts tests/integration/dispatch-image-roundtrip-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 32 focused tests passed for schema, jail, symlink, cap, magic bytes, content composition, dispatch roundtrip, legacy identity, and concurrent isolation.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "makeReadImageTool|composeToolResultContent|buildBaseDefaultTools|buildDaemonToolRegistry" src/tool/image/read.ts src/tool/image/compose.ts src/tool/index.ts src/agent/dispatch src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The producer, dispatch content consumer, and default registry consumers are all live.
+  - kind: test
+    command: bun test tests/unit/tool/read-image-hellgate.test.ts tests/integration/dispatch-image-roundtrip-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 32 focused unit and integration rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch6
+review_state: approved
+reviewer: codex/cross-review-wave1

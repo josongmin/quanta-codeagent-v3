@@ -1,0 +1,63 @@
+version: 1
+feature_id: llm-record-replay
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/bench/trajectory.ts:wrapTrajectoryLLM
+entrypoints:
+  - src/apps/bench/index.ts
+  - src/side-agent/worker-entry.mjs
+activation:
+  - Bench trajectory recording is default-on unless explicitly opted out; replay requires a trajectory path.
+  - A forked side-agent child sets QUANTA_SIDE_AGENT_LLM_REPLAY to use the hermetic replay port.
+effective_defaults:
+  cli: off
+  web: na
+  bench: on
+  headless: off
+  daemon: off
+producer:
+  - src/llm/replay/recording-llm.ts:recordingLlmPort
+  - src/llm/replay/replay-llm.ts:replayLlmPort
+  - src/llm/replay/jsonl-store.ts:jsonlReplayStore
+consumer:
+  - src/apps/bench/trajectory.ts
+  - src/apps/bench/resume/recorder.ts
+  - src/side-agent/worker-charter-runner.ts:buildLlmPort
+reachable: yes
+surface_findings:
+  - The parent LLM barrel remains import-safe, but bench composition records trajectories by default and replay is an explicit cassette mode.
+  - The forked side-agent worker has a concrete hermetic replay consumer with fail-loud cassette misses.
+  - The catalog's claim that eval grounding drives this replay slice is unsupported; the actual production consumers are bench and side-agent, and batch recording is not globally default-off.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/bench-trajectory-record-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit record opt-out and unset replay retain the original LLM port byte-for-byte.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm-replay-hellgate.test.ts tests/unit/bench-trajectory-record-hellgate.test.ts tests/integration/side-agent-process-llm-charter-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 29 store, recorder, replay-hit/miss, bench wrapper, and forked worker cassette cases pass.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: stale-claim
+blocker: Catalog calls the slice default-off and says eval grounding drives it, but bench recording is default-on and no eval source imports the replay sub-barrel.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg -n 'recordingLlmPort|replayLlmPort|jsonlReplayStore|QUANTA_SIDE_AGENT_LLM_REPLAY' src/apps/bench src/side-agent; rg -n '\\"@/llm/replay\\"|llm/replay' src/apps/eval"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Bench and side-agent have concrete consumers; the eval search returns no replay-slice import.
+  - kind: test
+    command: bun test tests/unit/llm-replay-hellgate.test.ts tests/unit/bench-trajectory-record-hellgate.test.ts tests/integration/side-agent-process-llm-charter-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 29 focused core, bench-composition, and forked-child replay cases pass.
+audited_at: "2026-07-19"
+auditor: codex/p1-llm-extended
+review_state: approved
+reviewer: codex/cross-review-wave1

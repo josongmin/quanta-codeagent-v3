@@ -1,0 +1,50 @@
+version: 1
+feature_id: conv-checkpoint-auto-record
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/surface-compose/mutable-wires.ts:buildMutableSurfaceWires
+entrypoints: [src/apps/cli/repl.ts:runRepl, src/apps/cli/repl/session-loop.ts:runSessionLoop]
+activation: [QUANTA_CHECKPOINT_CONV must be truthy., "The CLI composer installs the wire, then the session loop records a successful turn and slash dispatch exposes /rewind-conv."]
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer: [src/apps/cli/repl/conv-checkpoint-wire.ts:startConvCheckpointWire]
+consumer: [src/apps/cli/repl/surface-compose/mutable-wires.ts:buildMutableSurfaceWires, src/apps/cli/repl/session-loop.ts:recordTurnSnapshot, src/apps/cli/rewind-conv-cmd.ts:executeRewindConv]
+reachable: yes
+surface_findings: ["The CLI composer gates the wire and intentionally omits the slash slot when the env is unset.", "The loop calls recordTurn after turn completion, while /rewind-conv uses the same live wire to list or restore checkpoints."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/repl-surface-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset QUANTA_CHECKPOINT_CONV produces a null wire and an omitted checkpoint slash slot.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/conv-checkpoint-auto-record-hellgate.test.ts tests/unit/cli/repl-surface-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Enabled wire records, lists, restores, handles errors, and is installed into the surface.
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'QUANTA_CHECKPOINT_CONV|recordTurn\(|convCheckpointSlot' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/repl src/apps/cli/rewind-conv-cmd.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The gate constructs the live wire, the loop records it, and the slash context consumes it.
+  - kind: test
+    command: bun test tests/unit/conv-checkpoint-auto-record-hellgate.test.ts tests/unit/cli/repl-surface-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected checkpoint wire rails passed in the focused audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch4
+review_state: approved
+reviewer: codex/cross-review-wave1

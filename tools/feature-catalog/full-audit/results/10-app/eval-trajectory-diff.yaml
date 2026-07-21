@@ -1,0 +1,54 @@
+version: 1
+feature_id: eval-trajectory-diff
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/trajectory/diff.ts:diffStreams
+entrypoints:
+  - src/apps/eval/trajectory/replay.ts:replayFixture
+  - src/apps/eval/index.ts:cmdTrajectory
+activation:
+  - Run bun run eval trajectory replay --fixture JSONL with a configured replay agent.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/eval/trajectory/diff.ts:diffStreams
+consumer:
+  - src/apps/eval/trajectory/replay.ts:replayFixture
+  - src/apps/eval/trajectory/replay.ts:verdictFromDiff
+reachable: yes
+surface_findings:
+  - Replay consumes the projected LCS summary and maps it to pass, partial, or fail using the documented ratio ladder.
+  - Projection ignores deliberately noisy event kinds but retains tool names, input-key shape, result outcome, recovery reason, and session-end reason.
+  - The zero-length denominator guard treats no-event equality as partial rather than emitting a non-finite ratio.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-trajectory-diff.test.ts tests/unit/eval-replay-verdict.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Equal and divergent projection cases, noisy event elision, capped divergence reporting, and verdict boundaries passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'diffStreams|verdictFromDiff|replayFixture|cmdTrajectory' src/apps/eval/trajectory src/apps/eval/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The deterministic comparator feeds the live replay verdict and eval CLI command.
+  - kind: test
+    command: bun test tests/unit/eval-trajectory-diff.test.ts tests/unit/eval-replay-verdict.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused trajectory diff and verdict rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,57 @@
+version: 1
+feature_id: multimodal-embedding-mvp
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/retrieval/multimodal/registry.ts:createMultiModalEmbedderFromEnv
+entrypoints:
+  - src/retrieval/multimodal/index.ts
+activation:
+  - A future caller constructs the registry with QUANTA_MM_EMBED set to voyage, clip, or headless.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/retrieval/multimodal/voyage-multimodal.ts:createVoyageMultiModalEmbedder
+  - src/retrieval/multimodal/clip-rest.ts:createClipRestEmbedder
+  - src/retrieval/multimodal/headless-stub.ts:createHeadlessMmEmbedder
+consumer: []
+reachable: no
+surface_findings:
+  - The port, three adapters, registry, deterministic headless path, and closed input/config errors are implemented and the registry defaults to null.
+  - No production composition root constructs the multimodal registry or supplies its vectors to a vector store or retrieval pipeline.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/retrieval/multimodal-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset and unknown QUANTA_MM_EMBED values return null.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/retrieval/multimodal-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Shape, adapter, boundary-error, registry, and deterministic headless rails pass under injected callers.
+failure_posture: unknown
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production composition root constructs this registry or connects image/audio vectors to storage and retrieval consumers.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'createMultiModalEmbedderFromEnv|MultiModalEmbedder' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/retrieval/multimodal src/apps src/host src/runner
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Factory references are confined to the multimodal slice; no app, host, or runner consumer constructs it.
+  - kind: test
+    command: bun test tests/unit/retrieval/multimodal-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused multimodal rail passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,62 @@
+version: 1
+feature_id: session-effort-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/skill-gate.ts:resolveSkillTurnOverride
+entrypoints:
+  - src/host/bootstrap/bootstrap-session.ts:createEffortStore
+  - src/host/runtime/internal/context-binding/base.ts:sessionEffort
+  - src/apps/cli/repl/surface-compose/slash-context-compose.ts:effort context
+activation:
+  - QUANTA_EFFORT seeds low, medium, high, or max for a session
+  - /effort mutates the shared session effort store
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/bootstrap/bootstrap-session.ts:effortStore
+  - src/apps/cli/repl/surface-compose/slash-context-compose.ts:effort.set
+consumer:
+  - src/agent/loop/skill-gate.ts:resolveSkillTurnOverride
+  - src/agent/loop/stream-consume.ts:LLM input override
+reachable: yes
+surface_findings:
+  - Bootstrap, the CLI slash surface, and the loop share one EffortStore.
+  - Skill effort wins over session effort; default or undefined produces no thinking field.
+  - The catalog's statement that CLI /effort is a B2 prefill stub is obsolete in the frozen source.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/session-effort-precedence.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default and undefined session effort both produce no thinking field in the loop input.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/effort-slash-hellgate.test.ts tests/unit/slash-commands.test.ts tests/integration/session-effort-precedence.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Slash mutation is live and high session effort reaches the loop as a 16384-token thinking budget unless a skill override wins.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: "The catalog web evidence still describes /effort as a B2 prefill stub and claims QUANTA_EFFORT does not reach the real LLM input; the frozen source wires it through bootstrap, context binding, and stream consumption."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n 'createEffortStore|sessionEffort|resolveSkillTurnOverride|QUANTA_EFFORT' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host src/apps/cli src/agent/loop
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The same mutable store is boot-seeded, exposed to the slash surface, read by the loop, and converted into the LLM thinking override.
+  - kind: test
+    command: bun test tests/unit/cli/effort-slash-hellgate.test.ts tests/unit/slash-commands.test.ts tests/integration/session-effort-precedence.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 43 focused tests passed for slash behavior, registration, skill precedence, session activation, and paired OFF controls.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

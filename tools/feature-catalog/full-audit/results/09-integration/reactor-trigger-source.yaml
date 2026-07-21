@@ -1,0 +1,50 @@
+version: 1
+feature_id: reactor-trigger-source
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/reactor/trigger-source-ci.ts:createCiTriggerSource
+entrypoints:
+  - src/reactor/index.ts:exports
+activation: []
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/reactor/trigger-source-ci.ts:createCiTriggerSource
+  - src/reactor/trigger-source-pr-comment.ts:createPrCommentTriggerSource
+consumer: []
+reachable: no
+surface_findings:
+  - CI and PR-comment factories produce bounded, evidence-bearing triggers and are covered by a composed test path.
+  - The frozen tree contains no non-test production call site for either factory; the CLI bridge accepts externally supplied triggers but does not construct these adapters.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/reactor-trigger-source.test.ts tests/integration/reactor-babysit-end-to-end.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Both factories handle success, failure, dedup, watermark, abort, and test-local source-to-self-wake composition.
+failure_posture: degraded
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: "createCiTriggerSource and createPrCommentTriggerSource have no frozen production consumer outside their own reactor slice; CLI integration receives socket triggers but does not instantiate these factory adapters."
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'createCiTriggerSource|createPrCommentTriggerSource' 9a12f7a855640a8be1e4654472766bbc445696ea -- .
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Outside declarations, barrel exports, docs, and tests, no production construction call site exists.
+  - kind: test
+    command: bun test tests/unit/reactor-trigger-source.test.ts tests/integration/reactor-babysit-end-to-end.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused CI and PR-comment source behavior plus isolated composition rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

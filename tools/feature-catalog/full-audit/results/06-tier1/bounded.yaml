@@ -1,0 +1,55 @@
+version: 1
+feature_id: bounded
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/spawn-depth.ts:effectiveCap
+entrypoints:
+  - src/agent/tier1/subagent.ts:buildSubagentBlock
+  - src/agent/subagent-runner.ts:createSubagentRunner
+activation:
+  - Every enabled subagent spawn resolves a lineage-derived child depth against the operator cap and optional tightening-only subagent maxDepth.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/spawn-depth.ts:effectiveCap
+consumer:
+  - src/agent/tier1/subagent.ts
+  - src/agent/subagent-runner.ts
+  - src/subagent/tools-6.ts
+reachable: yes
+surface_findings:
+  - The live bound is a min-cap: QUANTA_MAX_DESCENDANT_DEPTH is the authoritative policy and config.subagent.maxDepth can only tighten it.
+  - Default policy is one descendant level, not the catalog's stated default depth of three; a depth-cap attempt returns a typed denial without forking a child.
+  - Capability projection removes creation tools at the cap and the runner independently rejects forged or malformed depth attempts.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-runner.test.ts tests/unit/subagent-6-tools-hellgate.test.ts tests/unit/subagent-nesting-capability-absence-hellgate.test.ts tests/unit/subagent-nesting-effective-cap-ssot-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Min-cap, capability absence, lineage-derived deny, and cross-constructor parity rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: The catalog states maxDepth defaults to 3, while the active operator policy QUANTA_MAX_DESCENDANT_DEPTH defaults to 1 and legacy QUANTA_SUBAGENT_MAX_DEPTH can only tighten it.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'effectiveCap|QUANTA_MAX_DESCENDANT_DEPTH|QUANTA_SUBAGENT_MAX_DEPTH|effectiveMaxDepth' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent/spawn-depth.ts src/agent/tier1/subagent.ts src/agent/subagent-runner.ts src/apps/cli/internal.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The common policy cap and the tightening-only config cap are threaded to projection and runner rejection.
+  - kind: test
+    command: bun test tests/unit/subagent-runner.test.ts tests/unit/subagent-6-tools-hellgate.test.ts tests/unit/subagent-nesting-capability-absence-hellgate.test.ts tests/unit/subagent-nesting-effective-cap-ssot-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused recursion-bound rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

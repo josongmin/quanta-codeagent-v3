@@ -1,0 +1,45 @@
+version: 1
+feature_id: edit
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/edit/index.ts:makeEditTool
+entrypoints: [src/tool/index.ts:buildBaseDefaultTools, src/agent/dispatch/execute.ts:executeTool]
+activation: ["edit is a default built-in mutating tool; strategy hints are emitted only on exact/fuzzy mismatch failures."]
+effective_defaults:
+  cli: on
+  web: on
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer: [src/tool/edit/index.ts:buildMismatchResult, src/tool/edit/strategy-hint.ts:classifyMismatch, src/tool/edit/strategy-hint.ts:formatStrategyHint]
+consumer: [src/tool/index.ts:buildBaseDefaultTools, src/agent/dispatch/execute.ts:executeTool]
+reachable: yes
+surface_findings: ["Default registry registration reaches edit through the normal dispatch path.", "Exact/fuzzy mismatch outcomes include structured markers and deterministic read_then_patch or scripted_replace hints, while success remains hint-free."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/edit-recovery-hellgate.test.ts tests/unit/edit-strategy-hint.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 24 focused tests passed, covering fuzzy recovery, ambiguity rejection, typed mismatch markers, strategy routing, and no-hint success.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "buildMismatchResult|classifyMismatch|formatStrategyHint|editTool|buildBaseDefaultTools" src/tool/edit/index.ts src/tool/edit/strategy-hint.ts src/tool/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Failure mapping, model-visible hints, tool export, and default registry consumer are live.
+  - kind: test
+    command: bun test tests/unit/edit-recovery-hellgate.test.ts tests/unit/edit-strategy-hint.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 24 strategy and safety rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-edit
+review_state: approved
+reviewer: codex/cross-review-wave1

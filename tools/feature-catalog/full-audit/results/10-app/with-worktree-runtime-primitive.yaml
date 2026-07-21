@@ -1,0 +1,59 @@
+version: 1
+feature_id: with-worktree-runtime-primitive
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/worktree.ts:withWorktree
+entrypoints:
+  - src/agent/subagent-runner.ts:createSubagentRunner
+activation:
+  - Request a subagent with isolation worktree in a Git workspace; the runner invokes withWorktree for the child run.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/runtime/worktree.ts:withWorktree
+  - src/runtime/worktree.ts:runWorktreeAddWithRetry
+consumer:
+  - src/agent/subagent-runner.ts:executeChild
+  - src/runtime/worktree-fork.ts:fork worktree creation retry helper
+reachable: yes
+surface_findings:
+  - createSubagentRunner selects the throwaway HOF only for isolation worktree requests whose requested cwd passes the Git probe; non-Git workspaces deliberately run without isolation and report that fact.
+  - Clean child worktrees are removed, dirty worktrees remain for inspection, and body failures attempt forced cleanup before rethrowing.
+  - Add retries are bounded and restricted to lock-shaped failures; non-lock failures return immediately.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/worktree.test.ts tests/unit/runtime/kill-escalation-and-worktree-retry.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Non-Git rejection, clean cleanup, non-lock no-retry, and bounded lock retry behavior passed.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/worktree.test.ts tests/unit/runtime/kill-escalation-and-worktree-retry.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real temporary Git worktree clean, dirty-retention, thrown-body cleanup, and transient-lock retry rails passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'withWorktree|isolation === "worktree"|runWorktreeAddWithRetry' src/agent/subagent-runner.ts src/runtime/worktree.ts src/runtime/worktree-fork.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The subagent runner consumes the throwaway HOF for requested Git worktree isolation and the persistent fork route shares retry logic.
+  - kind: test
+    command: bun test tests/unit/worktree.test.ts tests/unit/runtime/kill-escalation-and-worktree-retry.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused worktree rails passed within the 118-pass 11-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

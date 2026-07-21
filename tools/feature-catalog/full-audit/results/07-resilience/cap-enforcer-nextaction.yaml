@@ -1,0 +1,60 @@
+version: 1
+feature_id: cap-enforcer-nextaction
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/cap-enforcer.ts:CapEnforcer and buildCapEnforcer
+entrypoints:
+  - src/apps/cli/internal.ts:runtime configuration parsing
+  - src/agent/loop/session-bootstrap.ts:attachCapEnforcer
+activation:
+  - QUANTA_CAP_ENFORCE=1 makes runtimeConfig().capEnforce true.
+  - AgentConfig.capEnforce true also allocates the session-scoped CapEnforcer.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/cap-enforcer.ts:record tracks the returned NextAction by tool and target path.
+consumer:
+  - src/agent/dispatch.ts invokes capEnforcer.check before dispatch.
+  - src/agent/dispatch/execute.ts invokes capEnforcer.record after a tool result.
+  - src/agent/loop/session-bootstrap.ts installs the enabled session instance.
+reachable: yes
+surface_findings:
+  - The unset env path returns undefined and dispatch performs no check or allocation.
+  - Both env and explicit AgentConfig activation route into the production dispatch and execute seams.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/next-action-cap-enforce.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: CAP-C1 proves an unset QUANTA_CAP_ENFORCE returns no CapEnforcer and CAP-C2/C3 prove explicit and env activation.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/next-action-cap-enforce.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: CAP-D cases prove ignored hints yield reminders while applied or differently targeted hints do not.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'attachCapEnforcer\|capEnforcer?.check\|capEnforcer?.record\|QUANTA_CAP_ENFORCE' 9a12f7a -- src/agent src/shared src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The default-off config is attached at session bootstrap and consumed before and after production tool dispatch.
+  - kind: test
+    command: bun test tests/unit/next-action-cap-enforce.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 17 pass and 0 fail across OFF and ON policy branches.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

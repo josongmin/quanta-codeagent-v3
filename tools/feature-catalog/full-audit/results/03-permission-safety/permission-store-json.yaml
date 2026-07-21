@@ -1,0 +1,55 @@
+version: 1
+feature_id: permission-store-json
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/permission/permission-store.ts:createPermissionStore"
+entrypoints:
+  - "src/apps/cli/repl.ts:replDeps.loadPermissionStore"
+  - "src/agent/admissibility-gate/gates.ts:runPermissionStackGate"
+activation:
+  - "The interactive CLI loads the process singleton before composing its runtime context."
+  - "Any dispatch using the permission stack receives the injected store or the guarded default singleton fallback."
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: on
+  headless: on
+  daemon: unknown
+producer:
+  - "src/permission/permission-store.ts:createPermissionStore"
+  - "src/permission/json-state-file.ts:createJsonStateFile"
+consumer:
+  - "src/apps/cli/repl.ts:replDeps.loadPermissionStore"
+  - "src/agent/admissibility-gate/gates.ts:evaluateStack"
+reachable: yes
+surface_findings:
+  - "CLI calls getDefaultPermissionStore(), awaits load(), and threads that exact instance into runtime composition."
+  - "The dispatch permission-stack gate consumes an injected store and retains the composition-adjacent default-store fallback for legacy callers."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/permission-store-hardening.test.ts tests/unit/permission-per-thread.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "52 tests pass: durable round trips, quarantine, atomic/debounced writes, and multi-process merge/no-resurrection rails."
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'getDefaultPermissionStore|loadPermissionStore|evaluateStack' src/apps/cli/repl.ts src/agent/admissibility-gate/gates.ts src/permission/permission-store.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "CLI loads the singleton and the live dispatch gate supplies the same store to the policy stack."
+  - kind: test
+    command: "bun test tests/unit/permission-store-hardening.test.ts tests/unit/permission-per-thread.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "52 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch9
+review_state: approved
+reviewer: codex/cross-review-wave1

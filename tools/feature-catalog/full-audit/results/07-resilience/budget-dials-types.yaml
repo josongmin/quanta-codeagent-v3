@@ -1,0 +1,42 @@
+version: 1
+feature_id: budget-dials-types
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/budget/types.ts
+entrypoints:
+  - src/agent/budget/index.ts
+  - src/agent/budget/meter.ts
+activation:
+  - Compile-time type contracts are consumed by the meter, events, run-mode presets, and clamp helper.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/agent/budget/types.ts declares optional requested ceilings and closed policy unions.
+consumer:
+  - src/agent/budget/meter.ts, events.ts, run-mode/presets.ts, and run-mode/clamp.ts import the types.
+reachable: no
+surface_findings:
+  - This catalog item intentionally describes type-only contracts, not a separately activatable runtime surface.
+  - Runtime budget behavior belongs to the dependent meter and run-mode features.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: na
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "BudgetDials|BudgetCaps|BudgetExhaustionPolicy" src/agent/budget src/agent/run-mode
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Types are imported by the meter and run-mode contract owners; they do not create an I/O or activation path themselves.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

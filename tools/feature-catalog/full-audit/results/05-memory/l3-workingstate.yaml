@@ -1,0 +1,53 @@
+version: 1
+feature_id: l3-workingstate
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/working-state.ts:buildWorkingStateBlock
+entrypoints:
+  - src/agent/features.ts:buildSessionFeatures
+  - src/agent/loop/context-assembler.ts:workingState snapshot
+activation:
+  - Enable the working-state knob on cli, agent-batch, or agent-interactive; bench is deliberately excluded to retain measurement identity.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/update-working-state.ts:createUpdateWorkingStateTool
+consumer:
+  - src/agent/prompt-reminders.ts:renderWorkingStateBlock
+  - src/apps/cli/working-state-panel.ts:state panel
+reachable: yes
+surface_findings:
+  - The opt-in builder creates one session-scoped mutable handle, registers update_working_state, threads it to ToolContext, and snapshots it into the per-turn reminder.
+  - CLI exposes the resulting state through /state and /working-state; absent wiring produces a typed not-wired display rather than an implicit state object.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/runner/knobs/working-state.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Falsy or invalid knob values preserve the config identity, and bench is excluded from the apply surface.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/working-state.test.ts tests/unit/update-working-state.test.ts tests/unit/runner/knobs/working-state.test.ts tests/unit/cli/working-state-panel.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Session mutation, caps, tool context fallback, knob activation, reminder data shape, and CLI rendering all passed.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: The catalog describes naming alignment only, but the snapshot implements a live opt-in session scratchpad with tool, prompt, and CLI consumers.
+disposition: fix-claim
+receipts:
+  - kind: test
+    command: bun test tests/unit/working-state.test.ts tests/unit/update-working-state.test.ts tests/unit/runner/knobs/working-state.test.ts tests/unit/cli/working-state-panel.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused command passed 66 state, tool, knob, and CLI rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,61 @@
+version: 1
+feature_id: subagent-msg-delivery-modes
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/subagent-delivery/controller.ts:createSubagentDeliveryController
+entrypoints:
+  - src/agent/optional-ports.ts:wireSubagentToolGates
+  - src/agent/tier1/subagent-introspect.ts:buildSubagentIntrospectBlock
+  - src/agent/subagent-runner.ts:createSubagentRunner
+activation:
+  - QUANTA_SUBAGENT_FOLLOWUP=on exposes followup delivery when the session substrate is available.
+  - QUANTA_SUBAGENT_STEER=on plus followup enables same-turn steer handling.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/subagent-delivery/controller.ts:createSubagentDeliveryController
+  - src/agent/subagent-mailbox.ts:createSubagentMailbox
+consumer:
+  - src/agent/tier1/subagent-introspect.ts:buildSubagentIntrospectBlock
+  - src/agent/subagent-runner.ts:createSubagentRunner
+reachable: yes
+surface_findings:
+  - Queue, interrupt, and steer use typed outcomes, lineage checks, redacted fallback payloads, and exactly-one mutation rules.
+  - The current integration test is the catalog's previously-pending WS7 live-child smoke: it creates a real child runAgent loop and proves all five delivery modes end to end.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/subagent-control-endpoint-hellgate.test.ts tests/unit/subagent-steer-safepoint-hellgate.test.ts tests/unit/subagent-introspect-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing gates leave the child without control capabilities; steer-off preserves the one-call loop and no injection or receipt.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-delivery-contract-hellgate.test.ts tests/unit/subagent-control-endpoint-hellgate.test.ts tests/unit/subagent-delivery-controller-hellgate.test.ts tests/unit/subagent-steer-safepoint-hellgate.test.ts tests/unit/subagent-introspect-hellgate.test.ts tests/integration/subagent-delivery-modes-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The live-child WS7 test passes queue/busy, wake/idle, same-turn steer, interrupt/restart, and stale-turn fallback scenarios.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: The catalog says WS7 live-child product smoke remains pending, but tests/integration/subagent-delivery-modes-real-loop-e2e.test.ts implements and passes that five-scenario smoke.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_SUBAGENT_FOLLOWUP|QUANTA_SUBAGENT_STEER|createSubagentDeliveryController|createSubagentRunner|buildSubagentIntrospectBlock' src/agent/optional-ports.ts src/agent/subagent-runner.ts src/agent/tier1/subagent-introspect.ts src/agent/subagent-delivery
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Strict gates, delivery controller, public tool construction, and real child runner are connected in the live tree.
+  - kind: test
+    command: bun test tests/unit/subagent-delivery-contract-hellgate.test.ts tests/unit/subagent-control-endpoint-hellgate.test.ts tests/unit/subagent-delivery-controller-hellgate.test.ts tests/unit/subagent-steer-safepoint-hellgate.test.ts tests/unit/subagent-introspect-hellgate.test.ts tests/integration/subagent-delivery-modes-real-loop-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused unit and WS7 real-loop proof is included in the 276-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

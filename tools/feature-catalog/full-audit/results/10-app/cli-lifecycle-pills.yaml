@@ -1,0 +1,58 @@
+version: 1
+feature_id: cli-lifecycle-pills
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/lifecycle-pills.ts:createLifecyclePills
+entrypoints:
+  - src/apps/cli/repl/factories/lifecycle.ts:buildLifecycleBundle
+  - src/apps/cli/repl/surface-compose/turn-sinks.ts:snapshotAndFlushLifecyclePills
+activation:
+  - Use the interactive CLI on a TTY with QUANTA_LIFECYCLE_PILLS enabled and at least one non-empty subagent, follow-up, or MCP state.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/lifecycle-pills.ts:createLifecyclePills
+consumer:
+  - src/apps/cli/repl/surface-compose/turn-sinks.ts:snapshotAndFlushLifecyclePills
+reachable: yes
+surface_findings:
+  - The REPL snapshots active TaskRegistry, live MCP health, and its optional FollowUpQueue before flushing the terminal row.
+  - The renderer is TTY-gated and supports master and per-pill environment suppression.
+  - The CLI creates a FollowUpQueue but this bundle has no CLI producer that enqueues follow-up delivery, so the follow-up pill cannot prove the advertised live queued-follow-up behavior.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/lifecycle-pills.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Empty state, non-TTY, and explicit disable paths render no lifecycle bytes.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/lifecycle-pills.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Subagent, follow-up formatting, MCP health, viewport truncation, and lifecycle updates passed as injected state.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: conditional
+blocker: "The REPL FollowUpQueue is allocated but no CLI producer enqueues delivery work, leaving the follow-up pill dependent on an unwired producer."
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'createLifecyclePills|FollowUpQueue|snapshotAndFlushLifecyclePills|lifecyclePills.update' src/apps/cli/repl src/apps/cli/lifecycle-pills.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Factory allocation and per-turn subagent/MCP snapshot consumption are live; the queue is explicitly documented producer-less.
+  - kind: test
+    command: bun test tests/unit/cli/lifecycle-pills.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused lifecycle-pill formatter and gate rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch24
+review_state: approved
+reviewer: codex/cross-review-wave1

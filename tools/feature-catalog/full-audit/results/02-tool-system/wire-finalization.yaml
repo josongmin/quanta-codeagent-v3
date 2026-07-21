@@ -1,0 +1,58 @@
+version: 1
+feature_id: wire-finalization
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-config-assembler.ts:maybeWireWebSearch and src/tool/index.ts:buildBaseDefaultTools
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+  - src/agent/tier1/features.ts:buildSessionFeatures
+  - src/tool/index.ts:buildBaseDefaultTools
+activation:
+  - "BRAVE_SEARCH_API_KEY takes precedence over QUANTA_WEB_SEARCH_DUCKDUCKGO=1 and wires web_search only when a provider resolves."
+  - "csv_read, ndjson_read, yaml_read, pdf_read, and xlsx_read are unconditional base tools classified read-only in MUTATING_TOOL_TABLE."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/web/providers/from-env.ts:providerFromEnv
+  - src/host/runtime/agent-config-assembler.ts:maybeWireWebSearch
+  - src/tool/index.ts:buildBaseDefaultTools
+consumer:
+  - src/agent/tier1/features.ts:buildSessionFeatures
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+reachable: yes
+surface_findings:
+  - "The env factory has deterministic Brave-over-DDG precedence and the assembler converts a resolved provider into the webSearch slot; session features then registers web_search without a dead no-provider tool."
+  - "The five document readers are present in every default registry and have explicit null read-only table entries, preventing plan-mode unknown-tool drift."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/web-search-from-env-hellgate.test.ts tests/unit/wire-closeout-final-hellgate.test.ts tests/unit/document-tools-defaults-registration-hellgate.test.ts tests/integration/hexagonal-ports-closeout.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Env precedence, absent-provider identity, session web_search registration, document defaults, and composition rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "providerFromEnv|maybeWireWebSearch|buildWebSearchBlock|csvReadTool|ndjsonReadTool|yamlReadTool|pdfReadTool|xlsxReadTool|MUTATING_TOOL_TABLE" src/tool/web/providers/from-env.ts src/host/runtime/agent-config-assembler.ts src/agent/tier1/features.ts src/tool/index.ts src/agent/mode.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Provider selection, host-to-session consumer, base document registry, and plan-mode table are live.
+  - kind: test
+    command: bun test tests/unit/tool/web-search-from-env-hellgate.test.ts tests/unit/wire-closeout-final-hellgate.test.ts tests/unit/document-tools-defaults-registration-hellgate.test.ts tests/integration/hexagonal-ports-closeout.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 45 selected provider and composition tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch7
+review_state: approved
+reviewer: codex/cross-review-wave1

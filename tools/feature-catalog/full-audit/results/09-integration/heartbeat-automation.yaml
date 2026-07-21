@@ -1,0 +1,54 @@
+version: 1
+feature_id: heartbeat-automation
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/heartbeat-binder.ts:heartbeatEnqueueHandler
+entrypoints:
+  - src/scheduler/runtime-wire.ts:automation handler
+  - src/apps/cli/repl/session-loop.ts:heartbeat binder composition
+activation:
+  - Enable QUANTA_AUTOMATION and create a heartbeat automation for an existing thread.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/scheduler/automation-engine/sqlite/operations.ts:heartbeat validation
+  - src/apps/cli/repl/heartbeat-binder.ts:heartbeatEnqueueHandler
+consumer:
+  - src/scheduler/runtime-wire.ts:automation handler
+  - src/apps/cli/repl/session-loop.ts:enqueueWithHeartbeat
+reachable: yes
+surface_findings:
+  - The scheduler forwards heartbeat target and inherited policy to the live CLI session-loop binder.
+  - The binder clamps inherited authority and rejects absent or cross-thread targets; the overall feature remains behind QUANTA_AUTOMATION.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/scheduler/automation-engine-heartbeat-hellgate.test.ts tests/unit/heartbeat-binder-resume-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Engine uniqueness, production dispatch, thread targeting, no-widening authority clamp, and no-throw rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: "Heartbeat delivery is production-wired only when default-off automation is enabled and a heartbeat is explicitly scheduled."
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'heartbeatEnqueueHandler|targetThreadId|inheritedPolicy' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/scheduler/runtime-wire.ts src/apps/cli/repl/session-loop.ts src/apps/cli/repl/heartbeat-binder.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Scheduler handler forwards heartbeat routing and session-loop installs the binding handler.
+  - kind: test
+    command: bun test tests/unit/scheduler/automation-engine-heartbeat-hellgate.test.ts tests/unit/heartbeat-binder-resume-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused heartbeat authority and delivery rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

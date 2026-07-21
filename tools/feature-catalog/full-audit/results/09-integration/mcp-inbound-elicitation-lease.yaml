@@ -1,0 +1,58 @@
+version: 1
+feature_id: mcp-inbound-elicitation-lease
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal.ts:buildCliElicitationPrompterFactory
+entrypoints:
+  - src/agent/mcp-bridge.ts
+  - src/mcp/client.ts:handleInboundRequest
+activation:
+  - An MCP server sends an elicitation request while the CLI has an interactive TTY prompter.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/mcp/client.ts inbound elicitation request handler
+  - src/apps/cli/internal.ts per-server prompter factory
+consumer:
+  - MCP bridge forwards the factory into the client request handler.
+reachable: yes
+surface_findings:
+  - TTY mode creates a per-server lease that coalesces prompts; noninteractive mode intentionally leaves the factory undefined.
+  - Inbound requests route to accept, decline, multi-field decline, URL prompt, or the stable -32601 unknown-method result instead of being dropped.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mcp-elicitation-inbound-hellgate.test.ts tests/unit/apps/cli/mcp-elicitation-cli-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Headless and noninteractive paths offer no prompter and deterministically decline rather than issuing interactive work.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp-elicitation-inbound-hellgate.test.ts tests/unit/apps/cli/mcp-elicitation-cli-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Inbound routing, request forms, lease coalescing, TTY factory wiring, and noninteractive behavior passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'ElicitationLeasePool|elicitationPrompterFor|handleInboundRequest' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli src/agent/mcp-bridge.ts src/mcp
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI construction, bridge forwarding, and inbound client handling are linked by live production symbols.
+  - kind: test
+    command: bun test tests/unit/mcp-elicitation-inbound-hellgate.test.ts tests/unit/apps/cli/mcp-elicitation-cli-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused inbound elicitation and CLI wiring rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

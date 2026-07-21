@@ -1,0 +1,50 @@
+version: 1
+feature_id: hitl-otel-emit-outcome
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/admissibility-gate/hitl.ts:runHitlGate
+entrypoints:
+  - src/agent/admissibility-gate/shared.ts:emitHandoffEvent
+activation:
+  - Live admissibility gate calls the optional span attribute sink after tier resolution and handoff outcomes.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/admissibility-gate/hitl.ts
+consumer:
+  - src/observability/spans.ts:recordAttrs
+reachable: yes
+surface_findings:
+  - Gate call sites are live; without a span sink recordAttrs is a shared zero-allocation no-op, so actual export remains resource-dependent.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/hitl-otel-emit-hellgate.test.ts tests/unit/admissibility-gate.test.ts tests/unit/observability/spans.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Tier outcome, handoff redaction, gate ordering, and no-op sink rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: Span-sink installation is external to the decision site.
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'recordAttrs|emitHandoffEvent|runHitlGate' src/agent/admissibility-gate src/observability/spans.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Live gate and handoff branches call the span attribute helper.
+  - kind: test
+    command: bun test tests/unit/hitl-otel-emit-hellgate.test.ts tests/unit/admissibility-gate.test.ts tests/unit/observability/spans.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused HITL and span rails passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

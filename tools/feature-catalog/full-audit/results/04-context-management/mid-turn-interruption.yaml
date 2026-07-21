@@ -1,0 +1,45 @@
+version: 1
+feature_id: mid-turn-interruption
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/mid-turn-capture-wire.ts:maybeCreateMidTurnCaptureWire
+entrypoints: [src/apps/cli/index.ts]
+activation: ["QUANTA_MIDTURN_CAPTURE=1 and a live thread identifier"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/agent/mid-turn-interruption/default.ts:defaultMidTurnCapture]
+consumer: [src/apps/cli/repl/mid-turn-capture-wire.ts, src/apps/cli/repl/input-lane.ts]
+reachable: yes
+surface_findings: ["The CLI wire captures input to PlanQueueStore and mirrors it into the external prompt queue; browser handling remains absent as documented."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mid-turn-capture-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off produces no capture handle.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mid-turn-interruption-hellgate.test.ts tests/unit/mid-turn-capture-wire-hellgate.test.ts tests/unit/apps/cli/input-lane-hellgate.test.ts tests/unit/apps/cli/mid-turn-approval-channel.test.ts tests/integration/plan-queue-mid-turn-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Capture modes, policy error safety, approval routing, queue folding, and integration timing pass.
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/mid-turn-interruption-hellgate.test.ts tests/unit/mid-turn-capture-wire-hellgate.test.ts tests/unit/apps/cli/input-lane-hellgate.test.ts tests/unit/apps/cli/mid-turn-approval-channel.test.ts tests/integration/plan-queue-mid-turn-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 53 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

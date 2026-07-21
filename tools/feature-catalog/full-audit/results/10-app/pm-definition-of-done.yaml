@@ -1,0 +1,48 @@
+version: 1
+feature_id: pm-definition-of-done
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tools/pm/definition-of-done.ts:checkFeatureDoD
+entrypoints: [tools/pm/check.ts]
+activation: ["bun tools/pm/check.ts <feature-id>", "bun tools/pm/check.ts --all --strict"]
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer: [tools/pm/definition-of-done.ts, tools/pm/baseline.json]
+consumer: [tools/pm/check.ts, tests/unit/pm-dod-ratchet.test.ts]
+reachable: no
+surface_findings:
+  - "The pure judge and subprocess CLI are real tooling owners, outside application runtime surfaces."
+  - "The current baseline ratchet is red: three un-grandfathered failures and three stale baseline entries violate its monotonic contract."
+  - "The strict CLI contract rail also times out on its strict L2 fixture after 6.1s against a 5s test limit."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/pm-definition-of-done.test.ts tests/unit/pm-check-cli-hellgate.test.ts tests/unit/pm-dod-ratchet.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: Pure judge passes, but ratchet has 3 new holes plus 3 stale baseline ids and strict CLI fixture times out.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: proof-gap
+blocker: "The claimed executable DoD gate is currently red: peer-message-surfacing, presets-slash-sticky-model, and assemble-config are not grandfathered; glob-tool, lane-manager-parallel, and scheduler-runtime are stale baseline entries; strict CLI test exceeds timeout."
+disposition: hold
+receipts:
+  - kind: source
+    command: sed -n '1,220p' tools/pm/check.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI loads strict catalog features, runs checkFeatureDoD, and exits nonzero on failures or missing ids.
+  - kind: test
+    command: bun test tests/unit/pm-definition-of-done.test.ts tests/unit/pm-check-cli-hellgate.test.ts tests/unit/pm-dod-ratchet.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: Ratchet reports 3 new holes and 3 stale baseline ids; strict CLI test timed out after 5000ms.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

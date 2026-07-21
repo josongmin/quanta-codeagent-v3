@@ -1,0 +1,54 @@
+version: 1
+feature_id: playbook-auto-dispatch-git-directive-completion
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/playbook/auto-dispatch.ts:startPlaybookAutoDispatch
+entrypoints:
+  - src/apps/cli/repl/session-loop.ts:attachPlaybookHandle
+  - src/tool/git/_directive-publish.ts:publishGitDirective
+activation:
+  - Enable the playbook trigger wire in the CLI REPL and register an inline-trigger playbook; Git directives emit only when a collector or emitter surface is wired.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/skill/playbook/auto-dispatch.ts:dispatchPlaybook
+  - successful stage, push, and create-pr tool paths
+consumer:
+  - CLI REPL external prompt queue sink
+  - Git directive collector and emitter
+reachable: yes
+surface_findings:
+  - The session loop attaches the opt-in watcher and maps a trigger to a queued external /play prompt, with session-close detach.
+  - Stage, push, and create-pr publish only after success; missing or throwing publication surfaces do not alter the successful tool result.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/playbook-inline-trigger-dispatch-hellgate.test.ts tests/unit/git-directive-stage-push-pr-hooks-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Disabled playbook dispatch starts no watcher, no-surface Git tools preserve successful legacy results, and failing Git operations emit zero directives.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/playbook-inline-trigger-dispatch-hellgate.test.ts tests/unit/git-directive-stage-push-pr-hooks-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Trigger metadata enqueue, glob and debounce rules, sink errors, lifecycle stop, three directive kinds, force/draft fields, and ordered collector output passed.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/integration/playbook-inline-trigger-dispatch-hellgate.test.ts tests/unit/git-directive-stage-push-pr-hooks-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused playbook and directive command passed 27 trigger and success-only publication rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

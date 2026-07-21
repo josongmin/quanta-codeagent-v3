@@ -1,0 +1,58 @@
+version: 1
+feature_id: stage1-store-agent-port
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/memory/stage1-store/port.ts:Stage1StorePortV2
+entrypoints:
+  - src/agent/memory-consolidator-hook.ts:reuseConsumedEntry
+  - src/agent/memory/stage1-store/index.ts:adapter exports
+activation:
+  - A composition root must construct inMemoryStage1Store or sqliteStage1Store and supply it to the consolidator hook; no production composition source constructs this port in the snapshot.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/memory/stage1-store/in-memory.ts:inMemoryStage1Store
+  - src/agent/memory/stage1-store/sqlite.ts:sqliteStage1Store
+consumer:
+  - src/agent/memory-consolidator-hook.ts:Stage1ConsumeInput store
+reachable: no
+surface_findings:
+  - Both adapters implement no-throw typed results for write, read, increment, selection, and atomic reuse accounting, with SQLite schema migration loud at construction.
+  - No source outside the port slice or consolidator helper constructs an adapter or passes Stage1StorePortV2 into a live AgentConfig or composition root; the helper retains its store_missing path.
+off_identity_proof:
+  kind: source
+  command: rg -n 'inMemoryStage1Store|sqliteStage1Store|Stage1StorePortV2' src --glob '!src/agent/memory/stage1-store/**' --glob '!src/agent/memory-consolidator-hook.ts'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The production search has no construction or injection call site beyond the local seam and helper type use.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/stage1-store-hellgate.test.ts src/agent/memory/stage1-store/__tests__/reuse-consumed-entry.hellgate.test.ts src/agent/memory/stage1-store/__tests__/persist-evict-abort.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: In-memory and SQLite adapter contracts, upsert, typed failures, reuse single-bump accounting, and abort behavior passed in isolated seams.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: seam-only
+blocker: The advertised default in-memory composition is absent; adapters and helper are testable but no live host wires the agent-side port.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'inMemoryStage1Store|sqliteStage1Store|Stage1StorePortV2' src --glob '!src/agent/memory/stage1-store/**' --glob '!src/agent/memory-consolidator-hook.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No live composition consumer was found.
+  - kind: test
+    command: bun test tests/unit/stage1-store-hellgate.test.ts src/agent/memory/stage1-store/__tests__/reuse-consumed-entry.hellgate.test.ts src/agent/memory/stage1-store/__tests__/persist-evict-abort.hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Adapter-local proof passed but does not establish host reachability.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

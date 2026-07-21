@@ -1,0 +1,62 @@
+version: 1
+feature_id: heartbeat-eligibility
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/autorun-eligibility.ts:evaluateAutorunEligibility
+entrypoints:
+  - src/permission/autorun-eligibility-wire.ts:buildAutorunEligibility
+  - src/scheduler/runtime-wire.ts:buildAutomationEngineSlot
+  - src/apps/cli/repl/session-loop.ts:reactor bridge composition
+activation:
+  - QUANTA_AUTORUN_POLICY accepts never, on-request, on-failure, or always; unset and unrecognized values omit the resolver.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: off
+producer:
+  - src/permission/autorun-eligibility.ts:evaluateAutorunEligibility
+  - src/permission/autorun-eligibility-wire.ts:buildAutorunEligibility
+consumer:
+  - src/scheduler/runtime-wire.ts:buildAutomationEngineSlot
+  - src/agent/loop-helpers.ts:startAutomationEngineTicker
+  - src/apps/cli/repl/session-loop.ts:reactor heartbeat injection
+reachable: yes
+surface_findings:
+  - The policy evaluator is total and additive: it can block otherwise due work but cannot cause execution.
+  - Unset or unrecognized knob values return undefined, so both scheduler and reactor omit the gate and retain their prior behavior.
+  - Scheduler consults eligibility before claiming due work and carries the closed reason in skip outcomes; reactor reads the latest turn outcome at evaluation time.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/reactor-autorun-eligibility-wire-hellgate.test.ts tests/unit/scheduler/automation-eligibility-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset and invalid policy values omit the resolver, and the scheduler no-gate path fires byte-identically.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/reactor-autorun-eligibility-wire-hellgate.test.ts tests/unit/scheduler/automation-eligibility-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Closed policy verdicts, fresh on-failure outcome reads, pre-claim blocking, allowed dispatch, and reason propagation passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildAutorunEligibility|eligibility|tickScheduler' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/permission src/scheduler src/agent src/apps/cli src/host
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The shared resolver is injected into both scheduler and reactor consuming paths, and ticker forwards it to the pre-claim scheduler call.
+  - kind: test
+    command: bun test tests/unit/apps/cli/reactor-autorun-eligibility-wire-hellgate.test.ts tests/unit/scheduler/automation-eligibility-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused composition, default-off, policy, scheduler, and reason-anchor rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

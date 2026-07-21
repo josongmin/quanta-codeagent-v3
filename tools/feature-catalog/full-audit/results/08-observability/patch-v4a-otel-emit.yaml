@@ -1,0 +1,51 @@
+version: 1
+feature_id: patch-v4a-otel-emit
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/patch/applier.ts:wrapObserver
+entrypoints:
+  - src/tool/apply-patch.ts:applyPatchTool
+activation:
+  - Patch application wraps its optional observer with the canonical OTel trace emitter.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/observability/patch-trace/otel-patch-trace.ts:emitOtel
+consumer:
+  - src/patch/applier.ts:wrapObserver
+  - src/tool/apply-patch.ts:applyPatchTool
+reachable: yes
+surface_findings:
+  - Each apply operation fans out categorical patch attributes independently; sink absence stays no-op and observer failure cannot alter apply semantics.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/patch-v4a-otel-emit-hellgate.test.ts tests/unit/tool/apply-patch.test.ts tests/integration/apply-patch-tool.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Apply integration, categorical emit, failure isolation, and jail rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: Export depends on an installed span sink; the patch apply path itself is live.
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'wrapObserver|emitOtel|recordAttrs|applyPatchTool' src/patch/applier.ts src/tool/apply-patch.ts src/observability/patch-trace
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Apply owner installs the trace wrapper and the wrapper uses canonical span attributes.
+  - kind: test
+    command: bun test tests/unit/patch-v4a-otel-emit-hellgate.test.ts tests/unit/tool/apply-patch.test.ts tests/integration/apply-patch-tool.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused patch and integration rails passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

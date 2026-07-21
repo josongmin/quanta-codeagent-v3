@@ -1,0 +1,55 @@
+version: 1
+feature_id: 0541-sdk-transport-door
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/sdk/connect.ts:connect
+entrypoints:
+  - src/sdk/connect.ts:connect
+  - src/ipc/session/handle.ts:toSessionHandle
+  - src/ipc/session/attach-flow.ts:runSessionHandshake
+activation:
+  - A TypeScript caller supplies transports.ws(...) or transports.stdio(...) to connect().
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/sdk/connect.ts:connect
+  - src/ipc/session/client.ts:createSessionClient
+consumer:
+  - src/ipc/session/handle.ts:toSessionHandle
+  - src/ipc/session/attach-flow.ts:runSessionHandshake
+reachable: yes
+surface_findings:
+  - The exported connect() performs the session handshake, returns the canonical SessionHandle, and closes a failed transport rather than exposing a partial handle.
+  - The real-loop integration covers append, turn.run, approval continuation, terminal waiting, and the gate-off compatibility branch.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/ipc/session-handle.test.ts tests/unit/ipc/session-attach-flow.test.ts tests/unit/ipc/session-handle-conformance.test.ts tests/unit/sdk/connect.test.ts tests/unit/protocol/session-builders.test.ts tests/integration/sdk-connect-session-handle-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real-loop SDK transport tests complete append, turn, approval, cancellation, typed hang guards, and wire-handle conformance.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'export.*connect|runSessionHandshake|toSessionHandle|resumeFromSeq' src/sdk/connect.ts src/ipc/session/attach-flow.ts src/ipc/session/handle.ts src/ipc/session/client.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Public transport entry, handshake, handle adaptation, and resume handover are in one live source chain.
+  - kind: test
+    command: bun test tests/unit/ipc/session-handle.test.ts tests/unit/ipc/session-attach-flow.test.ts tests/unit/ipc/session-handle-conformance.test.ts tests/unit/sdk/connect.test.ts tests/unit/protocol/session-builders.test.ts tests/integration/sdk-connect-session-handle-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused SDK and handle proof is included in the 276-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

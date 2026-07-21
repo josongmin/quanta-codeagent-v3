@@ -1,0 +1,59 @@
+version: 1
+feature_id: ndjson-introspection
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/session-loop.ts interactive session close stack and onAfterResult emission
+entrypoints:
+  - src/apps/cli/repl/session-loop.ts
+activation:
+  - QUANTA_NDJSON_INGEST_PORT=<1..65535> creates a loopback HTTP streaming sink.
+  - QUANTA_NDJSON_INGEST_FILE=<path> creates an append-file sink.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/repl/session-loop.ts:onAfterResult emits turn.complete
+consumer:
+  - src/apps/cli/repl/ndjson-wire.ts:maybeCreateNdjsonSinkWire
+  - src/observability/ndjson/sinks.ts:createBufferedNdjsonSink
+reachable: yes
+surface_findings:
+  - "The interactive CLI constructs the env-gated wire, registers stop in its close stack, and emits one turn.complete record after a result."
+  - "Snapshot-wide source search finds no non-test producers for tool start/stop, LLM deltas, permission decisions, or subagent forks; this is not the catalog's advertised live agent-event firehose."
+  - "The catalog's deferred-composition and no-app-import assertions are stale, while its broader multi-boundary firehose claim remains over-stated."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability-ndjson-introspection-hellgate.test.ts tests/unit/cli/ndjson-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No env or empty env returns the NullNdjsonSink with an inactive no-op stop path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-ndjson-introspection-hellgate.test.ts tests/unit/cli/ndjson-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 54 focused cases pass for deterministic/framing-safe encoding, bounded sink behavior, file and loopback HTTP adapters, teardown, and malformed-env degradation.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: The live implementation is a CLI turn-completion NDJSON sink, not the catalog's claimed tool/LLM/permission/subagent event firehose; claim and surface evidence need correction or missing producer boundaries must be wired.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'maybeCreateNdjsonSinkWire|ndjson\\.sink\\.emit' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/repl src/observability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI constructs the env-gated sink and emits one turn.complete record; that is the only non-test producer in the searched production paths.
+  - kind: test
+    command: bun test tests/unit/observability-ndjson-introspection-hellgate.test.ts tests/unit/cli/ndjson-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 54 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-llm-core
+review_state: approved
+reviewer: codex/cross-review-wave1

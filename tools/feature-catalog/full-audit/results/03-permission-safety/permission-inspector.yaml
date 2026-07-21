@@ -1,0 +1,47 @@
+version: 1
+feature_id: permission-inspector
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/inspector.ts:getPermissionInspector
+entrypoints:
+  - src/permission/index.ts:getPermissionInspector export
+  - tests/unit/permission-inspector.test.ts
+activation:
+  - "A composition root must construct the inspector with a PermissionStore and render its result."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/permission/inspector.ts:getPermissionInspector
+consumer:
+  - tests/unit/permission-inspector.test.ts
+reachable: no
+surface_findings:
+  - "No production call to getPermissionInspector exists outside its definition, barrel export, ADR, generated architecture document, and unit test."
+  - "The active /permission CLI uses inspectPermission plus direct PermissionStoreView reads instead of this store-bound inspector."
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: na
+security_posture: verified
+observability: na
+verdict: seam-only
+blocker: "No production composition root or CLI/Tauri consumer constructs getPermissionInspector; catalog claims an eventual surface, not a live one."
+disposition: wire
+receipts:
+  - kind: source
+    command: "rg -n 'getPermissionInspector' . --glob '!node_modules/**' --glob '!tools/feature-catalog/full-audit/**'"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Only the definition, barrel export, ADR/generated documentation, and unit test reference the factory; no runtime composition call exists."
+  - kind: test
+    command: "bun test tests/unit/permission-inspector.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "10 tests pass for stack explanations and agreement with evaluateStack, proving the seam but not production reachability."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch6
+review_state: approved
+reviewer: codex/cross-review-wave1

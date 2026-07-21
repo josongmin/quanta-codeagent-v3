@@ -1,0 +1,55 @@
+version: 1
+feature_id: safe
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/streaming-dispatch.ts:streamingTurn
+entrypoints:
+  - src/agent/loop/same-turn-engine.ts:runSameTurnEngine
+  - src/agent/loop/stream-consume.ts:runSamplingScope
+activation:
+  - Every normal agent stream turn enters streamConsume, which calls streamingTurn with the live registry predicates and dispatch callback.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/streaming-dispatch.ts:streamingTurn
+  - src/agent/loop/stream-consume.ts:runSamplingScope
+consumer:
+  - src/agent/loop/same-turn-engine.ts:runSameTurnEngine
+  - src/agent/dispatch.ts:dispatchTool
+reachable: yes
+surface_findings:
+  - The normal same-turn engine awaits streamConsume, whose sampling scope calls streamingTurn for the provider event stream.
+  - The live binding supplies registry concurrency, read-only, and early-dispatch-safe predicates plus the normal dispatch callback; this is not a dormant helper.
+  - Early work is restricted by the read-only or explicitly isolated predicate; a barrier serializes later calls and refusal skips deferred work.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/streaming-dispatch.test.ts tests/unit/streaming-dispatch-hellgate.test.ts tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts tests/integration/streaming-dispatch-in-progress-e2e.test.ts tests/integration/streaming-dispatch-rejection-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 37 pass, 0 fail; the owner rails prove safe overlap, head-of-line serialization, refusal safety, abort handling, reset cleanup, result ordering, and rejection behavior.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'streamingTurn|streamConsume\\(' src/agent/loop/stream-consume.ts src/agent/loop/same-turn-engine.ts src/agent/streaming-dispatch.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The active loop awaits streamConsume; runSamplingScope invokes streamingTurn with live AgentConfig registry predicates and dispatch binding.
+  - kind: test
+    command: bun test tests/unit/streaming-dispatch.test.ts tests/unit/streaming-dispatch-hellgate.test.ts tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts tests/integration/streaming-dispatch-in-progress-e2e.test.ts tests/integration/streaming-dispatch-rejection-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 37 pass, 0 fail over direct owner and integration rails.
+audited_at: "2026-07-19"
+auditor: codex/root-p3-agent-loop
+review_state: approved
+reviewer: codex/cross-review-wave1

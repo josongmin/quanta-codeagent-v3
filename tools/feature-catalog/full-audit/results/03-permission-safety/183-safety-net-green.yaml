@@ -1,0 +1,52 @@
+version: 1
+feature_id: 183-safety-net-green
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/admissibility-gate.ts:runAdmissibilityGate"
+entrypoints:
+  - "src/agent/dispatch.ts:dispatchToolInner"
+activation:
+  - "Any dispatchable tool call executes the admissibility gate before the tool implementation."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - "src/agent/admissibility-gate/gates.ts:runHitlReviewGate"
+  - "src/permission/policy.ts:evaluate"
+consumer:
+  - "src/agent/dispatch.ts:dispatchToolInner"
+reachable: yes
+surface_findings:
+  - "The behavior-preserving extraction is active in the normal dispatch path and the selected tests cover ordering and terminal hard-deny behavior."
+  - "The catalog's numeric claim is stale: its three listed owner tests currently execute 53 tests, not a 183-test integrated safety net."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/hitl-tier-dispatch.test.ts tests/unit/admissibility-gate.test.ts tests/unit/admissibility-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "53 ordering, dispatch, and hard-deny safety tests pass, but this does not substantiate the catalog's stated count of 183."
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: "The feature title/purpose claim a 183-test integrated safety net, while the declared owner test invocation at the frozen revision runs 53 tests."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg -n \"runAdmissibilityGate\\(\" src/agent/dispatch.ts; bun fc show 183-safety-net-green"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The gate is production-reachable; the source catalog itself makes the numeric 183 assertion."
+  - kind: test
+    command: "bun test tests/unit/hitl-tier-dispatch.test.ts tests/unit/admissibility-gate.test.ts tests/unit/admissibility-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "53 pass, 0 fail; no 183-test count is present in the selected rail."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch2
+review_state: approved
+reviewer: codex/cross-review-wave1

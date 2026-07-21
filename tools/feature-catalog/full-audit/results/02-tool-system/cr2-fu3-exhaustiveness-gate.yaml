@@ -1,0 +1,52 @@
+version: 1
+feature_id: cr2-fu3-exhaustiveness-gate
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/edit/strategy-hint.ts:EditMismatchKind and classifyMismatch
+entrypoints: [src/tool/edit/index.ts:editTool, src/tool/default-tool-ports.ts:defaultTools]
+activation: [The default edit tool emits typed mismatch kinds on failed exact and fuzzy edit paths.]
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: on
+  headless: on
+  daemon: unknown
+producer: [src/tool/edit/{exact,fuzzy}.ts: typed EditMismatchKind outcomes, src/tool/edit/strategy-hint.ts:classifyMismatch]
+consumer: [src/tool/edit/index.ts:buildMismatchResult, src/tool/default-tool-ports.ts:defaultTools]
+reachable: yes
+surface_findings:
+  - The default edit-tool execution path passes the structural kind to classifyMismatch and emits a stable text marker only as an out-of-process fallback.
+  - The finite union and exhaustive switch make an added mismatch kind a compile-time obligation, while focused tests exercise all emitted failure kinds.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/edit-recovery-hellgate.test.ts tests/unit/edit-strategy-hint.test.ts tests/unit/edit.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All selected focused cases passed, including every structural mismatch kind, marker fallback, exact/fuzzy failures, and edit-tool emission.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'EditMismatchKind|classifyMismatch|formatEditMismatchMarker|buildMismatchResult' src/tool/edit/strategy-hint.ts src/tool/edit/index.ts src/tool/edit/{exact,fuzzy}.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The default edit path receives typed producer outcomes, classifies them through the exhaustive switch, and carries a stable marker over text-only boundaries.
+  - kind: test
+    command: bun test tests/unit/edit-recovery-hellgate.test.ts tests/unit/edit-strategy-hint.test.ts tests/unit/edit.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: All selected cases passed with 0 failures.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Strict reachability reported no L3-or-higher unreachable or dead-API feature claims.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-pr
+review_state: approved
+reviewer: codex/cross-review-wave1

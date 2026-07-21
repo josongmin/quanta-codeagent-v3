@@ -1,0 +1,56 @@
+version: 1
+feature_id: bench-simplicity-steer
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/eval/driver/config-build.ts:buildConfig
+entrypoints:
+  - src/runner/batch/eval/driver/config-build.ts:buildConfig
+activation:
+  - Set QUANTA_BENCH_SIMPLICITY=1 for a SWE-bench instance.
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: resource
+  daemon: na
+producer:
+  - src/runner/batch/eval/driver/config-build.ts
+consumer:
+  - SWE-bench system prompt
+reachable: yes
+surface_findings:
+  - Driver creates the simplicity prompt line only for SWE-bench instances when the env gate is enabled.
+  - Snapshot schema and focused test establish that unset is off, contradicting the catalog title, label, and purpose that describe default-on behavior.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/bench-prompt-steer-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset gate leaves the simplicity directive absent.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/bench-prompt-steer-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Enabled gate appends the steer only to SWE-bench prompts.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: Catalog claims DEFAULT-ON while code, knob schema, and test prove default-OFF opt-in behavior.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'QUANTA_BENCH_SIMPLICITY|simplicity' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/runner/batch/eval/driver src/config/knob-schema
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Prompt construction gates simplicity on the environment knob and schema documents default off.
+  - kind: test
+    command: bun test tests/unit/bench-prompt-steer-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused simplicity-steer rail passed with default-off assertion.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

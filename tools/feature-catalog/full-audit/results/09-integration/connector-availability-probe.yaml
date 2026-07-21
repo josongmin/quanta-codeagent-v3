@@ -1,0 +1,50 @@
+version: 1
+feature_id: connector-availability-probe
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/connectors/availability-prober.ts:createAvailabilityProber
+entrypoints:
+  - src/connectors/index.ts
+activation:
+  - A future connector composition imports createAvailabilityProber and supplies DNS, fetch, and clock ports.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/connectors/availability-prober.ts:createAvailabilityProber
+consumer: []
+reachable: no
+surface_findings:
+  - The prober implements DNS then HEAD classification, bounded LRU caching, and same-host in-flight deduplication.
+  - Production references outside its own module are limited to the connectors barrel export; no CLI, host, MCP, web, daemon, or connector composition invokes it.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/connector-availability-hellgate.test.ts tests/unit/connectors-availability-lru.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: DNS, HEAD, timeout, LRU, and in-flight deduplication rails passed under test callers.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production connector composition creates or invokes the prober; the catalog's CLI full-surface claim has no executable consumer.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'createAvailabilityProber' 9a12f7a855640a8be1e4654472766bbc445696ea -- src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The only references are the implementation declaration and connectors barrel export.
+  - kind: test
+    command: bun test tests/unit/connector-availability-hellgate.test.ts tests/unit/connectors-availability-lru.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused availability and LRU rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

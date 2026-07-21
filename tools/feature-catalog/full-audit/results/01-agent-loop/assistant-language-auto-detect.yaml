@@ -1,0 +1,64 @@
+version: 1
+feature_id: assistant-language-auto-detect
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/language-detect/index.ts:buildLanguageHint
+entrypoints:
+  - src/shared/runtime-config.ts:runtimeConfig langDetect gate
+  - src/agent/loop/context-assembler.ts:buildTurnContext
+activation:
+  - QUANTA_LANG_DETECT must be enabled
+  - latest user text must classify as high-confidence non-English script
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/language-detect/index.ts:detectLanguage and buildLanguageHint
+consumer:
+  - src/agent/loop/context-assembler.ts:buildTurnContext
+  - src/agent/prompt-reminders.ts:buildDynamicContext
+reachable: yes
+surface_findings:
+  - "CLI: shared turn context appends the detected notice to the dynamic prompt slot before the model call."
+  - "Web: web-daemon constructs AgentConfig through the shared interactive turn assembler and runtime path, which reaches the same loop context assembler."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/language-detect.test.ts tests/unit/agent/language-hint-prompt-hellgate.test.ts tests/integration/language-detect-turn-context-consumer-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off Korean control and English-or-ambiguous controls render no language notice and leave model messages without one.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/language-detect.test.ts tests/unit/agent/language-hint-prompt-hellgate.test.ts tests/integration/language-detect-turn-context-consumer-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-on Korean reaches both rendered dynamic context and messages received by a real runAgent loop; forged user text cannot spoof a detector notice.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg QUANTA_LANG_DETECT buildLanguageHint and buildDynamicContext in src/shared src/agent src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: runtimeConfig reads the strict gate; context-assembler forwards the optional hint to the shared dynamic prompt builder; web-daemon uses the shared runtime assembler.
+  - kind: test
+    command: bun test tests/unit/agent/language-detect.test.ts tests/unit/agent/language-hint-prompt-hellgate.test.ts tests/integration/language-detect-turn-context-consumer-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 23 pass, 0 fail; script classification, OFF identity, rendered prompt, real loop delivery, and anti-spoof control pass.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No reachability exception was reported for assistant-language-auto-detect.
+audited_at: "2026-07-19"
+auditor: codex/p1-agentloop-core
+review_state: approved
+reviewer: codex/cross-review-wave1

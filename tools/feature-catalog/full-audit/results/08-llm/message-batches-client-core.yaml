@@ -1,0 +1,45 @@
+version: 1
+feature_id: message-batches-client-core
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/message-batches.ts:createMessageBatchesClient
+entrypoints:
+  - src/llm/index.ts re-exports the explicit-call client core
+activation:
+  - An external composition root constructs the client and explicitly calls create, retrieve, results, or cancel.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/message-batches.ts:createMessageBatchesClient
+consumer: []
+reachable: no
+surface_findings:
+  - No production import calls createMessageBatchesClient; the parent LLM barrel export is inert.
+  - The client intentionally has no create-poll-results lifecycle owner, agent tool, or host affordance.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: degraded
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: No production composition root drives the batch lifecycle.
+disposition: wire
+receipts:
+  - kind: source
+    command: "rg -n --glob 'src/**' --glob '!src/llm/message-batches.ts' --glob '!src/llm/index.ts' 'createMessageBatchesClient' src"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The search has no consumer outside the defining module and inert barrel re-export.
+  - kind: test
+    command: bun test tests/unit/llm/message-batches-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 8 focused client and explicit lifecycle simulation cases pass, including no-throw transport and malformed JSONL handling.
+audited_at: "2026-07-19"
+auditor: codex/p1-llm-extended
+review_state: approved
+reviewer: codex/cross-review-wave1

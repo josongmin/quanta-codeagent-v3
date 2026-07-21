@@ -1,0 +1,55 @@
+version: 1
+feature_id: pdp-security-floor-decider
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/admissibility-gate/gates.ts:runHitlReviewGate"
+entrypoints:
+  - "src/agent/dispatch.ts:dispatchToolInner"
+  - "src/agent/admissibility-gate.ts:runAdmissibilityGate"
+activation:
+  - "A registry tool resolves to always-confirm and declares capability.confirm=sensitive."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - "src/permission/pdp.ts:decideFloor"
+  - "src/permission/policy.ts:inferToolTierDetailed"
+consumer:
+  - "src/agent/admissibility-gate/gates.ts:runHitlReviewGate"
+  - "src/tool/git/push.ts:gitPushTool capability"
+  - "src/tool/gh/index.ts:external write tool capabilities"
+reachable: yes
+surface_findings:
+  - "The gate computes capability from the live registry and applies the universal floor even when hitl.enabled is absent."
+  - "Only sensitive always-confirm tools join this floor; needs-sandbox and capability-less always-confirm tools defer to mode policy, preventing an unintended blanket shell prompt."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/permission/pdp-decide-floor.test.ts tests/unit/permission/sensitive-tool-capability-ratchet.test.ts tests/integration/always-confirm-secure-by-default-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The exhaustive decider table, sensitive external-tool ratchet, no-asker denial, autonomous opt-out, and real git_push decline path passed."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'decideFloor|universalFloor|capability.*confirm|runHitlReviewGate' src/permission/pdp.ts src/permission/policy.ts src/agent/admissibility-gate/gates.ts src/tool/git src/tool/gh"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The pure PDP is consulted by the live review gate using each registry tool's capability declaration."
+  - kind: test
+    command: "bun test tests/unit/permission/pdp-decide-floor.test.ts tests/unit/permission/sensitive-tool-capability-ratchet.test.ts tests/integration/always-confirm-secure-by-default-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Pure truth-table, declaration-to-outcome ratchet, and runAgent enforcement evidence passed."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch3
+review_state: approved
+reviewer: codex/cross-review-wave1

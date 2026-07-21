@@ -1,0 +1,53 @@
+version: 1
+feature_id: headless-second-consumer
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/headless/index.ts:runHeadlessOnce
+entrypoints:
+  - src/apps/headless/index.ts:runHeadlessOnce
+activation:
+  - A caller supplies HeadlessRunInput; runHeadlessOnce creates the local session bridge and executes the shared host/runner path without CLI imports.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: on
+  daemon: na
+producer:
+  - src/apps/headless/index.ts:runHeadlessOnce
+  - src/apps/headless/session-bridge.ts:openHeadlessRuntimeSession
+consumer:
+  - SDK or headless caller of runHeadlessOnce
+  - src/host/bootstrap/bootstrap-session.ts:bootstrapSession
+reachable: yes
+surface_findings:
+  - The public headless entry constructs a local bridge which invokes the shared bootstrap session path.
+  - The headless source has no CLI imports and the focused smoke completes with deterministic fake dependencies.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts tests/unit/cli-session-commands.test.ts tests/unit/apps/cli/repl-host-slim-hellgate.test.ts tests/unit/apps/headless/headless-second-consumer-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The combined focused rail passed 142 tests, including no-CLI-import checks and the runHeadlessOnce end-to-end fake-LLM smoke.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'runHeadlessOnce|openHeadlessRuntimeSession|bootstrapSession' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/headless
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The snapshot public entry opens the headless runtime session, whose local bridge imports and calls host bootstrap.
+  - kind: test
+    command: bun test tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts tests/unit/cli-session-commands.test.ts tests/unit/apps/cli/repl-host-slim-hellgate.test.ts tests/unit/apps/headless/headless-second-consumer-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 142 focused tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

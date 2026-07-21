@@ -1,0 +1,50 @@
+version: 1
+feature_id: playbook-trigger-flag-echo
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/apps/cli/repl/session-loop-options.ts:buildSessionLoopOptions"
+entrypoints: [src/apps/cli/index.ts]
+activation: ["--playbook-trigger", "QUANTA_PLAYBOOK_TRIGGER=on"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: ["src/apps/cli/internal/argv.ts:playbookTriggerFlag", "src/apps/cli/repl/session-runtime-config.ts:readSessionRuntimeConfig"]
+consumer: ["src/apps/cli/repl/session-loop-options.ts:buildSessionLoopOptions", "src/apps/cli/repl/session-loop.ts:runSessionLoop"]
+reachable: yes
+surface_findings: ["The CLI argv presence bit flows through runtime config, bootstrap, setup, and session-loop options, then reaches maybeStartPlaybookTriggerWire as cliFlag.", "The wire preserves env-on precedence and omits the optional field when the flag is absent."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/playbook-flag-echo-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The absent flag is omitted and env-absent plus flag-absent returns the shared no-op handle.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/playbook-flag-echo-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The new env-absent plus cliFlag=true path activates the wire, and env-on still wins over cliFlag=false.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'playbookTriggerFlag|playbookCliFlag|maybeStartPlaybookTriggerWire' src/apps/cli/internal src/apps/cli/repl
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The parsed flag is carried through each CLI layer and is consumed by the live session-loop wire call.
+  - kind: test
+    command: bun test tests/unit/apps/cli/playbook-flag-echo-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 9 flag propagation and precedence tests pass.
+audited_at: "2026-07-19"
+auditor: codex/p1-tier1-core
+review_state: approved
+reviewer: codex/cross-review-wave1

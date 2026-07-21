@@ -1,0 +1,61 @@
+version: 1
+feature_id: turn-timing-anchors
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/turn-timing.ts:createTurnTimingCapture
+entrypoints:
+  - src/agent/loop/stream-consume.ts:streamConsume
+  - src/agent/stream-callbacks.ts:createStreamDispatcher
+  - src/llm/responses-stream.ts:postBody
+activation:
+  - Every streamed agent turn creates and finalizes a capture; a provider must stamp requestSentAt at its actual POST boundary for accurate latency.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/observability/turn-timing.ts:createTurnTimingCapture
+consumer:
+  - src/agent/loop/stream-consume.ts:streamConsume
+  - src/agent/stream-callbacks.ts:onFirstChunk
+  - src/agent/loop-helpers.ts:buildTtftAttrs
+reachable: yes
+surface_findings:
+  - Stream consumption creates the capture, the first streamed model output stamps firstTokenAt, and finalization emits the snapshot and OTel TTFT attribute.
+  - Only src/llm/responses-stream.ts calls markRequestSent at a production POST boundary. No other concrete LLM adapter calls it.
+  - An unstamped adapter snapshots requestSentAt as 0, so a real first token produces a finite but epoch-sized positive TTFT that safeTtftMs does not reject.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability/turn-timing.test.ts tests/unit/phase-ttft-readonly-trio-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The capture arithmetic and synthetic loop TTFT behavior pass, but those rails do not establish provider-wide POST stamping.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: conditional
+blocker: Wire markRequestSent immediately before the POST in every concrete streaming provider adapter, and make a missing request anchor emit null rather than arithmetic from zero.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'markRequestSent\\(' src --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: Outside the capture declaration, the sole production call is responses-stream.ts:postBody; provider-wide adapter stamping is absent.
+  - kind: source
+    command: rg -n 'createTurnTimingCapture|turnTimingCapture|markFirstToken|buildTtftAttrs' src/agent src/observability src/llm/responses-stream.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live loop creates, forwards, first-token stamps, finalizes, and exports the capture; the Responses POST boundary stamps request sent.
+  - kind: test
+    command: bun test tests/unit/observability/turn-timing.test.ts tests/unit/phase-ttft-readonly-trio-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Included in the focused 394-pass, 0-fail run; coverage is synthetic and cannot prove absent adapter calls.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch23
+review_state: approved
+reviewer: codex/cross-review-wave1

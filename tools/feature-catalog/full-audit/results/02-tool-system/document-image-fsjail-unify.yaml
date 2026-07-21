@@ -1,0 +1,60 @@
+version: 1
+feature_id: document-image-fsjail-unify
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/_shared/resolve-jailed-doc.ts:resolveJailedDoc
+entrypoints:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+activation:
+  - "read_image, csv_read, ndjson_read, yaml_read, and pdf_read are unconditional members of buildBaseDefaultTools."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/_shared/resolve-jailed-doc.ts:resolveJailedDoc
+  - src/tool/image/read.ts:preflight
+  - src/tool/document/csv-read.ts:preflight
+  - src/tool/document/ndjson-read.ts:preflight
+  - src/tool/document/pdf-read.ts:preflight
+  - src/tool/document/yaml-read.ts:preflight
+consumer:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+reachable: yes
+surface_findings:
+  - "Every implemented reader imports resolveJailedDoc and translates FsJailError at its preflight boundary."
+  - "The shared helper delegates to storage resolveJailed after empty-path and NUL guards; image and document readers are registered in the unconditional base registry."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/_shared-resolve-jailed-doc-hellgate.test.ts tests/unit/tool/image-read-fsjail-unify-hellgate.test.ts tests/unit/tool/read-image-hellgate.test.ts tests/unit/tool/csv-read-hellgate.test.ts tests/unit/tool/ndjson-read-hellgate.test.ts tests/unit/tool/pdf-read-hellgate.test.ts tests/unit/tool/yaml-read-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "126 focused helper and reader assertions passed, including traversal, outside-absolute, sibling-prefix, and symlink-parent escape rejection."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'resolveJailedDoc|csvReadTool|ndjsonReadTool|yamlReadTool|pdfReadTool|makeReadImageTool|buildBaseDefaultTools|buildDaemonToolRegistry' src/tool/_shared/resolve-jailed-doc.ts src/tool/image/read.ts src/tool/document/csv-read.ts src/tool/document/ndjson-read.ts src/tool/document/pdf-read.ts src/tool/document/yaml-read.ts src/tool/index.ts src/runner/assemble/tooling.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Five readers call the canonical helper and the base registry reaches CLI, shared runner, and daemon composition."
+  - kind: test
+    command: bun test tests/unit/tool/_shared-resolve-jailed-doc-hellgate.test.ts tests/unit/tool/image-read-fsjail-unify-hellgate.test.ts tests/unit/tool/read-image-hellgate.test.ts tests/unit/tool/csv-read-hellgate.test.ts tests/unit/tool/ndjson-read-hellgate.test.ts tests/unit/tool/pdf-read-hellgate.test.ts tests/unit/tool/yaml-read-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "126 focused helper and reader assertions passed."
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch5
+review_state: approved
+reviewer: codex/cross-review-wave1

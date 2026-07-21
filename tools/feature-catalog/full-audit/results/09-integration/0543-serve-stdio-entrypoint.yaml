@@ -1,0 +1,59 @@
+version: 1
+feature_id: 0543-serve-stdio-entrypoint
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/serve-stdio-cmd.ts:runServeStdioCmd
+entrypoints:
+  - src/apps/cli/index.ts:main
+  - src/apps/cli/serve-stdio-cmd.ts:runServeStdioCmd
+  - src/apps/headless/session-bridge.ts:createSessionBridge
+activation:
+  - QUANTA_SERVE_STDIO=1 quanta serve --stdio starts the session.v1 server.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/serve-stdio-cmd.ts:runServeStdioCmd
+consumer:
+  - src/sdk/connect.ts:connect
+  - src/apps/headless/session-bridge.ts:createSessionBridge
+reachable: yes
+surface_findings:
+  - The command is strictly maturity-gated and writes only session frames to stdout.
+  - Spawned-child proof exercises the real stdio transport, approval decisions, child tool isolation, EOF, SIGTERM, and the gate-off exit posture.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/serve-stdio-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: With the gate absent the child exits 64, stdout remains empty, and connect fails typed rather than hanging.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/serve-stdio-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: A real spawned server completes connect, turns, approvals, shutdown paths, and stdout-purity ratchet checks.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_SERVE_STDIO|runServeStdioCmd|serve --stdio|createSessionBridge' src/apps/cli/index.ts src/apps/cli/serve-stdio-cmd.ts src/apps/headless/session-bridge.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI dispatch, strict gate, command composition root, and bridge construction are present.
+  - kind: test
+    command: bun test tests/unit/cli/serve-stdio-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Ten spawned-process scenarios passed in the focused proof batch.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

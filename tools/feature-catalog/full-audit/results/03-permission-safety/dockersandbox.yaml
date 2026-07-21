@@ -1,0 +1,45 @@
+version: 1
+feature_id: dockersandbox
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/sandbox.ts:DockerSandbox
+entrypoints: []
+activation: ["explicit DockerSandbox construction and injected Sandbox consumer"]
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/runtime/sandbox.ts:DockerSandbox]
+consumer: []
+reachable: no
+surface_findings: ["The runtime barrel exports DockerSandbox but no application composition root constructs it in the frozen source tree."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/docker-sandbox-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 10 real-spawn stub-Docker cases cover argv, output caps, timeout, availability, env, and injection safety.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: seam-only
+blocker: No production composition root selects or injects DockerSandbox.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg -n "DockerSandbox" src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Only the implementation and barrel export exist; no application consumer was found.
+  - kind: test
+    command: bun test tests/integration/docker-sandbox-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 10 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

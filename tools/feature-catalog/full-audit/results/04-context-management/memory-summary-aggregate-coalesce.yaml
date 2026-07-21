@@ -1,0 +1,55 @@
+version: 1
+feature_id: memory-summary-aggregate-coalesce
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/prompt-sections.ts:fourSectionPreset memorySummaryMd coalesce"
+entrypoints:
+  - "src/runner/session-memory-auto.ts:assembleSessionMemoryAuto"
+  - "src/agent/loop/context-assembler.ts:assembleTurnContext"
+activation:
+  - "Session-memory auto wiring loads memory_summary.md when available and attaches memorySummaryMd to AgentConfig."
+  - "The context assembler passes that value into buildTurnContext, which prepends it to session_ctx under the untrusted aggregate wrapper."
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: on
+  daemon: on
+producer:
+  - "src/runner/session-memory-auto.ts:loadMemorySummary"
+  - "src/agent/prompt-sections.ts:fourSectionPreset"
+consumer:
+  - "src/agent/loop/context-assembler.ts:assembleTurnContext"
+  - "src/agent/prompt.ts:buildSystemSections"
+reachable: yes
+surface_findings:
+  - "Absent, empty, and whitespace-only summaries collapse to the legacy section shape."
+  - "Nonempty summaries share the session_ctx breakpoint rather than create a fifth cached section; oversized summaries throw before prompt emission."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/agent/prompt-sections.test.ts tests/unit/prompt-sections-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Memory summary prepend order, wrapper framing, byte cap boundaries, absent identity, and four-breakpoint preservation passed."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg memorySummaryMd in src/runner/session-memory-auto.ts src/agent/loop/context-assembler.ts src/agent/prompt.ts src/agent/prompt-sections.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The session loader, AgentConfig, loop context assembly, prompt compiler, and section renderer form one live data path."
+  - kind: test
+    command: "bun test tests/unit/agent/prompt-sections.test.ts tests/unit/prompt-sections-hellgate.test.ts tests/unit/prompt-dynamic.test.ts tests/unit/today-date-clock-port-hellgate.test.ts tests/unit/skill-trigger-rules.test.ts tests/integration/mode-block-matrix-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "98 pass, 0 fail across the shared focused prompt context audit rail."
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch2
+review_state: approved
+reviewer: codex/cross-review-wave1

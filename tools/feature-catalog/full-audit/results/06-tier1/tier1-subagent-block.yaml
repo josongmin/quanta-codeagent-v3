@@ -1,0 +1,50 @@
+version: 1
+feature_id: tier1-subagent-block
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/tier1/subagent.ts:buildSubagentBlock"
+entrypoints: [src/apps/cli/index.ts]
+activation: ["AgentConfig.subagent configured"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: ["src/agent/tier1/subagent.ts:buildSubagentBlock"]
+consumer: ["src/agent/features.ts:buildSessionFeatures", "src/agent/loop/session-lifecycle.ts:cleanupFinishedSession"]
+reachable: yes
+surface_findings: ["When configured, the builder creates agent, task_output, and task_stop against one TaskRegistry and returns that same registry to session features.", "The session finish path invokes the cleanup hook, whose explicit host authority force-stops pending children and waits for their runner promises."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/subagent-features-wiring.test.ts tests/integration/subagent-cleanup-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent config omits the tool trio, registry, and cleanup hook; configured and empty cleanup remains idempotent.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/subagent-cleanup-e2e.test.ts tests/integration/subagent-cleanup-invocation-e2e.test.ts tests/integration/subagent-features-wiring.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 20 integration tests cover shared registry identity, force-stop cleanup, runner draining, finish ordering, and default-OFF omission.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildSubagentBlock|taskRegistry|forceStop|features\.cleanup' src/agent/tier1/subagent.ts src/agent/features.ts src/agent/loop/session-lifecycle.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The Tier-1 builder, session feature projection, and session-finish cleanup consumer are all concrete source links.
+  - kind: test
+    command: bun test tests/integration/subagent-cleanup-e2e.test.ts tests/integration/subagent-cleanup-invocation-e2e.test.ts tests/integration/subagent-features-wiring.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 20 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-tier1-core
+review_state: approved
+reviewer: codex/cross-review-wave1

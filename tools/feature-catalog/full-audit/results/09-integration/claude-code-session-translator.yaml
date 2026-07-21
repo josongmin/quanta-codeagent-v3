@@ -1,0 +1,59 @@
+version: 1
+feature_id: claude-code-session-translator
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/migration/translators/claude-code.ts:claudeCodeTranslator
+entrypoints:
+  - src/migration/translators/index.ts:translatorFor
+  - src/migration/importer.ts:runImport
+  - src/apps/cli/session-import-handler.ts:createCliImportHandler
+activation:
+  - session import claude_code explicitly invokes the importer
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/migration/translators/claude-code.ts:claudeCodeTranslator
+consumer:
+  - src/migration/importer.ts:translatorFor
+  - src/apps/cli/session-import-handler.ts:createCliImportHandler
+reachable: yes
+surface_findings:
+  - The translator is selected for claude_code by the migration registry and its output feeds the CLI import handler.
+  - Malformed lines and unsupported bookkeeping records are skipped rather than aborting a transcript import.
+off_identity_proof:
+  kind: source
+  command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/apps/cli/session-import-handler.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Translation is reached only through the explicit session import command path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/migration-claude-code-translator.test.ts tests/integration/migration-claude-code-fixture.test.ts tests/unit/migration-import-redaction-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real fixture imports produce translated messages, preserve supported tool blocks, skip malformed data, and reject symlinked inputs.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'claudeCodeTranslator|translatorFor|readImportFile|createCliImportHandler' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/migration src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Registry selection and CLI import consumption are live; all translator reads pass through the guarded import reader.
+  - kind: test
+    command: bun test tests/unit/migration-import-redaction-hellgate.test.ts tests/integration/migration-claude-code-translator.test.ts tests/integration/migration-claude-code-fixture.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused translator and trust-boundary rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

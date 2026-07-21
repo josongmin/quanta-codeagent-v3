@@ -1,0 +1,53 @@
+version: 1
+feature_id: slash-rules-indicator
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/rule-indicator.ts:buildRuleInventory
+entrypoints:
+  - src/apps/cli/rules-cmd.ts:rulesCmd
+  - CLI status pill composition
+activation:
+  - Run interactive CLI with rule indicator enabled; invoke /rules or inspect status pills.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/rule-indicator.ts:buildRuleInventory
+consumer:
+  - src/apps/cli/rules-cmd.ts:rulesCmd
+  - status pill renderer
+reachable: yes
+surface_findings:
+  - CLI inventory mirrors global and glob rule discovery without altering prompt injection.
+  - QUANTA_RULE_INDICATOR=0 short-circuits disk work and non-TTY paths omit the pill.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/rule-indicator.test.ts tests/unit/cli/rules-cmd.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Disabled indicator returns empty singleton and /rules reports disabled.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/rule-indicator.test.ts tests/unit/cli/rules-cmd.test.ts tests/unit/slash-commands.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Rule discovery, active matching, path simulation, list, and slash rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: "Indicator and TTY pill are environment-gated UI mirrors rather than universally active surfaces."
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/cli/rule-indicator.test.ts tests/unit/cli/rules-cmd.test.ts tests/unit/slash-commands.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused rule indicator rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

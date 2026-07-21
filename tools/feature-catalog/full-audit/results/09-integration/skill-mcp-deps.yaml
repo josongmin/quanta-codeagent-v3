@@ -1,0 +1,64 @@
+version: 1
+feature_id: skill-mcp-deps
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-config-assembler.ts:maybeWireSkillMcp
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:wireOptionalCapabilitySlots
+  - src/agent/loop-activation-hook.ts:reconcileSkillMcpDepsForTurn
+  - src/agent/loop/session-lifecycle.ts:disposeSessionResources
+activation:
+  - QUANTA_SKILL_MCP_DEPS must be exactly "1" for the assembler to mint a per-session coordinator.
+  - An active skill's frontmatter dependencies.tools entry is reconciled each turn and torn down at session end.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/skill/discover.ts:discoverSkills
+  - src/skill/skill-mcp-deps/resolve.ts:resolveMcpDeps
+  - src/agent/skill-mcp-wire.ts:buildSkillMcpSession
+consumer:
+  - src/host/runtime/agent-config-assembler.ts:maybeWireSkillMcp
+  - src/agent/loop-activation-hook.ts:reconcileSkillMcpDepsForTurn
+  - src/agent/loop/session-lifecycle.ts:disposeSessionResources
+reachable: yes
+surface_findings:
+  - Discovery lifts frontmatter dependencies onto the active-skill inventory only under the feature gate.
+  - The assembler constructs the real stdio and HTTP-SSE adapter; the loop reconciles deduped active dependencies and lifecycle cleanup invokes shutdownAll.
+  - Failed launch/connect is no-throw and retryable, while duplicate identities remain attached once across skills and turns.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/skill-mcp-deps-hellgate.test.ts tests/unit/skill-mcp-substrate-hellgate.test.ts tests/unit/skill-mcp-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off avoids discovery propagation, session construction, and all attach calls.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill-mcp-deps-hellgate.test.ts tests/unit/skill-mcp-attach-adapter-hellgate.test.ts tests/unit/skill-mcp-substrate-hellgate.test.ts tests/unit/skill-mcp-e2e-hellgate.test.ts tests/unit/skill-mcp-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused proof covers discovery, assembler wiring, real loop reconciliation, stdio/HTTP routing, dedupe, detachment, shutdown, and connection failure cleanup.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'maybeWireSkillMcp|buildSkillMcpSession|reconcileSkillMcpDepsForTurn|skillMcpSession|shutdownAll|rawDependencies' src/host/runtime src/agent src/skill
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The snapshot contains the complete discovery, root-mint, per-turn reconcile, and teardown chain.
+  - kind: test
+    command: bun test tests/unit/skill-mcp-deps-hellgate.test.ts tests/unit/skill-mcp-attach-adapter-hellgate.test.ts tests/unit/skill-mcp-substrate-hellgate.test.ts tests/unit/skill-mcp-e2e-hellgate.test.ts tests/unit/skill-mcp-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused skill-MCP proof completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-surfaces
+review_state: approved
+reviewer: codex/cross-review-wave1

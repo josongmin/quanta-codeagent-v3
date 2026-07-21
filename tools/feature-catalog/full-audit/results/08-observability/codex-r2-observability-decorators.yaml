@@ -1,0 +1,59 @@
+version: 1
+feature_id: codex-r2-observability-decorators
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/codex-r2-metrics/cache-metrics-decorator.ts:withCacheMetrics
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+activation:
+  - A sessionId and a structurally valid MetricsRegistry cause the host composition root to adapt the registry and wrap the default system-prompt cache.
+  - withRegistryMetrics has no non-test call site, so registry metric decoration is not activated from a shipped composition root.
+effective_defaults:
+  cli: resource
+  web: unknown
+  bench: off
+  headless: resource
+  daemon: resource
+producer:
+  - src/observability/codex-r2-metrics/cache-metrics-decorator.ts:withCacheMetrics
+  - src/observability/codex-r2-metrics/registry-metrics-decorator.ts:withRegistryMetrics
+consumer:
+  - src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+reachable: no
+surface_findings:
+  - Cache hit/miss metrics are live when the host receives a real MetricsRegistry and a sessionId; the adapter sends them to the supplied registry.
+  - Registry decoration has only owner-local test consumers, despite being part of the same advertised cache-plus-registry feature.
+  - Absent metrics, absent sessionId, or a caller-supplied cache leaves the legacy unwrapped path intact.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/composition-codex-r2-metrics-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Metrics absence, legacy-shaped metrics, no sessionId, and caller-owned cache all skip the wrapper.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/codex-r2-metrics-cache-hellgate.test.ts tests/unit/codex-r2-metrics-registry-hellgate.test.ts tests/unit/composition-codex-r2-metrics-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The host-wrapped cache emits hits and misses to a real registry; both decorators preserve owner-local behavior under hostile emitters.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: seam-only
+blocker: withRegistryMetrics is never installed by a production composition root, leaving the registry half of this combined L3 feature dormant.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg "withCacheMetrics\\(|withRegistryMetrics\\(|adaptMetricsRegistryToEmitter\\(" src tests/unit
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The cache wrapper is called from agent-config assembly; withRegistryMetrics has no source call outside its owner tests.
+  - kind: test
+    command: bun test tests/unit/codex-r2-metrics-cache-hellgate.test.ts tests/unit/codex-r2-metrics-registry-hellgate.test.ts tests/unit/composition-codex-r2-metrics-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected focused rails passed as part of the 174-pass, 0-fail audit run.
+audited_at: "2026-07-19"
+auditor: codex/p1-observability-a
+review_state: approved
+reviewer: codex/cross-review-wave1

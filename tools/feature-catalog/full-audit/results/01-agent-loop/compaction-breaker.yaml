@@ -1,0 +1,59 @@
+version: 1
+feature_id: compaction-breaker
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/compaction-wire.ts:maybeCompact and src/agent/loop/recovery-executor.ts:applyCompactRecovery
+entrypoints:
+  - src/host/runtime/internal/context-binding/base.ts:buildCompactionConfig
+  - src/agent/loop/session-bootstrap.ts:buildSessionBootstrap
+activation:
+  - "The host supplies compaction when the session has a store or summarizer; session bootstrap constructs CompactionBreaker unless explicitly disabled."
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/compaction-breaker.ts:CompactionBreaker
+consumer:
+  - src/agent/loop/compaction-wire.ts:maybeCompact
+  - src/agent/loop/recovery-executor.ts:applyCompactRecovery
+  - src/agent/loop/turn-outcome.ts:resolveTurnLoopOutcome
+reachable: yes
+surface_findings:
+  - "Session bootstrap creates the breaker by default; proactive and reactive compaction both record strikes, and a successful tool turn resets them."
+  - "The breaker abort is converted into the rapid_refill_breaker terminal path rather than allowing repeated compaction retries."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/compaction-breaker-hellgate.test.ts tests/integration/breaker-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Focused run proves 3-strike boundaries, productive reset discrimination, and a real runAgent rapid_refill_breaker terminal outcome."
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'new CompactionBreaker|recordReactive|recordProactive|noteProgress|breaker\.check' src/agent/loop src/agent/types
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Bootstrap construction, proactive and reactive strike recording, pre-retry checking, and landed-turn reset form one live loop."
+  - kind: test
+    command: bun test tests/unit/compaction-breaker-hellgate.test.ts tests/integration/breaker-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "22 unit and end-to-end breaker cases passed in the focused audit rail."
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Strict reachability reported zero L3+ unreachable or dead-API feature claims."
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-compaction
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,49 @@
+version: 1
+feature_id: session-config-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/session_config.ts:sessionConfigTool
+entrypoints:
+  - src/tool/index.ts:buildDefaultTools
+  - src/host/bootstrap/bootstrap-session.ts:sessionConfigPort
+activation:
+  - Agent invokes session_config get or set_effort during a composed CLI session.
+effective_defaults:
+  cli: resource
+  web: off
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/tool/session_config.ts
+consumer:
+  - src/agent/dispatch.ts
+  - src/host/bootstrap/bootstrap-session.ts
+reachable: yes
+surface_findings:
+  - Tool registration is unconditional; CLI composition maps the shared session posture port through dispatch.
+  - get is read-only and set_effort changes the same effort store the next agent turn observes; absent host ports return typed not_wired.
+  - Web has no port mint site, although a host can opt in through the duck-typed seam.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/session-config.test.ts tests/unit/tool/session-config-dispatch.integration.test.ts tests/unit/tool/session-config-tool-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Tool validation, dispatch propagation, shared effort mutation, registry name, and not-wired behavior passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/tool/session-config.test.ts tests/unit/tool/session-config-dispatch.integration.test.ts tests/unit/tool/session-config-tool-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused session-config rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

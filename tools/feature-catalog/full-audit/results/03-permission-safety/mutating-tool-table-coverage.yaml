@@ -1,0 +1,59 @@
+version: 1
+feature_id: mutating-tool-table-coverage
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/dispatch.ts:consultPlanModeSeam"
+entrypoints:
+  - "src/agent/dispatch.ts:dispatchToolInner"
+  - "src/agent/mode.ts:resolveCollaborationMode"
+activation:
+  - "A non-read-only tool call reaches dispatch with collaborationMode=plan, mode=plan, or planMode=true."
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/agent/mode.ts:MUTATING_TOOL_TABLE"
+  - "src/agent/mode.ts:CALLER_WIRE_TOOL_NAMES"
+consumer:
+  - "src/agent/dispatch-seam-guard.ts:checkDispatchAllowed"
+  - "src/agent/dispatch.ts:consultPlanModeSeam"
+reachable: yes
+surface_findings:
+  - "Every non-read-only dispatch consults the plan seam before execution; the table turns omitted classifications into a typed fail-closed denial."
+  - "The cross-check covers default registry names and the separately maintained caller-wire SSOT, while the S2 hellgate exercises the twelve original drift entries and the agent tool's non-read-only posture."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/plan-mode-dispatch-block-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Absent plan configuration and explicit default collaboration mode preserve ordinary mutating dispatch."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/mode-mutating-table-coverage-hellgate.test.ts tests/unit/mode-mutating-table.test.ts tests/unit/plan-mode-dispatch-block-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Classification, orphan detection, unknown-tool fail closure, exact mutating kinds, and pre-execute plan-mode blocks passed."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'MUTATING_TOOL_TABLE|CALLER_WIRE_TOOL_NAMES|checkDispatchAllowed|consultPlanModeSeam' src/agent/mode.ts src/agent/dispatch.ts src/agent/dispatch-seam-guard.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The frozen table is the plan seam's classification authority and dispatch consults it before execute for every non-read-only plan call."
+  - kind: test
+    command: "bun test tests/unit/mode-mutating-table-coverage-hellgate.test.ts tests/unit/mode-mutating-table.test.ts tests/unit/plan-mode-dispatch-block-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Coverage and live-dispatch rails passed in the audited batch."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch3
+review_state: approved
+reviewer: codex/cross-review-wave1

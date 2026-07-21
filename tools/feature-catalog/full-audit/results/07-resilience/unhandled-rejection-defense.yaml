@@ -1,0 +1,50 @@
+version: 1
+feature_id: unhandled-rejection-defense
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/unhandled-rejection-defense.ts:installUnhandledRejectionDefense
+entrypoints:
+  - src/apps/cli/index.ts
+activation:
+  - CLI module initialization installs one process-level diagnostic handler.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/unhandled-rejection-defense.ts:makeUnhandledRejectionHandler
+consumer:
+  - src/apps/cli/index.ts:installUnhandledRejectionDefense
+reachable: yes
+surface_findings:
+  - Registration is idempotent, emits one diagnostic for an escape, and deliberately never terminates the process.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/unhandled-rejection-defense-hellgate.test.ts tests/integration/streaming-dispatch-rejection-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The dedicated rail proves exactly-once registration, logging, and no process exit; streaming rejection containment also passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'installUnhandledRejectionDefense|unhandledRejection' src/apps/cli/index.ts src/apps/cli/unhandled-rejection-defense.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI entry initializes the one-time defense handler.
+  - kind: test
+    command: bun test tests/unit/unhandled-rejection-defense-hellgate.test.ts tests/integration/streaming-dispatch-rejection-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Dedicated behavior and upstream rejection-containment rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

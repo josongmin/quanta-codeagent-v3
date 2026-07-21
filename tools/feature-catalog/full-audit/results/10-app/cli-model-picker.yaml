@@ -1,0 +1,56 @@
+version: 1
+feature_id: cli-model-picker
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/slash/model-cmd.ts:modelCmd
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/repl.ts:runRepl
+  - src/apps/cli/slash/registry-surface.ts:SURFACE_SLASH_COMMANDS
+activation:
+  - The interactive CLI registers /model in the surface slash registry.
+  - The mutable-wire composer builds the mode-aware model adapter when runtime context supplies the sticky model store.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/slash/model-picker.ts:pickModel
+  - src/apps/cli/repl/ctx-adapters/model-adapter.ts:buildModelAdapter
+consumer:
+  - src/apps/cli/slash/model-cmd.ts:modelCmd
+  - src/apps/cli/repl/surface-compose/mutable-wires.ts:composeMutableSurfaceWires
+reachable: yes
+surface_findings:
+  - The surface registry registers modelCmd once and the REPL composes its model slot from the same sticky store used by the runtime.
+  - The adapter writes the current mode key and clamps only when the selected model metadata requires it; absent stores degrade to the documented not-wired response.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test src/apps/cli/__tests__/model-picker.hellgate.test.ts src/apps/cli/__tests__/model-cmd-e2e.hellgate.test.ts src/apps/cli/__tests__/model-compose-wire.hellgate.test.ts src/apps/cli/repl/ctx-adapters/__tests__/model-adapter.hellgate.test.ts tests/unit/cli/timeline-panel-hellgate.test.ts tests/unit/cli/wire-tir-hellgate.test.ts tests/unit/cli/agent-event-surface-inventory-hellgate.test.ts tests/unit/cli/inspect-cmd-hellgate.test.ts tests/unit/cli/replay-cmd-hellgate.test.ts tests/unit/slash-commands.test.ts tests/unit/knob-unit-display.test.ts tests/unit/bench-knob-unit-display-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 205 focused tests passed, including registration, exact and case-insensitive selection, mode-aware persistence, effort clamp, and absent-store degradation.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'modelCmd|buildModelAdapterWire|stickyModelStore' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/slash/registry-surface.ts src/apps/cli/repl/surface-compose
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The snapshot registers modelCmd and passes runtime-context sticky storage into the model adapter wire.
+  - kind: test
+    command: bun test src/apps/cli/__tests__/model-picker.hellgate.test.ts src/apps/cli/__tests__/model-cmd-e2e.hellgate.test.ts src/apps/cli/__tests__/model-compose-wire.hellgate.test.ts src/apps/cli/repl/ctx-adapters/__tests__/model-adapter.hellgate.test.ts tests/unit/cli/timeline-panel-hellgate.test.ts tests/unit/cli/wire-tir-hellgate.test.ts tests/unit/cli/agent-event-surface-inventory-hellgate.test.ts tests/unit/cli/inspect-cmd-hellgate.test.ts tests/unit/cli/replay-cmd-hellgate.test.ts tests/unit/slash-commands.test.ts tests/unit/knob-unit-display.test.ts tests/unit/bench-knob-unit-display-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 205 focused tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

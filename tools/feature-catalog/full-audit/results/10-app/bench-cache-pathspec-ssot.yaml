@@ -1,0 +1,52 @@
+version: 1
+feature_id: bench-cache-pathspec-ssot
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/corpus/cache-pathspecs.ts
+entrypoints: [src/runner/batch/corpus/index.ts]
+activation: [bench patch sanitizer, QUANTA_BENCH_CACHE_PATHSPECS_EXTRA optional]
+effective_defaults:
+  cli: na
+  web: na
+  bench: on
+  headless: on
+  daemon: na
+producer: [src/runner/batch/corpus/cache-pathspecs.ts:DEFAULT_CACHE_DIR_NAMES]
+consumer: [src/runner/batch/corpus/failure-classifier.ts, bench git diff construction]
+reachable: yes
+surface_findings:
+  - "Both pathspec and cache-leak regex derive from the same effective directory list, including runtimeConfig cachePathspecsExtra."
+  - "Catalog metadata is stale: it labels configuration static and CLI full, but the owner is bench/headless and supports dynamic QUANTA_BENCH_CACHE_PATHSPECS_EXTRA merging."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/bench-patch-prune.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default exclusions prune cache-shaped paths before patch capture.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/bench-patch-prune.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Root-anchored pathspecs, regex parity, and operator extras are covered.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: "Correct metadata: this is bench/headless runtime configuration with QUANTA_BENCH_CACHE_PATHSPECS_EXTRA, not static interactive-CLI functionality."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: sed -n '1,140p' src/runner/batch/corpus/cache-pathspecs.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: DEFAULT_CACHE_DIR_NAMES plus runtime config derive both effective consumers.
+  - kind: test
+    command: bun test tests/unit/bench-patch-prune.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Patch prune SSOT rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

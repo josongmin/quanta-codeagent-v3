@@ -1,0 +1,51 @@
+version: 1
+feature_id: default-acceptedits-bypass-auto
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/policy.ts:permission evaluation
+entrypoints:
+  - src/apps/cli/repl/session-runtime-config.ts:QUANTA_PERMISSION seed
+  - src/apps/cli/mode-cycle.ts:interactive posture change
+activation:
+  - Start or reconfigure a CLI session with default, acceptEdits, bypass, or auto permission posture.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/permission/policy.ts
+  - src/permission/classifier.ts
+consumer:
+  - src/apps/cli/repl/session-loop.ts
+  - src/apps/bench/eval/driver.ts
+  - src/apps/headless/session-bridge.ts
+reachable: yes
+surface_findings:
+  - CLI seeds default permission mode from environment and projects mode-cycle changes into the next session turn.
+  - Auto mode preserves hard-deny precedence and degrades missing classifier capability to ask rather than auto-allowing.
+  - Web renders the mode but does not provide a mutation verb; its effective posture remains host-owned.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission-classifier.test.ts tests/unit/permission.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Mode semantics, hard-deny dominance, classifier escalation, absence degradation, and policy behavior passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/permission-classifier.test.ts tests/unit/permission.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused permission mode rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

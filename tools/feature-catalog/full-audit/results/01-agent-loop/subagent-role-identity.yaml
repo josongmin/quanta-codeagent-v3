@@ -1,0 +1,63 @@
+version: 1
+feature_id: subagent-role-identity
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/named-agent-registry.ts:loadNamedAgents and src/agent/subagent-runner-child-config.ts:applyNamedAgent
+entrypoints:
+  - src/apps/cli/repl/runtime-context-compose.ts:composeCliRuntimeContext
+  - src/apps/cli/index.ts:batch runner assembly
+  - src/apps/agent/index.ts:headless assembly
+activation:
+  - A session cwd contains a valid .quanta/agents or .claude/agents definition and a parent emits a matching agent_type.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/named-agent-registry.ts:loadNamedAgents
+  - src/agent/subagent-runner-child-config.ts:applyNamedAgent
+  - src/agent/subagent-runner.ts:recordChildNickname
+consumer:
+  - src/apps/cli/repl/runtime-context-compose.ts:RuntimeBootstrapOverlay namedAgentResolver
+  - src/apps/cli/index.ts:batchPartial namedAgentResolver
+  - src/agent/subagent-runner-child-config.ts:buildChildConfig
+reachable: yes
+surface_findings:
+  - Interactive CLI, batch CLI, and headless assembly load a nonempty named-agent registry and pass it to the subagent runner.
+  - A matching definition supplies system, tools, model, and mode only where the request did not explicitly supply them; tools intersect with the parent registry and cannot widen it.
+  - Missing directories, an absent resolver, and nonmatching agent types retain parent system and tool behavior; nickname writes also no-op without the optional metadata port.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/named-agent-registry.test.ts tests/unit/subagent/named-agent-spawn-hellgate.test.ts tests/unit/named-agent-resolver-composition-wire.test.ts tests/unit/apps/named-agent-resolver-interactive-batch-wire.test.ts tests/integration/subagent-role-identity-real-loop-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused loader, composition, security, default-path, and real-child-loop rails passed; the real loop receives the role system only under a matching wired resolver.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'loadNamedAgents|namedAgentResolver|applyNamedAgent|filterRegistry|recordChildNickname' src/apps/cli src/apps/agent src/agent/subagent-runner.ts src/agent/subagent-runner-child-config.ts src/agent/named-agent-registry.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Primary composition roots load and carry the resolver to the child builder, which folds definitions then applies narrow-only registry filtering and optional metadata recording.
+  - kind: test
+    command: bun test tests/unit/agent/named-agent-registry.test.ts tests/unit/subagent/named-agent-spawn-hellgate.test.ts tests/unit/named-agent-resolver-composition-wire.test.ts tests/unit/apps/named-agent-resolver-interactive-batch-wire.test.ts tests/integration/subagent-role-identity-real-loop-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The selected rails passed with 0 failures; parser and symlink safety, resolver propagation across all primary surfaces, tool-widening rejection, default identity, and a real loop are covered.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Reachability reports no L3-or-higher feature exception.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-subagent
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,58 @@
+version: 1
+feature_id: llm-adapter-shared-helpers
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/adapters/shared.ts:resolveAdapterStreamTimeouts
+entrypoints:
+  - src/llm/adapters/anthropic.ts:AnthropicAdapter constructor
+  - src/llm/adapters/openai.ts:OpenAIAdapter constructor
+  - src/llm/adapters/chatgpt-oauth.ts:ChatGPTOAuthAdapter constructor
+activation:
+  - QUANTA_LLM_STREAM_FIRST_CHUNK_MS and QUANTA_LLM_STREAM_IDLE_MS set timeout defaults at adapter construction
+  - Per-adapter stream timeout options override runtime configuration
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/llm/adapters/shared.ts:resolveAdapterStreamTimeouts
+  - src/llm/adapters/shared.ts:parseToolInputOrThrow
+  - src/llm/adapters/shared.ts:buildUsageEvent
+consumer:
+  - src/llm/adapters/anthropic.ts:mapRawEvent
+  - src/llm/adapters/openai.ts:OpenAIAdapter
+  - src/llm/openai-responses-wire.ts:tool input parser
+reachable: yes
+surface_findings:
+  - The helpers are used by Anthropic, OpenAI, OAuth/Responses, and multicloud adapters rather than only their original two consumers.
+  - Timeout configuration is resolved at construction and malformed tool JSON raises the established typed stream-corrupt error.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/anthropic.test.ts tests/unit/openai-adapter.test.ts tests/unit/openai.test.ts tests/unit/stream-timeout.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Both legacy adapters preserve tool reconstruction and usage behavior while applying shared timeout resolution and typed input errors.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'resolveAdapterStreamTimeouts|parseToolInputOrThrow|buildUsageEvent' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/llm
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Shared helpers are consumed by active adapters and the OpenAI Responses wire.
+  - kind: test
+    command: bun test tests/unit/anthropic.test.ts tests/unit/openai-adapter.test.ts tests/unit/openai.test.ts tests/unit/stream-timeout.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused Anthropic, OpenAI, and timeout rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

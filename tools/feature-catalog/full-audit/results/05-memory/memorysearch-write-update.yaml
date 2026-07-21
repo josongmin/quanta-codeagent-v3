@@ -1,0 +1,54 @@
+version: 1
+feature_id: memorysearch-write-update
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/memory-tools.ts:memoryTools
+entrypoints:
+  - src/runner/assemble/tooling.ts:buildToolingCore
+activation:
+  - buildToolingCore registers memory_search, memory_write, and memory_update whenever a persistent store exists and memory.selfEditTools is not false.
+  - The thread mode and budget guard can deny mutations with typed ok:false results; store and tool failures are caught inside each execute generator.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/memory-tools.ts:memoryTools
+consumer:
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/tool/registry.ts:ToolRegistry
+reachable: yes
+surface_findings:
+  - The assembler appends the three memory tools to the live registry using the same configured store used by memory assembly.
+  - Search is read-only and concurrent; write and update are mutating/non-concurrent, are mode and budget guarded, and every execution failure is converted to typed result output.
+  - Registration is resource-dependent on a persistent store rather than a separate default-OFF feature gate.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-tools.test.ts tests/unit/agent/memory-citation-accumulator.test.ts tests/unit/memory-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused tools rail passed for registry shape, search filters, write/update/delete, embeddings, schema rejection, and no-throw failure conversion.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "memoryTools\(|memory_search|memory_write|memory_update|buildToolingCore" src/runner/assemble/tooling.ts src/agent/memory-tools.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live registry assembly calls memoryTools and each declared tool has a defensive execute implementation.
+  - kind: test
+    command: bun test tests/unit/memory-tools.test.ts tests/unit/agent/memory-citation-accumulator.test.ts tests/unit/memory-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused memory tools and persistence rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-memory-batch6
+review_state: approved
+reviewer: codex/cross-review-wave1

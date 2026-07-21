@@ -1,0 +1,58 @@
+version: 1
+feature_id: shadow-odb-workspace-hash
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/storage/shadow-odb/hash.ts:workspaceHash
+entrypoints:
+  - src/storage/shadow-odb/default/ops.ts:shadow store initialization
+  - src/apps/cli/repl/surface-compose/core-state.ts:QUANTA_SHADOW composition
+activation:
+  - Set QUANTA_SHADOW to a truthy value in the interactive CLI.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/storage/shadow-odb/hash.ts:workspaceHash
+consumer:
+  - src/storage/shadow-odb/default/ops.ts:init
+  - src/apps/cli/repl/surface-compose/core-state.ts:defaultShadowOdb
+reachable: yes
+surface_findings:
+  - The hash is consumed by defaultShadowOdb initialization and CLI composition creates that ODB only with QUANTA_SHADOW enabled.
+  - The catalog's unconditional CLI full wording omits the default-off environment gate.
+off_identity_proof:
+  kind: source
+  command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/apps/cli/repl/surface-compose/core-state.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent QUANTA_SHADOW yields shadowOdb undefined and does not construct the store.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/shadow-odb-hellgate.test.ts tests/unit/shadow-odb-rewind-extensions-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Hash determinism, trailing-slash normalization, distinct roots, and initialized ODB behavior passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: conditional
+blocker: "The storage path is live only after the default-off QUANTA_SHADOW composition gate is enabled."
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'workspaceHash|defaultShadowOdb|QUANTA_SHADOW' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/storage/shadow-odb src/apps/cli/repl/surface-compose
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Storage operations call workspaceHash and the CLI gate constructs defaultShadowOdb only when enabled.
+  - kind: test
+    command: bun test tests/unit/shadow-odb-hellgate.test.ts tests/unit/shadow-odb-rewind-extensions-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused hash and ODB rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

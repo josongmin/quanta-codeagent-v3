@@ -1,0 +1,58 @@
+version: 1
+feature_id: src-agent-working-state-ts
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/working-state.ts:createWorkingStateSession
+entrypoints:
+  - src/agent/features.ts:buildSessionFeatures
+  - src/agent/loop/context-assembler.ts:assembleTurnContext
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts:stateHookOptions
+activation:
+  - AgentConfig.workingState.enabled=true builds a session handle and registers update_working_state.
+  - The CLI maps QUANTA_WORKING_STATE truthy values to that config only on the CLI surface.
+effective_defaults:
+  cli: off
+  web: unknown
+  bench: off
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/working-state.ts:createWorkingStateSession
+  - src/tool/update-working-state.ts:createUpdateWorkingStateTool
+consumer:
+  - src/agent/features.ts:buildSessionFeatures retains the handle and adds the tool.
+  - src/agent/loop/context-assembler.ts snapshots the live handle into the per-turn reminder.
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts publishes the session snapshot to /state.
+reachable: yes
+surface_findings:
+  - Off path is structural: no feature block, no tool registration, and no working-state reminder input when config is absent.
+  - On path is live through runAgent: tool mutation updates the session handle and subsequent reminder construction reads its snapshot.
+  - The CLI knob intentionally excludes bench to preserve measurement shape.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/agent-features.test.ts tests/integration/reminder-injection-through-loop-hell-e2e.test.ts tests/unit/runner/knobs/working-state.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 19 focused tests passed for absent-vs-enabled registration, real reminder traversal, and CLI knob surface filtering.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "buildWorkingStateBlock|workingState\?\.snapshot|onWorkingStateReady|QUANTA_WORKING_STATE" src/agent src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The handle has production builders, a per-turn consumer, and a CLI observer publication path.
+  - kind: test
+    command: bun test tests/integration/agent-features.test.ts tests/integration/reminder-injection-through-loop-hell-e2e.test.ts tests/unit/runner/knobs/working-state.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 19 focused tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch7
+review_state: approved
+reviewer: codex/cross-review-wave1

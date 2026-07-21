@@ -1,0 +1,51 @@
+version: 1
+feature_id: headless-output-format-stream-json
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/agent/mode-presets/stream-json-sink.ts:StreamJsonSink
+entrypoints:
+  - src/apps/agent/mode-presets/headless.ts:headless preset
+activation:
+  - Run headless mode with --output-format json or stream-json; optionally add --include-partial.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/apps/agent/mode-presets/stream-json-sink.ts:StreamJsonSink
+consumer:
+  - src/apps/agent/mode-presets/headless.ts
+reachable: yes
+surface_findings:
+  - Headless preset reads the selected format and injects the stream sink for JSON modes.
+  - Default text output remains byte-identical; partial deltas are separately opt-in.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/headless-stream-json-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default text contract remains separate from JSON modes.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/agent/mode-presets/stream-json-sink.test.ts tests/integration/headless-stream-json-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: NDJSON/array codec, partial gate, idempotent finalize, EPIPE isolation, and headless e2e rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: conditional
+blocker: "Machine output activates only for explicit headless output-format selection."
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/apps/agent/mode-presets/stream-json-sink.test.ts tests/integration/headless-stream-json-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused stream-json rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

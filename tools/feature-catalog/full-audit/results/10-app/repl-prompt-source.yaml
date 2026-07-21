@@ -1,0 +1,51 @@
+version: 1
+feature_id: repl-prompt-source
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/prompt-pipeline.ts:buildCliPromptSource
+entrypoints:
+  - src/apps/cli/repl.ts:REPL session composition
+activation:
+  - Start the interactive CLI REPL and submit a line.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/repl/prompt-pipeline.ts:buildCliPromptSource
+consumer:
+  - src/apps/cli/repl.ts:REPL loop
+reachable: yes
+surface_findings:
+  - Prompt pipeline supplies the live REPL PromptSource and routes slash commands before model turns.
+  - Empty slash context uses the documented not-wired fallback; path-like input remains a prompt rather than slash dispatch.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/skills-slash-hellgate.test.ts tests/integration/skills-slash-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Live slash short-circuit, disk skill reload, path fallback, and model non-reachability rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildCliPromptSource|classifyReplLine' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/repl
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: REPL prompt pipeline owns the live adapter implementation.
+  - kind: test
+    command: bun test tests/unit/apps/cli/skills-slash-hellgate.test.ts tests/integration/skills-slash-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused PromptSource rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,54 @@
+version: 1
+feature_id: cli-diff-preview
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/diff-preview.ts:renderActionDiff
+entrypoints:
+  - src/apps/cli/repl/runtime-context-compose.ts:buildConfirmContext
+activation:
+  - CLI confirmation calls diffPreviewEnabled before rendering renderActionDiff for a mutable tool action.
+  - QUANTA_DIFF_PREVIEW=1 forces the preview on, =0 disables it, and an unset value follows stderr.isTTY.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/diff-preview.ts:renderActionDiff
+  - src/runner/action-diff.ts:computeActionDiff
+consumer:
+  - src/apps/cli/repl/runtime-context-compose.ts:buildConfirmContext
+reachable: yes
+surface_findings:
+  - The interactive confirm assembly appends the rendered write/edit/apply_patch/apply_patch_structured/scripted_replace preview before the approval prompt.
+  - The implementation is live and the focused rail covers valid render paths, malformed input, caps, fallback, and hunk rendering.
+  - The catalog says default-OFF/byte-identical legacy output, but an unset QUANTA_DIFF_PREVIEW enables the preview whenever stderr is a TTY; that claim is stale.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/diff-preview.test.ts tests/unit/cli/compute-action-diff.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused action rendering, graceful fallback, environment-gate, and hunk-output coverage passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg "diffPreviewEnabled|renderActionDiff|buildConfirmContext" src/apps/cli/diff-preview.ts src/apps/cli/repl/runtime-context-compose.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live CLI confirmation path calls the renderer, and the default gate is stderr.isTTY when the env value is unset.
+  - kind: test
+    command: bun test tests/unit/cli/diff-preview.test.ts tests/unit/cli/compute-action-diff.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused diff preview and shared action-diff rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-memory-batch6
+review_state: approved
+reviewer: codex/cross-review-wave1

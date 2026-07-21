@@ -1,0 +1,52 @@
+version: 1
+feature_id: microcompact-tool-result-evict
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/compaction-wire.ts:maybeMicrocompact
+entrypoints: [src/agent/loop/compaction-wire.ts]
+activation: [QUANTA_MICROCOMPACT=1]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/agent/tool-result-evict/evict.ts:microcompactToolResults]
+consumer: [src/agent/loop/compaction-wire.ts:maybeMicrocompact]
+reachable: yes
+surface_findings:
+  - "Tier-1 pass executes before full compaction only under strict runtime gate and cadence."
+  - "Changed transcripts install through wm.replace rather than in-place mutation, reseeding token accounting; invalid tuning emits a refusal and skips eviction."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/microcompaction-wire-failclosed-hellgate.test.ts tests/integration/microcompaction-tier-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off does not construct spill state or mutate transcript.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/microcompaction-evict-hellgate.test.ts tests/unit/microcompaction-x-token-delta-hellgate.test.ts tests/unit/microcompaction-tuning-failclosed-hellgate.test.ts tests/unit/microcompaction-wire-failclosed-hellgate.test.ts tests/integration/microcompaction-tier-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Eviction, pairing preservation, counter reseed, tuning refusal, wire behavior, and tier e2e pass.
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'maybeMicrocompact|microcompactToolResults|wm\.replace|MicrocompactTuningError' src/agent/loop/compaction-wire.ts src/agent/tool-result-evict
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production gate, pure evictor, replacement install, and fail-closed handler are live.
+  - kind: test
+    command: bun test tests/unit/microcompaction-evict-hellgate.test.ts tests/unit/microcompaction-x-token-delta-hellgate.test.ts tests/unit/microcompaction-tuning-failclosed-hellgate.test.ts tests/unit/microcompaction-wire-failclosed-hellgate.test.ts tests/integration/microcompaction-tier-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Microcompaction rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

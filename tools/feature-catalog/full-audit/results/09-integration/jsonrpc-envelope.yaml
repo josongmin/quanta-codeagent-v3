@@ -1,0 +1,53 @@
+version: 1
+feature_id: jsonrpc-envelope
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/jsonrpc/index.ts
+entrypoints:
+  - src/shared/jsonrpc/codec.ts
+  - src/shared/jsonrpc/correlation.ts
+  - src/shared/jsonrpc/channel-naming.ts
+activation:
+  - A protocol owner must import this standalone module and replace its local JSON-RPC implementation.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - The module exports strict envelope schemas, codec helpers, correlation, and channel naming.
+consumer:
+  - No production source imports @/shared/jsonrpc; MCP and LSP retain separate local JSON-RPC implementations.
+reachable: no
+surface_findings:
+  - The module header and deliberate_hold both state that MCP/LSP migration is deferred.
+  - Integration tests exercise the library with synthetic session envelopes, not a production MCP/LSP path.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/jsonrpc-envelope.test.ts tests/unit/jsonrpc-codec.test.ts tests/unit/jsonrpc-correlation.test.ts tests/unit/jsonrpc-channel-naming.test.ts tests/integration/jsonrpc-envelope-hell-e2e.test.ts tests/integration/jsonrpc-x-session-envelope-cross.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Schema, codec, correlation, fuzz, and synthetic cross-envelope rails passed.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: MCP and LSP still own and consume duplicate local JSON-RPC stacks; this standalone module has no production protocol consumer.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n "from \"@/shared/jsonrpc|from '@/shared/jsonrpc|shared/jsonrpc" src apps --glob '!src/shared/jsonrpc/**'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production importer was found; only test files consume the standalone module.
+  - kind: test
+    command: bun test tests/unit/jsonrpc-envelope.test.ts tests/unit/jsonrpc-codec.test.ts tests/unit/jsonrpc-correlation.test.ts tests/unit/jsonrpc-channel-naming.test.ts tests/integration/jsonrpc-envelope-hell-e2e.test.ts tests/integration/jsonrpc-x-session-envelope-cross.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 92 focused library and synthetic integration tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

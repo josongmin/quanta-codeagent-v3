@@ -1,0 +1,54 @@
+version: 1
+feature_id: windows-sandbox-backend
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/os-sandbox/default.ts:defaultOsSandbox
+entrypoints:
+  - src/runtime/os-sandbox/windows.ts:compileWindowsSandboxSpec
+  - src/runtime/os-sandbox/windows-native.ts:nativeWindowsOsSandbox
+activation:
+  - On win32, request a non-off sandbox profile. A detected native helper executes the compiled spec; an absent helper now returns a typed refusal from the default router.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/runtime/os-sandbox/windows.ts:compileWindowsSandboxSpec
+  - src/runtime/os-sandbox/windows-native.ts:detectNativeWindows
+consumer:
+  - src/runtime/os-sandbox/default.ts:defaultOsSandbox
+  - native helper binding:spawn_sandboxed
+reachable: yes
+surface_findings:
+  - The pure compiler preserves Windows/UNC path forms, serializes via JSON stdin, and compiles off or danger-full-access to null passthrough.
+  - The native boundary can degrade when called directly, but the default win32 router refuses every requested sandbox if helper detection fails, preventing an unsandboxed command launch.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/os-sandbox-windows-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Off and danger-full-access are pure passthroughs with no degradation reason.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/os-sandbox-windows-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Compiled-policy, native-binding DI, helper-present selection, helper-absent refusal, and non-win32 regression rails passed; only real helper integration remains skipped as declared L3 backlog.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: The catalog says an absent helper degrades to byte-identical passthrough, but defaultOsSandbox now returns sandboxUnavailableRefusal for a requested win32 sandbox when helper detection fails.
+disposition: fix-claim
+receipts:
+  - kind: test
+    command: bun test tests/unit/os-sandbox-windows-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The combined audit command passed 30 Windows compiler, boundary, selection, and refusal rails; the optional L3 real-helper test was skipped.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

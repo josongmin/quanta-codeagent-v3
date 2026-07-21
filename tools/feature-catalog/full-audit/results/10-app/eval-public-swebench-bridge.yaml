@@ -1,0 +1,42 @@
+version: 1
+feature_id: eval-public-swebench-bridge
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/index.ts:main
+entrypoints:
+  - src/apps/eval/index.ts
+  - src/apps/eval/public/adapters/swebench.ts:runSwebenchAdapter
+activation:
+  - Run the eval CLI public swebench-verified command with a bench-report path.
+effective_defaults:
+  cli: na
+  web: na
+  bench: resource
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/eval/public/adapters/swebench.ts:runSwebenchAdapter
+consumer:
+  - src/apps/eval/index.ts
+reachable: yes
+surface_findings:
+  - Eval CLI imports runSwebenchAdapter and documents the public swebench-verified subcommand.
+  - The adapter reads bench-report JSON and maps results to PublicPayload, but no focused unit or integration rail covers this owner seam.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: proof-gap
+blocker: No test imports the public SWE-bench adapter or exercises missing-report, mapping, and persistence behavior through the eval CLI.
+disposition: hold
+receipts:
+  - kind: source
+    command: git grep -n -E 'runSwebenchAdapter|public swebench-verified|bench-report' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/eval
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Eval CLI wires the public adapter command to the SWE-bench report bridge.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

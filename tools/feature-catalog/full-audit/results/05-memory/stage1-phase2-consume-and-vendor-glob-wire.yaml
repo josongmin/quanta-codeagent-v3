@@ -1,0 +1,60 @@
+version: 1
+feature_id: stage1-phase2-consume-and-vendor-glob-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/memory/stage1-store/consume-phase2.ts:consumeStage1ForPhase2
+entrypoints:
+  - src/apps/agent/mode-presets/system.ts:resolveModePresetGlobRules
+activation:
+  - QUANTA_VENDOR_RULES enables the vendor glob branch on trusted presets.
+  - Stage1 reuse requires a production caller to inject a Stage1 store and invoke consumeStage1ForPhase2; none exists.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/memory/stage1-store/consume-phase2.ts:consumeStage1ForPhase2
+  - src/agent/glob-rules.ts:loadGlobRulesWithVendors
+consumer:
+  - src/apps/agent/mode-presets/system.ts:resolveModePresetGlobRules
+  - src/agent/prompt.ts:buildPrompt
+reachable: no
+surface_findings:
+  - Vendor glob composition is live for trusted interactive, headless, and IDE presets behind QUANTA_VENDOR_RULES.
+  - The Stage1 Phase2 SELECT and reuse branch has no production call site; all discovered invocations are tests.
+  - The catalog's vendor production-call-site-zero statement is stale, but its SEAM-ONLY conclusion remains correct because the paired Stage1 consume branch is dormant.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/vendor-detector-glob-rules-wire-hellgate.test.ts tests/unit/vendor-glob-unconsumed-failclosed-hellgate.test.ts tests/unit/stage1-phase2-consume-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Vendor gate-off is legacy-identical and absent Stage1 store makes no store I/O.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/stage1-phase2-consume-and-vendor-glob-e2e-hellgate.test.ts tests/unit/vendor-glob-composition-wire-spec-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real vendor content reaches a trusted prompt and the owned Stage1 adapter can reuse records when explicitly invoked.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: seam-only
+blocker: No production composition root invokes consumeStage1ForPhase2, so the advertised Stage1 to Phase2 SELECT-consumption half is not activatable from a shipped surface.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg "loadGlobRulesWithVendors\(|consumeStage1ForPhase2\(" src tests/unit
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Vendor resolver has a production caller; consumeStage1ForPhase2 appears only in tests.
+  - kind: test
+    command: bun test tests/unit/stage1-store-hellgate.test.ts tests/unit/vendor-detector-glob-rules-wire-hellgate.test.ts tests/unit/vendor-glob-unconsumed-failclosed-hellgate.test.ts tests/unit/stage1-phase2-consume-wire-hellgate.test.ts tests/unit/stage1-phase2-consume-and-vendor-glob-e2e-hellgate.test.ts tests/unit/vendor-glob-composition-wire-spec-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected focused rail passed as part of the 244-pass, 0-fail audit run.
+audited_at: "2026-07-19"
+auditor: codex/p1-context-memory
+review_state: approved
+reviewer: codex/cross-review-wave1

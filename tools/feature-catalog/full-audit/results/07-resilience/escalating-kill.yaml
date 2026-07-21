@@ -1,0 +1,54 @@
+version: 1
+feature_id: escalating-kill
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/guarded-spawn.ts:escalatingKill
+entrypoints:
+  - src/runtime/shell.ts:runShell
+  - src/runtime/sandbox.ts:LocalSandbox.run and DockerSandbox.run
+activation:
+  - Every runShell execution constructs escalatingKill for its spawned child.
+  - LocalSandbox and DockerSandbox pass the same kill closure into withSpawnedChild.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/runtime/guarded-spawn.ts:escalatingKill emits SIGTERM then arms one KILL_GRACE_MS SIGKILL timer.
+consumer:
+  - src/runtime/shell.ts:runShell wires the closure to timeout and abort handling.
+  - src/runtime/sandbox.ts:LocalSandbox.run and DockerSandbox.run wire the closure to their timeout handling.
+reachable: yes
+surface_findings:
+  - The helper is not a dormant policy knob; shell and sandbox spawn paths call it by default.
+  - A supplied process-tree killer signals descendants when a positive pid is available.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/runtime/guarded-spawn.test.ts tests/unit/runtime/kill-escalation-and-worktree-retry.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 12 passing cases prove SIGTERM to SIGKILL escalation, early-exit disarm, reentrancy-safe timer handling, and RAII cleanup.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'escalatingKill(' 9a12f7a -- src/runtime/shell.ts src/runtime/sandbox.ts src/runtime/guarded-spawn.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production shell and both sandbox implementations invoke the centralized escalation helper.
+  - kind: test
+    command: bun test tests/unit/runtime/guarded-spawn.test.ts tests/unit/runtime/kill-escalation-and-worktree-retry.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 12 pass and 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

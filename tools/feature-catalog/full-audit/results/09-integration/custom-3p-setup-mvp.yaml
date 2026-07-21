@@ -1,0 +1,53 @@
+version: 1
+feature_id: custom-3p-setup-mvp
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/connectors/custom-3p/index.ts
+entrypoints:
+  - src/connectors/custom-3p/in-memory-registry.ts
+  - src/connectors/custom-3p/jsonl-store.ts
+  - src/connectors/custom-3p/health-probe.ts
+activation:
+  - A future connector surface must construct a custom-3p registry and expose register/update/remove/health/list.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - The slice exports in-memory and JSONL registries plus an injected-dependency health probe.
+consumer:
+  - No application source outside src/connectors/custom-3p imports or constructs the registry.
+reachable: no
+surface_findings:
+  - No CLI connector slash, web settings surface, agent config slot, or MCP consumer is present.
+  - JSONL persistence and health semantics are tested only through direct construction.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/connectors/custom-3p-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The main connectors barrel does not export the feature and no default construction occurs.
+on_efficacy_proof: null
+failure_posture: na
+security_posture: na
+observability: na
+verdict: not-activatable
+blocker: The registry has no production composition root or user-facing surface, exactly as the catalog's deliberate hold states.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n "Custom3p|custom-3p|createJsonlCustom3p|healthProbe" src apps --glob '!src/connectors/custom-3p/**'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production consumer outside the implementation slice was found.
+  - kind: test
+    command: bun test tests/unit/connectors/custom-3p-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 19 direct registry, persistence, lifecycle, and health-probe tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

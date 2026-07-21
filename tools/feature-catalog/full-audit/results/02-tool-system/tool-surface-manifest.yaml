@@ -1,0 +1,47 @@
+version: 1
+feature_id: tool-surface-manifest
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/surface/manifest.ts:manifest resolver
+entrypoints:
+  - src/tool/index.ts:buildDefaultTools
+activation:
+  - Tool composition reads base and gated manifest definitions for a selected surface.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/tool/surface/manifest.ts
+consumer:
+  - src/tool/index.ts:buildDefaultTools
+  - CLI environment seeding
+reachable: yes
+surface_findings:
+  - The manifest separates unconditional base tools from gated rows and derives surface defaults through pure resolvers.
+  - A two-way drift rail checks both missing manifest rows and stale manifest names against real registry construction.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool-surface-manifest-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Base equality, duplicate/orphan detection, gate shape, and surface default rails passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/tool-surface-manifest-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused manifest drift rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

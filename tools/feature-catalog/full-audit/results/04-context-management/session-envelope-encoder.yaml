@@ -1,0 +1,60 @@
+version: 1
+feature_id: session-envelope-encoder
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/session/envelope-encoder.ts:encodeSessionLine/decodeSessionLine
+entrypoints:
+  - src/session/store.ts:appendEnvelope
+  - src/apps/cli/inspect-cmd.ts:iterateSessionFile
+  - src/apps/cli/why-cmd.ts:iterateSessionFile
+activation:
+  - The decoder is used by CLI inspection and explanation paths when an envelope file exists.
+  - Encoding requires a caller to append a SessionEnvelopeRecord through appendEnvelope.
+effective_defaults:
+  cli: unknown
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/session/envelope-encoder.ts:encodeSessionLine validates and canonicalizes a SessionEnvelopeRecord
+consumer:
+  - src/apps/cli/inspect-cmd.ts reads decoded envelope lines
+  - src/apps/cli/why-cmd.ts reads decoded envelope lines
+reachable: no
+surface_findings:
+  - The decoder has live CLI consumers and deterministic codec tests.
+  - No production caller emits an envelope with appendEnvelope, so encodeSessionLine has no live session-event producer and the claimed JSONL persistence rail is incomplete.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/session-envelope-encoding.test.ts tests/unit/session-envelope-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Canonical key ordering, schema rejection, BOM and CR handling, typed decode failures, and streaming behavior passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: seam-only
+blocker: No production call site invokes appendEnvelope, so the encoder cannot produce a live JSONL session event stream.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n "appendEnvelope\\(" src --glob '!src/session/store.ts' --glob '!**/*.test.*'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: No production emitter was found outside the append seam itself.
+  - kind: source
+    command: rg -n "iterateSessionFile" src/apps/cli/inspect-cmd.ts src/apps/cli/why-cmd.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI inspection and why commands consume the decoder path.
+  - kind: test
+    command: bun test tests/unit/session-envelope-encoding.test.ts tests/unit/session-envelope-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused codec and schema rails passed within the 496-pass audit command.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch5
+review_state: approved
+reviewer: codex/cross-review-wave1

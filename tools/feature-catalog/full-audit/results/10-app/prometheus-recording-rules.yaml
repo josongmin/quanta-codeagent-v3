@@ -1,0 +1,38 @@
+version: 1
+feature_id: prometheus-recording-rules
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: docs/observability/recording-rules.yaml
+entrypoints: []
+activation:
+  - Deploy the recording-rules YAML to an external Prometheus server.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - docs/observability/recording-rules.yaml
+consumer: []
+reachable: no
+surface_findings:
+  - This repository contains a Prometheus configuration artifact but no in-repo Prometheus deployment, loader, or validation harness.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: unknown
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: External Prometheus load and rule evaluation are outside this repository; no executable in-repo consumer exists.
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'recording-rules\.yaml|quanta\.slo\.error_rate' 9a12f7a855640a8be1e4654472766bbc445696ea -- src tools package.json docs
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Recording rules occur as documentation configuration, not an in-repo runtime load path.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

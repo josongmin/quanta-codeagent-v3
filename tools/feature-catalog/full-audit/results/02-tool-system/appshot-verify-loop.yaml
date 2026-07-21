@@ -1,0 +1,61 @@
+version: 1
+feature_id: appshot-verify-loop
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/host/runtime/agent-config-assembler.ts:maybeWireAppshot"
+entrypoints:
+  - src/apps/cli/index.ts
+  - "src/host/runtime/agent-config-assembler.ts"
+activation:
+  - QUANTA_APPSHOT canonical gate enabled
+  - live BrowserPort assembled
+  - judge LLMPort available
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/tool/appshot/loop.ts:runAppshotLoop"
+  - "src/host/runtime/appshot-port-wire.ts:buildAppshotPortWire"
+consumer:
+  - "src/host/runtime/agent-config-assembler.ts:maybeWireAppshot"
+  - "src/agent/tier1/appshot.ts:buildAppshotBlock"
+reachable: conditional
+surface_findings:
+  - "The assembler creates the real closed port only after both BrowserPort and judge LLMPort exist, then the tier-1 block registers appshot_verify."
+  - "The loop refuses an unavailable browser or judge and rejects an unbranded pass; no local Chrome and credentialed judge end-to-end receipt exists."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/appshot-reachability-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Knob-off and missing-browser controls leave the slot unset and the tool absent."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/appshot-loop-hellgate.test.ts tests/unit/appshot-tool-hellgate.test.ts tests/unit/appshot-reachability-hellgate.test.ts tests/unit/appshot-fail-closed-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Scripted composition proves the bounded scaffold-render-screenshot-judge path, registration, jail, branded pass, and typed refusal behavior."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: "A real system-Chrome plus credentialed judge-LMM end-to-end execution was not available in this audit; activation depends on those host resources."
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'maybeWireAppshot|QUANTA_APPSHOT|cfg.browser|cfg.llm' src/host/runtime/agent-config-assembler.ts src/agent/tier1/appshot.ts src/tool/index.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Production composition gates the tool on appshot, browser, and judge availability before registry exposure."
+  - kind: test
+    command: "bun test tests/unit/appshot-loop-hellgate.test.ts tests/unit/appshot-tool-hellgate.test.ts tests/unit/appshot-reachability-hellgate.test.ts tests/unit/appshot-fail-closed-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The selected 61 rails passed with no fabricated judge pass, unbounded loop, jail escape, or unwired registration."
+audited_at: "2026-07-19"
+auditor: codex/p1-tools-exec
+review_state: approved
+reviewer: codex/cross-review-wave1

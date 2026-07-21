@@ -1,0 +1,60 @@
+version: 1
+feature_id: git-log-search-skill
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/system-skills/git-log-search/index.ts and SKILL.md, consumed by src/agent/tier1/skill.ts:buildSkillBlock
+entrypoints:
+  - src/apps/cli/internal.ts:buildSkillsConfig
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+activation:
+  - Interactive CLI defaults QUANTA_SKILLS to enabled and passes skills: {} for bundled system skills.
+  - The model invokes the discovered skill through the generic Skill tool; QUANTA_SKILLS=0 removes the tool and inventory.
+effective_defaults:
+  cli: on
+  web: na
+  bench: off
+  headless: off
+  daemon: unknown
+producer:
+  - src/skill/system-skills/git-log-search/SKILL.md
+  - src/skill/system-skills/git-log-search/index.ts:triggerGitLogSearch
+consumer:
+  - src/agent/tier1/skill.ts:buildSkillBlock
+  - src/skill/system-skills/index.ts:discoverSystemSkills
+reachable: yes
+surface_findings:
+  - CLI default configuration discovers bundled skills without requiring QUANTA_SKILLS_DIR and registers the Skill tool through buildSessionFeatures.
+  - The exported trigger helper is router-agnostic and has no dedicated slash-command consumer, but the skill itself is model-invocable through the live generic Skill tool.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/features.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: skills absent omits Skill and ToolSearch from the session feature surface.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/system-skills-git-log-search-hellgate.test.ts tests/unit/features.test.ts tests/integration/skill-progress-audit-discovery.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The git-log-search bundle is discovered with its required contract, while the shared live Skill path proves bundled system skills reach the model and arm the generic skill gate.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildSkillsConfig|discoverSystemSkills|buildSkillBlock|createSkillTool' src/apps/cli/internal.ts src/agent/tier1/skill.ts src/skill/system-skills/git-log-search src/skill
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Default CLI skills configuration reaches bundled discovery and generic tool registration; the router helper is supplemental rather than the only consumer.
+  - kind: test
+    command: bun test tests/unit/system-skills-git-log-search-hellgate.test.ts tests/unit/features.test.ts tests/integration/skill-progress-audit-discovery.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused system-skill contract and live bundled-discovery rails passed.
+audited_at: '2026-07-19'
+auditor: codex/p2-tier1-batch19
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,50 @@
+version: 1
+feature_id: platform-base-shell-argv
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/runtime/shell-argv.ts:buildBaseShellArgv"
+entrypoints: [src/apps/cli/index.ts]
+activation: ["runShell always resolves the base argv", "QUANTA_WIN_SHELL=cmd|auto|bash|pwsh on win32"]
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer: ["src/runtime/shell-argv.ts:buildBaseShellArgv", "src/runtime/shell-argv.ts:resolveWinShellMode"]
+consumer: ["src/runtime/shell.ts:runShell"]
+reachable: yes
+surface_findings: ["Every runShell invocation consults the resolver. Non-win32 resolves an absolute bash path; win32 defaults to a typed refusal, while explicit modes select cmd, auto discovery, bash, or pwsh.", "The catalog's default-OFF label applies to Windows alternative-shell selection; the resolver itself is live on the normal runtime path."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/runtime/win-shell-guard-hellgate.test.ts tests/unit/runtime/shell-discovery-ladder-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Non-win32 argv parity and win32 unset, empty, and typo safe-default behavior pass.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/runtime/win-shell-guard-hellgate.test.ts tests/unit/runtime/shell-discovery-ladder-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 20 pure ladder and runtime tests pass, covering bash, PowerShell, cmd, no-shell refusal, discovery fallbacks, and no-silent-spawn behavior.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildBaseShellArgv|resolveWinShellMode|discoverShells|QUANTA_WIN_SHELL' src/runtime/shell.ts src/runtime/shell-argv.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: runShell calls the resolver and returns a typed exitCode 127 result before spawn on a refusal.
+  - kind: test
+    command: bun test tests/unit/runtime/shell-discovery-ladder-hellgate.test.ts tests/unit/runtime/win-shell-guard-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 20 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-security-sandbox
+review_state: approved
+reviewer: codex/cross-review-wave1

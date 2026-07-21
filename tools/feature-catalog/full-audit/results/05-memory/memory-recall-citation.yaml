@@ -1,0 +1,55 @@
+version: 1
+feature_id: memory-recall-citation
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/turn-summary.ts:formatMemoryRow
+entrypoints:
+  - src/apps/cli/repl/factories/turn-summary.ts:buildTurnSummaryAndStream
+  - src/apps/cli/repl/surface-compose/turn-sinks.ts:composeTurnSinks
+activation:
+  - TTY CLI sessions create a turn-summary collector by default; QUANTA_TURN_SUMMARY can disable it and non-TTY defaults to disabled.
+  - A final AgentOutcome with one or more memoryCitations renders a bounded record-id row, without scores or recalled text.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/agent/loop/session-lifecycle.ts:buildFinalAgentOutcome
+consumer:
+  - src/apps/cli/turn-summary.ts:renderSummary
+  - src/apps/cli/repl/surface-compose/turn-sinks.ts:renderAndResetSummary
+reachable: yes
+surface_findings:
+  - The live REPL renders the collector output to stderr after each completed turn and resets the collector for the next turn.
+  - The memory row is omitted when citations are absent and reveals record IDs only; scores and recalled text are not rendered.
+  - This is a CLI-only summary panel, so the catalog's web-missing statement is accurate rather than an unimplemented web surface.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/memory-citation-accumulator.test.ts tests/integration/memory-citation-end-to-end.test.ts tests/unit/cli/turn-summary.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 39 focused tests passed, including turn-summary memory rows, row hiding, bounding, and the upstream live outcome signal.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "formatMemoryRow|memoryCitations|createTurnSummary|renderAndResetSummary" src/apps/cli/turn-summary.ts src/apps/cli/repl/factories/turn-summary.ts src/apps/cli/repl/surface-compose/turn-sinks.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The outcome citation array is consumed by the default TTY collector and its rendered panel is written by the real REPL turn sink.
+  - kind: test
+    command: bun test tests/unit/agent/memory-citation-accumulator.test.ts tests/integration/memory-citation-end-to-end.test.ts tests/unit/cli/turn-summary.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused producer, outcome, and UI row rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch11
+review_state: approved
+reviewer: codex/cross-review-wave1

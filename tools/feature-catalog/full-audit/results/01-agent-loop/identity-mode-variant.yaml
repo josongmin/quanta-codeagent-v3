@@ -1,0 +1,60 @@
+version: 1
+feature_id: identity-mode-variant
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt.ts:buildSystemPrompt
+entrypoints:
+  - src/apps/cli/repl.ts:pickIdentity
+  - src/host/bootstrap/bootstrap-session.ts:buildPromptState
+activation:
+  - QUANTA_IDENTITY enables the CLI initial identity lines; the interactive /identity state can refresh the system prompt for a selected mode during a session.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/agent/identity/default-identities.ts
+  - src/apps/cli/internal.ts:pickIdentity
+consumer:
+  - src/host/bootstrap/bootstrap-session.ts:buildPromptState
+  - src/agent/prompt.ts:buildSystemPrompt
+reachable: yes
+surface_findings:
+  - CLI bootstrap obtains pickIdentity, builds the system source with it, and holds a refresh callback for identity-mode changes.
+  - Absent identity or an empty array leaves the base prompt byte-identical; enabled modes splice validated lines before persona.
+  - A real two-turn CLI run proves /identity changes only the following turn's system prefix and has a red-on-injection guard.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/identity-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent and empty identity inputs both produce a byte-identical legacy prompt.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/identity-hellgate.test.ts tests/integration/identity-mid-session-prompt-rebuild-e2e.test.ts tests/unit/apps/cli/session-setup-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 37 pass, 0 fail; mode table, splice ordering, CLI bootstrap, mid-session refresh, and red-on-injection behavior are covered.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'pickIdentity|buildPromptState|identityLines|refreshSystemPrompt' src/apps/cli/internal.ts src/host/bootstrap/bootstrap-session.ts src/agent/prompt.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI bootstrap supplies the identity lines into the system source and the prompt builder splices them in the validated identity slot.
+  - kind: test
+    command: bun test tests/unit/agent/identity-hellgate.test.ts tests/integration/identity-mid-session-prompt-rebuild-e2e.test.ts tests/unit/apps/cli/session-setup-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 37 pass, 0 fail across off identity, table behavior, bootstrap, and real mid-session refresh.
+audited_at: "2026-07-19"
+auditor: codex/root-p3-agent-loop
+review_state: approved
+reviewer: codex/cross-review-wave1

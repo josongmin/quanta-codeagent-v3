@@ -1,0 +1,54 @@
+version: 1
+feature_id: reminder-memory-recall-routing-hints-only
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/memory.ts:formatBlock
+entrypoints:
+  - src/agent/loop/context-assembler.ts:resolveMemoryContext
+  - src/agent/loop/context-assembler.ts:assembleTurnContext
+activation:
+  - A configured memory store reaches recallContext on every assembled turn.
+  - The CLI memory factory supplies a volatile store by default; QUANTA_MEMORY=off removes the entire memory path.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: off
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/memory.ts:recallContext formats the recalled entries with the routing-hints-only H2.
+consumer:
+  - src/agent/loop/context-assembler.ts:assembleTurnContext passes memoryContext to the dynamic reminder renderer.
+reachable: yes
+surface_findings:
+  - formatBlock emits exactly one "Memory hints (routing hints only — not proof)" frame around recalled rows and the optional truncation disclosure.
+  - resolveMemoryContext catches recall failures, emits a stream error, and omits the memory block; embedder failures degrade to lexical recall.
+  - The real runAgent reminder rail observes store recall in the sent prompt and escapes forged reminder boundaries.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/reminder-injection-through-loop-hell-e2e.test.ts tests/integration/agent-memory-e2e.test.ts tests/integration/memory-default-on-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 20 focused integration tests passed, including real runAgent recall into the reminder tail and default-on store reachability.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "formatBlock|routing hints only|resolveMemoryContext|memoryContext" src/agent/memory.ts src/agent/loop/context-assembler.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The formatted recall block is directly consumed by assembled turn context and the prompt input.
+  - kind: test
+    command: bun test tests/integration/reminder-injection-through-loop-hell-e2e.test.ts tests/integration/agent-memory-e2e.test.ts tests/integration/memory-default-on-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 20 focused integration tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch7
+review_state: approved
+reviewer: codex/cross-review-wave1

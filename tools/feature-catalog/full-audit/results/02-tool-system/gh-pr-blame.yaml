@@ -1,0 +1,55 @@
+version: 1
+feature_id: gh-pr-blame
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/gh/pr-blame.ts:ghPrBlameTool
+entrypoints:
+  - src/tool/gh/index.ts
+  - src/tool/surface/gated-tools.ts
+  - src/apps/web-daemon/session-hooks.ts
+activation:
+  - Invoke gh_pr_blame with an authenticated gh CLI and a valid PR reference.
+effective_defaults:
+  cli: on
+  web: on
+  bench: na
+  headless: na
+  daemon: on
+producer:
+  - src/tool/gh/pr-blame.ts:ghPrBlameTool
+  - src/tool/gh/pr-blame-parser.ts:buildBlameBody
+consumer:
+  - src/tool/gh/index.ts
+  - src/tool/surface/gated-tools.ts
+reachable: yes
+surface_findings:
+  - The GH tool registry exports gh_pr_blame and the tool surface exposes it on interactive and web-daemon agent paths.
+  - User file/line filters are post-fetch only; PR refs are validated before argv construction, and gh/auth/abort/malformed-output failures return bounded error envelopes.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/gh-pr-tools-hellgate.test.ts tests/unit/gh-pr-blame-injection-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Thread extraction, proximity filters, error envelopes, argv rejection, output bounds, auth/abort handling, and read-only contract rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'ghPrBlameTool|gh_pr_blame' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/tool/gh src/tool/surface src/agent/mode.ts src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: GH registry and agent tool surfaces include the read-only PR blame tool.
+  - kind: test
+    command: bun test tests/unit/gh-pr-tools-hellgate.test.ts tests/unit/gh-pr-blame-injection-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: PR blame behavior and adversarial-input rails passed in the 197-pass focused bundle.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

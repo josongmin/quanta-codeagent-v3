@@ -1,0 +1,65 @@
+version: 1
+feature_id: awf-tool-matcher
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/hooks.ts:HookBus.emitPreToolUse
+entrypoints:
+  - src/host/runtime/agent-arg-builder/command-hooks-wire.ts:wireCommandHooks
+  - src/host/runtime/agent-arg-builder/observability-wire.ts:resolveObservabilitySlots
+activation:
+  - A host must construct HookBus and register a HookBus.on handler with options.matcher
+  - Command hooks separately consume their string matcher through command-hooks/runner
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/tool-matchers.ts:matchTool
+  - src/agent/tool-matchers.ts:FS_TOOLS_MATCHER and AGENT_TOOLS_MATCHER
+consumer:
+  - src/agent/hooks.ts:HookBus pre_tool_use and tool-shaped event dispatch
+  - src/agent/command-hooks/runner.ts:bindingMatches fallback
+reachable: no
+surface_findings:
+  - "HookBus itself is constructed by command-hook and observability composition paths."
+  - "No production HookBus.on call supplies the third matcher option, and the two exported AWF matcher constants have no production consumer."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/tool-matchers.test.ts tests/unit/hooks-matcher.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Legacy two-argument registrations match every tool and retain their prior handler behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool-matchers.test.ts tests/unit/hooks-matcher.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: HookBus directly exercises exact, array, regexp, and predicate matcher behavior plus handler isolation.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: seam-only
+blocker: "No production registration supplies HookBus.on(..., { matcher }); FS_TOOLS_MATCHER and AGENT_TOOLS_MATCHER are exported but unconsumed outside tests."
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'matcher:|FS_TOOLS_MATCHER|AGENT_TOOLS_MATCHER|matchTool' src/agent src/host src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: HookBus calls matchTool at dispatch, but production registrations omit the third matcher argument and constants have no production reference.
+  - kind: test
+    command: bun test tests/unit/tool-matchers.test.ts tests/unit/hooks-matcher.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 18 pass, 0 fail; all matcher variants, legacy parity, deny ordering, and throw isolation pass.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The code is reachable; the missing evidence is an activation producer for matcher options.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-plan
+review_state: approved
+reviewer: codex/cross-review-wave1

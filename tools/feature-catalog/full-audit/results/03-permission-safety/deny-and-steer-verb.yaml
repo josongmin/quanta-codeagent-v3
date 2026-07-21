@@ -1,0 +1,55 @@
+version: 1
+feature_id: deny-and-steer-verb
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/admissibility-gate/shared.ts:denyFromConfirm
+entrypoints:
+  - src/agent/admissibility-gate/hitl.ts:runHitlGate
+  - src/agent/admissibility-gate/gates.ts:runModePolicy and reviewer deny paths
+  - src/agent/confirm-decision.ts:normalizeConfirm
+activation:
+  - "An onConfirm host returns {decision: 'deny_and_steer', steer: '<non-empty>'}."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/confirm-decision.ts:normalizeConfirm
+  - src/agent/admissibility-gate/shared.ts:denyFromConfirm
+consumer:
+  - src/agent/admissibility-gate/hitl.ts:runHitlGate
+  - src/agent/admissibility-gate/gates.ts:runModePolicy
+reachable: conditional
+surface_findings:
+  - "The gate emits a typed deny result with steerInjection and the deny_steer preview under real HITL and mode-policy confirmation paths."
+  - "The active loop, dispatch, and streaming-dispatch production code intentionally contain zero steerInjection reads; the correction never reaches the next model prompt."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/integration/admissibility-deny-steer.test.ts tests/integration/admissibility-deny-steer-hell.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "46 tests pass for normalization, gate emission, precedence, and explicit G-1 through G-1d proof that loop consumption is absent."
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: conditional
+blocker: "The gate emits steerInjection but no production loop/dispatch/streaming consumer folds it into the next-turn model input; the catalog's stated host redirection outcome is therefore incomplete."
+disposition: wire
+receipts:
+  - kind: source
+    command: "rg -n 'denyFromConfirm|buildDenySteerMessage|steerInjection' src/agent/admissibility-gate src/agent/confirm-decision.ts src/agent/loop.ts src/agent/dispatch.ts src/agent/streaming-dispatch.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Gate helper writes steerInjection while loop, dispatch, and streaming-dispatch have no executable consumer reference."
+  - kind: test
+    command: "bun test tests/integration/admissibility-deny-steer.test.ts tests/integration/admissibility-deny-steer-hell.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "46 pass, 0 fail; the suite explicitly pins the missing loop consumer as the present-state invariant."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch6
+review_state: approved
+reviewer: codex/cross-review-wave1

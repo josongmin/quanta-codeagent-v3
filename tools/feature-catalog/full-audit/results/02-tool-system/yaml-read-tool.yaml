@@ -1,0 +1,55 @@
+version: 1
+feature_id: yaml-read-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/document/yaml-read.ts:yamlReadTool
+entrypoints:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+activation:
+  - "yaml_read is an unconditional base tool in buildDefaultTools."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/document/yaml-read.ts:yamlReadTool
+  - src/tool/document/yaml-read.ts:parsePhase
+consumer:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+reachable: yes
+surface_findings:
+  - "The reader uses unified jail resolution, rejects symlink leaves, converts parser errors into typed failures, and deterministically renders parsed YAML as JSON."
+  - "Every base registry surface receives yaml_read; it is classified read-only in the plan-mode table."
+  - "The catalog note claiming caller-deferred registration is obsolete because ADR-0142 added yaml_read to buildBaseDefaultTools."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/yaml-read-hellgate.test.ts tests/unit/document-tools-defaults-registration-hellgate.test.ts tests/integration/multi-plane-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Parsing, anchors, path guards, determinism, base registration, and real-file integration rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog notes must replace caller-deferred registration with base-registry availability.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "yamlReadTool|yaml_read|buildBaseDefaultTools|buildDaemonToolRegistry|MUTATING_TOOL_TABLE" src/tool/document/yaml-read.ts src/tool/index.ts src/apps/web-daemon/runtime-factory.ts src/agent/mode.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The YAML wrapper, base-registry consumers, and read-only plan classification are live.
+  - kind: test
+    command: bun test tests/unit/tool/yaml-read-hellgate.test.ts tests/unit/document-tools-defaults-registration-hellgate.test.ts tests/integration/multi-plane-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 113 combined document and composition tests passed, including YAML-specific rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch7
+review_state: approved
+reviewer: codex/cross-review-wave1

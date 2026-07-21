@@ -1,0 +1,53 @@
+version: 1
+feature_id: web-search-providers
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/web/providers/{brave,duckduckgo,from-env}.ts
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:maybeWireWebSearch
+  - src/tool/web/search.ts:webSearchTool
+activation:
+  - Set BRAVE_SEARCH_API_KEY to use Brave, or set QUANTA_WEB_SEARCH_DUCKDUCKGO=1 to opt into the limited DuckDuckGo fallback; explicit AgentConfig.webSearch.provider overrides environment resolution.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/web/providers/from-env.ts:providerFromEnv
+consumer:
+  - src/host/runtime/agent-config-assembler.ts:maybeWireWebSearch
+  - src/tool/web/search.ts:webSearchTool
+reachable: yes
+surface_findings:
+  - The provider factories remain off the default tool barrel, while the host assembler now wires a provider only when the key or explicit DuckDuckGo gate resolves.
+  - Brave keys travel only in X-Subscription-Token; the focused rail asserts they are never serialized into the URL.
+off_identity_proof:
+  kind: source
+  command: rg -n 'providerFromEnv|maybeWireWebSearch|webSearch' src/tool/web src/host/runtime/agent-config-assembler.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No resolved provider leaves AgentConfig.webSearch unset, so web_search is absent rather than a dead no-provider tool.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/web-search-providers-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 21 provider rails covered Brave request/error behavior and DuckDuckGo mapping, flattening, abort forwarding, and network failure.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/tool/web-search-providers-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The combined 12-file audit command passed 156 tests; provider request/error rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

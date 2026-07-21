@@ -1,0 +1,57 @@
+version: 1
+feature_id: h13-external-config-migration
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/config-migration-notice.ts:emitConfigMigrationNotice
+entrypoints:
+  - src/apps/cli/repl.ts:startup migration notice
+activation:
+  - Set QUANTA_MIGRATE_CONFIG=1 to detect; also set QUANTA_MIGRATE_CONFIG_IMPORT=1 to persist converted items.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/migration/external-config/run.ts:detect-convert flow
+  - src/migration/external-config/persist.ts:persistConvertedItems
+consumer:
+  - src/apps/cli/repl.ts:emitConfigMigrationNotice
+reachable: yes
+surface_findings:
+  - REPL startup invokes the notice seam; detection and mutation use distinct explicit gates.
+  - Persist logic contains the documented path-jail, atomic-write, untrusted-command, and malformed-target protections.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/config-migration-persist-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Knob-off path performs no detect, persist, or ledger write.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/external-config-migration-hellgate.test.ts tests/unit/external-config-migration-e2e-hellgate.test.ts tests/unit/config-migration-persist-hellgate.test.ts tests/unit/config-migration-persist-e2e-hellgate.test.ts tests/unit/config-migration-persist-harden-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Detection, conversion, throttle, persistence, hardening, and opt-in rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: "CLI startup wire is live but both migration detection and mutation are explicit default-off opt-ins."
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'emitConfigMigrationNotice|QUANTA_MIGRATE_CONFIG' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli src/shared
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: REPL invokes the gated notice and runtime config owns the gate.
+  - kind: test
+    command: bun test tests/unit/external-config-migration-hellgate.test.ts tests/unit/external-config-migration-e2e-hellgate.test.ts tests/unit/config-migration-persist-hellgate.test.ts tests/unit/config-migration-persist-e2e-hellgate.test.ts tests/unit/config-migration-persist-harden-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused migration rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

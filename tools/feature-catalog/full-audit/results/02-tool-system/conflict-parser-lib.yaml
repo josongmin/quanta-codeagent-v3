@@ -1,0 +1,50 @@
+version: 1
+feature_id: conflict-parser-lib
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/git/conflict-parser.ts:parseConflicts
+entrypoints: [src/apps/cli/index.ts]
+activation: ["QUANTA_GIT_TOOLS=1 exposes git_conflict_inspect, which imports the forwarding tool parser"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/git/conflict-parser.ts:parseConflicts]
+consumer: [src/tool/git/conflict-inspect.ts, src/tool/git/conflict-parser/parse.ts]
+reachable: yes
+surface_findings: ["The tool-local parser is a forwarder to the canonical src/git implementation, so the catalog claim that no loop consumer exists is false at this snapshot."]
+off_identity_proof:
+  kind: source
+  command: rg -n "gitToolsEnabled|git_conflict_inspect" src/apps/cli/internal.ts src/tool/git
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The only model-facing consumer remains behind the git-tools opt-in surface.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git/conflict-parser.test.ts tests/unit/git/conflict-parser-differential-fuzz.test.ts tests/unit/git/conflict-parser-ssot-ratchet.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 257 tests include a real-git differential corpus, malformed input handling, and the single-source forwarding ratchet.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: Catalog purpose states nobody in the loop imports the parser, but git_conflict_inspect consumes the canonical parser through the tool forwarding module.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "parseConflicts" src/tool/git/conflict-inspect.ts src/tool/git/conflict-parser/parse.ts src/git/conflict-parser.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Tool consumer and canonical forwarder are present.
+  - kind: test
+    command: bun test tests/unit/git/conflict-parser.test.ts tests/unit/git/conflict-parser-differential-fuzz.test.ts tests/unit/git/conflict-parser-ssot-ratchet.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 257 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

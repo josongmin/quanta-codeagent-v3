@@ -1,0 +1,53 @@
+version: 1
+feature_id: run-mode-expansion-ide-daemon
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/agent/mode-presets/ide.ts:runMode and daemon.ts:runMode
+entrypoints:
+  - src/apps/agent/index.ts:mode dispatcher
+activation:
+  - Invoke the agent application with mode ide or daemon; external hosts supply their corresponding ports.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/run-mode/presets.ts:mode matrix
+  - src/apps/agent/mode-presets/ide.ts:runMode
+  - src/apps/agent/mode-presets/daemon.ts:runMode
+consumer:
+  - src/apps/agent/index.ts:dispatcher
+reachable: yes
+surface_findings:
+  - The agent application dispatcher loads the ide and daemon presets with matrix, policy, and exit-code validation.
+  - Interactive CLI does not present a mode picker, and external VS Code/Tauri/cron hosts still own the host adapter contract.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/agent/anti-regression-invariants.test.ts tests/unit/apps/agent/mode-presets/ide.test.ts tests/unit/apps/agent/mode-presets/daemon.test.ts tests/integration/mode-runners-ide-daemon-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Mode matrix, preset construction, defaults, overrides, abort mapping, and e2e runner rails passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: "Modes are implemented in the agent application but require explicit mode selection and external-host ports; interactive CLI full claim is overstated."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'runMode|mode === "ide"|mode === "daemon"' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/agent src/agent/run-mode
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Agent dispatcher and both preset owners are production source consumers.
+  - kind: test
+    command: bun test tests/unit/apps/agent/anti-regression-invariants.test.ts tests/unit/apps/agent/mode-presets/ide.test.ts tests/unit/apps/agent/mode-presets/daemon.test.ts tests/integration/mode-runners-ide-daemon-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused ide/daemon rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,61 @@
+version: 1
+feature_id: fast-apply-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/apply-patch.ts:tryFastApplyFallback
+entrypoints:
+  - src/agent/dispatch/tool-context.ts:buildToolContext
+  - src/tool/apply-patch.ts:applyPatchTool
+activation:
+  - QUANTA_FAST_APPLY=on causes composition to attach a fallback port to ToolContext.
+  - A recoverable parse, anchor, or apply failure calls the fallback once and retries its complete re-emitted patch once.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/apply-patch-fallback-wire.ts:classifyFastApplyError
+  - src/tool/apply-patch.ts:tryFastApplyFallback
+consumer:
+  - src/tool/apply-patch.ts:applyPatchTool
+  - src/agent/dispatch/tool-context.ts:buildToolContext
+reachable: yes
+surface_findings:
+  - The concrete ToolContext optional seam is supplied by agent dispatch and consumed only after recoverable V4A failures.
+  - Security-boundary errors and aborted signals bypass fallback; a thrown or unsuccessful port result restores the original error.
+  - The runtime rail proves the full path from an env-enabled runtime through real apply_patch to a rescued file mutation and pairs it with OFF byte identity.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apply-patch-fast-apply-wire-hellgate.test.ts tests/integration/runtime-fast-apply-fallback.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No port keeps original typed errors and makes zero side-conversation calls; the real runtime OFF case leaves the file unchanged.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apply-patch-fast-apply-wire-hellgate.test.ts tests/unit/agent/optional-ports-wire.test.ts tests/integration/runtime-fast-apply-fallback.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused tests cover classified failures, source snapshots, one retry, model recovery output, no-throw fallback, and real runtime rescue.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'fastApplyFallback|tryFastApplyFallback|classifyFastApplyError|failingTargetPath' src/agent/dispatch/tool-context.ts src/tool/apply-patch.ts src/tool/apply-patch-fallback-wire.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The dispatch seam, closed error classification, source snapshot extraction, and retry consumer are all live.
+  - kind: test
+    command: bun test tests/unit/apply-patch-fast-apply-wire-hellgate.test.ts tests/unit/agent/optional-ports-wire.test.ts tests/integration/runtime-fast-apply-fallback.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Twenty-seven focused assertions passed, including the real runtime ON/OFF pair.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-fastapply
+review_state: approved
+reviewer: codex/cross-review-wave1

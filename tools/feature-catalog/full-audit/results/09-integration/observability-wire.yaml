@@ -1,0 +1,62 @@
+version: 1
+feature_id: observability-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/observability-wire/wire.ts:wireObservability
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+  - src/apps/web-daemon/runtime-factory.ts:buildProductionRuntimeFactory
+activation:
+  - QUANTA_OBSERVABILITY uses the host gate vocabulary; a truthy supported value constructs the four observability ports and HookBus.
+  - Gate-off returns the shared noop handle and omits all AgentConfig observability slots.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/observability-wire/wire.ts:wireObservability
+  - src/agent/run-ledger-attribution/subscriber.ts:createRunLedgerHookSubscriber
+consumer:
+  - src/host/runtime/agent-arg-builder/observability-wire.ts:resolveObservabilitySlots
+  - src/apps/web-daemon/runtime-factory.ts:wireSessionObservability
+  - src/agent/dispatch.ts:runAdmissibilityGate
+reachable: yes
+surface_findings:
+  - The generic host builder constructs one HookBus and projects objective, runLedger, approvalStateMachine, shadowVerify, and hooks into AgentConfig.
+  - The web-daemon factory independently creates the same four-port wire per session and passes its live slots into the daemon session config.
+  - The wire's post_tool_use subscriber feeds RunLedger attribution; port-factory and subscription failures degrade only that slot and preserve siblings.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability-wire-hellgate.test.ts tests/unit/observability-live-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Disabled and malformed gate values return the noop handle, allocate no ports or HookBus, and omit every AgentConfig observability key.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-wire-hellgate.test.ts tests/unit/observability-live-wire-hellgate.test.ts tests/unit/observability-e2e-real-hookbus-hellgate.test.ts tests/unit/observability-multi-emit-smoke-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 50 focused cases passed for four-port construction, real HookBus attribution, state transitions, default-off identity, detach, and failure isolation.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'wireObservability|resolveObservabilitySlots|wireSessionObservability|post_tool_use|approvalStateMachine' src/agent/observability-wire src/host/runtime src/apps/web-daemon src/agent/dispatch.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Both production composition roots construct the wire and consume its projected slots; the HookBus subscriber and approval consumer are live.
+  - kind: test
+    command: bun test tests/unit/observability-wire-hellgate.test.ts tests/unit/observability-live-wire-hellgate.test.ts tests/unit/observability-e2e-real-hookbus-hellgate.test.ts tests/unit/observability-multi-emit-smoke-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 50 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-observability
+review_state: approved
+reviewer: codex/cross-review-wave1

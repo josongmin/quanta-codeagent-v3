@@ -1,0 +1,66 @@
+version: 1
+feature_id: cli-turn-indicator
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/factories/turn-indicator.ts:buildTurnIndicatorAndStream
+entrypoints:
+  - src/apps/cli/repl/session-setup.ts:setupSession
+  - src/apps/cli/repl/turn-runner.ts:runOneTurn
+activation:
+  - Interactive CLI with stdout TTY enables the indicator when QUANTA_SPINNER is omitted or truthy.
+  - Non-TTY CLI and explicit QUANTA_SPINNER=0|false|off|no leave the original stream untouched.
+effective_defaults:
+  cli: on
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/cli/turn-indicator.ts:createTurnIndicator
+  - src/apps/cli/repl/factories/indicator-stream-port.ts:buildIndicatorPort
+consumer:
+  - src/apps/cli/repl/factories/turn-indicator.ts:buildTurnIndicatorAndStream
+  - src/apps/cli/repl/turn-runner.ts:runOneTurn
+reachable: yes
+surface_findings:
+  - Session setup tees the indicator port into the CLI stream, and every REPL turn starts and stops the indicator.
+  - Assistant text, tool call, output-progress, and usage events update the live renderer without changing the recorder leg.
+  - Catalog says default-OFF, but isIndicatorEnabled returns true for a TTY with QUANTA_SPINNER unset.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/turn-indicator.test.ts tests/unit/apps/cli/cli-feature-config-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Non-TTY and explicit off tokens disable the port, and disabled indicator methods are no-ops.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/turn-indicator.test.ts tests/unit/apps/cli/cli-feature-config-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Tests cover lifecycle, glyphs, elapsed time, token updates, first-chunk transition, rate window, and TTY gate behavior.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: Catalog purpose and knob metadata describe QUANTA_SPINNER as default-OFF, but the production TTY gate is default-ON.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'isIndicatorEnabled|buildTurnIndicatorAndStream|buildIndicatorPort|turnIndicator\.start|turnIndicator\.stop' src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI session setup composes the tee and the turn runner owns start/stop lifecycle.
+  - kind: test
+    command: bun test tests/unit/cli/turn-indicator.test.ts tests/unit/apps/cli/cli-feature-config-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 199-pass focused audit run verifies enabled rendering and explicit/non-TTY disabled behavior.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception is reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-cliux
+review_state: approved
+reviewer: codex/cross-review-wave1

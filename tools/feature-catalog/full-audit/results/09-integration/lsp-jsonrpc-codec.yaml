@@ -1,0 +1,45 @@
+version: 1
+feature_id: lsp-jsonrpc-codec
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/lsp/adapters/jsonrpc.ts:MessageReader
+entrypoints:
+  - src/lsp/adapters/base.ts
+activation:
+  - LSP stdio client uses Content-Length framing for every server message.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: resource
+producer:
+  - src/lsp/adapters/jsonrpc.ts:MessageReader
+consumer:
+  - src/lsp/adapters/base.ts
+reachable: yes
+surface_findings:
+  - Reader handles partial, coalesced, UTF-8, malformed, over-cap, and resync framing cases.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/lsp-jsonrpc.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Exact framing and adversarial parser rails passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/lsp-jsonrpc.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: LSP codec rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

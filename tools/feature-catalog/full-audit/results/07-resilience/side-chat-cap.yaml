@@ -1,0 +1,55 @@
+version: 1
+feature_id: side-chat-cap
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/internal/context-binding/side-conversation.ts:startSideConversation
+entrypoints:
+  - src/apps/cli/repl/session-loop.ts:runReplSession
+  - src/apps/cli/side-cmd.ts:sideCmd
+  - src/sdk/runtime/session.ts:createRuntimeSession
+activation:
+  - A live CLI REPL session installs its runtime side.start method before /side can execute.
+effective_defaults:
+  cli: on
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/runtime/internal/context-binding/side-conversation.ts:buildIsolatedSideConversationConfig
+  - src/host/runtime/internal/context-binding/side-conversation.ts:startSideConversation
+consumer:
+  - src/apps/cli/side-cmd.ts:sideCmd
+  - src/apps/cli/repl/session-loop.ts:registerSideConversationStart
+reachable: yes
+surface_findings:
+  - The REPL late-binds the runtime session side method and the registered /side command invokes it through the injected surface slot.
+  - The isolated config intentionally does not copy parent hooks, mutable stores, approval state, memory, or Radar; the registry filters forbidden mutators and clamps max turns to five.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/side-cmd.test.ts tests/unit/host/runtime-side-conversation-isolation-hellgate.test.ts tests/integration/side-conversation-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Slash dispatch, isolation of parent hooks and stores, independent concurrent execution, and abort propagation pass.
+failure_posture: fail-loud
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'registerSideConversationStart|setSideConversationStart|startSideConversation|SIDE_CONVERSATION_FORBIDDEN|SIDE_CONVERSATION_MAX_TURNS_CAP' src/apps/cli/repl src/apps/cli/side-cmd.ts src/host/runtime/internal/context-binding/side-conversation.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The REPL installs the live starter and the host adapter owns the allowlist, forbidden set, cap, and isolated config.
+  - kind: test
+    command: bun test tests/unit/cli/side-cmd.test.ts tests/unit/host/runtime-side-conversation-isolation-hellgate.test.ts tests/integration/side-conversation-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 24 slash and isolation cases passed across the focused rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch23
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,58 @@
+version: 1
+feature_id: embedder-port
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/store.ts:buildEmbedderCore
+entrypoints:
+  - src/apps/cli/internal.ts:buildEmbedder
+  - src/apps/cli/internal.ts:buildTooling
+activation:
+  - An embedder is built only when a memory store exists, QUANTA_MEMORY_EMBED is not off, and OPENAI_API_KEY is present.
+  - buildToolingCore forwards it to memory tools and CLI session composition forwards it into AgentConfig.
+effective_defaults:
+  cli: resource
+  web: off
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/memory-embedder.ts:OpenAIEmbedder
+  - src/agent/memory-embedder.ts:NullEmbedder
+  - src/agent/memory-embedder.ts:CachingEmbedder
+consumer:
+  - src/runner/assemble/store.ts:buildEmbedderCore
+  - src/runner/assemble/tooling.ts:buildToolingCore
+  - src/apps/cli/repl/surface-compose/dispatch-compose.ts:composeDispatch
+  - src/agent/memory.ts:embedOne
+reachable: yes
+surface_findings:
+  - The CLI composition path makes the OpenAI embedder available to session persistence, recall, and memory self-edit tools only after store and credential gates pass.
+  - NullEmbedder remains an explicit offline test/dependency option; web-daemon builds a memory store for readout but does not build or inject this embedder.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-embedder.test.ts tests/integration/memory-default-on-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Batching, ordering, cache eviction, transport error wrapping, and the resource-gated memory assembly rail passed.
+failure_posture: degraded
+security_posture: conditional
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "buildEmbedderCore|buildEmbedder\\(|memoryEmbedder|embedder:" src/runner src/apps/cli src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI assembly creates the resource-gated adapter, passes it through tooling and dispatch composition, and live memory consumers invoke the port.
+  - kind: test
+    command: bun test tests/unit/memory-embedder.test.ts tests/integration/memory-default-on-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused embedder and factory rails passed as part of the 141-pass audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch9
+review_state: approved
+reviewer: codex/cross-review-wave1

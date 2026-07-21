@@ -1,0 +1,50 @@
+version: 1
+feature_id: pluggable-embedder-store-registry
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/search-index-backend.ts:resolveIndexEmbedder and buildSemanticBackend
+entrypoints: [src/apps/cli/internal.ts:buildTooling, src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs]
+activation: [QUANTA_INDEX must enable the semantic search pipeline., QUANTA_EMBED_PROVIDER and QUANTA_VECTOR_STORE select registry providers; unset provider selection retains the legacy hash and in-memory path.]
+effective_defaults:
+  cli: off
+  web: unknown
+  bench: off
+  headless: off
+  daemon: unknown
+producer: [src/retrieval/engines/embedder/registry.ts:createEmbedderFromEnv, src/retrieval/engines/store/registry.ts:createStoreFromEnv]
+consumer: [src/runner/assemble/search-index-backend.ts:resolveIndexEmbedder, src/runner/assemble/search-index-backend.ts:buildSemanticBackend, src/runner/assemble/search-pipeline.ts:buildSearchPipelineFromEnv, src/apps/cli/internal.ts:buildTooling]
+reachable: yes
+surface_findings: ["The live CLI tooling root builds the search pipeline and registers its tool; semantic presets require QUANTA_INDEX.", "Explicit unknown stores hard-disable rather than silently aliasing to the legacy store; unset provider selection stays on the legacy path."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/retrieval/engines-hellgate.test.ts tests/unit/runner/search-pipeline.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset registry env returns null and a semantic preset without QUANTA_INDEX falls back to the lexical pipeline.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/retrieval/engines-hellgate.test.ts tests/unit/runner/search-index-backend.test.ts tests/unit/runner/search-pipeline.test.ts tests/integration/search-pipeline-lance-wire.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Provider swaps, capability checks, explicit Lance wire, reconcile behavior, and pipeline construction passed.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'createEmbedderFromEnv|createStoreFromEnv|buildSearchPipelineFromEnv|buildSemanticBackend' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/retrieval src/runner src/apps/cli/internal.ts src/host/runtime/agent-arg-builder.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Registries feed the backend, the backend feeds the search pipeline, and CLI plus host roots consume the pipeline.
+  - kind: test
+    command: bun test tests/unit/retrieval/engines-hellgate.test.ts tests/unit/runner/search-index-backend.test.ts tests/unit/runner/search-pipeline.test.ts tests/integration/search-pipeline-lance-wire.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The selected retrieval and pipeline rail passed within the 155-test focused audit command.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch4
+review_state: approved
+reviewer: codex/cross-review-wave1

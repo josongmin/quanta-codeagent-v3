@@ -1,0 +1,54 @@
+version: 1
+feature_id: four-section-preset-renderer
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/prompt-sections.ts:fourSectionPreset and buildSectionedSystemBlocks"
+entrypoints:
+  - "src/agent/prompt.ts:buildTurnContext"
+  - "src/agent/loop/context-assembler.ts:assembleTurnContext"
+activation:
+  - "Core prompt assembly calls fourSectionPreset whenever project rules, session context, memory summary, or user append activates the sectioned path."
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: on
+  daemon: on
+producer:
+  - "src/agent/prompt-sections.ts:fourSectionPreset"
+  - "src/agent/prompt-sections.ts:buildSectionedSystemBlocks"
+consumer:
+  - "src/agent/prompt.ts:buildSystemSections and buildTurnContext"
+  - "src/agent/loop/context-assembler.ts:assembleTurnContext"
+reachable: yes
+surface_findings:
+  - "The live loop builds TurnContextInput and calls buildTurnContext on every assembled agent turn."
+  - "The renderer preserves declared section order, collapses blank optional values, and caps cacheable sections at four."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/agent/prompt-sections.test.ts tests/unit/prompt-sections-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Section ordering, blank-collapse, legacy single-block compatibility, wire blocks, four-breakpoint cap, and overflow rejection passed."
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg buildTurnContext and fourSectionPreset in src/agent/prompt.ts src/agent/loop/context-assembler.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The production context assembler calls buildTurnContext, which derives system sections through fourSectionPreset and renders SystemBlock values."
+  - kind: test
+    command: "bun test tests/unit/agent/prompt-sections.test.ts tests/unit/prompt-sections-hellgate.test.ts tests/unit/prompt-dynamic.test.ts tests/unit/today-date-clock-port-hellgate.test.ts tests/unit/skill-trigger-rules.test.ts tests/integration/mode-block-matrix-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "98 pass, 0 fail across the shared focused prompt context audit rail."
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch2
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,55 @@
+version: 1
+feature_id: snapshot-deep-copy
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/working-state.ts:createWorkingStateSession.snapshot
+entrypoints:
+  - src/agent/loop/context-assembler.ts:assembleTurnContext
+  - src/agent/loop/session-bootstrap.ts:onWorkingStateReady
+activation:
+  - A working-state-enabled session creates the only handle whose snapshot method is exposed to reminder and CLI observers.
+  - snapshot clones every array and row object before either consumer receives it.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/working-state.ts:createWorkingStateSession.snapshot
+consumer:
+  - src/agent/loop/context-assembler.ts reads a snapshot for the current turn.
+  - src/agent/loop/session-bootstrap.ts publishes a snapshot getter to the CLI observer.
+reachable: yes
+surface_findings:
+  - The clone covers ownerShortlist, blockers, nextStepQueue, deferredValidation, and optional hypothesis rather than only copying outer arrays.
+  - mutate is replacement-only, leaving snapshot as the sole live-reference escape seam.
+  - The enabled runAgent path reads the handle between tool updates and prompt assembly.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/working-state.test.ts tests/integration/agent-features.test.ts tests/integration/reminder-injection-through-loop-hell-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 32 focused tests passed, including outer-array, inner-object, and inner-array alias mutation checks plus enabled loop traversal.
+failure_posture: na
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "snapshot\(\)|map\(.*\.\.\.|workingState\?\.snapshot|onWorkingStateReady" src/agent/working-state.ts src/agent/loop
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Snapshot has live loop and observer consumers and clones nested rows before returning.
+  - kind: test
+    command: bun test tests/unit/working-state.test.ts tests/integration/agent-features.test.ts tests/integration/reminder-injection-through-loop-hell-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 32 focused tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch7
+review_state: approved
+reviewer: codex/cross-review-wave1

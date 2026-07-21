@@ -1,0 +1,62 @@
+version: 1
+feature_id: network-egress-proxy
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/entry.ts:withEgressProxy
+entrypoints:
+  - src/host/runtime/agent-arg-builder-config-slots.ts:resolveNetworkProxySlot
+  - src/agent/dispatch/tool-context.ts proxyEnv projection
+  - src/tool/bash/index.ts
+activation:
+  - Set QUANTA_NETWORK_PROXY to 1 or an explicit allowlist so AgentConfig.networkProxy is enabled.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer:
+  - src/runtime/network-proxy/loopback-proxy.ts:LoopbackEgressProxy
+  - src/runtime/network-proxy/lifecycle.ts:withEgressProxy
+consumer:
+  - src/runtime/shell.ts:withProxyEnv
+  - src/runtime/sandbox.ts:withProxyEnv
+  - src/tool/bash/index.ts
+reachable: yes
+surface_findings:
+  - Enabled sessions bind a loopback proxy, project proxyEnv through ToolContext, and inject proxy variables into bash and LocalSandbox child environments.
+  - Focused rails prove allow, deny, amendment/revocation, SSRF literal and CONNECT canonicalization, DNS-rebinding peer re-check, teardown, and byte-identical OFF behavior.
+  - Background detached shells and direct git argv spawns do not receive proxyEnv, leaving subprocess egress bypasses outside the live coverage.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/network-proxy-subprocess-e2e.test.ts tests/integration/network-proxy-bash-tool-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent and enabled:false configurations construct no proxy and inject no child proxy variables.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/runtime/network-proxy-ssrf.test.ts tests/integration/network-proxy-e2e.test.ts tests/integration/network-proxy-subprocess-e2e.test.ts tests/integration/network-proxy-bash-tool-e2e.test.ts tests/integration/network-proxy-ssrf-connect-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Proxy decision, real child, bash dispatch, SSRF, and rebinding rails passed.
+failure_posture: fail-closed
+security_posture: conditional
+observability: verified
+verdict: conditional
+blocker: proxyEnv is not threaded to bash-bg-registry detached shells or direct git tool spawns, so those subprocesses can open ungated sockets.
+disposition: hold
+receipts:
+  - kind: source
+    command: git grep -n -E 'withEgressProxy|networkProxy|proxyEnv|withProxyEnv' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent/loop src/agent/dispatch src/runtime/shell.ts src/runtime/sandbox.ts src/tool/bash src/runtime/bash-bg-registry.ts src/tool/git
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Foreground bash and LocalSandbox consume proxyEnv; background-shell and git direct-spawn paths have no projection.
+  - kind: test
+    command: bun test tests/unit/runtime/network-proxy-ssrf.test.ts tests/integration/network-proxy-e2e.test.ts tests/integration/network-proxy-subprocess-e2e.test.ts tests/integration/network-proxy-bash-tool-e2e.test.ts tests/integration/network-proxy-ssrf-connect-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused proxy rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

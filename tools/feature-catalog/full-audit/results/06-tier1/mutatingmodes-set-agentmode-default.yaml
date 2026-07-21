@@ -1,0 +1,58 @@
+version: 1
+feature_id: mutatingmodes-set-agentmode-default
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/mode.ts:MUTATING_MODES
+entrypoints:
+  - src/apps/cli/internal/argv.ts:planEnabled
+  - src/agent/admissibility-gate.ts
+activation:
+  - QUANTA_PLAN=1 or --plan causes the CLI to assemble plan posture, where mutating tool dispatch is blocked before execution.
+  - The source now treats both default and editor as mutating modes; all other and unknown modes remain fail-closed.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: on
+  daemon: unknown
+producer:
+  - src/agent/mode.ts:isMutatingToolBlockedInMode
+consumer:
+  - src/agent/admissibility-gate.ts
+reachable: yes
+surface_findings:
+  - The positive set remains the live authority for fail-closed mutation admission.
+  - The catalog's exact set claim is stale because editor is now explicitly mutating.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/plan-mode-dispatch-block-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default configuration retains normal mutating dispatch while plan posture blocks it before execution.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/admissibility-hellgate.test.ts tests/unit/mode-plan-block.test.ts tests/integration/mode-block-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Mutation matrix and loop e2e controls passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: Catalog title says MUTATING_MODES equals default only, while current source defines default and editor.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg 'MUTATING_MODES|isMutatingToolBlockedInMode|planEnabled' src/agent/mode.ts src/apps/cli/internal/argv.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Source declares default and editor in the positive set and maps QUANTA_PLAN or --plan to plan mode.
+  - kind: test
+    command: bun test tests/unit/admissibility-hellgate.test.ts tests/unit/plan-mode-dispatch-block-hellgate.test.ts tests/unit/mode-plan-block.test.ts tests/integration/mode-block-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused matrix and live-loop dispatch rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

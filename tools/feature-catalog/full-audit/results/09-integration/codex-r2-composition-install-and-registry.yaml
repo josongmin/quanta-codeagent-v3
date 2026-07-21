@@ -1,0 +1,58 @@
+version: 1
+feature_id: codex-r2-composition-install-and-registry
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+  - src/agent/codex-r2-wire-install/install.ts:installCodexR2Wires
+  - src/agent/session-resource-registry/global.ts:getGlobalSessionResourceRegistry
+activation:
+  - A sessionId causes host assembly to acquire session resources and install the Codex R2 wire slots.
+effective_defaults:
+  cli: on
+  web: resource
+  bench: off
+  headless: resource
+  daemon: resource
+producer:
+  - Host assembly obtains global or caller-owned session resources and invokes installCodexR2Wires.
+consumer:
+  - AgentConfig consumers use the installed cache, store-backed event emitters, mention injector, and compaction hooks.
+reachable: yes
+surface_findings:
+  - The catalog still says registry composition is deferred, but host assembly now calls getGlobalSessionResourceRegistry or buildCallerOwnedRegistryWithTelemetry for sessionId.
+  - apps/agent/assemble.ts remains only the thin surface shim; host/runtime is the real owner.
+off_identity_proof:
+  kind: test
+  command: bun test src/agent/codex-r2-wire-install/__tests__/install.hellgate.test.ts tests/unit/composition-roots-codex-r2-wire-hellgate.test.ts tests/unit/composition-registry-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Empty dependencies and absent sessionId preserve no-registry/no-slot fallback behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/agent/codex-r2-wire-install/__tests__/install.hellgate.test.ts tests/unit/composition-roots-codex-r2-wire-hellgate.test.ts tests/unit/composition-registry-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Composition roots, registry same-id reuse, caller override precedence, and all wire slots passed.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "installCodexR2Wires|getGlobalSessionResourceRegistry|buildCallerOwnedRegistryWithTelemetry" src/host/runtime/agent-config-assembler.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Host assembly installs Codex R2 slots and now selects concrete session registry resources.
+  - kind: test
+    command: bun test src/agent/codex-r2-wire-install/__tests__/install.hellgate.test.ts tests/unit/composition-roots-codex-r2-wire-hellgate.test.ts tests/unit/composition-registry-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 31 install and composition-registry tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

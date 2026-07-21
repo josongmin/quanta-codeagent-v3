@@ -1,0 +1,51 @@
+version: 1
+feature_id: skill-vs-extension
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/skill-vs-extension.ts:classify and assertAllowedTool
+entrypoints: []
+activation:
+  - No production dispatcher imports classify, assertAllowedTool, or isToolAllowed; the functions run only through direct callers and tests.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/skill/skill-vs-extension.ts:classify
+  - src/skill/skill-vs-extension.ts:assertAllowedTool
+consumer: []
+reachable: no
+surface_findings:
+  - The classifier and explicit whitelist semantics are implemented and covered by unit and integration rails.
+  - Production skill discovery constructs allowedTools values, while the live loop instead uses its separate skillGate path; no production call enforces this module's classify or assertAllowedTool APIs.
+  - The catalog CLI-full routing claim is unsupported at the frozen revision.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill-vs-extension.test.ts tests/integration/skill-frontmatter-hell-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Category contradiction rejection, exact whitelist behavior, and frontmatter integration behavior passed in the focused rail.
+failure_posture: fail-closed
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: No production tool dispatch or slash routing consumer invokes the classifier or its allowed-tool assertion before invocation.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n "assertAllowedTool\\(|isToolAllowed\\(|classify\\(" src/agent src/apps src/skill --glob '!**/*.test.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Aside from the module definition and unrelated classifiers, no production invocation of these Skill-vs-Extension APIs exists.
+  - kind: test
+    command: bun test tests/unit/skill-vs-extension.test.ts tests/integration/skill-frontmatter-hell-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The classifier and exact whitelist contracts passed in the 183-test combined run.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch15
+review_state: approved
+reviewer: codex/cross-review-wave1

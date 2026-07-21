@@ -1,0 +1,45 @@
+version: 1
+feature_id: oauth-callback-provider
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/auth/chatgpt-oauth/callback-port.ts:OAuthCallbackProvider
+entrypoints:
+  - src/auth/chatgpt-oauth/cli-callback.ts
+activation:
+  - CLI browser flow selects the loopback callback provider.
+effective_defaults:
+  cli: resource
+  web: off
+  bench: na
+  headless: off
+  daemon: off
+producer:
+  - src/auth/chatgpt-oauth/cli-callback.ts
+consumer:
+  - src/auth/chatgpt-oauth/browser-flow.ts
+reachable: yes
+surface_findings:
+  - CLI loopback state and port errors are covered; Tauri and Web implementations remain the catalogued deliberate hold.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/auth/browser-flow.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Browser flow state, timeout, abort, user denial, and loopback port exhaustion rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: conditional
+blocker: Tauri and Web callback provider bodies are not built.
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/auth/browser-flow.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI OAuth callback rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

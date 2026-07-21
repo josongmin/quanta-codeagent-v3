@@ -1,0 +1,50 @@
+version: 1
+feature_id: notebook-edit-cell-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+entrypoints: [src/apps/cli/index.ts, src/host/runtime/agent-arg-builder/gated-tool-ports.ts]
+activation: ["runtime config QUANTA_NOTEBOOK_EDIT=1", "tool registry DefaultToolPorts.notebookEdit=true"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/tool/notebook-edit/tool.ts:makeNotebookEditTool, src/tool/notebook-edit/index.ts:editNotebook]
+consumer: [src/host/runtime/agent-arg-builder/gated-tool-ports.ts, src/tool/index.ts]
+reachable: yes
+surface_findings: ["The host passes the same jailed filesystem port to the central registry; notebook_edit is absent until the explicit gate is enabled."]
+off_identity_proof:
+  kind: source
+  command: rg -n "cfg.notebookEdit|p.notebookEdit === true" src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/tool/index.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Both port construction and tool registration are absent by default.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/notebook-edit.test.ts tests/unit/tool/notebook-edit-tool-hellgate.test.ts tests/unit/edit-fresh-hash-notebook-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Pure editing, jailed atomic wrapper, stale-read denial, history, and real chained notebook edits passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "cfg.notebookEdit|p.notebookEdit === true" src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/tool/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Concrete gated composition and registry call sites exist.
+  - kind: test
+    command: bun test tests/unit/tool/notebook-edit.test.ts tests/unit/tool/notebook-edit-tool-hellgate.test.ts tests/unit/edit-fresh-hash-notebook-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 25 audit-selected notebook rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

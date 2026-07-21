@@ -1,0 +1,53 @@
+version: 1
+feature_id: permission-profile-list-select
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/profile-list-select.ts:{listPermissionProfiles,selectPermissionProfile}
+entrypoints:
+  - src/permission/named-profiles.ts:resolveProfileByName
+  - src/permission/two-layer-manager.ts:setPermissionProfileByName
+activation:
+  - Set QUANTA_PROFILES_DIR to a directory of complete profile JSON files, or supply profilesDir to the List/Select API; use allowWiden only for an explicit caller-authorized widening.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/permission/profile-list-select.ts:listUserProfileFiles
+consumer:
+  - src/permission/profile-list-select.ts:selectPermissionProfile
+  - src/permission/two-layer-manager.ts:permission decisions
+reachable: yes
+surface_findings:
+  - Absent directory reads no files and returns only the three frozen built-ins; a built-in name wins over any colliding disk filename.
+  - Disk structures are rebuilt from validated primitives, ceiling-checked by axis, and unknown/traversal names produce typed errors instead of a permissive fallback.
+off_identity_proof:
+  kind: test
+  command: bun test src/permission/__tests__/profile-list-select.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No directory returned exactly three built-ins and Select returned each built-in by reference.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/permission/__tests__/profile-list-select.hellgate.test.ts src/permission/__tests__/profile-list-select-harder.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Validation, every ceiling axis, shadow/traversal handling, symlink ceiling checks, and disk-profile-to-manager decision e2e passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test src/permission/__tests__/profile-list-select.hellgate.test.ts src/permission/__tests__/profile-list-select-harder.hellgate.test.ts tests/unit/permission-slice-boundary.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The combined audit command passed 85 List/Select and slice-isolation rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

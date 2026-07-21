@@ -1,0 +1,48 @@
+version: 1
+feature_id: retrieval-hybrid-query
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/retrieval/hybrid-query.ts:runHybridQuery
+entrypoints:
+  - src/retrieval/index.ts exports runHybridQuery.
+activation:
+  - Requires a caller to supply BM25 and embedding source callbacks and optionally a reranker.
+  - No production source invokes runHybridQuery.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/retrieval/hybrid-query.ts:runHybridQuery
+consumer:
+  - No production consumer; all invocations are focused tests.
+reachable: no
+surface_findings:
+  - The pure three-stage funnel correctly dispatches keyword, embedding, and parallel hybrid sources under its unit rail.
+  - The catalog evidence path src/runner/assemble/retrieval.ts constructs registry state but does not import or call runHybridQuery.
+  - No localize bridge exists at the advertised production seam.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No shipped caller supplies first-stage callbacks to runHybridQuery, so the funnel is an unactivated orchestration seam.
+disposition: wire
+receipts:
+  - kind: source
+    command: "rg -n 'runHybridQuery\\(' src --glob '*.ts'"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The only source hit is the function declaration; production has no invocation.
+  - kind: test
+    command: bun test tests/unit/retrieval-hybrid-query-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 20 focused tests passed for source selection, parallel hybrid execution, RRF ordering, limits, and error propagation.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch12
+review_state: approved
+reviewer: codex/cross-review-wave1

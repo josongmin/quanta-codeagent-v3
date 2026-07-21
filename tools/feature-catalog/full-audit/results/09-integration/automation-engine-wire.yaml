@@ -1,0 +1,65 @@
+version: 1
+feature_id: automation-engine-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/scheduler/runtime-wire.ts:assembleAutomation
+entrypoints:
+  - src/apps/cli/repl/session-loop.ts
+  - src/host/runtime/agent-arg-builder.ts:resolveAutomation
+  - src/agent/loop/session-bootstrap.ts:maybeStartAutomationTicker
+activation:
+  - QUANTA_AUTOMATION=on and a valid QUANTA_AUTOMATION_INTERVAL_MS create an AutomationEngineSlot.
+  - The interactive REPL supplies a real enqueueUserMessage handler and owns the ticker.
+  - The generic agent-arg builder supplies a fail-loud stub handler until a mode preset replaces it.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/scheduler/runtime-wire.ts:assembleAutomation
+  - src/scheduler/automation-engine/index.ts:inMemoryAutomationEngine
+  - src/agent/loop-helpers.ts:startAutomationEngineTicker
+consumer:
+  - src/apps/cli/repl/session-loop.ts:runReplSession
+  - src/agent/loop/session-bootstrap.ts:maybeStartAutomationTicker
+  - src/host/runtime/agent-arg-builder.ts:resolveAutomation
+reachable: conditional
+surface_findings:
+  - The REPL passes enqueueWithHeartbeat into assembleAutomation and starts the slot's ticker, so interactive fires reach the real agent queue.
+  - Shared session bootstrap now arms an automation slot for every surface, but the generic composition root's handler only records a drop metric and warns.
+  - Therefore the advertised headless mode does not have a production dispatch consumer unless its preset overrides the stub handler.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/automation-wire-hellgate.test.ts tests/integration/albb-14-automation-wire.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Disabled or invalid env omits the slot and the shared lifecycle arms no ticker when no slot exists.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/automation-wire-hellgate.test.ts tests/integration/albb-14-automation-wire.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The focused rail proves real-handler delivery and separately proves the base-composition stub increments the dropped-fire metric.
+failure_posture: fail-loud
+security_posture: na
+observability: verified
+verdict: conditional
+blocker: The base composition root used by non-REPL modes installs a no-op fail-loud handler, so a configured headless automation can tick and record runs without enqueuing its prompt into an agent loop.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'assembleAutomation|enqueueWithHeartbeat|automationEngine|maybeStartAutomationTicker|AUTOMATION_FIRES_DROPPED_COUNTER|stub agent loop' src/apps/cli/repl/session-loop.ts src/host/runtime/agent-arg-builder.ts src/agent/loop/session-bootstrap.ts src/scheduler/runtime-wire.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The interactive consumer is live, while the generic host consumer deliberately exposes a measured stub-delivery gap.
+  - kind: test
+    command: bun test tests/unit/cli/automation-wire-hellgate.test.ts tests/integration/albb-14-automation-wire.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused scheduler, tool, ticker, teardown, real-handler, and fail-loud-stub cases completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-runtime
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,51 @@
+version: 1
+feature_id: branch-search-verifier-suite
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/branch-search/verify.ts
+entrypoints:
+  - src/agent/branch-search/search.ts
+  - src/runner/knobs/knobs/branch-search.ts:applyBranchSearch
+activation:
+  - Verifiers run for candidates only after the bench-only branchSearch knob creates a config block.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/branch-search/verify.ts:combineVerifiers
+consumer:
+  - src/agent/branch-search/search.ts
+reachable: yes
+surface_findings:
+  - Verifier implementations are real and exercised, but their catalog CLI surface is not presently wired.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/branch-search.test.ts tests/unit/branch-search-minimal-change-hellgate.test.ts tests/unit/bench-branch-search-wiring-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Verifier composition and bench configuration rails passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: Catalog's CLI full claim is unsupported; the live config producer is default-off and bench-only.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg 'combineVerifiers|branchSearch|SURFACES' src/agent/branch-search src/runner/knobs/knobs/branch-search.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Search consumes verifier signals only under optional branchSearch config, and the knob applies only to bench.
+  - kind: test
+    command: bun test tests/unit/branch-search.test.ts tests/unit/branch-search-minimal-change-hellgate.test.ts tests/unit/bench-branch-search-wiring-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused verifier rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

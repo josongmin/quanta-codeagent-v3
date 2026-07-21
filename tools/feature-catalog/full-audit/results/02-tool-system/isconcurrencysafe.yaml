@@ -1,0 +1,47 @@
+version: 1
+feature_id: isconcurrencysafe
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/streaming-dispatch.ts:dispatch streaming calls
+entrypoints:
+  - src/agent/loop/stream-consume.ts:registry predicate adapter
+activation:
+  - A streaming turn emits multiple tool calls; declarations marked concurrency-safe may start before a serial barrier.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/tool/registry.ts:isConcurrencySafe
+consumer:
+  - src/agent/loop/stream-consume.ts
+  - src/agent/streaming-dispatch.ts
+reachable: yes
+surface_findings:
+  - The loop binds registry predicates into streaming dispatch, which overlaps safe calls only until an unsafe barrier and preserves model order.
+  - A throwing third-party classification predicate is contained and cannot become an unhandled early-dispatch failure.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/streaming-dispatch.test.ts tests/unit/streaming-dispatch-hellgate.test.ts tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts tests/integration/streaming-dispatch-in-progress-e2e.test.ts tests/integration/streaming-dispatch-rejection-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Safe overlap, unsafe serialization, abort, rejection, and integration streaming dispatch rails passed.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/streaming-dispatch.test.ts tests/unit/streaming-dispatch-hellgate.test.ts tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts tests/integration/streaming-dispatch-in-progress-e2e.test.ts tests/integration/streaming-dispatch-rejection-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused concurrent dispatch rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

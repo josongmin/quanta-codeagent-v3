@@ -1,0 +1,60 @@
+version: 1
+feature_id: memory-cross-session-inject
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/session-memory-auto.ts:selectSessionStartMemoryContext
+entrypoints:
+  - src/host/runtime/internal/context-binding/base.ts:extendBaseWithMemoryAuto
+activation:
+  - Runtime context binding calls buildSessionMemoryAutoWires and carries sessionCtx into AgentConfig.
+  - Contrary to the catalog claim, QUANTA_MEMORY_AUTO is default-on; QUANTA_MEMORY_AUTO=off disables the wire.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: unknown
+  headless: on
+  daemon: on
+producer:
+  - src/memory/cross-session/default-injector.ts:DefaultCrossSessionInjector
+  - src/memory/cross-session/prompt-section.ts:renderMemorySection
+consumer:
+  - src/runner/session-memory-auto.ts:selectSessionStartMemoryContext
+  - src/host/runtime/internal/context-binding/base.ts:extendBaseWithMemoryAuto
+  - src/agent/prompt-sections.ts:buildPromptSections
+reachable: yes
+surface_findings:
+  - Selected Stage1 records are rendered at session start, carried through runtime base as sessionCtx, and inserted into the prompt session_ctx section.
+  - The catalog's default-OFF claim and QUANTA_MEMORY_AUTO=on activation condition are stale: the authoritative wire uses parseEnvFlag with defaultOn true.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/session-memory-auto.test.ts tests/unit/memory-consolidator-hook-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: QUANTA_MEMORY_AUTO=off returns no memory wires and no automatic injector path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/session-memory-auto.test.ts tests/unit/memory-consolidator-hook-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Session-start selection renders into sessionCtx and the producer hook mirrors distilled records for the next session.
+failure_posture: degraded
+security_posture: conditional
+observability: na
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg "assembleMemoryAuto|parseEnvFlag.*defaultOn|selectSessionStartMemoryContext|sessionCtx" src/memory src/runner src/host src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The memory-auto policy defaults on and the live host-to-prompt consumer chain is present.
+  - kind: test
+    command: bun test tests/unit/cli/session-memory-auto.test.ts tests/unit/memory-consolidator-hook-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selected focused rail passed as part of the 244-pass, 0-fail audit run.
+audited_at: "2026-07-19"
+auditor: codex/p1-context-memory
+review_state: approved
+reviewer: codex/cross-review-wave1

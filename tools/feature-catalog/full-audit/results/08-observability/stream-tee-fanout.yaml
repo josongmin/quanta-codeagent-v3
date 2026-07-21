@@ -1,0 +1,54 @@
+version: 1
+feature_id: stream-tee-fanout
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/stream/adapters/tee.ts:TeeStream.emit
+entrypoints:
+  - src/apps/agent/mode-presets/interactive.ts:buildInteractiveBase
+  - src/runner/assemble/streaming.ts:assembleStreaming
+activation:
+  - Interactive mode composes base and surface streams into TeeStream.
+  - Recorder assembly wraps the live stream and JsonlRecorder in TeeStream.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: on
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/stream/adapters/tee.ts forwards events in port order and tracks per-port failures.
+consumer:
+  - src/apps/agent/mode-presets/interactive.ts emits the interactive stream through TeeStream.
+  - src/runner/assemble/streaming.ts uses TeeStream for recorder fan-out.
+reachable: yes
+surface_findings:
+  - Product paths use non-strict fan-out; batch reporting intentionally uses strict mode.
+  - onFirstDegrade supplies a latched composition callback while degraded returns a safe snapshot.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tee.test.ts tests/integration/agent-observability.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unit cases cover ordered fan-out, non-strict isolation, degradation counts, strict rethrow, and the integration rail records a coherent trajectory through TeeStream.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'new TeeStream' 9a12f7a -- src/apps/agent/mode-presets/interactive.ts src/runner/assemble/streaming.ts src/apps/eval
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Interactive, recorder, and evaluation composition paths construct the fan-out adapter.
+  - kind: test
+    command: bun test tests/unit/tee.test.ts tests/integration/agent-observability.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused rail passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

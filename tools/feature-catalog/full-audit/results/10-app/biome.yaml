@@ -1,0 +1,53 @@
+version: 1
+feature_id: biome
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: biome.json:linter.rules
+entrypoints:
+  - biome.json
+  - .github/workflows/ci.yml:lint
+activation:
+  - bun run lint invokes Biome with repository rules and slice-specific restricted-import overrides.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - biome.json
+consumer:
+  - package.json:scripts.lint
+  - .github/workflows/ci.yml
+reachable: no
+surface_findings:
+  - This is repository policy and CI tooling, not a separately activatable runtime feature.
+  - Slice-boundary tests enforce that configuration and entrypoints remain paired while individual slice guards scan live source imports and process access.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent-slice-boundary.test.ts tests/unit/tool-slice-boundary.test.ts tests/unit/runner-slice-boundary.test.ts tests/unit/slice-boundary-config-parity.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Agent, tool, and runner slice guards plus config-entrypoint parity all pass.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: No runtime activation surface exists; this catalog item is static policy and CI enforcement.
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'noRestrictedImports|noConsole|noUnusedImports|noExcessiveCognitiveComplexity' biome.json
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Repository lint rules and slice import restrictions are defined in the Biome configuration.
+  - kind: test
+    command: bun test tests/unit/agent-slice-boundary.test.ts tests/unit/tool-slice-boundary.test.ts tests/unit/runner-slice-boundary.test.ts tests/unit/slice-boundary-config-parity.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused static-policy guards are included in the 276-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

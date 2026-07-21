@@ -1,0 +1,58 @@
+version: 1
+feature_id: sandbox-policy
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runtime/sandbox.ts:SandboxPolicy, LocalSandbox.run, and DockerSandbox.run
+entrypoints:
+  - src/runtime/sandbox.ts:LocalSandbox.run
+  - src/runtime/sandbox.ts:DockerSandbox.run
+activation:
+  - A caller must instantiate LocalSandbox or DockerSandbox and pass a SandboxPolicy to run.
+  - No CLI composition root constructs either runtime Sandbox implementation for the bash tool.
+effective_defaults:
+  cli: off
+  web: na
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/runtime/sandbox.ts:LocalSandbox and DockerSandbox implement the five-field runtime policy.
+consumer: []
+reachable: no
+surface_findings:
+  - The CLI shell sandbox slot uses the different os-sandbox SandboxPolicy type and wraps runShell argv.
+  - Search at the snapshot finds no production new LocalSandbox or new DockerSandbox construction outside tests.
+  - The implementation and unit rails prove local behavior, but the catalog claim that runShell uses this policy is false.
+off_identity_proof:
+  kind: source
+  command: git grep -n 'new LocalSandbox\|new DockerSandbox' 9a12f7a -- src
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No production construction site was found; the policy is dormant from normal CLI bash execution.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/sandbox.test.ts tests/unit/sandbox-buildargv.test.ts tests/unit/eval-sandbox-escape.test.ts tests/unit/os-sandbox-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 58 passing cases cover the direct LocalSandbox and DockerSandbox policy behavior and separately cover OS-sandbox semantics.
+failure_posture: unknown
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: No production composition root instantiates the runtime SandboxPolicy implementations; the live CLI uses a separate OS-sandbox policy model.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'new LocalSandbox|new DockerSandbox|installShellSandbox|runShell' 9a12f7a -- src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime implementations exist, but production CLI shell composition installs a separate OS wrapper around runShell instead.
+  - kind: test
+    command: bun test tests/unit/sandbox.test.ts tests/unit/sandbox-buildargv.test.ts tests/unit/eval-sandbox-escape.test.ts tests/unit/os-sandbox-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 58 pass and 0 fail; this is direct implementation evidence, not composition reachability.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

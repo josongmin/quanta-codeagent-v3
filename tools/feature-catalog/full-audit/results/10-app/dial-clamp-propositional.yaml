@@ -1,0 +1,51 @@
+version: 1
+feature_id: dial-clamp-propositional
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+activation:
+  - Assemble an agent configuration with preset, requested, or environment cost dials and mode budget caps.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/run-mode/clamp.ts:clampDials
+consumer:
+  - src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+reachable: yes
+surface_findings:
+  - The host assembler merges preset, caller, and environment cost dials, clamps them against policy caps, and passes the result to BudgetMeter.
+  - Dedicated tests import and execute clampDials, contradicting the catalog note that no test imports its evidence paths.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/run-mode/clamp.test.ts tests/unit/agent/run-mode/clamp-edge-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Clamp, log, callback, non-finite input, closed-field, and immutability rails passed.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: The implementation is live and tested, but catalog maturity notes incorrectly state that no test imports evidence code.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'clampDials\(' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host/runtime/agent-config-assembler.ts src/agent/run-mode/clamp.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Agent assembly invokes the clamp before meter construction.
+  - kind: test
+    command: bun test tests/unit/agent/run-mode/clamp.test.ts tests/unit/agent/run-mode/clamp-edge-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused dial-clamp rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

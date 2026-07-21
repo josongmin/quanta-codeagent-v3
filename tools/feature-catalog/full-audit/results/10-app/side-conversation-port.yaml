@@ -1,0 +1,61 @@
+version: 1
+feature_id: side-conversation-port
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/internal/context-binding/side-conversation.ts:startSideConversation
+entrypoints:
+  - src/apps/cli/repl/session-loop.ts:registerSideConversationStart
+  - src/apps/cli/repl/slash-surface.ts:buildReplSlashCtx
+activation:
+  - Start an interactive CLI session, then invoke /side QUESTION after the session loop has registered its runtime starter.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/host/runtime/internal/context-binding/side-conversation.ts:buildIsolatedSideConversationConfig
+  - src/host/runtime/internal/context-binding/side-conversation.ts:startSideConversation
+consumer:
+  - src/apps/cli/repl/session-loop.ts:session.side.start registration
+  - src/apps/cli/repl/slash-surface.ts:side starter closure
+  - src/apps/cli/side-cmd.ts:sideCmd
+reachable: yes
+surface_findings:
+  - The session loop installs the RuntimeSession side starter after session construction; the slash surface holds only a typed closure and no runner assembly internals.
+  - Before registration, the command reports not wired and exits with the D-6 posture rather than inventing a fallback.
+  - The host creates an isolated configuration with explicit tool allowlisting and does not carry parent hooks, mutable stores, radar, objective, or approval state into the side conversation.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/side-conv-port-hellgate.test.ts tests/unit/cli/side-cmd.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing or unwired starter yields the documented D-6 output and no invocation.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/side-conv-port-hellgate.test.ts tests/unit/host/runtime-side-conversation-isolation-hellgate.test.ts tests/unit/cli/side-cmd.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: CLI argument forwarding, source-fence checks, host isolation, and starter-error rendering rails passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'registerSideConversationStart|session.side.start|startSideConversation|isSideConversationWired' src/apps/cli/repl src/host/runtime/internal/context-binding
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live CLI session registers the host runtime closure and projects it into the slash command context.
+  - kind: test
+    command: bun test tests/unit/apps/cli/side-conv-port-hellgate.test.ts tests/unit/host/runtime-side-conversation-isolation-hellgate.test.ts tests/unit/cli/side-cmd.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused port and isolation rails passed within the 315-pass 18-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

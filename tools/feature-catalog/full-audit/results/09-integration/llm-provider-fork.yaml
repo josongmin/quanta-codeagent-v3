@@ -1,0 +1,60 @@
+version: 1
+feature_id: llm-provider-fork
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/llm.ts:selectLlmTransport
+entrypoints:
+  - src/runner/assemble/llm.ts:buildMainLLMCore
+  - src/apps/cli/internal.ts:CLI LLM construction
+activation:
+  - QUANTA_LLM_TRANSPORT selects bedrock, vertex, foundry, mantle, or default
+  - Cloud transport environment signals select a non-default provider when no explicit transport is set
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/providers/registry.ts:resolveProvider
+  - src/llm/factory.ts:createMulticloudLLM
+consumer:
+  - src/runner/assemble/llm.ts:buildMainLLMCore
+  - src/apps/cli/internal.ts:selectLlmTransport
+reachable: yes
+surface_findings:
+  - No transport signal preserves the legacy provider path; explicit or environment selection routes the main agent LLM through createMulticloudLLM.
+  - Cloud credential rotation is ordered before adapter creation, rejects untrusted authority without shelling, and keeps secrets out of events and errors.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/h7-main-llm-transport-routing-hellgate.test.ts tests/unit/h7-multicloud-rotation-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No selector or cloud signal uses the same legacy path and never consults the credential source.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm-providers/port-hellgate.test.ts tests/unit/llm-providers/registry-hellgate.test.ts tests/unit/llm-providers/default-adapter-hellgate.test.ts tests/unit/llm-providers/bedrock-adapter-hellgate.test.ts tests/unit/llm-providers/vertex-adapter-hellgate.test.ts tests/unit/h7-multicloud-rotation-wire-hellgate.test.ts tests/unit/h7-main-llm-transport-routing-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Registry precedence, provider error taxonomy, adapter streams, rotating credentials, and main-LLM routing are covered.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'createMulticloudLLM|selectLlmTransport|QUANTA_LLM_TRANSPORT|resolveProvider' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/llm src/runner src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI and runner composition consume the provider registry and multicloud factory for the main agent LLM.
+  - kind: test
+    command: bun test tests/unit/llm-providers/port-hellgate.test.ts tests/unit/llm-providers/registry-hellgate.test.ts tests/unit/llm-providers/default-adapter-hellgate.test.ts tests/unit/llm-providers/bedrock-adapter-hellgate.test.ts tests/unit/llm-providers/vertex-adapter-hellgate.test.ts tests/unit/h7-multicloud-rotation-wire-hellgate.test.ts tests/unit/h7-main-llm-transport-routing-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused provider, multicloud credential, and live main-route rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

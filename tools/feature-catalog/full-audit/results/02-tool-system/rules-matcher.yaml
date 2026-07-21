@@ -1,0 +1,45 @@
+version: 1
+feature_id: rules-matcher
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/rules/matcher.ts:matchPreparedCommand and src/rules/store.ts:RulesStore.match
+entrypoints: []
+activation: [An application must construct RulesStore, load one or more layers, and inject it into the admissibility gate; no production composition root does this.]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/rules/matcher.ts:matchCommand, src/rules/matcher.ts:matchPreparedCommand, src/rules/store.ts:RulesStore]
+consumer: []
+reachable: no
+surface_findings: ["The matcher has deterministic longest-prefix and ASCII-space-boundary behavior, while RulesStore precomputes per-layer ordering and the admissibility gate consumes an injected store.", "There is no production src construction or injection of RulesStore; all new RulesStore and loadLayer calls are in tests. Catalog cli:full is therefore unsupported at this snapshot."]
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/rules/matcher.test.ts tests/unit/rules/parser.test.ts tests/unit/rules/store.test.ts tests/integration/rules-argv-array-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 67 parser, matcher, precedence-store, immutable snapshot, and real admissibility-gate argv-rule cases passed.
+failure_posture: fail-closed
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: No application composition root constructs RulesStore, loads operator/project rules, and injects it into the live admissibility gate.
+disposition: downgrade
+receipts:
+  - kind: source
+    command: rg -n 'new RulesStore|loadLayer\(|rulesStore:' src --glob '*.ts'; rg -n 'rulesStore\.match|opts\.rulesStore\.match' src/agent --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The gate can consume an injected store, but production src has no constructor or layer-loading consumer.
+  - kind: test
+    command: bun test tests/unit/rules/matcher.test.ts tests/unit/rules/parser.test.ts tests/unit/rules/store.test.ts tests/integration/rules-argv-array-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 67 pass, 0 fail; direct matcher and injected real-gate behavior are both covered.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-registry
+review_state: approved
+reviewer: codex/cross-review-wave1

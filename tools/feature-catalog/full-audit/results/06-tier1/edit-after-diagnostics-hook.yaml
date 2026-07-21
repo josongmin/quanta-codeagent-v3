@@ -1,0 +1,45 @@
+version: 1
+feature_id: edit-after-diagnostics-hook
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/lsp-diagnostics-hook.ts:attachLspDiagnosticsHook"
+entrypoints: ["src/agent/lsp-diagnostics-hook.ts:attachLspDiagnosticsHook"]
+activation: ["QUANTA_LSP_DIAGNOSTICS_HOOK plus hook bus and pending-prompt slot are required."]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: ["src/agent/lsp-diagnostics-hook.ts:attachLspDiagnosticsHook"]
+consumer: ["src/agent/hooks post_tool_use bus", "src/agent/loop pending-prompt drain"]
+reachable: yes
+surface_findings: ["Gate-on post-edit diagnostics are injected as a next-turn prompt hook; missing or failing LSP degrades to no injection."]
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/lsp-diagnostics-hook-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Absent attachment produces no post-tool handler."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/lsp-diagnostics-hook-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Edit extraction, injection, cache reuse, and LSP failures pass."
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: "bun test tests/unit/lsp-diagnostics-hook-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 96-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,53 @@
+version: 1
+feature_id: eval-tier4-compare
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/compare/index.ts:runCompare
+entrypoints:
+  - src/apps/eval/index.ts:cmdCompare
+activation:
+  - Run bun run eval compare --scenario ID --usecase ID with at least two named adapters and a judge provider.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/eval/compare/index.ts:runCompare
+  - src/apps/eval/compare/pairwise-judge.ts:pairwiseJudge
+consumer:
+  - src/apps/eval/index.ts:cmdCompare
+reachable: yes
+surface_findings:
+  - The eval CLI validates agent names and cardinality before runCompare, while individual missing external CLIs are reported as skipped.
+  - Available adapters run concurrently in isolated temporary directories; pairwise parse failure increments error rather than a success-like result.
+  - Each matchup is persisted through ResultStore with its specific agent pair and verdict fields.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-pairwise-judge.test.ts tests/unit/eval-compare-adapters.test.ts tests/unit/eval-error-channels.test.ts tests/integration/eval-five-tier-compare-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Adapter availability, timeout and argv rails, malformed judges, and persisted full-flow matchups passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'cmdCompare|runCompare|pairwiseJudge|agentsSkipped|ResultStore' src/apps/eval/index.ts src/apps/eval/compare
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI validation, adapter probes, concurrent runs, judge, and result persistence form a live eval path.
+  - kind: test
+    command: bun test tests/unit/eval-pairwise-judge.test.ts tests/unit/eval-compare-adapters.test.ts tests/unit/eval-error-channels.test.ts tests/integration/eval-five-tier-compare-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused compare rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

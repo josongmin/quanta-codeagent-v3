@@ -1,0 +1,54 @@
+version: 1
+feature_id: per-string-empty-patch-refine
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/update-working-state.ts:schema
+entrypoints:
+  - src/agent/tier1/working-state.ts:buildWorkingStateBlock
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts:stateHookOptions
+activation:
+  - QUANTA_WORKING_STATE truthy wires AgentConfig.workingState.enabled on the interactive CLI surface.
+  - The session builder registers update_working_state and its Zod schema rejects an empty patch before dispatch.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/update-working-state.ts:createUpdateWorkingStateTool
+consumer:
+  - src/agent/tier1/working-state.ts:buildWorkingStateBlock
+  - src/agent/dispatch.ts:dispatchTool
+reachable: yes
+surface_findings:
+  - WorkingState is explicitly opt-in; absent config does not register the mutating tool or render the reminder block.
+  - The schema caps ordinary strings at 500 characters, hypothesis at 2000 characters, arrays at 50 entries, and refuses a no-field patch with an actionable message.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/update-working-state.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rail passed schema rejection for empty patches and all list and string-cap boundaries together with live handle mutation.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "createUpdateWorkingStateTool|workingStateEnabled|QUANTA_WORKING_STATE" src/tool/update-working-state.ts src/agent/tier1/working-state.ts src/apps/cli/repl/surface-compose
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI environment gate reaches the session builder, which registers the tool only when working state is enabled.
+  - kind: test
+    command: bun test tests/unit/update-working-state.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Empty-patch refine and per-field cap tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch8
+review_state: approved
+reviewer: codex/cross-review-wave1

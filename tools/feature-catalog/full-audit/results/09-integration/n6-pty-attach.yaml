@@ -1,0 +1,63 @@
+version: 1
+feature_id: n6-pty-attach
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts:resolvePtySessionSlot
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+  - src/tool/index.ts:buildDefaultTools
+activation:
+  - QUANTA_PTY_ATTACH enables runtimeConfig().ptyAttach and inserts a real PtySessionPort into the default-tool ports.
+  - The port selects a Bun-native or tmux backend and registers the six pty_* tools in the base registry.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/runtime/pty-backend.ts:buildPtyBackend
+  - src/tool/pty/tools.ts:ptyTools
+  - src/tool/pty/tmux-adapter.ts:createTmuxAdapter
+consumer:
+  - src/host/runtime/agent-arg-builder/gated-tool-ports.ts:resolvePtySessionSlot
+  - src/tool/index.ts:buildDefaultTools
+  - src/agent/dispatch.ts:dispatchTool
+reachable: yes
+surface_findings:
+  - The root leaves ptySession absent until the explicit gate is on; buildDefaultTools then adds exactly the six PTY tools.
+  - The real dispatch path reaches attach, write, and resumable read against the injected tmux adapter; foreign session access and unsafe writes are denied before unsafe execution.
+  - The feature YAML declares no knobs even though QUANTA_PTY_ATTACH and QUANTA_PTY_BACKEND are live runtime controls.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/pty-attach-e2e-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off root registration omits all six PTY tools and the on-menu minus those tools equals the off-menu.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/pty-attach-hellgate.test.ts tests/unit/pty-attach-e2e-hellgate.test.ts tests/unit/pty-bun-native-adapter-hellgate.test.ts tests/unit/pty-bun-native-parity-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused proof covers composition-root registration, real dispatch attach/write/read, plan-mode blocks, hard-deny, tmux jail, Bun-native parity, and no-throw backend failures.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: The catalog omits the live QUANTA_PTY_ATTACH and QUANTA_PTY_BACKEND knobs, leaving the activation contract incomplete despite a reachable implementation.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_PTY_ATTACH|ptyAttach|resolvePtySessionSlot|buildPtyBackend|ptySession|ptyTools' src/shared/runtime-config.ts src/host/runtime src/tool/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime config, gated composition, backend construction, tool registration, and dispatch consumers are present in the snapshot.
+  - kind: test
+    command: bun test tests/unit/pty-attach-hellgate.test.ts tests/unit/pty-attach-e2e-hellgate.test.ts tests/unit/pty-bun-native-adapter-hellgate.test.ts tests/unit/pty-bun-native-parity-hellgate.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused PTY proof completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-surfaces
+review_state: approved
+reviewer: codex/cross-review-wave1

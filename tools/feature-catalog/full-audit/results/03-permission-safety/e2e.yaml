@@ -1,0 +1,55 @@
+version: 1
+feature_id: e2e
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/admissibility-gate.ts:runAdmissibilityGate
+entrypoints:
+  - src/agent/dispatch.ts:dispatchTool
+  - src/agent/admissibility-gate.ts:runAdmissibilityGate
+activation:
+  - Every dispatched tool call reaches the admissibility gate with its resolved shell command before execution.
+  - Policy-injection adversarial cases exercise the same production gate through the agent loop.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/permission/policy.ts:hardDeny
+  - src/agent/admissibility-gate/gates.ts:earlyHardDeny
+consumer:
+  - src/agent/admissibility-gate.ts:runAdmissibilityGate
+  - src/agent/dispatch.ts:dispatchTool
+reachable: yes
+surface_findings:
+  - The dispatch path runs early hard-deny before grant, rule, confirmation, and mode-policy allow-capable branches.
+  - Injection defenses are exercised through real agent-loop dispatch, including forged reminder content and shell-smuggling cases, while benign read-only controls remain allowed.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/admissibility-gate.test.ts tests/integration/policy-injection.test.ts tests/integration/reminder-injection-through-loop-hell-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused policy-injection, forged-reminder, hard-deny, and benign-control rails passed through the live gate.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "runAdmissibilityGate|earlyHardDeny|hardDeny|withResolvedShellCommand" src/agent/dispatch.ts src/agent/admissibility-gate.ts src/agent/admissibility-gate src/permission
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The hard-deny producer is consumed by the pre-execute production dispatch gate.
+  - kind: test
+    command: bun test tests/unit/admissibility-gate.test.ts tests/integration/policy-injection.test.ts tests/integration/reminder-injection-through-loop-hell-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused injection and reminder e2e rail passed in the 414-pass selected audit run.
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch1
+review_state: approved
+reviewer: codex/cross-review-wave1

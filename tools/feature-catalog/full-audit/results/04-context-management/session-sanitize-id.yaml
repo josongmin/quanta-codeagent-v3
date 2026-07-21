@@ -1,0 +1,54 @@
+version: 1
+feature_id: session-sanitize-id
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/session/paths.ts:sanitizeId at every session file-path boundary
+entrypoints:
+  - src/session/paths.ts:sessionFilePath
+  - src/session/paths.ts:archivedFilePath
+  - src/session/store.ts:sessionEnvelopePath
+activation:
+  - All snapshot and JSONL session path builders call sanitizeId unconditionally before joining the session root.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/session/paths.ts:sanitizeId validates an untrusted session identifier
+consumer:
+  - src/session/store.ts:loadSessionById/saveSessionById path resolution
+  - src/session/store.ts:sessionEnvelopePath
+reachable: yes
+surface_findings:
+  - The synchronous and provider-aware snapshot path builders, archive path builders, and JSONL path builder all route identifiers through the same guard.
+  - Traversal, separators, controls, leading dashes, dot segments, empty strings, and overlong ids fail before filesystem access.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/session-paths.test.ts tests/unit/session-security-regression.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused paths and security regression rails prove every supported session path constructor rejects unsafe ids and accepts UUID-shaped ids unchanged.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "sanitizeId|sessionFilePath|archivedFilePath|sessionEnvelopePath" src/session/paths.ts src/session/store.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Every path constructor invokes sanitizeId before interpolation into a session-root path.
+  - kind: test
+    command: bun test tests/unit/session-paths.test.ts tests/unit/session-security-regression.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused rail passed within the 496-pass audit command.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch5
+review_state: approved
+reviewer: codex/cross-review-wave1

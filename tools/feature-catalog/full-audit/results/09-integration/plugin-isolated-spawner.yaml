@@ -1,0 +1,52 @@
+version: 1
+feature_id: plugin-isolated-spawner
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/plugin-isolation/bun-spawner.ts:createBunSpawner
+entrypoints:
+  - src/mcp/isolated-client.ts:IsolatedMcpClient constructor
+activation:
+  - Isolated MCP launcher paths use the default Bun process spawner when no test adapter is injected.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/plugin-isolation/bun-spawner.ts:createBunSpawner
+consumer:
+  - src/mcp/isolated-client.ts:IsolatedMcpClient constructor
+  - src/agent/plugin-mcp-launcher/isolated-launcher-port.ts:createIsolatedMcpLauncherPort
+reachable: yes
+surface_findings:
+  - The isolated client defaults to createBunSpawner and launches plugin MCP children through the live launcher port.
+  - Spawn request validation, timeouts, bounded stdout handling, and idempotent kill are covered.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/plugin-isolation-spawner-hellgate.test.ts tests/unit/plugin-isolation-spawner.test.ts tests/unit/plugin-isolation-mcp-integration-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Spawn validation, child round-trips, timeout/abort behavior, bounded output, and MCP spawn integration passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'createBunSpawner|IsolatedMcpClient|createIsolatedMcpLauncherPort' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/plugin-isolation src/mcp src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: IsolatedMcpClient defaults to the Bun spawner and live plugin-MCP launcher wiring constructs that client.
+  - kind: test
+    command: bun test tests/unit/plugin-isolation-spawner-hellgate.test.ts tests/unit/plugin-isolation-spawner.test.ts tests/unit/plugin-isolation-mcp-integration-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused spawner and isolated MCP integration rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

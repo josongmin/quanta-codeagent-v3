@@ -1,0 +1,62 @@
+version: 1
+feature_id: testrunner
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/verify-guard.ts:isVerify
+entrypoints:
+  - src/agent/guards/verify-guard.ts:createVerifyGuard
+  - src/agent/loop/session-bootstrap.ts:bootstrapSession
+activation:
+  - With AgentConfig.verifyGuard present, a test_runner history entry after the latest mutation is an unconditional recognized verification signal.
+  - The loop passes tool history into createVerifyGuard, which delegates closeout classification to decideVerifyGuard.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer:
+  - src/agent/verify-guard.ts:isVerify
+  - src/tool/test-runner.ts:testRunnerTool
+consumer:
+  - src/agent/verify-guard.ts:decideVerifyGuard
+  - src/agent/guards/verify-guard.ts:createVerifyGuard
+  - src/agent/loop/session-bootstrap.ts:bootstrapSession
+reachable: yes
+surface_findings:
+  - "This catalog feature is the verify-guard recognition rule, not a claim that every test_runner invocation passed."
+  - "When verify guard is enabled, test_runner is accepted regardless of its argument; mustPass separately inspects its outcome."
+  - "The dedicated test runner tool also has integration coverage for pass, fail, timeout, and runner selection."
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/verify-guard-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: With no verifyGuard config the loop is byte-identical; test-runner recognition cannot influence a closeout.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/verify-guard-hellgate.test.ts tests/unit/verify-guard-must-pass-hellgate.test.ts tests/integration/verify-guard-e2e.test.ts tests/integration/test-runner.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: edit then test_runner clears presence enforcement, failed test_runner blocks in mustPass mode, and the real test-runner tool reports pass/fail/timeout outcomes.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'entry.name === "test_runner"|decideVerifyGuard|createVerifyGuard' src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live guard policy classifies test_runner and the guard adapter invokes that policy at real finish attempts.
+  - kind: test
+    command: bun test tests/unit/verify-guard-hellgate.test.ts tests/unit/verify-guard-must-pass-hellgate.test.ts tests/integration/verify-guard-e2e.test.ts tests/integration/test-runner.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 0 failures across recognition, must-pass outcome handling, loop wiring, and tool execution outcomes.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-guard
+review_state: approved
+reviewer: codex/cross-review-wave1

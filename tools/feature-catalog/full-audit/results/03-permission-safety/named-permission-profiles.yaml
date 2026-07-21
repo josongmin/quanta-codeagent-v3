@@ -1,0 +1,60 @@
+version: 1
+feature_id: named-permission-profiles
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/permission-profile.ts:resolvePermissionProfileWiring
+entrypoints:
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+  - src/apps/agent/cli-args.ts permission-profile flag parser
+activation:
+  - Set QUANTA_PERMISSION_PROFILE or pass --permission-profile with default, restricted, or trusted at session startup.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/permission/named-profiles.ts:NAMED_PROFILES
+  - src/permission/profile-to-context.ts:permissionModeFromProfile
+consumer:
+  - src/host/runtime/agent-arg-builder/permission-profile.ts:resolvePermissionProfileWiring
+  - src/permission/two-layer-manager.ts:setPermissionProfileByName
+reachable: yes
+surface_findings:
+  - CLI flag/env selection resolves a closed registry, publishes the manager, and derives the active PermissionContext mode from the selected approval policy.
+  - Unknown profiles fail closed; absent selection leaves the optional session field omitted and custom resolves to the locked-down default.
+  - The approval axis is behavior-live, but profile.fileSystem remains a published forward-compat slot without dispatch-time enforcement and no settings-file profile loader exists.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/permission/named-profile-session-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent flag and environment leave the permission-profile slot omitted.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission/named-profiles-hellgate.test.ts tests/unit/permission/named-profile-session-wire-hellgate.test.ts tests/unit/permission-profile-to-context-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Registry, fail-closed decode, CLI/env selection, manager publication, and approval-mode derivation rails passed.
+failure_posture: fail-closed
+security_posture: conditional
+observability: na
+verdict: conditional
+blocker: Profile.fileSystem has no runtime execution-time enforcement, and a settings-file profiles loader with scope precedence is intentionally absent.
+disposition: hold
+receipts:
+  - kind: source
+    command: git grep -n -E 'resolvePermissionProfileWiring|permissionModeFromProfile|setPermissionProfileByName|QUANTA_PERMISSION_PROFILE' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host/runtime src/permission src/apps/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Session composition resolves the named profile, publishes it, and derives the existing permission context mode.
+  - kind: test
+    command: bun test tests/unit/permission/named-profiles-hellgate.test.ts tests/unit/permission/named-profile-session-wire-hellgate.test.ts tests/unit/permission-profile-to-context-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused named-profile rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

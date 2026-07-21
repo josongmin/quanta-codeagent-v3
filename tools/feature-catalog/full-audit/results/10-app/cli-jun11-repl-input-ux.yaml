@@ -1,0 +1,70 @@
+version: 1
+feature_id: cli-jun11-repl-input-ux
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/runtime-context-compose.ts:buildCliOnConfirm
+entrypoints:
+  - src/apps/cli/index.ts:main
+  - src/apps/cli/repl/surface-compose/prompt-ux.ts:buildPromptUx
+  - src/apps/cli/repl/session-loop.ts:runSessionLoop
+activation:
+  - CLI_FEATURE_GATES seeds QUANTA_PREFLIGHT_CHECK and QUANTA_BRACKETED_PASTE on when unset; explicit =0 opts out.
+  - QUANTA_AUTOMATION_INBOX remains opt-in and composes a banner into the scheduler slot.
+  - Prefix grants are available only through the approval context and preserve the hard-deny backstop.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/preflight.ts:preflightApplyWarning
+  - src/apps/cli/raw-line-reader.ts:readLine
+  - src/permission/session-grant-prefix.ts:derivePrefixGrantKey
+consumer:
+  - src/apps/cli/repl/runtime-context-compose.ts:buildCliOnConfirm
+  - src/apps/cli/repl/surface-compose/prompt-ux.ts:buildPromptUx
+  - src/apps/cli/repl/session-loop.ts:runSessionLoop
+reachable: yes
+surface_findings:
+  - The interactive CLI seeds the two correctness UX gates and wires their consumers into the confirmation prompt and raw input reader.
+  - Preflight uses the edit and patch applicability machinery without mutation; bracketed paste is terminal-guarded and preserves real Enter semantics.
+  - The PTY rail proves the live confirmation warning and both session and durable prefix-grant paths; hard-deny siblings do not inherit a prefix grant.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli-preflight-applicability-hellgate.test.ts src/apps/cli/__tests__/raw-line-reader-bracketed-paste.hellgate.test.ts tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit =0 removes the seeded preflight and bracketed-paste behavior, while the automation banner remains inert until enabled.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli-preflight-applicability-hellgate.test.ts src/apps/cli/__tests__/raw-line-reader-bracketed-paste.hellgate.test.ts tests/unit/cli/automation-inbox-wire-hellgate.test.ts tests/unit/permission/session-grant-prefix-hellgate.test.ts tests/unit/permission/trust-scope-durable-prefix-grant-hellgate.test.ts tests/unit/permission/prefix-grant-harddeny-backstop-hellgate.test.ts tests/unit/permission/trust-scope-prefix-gate-guard-hellgate.test.ts tests/e2e-pty/cli-approval-preflight-prefix-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 76 unit and PTY cases passed, covering paired warning/no-warning controls, non-mutating previews, paste buffering, inbox composition, prefix scope, durable persistence, hard-deny, and real terminal confirmation.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_PREFLIGHT_CHECK|QUANTA_BRACKETED_PASTE|QUANTA_AUTOMATION_INBOX|preflightApplyWarning|bracketedPaste|derivePrefixGrantKey' src/apps/cli src/permission src/host/runtime/internal/context-binding.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI seed, preflight consumer, terminal input reader, automation slot, and prefix-grant owner/consumer are all in the production graph.
+  - kind: test
+    command: bun test tests/unit/cli-preflight-applicability-hellgate.test.ts src/apps/cli/__tests__/raw-line-reader-bracketed-paste.hellgate.test.ts tests/unit/cli/automation-inbox-wire-hellgate.test.ts tests/unit/permission/session-grant-prefix-hellgate.test.ts tests/unit/permission/trust-scope-durable-prefix-grant-hellgate.test.ts tests/unit/permission/prefix-grant-harddeny-backstop-hellgate.test.ts tests/unit/permission/trust-scope-prefix-gate-guard-hellgate.test.ts tests/unit/cli/cli-default-on-ux-gates-hellgate.test.ts tests/e2e-pty/cli-approval-preflight-prefix-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 76 focused unit and PTY cases passed.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3-plus feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-session
+review_state: approved
+reviewer: codex/cross-review-wave1

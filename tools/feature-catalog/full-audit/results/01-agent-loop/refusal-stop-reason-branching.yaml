@@ -1,0 +1,58 @@
+version: 1
+feature_id: refusal-stop-reason-branching
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/recovery.ts:decideFromStopPolicy
+entrypoints:
+  - src/agent/loop/same-turn-engine.ts:runSameTurnEngine
+activation:
+  - A host must supply AgentConfig.stopReasonPolicy; the same-turn engine passes that optional port into resolveTurnAction.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/stop-reason/default-policy.ts:defaultStopReasonPolicy
+consumer:
+  - src/agent/recovery.ts:decideFromStopPolicy
+  - src/agent/loop/same-turn-engine.ts:runSameTurnEngine
+reachable: no
+surface_findings:
+  - The recovery and same-turn seam are correctly wired for a supplied policy, and the default 8-arm table plus translation rails are comprehensive.
+  - No production composition root constructs defaultStopReasonPolicy or supplies config.stopReasonPolicy; the only occurrences are type/optional consumer and tests.
+  - With the port absent, all surfaces preserve legacy routing, including typed refusal and content-filtered safety behavior.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/stop-reason-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent policy returns null for every reason and real runAgent retains the legacy completion/refusal behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/stop-reason-hellgate.test.ts tests/unit/recovery-hell.test.ts tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 74 pass, 0 fail; injected policy routes all eight values and validates translation, while legacy refusal safety remains covered.
+failure_posture: fail-loud
+security_posture: conditional
+observability: na
+verdict: seam-only
+blocker: A production composition root must instantiate and thread defaultStopReasonPolicy into AgentConfig before the claimed CLI feature is activatable.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'defaultStopReasonPolicy|stopReasonPolicy|decideFromStopPolicy' src/agent src/apps
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production code only declares/consumes the optional port; no composition root creates the default policy or sets AgentConfig.stopReasonPolicy.
+  - kind: test
+    command: bun test tests/unit/agent/stop-reason-hellgate.test.ts tests/unit/recovery-hell.test.ts tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 74 pass, 0 fail across port policy, legacy fallback, refusal, and dispatch short-circuit rails.
+audited_at: "2026-07-19"
+auditor: codex/root-p3-agent-loop
+review_state: approved
+reviewer: codex/cross-review-wave1

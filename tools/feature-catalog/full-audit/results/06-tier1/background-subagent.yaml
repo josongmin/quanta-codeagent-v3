@@ -1,0 +1,46 @@
+version: 1
+feature_id: background-subagent
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/subagent-bg.ts:buildSubagentBgBlock
+entrypoints:
+  - src/agent/features.ts:buildSessionFeatures
+activation:
+  - The feature builder registers background tools only when AgentConfig.subagentBackground is supplied.
+  - No CLI, runner, or host production composition root constructs and supplies that scheduler slot.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/subagent-background.ts
+consumer:
+  - src/agent/tier1/subagent-bg.ts:buildSubagentBgBlock
+reachable: no
+surface_findings:
+  - Unit wire tests prove injected scheduler behavior but production configuration never injects it.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: na
+security_posture: verified
+observability: na
+verdict: seam-only
+blocker: No production constructor or AgentConfig.subagentBackground injection exists.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg 'subagentBackground|buildSubagentBgBlock' src/agent src/apps src/runner
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Features consumes the optional slot, but no production composition root supplies it.
+  - kind: test
+    command: bun test tests/unit/subagent-background-hellgate.test.ts tests/unit/subagent-background-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Injection seam contract passed without proving host reachability.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

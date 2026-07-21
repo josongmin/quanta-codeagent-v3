@@ -1,0 +1,50 @@
+version: 1
+feature_id: projects-kb
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts:resolveProjectsKbSlot
+entrypoints: [src/apps/cli/index.ts, src/host/runtime/agent-arg-builder/gated-tool-ports.ts]
+activation: ["QUANTA_PROJECTS_KB=1", "per-session ProjectsKbStore minted then threaded to DefaultToolPorts"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/tool/projects-kb/tool.ts:projectsKbTool, src/tool/projects-kb/store.ts:createProjectsKbStore]
+consumer: [src/host/runtime/agent-arg-builder/gated-tool-ports.ts, src/tool/index.ts, src/apps/cli/internal.ts]
+reachable: yes
+surface_findings: ["Host and interactive CLI each mint a per-session store only under the gate; tool output does not expose raw document bodies."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/projects-kb.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off menu parity and absent projects_kb registration are explicit paired controls.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/projects-kb.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real composition dispatch proves metadata-only write and jailed-path denial; unit rail proves body leak resistance and fallback behavior.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "resolveProjectsKbSlot|projectsKb" src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/tool/index.ts src/apps/cli/internal.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Gate-to-store-to-registry consumers exist in both composition paths.
+  - kind: test
+    command: bun test tests/unit/projects-kb.test.ts tests/unit/composition-root-gated-port-activation-r3-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 44 selected rails pass.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

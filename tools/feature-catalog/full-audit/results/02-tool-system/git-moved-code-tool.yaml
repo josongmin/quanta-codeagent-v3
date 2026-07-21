@@ -1,0 +1,52 @@
+version: 1
+feature_id: git-moved-code-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/git/moved-code-tool.ts:gitMovedCodeTool
+entrypoints: [src/tool/git/index.ts:gitTools, src/apps/cli/internal.ts:gitToolList]
+activation: ["QUANTA_GIT_TOOLS=1 registers git_moved_code in the interactive CLI; it is absent from the normal CLI and web-daemon tool registries."]
+effective_defaults:
+  cli: off
+  web: off
+  bench: unknown
+  headless: off
+  daemon: off
+producer: [src/tool/git/moved-code-tool.ts:gitMovedCodeTool, src/tool/git/moved-code/index.ts:classifyDiff]
+consumer: [src/tool/git/index.ts:gitTools, src/apps/cli/internal.ts:gitToolList, src/apps/agent/mode-presets/ci-bot-policy.ts:buildCiBotPolicy]
+reachable: conditional
+surface_findings:
+  - "The tool preserves argv boundaries for base and paths, truncates output, and invokes the pure classifier through the git runner."
+  - "The catalog's cli:full and web:full claims are stale because the CLI path is QUANTA_GIT_TOOLS-gated and the web daemon does not call gitTools."
+off_identity_proof:
+  kind: source
+  command: rg -n 'gitToolsEnabled|gitToolList|gitTools\(' src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/web-daemon
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Git tools are an empty list without the CLI gate and are absent from the daemon registry.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/git-moved-code-tool.test.ts tests/unit/moved-code-detector-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 36 cases passed across classifier behavior, tool argv guards, error paths, bounds, and cancellation forwarding.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: Catalog must describe the QUANTA_GIT_TOOLS-gated CLI surface and remove web:full until a web composition root consumes gitTools.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'gitMovedCodeTool|classifyDiff|gitToolsEnabled|gitToolList|buildDaemonToolRegistry' src/tool/git/moved-code-tool.ts src/tool/git/index.ts src/apps/cli/internal.ts src/apps/cli/internal/argv.ts src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The producer is live and has gated CLI plus ci-bot consumers; no normal web-daemon consumer exists.
+  - kind: test
+    command: bun test tests/unit/git-moved-code-tool.test.ts tests/unit/moved-code-detector-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 36 focused cases passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-next
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,46 @@
+version: 1
+feature_id: tauri-desktop-shell
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: apps/tauri-shell/src/main.rs:main
+entrypoints:
+  - apps/tauri-shell/src/main.rs
+activation:
+  - Build and launch the macOS Tauri shell with its frontend and sidecar prerequisites.
+effective_defaults:
+  cli: na
+  web: resource
+  bench: na
+  headless: na
+  daemon: resource
+producer:
+  - apps/tauri-shell/src/main.rs
+consumer:
+  - macOS desktop bundle
+reachable: yes
+surface_findings:
+  - Tauri builder, command handlers, daemon supervisor, hotkey, OCR, deep-link, and notification source are present.
+  - No target build directory, cargo build receipt, automated test, signed bundle, or desktop runtime proof exists in this snapshot.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: unknown
+security_posture: conditional
+observability: partial
+verdict: proof-gap
+blocker: The shell remains unbuilt and untested in this snapshot; its cataloged scaffold hold is accurate.
+disposition: hold
+receipts:
+  - kind: source
+    command: git grep -n -E 'tauri::Builder|generate_handler|QUANTA_SURFACE' 9a12f7a855640a8be1e4654472766bbc445696ea -- apps/tauri-shell/src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Desktop source declares the builder, command surface, and daemon environment.
+  - kind: source
+    command: ls apps/tauri-shell/target
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: No local Cargo target output exists.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

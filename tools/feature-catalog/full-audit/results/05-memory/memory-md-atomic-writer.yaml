@@ -1,0 +1,59 @@
+version: 1
+feature_id: memory-md-atomic-writer
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/memory/consolidate/writer.ts:MemoryWriter.writeAtomic
+entrypoints:
+  - src/runner/session-memory-auto.ts:buildSessionMemoryAutoWires
+  - src/runner/session-memory-auto.ts:prepareSessionStartMemory
+activation:
+  - Default-on CLI memory-auto creates FileMemoryWriter, supplies it to the session-start Phase 2 auto-trigger, and the trigger calls runPhase2 only after its pending-count or age threshold is reached.
+  - QUANTA_MEMORY_AUTO=off returns no wire bundle, so neither the writer nor its SQLite backing store is allocated.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: off
+  daemon: unknown
+producer:
+  - src/memory/consolidate/writer.ts:MemoryWriter.writeAtomic
+consumer:
+  - src/memory/consolidate/phase2.ts:runPhase2
+  - src/runner/session-memory-auto.ts:runSessionStartPhase2AutoTrigger
+reachable: yes
+surface_findings:
+  - The actual session-memory builder constructs a real filesystem writer and passes it through the auto-trigger configuration.
+  - The writer fails loud on setup, cap, rename, and git-commit failures; Phase 2 withholds the watermark advancement when the write fails.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/memory-auto-trigger-session-end-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: QUANTA_MEMORY_AUTO=off leaves the auto bundle absent.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory/consolidate-writer.test.ts tests/integration/consolidate-phase2-end-to-end.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All atomic writer failure arms and real filesystem plus git Phase 2 writes passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: unknown
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'new FileMemoryWriter|runSessionStartPhase2AutoTrigger|runPhase2' src/runner/session-memory-auto.ts src/memory/consolidate
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The CLI memory-auto builder owns the real writer and passes it to the thresholded Phase 2 trigger.
+  - kind: test
+    command: bun test tests/unit/memory/consolidate-writer.test.ts tests/integration/consolidate-phase2-end-to-end.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Atomic temp cleanup, cap behavior, git failure handling, and real disk git commits passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

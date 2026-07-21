@@ -1,0 +1,45 @@
+version: 1
+feature_id: subagent-delegation-suppression
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/shared/delegation-policy.ts:delegationSuppressEnabled"
+entrypoints: ["src/subagent/agent-tool.ts", "src/subagent/agent-tools-6.ts", "src/agent/prompt-body.ts"]
+activation: ["QUANTA_SUBAGENT_DELEGATE_SUPPRESS is an explicit default-off gate."]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: ["src/shared/delegation-policy.ts delegation policy atom"]
+consumer: ["src/subagent/agent-tool.ts tool description", "src/subagent/agent-tools-6.ts spawn description", "src/agent/prompt-body.ts routing atom"]
+reachable: yes
+surface_findings: ["The single policy atom changes both general spawn descriptions and the real system prompt only when enabled; bulk fan-out tools are intentionally excluded."]
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/subagent-delegation-suppression-hellgate.test.ts tests/unit/prompt-delegation-suppress-atom-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Default-off render equals frozen original tool and prompt text."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/subagent-delegation-suppression-hellgate.test.ts tests/unit/prompt-delegation-suppress-atom-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Both tool surfaces and buildSystemPrompt receive the gated policy."
+failure_posture: na
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: "bun test tests/unit/subagent-delegation-suppression-hellgate.test.ts tests/unit/prompt-delegation-suppress-atom-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 96-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

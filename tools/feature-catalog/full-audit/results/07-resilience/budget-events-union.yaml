@@ -1,0 +1,56 @@
+version: 1
+feature_id: budget-events-union
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/budget/events.ts:BudgetEvent, isBudgetEvent, and makeClampEvent
+entrypoints:
+  - src/agent/run-mode/clamp.ts:clampDials optional onClamp callback
+activation:
+  - A caller must supply clampDials onClamp or independently construct BudgetEvent values.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/budget/events.ts defines the closed union and pure clamp factory.
+consumer: []
+reachable: no
+surface_findings:
+  - The source tree contains no production budget_tick or BudgetExhaustedEvent object construction.
+  - clampDials can produce BudgetClampEvent only through an optional onClamp callback; the normal assembler calls it without one.
+  - Stop reasons use the budget_exhausted string but are not BudgetExhaustedEvent trajectory records.
+off_identity_proof:
+  kind: source
+  command: git grep -n -E 'budget_tick|BudgetExhaustedEvent|isBudgetEvent' 9a12f7a -- src
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Only event definitions and exports are found; no live trajectory producer constructs tick or exhausted event records.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/budget/exhaustion.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Direct tests prove union tag recognition, clamp factory shape, and exhaustive type-level use only.
+failure_posture: na
+security_posture: na
+observability: unknown
+verdict: seam-only
+blocker: No live trajectory consumer emits or persists the declared BudgetTickEvent or BudgetExhaustedEvent union values.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'budget_tick|budget_clamp|makeClampEvent|onClamp' 9a12f7a -- src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: makeClampEvent is reachable only through optional clamp callback and no normal assembler callback records it.
+  - kind: test
+    command: bun test tests/unit/agent/budget/exhaustion.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 8 pass and 0 fail, all direct union and factory assertions.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

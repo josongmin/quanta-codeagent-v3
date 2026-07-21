@@ -1,0 +1,58 @@
+version: 1
+feature_id: slash-cost-panel
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/cost-panel.ts:createCostPanel
+entrypoints:
+  - src/apps/cli/repl/factories/cost-panel.ts:buildCostPanelOrUndefined
+  - src/apps/cli/repl/surface-compose/turn-sinks.ts:foldCostPanelIfWired
+activation:
+  - Run the interactive REPL on a TTY with QUANTA_COST_PANEL not disabled; invoke /cost for the detailed panel.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer:
+  - src/apps/cli/cost-panel.ts:createCostPanel
+consumer:
+  - src/apps/cli/repl/factories/cost-panel.ts:buildCostPanelOrUndefined
+  - src/apps/cli/repl/surface-compose/turn-sinks.ts:foldCostPanelIfWired
+reachable: yes
+surface_findings:
+  - REPL builds the panel and folds per-turn metric deltas into its cumulative state.
+  - Non-TTY or QUANTA_COST_PANEL=0 leaves the panel absent and /cost uses the not-wired fallback.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/cost-panel.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Disabled and non-TTY gates return no panel.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/cost-panel.test.ts tests/unit/cli/cost-panel-hardening-hellgate.test.ts tests/unit/slash-commands.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Cumulative totals, unknown pricing, detail rendering, slash routing, and hardening rails passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: conditional
+blocker: "The cost panel is TTY-bound and explicitly switchable off, so noninteractive surfaces do not receive the slash panel."
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildCostPanelOrUndefined|foldCostPanelIfWired|createCostPanel' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Factory and turn sink consume the cumulative panel in the live REPL.
+  - kind: test
+    command: bun test tests/unit/cli/cost-panel.test.ts tests/unit/cli/cost-panel-hardening-hellgate.test.ts tests/unit/slash-commands.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused cost panel rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

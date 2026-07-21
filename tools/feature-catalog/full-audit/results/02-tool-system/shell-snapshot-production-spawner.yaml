@@ -1,0 +1,62 @@
+version: 1
+feature_id: shell-snapshot-production-spawner
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal/shell-snapshot.ts:buildShellSnapshotConfig
+entrypoints:
+  - src/apps/cli/repl/runtime-context-compose.ts
+  - src/agent/loop/session-bootstrap.ts
+  - src/tool/bash/index.ts
+activation:
+  - Enable QUANTA_SHELL_SNAPSHOT or pass --shell-snapshot for an interactive CLI session.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/runtime/shell-snapshot/bun-spawner.ts:createBunSpawner
+  - src/runtime/shell-snapshot/file-store.ts:createShellSnapshotPort
+consumer:
+  - src/apps/cli/internal/shell-snapshot.ts:buildShellSnapshotConfig
+  - src/agent/shell-snapshot-session.ts
+  - src/tool/bash/index.ts
+reachable: yes
+surface_findings:
+  - CLI composition produces a Bun-backed port only when the env/argv gate enables it, then conditionally overlays AgentConfig.shellSnapshot.
+  - Session bootstrap prunes on start, per-turn capture publishes a restore seam, and bash consumes it; capture failure falls back to the legacy spawn path.
+  - Snapshot files are bounded by age and size pruning while retaining the most recent oversize file rather than deleting all state.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/shell-snapshot-runshell-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent configuration leaves session helper undefined and bash runs without a source prefix.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/runtime/shell-snapshot-bun-spawner-hellgate.test.ts tests/unit/runtime/shell-snapshot-prune-by-size-hellgate.test.ts tests/integration/shell-snapshot-runshell-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Production spawn, timeout, snapshot write, pruning, loop capture, bash restoration, and capture-failure fallback rails passed.
+failure_posture: degraded
+security_posture: conditional
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildShellSnapshotConfig|shellSnapshotSession|snapshotForTurn|shellSnapshot' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli src/agent src/tool/bash src/runtime/shell-snapshot
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI config, session lifecycle, dispatch context, and bash restore seam are connected.
+  - kind: test
+    command: bun test tests/unit/runtime/shell-snapshot-bun-spawner-hellgate.test.ts tests/unit/runtime/shell-snapshot-prune-by-size-hellgate.test.ts tests/integration/shell-snapshot-runshell-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Shell snapshot rails passed in the 197-pass focused bundle.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

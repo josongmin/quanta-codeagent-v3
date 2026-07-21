@@ -1,0 +1,62 @@
+version: 1
+feature_id: plan-mode
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/factories/plan-store.ts:buildPlanStoreOrUndefined
+entrypoints:
+  - src/apps/cli/repl/factories/plan-store.ts:buildPlanStoreOrUndefined
+  - src/agent/tier1/plan-mutation.ts:buildPlanMutationBlock
+  - src/agent/loop/plan-exit-wire.ts
+activation:
+  - CLI planStore defaults on unless QUANTA_PLAN_STORE disables it; session feature construction then registers the five structured plan tools and dispatch adapts the same store into a plan mutator.
+  - Collaboration plan posture remains separately opt-in through QUANTA_PLAN or --plan and blocks ordinary mutating tools.
+effective_defaults:
+  cli: on
+  web: off
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/tool/plan/index.ts:buildPlanTools
+  - src/agent/plan/state.ts
+consumer:
+  - src/agent/tier1/plan-mutation.ts:buildPlanMutationBlock
+  - src/agent/dispatch/tool-context.ts:planStoreToMutator
+  - src/agent/loop/plan-exit-wire.ts
+reachable: yes
+surface_findings:
+  - The default CLI plan store is shared by structured tools, slash context, focus-chain injection, and plan-exit lifecycle.
+  - Web does not bridge plan events or mount a plan UI, matching the catalog's missing web surface.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/agent/plan/transitions-hell.test.ts tests/unit/tool/plan/plan-tools-hell.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent plan mutator returns the defined unavailable result; mutation tools are not materialized without planStore.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent/plan/transitions-hell.test.ts tests/unit/agent/plan/dag-hell.test.ts tests/unit/agent/plan/mutations-hell.test.ts tests/unit/tool/plan/plan-tools-hell.test.ts tests/unit/agent/submission-set-mode-hell.test.ts tests/unit/agent/control-op-handler-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Structured plan state, DAG validation, tool adapters, and mode transition control rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'buildPlanStoreOrUndefined|buildPlanMutationBlock|planStoreToMutator|plan-exit' src/apps/cli src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI creates the default-on store and the agent loop consumes the same store for tool dispatch and lifecycle handling.
+  - kind: test
+    command: bun test tests/unit/agent/plan/transitions-hell.test.ts tests/unit/agent/plan/dag-hell.test.ts tests/unit/agent/plan/mutations-hell.test.ts tests/unit/tool/plan/plan-tools-hell.test.ts tests/unit/agent/submission-set-mode-hell.test.ts tests/unit/agent/control-op-handler-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused structured plan rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

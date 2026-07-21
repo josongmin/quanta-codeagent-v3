@@ -1,0 +1,46 @@
+version: 1
+feature_id: agent-cli-args-parser
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/agent/cli-args.ts:parseAgentArgs
+entrypoints:
+  - src/apps/agent/index.ts:agent application main
+activation:
+  - Invoke the unified agent application with mode arguments.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: resource
+  daemon: resource
+producer:
+  - src/apps/agent/cli-args.ts:parseAgentArgs
+consumer:
+  - src/apps/agent/index.ts
+reachable: no
+surface_findings:
+  - Agent app owns argv parsing and maps typed errors to usage behavior; interactive CLI does not import this standalone entry.
+  - Parser is pure and has no environment or I/O access.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/agent/cli-args.test.ts tests/unit/apps/agent/anti-regression-invariants.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All mode/flag success, typed error, help, and structured-output parsing rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/apps/agent/cli-args.test.ts tests/unit/apps/agent/anti-regression-invariants.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Agent argv rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

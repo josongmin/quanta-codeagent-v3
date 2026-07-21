@@ -1,0 +1,53 @@
+version: 1
+feature_id: quantacompacttokens
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/compaction/token-baseline.ts:resolveThreshold
+entrypoints:
+  - src/shared/runtime-config.ts:parseCompactionSlice
+  - src/agent/compaction.ts:compactIfNeeded
+activation:
+  - Set QUANTA_COMPACT_TOKENS to a positive integer before runtime configuration is frozen; it overrides model-derived and default proactive compaction thresholds.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/shared/runtime-config.ts:runtimeConfig compactTokens
+consumer:
+  - src/agent/compaction/token-baseline.ts:resolveThreshold
+  - src/agent/compaction.ts:compactIfNeeded
+reachable: yes
+surface_findings:
+  - The environment parser accepts only a positive integer and resolveThreshold gives that value precedence below only an explicit call-site threshold.
+  - Without the knob, threshold selection retains the model-derived then 120k fallback behavior; the same resolver also supplies the background compaction limit.
+off_identity_proof:
+  kind: source
+  command: rg -n 'compactTokens|resolveThreshold|DEFAULT_THRESHOLD' src/shared/runtime-config.ts src/agent/compaction/token-baseline.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: An undefined runtimeConfig compactTokens value falls through to the existing model-derived or legacy default threshold.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/compaction.test.ts tests/unit/token-baseline-box-hellgate.test.ts tests/unit/loop/token-baseline-capture-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Threshold-driven compaction and the token-baseline accounting/loop rails passed; source confirms the env override is authoritative at threshold resolution.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/compaction.test.ts tests/unit/token-baseline-box-hellgate.test.ts tests/unit/loop/token-baseline-capture-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused threshold and token-baseline command passed 28 tests with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

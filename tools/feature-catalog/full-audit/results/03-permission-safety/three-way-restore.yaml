@@ -1,0 +1,50 @@
+version: 1
+feature_id: three-way-restore
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/per-tool-checkpoint/three-way-restore.ts:defaultThreeWayRestore"
+entrypoints: [src/apps/cli/index.ts]
+activation: ["QUANTA_PER_TOOL_RECORD truthy", "QUANTA_SHADOW truthy", "/rewind-tool <tag> --mode=files|task|both --yes"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: ["src/agent/per-tool-checkpoint/three-way-restore.ts:defaultThreeWayRestore"]
+consumer: ["src/apps/cli/rewind-tool-cmd.ts:rewindToolCommand", "src/apps/cli/repl/surface-compose/slash-context-compose.ts:slashOptionalSlots"]
+reachable: yes
+surface_findings: ["The gated CLI surface provides the same restore port to /rewind-tool; files restores are SHA-pinned and task restores use the conversation store.", "The owner test suite currently fails two files-leg assertions, so live wiring alone cannot support a PASS verdict."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/repl-surface-wire-hellgate.test.ts tests/unit/cli/repl-slash-ctx-mega-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 41 surface tests pass; absent optional inputs omit the per-tool slash slot and a wired slot is explicitly projected.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/per-tool-checkpoint-hellgate.test.ts --test-name-pattern 'ThreeWayRestorePort|/rewind-tool slash routing'
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: "2 files-leg assertions fail: HELL-D11 and HELL-D13 expect [src/foo.ts] but restoreFiles and restoreBoth return filesChanged: []."
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: proof-gap
+blocker: "The only owner efficacy suite has two failing files-leg assertions at the frozen revision; fix the diff/fixture contract and rerun before activation is certified."
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'defaultThreeWayRestore|restoreFiles|restoreTask|restoreBoth|perToolRestorePort' src/agent/per-tool-checkpoint src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The source owns three explicit restore legs and injects the port into the CLI slash context under the per-tool gate.
+  - kind: test
+    command: bun test tests/unit/per-tool-checkpoint-hellgate.test.ts --test-name-pattern 'ThreeWayRestorePort|/rewind-tool slash routing'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: HELL-D11 and HELL-D13 fail while the remaining 10 selected restore and slash-routing tests pass.
+audited_at: "2026-07-19"
+auditor: codex/p1-security-sandbox
+review_state: approved
+reviewer: codex/cross-review-wave1

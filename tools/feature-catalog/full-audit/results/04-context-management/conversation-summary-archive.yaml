@@ -1,0 +1,60 @@
+version: 1
+feature_id: conversation-summary-archive
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/session-bootstrap.ts:createRunAgentContext
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+  - src/agent/loop/compaction-wire.ts:applyProactiveResult
+activation:
+  - AgentConfig.compaction.archive must be true before session bootstrap creates an archive.
+  - A successful proactive compaction appends an entry and emits context_compacted.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/conversation-summary-archive.ts:createArchive
+  - src/agent/conversation-summary-archive.ts:appendSummary
+consumer:
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+  - src/agent/loop/compaction-wire.ts:applyProactiveResult
+reachable: conditional
+surface_findings:
+  - "The archive module and loop append/event seam are implemented and pass when a caller supplies compaction.archive true."
+  - "No production composition root under src/apps, src/host, or src/runner was found to enable compaction.archive true, leaving shipped activation absent."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/compaction-archive-loop.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: archive false emits no context_compacted event while the legacy recovery ordering remains unchanged.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/conversation-summary-archive.test.ts tests/unit/compaction-archive-loop.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit archive mode appends summaries, emits the event, preserves FIFO cap, and keeps token accounting consistent.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: conditional
+blocker: No production composition root enables AgentConfig.compaction.archive true, so no shipped surface can activate the archive.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg "compaction.archive|archive: true" src/apps src/host src/runner src/agent
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Session bootstrap and compaction wire implement the guarded seam; production composition search found no archive true producer.
+  - kind: test
+    command: bun test tests/unit/conversation-summary-archive.test.ts tests/unit/compaction-archive-loop.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 114 shared-rail tests passed, including archive true append/event, archive false identity, and FIFO cap behavior.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch3
+review_state: approved
+reviewer: codex/cross-review-wave1

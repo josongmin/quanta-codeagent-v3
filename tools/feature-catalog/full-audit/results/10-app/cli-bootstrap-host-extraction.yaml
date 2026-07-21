@@ -1,0 +1,53 @@
+version: 1
+feature_id: cli-bootstrap-host-extraction
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/bootstrap/bootstrap-session.ts:bootstrapSession
+entrypoints:
+  - src/apps/cli/repl/session-setup.ts:setupSession
+  - src/host/bootstrap/index.ts
+activation:
+  - CLI session setup injects surface closures into the host bootstrap and consumes its typed session result.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/host/bootstrap/bootstrap-session.ts:bootstrapSession
+  - src/host/bootstrap/types.ts:SessionBootstrapDeps
+consumer:
+  - src/apps/cli/repl/session-setup.ts:setupSession
+reachable: yes
+surface_findings:
+  - The host owns bootstrap sequencing and typed failures while the CLI supplies all surface-sensitive factories as dependencies.
+  - The old CLI bootstrap file is absent; static guards prevent host imports back into CLI and prevent the CLI repl from recreating the extracted construction paths.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/host/bootstrap-host-extraction-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Bootstrap construction, errors, cleanup, factory contracts, host slice fence, and deletion of the old shim pass.
+failure_posture: fail-closed
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'bootstrapSession|SessionBootstrapDeps|SessionBootstrapResult' src/host/bootstrap/bootstrap-session.ts src/host/bootstrap/types.ts src/host/bootstrap/index.ts src/apps/cli/repl/session-setup.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Host bootstrap SSOT, typed contract, barrel, and CLI consumer are present in the live path.
+  - kind: test
+    command: bun test tests/unit/host/bootstrap-host-extraction-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused host-extraction proof is included in the 193-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,53 @@
+version: 1
+feature_id: god-code-ratchet
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tools/god-code/detect.ts:detectGodFunctions
+entrypoints:
+  - tests/unit/god-code-ratchet.test.ts
+  - tests/unit/god-code-detect-hellgate.test.ts
+activation:
+  - The unit test suite scans every non-test TypeScript source file and compares the findings with the frozen allowlist.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - tools/god-code/detect.ts:detectGodModules
+  - tools/god-code/detect.ts:detectGodFunctions
+consumer:
+  - tests/unit/god-code-ratchet.test.ts
+reachable: no
+surface_findings:
+  - The ratchet rejects new module and function violations, rejects stale allowlist entries, and requires thresholds and uniqueness to remain aligned.
+  - Detector hellgates make the check non-vacuous with over-boundary fixtures, exact-boundary controls, accessor coverage, and stable anonymous callback keys.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/god-code-ratchet.test.ts tests/unit/god-code-detect-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Live-tree allowlist ratchet and red-on-injection detector boundary tests pass.
+failure_posture: fail-closed
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: Static development and CI guard; it has no independently activatable product runtime surface.
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'GOD_MODULE_MAX_LINES|GOD_FUNCTION_MAX_LINES|detectGodModules|detectGodFunctions' tools/god-code/detect.ts tests/unit/god-code-ratchet.test.ts tests/unit/god-code-detect-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: AST detector thresholds and live-tree ratchet consumer are present with adversarial detector fixtures.
+  - kind: test
+    command: bun test tests/unit/god-code-ratchet.test.ts tests/unit/god-code-detect-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Seventeen ratchet and non-vacuity tests pass over the frozen snapshot.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

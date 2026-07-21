@@ -1,0 +1,62 @@
+version: 1
+feature_id: shadow-verify
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/observability-wire/wire.ts:constructHandleParts
+entrypoints:
+  - src/host/runtime/agent-arg-builder/observability-wire.ts:resolveObservabilitySlots
+  - src/apps/web-daemon/runtime-factory.ts:buildObservability
+activation:
+  - QUANTA_OBSERVABILITY=on constructs real scratch, V4A applier, and checker adapters when a repository root is available.
+  - AgentConfig.shadowVerify reaches buildSessionFeatures and registers the shadow_verify tool.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/shadow-verify/runner.ts:createShadowVerify
+  - src/agent/shadow-verify-adapters/index.ts:createShadowVerifyAdapters
+consumer:
+  - src/agent/observability-wire/wire.ts:constructHandleParts
+  - src/host/runtime/agent-arg-builder/observability-wire.ts:resolveObservabilitySlots
+  - src/agent/tier1/shadow-verify.ts:buildShadowVerifyBlock
+reachable: yes
+surface_findings:
+  - Wave 2 is live behind the observability gate: the host composes real scratch-worktree, V4A, and checker adapters, then the session feature builder registers shadow_verify.
+  - The catalog purpose's Wave-1-only/default-OFF-nothing-wired statement is stale; default-off remains true but activation wiring and real adapters are present.
+  - Missing repoRoot omits the port without degrading other observability slots; tool execution converts port failures into diagnostics and cleans scratch state.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability-wire-hellgate.test.ts tests/unit/observability-live-wire-hellgate.test.ts tests/unit/shadow-verify-tool-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off allocates no port or hook subscription, and an absent shadowVerify config produces no shadow_verify tool.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/shadow-verify-hellgate.test.ts tests/unit/shadow-verify-adapters-hellgate.test.ts tests/unit/shadow-verify-tool-hellgate.test.ts tests/unit/observability-live-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real worktree/V4A adapter tests verify patch application, path-escape rejection, disposal, checker diagnostics, host wire construction, and tool registration.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'createShadowVerifyAdapters|createShadowVerify\(|shadowVerify|buildShadowVerifyBlock|QUANTA_OBSERVABILITY' src/agent src/host/runtime src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production observability roots construct the real port and AgentConfig consumers materialize the tool.
+  - kind: test
+    command: bun test tests/unit/shadow-verify-hellgate.test.ts tests/unit/shadow-verify-adapters-hellgate.test.ts tests/unit/shadow-verify-tool-hellgate.test.ts tests/unit/observability-live-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runner, real adapters, tool mapping, and live composition rails completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-github
+review_state: approved
+reviewer: codex/cross-review-wave1

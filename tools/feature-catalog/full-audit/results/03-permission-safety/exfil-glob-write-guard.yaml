@@ -1,0 +1,52 @@
+version: 1
+feature_id: exfil-glob-write-guard
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/_shared/exfil-rail-guards.ts:globWriteGuardDeny
+entrypoints: [src/agent/dispatch/tool-context.ts]
+activation: [QUANTA_GLOB_WRITE_GUARD=1]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/tool/_shared/glob-in-path.ts:pathLooksLikeGlob]
+consumer: [src/tool/write/index.ts, src/tool/edit/index.ts, src/tool/notebook-edit/tool.ts]
+reachable: yes
+surface_findings:
+  - "Dispatch only adds globWriteGuard to ToolContext under the strict gate, and write/edit consult it before filesystem mutation."
+  - "Detector rejects fan-out tokens but deliberately permits literal brackets and non-expansion braces."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/exfil-rails-glob.test.ts tests/unit/exfil-rails-gates.test.ts tests/unit/exfil-rails-dispatch-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate absence writes glob text as the legacy literal path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/exfil-rails-glob.test.ts tests/unit/exfil-rails-gates.test.ts tests/unit/exfil-rails-dispatch-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Exact strict token rejects glob targets before write while exact paths proceed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'globWriteGuard|globWriteGuardEvent|pathLooksLikeGlob' src/agent/dispatch/tool-context.ts src/tool
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Strict runtime gate and pre-filesystem write/edit consumers are present.
+  - kind: test
+    command: bun test tests/unit/exfil-rails-glob.test.ts tests/unit/exfil-rails-gates.test.ts tests/unit/exfil-rails-dispatch-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Glob rail and public dispatch rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

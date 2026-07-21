@@ -1,0 +1,52 @@
+version: 1
+feature_id: deferred-tool-registry
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/deferred/default-registry.ts:DefaultDeferredResultRegistry
+entrypoints: [src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildAsyncDeferredTools, src/apps/cli/internal.ts:buildTooling]
+activation: ["QUANTA_ASYNC_TOOLS=1 creates a DefaultDeferredResultRegistry and registers poll_deferred; no concrete deferred-work producer shares the CLI-held registry."]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/tool/deferred/default-registry.ts:DefaultDeferredResultRegistry, src/tool/poll_deferred.ts:pollDeferredTool]
+consumer: [src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildAsyncDeferredTools, src/apps/cli/internal.ts:buildTooling]
+reachable: no
+surface_findings:
+  - "The registry is a complete in-memory deferred-work implementation with typed total poll and await results, bounded completed-entry eviction, and cancellation handling."
+  - "The async gate exposes poll_deferred with one shared registry, but the CLI retains that registry only through a void reference and wires no deferred-work producer; the catalog's type-surface-only claim is accurate."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/agent/async-tools-deferred-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The early-return gate test proves async tools and their registry are absent when QUANTA_ASYNC_TOOLS is off.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/deferred-registry-hellgate.test.ts tests/unit/apps/agent/async-tools-deferred-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 27 cases passed across lifecycle, eviction, cancellation, timeout cleanup, gate wiring, and a real registry poll round trip.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No concrete asynchronous tool producer is wired to the registry retained by the CLI composition root, so poll_deferred cannot observe production deferred work.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n 'buildAsyncDeferredTools|asyncDeferredRegistry|void asyncDeferredRegistry|DefaultDeferredResultRegistry' src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/apps/cli/internal.ts src/tool/deferred/default-registry.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The gate allocates and passes the registry to poll_deferred, but the CLI has no producer consumer beyond void asyncDeferredRegistry.
+  - kind: test
+    command: bun test tests/unit/tool/deferred-registry-hellgate.test.ts tests/unit/apps/agent/async-tools-deferred-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 27 focused cases passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-next
+review_state: approved
+reviewer: codex/cross-review-wave1

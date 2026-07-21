@@ -1,0 +1,62 @@
+version: 1
+feature_id: localize-phase-knob
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/knobs/knobs/localize-phase.ts:applyLocalizePhase
+entrypoints:
+  - src/apps/bench/index.ts
+  - src/runner/knobs/register-bench-knobs.ts:APPLY_BINDINGS
+activation:
+  - QUANTA_BENCH_LOCALIZE_PHASE=N, where N is an integer from 1 through 20, projects localizePhase.phase1Turns into bench config.
+  - QUANTA_BENCH_LOCALIZE_PHASE=0 is an explicit env-layer OFF sentinel which suppresses a preset-provided localize phase.
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - src/config/knob-schema/schemas/bench-loop.ts:localizePhaseSchema
+  - src/runner/knobs/knobs/localize-phase.ts:localizePhaseKnob
+consumer:
+  - src/runner/knobs/register-bench-knobs.ts:APPLY_BINDINGS
+  - src/runner/batch/eval/knobs-bench.ts:resolveLocalizePhase
+  - src/runner/batch/eval/driver/config-build.ts:localizePhaseConfigOf
+reachable: yes
+surface_findings:
+  - The bench registry resolves the schema and projects the selected phase count through BenchPosture into the live driver configuration.
+  - Unset or invalid values are inactive and preserve the config reference; explicit zero disables a preset value rather than falling through to it.
+  - The catalog activation claim is inaccurate: the live interface is a bounded numeric knob with an explicit zero OFF sentinel, not a strict boolean 1/on/true gate.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/runner/knobs/localize-phase.test.ts tests/unit/runner/knobs/localize-phase-hellgate.test.ts tests/unit/bench-sota-preset-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset and empty values are inactive and preserve byte identity; zero explicitly suppresses a preset-provided phase.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/runner/knobs/localize-phase.test.ts tests/unit/runner/knobs/localize-phase-hellgate.test.ts tests/unit/bench-sota-preset-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 46 focused cases passed, including numeric activation, registry projection, surface fencing, preset override, and malformed-input rejection.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: The catalog says the knob is a strict 1/on/true gate, but the authoritative schema accepts integer 1..20 and defines zero as explicit OFF.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'localizePhase|QUANTA_BENCH_LOCALIZE_PHASE|localize-phase' src/apps/bench src/runner src/config
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The source shows schema parsing, registrar binding, posture resolution, and driver config consumption; it also shows the bounded numeric domain and zero sentinel.
+  - kind: test
+    command: bun test tests/unit/runner/knobs/localize-phase.test.ts tests/unit/runner/knobs/localize-phase-hellgate.test.ts tests/unit/bench-sota-preset-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 46 localize parsing, OFF identity, ON projection, conflict, and preset-precedence cases passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-app-bench
+review_state: approved
+reviewer: codex/cross-review-wave1

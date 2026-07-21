@@ -1,0 +1,57 @@
+version: 1
+feature_id: tool-registry
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/tool/registry.ts:ToolRegistry.run"
+entrypoints:
+  - "src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildBaseRegistry"
+  - "src/runner/assemble/tooling.ts:buildToolingCore"
+activation:
+  - "Every production agent registry is constructed through ToolRegistry over default and surface-provided tool arrays."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - "src/tool/registry.ts:ToolRegistry"
+  - "src/tool/factory.ts:enforceOutputSchema"
+  - "src/tool/output-spill.ts:capToolOutput"
+  - "src/tool/schema.ts:zodToJsonSchema"
+consumer:
+  - "src/agent/dispatch.ts:dispatchTool"
+  - "src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildBaseRegistry"
+  - "src/runner/assemble/tooling.ts:buildToolingCore"
+reachable: yes
+surface_findings:
+  - "Both host and runner composition roots construct a live ToolRegistry, and dispatch consumes it for validation and execution."
+  - "Registry output is schema-enforced before model rendering and oversized output is capped with a persisted full-log path."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/output-spill.test.ts tests/unit/tool-factory.test.ts tests/unit/tool-output-schema-hellgate.test.ts tests/unit/schema.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The 68 selected checks cover schema projection, input and output validation, streaming hooks, deferred contract, cap/spill retention, and registry-level output-schema enforcement."
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'new ToolRegistry|class ToolRegistry|enforceOutputSchema|capToolOutput|zodToJsonSchema' src/tool src/agent src/host/runtime src/runner/assemble"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Host and runner composition roots instantiate the registry; registry run validates, executes, schema-enforces, renders, and caps output."
+  - kind: test
+    command: "bun test tests/unit/output-spill.test.ts tests/unit/tool-factory.test.ts tests/unit/tool-output-schema-hellgate.test.ts tests/unit/schema.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "68 focused registry and output-contract checks passed."
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch3
+review_state: approved
+reviewer: codex/cross-review-wave1

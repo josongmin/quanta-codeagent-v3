@@ -1,0 +1,52 @@
+version: 1
+feature_id: repro-test-slice
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/eval/driver/repro-test-prep.ts:prepareReproTest
+entrypoints: [src/apps/bench/eval/driver.ts, src/runner/batch/eval/kernel/steps/repro.ts]
+activation: [QUANTA_BENCH_REPRO_TEST=K, "K in 1..40"]
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer: [src/agent/repro-test/generate.ts, src/agent/repro-test/execute.ts, src/agent/repro-test/select.ts]
+consumer: [src/runner/batch/eval/driver/repro-test-prep.ts, src/runner/batch/eval/kernel/steps/repro.ts]
+reachable: yes
+surface_findings:
+  - "Bench posture parses the explicit K gate, and the kernel step uses the same predicate; a gated-on missing delegate throws rather than silently baselining."
+  - "The catalog's interactive CLI full-surface claim is stale: this is a bench/headless pipeline with no interactive src/apps/cli entry path."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/bench-repro-test-wiring.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset, invalid, and disabled knob cases remain inert and preserve base configuration.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/repro-test/generate.test.ts tests/unit/repro-test/execute.test.ts tests/unit/repro-test/select.test.ts tests/unit/repro-test/integration.test.ts tests/unit/repro-test/adversarial-repro.test.ts tests/unit/repro-test-hellgate.test.ts tests/unit/bench-repro-test-wiring.test.ts tests/unit/repro-run-argv.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Generation, execution, voting, default-off wiring, argv, and adversarial rails pass.
+failure_posture: fail-loud
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: "Correct surface_integration.cli from full to missing/bench-only; no interactive CLI import or runtime path consumes this pipeline."
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'reproTestK|prepareReproTest|reproGate' src/runner/batch src/apps/bench
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Default-off bench posture and production driver/kernel consumers are present.
+  - kind: test
+    command: bun test tests/unit/repro-test/generate.test.ts tests/unit/repro-test/execute.test.ts tests/unit/repro-test/select.test.ts tests/unit/repro-test/integration.test.ts tests/unit/repro-test/adversarial-repro.test.ts tests/unit/repro-test-hellgate.test.ts tests/unit/bench-repro-test-wiring.test.ts tests/unit/repro-run-argv.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused reproduction pipeline rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

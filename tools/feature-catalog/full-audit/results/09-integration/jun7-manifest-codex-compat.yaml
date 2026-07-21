@@ -1,0 +1,63 @@
+version: 1
+feature_id: jun7-manifest-codex-compat
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/plugin-manifest.ts:parsePluginManifest
+entrypoints:
+  - src/skill/plugin-loader.ts:loadPluginManifest
+  - src/skill/discover.ts:discoverSkills
+activation:
+  - QUANTA_MANIFEST_COMPAT=1 arms the strict compat parser path.
+  - Unset or any value other than the strict gate literal retains native strict parsing.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/skill/manifest-compat.ts:normalizePluginManifest
+  - src/skill/manifest-compat.ts:normalizeSkillFrontmatter
+  - src/skill/skill-frontmatter.ts:parseSkillMarkdown
+consumer:
+  - src/skill/plugin-manifest.ts:parsePluginManifest
+  - src/skill/plugin-loader.ts:loadPluginManifest
+  - src/skill/discover.ts:toSkill
+reachable: yes
+surface_findings:
+  - The real plugin loader calls the gated parser, and discover.ts gates the frontmatter normalizer at its tool-allowlist read site.
+  - Only the closed kebab-to-camel mapping is transformed; native camel wins collisions and grant-bearing inner schema fields remain strict.
+  - Real Codex-shaped fixtures load only when armed while native manifests retain their default strict behavior.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/manifest-codex-compat-hellgate.test.ts tests/unit/manifest-codex-compat-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unarmed real Codex fixtures reject through the live loader and native manifests remain byte-identical.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/manifest-codex-compat-hellgate.test.ts tests/unit/manifest-codex-compat-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Armed live loader accepts Codex plugin fixtures, discovery preserves the allowlist, and grant-smuggling injections fail or strip safely.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'manifestCompat|parsePluginManifest|normalizePluginManifest|normalizeSkillFrontmatter|parseSkillMarkdown' src/shared/runtime-config.ts src/skill/plugin-manifest.ts src/skill/plugin-loader.ts src/skill/skill-frontmatter.ts src/skill/discover.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime config gates both real plugin-loading and skill-discovery consumers through the bounded normalizers.
+  - kind: test
+    command: bun test tests/unit/manifest-codex-compat-hellgate.test.ts tests/unit/manifest-codex-compat-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused compatibility, live-loader, default-OFF, and grant-non-widening evidence completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-runtime
+review_state: approved
+reviewer: codex/cross-review-wave1

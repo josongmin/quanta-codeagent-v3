@@ -1,0 +1,57 @@
+version: 1
+feature_id: auth-revoke-on-logout
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/logout-cmd.ts:buildLogoutCmd
+entrypoints:
+  - src/apps/cli/slash/registry-surface.ts:buildSurfaceSlashCommands
+activation:
+  - Set QUANTA_OAUTH_REVOKE_ON_LOGOUT=1 and run /logout for a non-Codex-managed token with a refresh token.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer:
+  - src/auth/chatgpt-oauth/revoke.ts:revokeRefreshToken
+consumer:
+  - src/apps/cli/logout-cmd.ts:buildLogoutCmd
+  - src/apps/cli/slash/registry-surface.ts:buildSurfaceSlashCommands
+reachable: yes
+surface_findings:
+  - The CLI slash surface passes the runtime gate, real fetch port, and redacting logger into the logout command.
+  - Revocation is attempted before the unconditional local deletion; no token, revoke error, and Codex-managed branches do not block deletion or leak the credential.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli/token-revoke-on-logout-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off logout made zero network calls and preserved local-delete-only output.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/token-revoke-on-logout-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: RFC 7009 body shape, successful and failed revocation, delete ordering, token redaction, and Codex-managed skip rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'revokeRefreshToken|revokeOnLogout|buildLogoutCmd' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/logout-cmd.ts src/apps/cli/slash/registry-surface.ts src/auth/chatgpt-oauth/revoke.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The slash composition reads the gate and the command invokes the no-throw revoke leaf before deletion.
+  - kind: test
+    command: bun test tests/unit/cli/token-revoke-on-logout-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused revoke-on-logout rail passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

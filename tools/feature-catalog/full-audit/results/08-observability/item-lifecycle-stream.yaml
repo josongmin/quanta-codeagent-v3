@@ -1,0 +1,50 @@
+version: 1
+feature_id: item-lifecycle-stream
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/optional-ports.ts:wireItemLifecycle
+entrypoints:
+  - src/agent/optional-ports.ts:wireOptionalAgentPorts
+activation:
+  - QUANTA_ITEM_LIFECYCLE wraps the event sink with the item lifecycle tracker.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/stream/item-lifecycle.ts:ItemLifecycleTracker
+consumer:
+  - src/agent/optional-ports.ts
+reachable: yes
+surface_findings:
+  - Tracker emits balanced text and tool lifecycle events and ignores duplicate or orphan stream signals.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/item-lifecycle-hellgate.test.ts tests/unit/item-lifecycle-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset gate preserves the original stream.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/item-lifecycle-hellgate.test.ts tests/unit/item-lifecycle-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Tracker and opt-in wire rails passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/item-lifecycle-hellgate.test.ts tests/unit/item-lifecycle-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Item lifecycle rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

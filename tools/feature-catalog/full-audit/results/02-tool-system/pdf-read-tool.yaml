@@ -1,0 +1,57 @@
+version: 1
+feature_id: pdf-read-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/document/pdf-read.ts:pdfReadTool through src/agent/dispatch/execute.ts:shapeDispatchResult
+entrypoints:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/agent/dispatch/execute.ts:shapeDispatchResult
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+activation:
+  - "pdf_read is an unconditional base tool in buildDefaultTools; its document block is composed only after a successful read."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/tool/document/pdf-read.ts:pdfReadTool
+  - src/tool/image/compose.ts:composeToolResultContent
+consumer:
+  - src/tool/index.ts:buildBaseDefaultTools
+  - src/agent/dispatch/execute.ts:shapeDispatchResult
+  - src/apps/web-daemon/runtime-factory.ts:buildDaemonToolRegistry
+reachable: yes
+surface_findings:
+  - "The reader enforces jail resolution, leaf-symlink rejection, 32 MB cap, and PDF magic before emitting a base64 DocumentBlock."
+  - "The live dispatch path converts documents into contentBlocks and every default registry surface receives pdf_read."
+  - "The catalog note claiming caller-deferred registration and per-slice host wiring is obsolete: ADR-0142 registered pdf_read in the base registry."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/pdf-read-hellgate.test.ts tests/unit/document-tools-defaults-registration-hellgate.test.ts tests/integration/hexagonal-ports-closeout.test.ts tests/integration/multi-plane-e2e-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: PDF magic, jail, symlink, cap, default-registration, and dispatch content-block rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog notes must replace caller-deferred registration with base-registry availability.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "pdfReadTool|pdf_read|composeToolResultContent|buildBaseDefaultTools|buildDaemonToolRegistry" src/tool/document/pdf-read.ts src/tool/index.ts src/agent/dispatch/execute.ts src/tool/image/compose.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The producer, base-registry consumer, dispatch composer, and daemon registry are live.
+  - kind: test
+    command: bun test tests/unit/tool/pdf-read-hellgate.test.ts tests/unit/document-tools-defaults-registration-hellgate.test.ts tests/integration/hexagonal-ports-closeout.test.ts tests/integration/multi-plane-e2e-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 113 combined document and composition tests passed, including PDF-specific rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch7
+review_state: approved
+reviewer: codex/cross-review-wave1

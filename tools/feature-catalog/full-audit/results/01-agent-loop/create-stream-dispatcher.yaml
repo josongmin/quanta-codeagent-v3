@@ -1,0 +1,62 @@
+version: 1
+feature_id: create-stream-dispatcher
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/stream-callbacks.ts:createStreamDispatcher
+entrypoints:
+  - src/agent/loop/stream-consume.ts:streamConsume
+activation:
+  - Every streamed agent turn constructs callbacks before invoking the LLM stream
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/loop/stream-consume.ts:createStreamDispatcher
+consumer:
+  - src/agent/stream-callbacks.ts:dispatch callback
+  - src/agent/dispatch.ts:dispatchTool
+reachable: yes
+surface_findings:
+  - "CLI: streamConsume creates the dispatcher for every sampling stream and its callbacks reach the dispatch seam."
+  - "Web: no independent UI claim; catalog web-na accurately describes the internal factory."
+off_identity_proof:
+  kind: source
+  command: rg -n 'createStreamDispatcher\(session, state, anchors\)' src/agent/loop/stream-consume.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: This ungated extraction is always used; no feature switch changes behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/agent-loop-bugbash/createStreamDispatcher-seams.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The returned callback short-circuits denied tools, dispatches controls, and back-patches matching history slots.
+failure_posture: na
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'createStreamDispatcher|callbacks = createStreamDispatcher|dispatchTool' src/agent/loop/stream-consume.ts src/agent/stream-callbacks.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The live stream-consume owner constructs the factory result and callback dispatch reaches the tool seam.
+  - kind: test
+    command: bun test tests/integration/agent-loop-bugbash/createStreamDispatcher-seams.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Deny, allow, no-gate, history patch, unrelated slot, and absent-history controls passed.
+  - kind: source
+    command: bun fc reachability
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3+ reachability exception was reported.
+audited_at: "2026-07-19"
+auditor: codex/p2-agentloop-context
+review_state: approved
+reviewer: codex/cross-review-wave1

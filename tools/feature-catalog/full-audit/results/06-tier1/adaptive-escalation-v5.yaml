@@ -1,0 +1,52 @@
+version: 1
+feature_id: adaptive-escalation-v5
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/eval/adaptive-escalation/adaptive-run.ts:runAdaptiveBenchAttempt
+entrypoints: [src/apps/bench/eval/driver.ts]
+activation: [agentless-v5-thin-and-expanded, QUANTA_BENCH_V5_ADAPTIVE=1]
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer: [src/runner/batch/eval/adaptive-escalation]
+consumer: [src/apps/bench/eval/driver.ts]
+reachable: yes
+surface_findings:
+  - "Bench driver now calls runAdaptiveBenchAttempt under the strict v5 gate."
+  - "Catalog claim that live driver call-site is Wave-3 deferred is stale."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/bench-v5-preset-gate.test.ts tests/unit/kernel/preset-spec-parity.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Preset is inert thin-strict without the opt-in gate.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/adaptive-controller-hellgate.test.ts tests/unit/adaptive-escalation-hellgate.test.ts tests/unit/adaptive-evidence-facts-hellgate.test.ts tests/unit/adaptive-llm-router-hellgate.test.ts tests/unit/adaptive-phase-executor-hellgate.test.ts tests/unit/adaptive-router-evidence-hellgate.test.ts tests/unit/adaptive-router-prompt-hellgate.test.ts tests/unit/adaptive-run-hellgate.test.ts tests/unit/posture-phase-modules-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Controller schema, bounded transitions, evidence, router, executor, and runtime run rails pass.
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: Update deferred-call-site wording; src/apps/bench/eval/driver.ts now consumes the controller.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'runAdaptiveBenchAttempt|V5_ADAPTIVE' src/apps/bench/eval/driver.ts src/runner/batch/eval
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Driver and adaptive owner are connected.
+  - kind: test
+    command: bun test tests/unit/adaptive-run-hellgate.test.ts tests/unit/bench-v5-preset-gate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Adaptive run and gate rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

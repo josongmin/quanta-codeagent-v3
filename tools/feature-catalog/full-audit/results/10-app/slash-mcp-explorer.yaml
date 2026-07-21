@@ -1,0 +1,51 @@
+version: 1
+feature_id: slash-mcp-explorer
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/mcp-cmd.ts:mcpCmd
+entrypoints:
+  - src/apps/cli/repl/mcp-surface-wire.ts:buildMcpSurfaceInfo
+activation:
+  - Configure MCP, build a REPL surface snapshot, then invoke /mcp.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/repl/mcp-surface-wire.ts:buildMcpSurfaceInfo
+consumer:
+  - src/apps/cli/mcp-cmd.ts:mcpCmd
+reachable: yes
+surface_findings:
+  - Command consumes only the structural snapshot and does not touch MCP transport/process state.
+  - No configured server and no config path yields no surface and a not-wired slash fallback.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mcp-surface-wire.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Empty MCP configuration returns undefined snapshot.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp-cmd.test.ts tests/unit/mcp-surface-wire.test.ts tests/unit/slash-commands.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Server, tool, config, status, verbose, and slash route rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: "MCP explorer is wired only after MCP configuration produces a surface snapshot."
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/mcp-cmd.test.ts tests/unit/mcp-surface-wire.test.ts tests/unit/slash-commands.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused MCP explorer rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

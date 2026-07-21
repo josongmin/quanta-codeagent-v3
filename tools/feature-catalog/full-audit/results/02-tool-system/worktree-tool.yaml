@@ -1,0 +1,63 @@
+version: 1
+feature_id: worktree-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/runtime-context-compose.ts
+entrypoints:
+  - src/apps/cli/repl/runtime-context-compose.ts
+activation:
+  - QUANTA_WORKTREE_TOOL is enabled at CLI session bootstrap
+  - mintActiveWorktreeSlot injects AgentConfig.activeWorktreeSlot
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/agent/worktree-slot.ts:mintActiveWorktreeSlot
+  - src/agent/tier1/worktree.ts:buildWorktreeBlock
+  - src/tool/worktree/cwd-override.ts:resolveBashCwd
+  - src/tool/worktree/cwd-override.ts:resolveEditBase
+consumer:
+  - src/agent/features.ts:buildSessionFeatures
+  - src/tool/bash/index.ts:bashTool
+  - src/tool/read/index.ts:readTool
+  - src/tool/edit/index.ts:editTool
+reachable: yes
+surface_findings:
+  - "The interactive CLI mints one session slot on the explicit gate and buildSessionFeatures registers all three tools only when that slot is present."
+  - "Dispatch projects the current slot to bash and edit-fence consumers while retaining the session filesystem jail for absolute paths."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/tool/worktree/worktree-comp-root-gate.test.ts tests/unit/tool/worktree/worktree-dispatch-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "No slot omits all three worktree tools and leaves bash in the session cwd."
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/worktree/worktree-tools.test.ts tests/unit/tool/worktree/worktree-mutating-table.test.ts tests/unit/tool/worktree/worktree-dispatch-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "A real temporary git repository completed enter to bash in worktree to exit with cwd restoration."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'mintActiveWorktreeSlot|buildWorktreeBlock|resolveBashCwd|resolveEditBase' src/apps/cli/repl/runtime-context-compose.ts src/agent/features.ts src/tool/bash/index.ts src/tool/read/index.ts src/tool/edit/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The session-root slot, registration block, and bash read edit consumers are concretely wired."
+  - kind: test
+    command: bun test tests/unit/tool/worktree/worktree-tools.test.ts tests/unit/tool/worktree/worktree-comp-root-gate.test.ts tests/unit/tool/worktree/worktree-mutating-table.test.ts tests/unit/tool/worktree/worktree-dispatch-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Selected gate lifecycle jail classification and dispatch rails passed against real git fixtures."
+audited_at: "2026-07-19"
+auditor: codex/p1-tools-surface
+review_state: approved
+reviewer: codex/cross-review-wave1

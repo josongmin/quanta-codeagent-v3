@@ -1,0 +1,58 @@
+version: 1
+feature_id: turn-diff-emit-session
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/turn-loop.ts:executeTurnWithObservability
+entrypoints:
+  - src/agent/loop-helpers.ts:buildTurnDiffSession
+  - src/agent/loop/turn-loop.ts:executeTurnWithObservability
+  - src/agent/git-observability/turn-diff-emit.ts:wireTurnDiffEmit
+activation:
+  - AgentConfig.gitObservability.enabled constructs or accepts a TurnDiffSession for the session.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - TurnDiffSession captures an anchor and creates turn_diff_updated events when the diff is nonempty.
+consumer:
+  - executeTurnWithObservability calls startTurn and endTurn for each turn and forwards a non-null event to the AgentEvent stream.
+reachable: yes
+surface_findings:
+  - The catalog note stating that loop integration is future work is stale: the current loop calls startTurn and endTurn.
+  - The web host still drops the event and its diff panel is unmounted, so user-facing reachability is CLI-only.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/loop-turn-diff-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Without gitObservability the loop makes no startTurn or endTurn calls.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/loop-turn-diff-wire-hellgate.test.ts tests/unit/turn-diff-emit-edge-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Per-turn loop emission, anchor isolation, idempotence, cancellation forwarding, and git-failure degradation passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "turnDiffSession\.startTurn|turnDiffSession\.endTurn|buildTurnDiffSession" src/agent/loop src/agent/loop-helpers.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The active loop constructs the session and invokes both turn hooks.
+  - kind: test
+    command: bun test tests/unit/loop-turn-diff-wire-hellgate.test.ts tests/unit/turn-diff-emit-edge-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 19 loop and TurnDiffSession focused tests passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

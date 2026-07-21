@@ -1,0 +1,54 @@
+version: 1
+feature_id: layered-policy-merge
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/profile-layer-merge.ts:mergeProfileLayers
+entrypoints:
+  - src/runner/knobs/knobs/policy-merge.ts:policyMergeKnob
+  - src/host/runtime/agent-arg-builder.ts:resolvePermissionProfileWiring
+activation:
+  - Set one or more QUANTA_PERMISSION_PROFILE_PER_USER, QUANTA_PERMISSION_PROFILE_PER_REPO, or QUANTA_PERMISSION_PROFILE_TEAM_ADMIN values; set QUANTA_POLICY_MERGE_STRATEGY=most-restrictive to override source-precedence.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/permission/policy-layers/index.ts:resolvePolicyLayers
+  - src/permission/profile-layer-merge.ts:mergeProfileLayers
+consumer:
+  - src/permission/two-layer-manager.ts:live access decision
+  - src/host/runtime/agent-arg-builder.ts:PermissionContext mode
+reachable: yes
+surface_findings:
+  - Source precedence remains deterministic across layer ordering, while most-restrictive uses per-axis polarity rather than a whole-profile score.
+  - The live manager consumes the merged file-system profile, so strategy selection changes a real allow or deny result rather than only metadata.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/permission/policy-merge-knob-integration-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent knob and layered variables retain the legacy single-profile path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission/policy-layers-hellgate.test.ts tests/unit/permission/profile-layer-merge-hellgate.test.ts tests/unit/permission/profile-layer-merge-subfield-hellgate.test.ts tests/unit/permission/policy-merge-knob-integration-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Precedence, per-axis restrictiveness, provenance, permutation invariance, and strategy-driven live decisions passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/permission/policy-layers-hellgate.test.ts tests/unit/permission/profile-layer-merge-hellgate.test.ts tests/unit/permission/profile-layer-merge-subfield-hellgate.test.ts tests/unit/permission/policy-merge-knob-integration-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The combined audit command passed the 44 policy-layer and integration rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

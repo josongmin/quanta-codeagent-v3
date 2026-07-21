@@ -1,0 +1,56 @@
+version: 1
+feature_id: reviewer-3tier
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/permission/reviewer.ts:reviewAndDecide"
+entrypoints:
+  - "src/agent/admissibility-gate/gates.ts:runHitlReviewGate"
+  - "src/apps/cli/repl/runtime-context-compose.ts:buildAdmissibility"
+activation:
+  - "A reviewed/ask-shaped tool decision reaches the admissibility gate."
+  - "Guardian or auto-review selection additionally requires its configured port and explicit ladder/knob state."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - "src/permission/outcome.ts:buildDecision"
+  - "src/permission/reviewer.ts:reviewAndDecide"
+  - "src/permission/reviewer-default-policy.ts:selectDefaultReviewer"
+consumer:
+  - "src/agent/admissibility-gate/gates.ts:runHitlReviewGate"
+  - "src/apps/cli/repl/runtime-context-compose.ts:buildAdmissibility"
+reachable: yes
+surface_findings:
+  - "The CLI builds an OnConfirm-backed ReviewerPort for every session and routes configured auto/guardian reviewer paths through the same port."
+  - "The outcome matrix rejects inadmissible reviewer/outcome pairs and denial-precedence conflicts rather than silently selecting a winner."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/permission/outcome.test.ts tests/unit/permission/reviewer.test.ts tests/unit/permission.test.ts tests/unit/approval-ladder-hellgate.test.ts tests/unit/guardian-auto-approval-reviewer-hellgate.test.ts tests/unit/apps/cli/reviewer-policy.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The selected matrix, reviewer, ladder, guardian, and CLI policy rails pass with the full invocation."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n \"reviewAndDecide\\(|createOnConfirmReviewerPort|selectDefaultReviewer\" src/agent src/apps/cli/repl/runtime-context-compose.ts --glob '!**/*.test.ts'"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Gate calls the reviewer path and the interactive composition root constructs the concrete ReviewerPort/default tier."
+  - kind: test
+    command: "bun test tests/unit/permission/outcome.test.ts tests/unit/permission/reviewer.test.ts tests/unit/permission.test.ts tests/unit/approval-ladder-hellgate.test.ts tests/unit/guardian-auto-approval-reviewer-hellgate.test.ts tests/unit/apps/cli/reviewer-policy.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Selected reviewer rail passed, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch2
+review_state: approved
+reviewer: codex/cross-review-wave1

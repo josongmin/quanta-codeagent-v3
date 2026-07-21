@@ -1,0 +1,53 @@
+version: 1
+feature_id: multimodal-image-input
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/internal/context-binding/turn-runner.ts:runSessionTurn
+entrypoints: [src/apps/cli/repl/session-runtime-config.ts:buildSessionRuntimeConfig, apps/web-frontend/src/ws/session-hooks.ts:useSendTurn]
+activation: ["CLI accepts repeatable --image and /image attachments; the web frontend sends ImageBlock arrays with input.append. Empty image arrays preserve text-only turns."]
+effective_defaults:
+  cli: on
+  web: on
+  bench: resource
+  headless: resource
+  daemon: on
+producer: [src/apps/cli/image-loader.ts:loadImageBlock, src/apps/cli/repl/session-loop/turn-helpers.ts:drainTurnImages, src/llm/anthropic-messages-codec.ts:buildAnthropicMessagesRequest, src/llm/adapters/openai.ts:userParams]
+consumer: [src/host/runtime/internal/context-binding/turn-runner.ts:runSessionTurn, src/apps/cli/repl/session-loop.ts:runSessionTurn, apps/web-frontend/src/ws/session-hooks.ts:useSendTurn]
+reachable: yes
+surface_findings:
+  - CLI argv and queued attachments flow into the first and subsequent turn payloads, then into ContentBlock arrays used by both provider codecs.
+  - The web frontend has a concrete useSendTurn consumer that clones and sends images with input.append, and renders event images in its transcript state.
+  - The core CLI/provider efficacy rails pass; the web frontend's own Vitest rail cannot run in this snapshot because its React dependency is not installed.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/llm-image-block.test.ts tests/unit/runner/run-once-multimodal.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Empty image input preserves the pre-feature text-only request shape and runOnce behavior.
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: proof-gap
+blocker: The in-tree web frontend consumer is statically live, but `apps/web-frontend` cannot execute its session-hooks test at the frozen checkout because package `react` is absent; full web-surface efficacy is therefore unproven.
+disposition: hold
+receipts:
+  - kind: source
+    command: rg -n "argvImages|pendingImages|runSessionTurn|useSendTurn|input.append|image_url|buildAnthropicMessagesRequest" src/apps/cli src/host/runtime/internal/context-binding/turn-runner.ts src/llm apps/web-frontend/src/ws/session-hooks.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Concrete CLI, daemon/web, and dual-provider consumer paths carry ImageBlock arrays.
+  - kind: test
+    command: bun test tests/unit/llm-image-block.test.ts tests/unit/cli-image-loader.test.ts tests/unit/anthropic.test.ts tests/unit/openai.test.ts tests/unit/cli-argv-prompt.test.ts tests/unit/apps/cli/session-setup-hellgate.test.ts tests/unit/apps/cli/session-loop-hellgate.test.ts tests/unit/runner/run-once-multimodal.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 47 provider/loader tests and 66 CLI turn-composition tests passed in the selected runs.
+  - kind: test
+    command: cd apps/web-frontend && bun test src/ws/session-hooks.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: blocked
+    evidence: Test loading stopped before execution because the frozen checkout has no resolvable react package.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-multimodal
+review_state: approved
+reviewer: codex/cross-review-wave1

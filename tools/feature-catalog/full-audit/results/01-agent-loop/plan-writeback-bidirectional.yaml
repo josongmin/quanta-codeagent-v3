@@ -1,0 +1,50 @@
+version: 1
+feature_id: plan-writeback-bidirectional
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/playbook/plan-writeback/default-writeback.ts:createDefaultWriteback
+entrypoints:
+  - src/skill/playbook/plan-writeback/index.ts:barrel
+activation:
+  - A future host must instantiate and inject the port at a plan render boundary; no production caller currently does so.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/skill/playbook/plan-writeback/default-writeback.ts
+consumer: []
+reachable: no
+surface_findings:
+  - The leaf implements typed, frozen, monotonic side-queue envelopes and never mutates the plan directly.
+  - No loop, tool, skill dispatcher, plan renderer, or surface imports the barrel or constructs the writeback port.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/skill/playbook/plan-writeback-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Envelope, isolation, immutable update, error, monotonic ordering, and leaf-fence rails passed.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production host injects the port or drains findings at a plan re-render boundary.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'createDefaultWriteback|PlanWriteback|recordFinding' src --glob '!src/skill/playbook/plan-writeback/**'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No production consumer exists outside the isolated implementation.
+  - kind: test
+    command: bun test tests/unit/skill/playbook/plan-writeback-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused writeback rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

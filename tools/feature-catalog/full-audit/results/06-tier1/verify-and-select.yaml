@@ -1,0 +1,56 @@
+version: 1
+feature_id: verify-and-select
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/runner/batch/eval/knobs-bench.ts:applyBenchKnobs"
+entrypoints:
+  - "src/apps/bench/eval/driver.ts:runSelectionPhase"
+activation:
+  - "QUANTA_BENCH_VERIFY_SELECT_ESCAPE must be enabled in addition to a verify-select value; otherwise verifySelectN is undefined and the single-pass path runs."
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: na
+  daemon: na
+producer:
+  - "src/runner/batch/eval/selection-executor.ts:runSelection"
+consumer:
+  - "src/apps/bench/eval/driver.ts:runSelectionPhase"
+reachable: conditional
+surface_findings:
+  - "The full executor remains wired behind the explicit escape hatch, but the experiment registry marks the verify-select family retired and shipped presets do not activate it."
+  - "The catalog's claim of live experimental presets and current L3 promotion is stale relative to the retired fail-closed posture."
+off_identity_proof:
+  kind: test
+  command: "bun test src/runner/batch/eval/knobs-bench-verify-select-escape.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "A verify-select setting without the escape is inert and byte-identical to single pass."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/runner/verify-select-driver-parity.test.ts tests/integration/bench-verify-select-concurrency.test.ts tests/integration/bench-verify-select-telemetry.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Escape-enabled orchestration, parallel candidate generation, and telemetry rails pass."
+failure_posture: fail-closed
+security_posture: conditional
+observability: verified
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg -n 'verifySelectEscape|verifySelectN|retired' src/runner/batch/eval/knobs-bench.ts src/runner/batch/eval/kernel/experiments.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Runtime knob parsing fails closed without the escape and the experiment authority lists the family as retired."
+  - kind: test
+    command: "bun test tests/unit/verification-bundle-score.test.ts tests/unit/regression-oracle.test.ts tests/unit/impacted-test-discovery.test.ts tests/unit/repo-regression-discovery-adapter.test.ts tests/unit/selection-executor.test.ts tests/unit/resolved-consensus.test.ts tests/unit/pass-to-pass-threading.test.ts tests/unit/repro-consensus-selection-port.test.ts tests/unit/verify-select-regression-knob.test.ts tests/unit/runner/verify-select-driver-parity.test.ts tests/unit/bench-preset-drives-config-hellgate.test.ts tests/integration/bench-verify-select-concurrency.test.ts tests/integration/bench-verify-select-telemetry.test.ts src/runner/batch/eval/knobs-bench-verify-select-escape.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 502-pass focused batch."
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

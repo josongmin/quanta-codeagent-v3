@@ -1,0 +1,52 @@
+version: 1
+feature_id: color-policy-resolver
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/ui/ui-helpers.ts:ColorPolicyResolver
+entrypoints:
+  - src/apps/cli/markdown-painter.ts:MarkdownPainter
+activation:
+  - Render a CLI UI surface; NO_COLOR, FORCE_COLOR, and terminal TTY state choose its initial mode.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/ui/ui-helpers.ts:ColorPolicyResolver
+consumer:
+  - src/ui/ui-helpers.ts:wrap helpers
+  - src/apps/cli/markdown-painter.ts
+reachable: yes
+surface_findings:
+  - The default resolver backs all exported ANSI wrappers, and markdown rendering constructs isolated resolver instances where required.
+  - NO_COLOR wins over FORCE_COLOR; a cached decision avoids per-fragment environment or terminal variation.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/auth/auth-ui.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit off mode removes ANSI from wrapper output.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/auth/auth-ui.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit on mode and isolated cache behavior passed.
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/auth/auth-ui.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused color policy and UI helper rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

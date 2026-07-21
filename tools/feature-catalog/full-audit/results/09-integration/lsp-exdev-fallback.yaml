@@ -1,0 +1,47 @@
+version: 1
+feature_id: lsp-exdev-fallback
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/lsp/adapters/base/atomic-edit.ts:applyWorkspaceEditAtomic
+entrypoints:
+  - src/lsp/adapters/base.ts:applyWorkspaceEdit
+  - src/lsp/adapters/base/atomic-edit.ts:applyWorkspaceEditAtomic
+activation:
+  - A cross-filesystem rename would need EXDEV detection followed by copyFile and tmp unlink.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - The LSP client calls the extracted atomic-edit implementation for workspace edits.
+consumer:
+  - Atomic edit currently calls renameFile only; it has no copyFile seam or EXDEV fallback branch.
+reachable: no
+surface_findings:
+  - The current atomic-edit source explicitly documents EXDEV copy-and-delete as a follow-up and wraps any rename failure as a Phase 2 error.
+  - The catalog's cited base.ts no longer owns the implementation and its listed test has no EXDEV copy/unlink assertion.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: stale-claim
+blocker: The advertised EXDEV copy plus unlink path is absent after atomic-edit extraction; cross-filesystem rename still fails.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n "EXDEV|copyFile|unlinkTmp" src/lsp/adapters/base src/lsp/adapters/base/atomic-edit.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Atomic-edit comments retain EXDEV as a follow-up, and its seam surface contains no copyFile method.
+  - kind: test
+    command: bun test tests/unit/lsp-applyworkspaceedit-atomicity-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 10 atomicity tests passed, but the existing rename-failure rail asserts propagation rather than an EXDEV fallback.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

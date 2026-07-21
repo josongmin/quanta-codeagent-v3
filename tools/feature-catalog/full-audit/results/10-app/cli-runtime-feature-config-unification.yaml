@@ -1,0 +1,59 @@
+version: 1
+feature_id: cli-runtime-feature-config-unification
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/cli-feature-config.ts:readCliFeatureConfig
+entrypoints:
+  - src/apps/cli/repl/session-setup.ts:setupSession
+  - src/apps/cli/repl.ts:makeSessionBootstrapDeps
+activation:
+  - Interactive session setup resolves the typed surface feature config once from its runtime environment and TTY state.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/repl/cli-feature-config.ts:readCliFeatureConfig
+consumer:
+  - src/apps/cli/repl/session-setup.ts:setupSession
+  - src/apps/cli/repl.ts:makeSessionBootstrapDeps
+  - src/apps/cli/repl/surface-compose/prompt-ux.ts:buildPromptUx
+reachable: yes
+surface_findings:
+  - One pure resolver receives env and TTY inputs; build factories consume the typed record instead of process globals.
+  - The resolver intentionally preserves mixed historical defaults, including auto-on terminal affordances and explicit default-off destructive/observability gates.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/cli-feature-config-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Empty-env non-TTY and disabled-knob matrices preserve the canonical no-feature shape.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/cli-feature-config-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Environment sweep proves TTY gating, parsers, clamps, and all recorded feature projections.
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'readCliFeatureConfig|CliFeatureConfig|featureCfg' src/apps/cli/repl/cli-feature-config.ts src/apps/cli/repl/session-setup.ts src/apps/cli/repl.ts src/apps/cli/repl/surface-compose.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The session-start resolver and typed consumers are connected without direct surface helper process reads.
+  - kind: test
+    command: bun test tests/unit/apps/cli/cli-feature-config-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused config unification proof is included in the 193-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

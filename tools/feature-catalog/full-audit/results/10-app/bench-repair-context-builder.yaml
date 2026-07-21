@@ -1,0 +1,52 @@
+version: 1
+feature_id: bench-repair-context-builder
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/eval/repair/context.ts:buildRepairContext
+entrypoints: [src/apps/bench/eval/driver.ts, src/runner/batch/eval/driver/repair-phase.ts]
+activation: [bench repair rounds configured]
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer: [src/runner/batch/eval/repair/context.ts]
+consumer: [src/runner/batch/eval/repair/llm-evidence.ts, src/runner/batch/eval/driver/repair-phase.ts]
+reachable: yes
+surface_findings:
+  - "Current repair policy authority is runner/batch/eval/repair; apps/bench/eval/repair files remain compatibility re-exports."
+  - "The builder bounds context by trimming failure tail, then diff middle, then problem statement, preserving explicit truncation markers and no-revert instruction."
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/bench-repair.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Repair disabled leaves the base one-run/one-verify path byte-identical.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/repair-context.test.ts tests/unit/repair-validator.test.ts tests/unit/bench-repair-phase-policy.test.ts tests/integration/bench-repair.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Context bounds, validation, repair policy, continuity, no-leak, and abort behavior pass.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'buildRepairContext|buildRepairRoundSeedMessage|cumulativeDiff' src/runner/batch/eval/repair src/runner/batch/eval/driver/repair-phase.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production repair phase consumes the canonical context builder through runner-layer owners.
+  - kind: test
+    command: bun test tests/unit/repair-context.test.ts tests/unit/repair-validator.test.ts tests/unit/bench-repair-phase-policy.test.ts tests/integration/bench-repair.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused repair context and integration rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

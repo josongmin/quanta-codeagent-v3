@@ -1,0 +1,63 @@
+version: 1
+feature_id: memory-auto-trigger
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/session-memory-auto.ts:buildSessionMemoryAutoWires
+entrypoints:
+  - src/apps/cli/repl/runtime-context-compose.ts:composeRuntimeBootstrapContext
+  - src/host/runtime/internal/context-binding/base.ts:extendBaseWithMemoryAuto
+  - src/agent/loop/entry.ts:runAgent
+activation:
+  - CLI and headless composition supply memoryAuto to the runtime context binding.
+  - QUANTA_MEMORY_AUTO defaults on; explicit falsey values return no wires.
+  - Successful sessions invoke the consolidator hook, which distills and persists Stage1 output.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: on
+  daemon: unknown
+producer:
+  - src/memory/auto-trigger/wire.ts:assembleMemoryAuto
+  - src/runner/session-memory-auto.ts:buildSessionMemoryAutoWires
+consumer:
+  - src/host/runtime/internal/context-binding/base.ts:extendBaseWithMemoryAuto
+  - src/agent/loop/entry.ts:runAgent
+reachable: yes
+surface_findings:
+  - The live chain resolves policy, creates the session wires, adds memoryConsolidator to AgentConfig, then runs the hook only after successful sessions.
+  - The explicit off control returns no wires and prevents session-end persistence.
+  - Hook faults are converted to an error event or outcome and do not derail a successful agent session.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/memory-auto-trigger-session-end-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: QUANTA_MEMORY_AUTO=off produces no wires and no session-end firing in the non-vacuous control.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/memory-consolidator-hook-hellgate.test.ts tests/integration/memory-auto-trigger-session-end-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Default-on sessions distill and persist a real Stage1 row, and the next session receives the promoted context.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'assembleMemoryAuto|buildSessionMemoryAutoWires|runMemoryConsolidatorHook|memoryAuto:' src/apps/cli src/apps/headless src/host src/runner src/agent"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI and headless pass the policy into the host, which threads it to the successful-session hook.
+  - kind: test
+    command: bun test tests/unit/memory-consolidator-hook-hellgate.test.ts tests/integration/memory-auto-trigger-session-end-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused 34-test hook and lifecycle rail passed with default-on, opt-out, error-containment, and next-session evidence.
+audited_at: "2026-07-19"
+auditor: codex/p2-memory-batch12
+review_state: approved
+reviewer: codex/cross-review-wave1

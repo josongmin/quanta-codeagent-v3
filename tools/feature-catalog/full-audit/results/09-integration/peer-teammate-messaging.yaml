@@ -1,0 +1,59 @@
+version: 1
+feature_id: peer-teammate-messaging
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/peer-team-wire.ts:maybeWirePeerTeamMessaging
+entrypoints:
+  - src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+  - src/agent/loop/control-poll.ts:pollPeerInbox
+activation:
+  - Set QUANTA_TEAM_PEER_MSG=1 with the subagent mailbox available in an assembled agent configuration.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/runtime/peer-team-wire.ts:maybeWirePeerTeamMessaging
+  - src/agent/subagent-mailbox/peer-inbox.ts:createPeerInboxDrain
+consumer:
+  - src/host/runtime/agent-config-assembler.ts:assembleAgentConfig
+  - src/agent/loop/control-poll.ts:pollPeerInbox
+reachable: yes
+surface_findings:
+  - Agent configuration assembly invokes the host wire after optional mailbox setup; enabled mode decorates the mailbox, mints the team registry, and installs the redacting peer inbox.
+  - The turn control poll drains the wired inbox; gate-off or missing-mailbox modes leave the configuration unmodified.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/peer-messaging-host-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The host-wire rail proves gate-off byte identity and no peer inbox or team decoration.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/peer-messaging-hellgate.test.ts tests/unit/peer-messaging-host-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused rails prove auto-delivery, team-scoped denial, one-time delivery, redaction, inherited child configuration, and real host composition.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'maybeWirePeerTeamMessaging|pollPeerInbox|QUANTA_TEAM_PEER_MSG' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host/runtime src/agent/loop src/shared/runtime-config.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The composition root invokes the gate, and the loop owns the installed inbox polling seam.
+  - kind: test
+    command: bun test tests/unit/peer-messaging-hellgate.test.ts tests/unit/peer-messaging-host-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused peer-messaging and host-wiring rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

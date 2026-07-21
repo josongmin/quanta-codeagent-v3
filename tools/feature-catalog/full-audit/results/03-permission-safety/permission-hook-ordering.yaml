@@ -1,0 +1,55 @@
+version: 1
+feature_id: permission-hook-ordering
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/dispatch.ts:dispatchToolInner
+entrypoints:
+  - src/agent/dispatch.ts:dispatchTool
+  - src/agent/admissibility-gate.ts:runAdmissibilityGate
+activation:
+  - "Every dispatched tool call enters dispatchToolInner and invokes the canonical admissibility gate before execute."
+  - "When HookBus is wired, an admitted call reaches pre_tool_use as the last pre-execute gate."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/admissibility-gate.ts:runAdmissibilityGate
+  - src/agent/admissibility-gate/shared.ts:runPreToolUseHook
+consumer:
+  - src/agent/dispatch.ts:dispatchToolInner
+reachable: yes
+surface_findings:
+  - "dispatch captures a hook rewrite only after admission and executes the rewritten call; a hook deny returns before execute."
+  - "Permission denial, plan-mode denial, and HARD_DENY short-circuit before pre_tool_use."
+  - "A throwing hook handler is isolated by the HookBus, so hook infrastructure failure does not itself block an otherwise admitted tool call."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/permission-hook-ordering.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "14 ordering tests passed, covering denial precedence, rewrite execution, post-hook outcomes, exception isolation, chaining, and concurrent calls."
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'dispatchToolInner|runAdmissibilityGate|runPreToolUseHook|pre_tool_use|execute\\(' src/agent/dispatch.ts src/agent/admissibility-gate.ts src/agent/admissibility-gate/gates.ts src/agent/admissibility-gate/shared.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The shared dispatch chokepoint calls the gate before execution, and every admitting path reaches the pre-tool hook helper when a HookBus is present."
+  - kind: test
+    command: "bun test tests/unit/permission-hook-ordering.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "14 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch10
+review_state: approved
+reviewer: codex/cross-review-wave1

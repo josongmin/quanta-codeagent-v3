@@ -1,0 +1,56 @@
+version: 1
+feature_id: init-scaffold-slash
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/init-scaffold.ts:buildInitCmd
+entrypoints:
+  - src/apps/cli/slash/registry-surface.ts:conditional registration
+activation:
+  - Set QUANTA_INIT_SLASH=1 and invoke /init; use --dry-run or --force as appropriate.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/init-scaffold.ts:buildInitCmd
+consumer:
+  - src/apps/cli/slash/registry-surface.ts:registry construction
+reachable: yes
+surface_findings:
+  - Registry conditionally imports and registers the command only when the strict gate is on.
+  - Write path refuses existing target without force and supports no-write dry run.
+off_identity_proof:
+  kind: source
+  command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/apps/cli/slash/registry-surface.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent QUANTA_INIT_SLASH omits command registration.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/init-scaffold.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Pure scaffold, command detection, dry run, force protection, and no-throw error rails passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: conditional
+blocker: "Slash registration is explicitly default-off behind QUANTA_INIT_SLASH."
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildInitCmd|QUANTA_INIT_SLASH' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Surface registry owns the gated command registration.
+  - kind: test
+    command: bun test tests/unit/cli/init-scaffold.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused init scaffold rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

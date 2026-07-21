@@ -1,0 +1,53 @@
+version: 1
+feature_id: observability-ui-pane
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/web-daemon/index.ts:buildObservabilityPorts per-connection sink
+entrypoints:
+  - src/apps/web-daemon/runtime-factory.ts:observable facade ports
+  - src/apps/web-daemon/index.ts:WebSocket observability emitter
+  - apps/web-frontend/src/App.tsx:ObservabilityPane
+activation:
+  - Set QUANTA_OBSERVABILITY=on and connect the web UI; the daemon projects live facade ports and emits snapshot and delta frames to the pane.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - objective, run ledger, and approval state ports
+consumer:
+  - per-connection WebSocket emitter and React ObservabilityPane
+reachable: yes
+surface_findings:
+  - Current daemon wiring projects facade ports into a per-connection sink and real WS e2e receives snapshot then deltas for ledger and approval changes.
+  - The catalog hold claiming ports are not exposed and the emitter is scaffold-only is obsolete; gate-off sends no observability frame.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability-emitter-hellgate.test.ts tests/integration/agent-state-observability-ws-daemon-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Disabled and gate-off cases emit no frames.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-protocol-hellgate.test.ts tests/unit/observability-emitter-hellgate.test.ts tests/integration/agent-state-observability-ws-daemon-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Protocol, snapshot/delta, hostile-port isolation, and real daemon WebSocket delivery passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: Catalog deliberate_hold describes an unwired scaffold, while current runtime facade and daemon sink deliver live observable state.
+disposition: fix-claim
+receipts:
+  - kind: test
+    command: bun test tests/unit/observability-protocol-hellgate.test.ts tests/unit/observability-emitter-hellgate.test.ts tests/integration/agent-state-observability-ws-daemon-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused protocol, emitter, and live WS rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

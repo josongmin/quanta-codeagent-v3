@@ -1,0 +1,62 @@
+version: 1
+feature_id: bench-closure-repair-wiring
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/batch/eval/repair/index.ts:runRepairRounds and src/apps/bench/eval/driver.ts
+entrypoints:
+  - src/apps/bench/cli.ts:run dispatch
+  - src/apps/bench/run-main.ts
+  - src/apps/bench/eval/driver.ts
+activation:
+  - Run a bench job with a preset or knob configuration that enables closure-repair and admits a repairable primary rail.
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer:
+  - src/runner/batch/eval/repair-phase-policy.ts
+  - src/runner/batch/eval/repair/index.ts:runRepairRounds
+  - src/runner/batch/eval/rematerialize.ts:withCandidatePatch
+consumer:
+  - src/apps/bench/eval/driver.ts
+  - src/runner/knobs/presets.ts:agentless-v6-closure-repair
+reachable: yes
+surface_findings:
+  - The default bench posture leaves closure-repair inert; configured closure-repair presets set a repair-round budget and route primary-rail evidence into the repair phase.
+  - A red primary rail blocks false-green agent-command success, and rematerialization probes the candidate patch then restores the sandbox base.
+  - The integration rail drives the production driver with the closure knob on and proves repair attempts occur.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/bench-repair-phase-policy.test.ts tests/unit/repair-primary-rail-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Primary rail off preserves the legacy loop; absent repair rail does not start the closure repair loop.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/bench-closure-repair-gate.test.ts tests/unit/rematerialize.test.ts tests/unit/repair-primary-rail-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Production driver repair activation, rail enforcement, and candidate re-materialization/restoration rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'closure-repair|primaryRailStep|runRepairRounds|withCandidatePatch' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/bench/eval src/runner/batch/eval src/runner/knobs
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Bench driver forwards primary rail state to repair rounds and preset registry supplies closure-repair budget.
+  - kind: test
+    command: bun test tests/unit/bench-repair-phase-policy.test.ts tests/unit/repair-context.test.ts tests/unit/repair-validator-observe-only.test.ts tests/unit/repair-primary-rail-hellgate.test.ts tests/unit/rematerialize.test.ts tests/unit/runner/retry-policy.test.ts tests/integration/bench-closure-repair-gate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Policy, context, validation, primary rail, materialization, retry, and production-driver integration rails passed in the 231-pass bundle.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

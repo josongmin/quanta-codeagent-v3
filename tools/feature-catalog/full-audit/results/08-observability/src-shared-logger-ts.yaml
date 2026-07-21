@@ -1,0 +1,52 @@
+version: 1
+feature_id: src-shared-logger-ts
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/logger.ts:logger
+entrypoints:
+  - src/shared/index.ts
+  - src/apps/cli/index.ts
+activation:
+  - Shared stderr logger is imported by application and library callers; level filtering reads the frozen runtime configuration.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/shared/logger.ts:logger
+consumer:
+  - src/shared/index.ts
+  - src/apps/cli/index.ts
+reachable: yes
+surface_findings:
+  - QUANTA_LOG_LEVEL defaults to info, validates invalid values to info, and keeps stdout reserved for the agent stream.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/logger-threshold.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Level threshold, explicit override, invalid fallback, child inheritance, and line framing passed.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_LOG_LEVEL|runtimeConfig|writeStderr|logger =' src/shared/logger.ts src/shared/runtime-config.ts src/observability/logger.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime config owns threshold parsing and the shared logger owns stderr emission.
+  - kind: test
+    command: bun test tests/unit/logger-threshold.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Logger threshold rail passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

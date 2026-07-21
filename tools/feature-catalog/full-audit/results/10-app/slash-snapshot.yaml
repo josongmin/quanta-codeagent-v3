@@ -1,0 +1,60 @@
+version: 1
+feature_id: slash-snapshot
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/snapshot-cmd.ts:snapshotCmd
+entrypoints:
+  - src/apps/cli/slash/registry-surface.ts:SURFACE_SLASH_COMMANDS
+  - src/apps/cli/repl/surface-compose/dispatch.ts:buildSurfaceDispatch
+activation:
+  - Start the interactive REPL with QUANTA_SHADOW truthy, then run /snapshot, /snapshot N, /snapshot N file, or /snapshot diff N.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/snapshot-cmd.ts:snapshotCmd
+consumer:
+  - src/apps/cli/slash/registry-surface.ts:buildSurfaceSlashCommands
+  - src/apps/cli/repl/surface-compose/core-state.ts:buildSurfaceCoreState
+  - src/apps/cli/repl/surface-compose/dispatch.ts:buildSurfaceDispatch
+reachable: yes
+surface_findings:
+  - The command is always registered in the interactive registry, but its ShadowOdb capability is omitted unless QUANTA_SHADOW is truthy.
+  - The off path reports that the shadow store is not configured and returns zero without touching workspace state.
+  - Restore and rewind preview by default; --yes is required for mutation, and verified-anchor mismatches fail closed before rewind.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/cli-rewind-slash-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The absent shadowOdb case returns the documented no-op response with exit zero.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli-rewind-slash-hellgate.test.ts tests/unit/cli/snapshot-cmd-ordinal-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Registration, list, ordinal rewind, diff, partial restore, confirmation, SHA pinning, and verified-anchor rejection rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'snapshotCmd|shadowOdb|QUANTA_SHADOW' src/apps/cli/slash/registry-surface.ts src/apps/cli/repl/surface-compose src/apps/cli/snapshot-cmd.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The registry, QUANTA_SHADOW gate, context projection, and command body form a complete REPL consumer path.
+  - kind: test
+    command: bun test tests/unit/cli-rewind-slash-hellgate.test.ts tests/unit/cli/snapshot-cmd-ordinal-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused snapshot rails passed in the 294-case 15-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,54 @@
+version: 1
+feature_id: nudge-completed-read-only
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/streaming-dispatch.ts:streamingTurn
+entrypoints:
+  - src/agent/loop/stream-consume.ts:runSamplingScope
+  - src/agent/recovery.ts:resolveTurnAction
+activation:
+  - Normal streaming runs start only read-only concurrency-safe work before turn outcome; recovery receives the assembled message and retained result blocks after streamingTurn settles.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/streaming-dispatch.ts:streamingTurn
+consumer:
+  - src/agent/loop/stream-consume.ts:runSamplingScope
+  - src/agent/recovery.ts:resolveTurnAction
+reachable: yes
+surface_findings:
+  - In-flight results are discarded only on stream_reset tombstones and abort short-circuits; the early dispatch gate is strictly read-only so abort cannot lose a committed mutation.
+  - A refusal preserves already-started read-only result blocks while skipping deferred calls; tool-carrying refusal fallback is intentionally prevented to avoid result loss and re-execution.
+  - Nudge and completed paths operate on assembled results rather than discard them; integrated recovery retains partial output for max_tokens nudge.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/streaming-dispatch.test.ts tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts tests/unit/recovery-hellgate.test.ts tests/integration/agent-recovery-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 73 pass, 0 fail; result ordering, refusal survivor behavior, bounded nudge policy, and integrated retained partial output are covered.
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: stale-claim
+blocker: Catalog purpose must describe abort/tombstone discard semantics, not the contrary nudge/completed result-discard behavior.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'abandonInFlight|resetForTombstone|refusal_fallback|keepMessage|isReadOnly' src/agent/streaming-dispatch.ts src/agent/recovery.ts src/agent/loop/recovery-executor.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The only discard functions are abort/tombstone handlers; recovery guards tool-carrying refusal fallback and nudge retains its assembled state.
+  - kind: test
+    command: bun test tests/unit/streaming-dispatch.test.ts tests/unit/streaming-dispatch-refusal-shortcircuit.test.ts tests/unit/recovery-hellgate.test.ts tests/integration/agent-recovery-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 73 pass, 0 fail across streaming, refusal, and real recovery rails.
+audited_at: "2026-07-19"
+auditor: codex/root-p3-agent-loop
+review_state: approved
+reviewer: codex/cross-review-wave1

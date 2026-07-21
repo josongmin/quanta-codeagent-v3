@@ -1,0 +1,56 @@
+version: 1
+feature_id: quantastatepath
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/internal/argv.ts:resolveStatePath and resolveResume
+entrypoints:
+  - src/apps/cli/internal.ts:CLI resume composition
+activation:
+  - Provide --state or QUANTA_STATE_PATH, and --resume or QUANTA_RESUME when restoring state.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/session/store.ts:saveSession and loadSession
+consumer:
+  - src/apps/cli/internal.ts:runAgent resume path
+reachable: yes
+surface_findings:
+  - CLI argv resolution maps flags and environment to persisted state paths and resume tokens.
+  - With neither input, state and resume are absent, preserving the legacy fresh-session path.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/resume-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No state flag or environment resolves undefined state path.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/resume-wire-hellgate.test.ts tests/integration/cli-resume-e2e.test.ts tests/integration/resume-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: History/session transfer, tool boundary preservation, corrupt-file fallback, isolation, and atomic writes passed.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: conditional
+blocker: "The CLI state lifecycle is explicit resume/state opt-in and default-off."
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'QUANTA_STATE_PATH|QUANTA_RESUME|resolveStatePath|resolveResume' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI argv and internal composition consume both state and resume inputs.
+  - kind: test
+    command: bun test tests/unit/apps/cli/resume-wire-hellgate.test.ts tests/integration/cli-resume-e2e.test.ts tests/integration/resume-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused CLI resume rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

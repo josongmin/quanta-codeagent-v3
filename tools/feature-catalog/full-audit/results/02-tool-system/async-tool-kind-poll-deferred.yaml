@@ -1,0 +1,53 @@
+version: 1
+feature_id: async-tool-kind-poll-deferred
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/async-helper.ts:defineToolAsync and src/tool/poll_deferred.ts:pollDeferredTool
+entrypoints: [src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildAsyncDeferredTools, src/apps/cli/internal.ts:buildTooling]
+activation: [QUANTA_ASYNC_TOOLS=1 registers poll_deferred over a new registry, but no production caller constructs defineToolAsync with that registry.]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/tool/async-helper.ts:defineToolAsync, src/tool/deferred/default-registry.ts:DefaultDeferredResultRegistry]
+consumer: [src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildAsyncDeferredTools, src/apps/cli/internal.ts:buildTooling]
+reachable: no
+surface_findings:
+  - The helper, registry, poll tool, and dispatch envelope are implemented and focused rails prove their injected composition.
+  - The only production QUANTA_ASYNC_TOOLS wire registers poll_deferred. The CLI immediately voids the registry and no non-test source calls defineToolAsync, so no production deferred handle can be created.
+  - Catalog cli:web full is unsupported; the feature is an unwired async-tool seam rather than a usable three-piece loop.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/apps/agent/async-tools-deferred-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The runtime gate returns no tools and no registry when QUANTA_ASYNC_TOOLS is unset.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/async-tool-dispatch-hellgate.test.ts tests/unit/tool/poll-deferred-registry-throw-hellgate.test.ts tests/unit/apps/agent/async-tools-deferred-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 30 focused injected-registry assertions passed for async handles, polling, cancellation, dispatch rendering, gate behavior, and typed registry failures.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: seam-only
+blocker: No production composition root retains and passes the gated registry to any defineToolAsync producer; poll_deferred therefore has no production handle source.
+disposition: wire
+receipts:
+  - kind: source
+    command: rg -n 'buildAsyncDeferredTools|asyncDeferredRegistry|void asyncDeferredRegistry|defineToolAsync\(' src --glob '*.ts'
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The only non-helper hits allocate the poll-only registry and void it in CLI; no production async-tool producer consumes it.
+  - kind: test
+    command: bun test tests/unit/tool/async-tool-dispatch-hellgate.test.ts tests/unit/tool/poll-deferred-registry-throw-hellgate.test.ts tests/unit/apps/agent/async-tools-deferred-wire-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 30 focused injected composition and failure-path tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch9
+review_state: approved
+reviewer: codex/cross-review-wave1

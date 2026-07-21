@@ -1,0 +1,59 @@
+version: 1
+feature_id: bench-python-swebench
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/bench/python-swebench.ts:evaluateWithPythonSwebench
+entrypoints:
+  - src/apps/bench/cli.ts:run dispatch
+  - src/apps/bench/run-main.ts:buildPythonSwebench
+activation:
+  - Set QUANTA_SWEBENCH_PYTHON=1 and run a SWE-bench task with an importable Python swebench harness.
+effective_defaults:
+  cli: na
+  web: na
+  bench: off
+  headless: off
+  daemon: na
+producer:
+  - src/apps/bench/python-swebench.ts:evaluateWithPythonSwebench
+consumer:
+  - src/apps/bench/run-main.ts:buildPythonSwebench
+  - src/apps/bench/eval/verdict.ts:verify
+reachable: yes
+surface_findings:
+  - The standalone bench app gates the official grader behind QUANTA_SWEBENCH_PYTHON=1 and refuses a requested-but-unavailable grader instead of fake-grading.
+  - The grader uses an argv array, temporary predictions directory, import probe, bounded child timeout, and structured unavailable/malformed-report outcomes.
+  - It is not reachable from the interactive CLI; the catalog's cli UI designation conflicts with its own missing interactive-CLI integration evidence.
+off_identity_proof:
+  kind: source
+  command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/apps/bench/run-main.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: buildPythonSwebench returns undefined unless QUANTA_SWEBENCH_PYTHON is enabled.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/swebench-buildargv-sphinx-ra.test.ts tests/integration/bench-python-harness-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real spawned stub covered resolve, non-resolve, argv, malformed report, timeout, unavailable probe, and non-SWE input.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: The feature catalog presents this as a CLI UI while its current surface evidence says it is absent from the interactive CLI; it is reachable only through the bench application.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'buildPythonSwebench|evaluateWithPythonSwebench|QUANTA_SWEBENCH_PYTHON' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/bench src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The gate and evaluator composition are bench-owned; no interactive CLI consumer exists.
+  - kind: test
+    command: bun test tests/unit/swebench-buildargv-sphinx-ra.test.ts tests/integration/bench-python-harness-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Seven real-spawn harness cases and three argv-shim cases passed when run in their focused rail.
+audited_at: "2026-07-20"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,60 @@
+version: 1
+feature_id: gh-pr-open-author-and-ship
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/gh/pr-open.ts:ghPrOpenTool
+entrypoints:
+  - src/agent/tier1/pr-ship.ts:buildPrShipBlock
+  - src/agent/features.ts:PR ship feature block
+activation:
+  - Supply AgentConfig.composeAuthoring with an author LLM, then invoke gh_pr_open from a non-protected feature branch with its origin ref available.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/tool/gh/pr-open.ts:ghPrOpenTool
+  - src/tool/git/compose.ts:composePrText
+consumer:
+  - src/agent/tier1/pr-ship.ts:buildPrShipBlock
+  - src/agent/features.ts:buildPrShipBlock
+reachable: yes
+surface_findings:
+  - The feature block is absent when composeAuthoring is not wired; when present it exposes one write tool that remains subject to permission and plan-mode dispatch gates.
+  - The tool guards detached, protected, and identical branches before authoring or gh work; dryRun authors without invoking gh.
+  - Success uses distinct argv items for gh pr create and emits the create-pr directive only after successful PR creation.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/tool/gh-pr-open.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing authoring dependencies leave both the GH registry and PR-ship block byte-identical without gh_pr_open.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/gh-pr-open.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Authoring, preview, all precondition denials, push hint, draft flag, argv separation, write identity, and registration rails passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'ghPrOpenTool|composePrText|buildPrShipBlock|composeAuthoring' src/tool/gh src/tool/git/compose.ts src/agent/tier1 src/agent/features.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The gated feature builder creates the shared-authoring PR-open tool and feature composition consumes the builder.
+  - kind: test
+    command: bun test tests/unit/tool/gh-pr-open.hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused PR-open rails passed within the 155-pass 10-file command.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

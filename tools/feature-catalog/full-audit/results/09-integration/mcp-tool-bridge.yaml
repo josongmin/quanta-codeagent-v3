@@ -1,0 +1,60 @@
+version: 1
+feature_id: mcp-tool-bridge
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/mcp-bridge.ts:loadMcpTools
+entrypoints:
+  - src/apps/cli/internal.ts:loadMcpToolsOrEmpty
+  - src/apps/web-daemon/runtime-factory.ts:loadMcpToolsOrEmpty
+activation:
+  - QUANTA_MCP_CONFIG points to an MCP server configuration file
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/mcp/client.ts:McpClient
+  - src/agent/mcp-bridge.ts:loadMcpTools
+consumer:
+  - src/apps/cli/internal.ts:loadMcpToolsOrEmpty
+  - src/apps/web-daemon/runtime-factory.ts:loadMcpToolsOrEmpty
+  - src/agent/loop/tool-dispatch.ts:tool registry dispatch
+reachable: yes
+surface_findings:
+  - CLI and web-daemon both load bridged Tool instances and retain the corresponding clients for lifecycle management.
+  - Failed servers are isolated; successful servers still publish sanitized mcp__server__tool names.
+off_identity_proof:
+  kind: source
+  command: git grep -n 'loadMcpToolsOrEmpty|QUANTA_MCP_CONFIG' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli src/apps/web-daemon
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Both hosts resolve config before bridge loading; without configured servers the tool array is empty.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/mcp-client.test.ts tests/integration/mcp-bridge.test.ts tests/integration/mcp-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: A real agent loop invokes namespaced bridged tools, propagates result errors, and survives a failed peer server.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'loadMcpTools|mcpToolName|loadMcpToolsOrEmpty' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent src/mcp src/apps/cli src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Agent bridge creates namespaced tools from live clients and both production host paths consume the result.
+  - kind: test
+    command: bun test tests/unit/mcp-client-errors.test.ts tests/unit/mcp/stdio-pump-death-hellgate.test.ts tests/unit/mcp-inbound-adversarial-hellgate.test.ts tests/unit/agent/mcp-bridge-annotations-hellgate.test.ts tests/integration/mcp-client.test.ts tests/integration/mcp-bridge.test.ts tests/integration/mcp-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused client, bridge, adversarial, process-lifecycle, and real-loop rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

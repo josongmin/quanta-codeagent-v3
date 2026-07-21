@@ -1,0 +1,49 @@
+version: 1
+feature_id: assemble-llm-core
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/llm.ts:composeLLMCore
+entrypoints:
+  - src/apps/cli/internal.ts:composeLLM
+  - src/apps/cli/repl.ts:buildComposedLlm
+activation:
+  - QUANTA_MODEL_FALLBACK supplies comma-separated fallback model ids to composeLLMCore.
+  - Permission mode auto attaches the classifier; interactive TTY additionally enables live usage metering.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: unknown
+  headless: on
+  daemon: unknown
+producer:
+  - src/runner/assemble/llm.ts:buildLLMCore
+  - src/runner/assemble/llm.ts:composeLLMCore
+consumer:
+  - src/apps/cli/repl.ts:buildComposedLlm
+reachable: yes
+surface_findings:
+  - CLI REPL builds a retrying LLM then calls the CLI wrapper, which calls composeLLMCore on every session bootstrap.
+  - Fallback list, auto-classifier, and live usage branches are source-reachable from the wrapper, but no rail drives composeLLMCore with a fake provider through those branches.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: proof-gap
+blocker: No focused test or hermetic runtime receipt activates composeLLMCore's fallback or auto-classifier branch through the production wrapper; fallback-hellgate covers FallbackLLM directly, not this assembly wire.
+disposition: hold
+receipts:
+  - kind: source
+    command: git show 9a12f7a855640a8be1e4654472766bbc445696ea:src/apps/cli/repl.ts | rg -n -C 2 'composeLLM\\('
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: buildComposedLlm creates RetryingLLM and immediately delegates to the CLI wrapper, which delegates to composeLLMCore.
+  - kind: test
+    command: bun test tests/unit/fallback-hellgate.test.ts tests/unit/assemble-gate-log-level.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Fallback engine and gate-log contracts pass, but neither test invokes the composition core; this is supporting rather than ON-efficacy evidence.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch20
+review_state: approved
+reviewer: codex/cross-review-wave1

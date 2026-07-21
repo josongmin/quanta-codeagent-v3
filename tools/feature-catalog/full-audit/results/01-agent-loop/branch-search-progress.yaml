@@ -1,0 +1,63 @@
+version: 1
+feature_id: branch-search-progress
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/branch-search-runner.ts:buildBranchSearchTool
+entrypoints:
+  - src/agent/features.ts:buildSessionFeatures
+  - src/apps/cli/repl/factories/branch-progress.ts:buildBranchProgressOrUndefined
+activation:
+  - AgentConfig.branchSearch present
+  - AgentConfig.shadowOdb present (anchor and delta measurement)
+  - CLI progress tracker present (TTY default, QUANTA_BRANCH_PROGRESS kill switch)
+effective_defaults:
+  cli: resource
+  web: na
+  bench: off
+  headless: resource
+  daemon: na
+producer:
+  - src/agent/branch-search/anchor.ts:shadowOdbAnchor
+  - src/agent/branch-search/progress.ts:formatBranchTrace
+consumer:
+  - src/agent/branch-search-runner.ts:buildBranchSearchAnchor
+  - src/agent/branch-search-runner.ts:buildBranchProgressTrace
+  - src/apps/cli/slash/registry-surface.ts:branchesCmd
+reachable: yes
+surface_findings:
+  - "The anchor is absent unless a ShadowOdb is supplied; its omission preserves candidate shapes without delta."
+  - "CLI tracks trace events and exposes the recorded state through /branches; progress rendering is default-on only for a TTY tracker."
+  - "Bench supplies branchSearch only through its explicit branch-search posture, so it remains default-off there."
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/branch-search-anchor-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Anchor-absent control proves no delta field or anchor work is added to candidates.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/branch-search-anchor-hellgate.test.ts tests/unit/branch-search-minimal-change-hellgate.test.ts tests/unit/cli/branch-search-progress.test.ts tests/integration/dof21-branch-search-progress-real-anchor-proof.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 64 tests pass, including a real git plus ShadowOdb run with measured deltas and formatted trace output.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'shadowOdbAnchor|formatBranchTrace|buildBranchSearchAnchor|buildBranchProgressTrace' src/agent/branch-search-runner.ts src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production runner constructs the anchor and trace adapter; the CLI retains progress state and renders /branches.
+  - kind: test
+    command: bun test tests/unit/branch-search-anchor-hellgate.test.ts tests/unit/branch-search-minimal-change-hellgate.test.ts tests/unit/cli/branch-search-progress.test.ts tests/integration/dof21-branch-search-progress-real-anchor-proof.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 64 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/p1-agentloop-subagent
+review_state: approved
+reviewer: codex/cross-review-wave1

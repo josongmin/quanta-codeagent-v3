@@ -1,0 +1,61 @@
+version: 1
+feature_id: reasoning-carryover
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/factory.ts:resolveReasoningCarryover
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/llm/factory.ts:createLLM
+activation:
+  - QUANTA_REASONING_CARRYOVER=1 selects per-session carry-over stores for OpenAI Responses and ChatGPT OAuth adapters.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/openai-responses-wire.ts:normalizeResponsesReasoningItem
+  - src/llm/responses-stream.ts:defaultResponsesReasoningCarryoverStore
+consumer:
+  - src/llm/responses-stream.ts:streamResponsesSurface
+  - src/llm/adapters/openai-responses.ts:OpenAIResponsesAdapter
+  - src/llm/adapters/chatgpt-oauth.ts:ChatGPTOAuthAdapter
+reachable: yes
+surface_findings:
+  - The factory resolves the strict env gate only for Responses-family adapters; each enabled adapter allocates an isolated session store.
+  - ON captures opaque encrypted_content, prepends it to the next same-route request, adds include and store:false, and clears stale route data when a turn has no usable reasoning.
+  - OFF omits the store, reasoning item, and include field; Anthropic and chat-completions remain outside this path.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/reasoning-carryover-hellgate.test.ts tests/unit/reasoning-carryover-live-e2e-hellgate.test.ts tests/integration/reasoning-carryover-factory-gate-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset gate preserves the legacy outbound body with no carry-over data or include field.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/reasoning-carryover-hellgate.test.ts tests/unit/reasoning-carryover-e2e-hellgate.test.ts tests/unit/reasoning-carryover-live-hellgate.test.ts tests/unit/reasoning-carryover-live-e2e-hellgate.test.ts tests/integration/reasoning-carryover-factory-gate-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 30 unit, two-turn, live-adapter, route-isolation, malformed-ciphertext, and factory-env gate cases pass.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'reasoningCarryover|ResponsesReasoningCarryoverStore|normalizeResponsesReasoningItem|resolveReasoningCarryover' src/shared/runtime-config.ts src/llm/factory.ts src/llm/openai-responses-wire.ts src/llm/responses-stream.ts src/llm/adapters"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The env resolver, factory, adapter-owned store, capture, persistence, and re-emission seams are joined on the live Responses path.
+  - kind: test
+    command: bun test tests/unit/reasoning-carryover-hellgate.test.ts tests/unit/reasoning-carryover-e2e-hellgate.test.ts tests/unit/reasoning-carryover-live-hellgate.test.ts tests/unit/reasoning-carryover-live-e2e-hellgate.test.ts tests/integration/reasoning-carryover-factory-gate-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 30 focused wire, lifecycle, default-off, and factory-gate cases pass.
+audited_at: "2026-07-19"
+auditor: codex/p1-llm-extended
+review_state: approved
+reviewer: codex/cross-review-wave1

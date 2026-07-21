@@ -1,0 +1,60 @@
+version: 1
+feature_id: canvas-rich-diff-usage
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: apps/web-frontend/src/App.tsx:App
+entrypoints:
+  - apps/web-frontend/src/App.tsx
+  - apps/web-frontend/src/components/ObservabilityPane.tsx
+activation:
+  - Enable the canvas data source and receive context.usage or tool.diff frames in the web frontend.
+effective_defaults:
+  cli: na
+  web: off
+  bench: na
+  headless: na
+  daemon: off
+producer:
+  - apps/web-frontend/src/ws/canvas-hooks.ts:useContextUsage
+  - apps/web-frontend/src/ws/canvas-hooks.ts:useToolDiffs
+consumer:
+  - apps/web-frontend/src/components/ObservabilityPane.tsx:UsageBreakdownPanel
+  - apps/web-frontend/src/components/ObservabilityPane.tsx:DiffPanel
+reachable: yes
+surface_findings:
+  - App creates a CanvasSource from client.onCanvas, consumes context usage and tool diffs, and passes both to ObservabilityPane; UsageBreakdownPanel is therefore live when frames arrive.
+  - DiffPanel is live for tool.diff frames but always receives the default inline mode. No production caller selects DiffView split mode, so the rich split renderer remains an unused option.
+  - The catalog hold claiming UsageBreakdownPanel is fed null until client.onCanvas is wired is stale.
+off_identity_proof:
+  kind: source
+  command: git grep -n -E 'useContextUsage|useToolDiffs|UsageBreakdownPanel|DiffPanel' 9a12f7a855640a8be1e4654472766bbc445696ea -- apps/web-frontend/src/App.tsx apps/web-frontend/src/components/ObservabilityPane.tsx
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Without canvas frames the hooks retain null or empty values and all rich panes self-hide.
+on_efficacy_proof: null
+failure_posture: degraded
+security_posture: na
+observability: na
+verdict: conditional
+blocker: No production DiffPanel or DiffView caller passes mode split; web component rails cannot execute in this checkout because React dependencies are absent.
+disposition: wire
+receipts:
+  - kind: source
+    command: git grep -n -E 'client\.onCanvas|useContextUsage|useToolDiffs|<UsageBreakdownPanel|<DiffPanel' 9a12f7a855640a8be1e4654472766bbc445696ea -- apps/web-frontend/src/App.tsx apps/web-frontend/src/components/ObservabilityPane.tsx
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The app wires canvas events into both live panel inputs.
+  - kind: source
+    command: git grep -n -E 'mode=.split.|mode: .split.' 9a12f7a855640a8be1e4654472766bbc445696ea -- apps/web-frontend/src
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Split mode occurs only in the component test; no production caller opts into it.
+  - kind: test
+    command: cd apps/web-frontend && bun test src/components/canvas/SplitDiffView.test.tsx src/components/canvas/CollapsibleSection.test.tsx src/components/canvas/Swatch.test.tsx src/components/canvas/UsageBreakdownPanel.test.tsx
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: fail
+    evidence: Execution is blocked by missing react/jsx-dev-runtime in this checkout before test collection.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

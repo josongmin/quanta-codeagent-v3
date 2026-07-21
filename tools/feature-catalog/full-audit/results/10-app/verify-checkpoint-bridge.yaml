@@ -1,0 +1,58 @@
+version: 1
+feature_id: verify-checkpoint-bridge
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/guards/build.ts:buildGuardChain
+entrypoints:
+  - src/agent/guards/build.ts:buildGuardChain
+  - src/agent/guards/verify-guard.ts:createVerifyGuard
+activation:
+  - A configured verify guard plus config.shadowOdb constructs the bridge; each cleared finish attempt invokes markVerified for config.cwd.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/agent/verify-checkpoint-bridge.ts:defaultVerifyCheckpointBridge
+consumer:
+  - src/agent/guards/build.ts:buildGuardChain
+  - src/agent/guards/verify-guard.ts:createVerifyGuard
+reachable: yes
+surface_findings:
+  - buildGuardChain creates and injects the bridge only when shadowOdb is configured, preserving the default-off path.
+  - A verify pass fires the bridge asynchronously; markVerified failures are swallowed with a warning so verification policy outcome is unchanged.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/verify-checkpoint-bridge-wire-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Without shadowOdb the bridge is neither constructed nor called on a verify pass.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/verify-checkpoint-bridge-wire-hellgate.test.ts tests/unit/verify-checkpoint-bridge-edge-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Guard integration forwards cwd on pass, excludes failed verification, preserves no-throw behavior, and emits warning breadcrumbs on failure.
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: The catalog says the bridge is helper-only with no automatic wiring, but buildGuardChain constructs it from config.shadowOdb and injects it into createVerifyGuard.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'defaultVerifyCheckpointBridge|verifyCheckpoint|onVerifySuccess|markVerified' src/agent/guards/build.ts src/agent/guards/verify-guard.ts src/agent/verify-checkpoint-bridge.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Optional construction, guard injection, pass-only invocation, and no-throw bridge implementation are connected.
+  - kind: test
+    command: bun test tests/unit/verify-checkpoint-bridge-wire-hellgate.test.ts tests/unit/verify-checkpoint-bridge-edge-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused bridge and guard proof is included in the 157-pass batch.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,38 @@
+version: 1
+feature_id: repl-heuristics-inventory-audit
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: docs/architecture/repl-surface-map.md
+entrypoints: []
+activation:
+  - Manually run the documented numeric-literal search during a CLI maintenance audit.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - documented ripgrep inventory command
+consumer: []
+reachable: no
+surface_findings:
+  - This is a static governance inventory and manual audit procedure, not a runtime feature or executable report generator.
+off_identity_proof: null
+on_efficacy_proof: null
+failure_posture: na
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: No in-repo executable inventory artifact, caller, or automated check exists for the stated classification count.
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'ARBITRARY|DOC-BACKED|ENV-BACKED|repl-surface-map' 9a12f7a855640a8be1e4654472766bbc445696ea -- docs src/apps/cli tools
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The feature is represented as documentation and search guidance rather than a runtime or generated audit consumer.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

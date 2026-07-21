@@ -1,0 +1,65 @@
+version: 1
+feature_id: codex-r2-sqlite-session-registry
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/session-resource-registry/global.ts:buildDefaultRegistry
+entrypoints:
+  - src/apps/cli/index.ts:runCli
+  - src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+activation:
+  - QUANTA_SESSION_REGISTRY_SQLITE_PATH is a non-empty database path whose parent is usable.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/agent/session-resource-registry/sqlite-adapter/index.ts:createSqliteSessionResourceRegistry
+  - src/agent/session-resource-registry/sqlite-adapter/gc.ts:sweepSqliteRegistry
+consumer:
+  - src/agent/session-resource-registry/global.ts:buildDefaultRegistry
+  - src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2
+reachable: yes
+surface_findings:
+  - The global registry selects SQLite before disk and in-memory when QUANTA_SESSION_REGISTRY_SQLITE_PATH is set; the live host assembler consumes that registry for every configured session.
+  - The catalog's default-OFF hold is stale: the promised follow-up env swap already exists in global.ts, with SQLite precedence and a no-throw fallback chain.
+  - WAL, schema, rehydration, bounded retention, and same-id same-reference port invariants have focused proof; an unusable database falls through without aborting host startup.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/session-registry-env-swap-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent or empty SQLite path retains the in-memory singleton and a selected registry remains stable after later environment mutation.
+on_efficacy_proof:
+  kind: test
+  command: bun test src/agent/session-resource-registry/sqlite-adapter/__tests__/schema.hellgate.test.ts src/agent/session-resource-registry/sqlite-adapter/__tests__/serializer.hellgate.test.ts src/agent/session-resource-registry/sqlite-adapter/__tests__/sqlite-store.hellgate.test.ts src/agent/session-resource-registry/sqlite-adapter/__tests__/gc.hellgate.test.ts tests/unit/session-registry-env-swap-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 82 focused cases passed, including env selection, precedence over disk, WAL configuration, rehydration, retention, and fallback behavior.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'sessionRegistrySqlitePath|createSqliteSessionResourceRegistry|getGlobalSessionResourceRegistry|buildCallerOwnedRegistryWithTelemetry' src/agent/session-resource-registry/global.ts src/agent/session-resource-registry/caller-owned-builder.ts src/host/runtime/agent-config-assembler.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The runtime config selects SQLite first and the production assembler obtains session resources through its global or caller-owned registry path.
+  - kind: test
+    command: bun test src/agent/session-resource-registry/sqlite-adapter/__tests__/schema.hellgate.test.ts src/agent/session-resource-registry/sqlite-adapter/__tests__/serializer.hellgate.test.ts src/agent/session-resource-registry/sqlite-adapter/__tests__/sqlite-store.hellgate.test.ts src/agent/session-resource-registry/sqlite-adapter/__tests__/gc.hellgate.test.ts tests/unit/session-registry-env-swap-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 82 pass, 0 fail.
+  - kind: source
+    command: bun fc reachability --strict --symbols
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: No L3 feature module or declared symbol is unreachable or dead API.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-persistence
+review_state: approved
+reviewer: codex/cross-review-wave1

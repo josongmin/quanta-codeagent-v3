@@ -1,0 +1,61 @@
+version: 1
+feature_id: localize-phase-guard
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/dispatch/preflight-consults.ts:consultLocalizePhase"
+entrypoints:
+  - "src/agent/loop/session-bootstrap.ts:attachLocalizePhase"
+  - "src/agent/dispatch.ts:PRE_ADMISSIBILITY_CONSULTS"
+  - "src/runner/batch/eval/driver/config-build.ts:buildConfig"
+activation:
+  - "Bench posture resolves a positive localizePhase phase1Turns and carries it into the run AgentConfig."
+  - "The loop creates per-run state and every dispatch preflight consult blocks closed-set mutating tools while turn is in Phase 1."
+effective_defaults:
+  cli: off
+  web: unknown
+  bench: on
+  headless: off
+  daemon: unknown
+producer:
+  - "src/agent/localize-phase-guard.ts:decideLocalizePhase"
+  - "src/agent/loop-helpers.ts:attachLocalizePhase"
+consumer:
+  - "src/agent/dispatch/preflight-consults.ts:consultLocalizePhase"
+  - "src/agent/dispatch.ts:PRE_ADMISSIBILITY_CONSULTS"
+reachable: yes
+surface_findings:
+  - "The loop owns and increments one state object per run; dispatch executes the consult before later admissibility and tool execution."
+  - "Bench config-build carries posture localizePhase into AgentConfig; absent or invalid configuration is identity-pass, while an active block emits a decision event."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/loop-localize-phase.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Absent localizePhase leaves first-turn edit on the legacy path and omits localize phase state."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/localize-phase-guard-hellgate.test.ts tests/unit/loop-localize-phase.test.ts tests/unit/localize-phase-decision-observe-emit.test.ts tests/unit/localize-phase-apply-patch-capability-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "79 tests pass: loop-to-dispatch blocking, exact phase boundaries, apply_patch coverage, and per-deny decision telemetry."
+failure_posture: fail-closed
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'attachLocalizePhase|consultLocalizePhase|PRE_ADMISSIBILITY_CONSULTS|localizePhase' src/agent/loop src/agent/dispatch.ts src/agent/dispatch/preflight-consults.ts src/runner/batch/eval/driver/config-build.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Bench construction, loop state setup, and dispatch preflight are connected on the production path."
+  - kind: test
+    command: "bun test tests/unit/localize-phase-guard-hellgate.test.ts tests/unit/loop-localize-phase.test.ts tests/unit/localize-phase-decision-observe-emit.test.ts tests/unit/localize-phase-apply-patch-capability-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "79 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch9
+review_state: approved
+reviewer: codex/cross-review-wave1

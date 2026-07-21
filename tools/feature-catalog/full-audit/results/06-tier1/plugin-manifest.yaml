@@ -1,0 +1,50 @@
+version: 1
+feature_id: plugin-manifest
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/skill/plugin-loader.ts:discoverPlugins and loadPluginManifest"
+entrypoints: ["Direct library caller of src/skill/plugin-loader.ts"]
+activation: ["A host explicitly calls discoverPlugins and then loadPluginManifest for a .quanta-plugin root"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: ["src/skill/plugin-manifest.ts strict Zod schemas", "src/skill/plugin-loader.ts filesystem discovery and loader"]
+consumer: ["No production composition-root caller imports src/skill/plugin-loader.ts"]
+reachable: no
+surface_findings: ["The manifest schema and loader are implemented and tested, including strict validation, .mcp.json parsing, depth cap, skip set, and deterministic sort.", "Production plugin activation instead uses the separate src/agent/plugin-discovery scanner for .quanta/plugins; it does not call this .quanta-plugin loader or enroll its skills into buildSessionFeatures."]
+off_identity_proof:
+  kind: source
+  command: "rg -n 'loadPluginManifest|discoverPlugins' src --glob '*.ts'"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "No non-test production import consumes src/skill/plugin-loader.ts; ordinary surfaces do not discover or load this manifest shape."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/plugin-manifest-schema.test.ts tests/unit/plugin-loader.test.ts tests/integration/plugin-discovery.test.ts tests/integration/plugin-discovery-hell-e2e.test.ts tests/integration/plugin-x-skill-cross-hell-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "71 loader and schema tests pass, including malformed input, discovery boundaries, determinism, and plugin-to-skill parsing."
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: seam-only
+blocker: "No production composition root calls this loader or maps discovered plugin skills and MCP servers into the session registry."
+disposition: wire
+receipts:
+  - kind: source
+    command: "rg -n 'loadPluginManifest|discoverPlugins' src --glob '*.ts'"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The live host activation scanner is src/agent/plugin-discovery; no production path invokes this loader."
+  - kind: test
+    command: "bun test tests/unit/plugin-manifest-schema.test.ts tests/unit/plugin-loader.test.ts tests/integration/plugin-discovery.test.ts tests/integration/plugin-discovery-hell-e2e.test.ts tests/integration/plugin-x-skill-cross-hell-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "All 71 focused manifest and loader tests passed; one documented future cross-capability test remains todo."
+audited_at: "2026-07-19"
+auditor: "codex/p2-tier1-batch13"
+review_state: approved
+reviewer: codex/cross-review-wave1

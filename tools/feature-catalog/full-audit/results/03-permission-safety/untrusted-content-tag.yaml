@@ -1,0 +1,62 @@
+version: 1
+feature_id: untrusted-content-tag
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/untrusted.ts:embedUntrusted
+entrypoints:
+  - src/agent/prompt.ts:buildSectionedSystemBlocks
+  - src/agent/context-change/inject.ts:injectContextChangeMessages
+  - src/agent/mention-injection/inject-messages.ts:injectMentionMessages
+activation:
+  - "Any normal prompt assembly that emits a dynamic reminder, hook context, mention, or IDE/context-change fragment."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/shared/untrusted.ts:escapeBoundary
+  - src/shared/untrusted.ts:embedUntrusted
+consumer:
+  - src/agent/prompt.ts:buildSectionedSystemBlocks
+  - src/agent/context-change/inject.ts:injectContextChangeMessages
+  - src/agent/mention-injection/inject-messages.ts:injectMentionMessages
+  - src/tool/browser/result-map.ts:guardPageText
+reachable: yes
+surface_findings:
+  - "The canonical shared helper is re-exported through agent/untrusted and receives live prompt fragments in normal prompt, context-change, mention, and browser-result paths."
+  - "Legacy reminder and IDE aliases delegate to escapeBoundary rather than retaining independent escaping behavior."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/agent/untrusted-embed.test.ts tests/integration/reminder-injection-through-loop-hell-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Unit rail proves own-tag and system-reminder boundary defang with benign byte identity; real-loop rail proves a forged reminder boundary cannot escape the live prompt wrapper."
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'embedUntrusted\\(|escapeBoundary\\(' src/agent/prompt.ts src/agent/ide-context.ts src/agent/context-change/inject.ts src/agent/mention-injection/inject-messages.ts src/tool/browser/result-map.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Live dynamic-fragment assembly delegates to the shared boundary helper, including compatibility aliases."
+  - kind: test
+    command: "bun test tests/unit/agent/untrusted-embed.test.ts tests/integration/reminder-injection-through-loop-hell-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The focused helper and live-loop injection rails passed in the audit batch."
+  - kind: source
+    command: "bun fc reachability"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "No L3+ feature reachability exception was reported."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch5
+review_state: approved
+reviewer: codex/cross-review-wave1

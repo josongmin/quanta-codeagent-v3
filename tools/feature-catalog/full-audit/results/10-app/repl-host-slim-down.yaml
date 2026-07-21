@@ -1,0 +1,54 @@
+version: 1
+feature_id: repl-host-slim-down
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/factories/index.ts
+entrypoints:
+  - src/apps/cli/index.ts
+  - src/apps/cli/repl.ts:runRepl
+activation:
+  - runRepl imports the factory barrel and composes the surface adapters into the interactive session-loop options.
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/apps/cli/repl/factories/index.ts
+  - src/apps/cli/repl/factories/lifecycle.ts:buildLifecycleBundle
+consumer:
+  - src/apps/cli/repl.ts:runRepl
+  - src/apps/cli/repl/session-loop-options.ts:buildSessionLoopOptions
+reachable: yes
+surface_findings:
+  - repl.ts imports the factory barrel and does not define the ten lifted build helpers inline.
+  - Each factory accepts CliFeatureConfig and retains the default-off adapter behavior when its underlying feature gate is disabled.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts tests/unit/cli-session-commands.test.ts tests/unit/apps/cli/repl-host-slim-hellgate.test.ts tests/unit/apps/headless/headless-second-consumer-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The combined focused rail passed 142 tests, including factory uniqueness, barrel import, source-fence, and default-off construction cases.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'from "./repl/factories"|buildLifecycleBundle' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/repl.ts src/apps/cli/repl/factories
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The snapshot REPL consumes the factory barrel and the barrel re-exports the lifted factory implementations.
+  - kind: test
+    command: bun test tests/unit/apps/cli/session-cmd-shim-removal-hellgate.test.ts tests/unit/cli-session-commands.test.ts tests/unit/apps/cli/repl-host-slim-hellgate.test.ts tests/unit/apps/headless/headless-second-consumer-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 142 focused tests passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

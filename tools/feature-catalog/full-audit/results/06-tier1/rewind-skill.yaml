@@ -1,0 +1,50 @@
+version: 1
+feature_id: rewind-skill
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/skill/system-skills/rewind/index.ts
+entrypoints:
+  - src/agent/tier1/skill.ts:buildSkillTier
+activation:
+  - System skill discovery includes rewind in configured skill sessions; its shadow operations require a separately wired shadow store.
+effective_defaults:
+  cli: resource
+  web: resource
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/skill/system-skills/rewind/index.ts:triggerRewind
+consumer:
+  - src/agent/tier1/skill.ts:buildSkillTier
+reachable: yes
+surface_findings:
+  - Skill discovery and system collision protection are live; shadow restore efficacy is resource-backed by ShadowOdb.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/shadow-odb-rewind-extensions-hellgate.test.ts tests/unit/cli-rewind-slash-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Shadow restore safety and CLI rewind rails passed.
+failure_posture: fail-loud
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg 'discoverSystemSkills|triggerRewind|shadowOdb' src/skill src/agent/tier1 src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: System discovery reaches the live skill tier; shadow capability remains explicitly resource-gated.
+  - kind: test
+    command: bun test tests/unit/shadow-odb-rewind-extensions-hellgate.test.ts tests/unit/cli-rewind-slash-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Rewind safety rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

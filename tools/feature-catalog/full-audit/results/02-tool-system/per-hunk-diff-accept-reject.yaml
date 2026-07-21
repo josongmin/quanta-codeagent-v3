@@ -1,0 +1,50 @@
+version: 1
+feature_id: per-hunk-diff-accept-reject
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/internal/context-binding/approval-protocol.ts:resolveApproval
+entrypoints: [src/apps/cli/index.ts]
+activation: ["QUANTA_HUNK_APPROVAL=1", "previewable action with at least two hunks"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/apps/cli/repl/hunk-select.ts:parseHunkSelection, src/runner/hunk-apply.ts:applyHunkSelection]
+consumer: [src/host/runtime/internal/context-binding/approval-protocol.ts:resolveApproval]
+reachable: yes
+surface_findings: ["The opt-in CLI selection path and the web approval resolver share the staleness-guarded executor; web has no dedicated selection UI."]
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/host/runtime-approval-hunk-partial-apply-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off selection is ignored and produces the legacy whole-call behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/cli/hunk-select.test.ts tests/unit/runner/hunk-apply.test.ts tests/unit/host/runtime-approval-hunk-partial-apply-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 39 tests prove parsing, partial atomic writes, stale denial, mode preservation, and composition-layer activation.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "hunkApproval|QUANTA_HUNK_APPROVAL" src/host/runtime src/shared/runtime-config.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Runtime config guards the approval-protocol consumer.
+  - kind: test
+    command: bun test tests/unit/cli/hunk-select.test.ts tests/unit/runner/hunk-apply.test.ts tests/unit/host/runtime-approval-hunk-partial-apply-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 39 pass, 0 fail.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

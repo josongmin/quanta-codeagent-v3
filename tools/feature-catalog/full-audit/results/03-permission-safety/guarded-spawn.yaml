@@ -1,0 +1,56 @@
+version: 1
+feature_id: guarded-spawn
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/runtime/guarded-spawn.ts:withSpawnedChild"
+entrypoints:
+  - "src/runtime/shell.ts:runShell"
+  - "src/runtime/sandbox.ts:LocalSandbox.run"
+  - "src/runtime/sandbox.ts:DockerSandbox.run"
+activation:
+  - "Every shell or sandbox child process path invokes withSpawnedChild around the live child lifecycle."
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - "src/runtime/guarded-spawn.ts:withSpawnedChild"
+  - "src/runtime/guarded-spawn.ts:escalatingKill"
+consumer:
+  - "src/runtime/shell.ts:runShell"
+  - "src/runtime/sandbox.ts:LocalSandbox.run"
+  - "src/runtime/sandbox.ts:DockerSandbox.run"
+reachable: yes
+surface_findings:
+  - "Shell and both sandbox implementations wrap their spawned child with the same guard, including timer/listener disarm and throw-path kill."
+  - "The kill implementation routes through process-tree escalation where configured and rejects pid 0 from group signalling."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/runtime/guarded-spawn.test.ts tests/unit/runtime/kill-escalation-and-worktree-retry.test.ts tests/unit/runtime/process-tree-kill-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Normal cleanup, original-error preservation, SIGTERM-to-SIGKILL escalation, whole-tree kill, pid-0 exclusion, and no post-reap kill all passed."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'withSpawnedChild|escalatingKill' src/runtime/shell.ts src/runtime/sandbox.ts src/runtime/guarded-spawn.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "All three production child-process owners import and call the shared lifecycle guard."
+  - kind: test
+    command: "bun test tests/unit/runtime/guarded-spawn.test.ts tests/unit/runtime/kill-escalation-and-worktree-retry.test.ts tests/unit/runtime/process-tree-kill-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Focused lifecycle and process-tree security rail passed in the 270-test audit batch."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch8
+review_state: approved
+reviewer: codex/cross-review-wave1

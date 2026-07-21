@@ -1,0 +1,60 @@
+version: 1
+feature_id: agent-jobs-batch
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/apps/cli/batch-cmd.ts:runBatchCmd and src/agent/tier1/subagent.ts:buildSubagentBlock"
+entrypoints:
+  - "src/apps/cli/index.ts:quanta batch dispatch"
+  - "src/agent/tier1/subagent.ts:spawn_agents_on_csv registration"
+activation:
+  - "explicit quanta batch invocation"
+  - "QUANTA_SPAWN_AGENTS_CSV=true with subagent capability enabled"
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - "src/agent/batch-jobs/runner.ts:BatchJobRunner"
+  - "src/agent/batch-jobs-dispatch.ts:buildInMemoryBatchRunPort"
+consumer:
+  - "src/apps/cli/batch-cmd.ts:runBatchCmd constructs SQLite store and real row dispatch adapter"
+  - "src/agent/tier1/subagent.ts:spawnAgentsCsvTool receives the real SubagentRunner-backed port"
+reachable: yes
+surface_findings:
+  - "The human CLI command is explicit-submit only; importing the command module causes no runner or filesystem side effect."
+  - "The model-facing CSV tool is absent until the subagent capability and QUANTA_SPAWN_AGENTS_CSV gate are both enabled."
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/batch-cmd-wire-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Import-only and invalid or help command controls make zero runner calls and no output writes."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/agent-batch-jobs-hellgate.test.ts tests/unit/batch-cmd-wire-hellgate.test.ts tests/unit/spawn-agents-csv-hellgate.test.ts tests/unit/cli/batch-cmd-resume-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The 88 selected cases cover real row dispatch, durable restart resume, schema failure isolation, bounded concurrency, CSV export, and the gated model tool."
+failure_posture: fail-loud
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'runBatchCmd|enableSpawnAgentsCsv|spawnAgentsCsvTool|buildInMemoryBatchRunPort' src/apps/cli src/agent src/tool"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Both explicit CLI and opt-in model-tool consumers reach the shared batch runner through real subagent dispatch adapters."
+  - kind: test
+    command: "bun test tests/unit/agent-batch-jobs-hellgate.test.ts tests/unit/batch-cmd-wire-hellgate.test.ts tests/unit/spawn-agents-csv-hellgate.test.ts tests/unit/cli/batch-cmd-resume-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "All selected batch domain, CLI wire, tool, and durable-resume rails passed with zero failures."
+audited_at: "2026-07-19"
+auditor: codex/p1-resilience-tier1
+review_state: approved
+reviewer: codex/cross-review-wave1

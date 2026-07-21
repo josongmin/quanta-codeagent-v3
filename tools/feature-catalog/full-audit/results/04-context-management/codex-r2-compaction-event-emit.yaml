@@ -1,0 +1,61 @@
+version: 1
+feature_id: codex-r2-compaction-event-emit
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/agent/loop/compaction-wire.ts:emitCompactionEvent"
+entrypoints:
+  - "src/host/runtime/agent-config-assembler.ts:wireSessionResourcesAndCodexR2"
+  - "src/agent/loop/compaction-wire.ts:maybeCompact"
+  - "src/agent/loop/recovery-executor.ts:applyNonSuccessRecoveryAction"
+activation:
+  - "Assembler installs compactionEventEmit whenever it supplies the shared typed-event store."
+  - "A compaction event is emitted only after a qualifying proactive, reactive, micro, or manual compaction path occurs."
+effective_defaults:
+  cli: on
+  web: on
+  bench: unknown
+  headless: on
+  daemon: on
+producer:
+  - "src/agent/loop/compaction-wire.ts:emitCompactionEvent"
+  - "src/agent/loop/recovery-executor.ts:applyNonSuccessRecoveryAction"
+consumer:
+  - "src/agent/codex-r2-wire-install/install.ts:buildCompactionEventEmit"
+  - "src/memory/typed-event/in-memory-store.ts:createInMemoryTypedHistoryEventStore"
+reachable: yes
+surface_findings:
+  - "The assembler populates compactionEventEmit from the default store, so port presence is not default-OFF on assembled surfaces."
+  - "Proactive, reactive, micro, and user-requested compaction sites call the shared emitter; absence remains safe only for manually assembled configs."
+off_identity_proof:
+  kind: source
+  command: "rg fillCompactionEmit and wireSessionResourcesAndCodexR2 in src/agent/codex-r2-wire-install src/host/runtime/agent-config-assembler.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: fail
+  evidence: "The ledger's default-OFF port-presence claim is contradicted by unconditional store-backed slot installation in the shared assembler."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/loop-reactive-compaction-emit-hellgate.test.ts tests/unit/agent/compaction-event-reason-hellgate.test.ts tests/integration/loop-d4-d5-baseline-e2e.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Reactive, micro, manual, and real-loop compaction rails prove event emission shape, timing, and non-fatal observer failures."
+failure_posture: degraded
+security_posture: na
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg emitCompactionEvent in src/agent/loop/compaction-wire.ts src/agent/loop/recovery-executor.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "All active compaction call sites route through the same configured emitter."
+  - kind: test
+    command: "bun test tests/unit/loop-reactive-compaction-emit-hellgate.test.ts tests/unit/agent/compaction-event-reason-hellgate.test.ts tests/integration/loop-d4-d5-baseline-e2e.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "16 pass, 0 fail across reactive, micro, manual, and real-loop compaction rails."
+audited_at: "2026-07-19"
+auditor: codex/p1-context-events
+review_state: approved
+reviewer: codex/cross-review-wave1

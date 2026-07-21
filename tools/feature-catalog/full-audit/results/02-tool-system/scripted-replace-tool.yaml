@@ -1,0 +1,54 @@
+version: 1
+feature_id: scripted-replace-tool
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: "src/tool/scripted-replace.ts:scriptedReplaceTool"
+entrypoints:
+  - "src/tool/index.ts:buildBaseDefaultTools"
+  - "src/host/runtime/agent-arg-builder/gated-tool-ports.ts:buildBaseRegistry"
+activation:
+  - "scripted_replace is included in buildDefaultTools and is available to every registry built by production composition roots."
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - "src/tool/scripted-replace.ts:applyScriptedReplace"
+  - "src/tool/scripted-replace.ts:scriptedReplaceTool"
+consumer:
+  - "src/tool/index.ts:buildBaseDefaultTools"
+  - "src/tool/registry.ts:ToolRegistry.run"
+reachable: yes
+surface_findings:
+  - "The default registry exposes scripted_replace without a runtime gate; agent routing determines whether it is invoked."
+  - "The execution path uses jailed atomic writes, stale-read guard, typed failures, and regex safety checks."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/scripted-replace.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "The 51 selected checks cover literal and regex replacements, ReDoS rejection, FS jail, typed failures, stale-read denial, atomic rename, mode retention, and worktree resolution."
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'scriptedReplaceTool|scripted_replace|guardWrite|writeFileAtomic|isReDoSSuspicious' src/tool/index.ts src/tool/scripted-replace.ts src/host/runtime/agent-arg-builder/gated-tool-ports.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Default registration reaches the tool and its implementation applies jail, stale-read, atomic-write, and ReDoS controls before committing bytes."
+  - kind: test
+    command: "bun test tests/unit/scripted-replace.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "51 focused scripted-replace checks passed."
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch3
+review_state: approved
+reviewer: codex/cross-review-wave1

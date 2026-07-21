@@ -1,0 +1,60 @@
+version: 1
+feature_id: landlock-phase2
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/sandbox-wire.ts:wrapLinuxShellArgv
+entrypoints:
+  - src/apps/cli/index.ts:installCliSandbox
+  - src/runtime/shell.ts:runShell
+activation:
+  - Set QUANTA_SANDBOX to a restrictive profile on Linux.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer:
+  - src/runtime/os-sandbox/bubblewrap.ts:compileBubblewrapArgs
+  - src/runtime/os-sandbox/default.ts:defaultOsSandbox
+consumer:
+  - src/apps/cli/sandbox-wire.ts:buildCliOsSandbox
+  - src/runtime/shell.ts installed ShellSandboxSlot
+reachable: yes
+surface_findings:
+  - The portable OS-sandbox port compiles bubblewrap argv and refuses restrictive requests when its backend is unavailable; focused unit rails prove that port behavior.
+  - The production CLI shell slot is a separate path. On Linux with no bwrap or landlock-cli, wrapLinuxShellArgv returns the original argv with a degradation reason, and runShell still executes it.
+  - The real bwrap integration test reports its non-Linux precondition and skips both actual-fence cases on this macOS audit host.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/os-sandbox-bubblewrap-hellgate.test.ts tests/unit/os-sandbox-fail-closed-refusal-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Off and danger-full-access profiles retain passthrough behavior while restrictive port requests refuse when no backend exists.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/os-sandbox-bubblewrap-hellgate.test.ts tests/unit/os-sandbox-fail-closed-refusal-hellgate.test.ts tests/unit/os-sandbox-linux-hellgate.test.ts tests/integration/os-sandbox-bwrap-real-exec-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Compiler and fail-closed port rails pass; real bwrap execution is visibly skipped on non-Linux.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: The catalog says a requested restrictive backend never runs unsandboxed, but the live CLI ShellSandboxSlot returns the original argv on Linux backend absence and runShell executes that degraded passthrough.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: git grep -n -E 'installCliSandbox|wrapLinuxShellArgv|linux-bwrap-missing|installShellSandbox|getShellSandbox' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli src/runtime/shell.ts src/runtime/shell-sandbox-holder.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI installs a shell slot whose missing-backend branch preserves the original argv; runShell consumes that slot.
+  - kind: test
+    command: bun test tests/unit/os-sandbox-bubblewrap-hellgate.test.ts tests/unit/os-sandbox-fail-closed-refusal-hellgate.test.ts tests/unit/os-sandbox-linux-hellgate.test.ts tests/integration/os-sandbox-bwrap-real-exec-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 205 focused assertions pass and two Linux-only real-exec cases are explicitly skipped on this host.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

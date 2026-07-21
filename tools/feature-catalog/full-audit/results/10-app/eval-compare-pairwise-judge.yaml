@@ -1,0 +1,46 @@
+version: 1
+feature_id: eval-compare-pairwise-judge
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/eval/compare/pairwise-judge.ts:pairwiseJudge
+entrypoints:
+  - src/apps/eval/compare/index.ts:runCompare
+activation:
+  - Run an eval compare matchup with a judge LLM.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: na
+  headless: resource
+  daemon: na
+producer:
+  - src/apps/eval/compare/pairwise-judge.ts:pairwiseJudge
+consumer:
+  - src/apps/eval/compare/index.ts:runCompare
+reachable: yes
+surface_findings:
+  - Forward and swapped judgments must be inverse-consistent before a winner is reported.
+  - Invalid JSON is modeled as parseFailed and counted as an infrastructure error by the compare runner, not as a tie.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/eval-pairwise-judge.test.ts tests/unit/eval-error-channels.test.ts tests/integration/eval-five-tier-compare-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Bias-swap resolution, malformed response, and persisted compare-flow rails passed.
+failure_posture: fail-loud
+security_posture: conditional
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/eval-pairwise-judge.test.ts tests/unit/eval-error-channels.test.ts tests/integration/eval-five-tier-compare-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused pairwise judge rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

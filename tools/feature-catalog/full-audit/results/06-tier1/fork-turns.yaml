@@ -1,0 +1,61 @@
+version: 1
+feature_id: fork-turns
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/tier1/subagent.ts:buildSubagentBlock creates the shared forkPrompt from src/agent/fork-turns.ts
+entrypoints:
+  - src/agent/loop/session-bootstrap.ts:createRunAgentContext
+  - src/subagent/agent-tool.ts:applyForkPromptIfNeeded
+  - src/subagent/handlers-6.ts:handleSpawnAgent
+activation:
+  - The agent and spawn_agent schemas accept fork_turns as none, all, or a non-negative integer.
+  - Omitted fork_turns resolves to none and preserves the raw child prompt.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: off
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/fork-turns.ts:selectForkTurns
+  - src/agent/tier1/subagent.ts:forkPrompt
+consumer:
+  - src/subagent/agent-tool.ts:applyForkPromptIfNeeded
+  - src/subagent/handlers-6.ts:handleSpawnAgent
+reachable: yes
+surface_findings:
+  - Both the agent trio and six-tool spawn_agent route share one redacted forkPrompt closure and expose fork_turns in their model-visible schemas.
+  - Production constructs that closure without transcriptSource, so it reads config.messages only. The live loop working-memory buffer is not injected and turns accumulated after session construction are not inherited.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/fork-turns-hellgate.test.ts tests/unit/subagent-6-fork-parity-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: none and omitted fork_turns leave the child prompt byte-identical across both tool families.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/fork-turns-e2e.test.ts tests/unit/subagent-6-fork-schema-activation-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: all and numeric modes reach a real child loop and the strict six-tool schema exposes the field to the model.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: The catalog says a child inherits the parent's recent turns, but the sole production builder passes no live transcriptSource and therefore inherits only the frozen session seed in config.messages.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'transcriptSource|config\.messages|forkPrompt|applyForkPromptIfNeeded|fork_turns' src/agent/tier1/subagent.ts src/agent/fork-turns.ts src/subagent/agent-tool.ts src/subagent/handlers-6.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The production call uses default deps and falls back to config.messages; both agent surfaces consume the same closure.
+  - kind: test
+    command: bun test tests/unit/fork-turns-hellgate.test.ts tests/unit/subagent-6-fork-parity-hellgate.test.ts tests/unit/subagent-6-fork-schema-activation-hellgate.test.ts tests/integration/fork-turns-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Selection, redaction, trio-six parity, schema exposure, cold-start identity, and seeded-child-loop inheritance rails passed.
+audited_at: '2026-07-19'
+auditor: codex/p2-tier1-batch19
+review_state: approved
+reviewer: codex/cross-review-wave1

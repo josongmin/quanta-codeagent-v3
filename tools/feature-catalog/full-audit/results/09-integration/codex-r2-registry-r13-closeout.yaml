@@ -1,0 +1,61 @@
+version: 1
+feature_id: codex-r2-registry-r13-closeout
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/session-resource-registry/unified-api.ts:buildSessionResources
+entrypoints:
+  - src/apps/agent/assemble.ts:session resource assembly
+  - src/apps/cli/session-registry-cmd.ts:sessionRegistryCmd
+activation:
+  - AgentConfig.metrics with a session id selects caller-owned telemetry-aware registry construction
+  - /session-registry exposes stats, evict, cleanup, and help
+  - Registry sweep and WAL threshold settings opt into maintenance behaviors
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/session-resource-registry/caller-owned-builder.ts:buildCallerOwnedRegistryWithTelemetry
+  - src/agent/session-resource-registry/auto-sweep.ts:startAutoSweep
+consumer:
+  - src/apps/agent/assemble.ts:session resources
+  - src/apps/cli/session-registry-cmd.ts:sessionRegistryCmd
+reachable: yes
+surface_findings:
+  - The app assembly selects caller-owned construction only with metrics and a session id; otherwise it preserves the global singleton path.
+  - The registered CLI command drives inspection, idempotent eviction, cleanup, and discovery against the live registry API.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/assemble-caller-owned-wire-hellgate.test.ts tests/unit/auto-sweep-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Missing metrics uses the singleton and absent sweep configuration schedules no timer or telemetry work.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/caller-owned-registry-builder-hellgate.test.ts tests/unit/assemble-caller-owned-wire-hellgate.test.ts tests/unit/auto-sweep-hellgate.test.ts tests/unit/session-registry-slash.test.ts src/agent/session-resource-registry/__tests__/inspector.hellgate.test.ts src/agent/session-resource-registry/sqlite-adapter/__tests__/gc.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Caller-owned metrics, sweep telemetry, WAL restart/truncate behavior, path normalization, and CLI operations are all exercised.
+failure_posture: degraded
+security_posture: verified
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'callerOwned|metricsEmitter|walSizeThresholdBytes|session-registry' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent/session-resource-registry src/apps/agent/assemble.ts src/apps/cli/session-registry-cmd.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Assembly and CLI consumers reach the caller-owned registry, sweep telemetry, WAL controls, inspector, and operator surface.
+  - kind: test
+    command: bun test tests/unit/caller-owned-registry-builder-hellgate.test.ts tests/unit/assemble-caller-owned-wire-hellgate.test.ts tests/unit/auto-sweep-hellgate.test.ts tests/unit/session-registry-slash.test.ts src/agent/session-resource-registry/__tests__/inspector.hellgate.test.ts src/agent/session-resource-registry/sqlite-adapter/__tests__/gc.hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused R13 registry closeout rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

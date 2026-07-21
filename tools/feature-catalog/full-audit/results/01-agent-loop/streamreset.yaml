@@ -1,0 +1,55 @@
+version: 1
+feature_id: streamreset
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/streaming-dispatch.ts:handleStreamEvent
+entrypoints:
+  - src/llm/fallback.ts:FallbackLLM
+  - src/agent/loop/stream-consume.ts:runSamplingScope
+activation:
+  - A fallback provider emits stream_reset only after a previous provider yielded partial stream content; the normal stream consumer passes that event to streamingTurn.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/llm/fallback.ts:FallbackLLM
+  - src/llm/model-swap.ts
+consumer:
+  - src/agent/streaming-dispatch.ts:streamingTurn
+  - src/agent/loop/stream-consume.ts:runSamplingScope
+reachable: yes
+surface_findings:
+  - Fallback emits a tombstone only when a failed provider produced partial stream content; a pre-yield failure does not reset an empty partial.
+  - streamingTurn abandons in-flight slots, resets raw events and scheduling state, and assembles only the replacement stream.
+  - Rejected abandoned dispatches are caught to prevent unhandled rejections; fallback's end-to-end runAgent rail preserves only post-reset assistant text.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/streaming-dispatch.test.ts tests/unit/streaming-dispatch-hellgate.test.ts tests/unit/fallback-empty-tombstone.test.ts tests/unit/fallback-hellgate.test.ts tests/integration/fallback-tombstone-e2e.test.ts tests/integration/streaming-dispatch-rejection-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 38 pass, 0 fail; fallback emission, empty fallback, multi-swap, in-flight reset, no-unhandled-rejection, and real loop consumption are covered.
+failure_posture: fail-closed
+security_posture: na
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'stream_reset|abandon|FallbackLLM|streamingTurn' src/llm/fallback.ts src/llm/model-swap.ts src/agent/streaming-dispatch.ts src/agent/loop/stream-consume.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Provider fallback produces the tombstone and the live normal stream path consumes it through streamingTurn.
+  - kind: test
+    command: bun test tests/unit/streaming-dispatch.test.ts tests/unit/streaming-dispatch-hellgate.test.ts tests/unit/fallback-empty-tombstone.test.ts tests/unit/fallback-hellgate.test.ts tests/integration/fallback-tombstone-e2e.test.ts tests/integration/streaming-dispatch-rejection-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 38 pass, 0 fail across owner, fallback, rejection, and end-to-end tombstone rails.
+audited_at: "2026-07-19"
+auditor: codex/root-p3-agent-loop
+review_state: approved
+reviewer: codex/cross-review-wave1

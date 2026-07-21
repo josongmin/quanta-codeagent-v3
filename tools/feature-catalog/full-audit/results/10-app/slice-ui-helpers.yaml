@@ -1,0 +1,47 @@
+version: 1
+feature_id: slice-ui-helpers
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/ui/ui-helpers.ts
+entrypoints: [src/apps/cli/index.ts]
+activation: [direct CLI renderer imports]
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer: [src/ui/ui-helpers.ts]
+consumer: [src/apps/cli/welcome-banner.ts, src/apps/cli/agents-fleet-panel.ts, src/apps/cli/help-render.ts]
+reachable: yes
+surface_findings:
+  - "CLI renderers import the canonical @/ui helpers directly; the helpers are not a dead compatibility export."
+  - "The slice is pure ANSI/string rendering and has no independent activation gate."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/auth/auth-ui.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Color policy, ANSI stripping, box rendering, and relative-time helper cases pass.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n '@/ui|ui-helpers' src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Production CLI renderers consume the slice through the configured alias.
+  - kind: test
+    command: bun test tests/unit/auth/auth-ui.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Dedicated UI helper rail passed.
+audited_at: "2026-07-19"
+auditor: codex/root/p2_app_batch25
+review_state: approved
+reviewer: codex/cross-review-wave1

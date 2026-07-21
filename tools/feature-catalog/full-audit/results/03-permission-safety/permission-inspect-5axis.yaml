@@ -1,0 +1,59 @@
+version: 1
+feature_id: permission-inspect-5axis
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/permission/inspect.ts:inspectPermission
+entrypoints:
+  - src/apps/cli/slash/registry-app.ts:APP_SLASH_COMMANDS
+  - src/apps/cli/permission-explain.ts:permissionCmd
+  - src/apps/cli/repl/surface-compose/dispatch.ts:permissionInspect state injection
+activation:
+  - "/permission"
+  - "/permission explain <tool>"
+  - "/permission list"
+  - "/permission tier <tier>"
+effective_defaults:
+  cli: on
+  web: off
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/apps/cli/permission-explain.ts:runPermissionRender
+  - src/permission/inspect.ts:inspectPermission
+consumer:
+  - src/apps/cli/slash/registry-app.ts:APP_SLASH_COMMANDS
+  - src/apps/cli/slash-commands.ts:BUILTINS
+  - src/apps/cli/repl/surface-compose/dispatch.ts:runSlashCommand
+reachable: yes
+surface_findings:
+  - "The app slash registry imports permissionCmd and the command's end-to-end tests dispatch /permission and /permission explain bash."
+  - "The command has no browser rendering path; web is off rather than catalogued as full."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/permission/inspect.test.ts tests/unit/cli/permission-explain.test.ts tests/unit/cli/permission-explain-live-mode-hellgate.test.ts tests/unit/cli/permission-explain-override-tier-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "50 tests pass: five-axis output, slash registry dispatch, live mode/store projection, operator override ratchet, and HARD_DENY description-only rendering are covered."
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: "rg -n 'permissionCmd|permission-explain|inspectPermission' src/apps/cli src/permission"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "permissionCmd is imported into APP_SLASH_COMMANDS; its renderer calls inspectPermission and the REPL dispatch composition carries the live store view."
+  - kind: test
+    command: "bun test tests/unit/permission/inspect.test.ts tests/unit/cli/permission-explain.test.ts tests/unit/cli/permission-explain-live-mode-hellgate.test.ts tests/unit/cli/permission-explain-override-tier-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "50 pass, 0 fail."
+audited_at: "2026-07-19"
+auditor: codex/p2-safety-batch6
+review_state: approved
+reviewer: codex/cross-review-wave1

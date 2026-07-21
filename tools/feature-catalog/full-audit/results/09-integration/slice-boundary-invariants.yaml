@@ -1,0 +1,45 @@
+version: 1
+feature_id: slice-boundary-invariants
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: tests/unit/_arch/slice-boundary-scanner.ts
+entrypoints:
+  - tests/unit/agent-slice-boundary.test.ts
+activation:
+  - CI executes each slice-boundary scanner suite.
+effective_defaults:
+  cli: na
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - tests/unit/_arch/slice-boundary-scanner.ts
+consumer:
+  - CI test execution
+reachable: no
+surface_findings:
+  - Runtime architecture guards are non-runtime test rails and enforce explicit exceptions.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/agent-slice-boundary.test.ts tests/unit/tool-slice-boundary.test.ts tests/unit/permission-slice-boundary.test.ts tests/unit/memory-slice-boundary.test.ts tests/unit/llm-slice-boundary.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Representative owner slice rails pass; full suite remains CI scope.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: non-runtime
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'slice-boundary' tests/unit/_arch tests/unit/*-slice-boundary.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Scanner and per-slice guard inventory exists.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,53 @@
+version: 1
+feature_id: turncontextinput-mode-reporules-workingstate-activeskills
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt.ts:TurnContextInput to compile/buildTurnContext assembly
+entrypoints:
+  - src/agent/loop/context-assembler.ts:prepareTurnContext
+  - src/agent/prompt.ts:buildTurnContext
+activation:
+  - The live agent loop constructs the input each turn and forwards mode, repoRules, activeSkills, and workingState only when configured.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/loop/context-assembler.ts constructs TurnContextInput from AgentConfig and session state
+consumer:
+  - src/agent/prompt.ts:compile consumes mode, repoRules, activeSkills, and workingState for static and dynamic prompt sections
+  - src/agent/loop/context-assembler.ts forwards buildTurnContext output into the live stream context
+reachable: yes
+surface_findings:
+  - Optional field absence is intentional and removes the corresponding reminder or static section.
+  - The values are not a type-only seam: prepareTurnContext populates them in the live loop before buildTurnContext renders the prompt.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/prompt-dynamic.test.ts tests/unit/prompt-sections-hellgate.test.ts tests/unit/agent/prompt-sections.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Focused prompt rails passed mode precedence, repo-rules sectioning, active dynamic assembly, working-state placement, and unchanged cached-prefix behavior.
+failure_posture: na
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'TurnContextInput|repoRules|activeSkills|workingState|buildTurnContext' src/agent/prompt.ts src/agent/loop/context-assembler.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The production context assembler conditionally populates all four fields and invokes buildTurnContext for each agent turn.
+  - kind: test
+    command: bun test tests/unit/prompt-dynamic.test.ts tests/unit/prompt-sections-hellgate.test.ts tests/unit/agent/prompt-sections.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The focused prompt suite passed as part of the 236-pass audit command.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch1
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,64 @@
+version: 1
+feature_id: git-branch-name-schema-guard
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/git/types.ts:gitBranchSwitchInputSchema and src/tool/git/branch-switch.ts:gitBranchSwitchTool
+entrypoints:
+  - src/tool/git/index.ts:gitTools
+  - src/apps/cli/internal.ts:assembleFeatures
+activation:
+  - "CLI appends git_branch_switch only when QUANTA_GIT_TOOLS is enabled."
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/tool/git/types.ts:gitBranchSwitchInputSchema
+  - src/tool/git/branch-switch.ts:gitBranchSwitchTool
+consumer:
+  - src/tool/git/index.ts:gitTools
+  - src/apps/cli/internal.ts:gitToolList
+reachable: conditional
+surface_findings:
+  - "The zod input schema rejects empty, overlong, leading-dash, and shell-metacharacter branch names before the runner is called; the clean switch path also uses argv separator --."
+  - "The tool is registered only through the QUANTA_GIT_TOOLS-gated CLI gitToolList, while web-daemon builds default tools only. The catalog's cli:full and web:na/full-style claim does not describe that actual activation boundary."
+off_identity_proof:
+  kind: source
+  command: rg -n "gitToolsEnabled\\(|QUANTA_GIT_TOOLS|gitToolList|buildDaemonToolRegistry" src/apps/cli/internal.ts src/apps/web-daemon/runtime-factory.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The unset gate constructs an empty gitToolList and web-daemon never appends gitTools.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/git-branch-switch.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 15 focused tests passed for alphabet and leading-dash rejection, 64-character cap, argv construction, dirty-tree handling, and failure short-circuiting.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: Catalog must state that the guard is reachable only through the QUANTA_GIT_TOOLS CLI opt-in and has no web-daemon composition.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n "BRANCH_NAME_RE|gitBranchSwitchInputSchema|switch.*--|gitBranchSwitchTool" src/tool/git/types.ts src/tool/git/branch-switch.ts src/tool/git/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The owner schema and tool are live, and branch argv is built only after schema validation.
+  - kind: source
+    command: rg -n "gitToolsEnabled\\(|QUANTA_GIT_TOOLS|gitToolList|buildDaemonToolRegistry" src/apps/cli/internal.ts src/apps/web-daemon/runtime-factory.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Registration is CLI-gated and absent from the web-daemon registry.
+  - kind: test
+    command: bun test tests/unit/tool/git-branch-switch.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 15 focused owner rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-tools-batch6
+review_state: approved
+reviewer: codex/cross-review-wave1

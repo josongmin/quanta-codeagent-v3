@@ -1,0 +1,63 @@
+version: 1
+feature_id: subagent-mailbox
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/optional-ports.ts:wireOptionalPorts
+entrypoints:
+  - src/apps/cli/cli-feature-gates.ts:CLI_FEATURE_GATES
+  - src/agent/features.ts:buildSessionFeatures
+  - src/agent/subagent-runner-child-config.ts:buildSubagentChildConfig
+activation:
+  - QUANTA_SUBAGENT_MAILBOX=on supplies the bounded default mailbox when a caller did not inject one.
+  - The interactive CLI seeds QUANTA_SUBAGENT_MAILBOX, then buildSessionFeatures publishes the shared send/read tool pair.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: off
+  headless: off
+  daemon: unknown
+producer:
+  - src/agent/subagent-mailbox/store.ts:createSubagentMailbox
+  - src/tool/subagent-mailbox/index.ts:subagentMailboxTools
+consumer:
+  - src/agent/optional-ports.ts:wireOptionalPorts
+  - src/agent/features.ts:buildSessionFeatures
+  - src/agent/subagent-runner-child-config.ts:buildSubagentChildConfig
+reachable: yes
+surface_findings:
+  - The interactive CLI seeds the mailbox gate; optional-port assembly creates the bounded shared mailbox and the Tier-1 builder registers its tools.
+  - Child configuration carries the same mailbox instance, so a child and parent can use one delivery store.
+  - The catalog's ADR-0416 hold claiming there is no subagent_read_inbox tool is stale: the shared builder now exports both send and read tools, and a separate peer-inbox drain also consumes the same mailbox.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/subagent-mailbox-hellgate.test.ts tests/unit/subagent-mailbox-read-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: An absent mailbox slot yields an empty Tier-1 block and no mailbox tools.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/subagent-mailbox-hellgate.test.ts tests/unit/subagent-mailbox-read-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The 66 focused cases passed for direct and broadcast delivery, retention, default-on builder wiring, tool input safety, and send-to-read round trips.
+failure_posture: degraded
+security_posture: conditional
+observability: partial
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_SUBAGENT_MAILBOX|createDefaultSubagentMailbox|buildSubagentMailboxBlock|subagentMailboxTools|subagentMailbox' src/apps/cli src/agent src/host/runtime
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI seeding, production port assembly, feature registration, and child sharing are all live consumers.
+  - kind: test
+    command: bun test tests/unit/subagent-mailbox-hellgate.test.ts tests/unit/subagent-mailbox-read-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused proof completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-core
+review_state: approved
+reviewer: codex/cross-review-wave1

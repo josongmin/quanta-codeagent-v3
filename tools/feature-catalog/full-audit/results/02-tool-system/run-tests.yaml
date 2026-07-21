@@ -1,0 +1,50 @@
+version: 1
+feature_id: run-tests
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts
+entrypoints: [src/apps/cli/index.ts, src/host/runtime/agent-arg-builder/gated-tool-ports.ts]
+activation: ["runtime config QUANTA_TEST_RUNNER=1", "tool registry DefaultToolPorts.testRunner=true"]
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer: [src/tool/testrun/tool.ts:makeRunTestsTool]
+consumer: [src/host/runtime/agent-arg-builder/gated-tool-ports.ts, src/tool/index.ts]
+reachable: yes
+surface_findings: ["The central host gate and registry install run_tests only after opt-in; the tool executes user test code under the normal approval policy."]
+off_identity_proof:
+  kind: source
+  command: rg -n "cfg.testRunner|p.testRunner === true" src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/tool/index.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The host does not supply the port and the registry does not append run_tests when the gate is absent.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/tool/testrun/run-tests-real-e2e.test.ts tests/unit/tool/testrun/tool-faults.test.ts tests/unit/test-runner-local-env-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Real Go, Cargo, and Python fixtures executed and localized failure output; false-green and local environment rails passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "cfg.testRunner|p.testRunner === true" src/host/runtime/agent-arg-builder/gated-tool-ports.ts src/tool/index.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Gated host-to-registry handoff exists.
+  - kind: test
+    command: bun test tests/unit/tool/testrun/parse.test.ts tests/unit/tool/testrun/detect.test.ts tests/unit/tool/testrun/run-tests-real-e2e.test.ts tests/unit/tool/testrun/tool-faults.test.ts tests/unit/test-runner-local-env-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Parser, detector, real execution, fault, and environment rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,59 @@
+version: 1
+feature_id: trust-scope-store-persistent
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/runtime-context-compose.ts:createPersistentTrustScopeRegistry
+entrypoints:
+  - src/apps/cli/repl/runtime-context-compose.ts
+  - src/agent/admissibility-gate/gates.ts:trustScopeGrants
+activation:
+  - Set QUANTA_TRUST_SCOPE for the CLI session, then approve an eligible action with a durable trust scope.
+effective_defaults:
+  cli: off
+  web: na
+  bench: na
+  headless: na
+  daemon: na
+producer:
+  - src/permission/trust-scope-store.ts:createPersistentTrustScopeRegistry
+consumer:
+  - src/agent/admissibility-gate/gates.ts:trustScopeGrants
+  - src/apps/cli/repl/runtime-context-compose.ts durable approval writer
+reachable: yes
+surface_findings:
+  - The CLI env gate creates the persistent registry, threads it to AgentConfig, records durable approvals, and lets admissibility skip eligible repeat prompts.
+  - Focused rails prove atomic persistence, process hydration, TTL expiry, cascade precedence, deny handling, once-only consumption, and the unset legacy control.
+  - Store contents remain plaintext under the local path; OS-keyring encryption and multi-tenant posture are explicitly deferred.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/trust-scope-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unset trustScope preserves the legacy confirmation behavior.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/permission/trust-scope-store-hell.test.ts tests/integration/trust-scope-e2e.test.ts tests/integration/trust-scope-persistent-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Store and gate integration rails passed for persistence and repeat-action prompt skipping.
+failure_posture: degraded
+security_posture: conditional
+observability: na
+verdict: conditional
+blocker: Persistent grants are plaintext at rest; OS-keyring encryption and a hosted or multi-tenant trust model are not implemented.
+disposition: hold
+receipts:
+  - kind: source
+    command: git grep -n -E 'QUANTA_TRUST_SCOPE|createPersistentTrustScopeRegistry|trustScopeGrants|trustScope:' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/apps/cli/repl/runtime-context-compose.ts src/agent/admissibility-gate/gates.ts src/permission/trust-scope-store.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI composition creates the durable registry and the gate consumes it for repeat-action admission.
+  - kind: test
+    command: bun test tests/unit/permission/trust-scope-store-hell.test.ts tests/integration/trust-scope-e2e.test.ts tests/integration/trust-scope-persistent-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused store and integration rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

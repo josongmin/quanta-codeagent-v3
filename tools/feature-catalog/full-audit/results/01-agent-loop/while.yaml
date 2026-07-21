@@ -1,0 +1,55 @@
+version: 1
+feature_id: while
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/loop/turn-loop.ts:runAgentTurnLoop
+entrypoints:
+  - src/agent/loop/entry.ts:runAgentInner
+  - src/agent/loop/turn-loop.ts:runAgentTurnLoop
+activation:
+  - runAgentInner invokes runAgentTurnLoop for every normal agent run; the bounded for-loop begins at turn 1 and terminates at cfg.maxTurns.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: unknown
+  daemon: unknown
+producer:
+  - src/agent/loop/entry.ts:runAgent
+  - src/agent/loop/turn-loop.ts:runAgentTurnLoop
+consumer:
+  - src/agent/loop/turn-iteration.ts:prepareTurnIteration
+  - src/agent/loop/turn-outcome.ts:resolveTurnLoopOutcome
+reachable: yes
+surface_findings:
+  - The active loop is a bounded for-loop in turn-loop.ts; it performs admission checks, one observable turn execution, outcome resolution, and post-continue gates per iteration.
+  - Abort, park, terminal outcome, and max-turn branches finish through the shared lifecycle owner, while continued recovery stays within the same logical turn where appropriate.
+  - The catalog purpose and code evidence incorrectly name loop.ts as the loop implementation; loop.ts is now only a re-export shim.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/integration/agent-recovery-e2e.test.ts tests/integration/agent-abort.test.ts tests/integration/agent-refusal-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 33 pass, 0 fail; real runAgent rails cover bounded recovery, six productive rounds, pre/mid/post abort, refusal terminal routing, and turn accounting.
+failure_posture: fail-loud
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: Catalog purpose/evidence must point to src/agent/loop/turn-loop.ts rather than the re-export-only src/agent/loop.ts.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'for \(let turn|runAgentTurnLoop|return ctx.finish' src/agent/loop/entry.ts src/agent/loop/turn-loop.ts src/agent/loop.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: entry.ts invokes the turn-loop owner, which contains the bounded loop and its terminal paths; loop.ts only re-exports runAgent.
+  - kind: test
+    command: bun test tests/integration/agent-recovery-e2e.test.ts tests/integration/agent-abort.test.ts tests/integration/agent-refusal-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 33 pass, 0 fail across real runAgent recovery, abort, and refusal scenarios.
+audited_at: "2026-07-19"
+auditor: codex/root-p3-agent-loop
+review_state: approved
+reviewer: codex/cross-review-wave1

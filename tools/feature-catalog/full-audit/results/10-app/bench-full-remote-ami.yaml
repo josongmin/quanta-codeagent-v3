@@ -1,6 +1,6 @@
 version: 1
 feature_id: bench-full-remote-ami
-snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
 status: closed
 owner_seam: src/apps/bench/commands/grade.ts:cmdGrade
 entrypoints: [src/apps/bench/cli.ts]
@@ -47,5 +47,5 @@ receipts:
     evidence: Full-remote owner rails passed in the 384-case grouped run.
 audited_at: "2026-07-19"
 auditor: codex/root
-review_state: pending
-reviewer: null
+review_state: approved
+reviewer: codex/cross-review-wave1

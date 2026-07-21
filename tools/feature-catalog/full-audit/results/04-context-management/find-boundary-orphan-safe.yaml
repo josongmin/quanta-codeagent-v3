@@ -1,0 +1,57 @@
+version: 1
+feature_id: find-boundary-orphan-safe
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/compaction.ts:findBoundary
+entrypoints:
+  - src/agent/compaction.ts:compactIfNeeded
+  - src/agent/compaction.ts:reactiveCompact
+activation:
+  - Every proactive compaction computes its retained suffix through findBoundary.
+  - PTL recovery invokes reactiveCompact, which uses the same boundary owner.
+effective_defaults:
+  cli: on
+  web: na
+  bench: unknown
+  headless: on
+  daemon: on
+producer:
+  - src/agent/compaction.ts:findBoundary
+  - src/agent/compaction.ts:toolResultRefs
+  - src/agent/compaction.ts:toolUseIds
+consumer:
+  - src/agent/compaction.ts:compactIfNeeded
+  - src/agent/compaction.ts:reactiveCompact
+  - src/agent/compaction.ts:dropOldestTurn
+reachable: yes
+surface_findings:
+  - "The shared boundary owner is used by proactive and reactive compaction rather than a duplicated tool-pair scan."
+  - "The empty-suffix guard and incremental suffix-id set preserve orphan safety without an out-of-bounds dereference."
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/compaction.test.ts tests/integration/agent-recovery-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Unit rails prove pair preservation and keepTurns zero safety; the integration PTL rail exercises reactive consumption.
+failure_posture: fail-closed
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg "findBoundary\\(" src/agent/compaction.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: compactIfNeeded and reactiveCompact both call the same orphan-safe boundary implementation.
+  - kind: test
+    command: bun test tests/unit/compaction.test.ts tests/integration/agent-recovery-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 114 shared-rail tests passed; direct tests cover tool-pair retention and the empty-suffix regression.
+audited_at: "2026-07-19"
+auditor: codex/p2-context-batch3
+review_state: approved
+reviewer: codex/cross-review-wave1

@@ -1,0 +1,60 @@
+version: 1
+feature_id: role-based-model-override
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/ctx-adapters/preset-role-resolver-adapter.ts:buildPresetRoleModelResolver
+entrypoints:
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts:buildRuntimeFacadeCompose
+  - src/agent/subagent-runner-overrides.ts:resolveChildLlm
+activation:
+  - /presets selects a sticky role-to-model bundle in the interactive CLI
+  - AgentConfig roleModelResolver setOverride applies an explicit role override
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/llm/role-model-override/default-resolver.ts:defaultRoleModelResolver
+  - src/apps/cli/repl/ctx-adapters/preset-role-resolver-adapter.ts:buildPresetRoleModelResolver
+consumer:
+  - src/apps/cli/repl/surface-compose/runtime-compose.ts:roleModelResolver
+  - src/agent/subagent-runner-overrides.ts:resolveChildLlm
+reachable: yes
+surface_findings:
+  - CLI composes one resolver into the runtime facade; child role resolution reads it before selecting a child model.
+  - With no preset or explicit override, resolve returns the caller default verbatim.
+off_identity_proof:
+  kind: test
+  command: bun test src/apps/cli/repl/ctx-adapters/__tests__/preset-role-resolver-adapter.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: No selected preset resolves every checked role to the caller fallback verbatim.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/llm/role-model-override-hellgate.test.ts src/apps/cli/repl/ctx-adapters/__tests__/preset-role-resolver-adapter.hellgate.test.ts src/apps/cli/__tests__/presets-cmd.hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Explicit overrides beat a selected preset, selected preset bindings change live role resolution, and clear restores fallback behavior.
+failure_posture: fail-loud
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'roleModelResolver|resolveChildLlm|buildPresetRoleModelResolver' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/agent src/apps/cli
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: CLI composition installs the resolver and child configuration resolves the requested role through it.
+  - kind: test
+    command: bun test tests/unit/llm/role-model-override-hellgate.test.ts src/apps/cli/repl/ctx-adapters/__tests__/preset-role-resolver-adapter.hellgate.test.ts src/apps/cli/__tests__/presets-cmd.hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 32 focused assertions passed across resolver, adapter, and CLI preset activation rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

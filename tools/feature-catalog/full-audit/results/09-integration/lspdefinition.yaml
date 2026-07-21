@@ -1,0 +1,45 @@
+version: 1
+feature_id: lspdefinition
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/tool/lsp_nav/index.ts:lspNavTools
+entrypoints:
+  - src/apps/cli/internal.ts
+activation:
+  - QUANTA_LSP_TOOLS registers the LSP navigation tool family.
+effective_defaults:
+  cli: off
+  web: resource
+  bench: off
+  headless: off
+  daemon: resource
+producer:
+  - src/tool/lsp_nav/index.ts:lspNavTools
+consumer:
+  - src/apps/cli/internal.ts
+reachable: yes
+surface_findings:
+  - Tools refuse out-of-jail absolute paths and forward abort/session-stop behavior correctly.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/lsp-nav-tools.test.ts tests/unit/lsp-nav-per-tool.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: All navigation tool and degradation branches passed.
+failure_posture: degraded
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/lsp-nav-tools.test.ts tests/unit/lsp-nav-per-tool.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: LSP navigation rails passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

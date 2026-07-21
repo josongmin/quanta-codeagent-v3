@@ -1,0 +1,45 @@
+version: 1
+feature_id: metrics-typed-port-slice
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/observability/metrics/in-memory-registry.ts:defaultMetricsRegistry
+entrypoints:
+  - src/observability/metrics/index.ts
+activation:
+  - Consumers opt in by constructing the typed in-memory registry with an optional sink.
+effective_defaults:
+  cli: resource
+  web: na
+  bench: resource
+  headless: resource
+  daemon: resource
+producer:
+  - src/observability/metrics/in-memory-registry.ts:defaultMetricsRegistry
+consumer:
+  - src/observability/metrics/instrument-tool.ts
+reachable: yes
+surface_findings:
+  - Registry remains snapshot-only without a sink and preserves samples when a sink throws.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-metrics-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Registry, sink, label, percentile, and numeric-boundary rails passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/observability-metrics-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Typed metrics contract passed.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

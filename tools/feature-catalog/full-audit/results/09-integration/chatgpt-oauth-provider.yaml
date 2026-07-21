@@ -1,0 +1,64 @@
+version: 1
+feature_id: chatgpt-oauth-provider
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/llm/factory.ts:createLLM
+entrypoints:
+  - src/apps/cli/login-cmd.ts:loginCmd
+  - src/apps/cli/status-cmd.ts:statusCmd
+  - src/apps/web-daemon/server/fetch-handler.ts:auth routes
+activation:
+  - /login completes the PKCE browser flow and persists a token
+  - QUANTA_PROVIDER=chatgpt-oauth explicitly selects the provider
+  - A usable persisted OAuth token selects the provider when no higher-priority provider is configured
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/auth/chatgpt-oauth/browser-flow.ts:runBrowserFlow
+  - src/auth/chatgpt-oauth/token-store.ts:writeToken
+  - src/llm/adapters/chatgpt-oauth.ts:ChatGPTOAuthAdapter
+consumer:
+  - src/llm/factory.ts:createLLM
+  - src/apps/cli/login-cmd.ts:loginCmd
+  - src/apps/web-daemon/auth-routes.ts:handleAuthLoginStart
+reachable: yes
+surface_findings:
+  - CLI login, status, and logout share the token-store path with the LLM factory.
+  - Web-daemon exposes login, logout, and status handlers; the login-attempt registry is bounded.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/auth/chatgpt-oauth-adapter.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Absent OAuth token produces a typed auth error rather than an implicit provider or billing fallback.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/auth/pkce.test.ts tests/unit/auth/browser-flow.test.ts tests/unit/auth/token-store.test.ts tests/unit/auth/refresh.test.ts tests/unit/auth/jwt.test.ts tests/unit/cli/login-status-cmd.test.ts tests/unit/auth/chatgpt-oauth-adapter.test.ts src/apps/web-daemon/auth-routes.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: PKCE, token persistence, refresh coordination, CLI commands, web login lifecycle, and authenticated Responses requests all pass.
+failure_posture: fail-closed
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n 'chatgpt-oauth|createLLM|auth/login|auth/logout|auth/status' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/auth src/llm src/apps/cli src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Persisted OAuth credentials flow into the factory and both declared interactive surfaces expose the provider lifecycle.
+  - kind: test
+    command: bun test tests/unit/auth/pkce.test.ts tests/unit/auth/browser-flow.test.ts tests/unit/auth/token-store.test.ts tests/unit/auth/refresh.test.ts tests/unit/auth/jwt.test.ts tests/unit/cli/login-status-cmd.test.ts tests/unit/auth/chatgpt-oauth-adapter.test.ts tests/unit/slash-commands.test.ts src/apps/web-daemon/auth-routes.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused authentication, provider transport, CLI registration, and web login-status rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-resilience-batch22
+review_state: approved
+reviewer: codex/cross-review-wave1

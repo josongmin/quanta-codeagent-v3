@@ -1,0 +1,64 @@
+version: 1
+feature_id: canvas-web-components
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/web-daemon/runtime-factory.ts:createWebDaemonRuntime
+entrypoints:
+  - src/apps/web-daemon/index.ts:buildCanvasPorts
+  - apps/web-frontend/src/App.tsx:App
+activation:
+  - QUANTA_WEB_CANVAS=1 mints usage and tool-diff sources, wires AgentConfig.onToolDiff, and attaches per-connection canvas sinks.
+  - A context-usage frame or file-mutating tool result supplies frontend data; empty channels self-hide.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/web-daemon/canvas-usage-source.ts:createCanvasUsageSource
+  - src/apps/web-daemon/canvas-tool-diff-source.ts:createCanvasToolDiffSource
+  - src/tool/tool-diff-capture.ts:captureToolDiff
+consumer:
+  - src/apps/web-daemon/server.ts:attachCanvasSink
+  - apps/web-frontend/src/ws/canvas-hooks.ts:useContextUsage
+  - apps/web-frontend/src/ws/canvas-hooks.ts:useToolDiffs
+  - apps/web-frontend/src/components/ObservabilityPane.tsx:ObservabilityPane
+reachable: yes
+surface_findings:
+  - QUANTA_WEB_CANVAS gates both daemon sources and the per-connection WS bridge; gate-off leaves no canvas port or tool-diff capture sink.
+  - App mounts useContextUsage and useToolDiffs, passes their values to ObservabilityPane, and that pane renders UsageBreakdownPanel and one DiffPanel per captured tool mutation.
+  - The catalog surface evidence claiming DiffView/DiffPanel is not mounted is contradicted by the live App and ObservabilityPane consumers.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/canvas-web-components-hellgate.test.ts tests/unit/tool-diff-capture-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off canvas sinks are inert and tool mutation performs no extra pre-read or capture.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/canvas-web-components-hellgate.test.ts tests/unit/canvas-fanout-failclosed-hellgate.test.ts tests/unit/tool-diff-capture-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Protocol encoding, daemon fan-out, tool capture, binary/truncation behavior, and hostile WS isolation passed in the focused audit run.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: stale-claim
+blocker: The catalog's web-surface evidence still says DiffView/DiffPanel is not mounted even though the snapshot mounts and supplies it through App and ObservabilityPane.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'QUANTA_WEB_CANVAS|canvasToolDiff|useContextUsage|useToolDiffs|DiffPanel|UsageBreakdownPanel' src/apps/web-daemon apps/web-frontend/src/App.tsx apps/web-frontend/src/components/ObservabilityPane.tsx
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The daemon producer, WebSocket bridge, React hooks, and mounted render consumers are all present in the snapshot.
+  - kind: test
+    command: bun test tests/unit/canvas-web-components-hellgate.test.ts tests/unit/canvas-fanout-failclosed-hellgate.test.ts tests/unit/tool-diff-capture-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused canvas proof completed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-surfaces
+review_state: approved
+reviewer: codex/cross-review-wave1

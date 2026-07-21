@@ -1,0 +1,54 @@
+version: 1
+feature_id: eol-detect-split-join
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/shared/eol.ts:detectEol
+entrypoints:
+  - src/patch/applier.ts
+  - src/tool/edit/fuzzy.ts
+activation:
+  - Patch application or fuzzy edit handling processes source text with line terminators.
+effective_defaults:
+  cli: on
+  web: na
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/shared/eol.ts:detectEol
+  - src/shared/eol.ts:splitEolAware
+consumer:
+  - src/patch/applier.ts
+  - src/tool/edit/fuzzy.ts
+reachable: yes
+surface_findings:
+  - Patch application imports the shared EOL primitives and uses detection, split, and join at its file reconstruction seam.
+  - The edit slice retains a byte-equivalent detector and byte-splices fuzzy edits into the original source rather than whole-file reassembly.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/patch/applier-mixed-eol.test.ts tests/unit/edit-fuzzy-eol-join-ratchet.test.ts tests/unit/patch/applier-crlf.f1.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Mixed-EOL normalization, CRLF preservation, edit byte-splice, and detector parity rails passed.
+failure_posture: na
+security_posture: na
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'detectEol|splitEolAware|joinWithEol' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/shared/eol.ts src/patch/applier.ts src/tool/edit
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Shared EOL functions are consumed by the patch path and kept in parity with the edit slice.
+  - kind: test
+    command: bun test tests/unit/patch/applier-mixed-eol.test.ts tests/unit/edit-fuzzy-eol-join-ratchet.test.ts tests/unit/patch/applier-crlf.f1.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused EOL rails passed with no failures.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

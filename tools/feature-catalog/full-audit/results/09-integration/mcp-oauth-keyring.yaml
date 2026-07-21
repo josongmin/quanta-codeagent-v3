@@ -1,0 +1,59 @@
+version: 1
+feature_id: mcp-oauth-keyring
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/mcp-oauth-provider.ts:buildMcpOAuthWiring
+entrypoints:
+  - src/host/mcp-composition.ts:resolveMcpOAuthProvider
+  - src/host/runtime/mcp-oauth-provider.ts:resolveMcpOAuthKeyringOption
+activation:
+  - Set QUANTA_MCP_OAUTH=1 and QUANTA_MCP_OAUTH_KEYRING=1 for an oauth:true HTTP MCP server on a supported OS.
+effective_defaults:
+  cli: off
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/runtime/keyring/compose.ts:composeTokenStore
+  - src/host/runtime/keyring/select.ts:selectKeyring
+consumer:
+  - src/host/runtime/mcp-oauth-provider.ts:buildMcpOAuthWiring
+  - src/host/mcp-composition.ts:resolveMcpOAuthProvider
+reachable: yes
+surface_findings:
+  - OAuth composition resolves the platform option and injects the composed keyring and file token store into the live provider.
+  - Keyring operations use argv arrays and stdin for secrets; unavailable or failed stores degrade to the 0600 file store, while delete spans both stores.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/mcp-oauth-keyring-compose-hellgate.test.ts tests/unit/mcp-oauth-keyring-reachability-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Disabled keyring retains plain file-store behavior and disabled OAuth creates no provider or bearer.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/mcp-oauth-keyring-compose-hellgate.test.ts tests/unit/mcp-oauth-keyring-adapter-hellgate.test.ts tests/unit/mcp-oauth-keyring-reachability-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Composed persistence, migration, fallback, platform adapters, stdin-only secret handling, and live bearer reachability rails passed.
+failure_posture: degraded
+security_posture: verified
+observability: partial
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: git grep -n -E 'resolveMcpOAuthKeyringOption|composeTokenStore|mcpOAuthKeyring' 9a12f7a855640a8be1e4654472766bbc445696ea -- src/host/mcp-composition.ts src/host/runtime/mcp-oauth-provider.ts src/host/runtime/keyring
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Composition passes the platform keyring option to the OAuth wiring branch that composes the token store.
+  - kind: test
+    command: bun test tests/unit/mcp-oauth-keyring-compose-hellgate.test.ts tests/unit/mcp-oauth-keyring-adapter-hellgate.test.ts tests/unit/mcp-oauth-keyring-reachability-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused keyring compose adapter and reachability rails passed.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch27
+review_state: approved
+reviewer: codex/cross-review-wave1

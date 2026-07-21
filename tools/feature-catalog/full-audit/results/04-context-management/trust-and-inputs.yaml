@@ -1,0 +1,49 @@
+version: 1
+feature_id: trust-and-inputs
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/agent/prompt.ts:buildTurnContext
+entrypoints:
+  - src/agent/prompt.ts:compile
+  - src/agent/untrusted.ts:embedUntrusted
+activation:
+  - Always assembled into the static system prompt; untrusted dynamic fragments are routed through the prompt compiler before LLM submission.
+effective_defaults:
+  cli: on
+  web: on
+  bench: on
+  headless: on
+  daemon: on
+producer:
+  - src/agent/prompt.ts:resolveStaticBase
+  - src/agent/untrusted.ts:embedUntrusted
+consumer:
+  - src/agent/prompt.ts:buildTurnContext
+  - LLMPort system and user message serialization
+reachable: yes
+surface_findings:
+  - The static prompt pins the trust ladder, instruction-versus-data rule, and prompt-injection handling.
+  - Dynamic reminders, hook context, repo rules, and memory-derived aggregates are boundary-escaped before wrapping, so forged prompt tags cannot terminate their harness wrapper.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/prompt-system.test.ts tests/unit/agent/untrusted-embed.test.ts tests/unit/prompt-rules-snapshot.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Prompt trust assertions, stable cache-prefix wording, exact wrapper count, forged boundary defanging, and benign-content identity passed.
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: test
+    command: bun test tests/unit/prompt-system.test.ts tests/unit/agent/untrusted-embed.test.ts tests/unit/prompt-rules-snapshot.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The combined prompt audit command passed 80 prompt-contract, snapshot, and untrusted-boundary rails.
+audited_at: "2026-07-19"
+auditor: codex/p2-app-batch26
+review_state: approved
+reviewer: codex/cross-review-wave1

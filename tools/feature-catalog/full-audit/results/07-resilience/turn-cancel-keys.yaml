@@ -1,0 +1,50 @@
+version: 1
+feature_id: turn-cancel-keys
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/repl/turn-cancel-install.ts:installTurnCancel
+entrypoints:
+  - src/apps/cli/repl/turn-runner.ts:runOneTurn
+activation:
+  - Interactive TTY REPL installs the disposable keypress FSM for each running turn.
+effective_defaults:
+  cli: on
+  web: na
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/apps/cli/repl/turn-cancel-install.ts:installTurnCancel
+consumer:
+  - src/apps/cli/repl/turn-runner.ts:runOneTurn
+reachable: yes
+surface_findings:
+  - Ctrl+C aborts the outer surface controller and Esc-Esc aborts only the current turn; non-TTY input is an explicit no-op.
+off_identity_proof: null
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/apps/cli/turn-cancel-install-hellgate.test.ts tests/unit/apps/cli/turn-runner-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Raw-mode FSM, signal composition, cleanup, and hard versus soft cancellation boundaries passed.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n 'installTurnCancel|AbortSignal.any|onAbort|onCancel' src/apps/cli/repl/turn-cancel-install.ts src/apps/cli/repl/turn-runner.ts src/apps/cli/repl/session-loop.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: REPL turn owner installs the disposable FSM and consumes its dual-signal callbacks.
+  - kind: test
+    command: bun test tests/unit/apps/cli/turn-cancel-install-hellgate.test.ts tests/unit/apps/cli/turn-runner-hellgate.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: Focused cancellation rails passed with zero failures.
+audited_at: "2026-07-19"
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1

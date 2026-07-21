@@ -1,6 +1,6 @@
 version: 1
 feature_id: negative-invariants-doc-ssot
-snapshot_head: 9a12f7a855640a8be1e4654472766bbc445696ea
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
 status: closed
 owner_seam: docs/decisions/0044-negative-invariants.md
 entrypoints: []
@@ -33,5 +33,5 @@ receipts:
     evidence: ADR-0044 resolves and the doc-only feature has no missing evidence.
 audited_at: "2026-07-19"
 auditor: codex/root
-review_state: pending
-reviewer: null
+review_state: approved
+reviewer: codex/cross-review-wave1

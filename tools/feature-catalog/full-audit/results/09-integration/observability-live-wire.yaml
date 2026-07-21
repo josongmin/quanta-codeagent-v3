@@ -1,0 +1,63 @@
+version: 1
+feature_id: observability-live-wire
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/host/runtime/agent-arg-builder/observability-wire.ts:resolveObservabilitySlots
+entrypoints:
+  - src/apps/agent/index.ts:buildBaseFromArgs
+  - src/apps/web-daemon/runtime-factory.ts:buildProductionRuntimeFactory
+  - src/apps/web-daemon/index.ts:startWebDaemon
+activation:
+  - QUANTA_OBSERVABILITY causes the host and daemon composition roots to mint a HookBus and publish the four wire ports.
+  - The web-daemon facade exposes the live ports and the served socket sink is supplied by observability-ws-sink.
+effective_defaults:
+  cli: off
+  web: off
+  bench: off
+  headless: off
+  daemon: off
+producer:
+  - src/host/runtime/agent-arg-builder/observability-wire.ts:resolveObservabilitySlots
+  - src/apps/web-daemon/runtime-factory.ts:attachObservabilityPorts
+consumer:
+  - src/host/runtime/agent-arg-builder.ts:buildBaseFromArgs
+  - src/apps/web-daemon/index.ts:buildObservabilityPorts
+  - src/apps/web-daemon/server/ws-handlers.ts:applySurfaceSubscription
+reachable: yes
+surface_findings:
+  - Gate-on host composition puts the same HookBus used by dispatch and RunLedger attribution into AgentConfig, while gate-off omits all slots.
+  - The daemon facade carries the ports into buildObservabilityPorts and its WebSocket subscription path; the separate WS sink makes the former port-only deferral live.
+  - The catalog's cli-missing evidence and deliberate_hold claiming that no daemon WebSocket sink exists are stale against the live host and server consumers.
+off_identity_proof:
+  kind: test
+  command: bun test tests/unit/observability-live-wire-hellgate.test.ts tests/unit/observability-ws-sink-hellgate.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: Gate-off leaves AgentConfig and facade ports absent and attaches no WebSocket sink.
+on_efficacy_proof:
+  kind: test
+  command: bun test tests/unit/observability-live-wire-hellgate.test.ts tests/unit/observability-e2e-real-hookbus-hellgate.test.ts tests/integration/agent-state-observability-ws-daemon-e2e.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: 29 focused cases passed, including live HookBus ledger transitions and the real daemon's snapshot and delta delivery.
+failure_posture: degraded
+security_posture: na
+observability: verified
+verdict: stale-claim
+blocker: The catalog preserves an already-closed port-only WebSocket deferral and incorrectly marks the host composition evidence unreachable from the interactive CLI.
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: rg -n 'resolveObservabilitySlots|buildBaseFromArgs|attachObservabilityPorts|buildObservabilityPorts|attachObservabilitySink|applySurfaceSubscription' src/host/runtime src/apps/agent src/apps/web-daemon
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The generic host, daemon facade, server port projection, and served WebSocket consumer are all reachable production paths.
+  - kind: test
+    command: bun test tests/unit/observability-live-wire-hellgate.test.ts tests/unit/observability-e2e-real-hookbus-hellgate.test.ts tests/integration/agent-state-observability-ws-daemon-e2e.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 29 pass, 0 fail, 1 explicit red-on-injection test skipped.
+audited_at: "2026-07-19"
+auditor: codex/p1-integration-observability
+review_state: approved
+reviewer: codex/cross-review-wave1

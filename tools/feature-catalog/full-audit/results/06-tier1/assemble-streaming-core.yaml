@@ -1,0 +1,57 @@
+version: 1
+feature_id: assemble-streaming-core
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/runner/assemble/streaming.ts:buildStreamingCore
+entrypoints:
+  - src/apps/cli/internal.ts:buildStreaming
+activation:
+  - Every interactive CLI session asks buildStreaming for its event stream; QUANTA_OBSERVE_DIR or --observe-dir adds the recorder tee.
+effective_defaults:
+  cli: on
+  web: unknown
+  bench: resource
+  headless: off
+  daemon: unknown
+producer:
+  - src/runner/assemble/streaming.ts:buildStreamingCore
+consumer:
+  - src/apps/cli/internal.ts:buildStreaming
+  - src/host/bootstrap/bootstrap-session.ts:deps.buildStreaming
+reachable: yes
+surface_findings:
+  - The normal CLI assembler calls buildStreamingCore for every session and bootstrap consumes its stream and optional RunContext.
+  - With no observe directory the core returns StdoutStream with run undefined; setting --observe-dir supplies the JsonlRecorder TeeStream path.
+off_identity_proof:
+  kind: test
+  command: bun test tests/integration/cli-export-assembly.test.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: The CLI assembly rail invokes buildStreaming(undefined) and observes stream plus undefined run, preserving the no-recorder path.
+on_efficacy_proof:
+  kind: source
+  command: rg -n "buildStreamingCore\\(|observeDir|JsonlRecorder|TeeStream" src/runner/assemble/streaming.ts src/apps/cli/internal.ts src/host/bootstrap/bootstrap-session.ts
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: CLI forwards observeDir into buildStreamingCore, which mints RunContext and returns a stdout-plus-recorder tee; bootstrap consumes the result.
+failure_posture: fail-loud
+security_posture: na
+observability: verified
+verdict: pass
+blocker: null
+disposition: keep
+receipts:
+  - kind: source
+    command: rg -n "buildStreamingCore\\(" src/apps/cli/internal.ts src/runner/assemble/streaming.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: The production CLI wrapper is a direct caller of the surface-agnostic core.
+  - kind: test
+    command: bun test tests/integration/cli-export-assembly.test.ts
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: 6 CLI export-assembly tests passed, including the no-observe streaming path.
+audited_at: "2026-07-19"
+auditor: codex/p2-tier1-batch21
+review_state: approved
+reviewer: codex/cross-review-wave1

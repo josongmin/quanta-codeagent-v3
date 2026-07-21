@@ -1,0 +1,50 @@
+version: 1
+feature_id: session-export-import-slash
+snapshot_head: 01f02dbbac807a9bad0420cd509fa3e75a930037
+status: closed
+owner_seam: src/apps/cli/session-cmd.ts:sessionCmd
+entrypoints: [src/apps/cli/slash/registry-surface.ts:session command registration, src/apps/cli/repl/surface-compose/mutable-wires.ts:buildDefaultSessionIo]
+activation: [Interactive CLI always constructs sessionIo and registers /session export and import.]
+effective_defaults:
+  cli: on
+  web: na
+  bench: na
+  headless: off
+  daemon: na
+producer: [src/apps/cli/session-cmd.ts:sessionCmd, src/apps/cli/repl/surface-compose/wire-builders.ts:buildDefaultSessionIo]
+consumer: [src/apps/cli/slash/registry-surface.ts:slash dispatch]
+reachable: yes
+surface_findings: [The catalog's default-OFF claim is stale on the primary REPL because mutable-wires always supplies buildDefaultSessionIo; a missing injected sessionIo still remains a clean not-wired no-op for alternate embeddings.]
+off_identity_proof:
+  kind: test
+  command: "bun test tests/unit/session-export-import-slash-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Missing sessionIo returns not wired with exit 0."
+on_efficacy_proof:
+  kind: test
+  command: "bun test tests/unit/session-export-import-slash-hellgate.test.ts"
+  revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+  result: pass
+  evidence: "Export, import, path jail, size cap, typed failures, and round trip pass."
+failure_posture: fail-closed
+security_posture: verified
+observability: na
+verdict: stale-claim
+blocker: null
+disposition: fix-claim
+receipts:
+  - kind: source
+    command: "rg -n 'buildDefaultSessionIo|sessionCmd' src/apps/cli/repl/surface-compose src/apps/cli/slash"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "The primary interactive CLI wires sessionIo before slash dispatch."
+  - kind: test
+    command: "bun test tests/unit/session-export-import-slash-hellgate.test.ts"
+    revision: 9a12f7a855640a8be1e4654472766bbc445696ea
+    result: pass
+    evidence: "Included in the 325-pass focused batch."
+audited_at: '2026-07-19'
+auditor: codex/root
+review_state: approved
+reviewer: codex/cross-review-wave1
