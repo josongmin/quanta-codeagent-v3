@@ -77,21 +77,8 @@ knobs:
     default: 'undefined'
     purpose: 'injectable clock for tests'
 deliberate_hold:
-  reason: default-OFF until embed pipeline wiring lands
-  details: |
-    The slice ships the closed port + 3 adapters + 15-case hellgate, but
-    `commit-embedder` / `hybrid-query` / composition root do NOT consult
-    the cache yet. Wiring is a follow-up ADR (the chosen safety net —
-    until then the `none` adapter is the wire by default, so production
-    behaviour is byte-identical to the pre-ADR pipeline).
-  promotion_path: |
-    Promotion owner = the retrieval semantic pipeline stages
-    (`src/retrieval/pipeline/semantic-only.ts` + `semantic-then-rerank.ts` +
-    `parallel-rrf.ts`, which already accept an optional `cache?: EmbedCache`
-    slot) driven from the runner search-pipeline root: build the cache registry
-    under `QUANTA_EMBED_CACHE` and pass it as the `cache` port so repeat embed
-    lookups hit the LRU instead of re-billing the provider, then promote to L3.
-    Provider-cost row ⇒ opt-in explicit, never a silent default flip.
+  reason: 'The runner pipeline now consumes the registry for semantic presets, but QUANTA_EMBED_CACHE remains none by default because cache persistence and provider-cost efficacy are operator choices.'
+  promotion_path: 'Measure repeat-query cache-hit and invalidation behavior with a real embedder before any default flip.'
 notes: |
   Sync fast-hash (FNV-1a-mix) is used internally for hot-path latency;
   a collision guard compares the original `text + modelTag` before

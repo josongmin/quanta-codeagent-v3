@@ -154,9 +154,14 @@ describe("D. robustness", () => {
 
   test("D2 slot enumeration covers every declared slot (drift guard)", () => {
     // Every slot the wire can degrade must be in the closed enumeration.
-    expect([...OBSERVABILITY_WIRE_SLOTS].sort()).toEqual(
-      ["approvalStateMachine", "attribution", "objective", "runLedger", "shadowVerify"].sort(),
-    )
+    const expected: (typeof OBSERVABILITY_WIRE_SLOTS)[number][] = [
+      "approvalStateMachine",
+      "attribution",
+      "objective",
+      "runLedger",
+      "shadowVerify",
+    ]
+    expect([...OBSERVABILITY_WIRE_SLOTS].sort()).toEqual(expected.sort())
   })
 
   test("D3 degraded array is frozen (caller cannot mutate the failure record)", () => {

@@ -318,7 +318,7 @@ describe("end-to-end — followup_task wakes a real runAgent child loop", () => 
     expect(result.ok).toBe(true)
     expect(llm.calls).toBe(1) // one turn, no parking, byte-identical
 
-    // followup_task against a registry with no registered waker ⇒ no_waker, but
+    // followup_task against a registry with no endpoint ⇒ control_unavailable, but
     // the mailbox delivery still stands.
     const wake = new TurnWakeRegistry()
     const reg = new TaskRegistry()
@@ -328,8 +328,10 @@ describe("end-to-end — followup_task wakes a real runAgent child loop", () => 
       { agentId: "child-Z", message: "hi" },
       followupDeps(reg, mailbox, wake),
     )
-    expect(out.kind).toBe("error")
-    if (out.kind === "error") expect(out.cause).toBe("no_waker")
+    expect(out.kind).toBe("success")
+    if (out.kind === "success" && out.status === "degraded") {
+      expect(out.reason).toBe("control_unavailable")
+    }
     expect(mailbox.sent.length).toBe(1) // delivered despite no trigger
   })
 })

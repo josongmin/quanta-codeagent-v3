@@ -49,12 +49,10 @@ export function runLint(report: AuditReport, baseline: FcBaseline): LintResult {
   }
 
   const grandfathered = new Set(baseline.orphan_adrs_grandfathered)
-  const newOrphans = report.orphanAdrs.filter((n) => !grandfathered.has(n))
+  const newOrphans = report.orphanAdrs.filter((adr) => !grandfathered.has(adr.number))
   if (newOrphans.length > 0) {
     errors.push(
-      `orphan Accepted ADRs not in fc: ${newOrphans
-        .map((n) => `ADR-${String(n).padStart(4, "0")}`)
-        .join(", ")}. ` +
+      `orphan Accepted ADRs not in fc: ${newOrphans.map((adr) => formatAdr(adr)).join(", ")}. ` +
         `Add an fc entry that references the ADR, or grandfather via --update-baseline.`,
     )
   }
@@ -65,9 +63,9 @@ export function runLint(report: AuditReport, baseline: FcBaseline): LintResult {
         `Run \`bun fc lint --update-baseline\` to lock in the improvement.`,
     )
   }
-  const stillGrandfathered = report.orphanAdrs.filter((n) => grandfathered.has(n))
+  const stillGrandfathered = report.orphanAdrs.filter((adr) => grandfathered.has(adr.number))
   const removedFromOrphan = baseline.orphan_adrs_grandfathered.filter(
-    (n) => !report.orphanAdrs.includes(n),
+    (n) => !report.orphanAdrs.some((adr) => adr.number === n),
   )
   if (removedFromOrphan.length > 0) {
     warnings.push(
@@ -92,9 +90,16 @@ export function snapshotBaseline(
 ): FcBaseline {
   return {
     empty_stubs_max: report.counts.emptyStubs,
-    orphan_adrs_grandfathered: report.orphanAdrs.slice().sort((a, b) => a - b),
+    orphan_adrs_grandfathered: [...new Set(report.orphanAdrs.map((adr) => adr.number))].sort(
+      (a, b) => a - b,
+    ),
     updated_at: now().toISOString(),
   }
+}
+
+function formatAdr(adr: { readonly number: number; readonly path?: string }): string {
+  const label = `ADR-${String(adr.number).padStart(4, "0")}`
+  return adr.path ? `${label} (${adr.path})` : label
 }
 
 /** On-disk baseline.json shape. We tuck fc state into a sub-object so the

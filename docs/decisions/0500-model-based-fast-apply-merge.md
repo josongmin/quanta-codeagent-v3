@@ -6,7 +6,7 @@
   - `src/agent/fast-apply-fallback/types.ts` (`FastApplyPort` + `FastApplyMergeResult` + `FastApplyMergeDeps`, sibling to the re-emit port)
   - `src/agent/fast-apply-fallback/merge-runner.ts` (`createFastApplyMerge` + `buildMergePrompt` + `extractMergedFile` + `verifyMergeStructural`)
   - `src/agent/fast-apply-fallback/index.ts` (barrel export)
-  - `src/tool/types.ts` (`FastApplyMergeSeam` duck-typed mirror + `ToolContext.fastApplyMerge?` slot)
+  - `src/tool/types.ts` (`FastApplyMergeSeam` + mandatory `FastApplyMergeReviewSeam` duck-typed mirrors)
   - `src/tool/edit/index.ts` (the OPTIONAL merge rung, inserted after fuzzy / before the typed mismatch)
   - Knobs: `QUANTA_FAST_APPLY_MERGE` (gateOnStrict) + `QUANTA_FAST_APPLY_MODEL` (`runtimeConfig().fastApplyMerge` / `.fastApplyModel`)
   - Tests: `tests/unit/fast-apply-merge-runner-hellgate.test.ts`, `tests/unit/edit-fast-apply-merge-rung-hellgate.test.ts`
@@ -44,8 +44,10 @@ rung is reached ONLY when the deterministic exact/fuzzy ladder misses AND `ctx.f
   (1) runner-level STRUCTURAL check (non-empty, changed-vs-original, no leftover elision marker, complete
   fenced block); (2) edit-scoped bounded check in the tool (must contain `new_string`, must not still
   contain `old_string` unless `new_string` legitimately re-introduces it, must differ from original). The
-  accepted merge then flows through the SAME gated commit + `ToolDiffSink` path as any edit — there is NO
-  code path that writes a merged file without verification + the normal gate.
+  deterministic verification cannot prove that arbitrary unrelated semantics were preserved, so the proposal
+  additionally requires `FastApplyMergeReviewSeam.approve({path,before,after,editSketch})` before commit.
+  Missing, rejected, or throwing review fails closed. `ToolDiffSink` is post-write observation only, never
+  approval. An accepted merge then flows through the SAME gated commit + `ToolDiffSink` path as any edit.
 - **NO-THROW / fail-closed**: a role-resolve throw, dispatch throw, non-ok reply, empty/truncated reply, or
   any verification miss ⇒ `{ ok:false, merged:null, rationale }` ⇒ the ladder falls through to the existing
   byte-identical typed mismatch (and `apply_patch`'s re-emit remains the terminal patch fallback).
@@ -53,21 +55,20 @@ rung is reached ONLY when the deterministic exact/fuzzy ladder misses AND `ctx.f
 ## Default posture
 
 OFF, byte-identical. `QUANTA_FAST_APPLY_MERGE` is `gateOnStrict` (`=== "1"`) AND a `QUANTA_FAST_APPLY_MODEL`
-must be set (advertise-iff-able) for the port to be constructed. Absent either ⇒ `ctx.fastApplyMerge` is
-undefined ⇒ `tryFastApplyMergeRung` is a single `undefined` check that returns `null` ⇒ the edit ladder is
-the byte-identical `exact → fuzzy → typed mismatch` with ZERO apply-model dispatch. Distinct from the
-existing `QUANTA_FAST_APPLY` (the V4A re-emit rung) — the two knobs are independent.
+must be set (advertise-iff-able) for the producer port to be constructed. In addition, a host must explicitly
+supply `FastApplyMergeReviewSeam`; absent that authority, `tryFastApplyMergeRung` returns `null` before model
+dispatch and the edit ladder is the byte-identical `exact → fuzzy → typed mismatch`. A canvas/diff observer
+does not satisfy this requirement. Distinct from the existing `QUANTA_FAST_APPLY` (the V4A re-emit rung) —
+the two knobs are independent.
 
 ## Consequences
 
-- Faster + cheaper recovery on failed applies; fewer applies that fail outright (the apply model resolves
-  elisions the deterministic ladder cannot). Honest caveat: the merge rung adds one extra model call, so net
-  token cost is a WIN only when the apply model is cheaper than a full re-emit of the same edit — clearest on
-  LARGE files. On small files the re-emit was already cheap; the rung is OFF-by-default and after-fuzzy, so
-  it never spends on edits that already landed.
-- A model merge can hallucinate / drop content — mitigated STRUCTURALLY (verified proposal behind the normal
-  edit gate), not hopefully. The red-on-injection hellgate asserts a broken/hallucinated/injecting merge is
-  REJECTED and NEVER written.
+- A host that owns a real review authority can opt in to faster recovery on failed applies. Until that owner
+  exists, the env gate alone cannot activate a provider call or mutation.
+- A model merge can hallucinate / drop content. The R5 repair treats that as an authority problem rather than
+  a tunable heuristic: deterministic checks run first, then the complete before/after requires explicit
+  fail-closed review. EM-02b proves missing review prevents provider dispatch; EM-14 proves a content-drop
+  proposal cannot write when review denies.
 - Out of scope for v1 (noted for honesty): speculative-decoding parity (`NOSPEC`), hosted apply APIs, and
   native terse-sketch emission (which would let the merge run on the FIRST attempt, Cursor's actual flow).
   No model default is pinned (`no-heuristics-only-validated`): the apply model is operator-set and must be

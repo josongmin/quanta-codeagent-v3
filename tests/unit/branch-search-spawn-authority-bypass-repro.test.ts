@@ -28,20 +28,13 @@
  * `buildChildConfig`, and candidates get `branchSearch` stripped); this closes the
  * RFC kill-switch-completeness gap for the branch_search vector.
  */
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 
 const runAgentCalls: number[] = []
 
-// Stub the loop's `runAgent` BEFORE importing the binder so the binder closes
-// over the stub (mock.module hoists for subsequent imports in this file).
-mock.module("@/agent/loop", () => ({
-  runAgent: async (child: { depth?: number }) => {
-    runAgentCalls.push(child.depth ?? 0)
-    return { reason: "completed", messages: [], turns: 1 }
-  },
-}))
-
-const { bindBranchRunCandidate } = await import("@/agent/branch-search-runner")
+const { __setBranchRunAgentForTest, bindBranchRunCandidate } = await import(
+  "@/agent/branch-search-runner"
+)
 const { __resetRuntimeConfig } = await import("@/shared/runtime-config")
 
 let savedEnv: NodeJS.ProcessEnv
@@ -49,9 +42,14 @@ let savedEnv: NodeJS.ProcessEnv
 beforeEach(() => {
   savedEnv = { ...process.env }
   runAgentCalls.length = 0
+  __setBranchRunAgentForTest((async (child: { depth?: number }) => {
+    runAgentCalls.push(child.depth ?? 0)
+    return { reason: "completed", messages: [], turns: 1 }
+  }) as never)
   __resetRuntimeConfig()
 })
 afterEach(() => {
+  __setBranchRunAgentForTest(null)
   process.env = savedEnv
   __resetRuntimeConfig()
 })

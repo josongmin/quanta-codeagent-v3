@@ -298,12 +298,17 @@ describe("maybeCompact + real bg controller (FIX H1) — live-suffix install", (
     const backing = createWorkingMemory<Message>(seed)
     let replaces = 0
     const wm = {
+      get messages(): Message[] {
+        return backing.messages
+      },
       snapshot: () => backing.snapshot(),
       append: (message: Message) => backing.append(message),
       replace: (messages: Message[]) => {
         replaces += 1
         backing.replace(messages)
       },
+      clear: () => backing.clear(),
+      tokenEstimate: () => backing.tokenEstimate(),
     }
     let now = 1000
     const controller = makeBgCompactionController(
@@ -332,7 +337,11 @@ describe("maybeCompact + real bg controller (FIX H1) — live-suffix install", (
     // The PTL/recovery path replaces the history before the background result
     // reaches its boundary. This is a real reactive compaction, not a shaped
     // replacement fixture.
-    const reactive = await reactiveCompact({ messages: wm.snapshot(), llm: summarizerLlm })
+    const reactive = await reactiveCompact({
+      messages: [...wm.snapshot()],
+      llm: summarizerLlm,
+      system: "sys",
+    })
     expect(reactive.ok).toBe(true)
     if (!reactive.ok) throw new Error(`reactive compaction unexpectedly failed: ${reactive.reason}`)
     wm.replace(reactive.messages)

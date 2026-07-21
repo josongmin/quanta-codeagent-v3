@@ -39,7 +39,7 @@ mutation target** (the test was already real; the first revert was too shallow).
 | 8 | `t02-m2-strip-orphan-tool-use` | HIGH | `tests/unit/agent/turn-closeout-hellgate.test.ts` | T02 L1 M2 — refusal strips un-dispatched orphan `tool_use` blocks before persist | YES | real |
 | 9 | `t02-h2-append-pending-tool-results` | HIGH | turn-closeout-hellgate | T02 L1 H2 — budget exhaustion at a tool turn appends the matching `tool_result` (no unmatched `tool_use`) | YES | real |
 | 10 | `t02-h1-abort-classification` | CRITICAL | turn-closeout-hellgate | T02 L1 H1 — a mid-stream abort classifies as `aborted`, NOT `error`/RUNTIME_UNKNOWN | YES | real |
-| 11 | `t05-c1-reuse-single-bump` | CRITICAL | `src/agent/memory/stage1-store/__tests__/reuse-consumed-entry.hellgate.test.ts` | T05 C-1 — `reuseConsumedEntry` bumps `usageCount` by EXACTLY +1 (not the old +2 double-bump) | YES | real |
+| 11 | `t05-c1-reuse-single-bump` | CRITICAL | historical V2 Stage1 store | Superseded 2026-07-19: the unconsumed duplicate store was deleted; canonical Phase 1 → Phase 2 owns the live path | N/A | removed |
 | 12 | `t08-h1-destructive-reset-protected-branch` | HIGH | `src/permission/__tests__/fail-closed-base.hellgate.test.ts` | T08 L8 H1 — destructive `git reset` on a protected branch is DENIED even with no explicit ref | YES | real |
 | 13 | `t08-h3-lexical-traversal` | HIGH | fail-closed-base.hellgate | T08 L8 H3 — lexical `..` traversal cannot escape an allow-root | YES** | **mutation fixed** (test was real) |
 | 14 | `t08-h4-empty-writable-roots-deny` | HIGH | fail-closed-base.hellgate | T08 L8 H4 — empty `writableRoots` is DENY, not writable-anywhere | YES | real |

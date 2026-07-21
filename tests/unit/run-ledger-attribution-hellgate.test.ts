@@ -17,9 +17,8 @@
  *   - task_output settled (failed) ⇒ settle status:"failed"
  *   - task_output settled (stopped) ⇒ settle status:"stopped"
  *   - task_stop ok ⇒ settle status:"stopped"
- *   - get_mcp_task completed: ⇒ settle status:"completed"
- *   - get_mcp_task failed: ⇒ settle status:"failed"
- *   - cancel_mcp_task ok ⇒ settle status:"stopped"
+ *   - get_mcp_task authoritative state ⇒ observe_mcp_task (create/touch/settle)
+ *   - cancel_mcp_task exact success ⇒ observe_mcp_task stopped
  *   - unknown tool name ⇒ null (no action)
  *   - !ok pre-launch (bash background never minted shellId) ⇒ null
  *   - malformed payloads (null/undefined/missing fields/wrong types) ⇒ null
@@ -39,6 +38,7 @@ import {
   type LedgerAction,
   type LedgerMatcher,
 } from "@/agent/run-ledger-attribution"
+import { getMcpTaskTool, type TasksHandle } from "@/tool"
 
 const stepClock = (start = 1000, step = 10) => {
   let t = start
@@ -59,6 +59,21 @@ const matchEvent = (
 ): LedgerAction | null => m.match({ name, input, output, ok })
 
 const defaultMatcher = (): LedgerMatcher => createDefaultLedgerMatcher()
+
+/** Drive the real MCP task tool so the attribution test cannot drift from its
+ * model-facing output contract. */
+const runMcpTaskTool = async (
+  port: TasksHandle,
+  taskId: string,
+): Promise<{ ok: boolean; output: string }> => {
+  let result: { ok: boolean; output: string } | undefined
+  const ctx = { cwd: process.cwd(), signal: new AbortController().signal }
+  for await (const event of getMcpTaskTool(port).execute({ taskId }, ctx)) {
+    if (event.type === "result") result = event.result
+  }
+  if (result === undefined) throw new Error("get_mcp_task emitted no result")
+  return result
+}
 
 describe("ADR-0401 default ledger matcher — bash detached", () => {
   it("detects bash background launch from output string", () => {
@@ -228,38 +243,54 @@ describe("ADR-0401 default ledger matcher — subagent", () => {
 })
 
 describe("ADR-0401 default ledger matcher — mcp tasks", () => {
-  it("get_mcp_task completed ⇒ settle completed", () => {
+  it("get_mcp_task completed ⇒ authoritative terminal observation", () => {
     const m = defaultMatcher()
     const out = `mcp_t_99 [completed]\ncompleted: payload body`
     const a = matchEvent(m, "get_mcp_task", out, true, { taskId: "mcp_t_99" })
-    expect(a?.kind).toBe("settle")
-    if (a?.kind === "settle") {
+    expect(a?.kind).toBe("observe_mcp_task")
+    if (a?.kind === "observe_mcp_task") {
       expect(a.status).toBe("completed")
       expect(a.id).toBe("mcp_t_99")
     }
   })
 
-  it("get_mcp_task failed ⇒ settle failed", () => {
+  it("get_mcp_task failed ⇒ authoritative terminal observation with error", () => {
     const m = defaultMatcher()
     const out = `mcp_t_100 [failed]\nfailed: explosion`
     const a = matchEvent(m, "get_mcp_task", out, true, { taskId: "mcp_t_100" })
-    expect(a?.kind).toBe("settle")
-    if (a?.kind === "settle") expect(a.status).toBe("failed")
+    expect(a?.kind).toBe("observe_mcp_task")
+    if (a?.kind === "observe_mcp_task") {
+      expect(a.status).toBe("failed")
+      expect(a.error).toBe("explosion")
+    }
   })
 
-  it("get_mcp_task cancelled ⇒ settle stopped", () => {
+  it("get_mcp_task cancelled ⇒ authoritative terminal observation", () => {
     const m = defaultMatcher()
     const out = `mcp_t_101 [cancelled]\ncancelled`
     const a = matchEvent(m, "get_mcp_task", out, true, { taskId: "mcp_t_101" })
-    expect(a?.kind).toBe("settle")
-    if (a?.kind === "settle") expect(a.status).toBe("stopped")
+    expect(a?.kind).toBe("observe_mcp_task")
+    if (a?.kind === "observe_mcp_task") expect(a.status).toBe("stopped")
   })
 
-  it("get_mcp_task not-ready ⇒ null", () => {
+  it("get_mcp_task pending ⇒ waiting observation on the MCP tool", () => {
+    const m = defaultMatcher()
+    const out = `not-ready: mcp_t_102 [pending]`
+    const a = matchEvent(m, "get_mcp_task", out, true, { taskId: "mcp_t_102" })
+    expect(a?.kind).toBe("observe_mcp_task")
+    if (a?.kind === "observe_mcp_task") {
+      expect(a.status).toBe("waiting")
+      expect(a.waitingOn).toBe("tool")
+      expect(a.resumeAction).toBe("get_mcp_task mcp_t_102")
+    }
+  })
+
+  it("get_mcp_task in_progress ⇒ running observation", () => {
     const m = defaultMatcher()
     const out = `not-ready: mcp_t_102 [in_progress]`
     const a = matchEvent(m, "get_mcp_task", out, true, { taskId: "mcp_t_102" })
-    expect(a).toBeNull()
+    expect(a?.kind).toBe("observe_mcp_task")
+    if (a?.kind === "observe_mcp_task") expect(a.status).toBe("running")
   })
 
   it("get_mcp_task not-found ⇒ null (don't invent a settle)", () => {
@@ -269,12 +300,18 @@ describe("ADR-0401 default ledger matcher — mcp tasks", () => {
     expect(a).toBeNull()
   })
 
-  it("cancel_mcp_task ok ⇒ settle stopped", () => {
+  it("does not infer an active observation from an impossible terminal not-ready state", () => {
+    const m = defaultMatcher()
+    const out = `not-ready: mcp_t_inconsistent [completed]`
+    expect(matchEvent(m, "get_mcp_task", out, true, { taskId: "mcp_t_inconsistent" })).toBeNull()
+  })
+
+  it("cancel_mcp_task exact success ⇒ stopped observation", () => {
     const m = defaultMatcher()
     const out = `cancelled: mcp_t_55`
     const a = matchEvent(m, "cancel_mcp_task", out, true, { taskId: "mcp_t_55" })
-    expect(a?.kind).toBe("settle")
-    if (a?.kind === "settle") {
+    expect(a?.kind).toBe("observe_mcp_task")
+    if (a?.kind === "observe_mcp_task") {
       expect(a.status).toBe("stopped")
       expect(a.id).toBe("mcp_t_55")
     }
@@ -285,6 +322,12 @@ describe("ADR-0401 default ledger matcher — mcp tasks", () => {
     const out = `not-cancellable: mcp_t_done`
     const a = matchEvent(m, "cancel_mcp_task", out, false, { taskId: "mcp_t_done" })
     expect(a).toBeNull()
+  })
+
+  it("does not observe a mismatched echoed task id", () => {
+    const m = defaultMatcher()
+    const out = `not-ready: mcp_other [in_progress]`
+    expect(matchEvent(m, "get_mcp_task", out, true, { taskId: "mcp_expected" })).toBeNull()
   })
 })
 
@@ -418,6 +461,76 @@ describe("ADR-0401 hook-bus subscriber", () => {
       ok: true,
     })
     expect(ledger.get("sh_beta")?.status).toBe("completed")
+  })
+
+  it("subscriber records a real get_mcp_task result, then settles the same record", async () => {
+    const ledger = buildLedger()
+    const sub = createRunLedgerHookSubscriber({ ledger, owner: () => "thread_mcp" })
+    let phase: "pending" | "completed" = "pending"
+    const port: TasksHandle = {
+      list: async () => ({ ok: true, page: { tasks: [] } }),
+      getInfo: async () => ({ taskId: "mcp_live_1", state: phase }),
+      getResult: async () =>
+        phase === "pending"
+          ? { state: "not-ready" }
+          : { state: "completed", output: "result body" },
+      cancel: async () => ({ ok: false, reason: "not-cancellable" }),
+    }
+    const activeResult = await runMcpTaskTool(port, "mcp_live_1")
+    sub({
+      name: "get_mcp_task",
+      input: { taskId: "mcp_live_1" },
+      output: activeResult.output,
+      ok: activeResult.ok,
+    })
+    const active = ledger.get("mcp_live_1")
+    expect(active).not.toBeNull()
+    expect(active?.kind).toBe("mcp_task")
+    expect(active?.owner).toBe("thread_mcp")
+    expect(active?.status).toBe("waiting")
+    expect(active?.waitingOn).toBe("tool")
+    expect(active?.resumeAction).toBe("get_mcp_task mcp_live_1")
+
+    phase = "completed"
+    const terminalResult = await runMcpTaskTool(port, "mcp_live_1")
+    sub({
+      name: "get_mcp_task",
+      input: { taskId: "mcp_live_1" },
+      output: terminalResult.output,
+      ok: terminalResult.ok,
+    })
+    expect(ledger.get("mcp_live_1")?.status).toBe("completed")
+  })
+
+  it("subscriber records a terminal MCP observation even when it is the first poll", () => {
+    const ledger = buildLedger()
+    const sub = createRunLedgerHookSubscriber({ ledger, owner: () => "thread_mcp" })
+    sub({
+      name: "get_mcp_task",
+      input: { taskId: "mcp_terminal_first" },
+      output: "mcp_terminal_first [failed]\nfailed: remote error",
+      ok: true,
+    })
+    const entry = ledger.get("mcp_terminal_first")
+    expect(entry?.kind).toBe("mcp_task")
+    expect(entry?.status).toBe("failed")
+    expect(entry?.error).toBe("remote error")
+  })
+
+  it("subscriber refuses to overwrite another run kind on an MCP id collision", () => {
+    const ledger = buildLedger()
+    ledger.start({ id: "shared_id", kind: "shell", owner: "thread_shell", title: "make" })
+    const sub = createRunLedgerHookSubscriber({ ledger, owner: () => "thread_mcp" })
+    sub({
+      name: "get_mcp_task",
+      input: { taskId: "shared_id" },
+      output: "shared_id [completed]\ncompleted: remote result",
+      ok: true,
+    })
+    const entry = ledger.get("shared_id")
+    expect(entry?.kind).toBe("shell")
+    expect(entry?.status).toBe("running")
+    expect(entry?.owner).toBe("thread_shell")
   })
 
   it("subscriber is NO-THROW when matcher would emit + ledger throws", () => {

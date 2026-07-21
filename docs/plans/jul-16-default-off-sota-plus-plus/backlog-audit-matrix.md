@@ -34,8 +34,6 @@ Generated from `tools/feature-catalog/default-off-ledger.yaml` after the source 
 | code-coverage | enable-now | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | code-mode-js-runtime | measure-first | wired | real-loop | wire | none | real-loop covered; no execution receipt |
 | codebase-indexer | hold | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
-| codex-r2-compaction-event-emit | hold | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
-| codex-r2-context-change-injection-wire | hold | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | codex-r2-disk-persistence-and-env-swap | hold | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | codex-r2-mention-injection-pipeline | hold | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | codex-r2-multi-process-flock | hold | seam-only | unit | unit | none | dormant/unconsumed; no promotion proof |
@@ -58,7 +56,7 @@ Generated from `tools/feature-catalog/default-off-ledger.yaml` after the source 
 | env-probe | measure-first | wired | wire | wire | none | composition/wire covered; no execution receipt |
 | external-editor-compose | enable-now | wired | wire | wire | none | composition/wire covered; no execution receipt |
 | fast-apply-fallback | hold | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
-| fast-apply-merge | hold | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
+| fast-apply-merge | hold | wired | unit | unit | none | host-provided reviewer is threaded to ToolContext; env/model alone remains fail-closed |
 | fast-apply-wire | enable-now | wired | wire | wire | none | composition/wire covered; no execution receipt |
 | fault-evidence-knob | measure-first | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | flock-operations-telemetry | enable-now | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
@@ -71,7 +69,7 @@ Generated from `tools/feature-catalog/default-off-ledger.yaml` after the source 
 | github-pr-from-pr-cli | hold | wired | wire | wire | none | composition/wire covered; no execution receipt |
 | github-webhook-host-scaffold | enable-now | wired | real-loop | wire | none | real-loop covered; no execution receipt |
 | guardian-per-action-assessment | enable-now | wired | real-loop | unit | none | real-loop covered; no execution receipt |
-| identity-mid-session-prompt-rebuild | hold | consumer-only | unit | unit | none | dormant/unconsumed; no promotion proof |
+| identity-mid-session-prompt-rebuild | hold | wired | real-loop | unit | none | runner-owned factory consumed by host bootstrap; CLI two-turn e2e covered |
 | image-gen | measure-first | wired | wire | wire | none | composition/wire covered; no execution receipt |
 | infertooltier-secure-by-default-fallback | enable-now | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | issue-hint-expected-actual-opt-in | measure-first | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
@@ -151,10 +149,9 @@ Generated from `tools/feature-catalog/default-off-ledger.yaml` after the source 
 | spawn-batch-tool | enable-now | wired | wire | wire | none | composition/wire covered; no execution receipt |
 | spec-fidelity-steer-knob | measure-first | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
 | spinner-stall-detection | enable-now | wired | unit | unit | none | unit-only ON proof; promotion proof missing |
-| stage1-phase2-consume-and-vendor-glob-wire | repair-first | seam-only | unit | unit | none | dormant/unconsumed; no promotion proof |
 | stale-read-guard | enable-now | wired | real-loop | unit | none | real-loop covered; no execution receipt |
 | streaming-boomerang | hold | seam-only | unit | unit | none | dormant/unconsumed; no promotion proof |
-| streaming-cancellation-primitive | hold | seam-only | unit | unit | none | dormant/unconsumed; no promotion proof |
+| streaming-cancellation-primitive | hold | wired | real-loop | unit | none | host-injected live loop; ordinary surfaces lack a typed-cause producer |
 | structured-output-mode | repair-first | wired | wire | unit | none | composition/wire covered; no execution receipt |
 | subagent-6-tools | enable-now | wired | wire | unit | none | composition/wire covered; no execution receipt |
 | subagent-fs-ownership-enforce | repair-first | wired | wire | unit | none | composition/wire covered; no execution receipt |

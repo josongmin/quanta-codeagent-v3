@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { type AgentConfig, runAgent } from "@/agent"
+import { buildSystemPrompt, type AgentConfig, runAgent } from "@/agent"
 import type { StreamEvent, StreamInput } from "@/llm"
 import { __resetRuntimeConfig } from "@/shared"
 import { defaultTools, ToolRegistry } from "@/tool"
@@ -66,13 +66,15 @@ const flattenSystem = (s: StreamInput["system"]): string => {
   return JSON.stringify(s)
 }
 
-/** Config WITHOUT `system` so the real `buildSystemPrompt()` is assembled. */
+/** Build the same static base prompt the omitted-system fallback would render,
+ * while keeping AgentConfig's required system contract explicit. */
 const delegationConfig = (llm: SystemCapturingLLM): AgentConfig => ({
   llm,
   registry: new ToolRegistry(defaultTools),
   stream: new RecordingStream(),
   permission: { mode: "acceptEdits" } as AgentConfig["permission"],
   messages: [{ role: "user", content: [{ type: "text", text: "go" }] }],
+  system: buildSystemPrompt(),
   cwd: "/tmp",
   maxTurns: 3,
   signal: new AbortController().signal,

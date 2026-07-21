@@ -43,10 +43,13 @@ to the **in-process `HookBus`** `post_tool_use` event (declared in
 
 ### Closed contracts
 
-- **`LedgerAction`** — three arms (`start` / `touch` / `settle`) mirroring the
-  three `RunLedgerPort` verbs. `start` carries `id`, `runKind`, `owner`,
-  `title`, optional `resumeAction`. `settle` carries `id`, terminal `status`,
-  optional `error`.
+- **`LedgerAction`** — `start` / `touch` / `settle` mirror the three
+  `RunLedgerPort` verbs. The constrained fourth arm, `observe_mcp_task`, is
+  used only for an authoritative MCP task result: MCP exposes no task-launch
+  banner, so the subscriber creates an absent `mcp_task` entry and maps the
+  observed state to those three verbs. It never creates an entry from an id
+  alone. `start` carries `id`, `runKind`, `owner`, `title`, optional
+  `resumeAction`; `settle` carries `id`, terminal `status`, optional `error`.
 - **`LedgerMatcher.match(event)`** — pure function. Input: the four
   load-bearing fields of a `post_tool_use` event (`name`, `input`, `output`,
   `ok`). Output: a `LedgerAction` or `null`. **NO-THROW** under any malformed
@@ -73,11 +76,13 @@ Composes eight per-tool leaves, each anchored on a literal output banner:
 | `task_output`     | `status: stopped`                            | `settle status:"stopped"`         |
 | `task_output`     | `status: running` / block-timeout            | `null`                            |
 | `task_stop`       | `Stopped task <id>.` + `ok:true`             | `settle status:"stopped"`         |
-| `get_mcp_task`    | `completed: <payload>`                       | `settle status:"completed"`       |
-| `get_mcp_task`    | `failed: <payload>`                          | `settle status:"failed"`          |
-| `get_mcp_task`    | bare `cancelled` line                        | `settle status:"stopped"`         |
-| `get_mcp_task`    | `not-ready:` / `not-found:`                  | `null`                            |
-| `cancel_mcp_task` | `cancelled: <id>` + `ok:true`                | `settle status:"stopped"`         |
+| `get_mcp_task`    | exact `not-ready: <id> [pending]`            | observe → `start`, then `touch waiting(tool)` |
+| `get_mcp_task`    | exact `not-ready: <id> [in_progress]`        | observe → `start` / `touch running` |
+| `get_mcp_task`    | exact `<id> [state]` + `completed:`          | observe → `start` if absent, then `settle completed` |
+| `get_mcp_task`    | exact `<id> [state]` + `failed:`             | observe → `start` if absent, then `settle failed` |
+| `get_mcp_task`    | exact `<id> [state]` + bare `cancelled`      | observe → `start` if absent, then `settle stopped` |
+| `get_mcp_task`    | `not-found:` / malformed / mismatched id     | `null`                            |
+| `cancel_mcp_task` | exact `cancelled: <input taskId>` + `ok:true` | observe → `start` if absent, then `settle stopped` |
 | anything else     | —                                            | `null`                            |
 
 ### Slice fence
@@ -103,9 +108,10 @@ is enforced by tests rather than by reaching across the fence.
   still running) and `running`-status `task_output` polls do NOT settle.
   The only paths to terminal `failed`/`completed`/`stopped` are explicit
   signals from the producing tool.
-- **Owner stamping is fixed at `start`**: a custom `owner()` closure is
-  invoked when starting a new ledger entry. `touch`/`settle` do not
-  re-stamp owner (the wave-1 ledger keeps the original).
+- **Owner stamping is fixed at registration**: a custom `owner()` closure is
+  invoked for a `start` or authoritative MCP observation when it first
+  registers a new entry. `touch`/`settle` do not re-stamp owner (the wave-1
+  ledger keeps the original owner).
 - **Idempotent re-observation**: applying the same `post_tool_use` event
   twice does not break ledger state (a re-`start` overwrites; a duplicate
   `settle` on an already-settled entry is a no-op per the wave-1 contract).

@@ -201,9 +201,10 @@ describe("A4 concurrent settle/cancel/expire — exactly one wins, blocker clear
     ])
 
     const final = asm.get("cc-1")
+    if (final == null) throw new Error("requested approval disappeared during terminal settlement")
     // Exactly one terminal status latched.
-    expect(["approved", "cancelled", "expired"]).toContain(final?.status)
-    expect(final?.status).not.toBe("pending")
+    expect(["approved", "cancelled", "expired"]).toContain(final.status)
+    expect(final.status).not.toBe("pending")
     // The blocker is cleared exactly once — never double-cleared, never left set.
     expect(objective.get("session-x")?.blockers).toHaveLength(0)
     // Re-clearing a non-existent blocker did not corrupt the objective.

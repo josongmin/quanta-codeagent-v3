@@ -15,7 +15,7 @@
  * self-test → stamp → loop.
  *
  * The verdict inspectors are PURE / LEAF (no model calls, no IO, no `process.*`; input is the captured
- * `AgentEvent[]`). The loop is pure over its injected ports. The dominant Terminal-Bench failure (~70%)
+ * `AgentEvent[]`). The loop is pure over its injected ports. A dominant terminal-task failure
  * is "fake green": the agent claims done but never checked its deliverable against spec — this core
  * answers, fail-closed, whether the trajectory actually RAN and COMPARED against a fair reference, and
  * (with the loop) drives it to converge.
@@ -27,6 +27,9 @@ export type { ExerciseVerdict } from "./exercise"
 export { inspectExerciseEvidence, isExerciseCommand, resultObservedOutput } from "./exercise"
 export type { ConvergePorts, ConvergeResult, FairFailSource } from "./loop"
 export { runConvergeLoop } from "./loop"
+export { buildTaintedRefs, isUnfair } from "./oracle-taint"
+export type { OutputContractVerdict } from "./output-contract"
+export { outputContractVerdict } from "./output-contract"
 export type {
   ConvergeBounds,
   ConvergeOutcome,
@@ -35,9 +38,6 @@ export type {
   ConvergeVerdict,
 } from "./protocol"
 export { runConvergeProtocol } from "./protocol"
-export { buildTaintedRefs, isUnfair } from "./oracle-taint"
-export type { OutputContractVerdict } from "./output-contract"
-export { outputContractVerdict } from "./output-contract"
 export type { SelfTestReceipt } from "./self-test"
 export { inspectSelfTest, isSelfTestCommand, lastSelfTestFailure } from "./self-test"
 export type { VerificationStamp, VerificationState } from "./stamp"

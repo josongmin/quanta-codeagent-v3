@@ -121,7 +121,7 @@ describe("ADR-0469 Anthropic parity — responseFormat ⇒ forced-tool constrain
     })
     const resolved = resolveAnthropicResponseFormat(RF)
     expect(resolved?.tool.name).toBe(forced.tool.name)
-    expect(resolved?.tool.input_schema).toEqual(forced.tool.input_schema)
+    expect(JSON.stringify(resolved?.tool.input_schema)).toBe(JSON.stringify(personSchema))
     expect(resolved?.tool.description).toBe(forced.tool.description)
     expect(resolved?.toolChoice).toEqual({ type: "tool", name: forced.toolChoice.name })
   })
@@ -158,7 +158,8 @@ describe("ADR-0469 Anthropic OFF byte-identity — absent ⇒ pre-feature wire",
       tools: [{ name: "read", description: "d", input_schema: { type: "object" } }],
     })
     const a = anthReq(input)
-    const b = anthReq({ ...input, responseFormat: undefined } as StreamInput)
+    const { responseFormat: _responseFormat, ...withoutResponseFormat } = input
+    const b = anthReq(withoutResponseFormat)
     expect(JSON.stringify(a)).toBe(JSON.stringify(b))
   })
 })

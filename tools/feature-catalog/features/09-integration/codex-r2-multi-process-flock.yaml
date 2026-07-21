@@ -8,7 +8,9 @@ status: stable
 ui_surfaces: [n-a]
 monitoring: none
 modes: [n-a]
-configurable: n-a
+configurable: integrated
+config_refs:
+  env: [QUANTA_SESSION_REGISTRY_DISK_DIR]
 owners: ["@songmin"]
 labels: ["surface:core", "absorbed:codex", "default-off"]
 depends_on:
@@ -51,21 +53,5 @@ knobs:
     type: 'AcquireSessionLockOpts?'
     default: 'undefined (uses defaults: 5s timeout / 100ms retry / 30s stale)'
     notes: 'Per-session lock options. Override timeoutMs / retryIntervalMs / staleThresholdMs / now for tests.'
-deliberate_hold:
-  reason: |
-    Seam-only (DOF-30 verified @c2f0dd1c2): the disk-adapter file-lock
-    (`src/agent/session-resource-registry/disk-adapter/file-lock.ts`) only
-    activates when the disk session registry is configured via
-    `QUANTA_SESSION_REGISTRY_DISK_DIR`, which no composition root sets by default
-    — the default in-memory/global registry never touches the flock path
-    (byte-identical default-OFF). Unique primitive preserved: cross-process
-    O_EXCL advisory locking with stale-lock reclamation for the on-disk jsonl
-    session registry (Codex sqlite uses WAL — ADR-0357 sibling), the ONLY
-    slice providing multi-process mutual exclusion for the disk registry.
-  promotion_path: |
-    Promotion owner = `src/agent/session-resource-registry/global.ts` +
-    the auto-sweep host (`auto-sweep.ts`, already reads
-    `QUANTA_SESSION_REGISTRY_DISK_DIR`): when the disk registry is selected,
-    construct the disk adapter with `DiskRegistryConfig.lock` enabled so
-    concurrent quanta processes serialize registry mutations, then promote to L3.
-notes: 'Codex parity: jsonl uses lockfile pattern (Codex sqlite uses WAL — ADR-0357 sibling). Prior art: src/auth/lock-file-based.ts:19-21 + src/stream/adapters/jsonl-retention.ts:174 (same O_EXCL idiom).'
+deliberate_hold: null
+notes: '2026-07-19 source audit: global.ts selects the disk registry when QUANTA_SESSION_REGISTRY_DISK_DIR is set, and disk-store ALWAYS acquires the per-session lock (DiskRegistryConfig.lock only tunes policy). Codex parity: jsonl uses lockfile pattern (Codex sqlite uses WAL — ADR-0357 sibling).'

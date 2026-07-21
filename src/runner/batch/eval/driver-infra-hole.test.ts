@@ -22,11 +22,11 @@ describe("isSwebenchInfraGradeFailure (#2 measurement-hole fence)", () => {
   })
 
   test("resolved (passed) ⇒ false", () => {
-    expect(isSwebenchInfraGradeFailure(swebench, { passed: true, error: undefined })).toBe(false)
+    expect(isSwebenchInfraGradeFailure(swebench, { passed: true })).toBe(false)
   })
 
   test("non-swebench instance ⇒ false (a local-testCmd error is NOT this infra signal)", () => {
-    expect(isSwebenchInfraGradeFailure({ swebench: undefined }, { passed: false, error: "test failed" })).toBe(false)
+    expect(isSwebenchInfraGradeFailure({}, { passed: false, error: "test failed" })).toBe(false)
   })
 })
 

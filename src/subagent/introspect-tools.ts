@@ -81,14 +81,24 @@ export interface DeliveryRequestMirror {
 /** Mirror of the discriminated `SubagentDeliveryOutcome`. The tool reads `kind`
  *  + the per-arm fields it maps back onto {@link FollowupTaskOutput}. */
 export type DeliveryOutcomeMirror =
-  | { readonly kind: "accepted"; readonly effect: "steer_pending"; readonly targetTurnId: string }
+  | {
+      readonly kind: "accepted"
+      readonly deliveryId: string
+      readonly requestedMode: "steer"
+      readonly effect: "steer_pending"
+      readonly targetTurnId: string
+    }
   | {
       readonly kind: "applied"
+      readonly deliveryId: string
+      readonly requestedMode: "queue" | "interrupt"
       readonly effectiveMode: "queue" | "interrupt"
       readonly effect: "queued" | "woke" | "interrupted"
     }
   | {
       readonly kind: "degraded"
+      readonly deliveryId: string
+      readonly requestedMode: "queue" | "steer" | "interrupt"
       readonly effectiveMode: "queue"
       readonly effect: "queued" | "woke"
       readonly reason: string
@@ -243,13 +253,33 @@ export type FollowupTaskInput = z.infer<typeof FollowupTaskInputSchema>
 export type FollowupTaskOutput =
   | {
       readonly kind: "success"
+      readonly status: "accepted"
+      readonly deliveryId: string
+      readonly delivered: false
+      readonly triggered: false
+      readonly requestedMode: "steer"
+      readonly targetTurnId: string
+    }
+  | {
+      readonly kind: "success"
+      readonly status: "applied"
+      readonly deliveryId: string
       readonly delivered: true
-      /** true ⇒ woke an idle child immediately (or an accepted steer / interrupt
-       *  scheduled a turn); false ⇒ queued (mid-turn, drains next turn). */
+      /** true ⇒ woke an idle child or interrupted an active turn immediately;
+       *  false ⇒ queued (mid-turn, drains next turn). */
       readonly triggered: boolean
-      /** The controller's effective mode — `queue` when a live mode degraded, so
-       *  the model sees the ACTUAL behavior, not the request (RFC §4.6). */
-      readonly effectiveMode: "queue" | "steer" | "interrupt"
+      readonly requestedMode: "queue" | "interrupt"
+      readonly effectiveMode: "queue" | "interrupt"
+    }
+  | {
+      readonly kind: "success"
+      readonly status: "degraded"
+      readonly deliveryId: string
+      readonly delivered: true
+      readonly triggered: boolean
+      readonly requestedMode: "queue" | "steer" | "interrupt"
+      readonly effectiveMode: "queue"
+      readonly reason: string
     }
   | IntrospectError
 
@@ -316,29 +346,40 @@ export const handleFollowupTask = (
         rejectCause(outcome.reason),
       )
     case "accepted":
-      // Steer admitted (pending); a turn WILL consume it at the safe point.
-      return { kind: "success", delivered: true, triggered: true, effectiveMode: "steer" }
+      // Admission is not delivery. The correlated final receipt decides whether
+      // this becomes applied/degraded/cancelled/failed.
+      return {
+        kind: "success",
+        status: "accepted",
+        deliveryId: outcome.deliveryId,
+        delivered: false,
+        triggered: false,
+        requestedMode: outcome.requestedMode,
+        targetTurnId: outcome.targetTurnId,
+      }
     case "applied":
       return {
         kind: "success",
+        status: "applied",
+        deliveryId: outcome.deliveryId,
         delivered: true,
         triggered: outcome.effect === "woke" || outcome.effect === "interrupted",
+        requestedMode: outcome.requestedMode,
         effectiveMode: outcome.effectiveMode,
       }
     case "degraded":
       // The payload WAS delivered (retained in the mailbox); the live mode
-      // downgraded to queue. Honest surfacing: delivered, effective queue.
-      if (outcome.reason === "no_waker" || outcome.reason === "control_unavailable") {
-        return err(
-          `delivered to ${input.agentId} but it has no live turn-wake receiver (message queued for next read)`,
-          "no_waker",
-        )
-      }
+      // downgraded to queue. It remains a successful delivery with an explicit
+      // degraded status even when no live waker exists.
       return {
         kind: "success",
+        status: "degraded",
+        deliveryId: outcome.deliveryId,
         delivered: true,
         triggered: outcome.effect === "woke",
+        requestedMode: outcome.requestedMode,
         effectiveMode: "queue",
+        reason: outcome.reason,
       }
   }
 }
@@ -373,6 +414,13 @@ export interface IntrospectToolsDeps {
    *  Ownership / self / settled / label-resolution / wake now live in it. */
   readonly delivery?: DeliveryPort
   readonly callerLabel?: string
+  /** Best-effort lifecycle observation. Admission has no effective mode; the
+   *  finalization authority emits the correlated terminal event separately. */
+  readonly onSteerAdmission?: (notice: {
+    readonly deliveryId: string
+    readonly targetTaskId: string
+    readonly targetTurnId: string
+  }) => void
   /** Gate: build `list_agents` only when true. */
   readonly enableIntrospect?: boolean
   /** Gate: build `followup_task` only when true AND the delivery port exists. */
@@ -440,8 +488,32 @@ const followupTaskTool = (
       yield errorEvent(out)
       return
     }
+    if (out.status === "accepted") {
+      try {
+        deps.onSteerAdmission?.({
+          deliveryId: out.deliveryId,
+          targetTaskId: input.agentId,
+          targetTurnId: out.targetTurnId,
+        })
+      } catch {
+        // Observation only: a broken stream sink cannot revoke admission.
+      }
+      yield successEvent(
+        `steer accepted for ${input.agentId}; pending finalization (delivery ${out.deliveryId}, turn ${out.targetTurnId})`,
+        out,
+      )
+      return
+    }
+    const delivery = `delivery ${out.deliveryId}`
+    if (out.status === "degraded") {
+      yield successEvent(
+        `delivered to ${input.agentId}; ${out.requestedMode} degraded to queue (${out.reason}, ${delivery})`,
+        out,
+      )
+      return
+    }
     yield successEvent(
-      `delivered to ${input.agentId}; turn ${out.triggered ? "started" : "queued for next turn"} (${out.effectiveMode})`,
+      `delivered to ${input.agentId}; turn ${out.triggered ? "started" : "queued for next turn"} (${out.effectiveMode}, ${delivery})`,
       out,
     )
   },

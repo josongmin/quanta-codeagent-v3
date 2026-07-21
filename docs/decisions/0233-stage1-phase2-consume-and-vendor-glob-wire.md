@@ -1,6 +1,6 @@
 # ADR-0233: Stage1→Phase2 reuse-consume + vendor-detector ↔ glob-rules wire
 
-- **Status**: Accepted
+- **Status**: Partially superseded (2026-07-19)
 - **Date**: 2026-05-25
 - **Related ADRs**: ADR-0205 (multi-source rules vendor-detector slice),
   ADR-0216 (`Stage1StorePortV2` agent-side persist seam), ADR-0068
@@ -10,6 +10,11 @@
   (knobs for Wire 1), `src/agent/types/rules-config.ts` (knobs for Wire 2),
   `tests/unit/stage1-phase2-consume-wire-hellgate.test.ts` (15 cases),
   `tests/unit/vendor-detector-glob-rules-wire-hellgate.test.ts` (14 cases)
+
+> **Superseded scope:** Wire 1 and the V2 Stage1 store it consumed were removed
+> after audit: neither had a production caller and its record shape was not the
+> canonical Phase 2 input. Vendor-rule glob loading remains live, independently
+> owned by the multi-source vendor detector under `QUANTA_VENDOR_RULES`.
 
 ## Background
 

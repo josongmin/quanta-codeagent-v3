@@ -16,8 +16,9 @@
  * One preflight request. Caller (a remote-tool dispatcher about to invoke a
  * mutating action) supplies an opaque `agentId`, an `action` discriminator
  * (caller convention: e.g. `"tool.exec"`, `"connector.write"`), and a
- * `resource` string the policy table can match. `requestedAt` is absolute
- * epoch-ms — lets the attestor reject stale requests under clock skew.
+ * `resource` string the policy table can match. `requestedAt` is checked by
+ * the default adapter against its bounded freshness/skew policy before any
+ * allow token can be issued.
  */
 export interface AttestRequest {
   readonly agentId: string
@@ -25,6 +26,12 @@ export interface AttestRequest {
   readonly resource: string
   readonly requestedAt: number
 }
+
+/** Canonical, collision-free token scope for one preflight request. Consumers
+ * reconstruct this exact value from their expected request before `verify`;
+ * the agent identity is part of the scope so a token cannot cross agents. */
+export const attestationScopeFor = (req: AttestRequest): string =>
+  JSON.stringify([req.agentId, req.action, req.resource])
 
 /**
  * Short-lived STS token issued on `allow`. `token` is the base64url-encoded
@@ -59,15 +66,14 @@ export type AttestResult =
   | { readonly kind: "prompt-user"; readonly reason?: string }
 
 /**
- * Typed error for non-result failure paths — e.g. headless stub `mintToken`
- * (no remote attestor wired). `preflight` itself is NO-THROW by contract; an
- * internal failure surfaces as `{ kind: "deny", reason }` + a `preflight-error`
- * audit event.
+ * Typed error for constructor/configuration failures. `preflight` itself is
+ * NO-THROW by contract; an internal failure surfaces as `{ kind: "deny",
+ * reason }` + a `preflight-error` audit event.
  */
 export class AttestError extends Error {
   constructor(
     message: string,
-    public readonly code: "headless" | "tampered" | "expired" | "scope-mismatch" | "internal",
+    public readonly code: "tampered" | "expired" | "scope-mismatch" | "misconfigured" | "internal",
   ) {
     super(message)
     this.name = "AttestError"

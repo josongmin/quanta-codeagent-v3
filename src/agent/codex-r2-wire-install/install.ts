@@ -42,7 +42,7 @@
  */
 
 import type { ContextEvent } from "@/agent/context-change"
-import { detectContextChanges } from "@/agent/context-change"
+import { createContextEventStoreReader, detectContextChanges } from "@/agent/context-change"
 import type { MentionResolveErrorSink, MentionResolverPort } from "@/agent/mention-injection"
 import {
   buildInjectionFragments,
@@ -108,6 +108,7 @@ const buildContextEventsProducer = (
   sessionId: string | undefined,
   now: () => number,
   onError: ((message: string) => void) | undefined,
+  replayStoredEvents: boolean,
 ): (() => readonly ContextEvent[]) => {
   let prev: import("@/agent/context-change").TurnStateSnapshot | undefined
   let turnSeq = 0
@@ -115,7 +116,19 @@ const buildContextEventsProducer = (
     turnSeq++
     return sessionId !== undefined ? `${sessionId}#${turnSeq}` : `t${turnSeq}`
   }
+  // The store is shared by context-change, compaction and mention producers.
+  // Only compaction events lack a direct prompt injection path; replaying the
+  // other variants here would duplicate their owning surface. The reader
+  // filters before applying its bounded prompt budget, so unrelated shared
+  // history cannot delay a stored compaction across multiple turns.
+  const replayReader =
+    replayStoredEvents && store !== undefined
+      ? createContextEventStoreReader(store, {
+          include: (event) => event.kind === "compaction_event",
+        })
+      : undefined
   return (): readonly ContextEvent[] => {
+    const replayedCompactions = replayReader?.read() ?? []
     try {
       const current = getSnapshot()
       if (prev === undefined) {
@@ -123,12 +136,12 @@ const buildContextEventsProducer = (
         // nothing" event spray). Matches Codex behaviour where the
         // initial reference context is captured but not diffed.
         prev = current
-        return []
+        return replayedCompactions
       }
       const events = detectContextChanges(prev, current, now(), { turnId: mintTurnId() })
       prev = current
       if (store !== undefined && events.length > 0) appendAllSafe(store, events)
-      return events
+      return replayedCompactions.length === 0 ? events : [...replayedCompactions, ...events]
     } catch (e) {
       // NO-THROW envelope (ADR-0332 §J): a throwing `getSnapshot`/detector must
       // NOT escape the closure — the SEED path also runs inside this try, and a
@@ -146,7 +159,7 @@ const buildContextEventsProducer = (
       } catch (sinkErr) {
         logger.warn(`codex-r2-wire.contextEventsForTurn.sink: ${errMessage(sinkErr)}`)
       }
-      return []
+      return replayedCompactions
     }
   }
 }
@@ -264,6 +277,7 @@ const fillContextEvents = (cfg: AgentConfig, deps: CodexR2WireDeps, now: () => n
       deps.sessionId,
       now,
       onError,
+      deps.replayStoredEvents === true,
     )
     safeSet(cfg, "contextEventsForTurn", producer)
   } catch {

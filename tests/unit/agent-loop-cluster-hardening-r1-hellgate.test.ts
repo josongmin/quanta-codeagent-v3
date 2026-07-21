@@ -116,9 +116,12 @@ const BG_CFG: BgCompactionConfig = {
 
 const okSummarizer =
   (resultingTokens: number) =>
-  async (): Promise<{ ok: true; value: { summary: string; resultingTokens: number } }> => ({
+  async (): Promise<{
+    ok: true
+    value: { summary: string; resultingTokens: number; summarizedPrefixLen: number }
+  }> => ({
     ok: true,
-    value: { summary: "SUMMARY", resultingTokens },
+    value: { summary: "SUMMARY", resultingTokens, summarizedPrefixLen: 0 },
   })
 
 describe("W2 bg-compaction — 2-phase install correctness (hellgate)", () => {

@@ -176,13 +176,15 @@ const MUTATIONS: readonly Mutation[] = [
     id: "t03-lease-turn-scoped-clear",
     severity: "HIGH",
     guards: "T03 L5 H-1 — an approved grant does not leak across the turn boundary",
-    src: "src/host/runtime/internal/context-binding.ts",
-    find: `        slot.current = previous
-        for (const approvalId of armedAtEntry) leases.delete(approvalId)`,
+    src: "src/host/runtime/internal/context-binding/approval-protocol.ts",
+    find: `    slot.current = previous
+    if (pushedSurface) deps.surfaceConfirms.pop()
+    for (const approvalId of armedAtEntry) deps.leases.delete(approvalId)`,
     // Pre-fix: grants were a session-lifetime Set — never cleared at scope exit,
     // so an approval leaked to a later turn.
-    replace: `        slot.current = previous
-        void armedAtEntry`,
+    replace: `    slot.current = previous
+    if (pushedSurface) deps.surfaceConfirms.pop()
+    void armedAtEntry`,
     gate: "src/host/runtime/internal/__tests__/approval-lease-isolation.hellgate.test.ts",
     only: "good for exactly ONE turn",
   },
@@ -190,7 +192,7 @@ const MUTATIONS: readonly Mutation[] = [
     id: "t03-lease-fail-closed-shell-extract",
     severity: "HIGH",
     guards: "T03 L5 H-1 — a throwing extractShellCommand fails closed (forces prompt)",
-    src: "src/host/runtime/internal/context-binding.ts",
+    src: "src/host/runtime/internal/context-binding/approval-support.ts",
     find: `  } catch {
     return SHELL_EXTRACT_FAILED
   }`,
@@ -233,44 +235,24 @@ const MUTATIONS: readonly Mutation[] = [
     id: "t02-h1-abort-classification",
     severity: "CRITICAL",
     guards: "T02 L1 H1 — mid-stream abort classifies as aborted (NOT error/RUNTIME_UNKNOWN)",
-    src: "src/agent/loop.ts",
-    find: `    if (
-      config.signal.aborted ||
-      (e instanceof LLMError && e.kind === "aborted") ||
-      abortReasonOf(e) !== null
-    ) {
-      samplingStatus = "aborted"
-      return { aborted: true }
-    }`,
+    src: "src/agent/loop/stream-consume.ts",
+    find: `  if (
+    config.signal.aborted ||
+    (e instanceof LLMError && e.kind === "aborted") ||
+    abortReason === "abort"
+  )
+    return { status: "aborted", result: { aborted: true } }`,
     // Pre-fix: an abort thrown mid-stream fell through to {error} →
     // classifyLLMError("aborted")="fatal" → reported as a runtime failure.
-    replace: `    if (
-      false &&
-      (config.signal.aborted ||
-        (e instanceof LLMError && e.kind === "aborted") ||
-        abortReasonOf(e) !== null)
-    ) {
-      samplingStatus = "aborted"
-      return { aborted: true }
-    }`,
+    replace: `  if (
+    false &&
+    (config.signal.aborted ||
+      (e instanceof LLMError && e.kind === "aborted") ||
+      abortReason === "abort")
+  )
+    return { status: "aborted", result: { aborted: true } }`,
     gate: "tests/unit/agent/turn-closeout-hellgate.test.ts",
     only: "mid-stream abort ⇒ reason aborted",
-  },
-
-  // ── T05 memory contract ────────────────────────────────────────────────
-  {
-    id: "t05-c1-reuse-single-bump",
-    severity: "CRITICAL",
-    guards: "T05 C-1 — reuseConsumedEntry bumps usageCount by EXACTLY +1 (not +2)",
-    src: "src/agent/memory/stage1-store/in-memory.ts",
-    find: `        usageCount: existing.usageCount + 1,
-        selectedForPhase2: true,`,
-    // Pre-fix: the increment+select pair double-bumped usage (+2 per reuse),
-    // silently halving the maxUsageBeforeRefresh budget.
-    replace: `        usageCount: existing.usageCount + 2,
-        selectedForPhase2: true,`,
-    gate: "src/agent/memory/stage1-store/__tests__/reuse-consumed-entry.hellgate.test.ts",
-    only: "in-memory",
   },
 
   // ── T08 permission fail-closed base ────────────────────────────────────
@@ -279,15 +261,11 @@ const MUTATIONS: readonly Mutation[] = [
     severity: "HIGH",
     guards: "T08 L8 H1 — destructive reset on a protected branch is DENIED (no ref needed)",
     src: "src/permission/branch-only.ts",
-    find: `    const isDestructive = allToks.some(
-      (t) => t === "--hard" || t === "--merge" || t === "--keep",
-    )
+    find: `    const isDestructive = allToks.some((t) => t === "--hard" || t === "--merge" || t === "--keep")
     if (isDestructive && currentBranch && protectedBranches.includes(currentBranch)) {`,
     // Pre-fix: only an explicit protected-branch REF target was denied, so a
     // bare `git reset --hard HEAD~3` on main fell through to allow.
-    replace: `    const isDestructive = allToks.some(
-      (t) => t === "--hard" || t === "--merge" || t === "--keep",
-    )
+    replace: `    const isDestructive = allToks.some((t) => t === "--hard" || t === "--merge" || t === "--keep")
     if (false && isDestructive && currentBranch && protectedBranches.includes(currentBranch)) {`,
     gate: "src/permission/__tests__/fail-closed-base.hellgate.test.ts",
     only: "destructive reset on a protected branch",

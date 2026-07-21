@@ -174,6 +174,16 @@ describe("tool-surface manifest — GATED factories match the manifest two-way",
 })
 
 describe("tool-surface manifest — CLI default-ON seed derives from the SSOT", () => {
+  test("search_codebase declares the default lexical wire, not the optional index promotion", () => {
+    const entry = GATED_TOOLS.find((e) => e.name === "search_codebase")
+    expect(entry).toBeDefined()
+    expect(entry?.gate).toEqual({ kind: "config-slot", slot: "searchWire" })
+    expect(entry?.default.cli).toBe("on")
+    // QUANTA_INDEX controls semantic/hybrid promotion only.  If the manifest
+    // grew an env gate here, the CLI seed would incorrectly turn indexing on.
+    expect("env" in (entry?.gate ?? {})).toBe(false)
+  })
+
   test("seedEnvVarsForSurface('cli') is exactly the CLI-default-ON tool gates", () => {
     // jun-26 coordination-trio gating: QUANTA_SUBAGENT_MAILBOX / QUANTA_TEAM_PEER_MSG /
     // QUANTA_OBJECTIVE_TOOLS were FLIPPED to opt-in (engagement-UNVERIFIED, frontier
@@ -351,7 +361,6 @@ describe("tool-surface manifest — manifest→CATALOG completeness gate (root-c
       "QUANTA_CONTAINER_EXEC",
       "terminal container_exec gate — declared in the knob-inventory SSOT; a dedicated terminal-surface feature yaml is a backlog item",
     ],
-    ["QUANTA_COVERAGE_TOOL", "coverage_check tool gate — pre-existing, no feature yaml yet"],
     ["QUANTA_DEBUG_TOOLS", "debug tool group gate — pre-existing, no feature yaml yet"],
     [
       "QUANTA_SHADOW",
@@ -359,7 +368,6 @@ describe("tool-surface manifest — manifest→CATALOG completeness gate (root-c
     ],
     ["QUANTA_SUBAGENT_6TOOLS", "subagent 6-tool router gate — pre-existing, no feature yaml yet"],
     ["QUANTA_SUBAGENT_BG", "subagent background-run gate — pre-existing, no feature yaml yet"],
-    ["QUANTA_SUBAGENT_MAILBOX", "subagent mailbox gate — pre-existing, no feature yaml yet"],
     [
       "QUANTA_TB_WRITE_TOOL",
       "terminal container_write_file gate (B2 TB lever) — pre-existing, no feature yaml yet",

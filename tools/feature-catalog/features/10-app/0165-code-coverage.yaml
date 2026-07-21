@@ -45,6 +45,7 @@ evidence:
     - src/tool/coverage_check.ts
   adrs:
     - docs/decisions/0165-code-coverage.md
+    - docs/decisions/0173-coverage-istanbul-per-branch.md
   tests:
     unit:
       - tests/unit/coverage-source-hellgate.test.ts

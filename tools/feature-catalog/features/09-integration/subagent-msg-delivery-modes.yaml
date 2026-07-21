@@ -3,10 +3,10 @@ title: Subagent message delivery modes — queue / steer / interrupt (Codex foll
 section: 9
 subsystem: Subagent coordination (targeted child delivery timing)
 order: 543
-maturity: L2
+maturity: L3
 status: refined
 ui_surfaces: [cli]
-monitoring: n-a
+monitoring: integrated
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: partial
 owners: ["@songmin"]
@@ -17,11 +17,11 @@ config_refs:
 surface_integration:
   cli: full
   web: missing
-  method: unverified
-  verified: "2026-07-18"
+  method: audited
+  verified: "2026-07-20"
   evidence:
-    cli: "followup_task is a gated LLM tool (QUANTA_SUBAGENT_FOLLOWUP, CLI default-ON); its `mode` arg + typed outcome flow through the interactive CLI tool path. The delivery controller + control endpoint are owner-local proven (5 hellgate files); live-child smoke under QUANTA_SUBAGENT_STEER=on is WS7-pending (see notes)."
-    web: "no dedicated web event yet — the peer_message transcript surfacing (jul-15 surfacing RFC) is not landed, so a downgrade is caller-visible only via the followup_task tool RESULT (effectiveMode), not a distinct browser event"
+    cli: "followup_task is a gated LLM tool (QUANTA_SUBAGENT_FOLLOWUP, CLI default-ON); queue/steer/interrupt traverse the real delivery controller, control endpoint, child loop, and correlated receipt path in tests/integration/subagent-delivery-modes-real-loop-e2e.test.ts. Steer admission returns pending status + deliveryId without claiming an effective mode; admission and every terminal receipt are correlated through the typed subagent_delivery stream event, with terminal receipts also on the operator-notice bus."
+    web: "the typed subagent_delivery event exists and is durably recorded, but an explicit browser rendering/activation proof is not yet present"
 purpose: |
   Codex's `followUpQueueMode` (`queue | steer | interrupt`, corpus-verified in
   `.extracted_source/codex-ide` — `turn/steer` + `turn/interrupt` RPC +
@@ -59,7 +59,7 @@ purpose: |
   `end_turn`, a pending steer is injected and the SAME turn re-streams one more
   model call (no abort, no mailbox duplicate). A `SubagentSteerFinalizationPort`
   guarantees every accepted steer terminates in EXACTLY ONE correlated receipt
-  (applied / degraded-fallback / cancelled); an interrupt racing an accepted steer
+  (applied / degraded-fallback / cancelled / failed); an interrupt racing an accepted steer
   supersedes it (`superseded_by_interrupt`) with the steer preserved via one mailbox
   fallback. Remote-steer admission is bounded (`action_queue_full` /
   `same_turn_budget_exhausted`).
@@ -84,6 +84,12 @@ evidence:
     - src/agent/loop/same-turn-engine.ts
     - src/agent/tier1/subagent-introspect.ts
     - src/agent/optional-ports.ts
+    - src/stream/types.ts
+    - src/stream/item-stream-projector.ts
+    - src/stream/adapters/jsonl-recorder.ts
+    - src/stream/adapters/jsonl-recorder-communication-data.ts
+    - src/stream/adapters/stdout.ts
+    - src/apps/cli/timeline-panel.ts
   adrs: ["docs/plans/jul-18-subagent-message-delivery-modes-rfc.md"]
   tests:
     unit:
@@ -92,7 +98,11 @@ evidence:
       - tests/unit/subagent-delivery-controller-hellgate.test.ts
       - tests/unit/subagent-steer-safepoint-hellgate.test.ts
       - tests/unit/subagent-introspect-hellgate.test.ts
-    integration: []
+      - tests/unit/subagent-steer-degrade-notice-hellgate.test.ts
+      - tests/unit/peer-message-item-stream-and-render-hellgate.test.ts
+      - tests/unit/peer-message-recorder-hellgate.test.ts
+    integration:
+      - tests/integration/subagent-delivery-modes-real-loop-e2e.test.ts
     contract: []
 knobs:
   - name: QUANTA_SUBAGENT_FOLLOWUP
@@ -113,7 +123,7 @@ knobs:
       silent queue), no child conversation-action surface / steer plane allocated,
       and the `runTurn` safe-point branch is byte-identical (guarded on
       `config.childSteerDrain !== undefined`). ON ⇒ targeted steer admits + applies
-      at the safe point. Measure-first: default-OFF pending live-child validation.
+      at the safe point. The real-loop integration rail covers enabled and default-off behavior.
 notes: |
   Owner-local hellgates GREEN (verified 2026-07-18, integrated WS1–WS5):
   contract 8 · control-endpoint 14 · controller 23 · steer-safepoint 15 ·
@@ -133,16 +143,22 @@ notes: |
   fixed by gating that allocation on the steer plane, with a paired-control test.
   Post-fix: 246 pass, src typecheck + file-scoped biome clean.
 
+  STRUCTURAL REPAIR (verified 2026-07-20): finalization uses a claim/commit
+  retention protocol; throwing mailbox adapters terminate as correlated
+  `failed(mailbox_error)` receipts and throwing receipt sinks cannot poison the
+  loop. `followup_task` separates pending admission from final application and
+  preserves `deliveryId`. `TurnWakeRegistry` now stores one discriminated
+  registration cell per task, eliminating endpoint/label/waker split-brain.
+
+  OBSERVABILITY: the existing jul-15 peer-message stream substrate is landed.
+  Delivery lifecycle uses a distinct typed `subagent_delivery` event so content
+  mail and control receipts are not conflated. Admission and finalization share
+  `deliveryId`; recorder, item projection, stdout, and CLI timeline consumers are
+  wired in the same change. Explicit browser rendering remains unverified.
+
   SCOPE / DEFERRED (honest):
-  - peer_message TRANSCRIPT event + consumer cascade (recorder / protocol / CLI
-    timeline / web bridge / debug tracer) is DEPENDENT on the jul-15
-    peer-message-user-surfacing RFC, which is NOT landed. Until it lands, a
-    downgrade is operator-visible via the `followup_task` tool RESULT
-    (`effectiveMode` + reason), not a distinct transcript event. RFC §4.6 gates the
-    event work on "when jul-15's peer_message exists".
-  - WS7 live-child smoke (real spawned child under QUANTA_SUBAGENT_STEER=on, 5
-    scenarios) is what promotes this from owner-local L2 proof to a product-path L3
-    claim; until then maturity stays L2.
+  - WS7 real-loop integration covers 5 scenarios and promotes this to L3. It is a
+    deterministic in-process real child-loop rail, not an external CLI/browser smoke.
 
   Absorption map: Codex `followUpQueueMode: queue|steer|interrupt` → the `mode` axis;
   `turn/interrupt` + `multi_agents_v2/interrupt_agent.rs` → the endpoint `interrupt()`

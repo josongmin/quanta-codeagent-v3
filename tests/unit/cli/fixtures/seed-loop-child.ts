@@ -28,15 +28,11 @@
  * (c) grandchild inheritance, (d) rollback to OFF.
  */
 
-import { CLI_FEATURE_GATE_NAMES } from "@/apps/cli/cli-feature-gates"
+import { CLI_SEEDED_GATE_NAMES } from "@/apps/cli/cli-seeded-gates"
 import { gateOn } from "@/shared"
-import { seedEnvVarsForSurface } from "@/tool"
 
 /** The EXACT union the CLI seed loop iterates (index.ts:48). */
-const SEED_UNION: readonly string[] = [
-  ...CLI_FEATURE_GATE_NAMES,
-  ...seedEnvVarsForSurface("cli"),
-]
+const SEED_UNION: readonly string[] = CLI_SEEDED_GATE_NAMES
 
 /** The subset of gate names the parent asked us to report on (comma list in
  *  QUANTA_PROBE_GATES) — keeps the JSON small and the assertions explicit. */
@@ -49,7 +45,10 @@ const probed = (): readonly string[] => {
 const snapshot = (): Record<string, { value: string | null; on: boolean }> => {
   const out: Record<string, { value: string | null; on: boolean }> = {}
   for (const g of probed()) {
-    out[g] = { value: process.env[g] ?? null, on: gateOn(process.env as Record<string, string | undefined>, g) }
+    out[g] = {
+      value: process.env[g] ?? null,
+      on: gateOn(process.env as Record<string, string | undefined>, g),
+    }
   }
   return out
 }

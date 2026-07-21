@@ -41,9 +41,7 @@ async function pathExists(repoRelative: string): Promise<boolean> {
 /** Collect every (kind, path) evidence citation that does NOT resolve on disk.
  *  Mirrors `cmdValidate`'s code+tests evidence-on-disk check (ADRs excluded —
  *  those resolve by number, covered elsewhere). Pure: I/O via pathExists only. */
-async function danglingEvidence(
-  feature: Feature,
-): Promise<Array<{ kind: string; path: string }>> {
+async function danglingEvidence(feature: Feature): Promise<Array<{ kind: string; path: string }>> {
   const out: Array<{ kind: string; path: string }> = []
   const checks: Array<{ kind: string; paths: string[] }> = [
     { kind: "code", paths: feature.evidence.code },
@@ -64,15 +62,41 @@ describe("feature-catalog evidence existence (durable anti-rot lock)", () => {
     const features = await loadFeaturesStrict(FEATURES_DIR)
     expect(features.length).toBeGreaterThan(0)
 
+    const citations = features.flatMap(({ feature, path }) => [
+      ...feature.evidence.code.map((evidencePath) => ({ path, kind: "code", evidencePath })),
+      ...feature.evidence.tests.unit.map((evidencePath) => ({
+        path,
+        kind: "test.unit",
+        evidencePath,
+      })),
+      ...feature.evidence.tests.integration.map((evidencePath) => ({
+        path,
+        kind: "test.integration",
+        evidencePath,
+      })),
+      ...feature.evidence.tests.contract.map((evidencePath) => ({
+        path,
+        kind: "test.contract",
+        evidencePath,
+      })),
+    ])
+    const uniquePaths = [...new Set(citations.map(({ evidencePath }) => evidencePath))]
+    const exists = new Map(
+      await Promise.all(
+        uniquePaths.map(
+          async (evidencePath) => [evidencePath, await pathExists(evidencePath)] as const,
+        ),
+      ),
+    )
     const errors: string[] = []
-    for (const { feature, path } of features) {
-      const dangling = await danglingEvidence(feature)
-      for (const d of dangling) {
-        errors.push(`${path}: dangling evidence.${d.kind} "${d.path}"`)
-      }
+    for (const { path, kind, evidencePath } of citations) {
+      if (!exists.get(evidencePath))
+        errors.push(`${path}: dangling evidence.${kind} "${evidencePath}"`)
     }
 
-    // Surface the full list on failure so the fix is mechanical.
+    // Surface the full list on failure so the fix is mechanical. Evidence paths
+    // recur across the catalog; de-duplicate and issue the remaining disk probes
+    // concurrently so this full-catalog rail stays deterministic under CI I/O.
     expect(errors, errors.join("\n")).toEqual([])
     // Catalog grew past ~980 entries; the per-path fs.stat sweep (thousands of
     // stats) needs more than the 5s default — bump so this anti-rot lock stays a

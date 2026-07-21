@@ -40,8 +40,10 @@ evidence:
   code:
     - src/tool/web/index.ts
     - src/tool/web/fetch.ts
+    - src/tool/web/html-to-markdown.ts
+    - src/tool/web/turndown.d.ts
     - src/tool/web/search.ts
-  adrs: [127]
+  adrs: [127, "docs/decisions/0186-html-to-markdown-turndown-swap.md"]
   tests:
     unit:
       - tests/unit/tool/web-fetch-hellgate.test.ts

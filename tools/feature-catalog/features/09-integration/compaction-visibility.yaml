@@ -10,7 +10,7 @@ monitoring: integrated
 modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 config_refs:
-  env: []
+  env: [QUANTA_COMMAND_HOOKS, QUANTA_COMMAND_HOOKS_ACK]
 owners: ["@songmin"]
 labels: ["surface:core", "agent:recovery", "default-off"]
 depends_on: [hookbus, agent-objective-port]
@@ -49,10 +49,11 @@ purpose: |
   recovery-reason TYPES만 import (no @/llm, no @/agent/loop/dispatch/compaction);
   compaction.ts는 recovery-reason TYPES만 추가 import (no @/agent/objective —
   full ObjectivePort 대신 callback closure로 coupling 최소화).
-  Default-OFF / wave-3 sibling 다른 슬라이스 (observability-wire,
-  approval-gate-wire, web-daemon emitter, frontend) mutate 없음.
-  loop.ts 와이어링 (config.objective.setNextActions로 closure 구성 +
-  HookBus.emit("post_compact") subscriber)은 deferred — 이 wave는 contract만.
+  Default-OFF: command hooks가 명시적으로 enabled·risk-acknowledged되고
+  PostCompact binding이 있을 때만 CLI composition이 HookBus를 주입한다.
+  `buildPostCompactEmit`은 이 bus로 provenance를 전달하며, binding command는
+  표준 command-hook permission/timeout 정책 아래에서 실행된다. binding이 없으면
+  no-op이라 observer를 꾸며내지 않는다.
 evidence:
   code:
     - src/agent/recovery-reason/types.ts
@@ -127,3 +128,10 @@ notes: |
   sink 아님). compaction-wire.ts +19(import 1 + 옵션 spread 블록), 소스/테스트
   tsc 0 / biome 0(선존 rebuildBgInstallAgainstLive complexity 경고는 무관·비차단).
   잔여: web daemon post_compact 바인딩(surface_integration.web=missing).
+
+  2026-07-19 consumer proof: `QUANTA_COMMAND_HOOKS` + ACK + a trusted
+  `PostCompact` binding creates the real HookBus consumer. The command-hooks
+  rail drives an actual `post_compact` event through `installCommandHooks` and
+  proves the binding receives only the typed provenance JSON. This is not
+  default-ON: it runs an operator-configured command and therefore remains
+  measure-first.

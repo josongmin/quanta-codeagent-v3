@@ -83,6 +83,19 @@ const safeSettle = (
   }
 }
 
+/** Best-effort SM.cancel for a locally minted record that a kernel-owned
+ * deferred approval supersedes. This is deliberately distinct from a deny:
+ * the reviewer has not decided, and the kernel will continue the same pause
+ * under its own identity. */
+const safeCancel = (deps: ApprovalGateDeps, approvalId: string): void => {
+  if (deps.approvalSM === undefined || approvalId.length === 0) return
+  try {
+    deps.approvalSM.cancel(approvalId)
+  } catch {
+    // SM failure must not propagate past the gate boundary.
+  }
+}
+
 /** Best-effort SM.request — returns the minted id, or "" on failure. */
 const safeRequest = (
   deps: ApprovalGateDeps,
@@ -126,35 +139,40 @@ export const createApprovalGate = (deps: ApprovalGateDeps): ApprovalGatePort => 
     req: ApprovalGateRequest,
     resolver: ApprovalGateResolver,
   ): Promise<ApprovalGateResolution> => {
-    // Invoke the resolver before minting local attribution. A deferred runtime
-    // resolver throws its kernel approval id; minting after that preserves one
-    // canonical record instead of creating then falsely denying a local id.
+    // Mint the local record BEFORE awaiting the reviewer. This is the
+    // load-bearing visibility invariant: while a reviewer prompt is pending,
+    // Objective.blockers and RunLedger.waiting() must show why the turn paused.
+    // A deferred runtime resolver can later supersede this provisional identity
+    // with its kernel-owned id (handled in the catch below).
+    const localApprovalId = safeRequest(deps, req)
     let raw: ApprovalGateResolverReturn
     try {
       raw = await resolver(req)
     } catch (err) {
       const kernelApprovalId = kernelApprovalIdOf(err)
       if (kernelApprovalId !== undefined) {
+        // The host must resolve the kernel id, not our provisional local id.
+        // Cancel (never deny) the provisional record first so only the
+        // kernel-owned record remains active in Objective + RunLedger.
+        if (localApprovalId !== kernelApprovalId) safeCancel(deps, localApprovalId)
         safeRequest(deps, req, kernelApprovalId)
         throw err
       }
-      const approvalId = safeRequest(deps, req)
-      safeSettle(deps, approvalId, "deny")
+      safeSettle(deps, localApprovalId, "deny")
       throw err
     }
 
-    const approvalId = safeRequest(deps, req)
     // Normalize + settle. SM coerces unknown decisions to "deny" itself;
     //    the gate's RETURN preserves the raw decision so callers see what the
     //    resolver actually said. Reasoning: the gate's job is attribution, not
     //    decision policing.
     const { decision, modifiedAction } = normalizeResolverReturn(raw)
-    safeSettle(deps, approvalId, decision, modifiedAction)
+    safeSettle(deps, localApprovalId, decision, modifiedAction)
 
     // Surface the resolver's stated decision verbatim. For unknown enum
     //    values the caller still sees the malformed value as-typed; the SM
     //    record's coerced value is observable via `sm.get(approvalId)`.
-    return buildResolution(approvalId, decision, modifiedAction)
+    return buildResolution(localApprovalId, decision, modifiedAction)
   }
 
   const cancel: ApprovalGatePort["cancel"] = (approvalId: string): void => {

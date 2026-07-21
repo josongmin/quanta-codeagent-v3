@@ -419,7 +419,6 @@ describe("repair-breadth fan-out — structural family coverage widening", () =>
           sourceEvidence: ["static-witness:ast"],
         },
       }),
-      repairFamilyCoverage: undefined,
     }
 
     const [only] = await makeRepairBreadthRunCandidates(deps)({

@@ -62,6 +62,11 @@ export type DeliveryRejectReason =
   | "mode_disabled"
   | "internal_control_error"
 
+/** A failure after steer admission that prevented both safe-point application
+ * and the promised mailbox fallback. This is terminal and correlated; it is
+ * never collapsed into a successful-looking degrade. */
+export type DeliveryFinalFailureReason = "mailbox_error"
+
 export const ALL_DELIVERY_DEGRADE_REASONS = [
   "no_active_turn",
   "expected_turn_mismatch",
@@ -175,7 +180,7 @@ export type SubagentDeliveryOutcome =
     }
 
 /** Final receipt for an `accepted` steer, correlated by `deliveryId`. Every
- *  accepted delivery produces EXACTLY ONE of these (RFC §3.3). */
+ *  accepted delivery produces EXACTLY ONE terminal receipt (RFC §3.3). */
 export type SubagentDeliveryReceipt =
   | {
       readonly deliveryId: string
@@ -195,4 +200,9 @@ export type SubagentDeliveryReceipt =
       readonly deliveryId: string
       readonly kind: "cancelled"
       readonly reason: "target_settled" | "session_aborted"
+    }
+  | {
+      readonly deliveryId: string
+      readonly kind: "failed"
+      readonly reason: DeliveryFinalFailureReason
     }

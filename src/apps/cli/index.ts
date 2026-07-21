@@ -3,8 +3,7 @@ import { AgentArgsError } from "@/host/runtime"
 import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { selectRemoteRunner } from "@/remote"
 import { errMessage, logger, setTerminalIo } from "@/shared"
-import { seedEnvVarsForSurface } from "@/tool"
-import { CLI_FEATURE_GATE_NAMES } from "./cli-feature-gates"
+import { CLI_SEEDED_GATE_NAMES } from "./cli-seeded-gates"
 import { loadEnvFiles } from "./dotenv"
 import { applyToolProfileFlag } from "./internal/argv"
 import { runRemoteCmd } from "./remote-cmd"
@@ -45,7 +44,7 @@ loadEnvFiles([".env.dev", ".env.local", ".env"])
 // by default are DERIVED from the tool-surface SSOT (`seedEnvVarsForSurface`)
 // — adding a CLI-default-ON tool to the manifest auto-seeds its gate here; no
 // parallel list to drift.
-for (const gate of [...CLI_FEATURE_GATE_NAMES, ...seedEnvVarsForSurface("cli")]) {
+for (const gate of CLI_SEEDED_GATE_NAMES) {
   if (process.env[gate] === undefined) process.env[gate] = "1"
 }
 

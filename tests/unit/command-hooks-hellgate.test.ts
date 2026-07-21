@@ -449,6 +449,43 @@ describe("command hooks — HookBus integration", () => {
     expect(res.deny).toBeNull()
     expect(res.updatedInput).toEqual({ path: "/canon" })
   })
+
+  test("armed PostCompact command hook consumes real post_compact provenance through the bus", async () => {
+    const bus = new HookBus()
+    const gate = normalizeCommandHookGate({
+      enabled: true,
+      acknowledgedRisk: "operator approved compaction observer",
+      bindings: [{ event: "PostCompact", command: "observe-compact.sh" }],
+    })
+    const { port, calls } = fakeExec(() => ok())
+    installCommandHooks(bus, gate, { exec: port, permission: allowPermission, cwd: "/tmp" })
+
+    await bus.emit({
+      type: "post_compact",
+      threadId: "thread-42",
+      provenance: {
+        reason: "token_budget_exceeded",
+        tokensBefore: 12_000,
+        tokensAfter: 2_000,
+        turnsDropped: 3,
+        turnsKept: 2,
+        summaryRef: "summary-42",
+        resumeStep: "resume work",
+        compactedAt: 42,
+      },
+    })
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.command).toBe("observe-compact.sh")
+    expect(JSON.parse(calls[0]?.stdinJson ?? "{}")).toMatchObject({
+      hook_event_name: "post_compact",
+      payload: {
+        type: "post_compact",
+        threadId: "thread-42",
+        provenance: { reason: "token_budget_exceeded" },
+      },
+    })
+  })
 })
 
 // ---- settings loader -------------------------------------------------------

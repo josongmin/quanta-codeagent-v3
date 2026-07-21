@@ -10,7 +10,6 @@
  *   - {@link headlessStubAttestor} — fail-closed deny-all for CI / batch.
  */
 export {
-  __resetFallbackWarnedForTests,
   type DefaultAttestorOpts,
   defaultAttestor,
 } from "./default-attestor"
@@ -22,6 +21,7 @@ export {
   type AttestEventSink,
   type AttestRequest,
   type AttestResult,
+  attestationScopeFor,
   type PolicyTable,
   type PolicyVerdict,
   type StsToken,

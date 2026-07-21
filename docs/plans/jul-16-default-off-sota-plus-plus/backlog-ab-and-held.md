@@ -2,10 +2,20 @@
 
 > 레저·소스·테스트를 대조한 백로그다. 기능별 **역할 / 왜 default-ON 안 했나 / 코드위치**는 레저 ID와 대조한다. 경쟁사 비교는 별도 출처 상태를 명시하며, 인용 없는 항목은 roadmap 근거로 쓰지 않는다.
 >
-> **Closure 현황**: eligible 173행, **wired 152/173 = 87.9%**, runtime CLI seed 28, unknown-surface 0, unknown-value 0, checker error 0.
-> decisions: measure-first 50 · **enable-now 60** · repair-first 17 · hold 46.
+> **Closure 현황 (2026-07-20 source re-audit)**: eligible 172행, **wired 164/172 = 95.3%**, runtime CLI seed 30, unknown-surface 0, unknown-value 0, checker error 0. `compaction-event-emit`와 `context-change-injection`은 normal host에 항상 조립되는 production wire라 default-off denominator에서 제외했다. `fast-apply-merge`는 명시적 host `FastApplyMergeReviewSeam`을 `ToolContext`까지 전달한다; env/model만으로는 계속 fail-closed다.
+> decisions: measure-first 67 · **enable-now 68** · repair-first 0 · hold 37.
 >
-> **왜 87.9%가 천장인가**: 남은 21행은 objective가 "고유 dormant 삭제 금지"로 보존을 명령한 primitive들. 억지 배선하려면 가짜 consumer를 지어내야 함(dead-wire=어딧 금지). 나머지 measure-first 50은 행동/비용을 바꿔 **efficacy A/B(operator 결정)**가 선행돼야 켤 수 있음. → 여기서 정직하게 멈춤.
+> **남은 8행의 성격**: 4개는 실제 외부 계약/credential 또는 image policy가 먼저 필요하고, 3개는 producer-only여서 수명 소유자가 없으며, 1개는 실행 loop producer가 없는 transport seam이다. 가짜 consumer 또는 자동승인을 만들지 않는 한 이들은 `wired`가 될 수 없다. measure-first 67행은 행동/비용을 바꿔 **efficacy A/B(operator 결정)**가 선행돼야 기본값을 바꿀 수 있다.
+
+### 2026-07-19 구조 재감사 — 레저 정정과 실제 잔여 blocker
+
+| 구분 | feature | 소스 판정 | 다음 변경의 authority |
+|---|---|---|---|
+| 기존 wire를 레저가 놓침 | `codex-r2-multi-process-flock`, `embed-cache`, `git-directive-emit-leaf`, `search-pipeline-composer`, `semantic-search-port`, `compaction-visibility` | 모두 production caller가 있다. `search_codebase`는 기본 lexical wire이며 `QUANTA_INDEX`는 tool presence가 아니라 hybrid/semantic 승격이다. | ledger/feature catalog/tool manifest를 실제 host composition에 맞춤. |
+| 해결됨(2026-07-20) | `identity-mid-session-prompt-rebuild` | inline rebuild를 runner-owned `createSystemPromptRebuilder`로 추출·교체했다. host bootstrap이 결과를 shared `SystemSource`에 기록하고 CLI는 callback만 호출한다. | single owner wire hellgate + real two-turn e2e로 고정. |
+| producer-only | `model-tag-auto-hook`, `model-tag-versioning`, `message-batches-client-core` | registrar target의 lifetime owner, batch scheduler/poll/retry owner가 없다. | cache/vector-store lifetime 또는 async job authority를 먼저 설계. |
+| external/product contract | `bridge-attestation`, `jwks-agent-identity`, `dockersandbox`, `budget-probe-ledger-wire` | secret/IdP/image selector 또는 real run-budget policy가 없으면 보안·비용 의미가 바뀐다. | provisioned secret/issuer, pinned toolchain image, billing budget owner를 product 계약으로 결정. |
+| loop protocol 없음 | `streaming-boomerang` | `ChunkProducer`를 만드는 agent-loop lifecycle producer가 없다. | stream ownership·backpressure·cancel contract를 loop owner에서 확정. |
 
 ---
 
@@ -45,7 +55,7 @@
 | memory-cross-session-inject | 이전 세션 메모리를 프롬프트에 주입 (**opt-OUT, 이미 ON**) | `QUANTA_MEMORY_AUTO` (defaultOn) | **이미 default-ON**(ADR-0413); 역질문=bench 오염 A/B | `src/host/runtime/agent-arg-builder.ts:228` |
 | reasoning-carryover | OpenAI Responses reasoning item을 다음 턴 input에 re-feed (Codex식) | `QUANTA_REASONING_CARRYOVER` | provider reasoning 재주입(shape 의존), 미측정 | `src/llm/openai-responses-wire.ts:345` |
 | subagent-read-inbox | 서브에이전트가 자기 mailbox를 poll/drain하는 `subagent_read_messages` 도구 | `QUANTA_SUBAGENT_MAILBOX` (port) | multi-agent 도구 추가로 행동 변경, 미측정 | `src/tool/subagent-mailbox/index.ts:219` |
-| three-way-restore | `/rewind-tool` — 파일/대화상태/둘다 체크포인트 복원 | `/rewind-tool` command | **activation-ready 아님**: `QUANTA_PER_TOOL_RECORD`+`QUANTA_SHADOW`가 필요하고, files leg가 선택 tag SHA가 아니라 latest shadow anchor로 rewind함. tag-specific restore 계약을 고치기 전 broad enable 금지 | `src/agent/per-tool-checkpoint/three-way-restore.ts:110` |
+| three-way-restore | `/rewind-tool` — 파일/대화상태/둘다 체크포인트 복원 | `/rewind-tool` command | **conditional opt-in**: `QUANTA_PER_TOOL_RECORD`+`QUANTA_SHADOW`가 필요. files leg는 선택 tag SHA를 ordinal snapshot으로 해석하고 `expectSha`로 fail-closed 복원한다. broad default-ON은 파괴적 UX라 금지 | `src/agent/per-tool-checkpoint/three-way-restore.ts` |
 | env-probe | 시작 시 shell/tooling 팩트 스냅샷을 system prompt에 주입 (**이미 CLI-ON**) | `QUANTA_ENABLE_ENV_PROBE` (CLI-seeded) | CLI만 ON; 타 서피스는 프롬프트 추가분 A/B | `src/apps/cli/repl/env-probe-wire.ts:101` |
 | item-stream-fine-grained | per-item 스트림 델타(item-typed projection) | `QUANTA_ITEM_STREAM` | 스트림 이벤트 shape 변경; CLI도 gated `ItemStore`→`/activity` 및 attach renderer 소비 경로가 있음. 기본 ON efficacy/출력 영향은 미측정 | `src/apps/cli/repl/surface-compose.ts:589` |
 | git-co-change | 히스토리상 함께 바뀐 파일 제안하는 co-change git 도구 추가 | `QUANTA_GIT_CO_CHANGE`(+`QUANTA_GIT_TOOLS`) | 도구 추가로 도구선택 변경, 미측정 | `src/apps/cli/internal.ts:679` |
@@ -96,12 +106,10 @@
 
 hold는 "기본 활성화 보류" 결정이며 미배선과 동의어가 아니다. 46개 중 **26개는 이미 wired**이고, dormant 계열은 seam-only 11·producer-only 7·consumer-only 1·forward-contract 1이다. 후자만 살아있는 consumer 없이 억지 배선하면 dead-wire가 된다. 나머지는 외부 의존, 안전성, 비용, 또는 operator configuration 때문에 기본값을 유지한다.
 
-### B-1. codex-r2 흡수 primitive (11) — 대부분 producer/seam만, 라이브 소비 경로 미개통
+### B-1. codex-r2 흡수 primitive — producer/seam과 조건부 live wire 혼재
 
 | feature_id | 역할(흡수한 codex 능력) | 현황 | 왜 HELD | 코드위치 |
 |---|---|---|---|---|
-| codex-r2-compaction-event-emit | compaction 발생을 typed `compaction_event`로 store에 append | wired producer, 소비 no-op | 이벤트 append되나 라이브 턴에 렌더하는 소비자 미개통 | `src/agent/loop/compaction-wire.ts:697` |
-| codex-r2-context-change-injection-wire | cwd/mode/repo-rules 변화를 `<context-update>` user msg로 | 구조상 배선, diff-detector inert | `getSnapshot&store` 채워질 때만+activeSkillCursor `[]` fail-closed | `src/agent/context-change/inject.ts:173` |
 | codex-r2-disk-persistence-and-env-swap | logs_2.sqlite/JSONL-parity 세션 백엔드 스왑(재시작 넘어 재사용) | wired, env-off면 in-memory | `QUANTA_SESSION_REGISTRY_DISK_DIR` unset ⇒ 디스크경로 미진입 | `src/agent/session-resource-registry/global.ts:85` |
 | codex-r2-mention-injection-pipeline | `@skill/plugin://@@app/@file/@Symbol` 7-sigil 파서 | `@file`은 라이브, plugin/app 활성화는 HELD | plugin discovery source 미배선 | `src/agent/mention-injection/parser.ts:287` |
 | codex-r2-multi-process-flock | 세션별 O_EXCL 락+stale-reap+refcount(다중 프로세스 안전) | disk registry 선택 시 wired | `QUANTA_SESSION_REGISTRY_DISK_DIR`가 없는 기본 경로에서는 미사용; disk registry 선택·다중 프로세스 receipt가 필요 | `src/agent/session-resource-registry/disk-adapter/disk-store.ts:332` |
@@ -109,7 +117,7 @@ hold는 "기본 활성화 보류" 결정이며 미배선과 동의어가 아니�
 | codex-r2-plugin-system | `.codex-plugin/plugin.json` breadth-1 discovery | workspace plugin auto-wire 존재 | `<cwd>/.quanta/plugins`에 manifest가 없으면 빈 registry no-op; discovery source 부재가 아니라 실제 manifest/activation receipt가 없음 | `src/agent/plugin-activation-handler/auto-wire.ts:121` |
 | codex-r2-sqlite-session-registry | logs_2.sqlite WAL-parity 내구성 레지스트리 | wired-but-unselected | `QUANTA_SESSION_REGISTRY_SQLITE_PATH` 비어있으면 미구성 | `session-resource-registry/sqlite-adapter/sqlite-store.ts:94` |
 | codex-r2-system-prompt-cache-and-audit | 세션-scoped system-prompt 캐시(get_base_instructions parity) | wired | 호스트가 pre-built `system` 넘기면 우회 | `src/llm/system-prompt-cache/in-memory-cache.ts:63` |
-| codex-r2-typed-event-store | append-only typed-history 이벤트 store(ADR-0319) | producer-only | events append되나 기본 소비자(context-change)가 함께 HELD | `src/memory/typed-event/in-memory-store.ts:53` |
+| codex-r2-typed-event-store | append-only typed-history 이벤트 store(ADR-0319) | **wired, opt-in replay** | `QUANTA_TYPED_EVENT_REPLAY`에서 bounded append-index reader가 stored `compaction_event`만 다음 turn context에 replay; context/mention은 direct owner를 유지해 중복 주입하지 않음 | `src/agent/codex-r2-wire-install/install.ts` |
 | template-literal-windsurf | windsurf식 `{{var}}` 템플릿 확장기(ADR-0252) | production consumer 없음 | barrel export는 존재하지만 production caller가 없음; 호출자를 꾸며내지 않고 playbook renderer owner가 필요 | `src/skill/playbook/template-literal/index.ts:5` |
 
 ### B-2. 리트리벌 스택 / 모델 관리 (13) — default-OFF provider/index 비용과 미소비 leaf가 혼재
@@ -123,7 +131,7 @@ hold는 "기본 활성화 보류" 결정이며 미배선과 동의어가 아니�
 | model-tag-auto-hook | EmbedCache/VectorStore를 versioning invalidator 콜백으로 등록 | producer-only | 컴포지션 루트가 registrar 생성+installAll 미호출 | `src/retrieval/auto-hook/default-registrar.ts:120` ⚠️레저 경로 stale |
 | model-tag-versioning | ModelTag 코덱+invalidation 콜백 레지스트리 | producer-only | 등록자(auto-hook)도 미배선→레지스트리 항상 빔 | `src/retrieval/versioning/registry-callbacks.ts:33` ⚠️레저 경로 stale |
 | search-pipeline-composer | Stage[] DAG(lexical/semantic/rerank/rrf)를 SearchPipeline으로 reduce | semantic preset에서 소비 | `semantic-only`/`parallel-rrf`/`semantic-then-rerank`가 compose를 호출; 기본 ON 판단에는 corpus·provider receipt가 부족 | `src/retrieval/pipeline/semantic-only.ts:13` |
-| semantic-search-port | 임베딩 리트리벌 인덱스 닫힌 포트(ADR-0254) | legacy/별도 seam | provider·파이프라인 전체 부재를 뜻하지 않음; 이 포트 자체의 production consumer와 canonical ownership은 별도 확인 필요 | `src/retrieval/semantic/port.ts:24` |
+| semantic-search-port | 결정론적 headless embedder seam(삭제된 text-in port의 잔존 대체) | semantic preset에서 wired | `src/runner/assemble/pipeline.ts`가 semantic preset에 소비한다. 실제 provider/index 품질은 sibling `search-index-backend`가 소유하므로 headless 자체를 semantic-quality 증거로 승격하지 않음 | `src/retrieval/semantic/headless-embedder.ts` |
 | multi-source-rules-vendor-detector | cursor/cline/roo/aider/windsurf/quanta 6소스 룰 감지·정규화 | seam-only | additive seam, 컴포지션 루트가 `detectAll` 미호출 | `src/rules/vendor-detector/index.ts:18` |
 | effort-classifier | 프롬프트 키워드로 effort 분류/에스컬레이션 | **wired(env-gated)** ⚠️레저 unwired stale | `QUANTA_EFFORT_AUTO` 시 배선·소비 실존, effort ladder A/B 대기 | `src/agent/optional-ports.ts:162` |
 | node-repl-persistent-kernel | 상태유지 Node.js REPL 커널(spawn/exec/list) | seam-only | agent 도구 미등록→LLM 도달 불가 | `src/runtime/node-repl/index.ts:10` |
@@ -134,39 +142,39 @@ hold는 "기본 활성화 보류" 결정이며 미배선과 동의어가 아니�
 
 | feature_id | 역할 | 현황 | 왜 HELD (외부의존) | 코드위치 |
 |---|---|---|---|---|
-| bridge-attestation | host-bridge 액션마다 HMAC STS 토큰 mint/verify + 정책테이블 | seam-only | 프로비저닝된 서명 시크릿+preflight caller 필요(없으면 `"test-secret"` fallback INSECURE) | `src/security/bridge-attest/default-attestor.ts:133` |
+| bridge-attestation | host-bridge 액션마다 HMAC STS 토큰 mint/verify + 정책테이블 | seam-only | 프로비저닝된 32-byte+ 서명 시크릿과 preflight caller 필요; 누락/blank/weak secret은 생성 시 fail-closed | `src/security/bridge-attest/default-attestor.ts` |
 | jwks-agent-identity | JWKS 클라이언트로 서명된 agent-identity JWT 검증 | forward-contract | **외부 JWKS 엔드포인트 + IdP 발급자** 필요(verify-only) | `src/security/jwks-identity/default-client.ts:48` |
 | streaming-boomerang | back-pressure 단일슬롯 취소가능 스트리밍 spawn | seam-only | 실 agent loop 브리지 producer 미작성 | `src/agent/streaming-boomerang/default-streamer.ts:324` |
-| streaming-cancellation-primitive | CancellationController + AbortSignal 왕복 어댑터 | seam-only | loop callsite가 아직 이 signal 채택 안 함 | `src/agent/streaming-cancellation/default.ts:43` |
+| streaming-cancellation-primitive | CancellationController + AbortSignal 왕복 어댑터 | **wired, host opt-in** | sampling loop이 `AgentConfig.streamCancellation`을 provider/turn signal과 cancellable stream cleanup에 실제 소비. 표준 CLI/web에는 typed cause producer가 없어 broad enable은 보류 | `src/agent/loop/stream-cancellation-wire.ts` |
 | realtime-websocket-codex | Bun WebSocket RealtimePort(SDP negotiate, voices) | wired-but-gated | **realtime WS 엔드포인트 + bearer creds**(유료 provider 소켓) | `src/realtime/default-adapter.ts:351` |
 | voice-input-stt-slice | sox/parec/arecord 오디오 레코더 + transcriber, `/voice` 슬래시 | **not activatable** | recorder/transcriber pair를 만드는 production composition root가 없어 mic/STT 의존을 채워도 `/voice`가 live port를 얻지 못함 | `src/apps/cli/voice-cmd.ts:341` |
 | vscode-chatsessions-surface | session.v1→VS Code chatSessions 프로젝션 | **not activatable** | adapter만 있고 extension `activate()`/provider registration 및 emit artifact가 없어 VS Code host만으로 로드되지 않음 | `surfaces/vscode/src/provider.ts:57` |
 | github-actions-trigger-adapter | GITHUB_EVENT_PATH 읽어 ProactiveTrigger 발사(self-loop 방어 3중) | wired | **GitHub Actions 러너 env** 안에서만 유의미 | `src/integrations/github/event-source-actions.ts:63` |
 | github-pr-from-pr-cli | `from-pr` — 트리거 폴링→gh로 PR 컨텍스트→idempotent 코멘트 | standalone runner only | top-level CLI dispatcher에는 아직 등록되지 않음; `from-pr-cmd-runner`를 직접 실행하고 Actions env·gh auth·network가 있어야 동작 | `src/apps/cli/from-pr-cmd-runner.ts:1` |
 | gh-pr-code-tour | `gh pr diff` 파싱해 헌크별 numbered 투어(read-only) | wired(ci-bot preset) | **gh CLI + network** | `src/tool/gh/pr-code-tour.ts:151` |
-| dockersandbox | `docker run --rm`로 TRUE 격리(--network none, bind jail) | **seam-only** ⚠️레저 정정됨 | **Docker 데몬** 필요 + 라이브 selector 없음(no `new DockerSandbox`) | `src/runtime/sandbox.ts:306` |
+| dockersandbox | `docker run --rm` 실행 경계(--network none, bind mount) | **seam-only** ⚠️레저 정정됨 | 라이브 selector 없음(no `new DockerSandbox`). 2026-07-19 로컬 daemon contract는 통과했지만 기본 `node:22-slim`은 mutable/root/writable mount이며 CPU·memory 기본값도 없다. host Bun/git/rg 부재까지 있어 기존 bash 전역 대체는 기능 퇴행; digest-pinned hardened profile을 소유한 전용 consumer가 먼저 필요 | `src/runtime/sandbox.ts:306` |
 
 ### B-4. 패치 / 체크포인트 / git (11) — 대부분 env-gated로 배선됨, default-OFF 유지
 
 | feature_id | 역할 | 현황 | 왜 HELD | 코드위치 |
 |---|---|---|---|---|
 | fast-apply-fallback | V4A apply 실패 시 side-conversation 모델로 1회 fast-apply 재시도 | **wired(env-gated)** ⚠️레저 activation stale | `QUANTA_FAST_APPLY` 시 end-to-end; default-OFF | `apply-patch.ts:626` |
-| fast-apply-merge | `{original,editSketch}`를 apply-model에 보내 머지 파일 추출 | wired(env-gated) | `QUANTA_FAST_APPLY_MERGE=1`+`_MODEL` 필요; mutating, 비용 A/B | `merge-runner.ts:141` |
+| fast-apply-merge | `{original,editSketch}`를 apply-model에 보내 머지 파일 추출 | **hold, wired(host review required)** | env/model은 merge port만 만든다. host가 명시적으로 준 complete before/after `FastApplyMergeReviewSeam`은 `ToolContext`까지 전달된다. 그 seam이 없으면 provider dispatch 전에 mismatch로 fail-closed. ToolDiffSink는 post-write 관측이라 승인 권한이 아니다. | `src/agent/dispatch/tool-context.ts` |
 | force-background | queued 백그라운드 서브에이전트를 즉시/FIFO-head 승격 | wired(env-gated) | `QUANTA_FORCE_BACKGROUND`+admission queue 필요 | `src/agent/subagent-background.ts:172` |
 | per-tool-checkpoint-granularity | 도구별 granular 체크포인트 정책(개별 record/rewind) | **wired(env-gated)** ⚠️레저 stale | `QUANTA_PER_TOOL_RECORD`+shadowOdb, default-OFF | `src/agent/per-tool-checkpoint/index.ts:34` |
-| identity-mid-session-prompt-rebuild | `/identity` 스왑 후 다음 턴 system prompt 리빌드 클로저 | consumer-only(forward-seam) | 라이브는 인라인 `buildPromptFromIdentityMode` 사용, 이 포트 caller 없음 | `src/apps/cli/repl/system-prompt-rebuilder.ts:57` |
+| identity-mid-session-prompt-rebuild | `/identity` 스왑 후 다음 턴 system prompt 리빌드 클로저 | **wired(host bootstrap)** | runner-owned factory가 live identity state를 읽어 shared `SystemSource`에 기록; CLI는 refresh callback만 호출 | `src/host/bootstrap/bootstrap-session.ts` |
 | conflict-parser-lib | git 충돌 마커를 구조화 헌크로 파싱(순수 lib) | **wired** ⚠️레저 stale | `gitConflictInspectTool`이 소비; git 도구그룹 활성 시 도달 | `src/git/conflict-parser.ts` → `tool/git/conflict-inspect.ts:31` |
 | git-directive-emit-leaf | GitDirective를 `::git-<kind>{json}` Codex 와이어 포맷으로 직렬화 | wired(leaf) | protocol 게이트와 transitively HELD | `src/agent/git-directives/serializer.ts:20` |
 | git-directive-emit-protocol | `::git-*` 방출을 final-answer phase에서만 허용(phase-guard) | wired(env-gated) | `QUANTA_GIT_DIRECTIVE_EMIT` knob를 라이브 서피스가 default 미설정 | `src/git/directive-emit/phase-guard.ts:19` |
 | no-patch-breaker-knob | empty-patch breaker 비활성(패치 없어도 계속) | wired(bench-only) | NOOP-apply, 벤치 driver posture서 소비 | `src/runner/knobs/knobs/no-patch-breaker.ts:14` |
 | patch-hygiene-knob | 생성 diff에 patch-hygiene 리포트/정규화 패스 | wired(bench-only) | NOOP-apply, 벤치 posture서 소비 | `src/runner/knobs/knobs/patch-hygiene.ts:14` |
-| compaction-visibility | 히스토리 fold 후 `postCompactEmit(provenance)` 훅 발사 | producer-only, 구독자 없음 | **어떤 서피스도 post_compact 훅 미등록** | `src/agent/compaction.ts:222` |
+| compaction-visibility | 히스토리 fold 후 `postCompactEmit(provenance)` 훅 발사 | **wired, command-hooks opt-in** | `QUANTA_COMMAND_HOOKS`+ACK+`PostCompact` binding에서 CLI HookBus가 provenance를 실제 hook command로 전달. 외부 command 실행/compaction 행동 영향 때문에 default-ON 전환은 A/B·operator 결정 | `src/agent/loop/compaction-wire.ts` |
 
 ---
 
 ## 버킷 C — 수리 먼저 (repair-first, 17)
 
-17개 중 16개는 wired, `stage1-phase2-consume-and-vendor-glob-wire` 1개는 seam-only다. 기본 활성화 전에 **켜기 전 고쳐야 할 구체 결함** 또는 컴포지션 루트 blocker가 있는 것들이다.
+16개 모두 실제 wired product path를 가진다. 기본 활성화 전에 **켜기 전 고쳐야 할 구체 결함** 또는 컴포지션 루트 blocker가 있는 것들이다.
 
 | feature_id | 역할 | 왜 REPAIR-FIRST (구체 blocker) | 코드위치 |
 |---|---|---|---|
@@ -182,7 +190,6 @@ hold는 "기본 활성화 보류" 결정이며 미배선과 동의어가 아니�
 | response-in-progress | Codex `response.in_progress` 하트비트를 StreamEvent로 | Codex가 이 이벤트를 조용히 drop(forward-compat gap); provider 미방출 | `src/llm/streaming-events.ts:53` |
 | run-ledger-attribution | post_tool_use서 run ledger(start/touch/settle) 구동 | observability wire가 구독함; `QUANTA_OBSERVABILITY`+HookBus 조건에서의 cost/behavior가 기본 ON blocker | `src/agent/observability-wire/wire.ts:273` |
 | shadow-verify | 패치를 scratch overlay에 적용해 lint/type/test(commit 전 verify) | real scratch-worktree/V4A/LSP-test adapter가 wired; mutation·시간·resource policy와 production receipt가 기본 ON blocker | `src/agent/shadow-verify-adapters/index.ts:35` |
-| stage1-phase2-consume-and-vendor-glob-wire | SQLite로 Stage1Store를 Phase2 소비+vendor-glob 감지 | 컴포지션 루트가 `sqliteStage1Store(db)` 미구성, DB 핸들 안 열림 | `src/agent/memory/stage1-store/sqlite.ts:74` |
 | structured-output-mode | JSON-Schema response_format 부착 + no-throw 검증 | provider adapter(OpenAI/Anthropic)는 구현됐지만 standard CLI/web/agent surface가 `responseFormat`을 공급하지 않아 **product gate-on 경로 없음**; SDK caller용 port만 동작 | `src/llm/anthropic-messages-codec.ts:256` |
 | subagent-fs-ownership-enforce | 서브에이전트 소유 서브트리 밖 write 거부(canonical path) | child config가 policy를 만들고 dispatch가 hard-deny함; broad default activation의 compatibility policy를 정해야 함 | `src/agent/subagent/dispatch.ts:327` |
 | subagent-resume-replay | 중단된 서브에이전트 핸들을 재시작 시 re-fork(replay) | session execution plane의 live gate가 consumer; legacy handle depth-guard migration policy가 blocker | `src/runner/session-execution-plane.ts:207` |
@@ -215,7 +222,7 @@ hold는 "기본 활성화 보류" 결정이며 미배선과 동의어가 아니�
 - `apply-patch-structured-result`의 partial-apply는 Wave R에서 명시적으로 promotion됐다. whole-patch atomicity는 기존 `apply_patch`, per-op atomic/cross-op partial + targeted retry는 `apply_patch_structured`가 소유한다. real-FS 실패-target byte 보존과 jail escape 격리는 receipt `25d19d89b`로 고정됐다.
 - `approval-gate-wire`는 state-machine request 실패 시 legacy resolver fallback을 허용한다. durable approval attribution을 보안 통제로 승격하기 전 strict fail-closed surface policy가 필요하다.
 - `collect-evidence`, command hooks, shadow verify, appshot은 untrusted repo 실행·mutation·Chrome/provider cost가 걸려 있어 real external receipt와 permission/sandbox policy 없이는 default-ON 후보가 아니다.
-- `stage1-phase2-consume-and-vendor-glob-wire`는 여전히 seam-only다. DB lifecycle과 Phase2 DI의 composition root가 실제 잔여 wire다.
+- Stage1 V2 reuse duplicate는 제거됐다. SQLite lifecycle과 canonical Phase2 DI는 `buildSessionMemoryAutoWires`의 `@/memory/consolidate` store만 소유한다; vendor glob은 독립된 live `QUANTA_VENDOR_RULES` feature다.
 
 ### 단순 gate-on readiness 재감사
 
@@ -225,8 +232,8 @@ hold는 "기본 활성화 보류" 결정이며 미배선과 동의어가 아니�
 
 - **바로 조립 경로에 도달 (대표 PASS):** adaptive thinking, language detect, edit repair, env probe, projects KB, run workflow, subagent mailbox, approval/run-ledger/shadow verify, retrieval indexer, recovery router, code mode, manifest compat, worktree. 단, 동작이 실제로 발화하려면 해당 입력(예: failed edit, rate-limit header, subagent message)이 필요할 수 있다.
 - **조건부:** semantic pipeline/cache는 preset·index·provider 조합, replay는 cassette path, fast apply는 model, per-tool checkpoint는 `QUANTA_PER_TOOL_RECORD`+`QUANTA_SHADOW`, MCP/PTY/image/debug/GitHub/realtime는 trusted server·binary·credential·network·TTY가 필요하다. 조건이 없을 때 typed failure/no-op으로 끝나는지가 정상 동작이다.
-- **단순 turn-on 불가 (production selector/consumer 없음):** `bridge-attestation`, `jwks-agent-identity`, `dockersandbox`, `voice-input-stt-slice`, `streaming-boomerang`, `streaming-cancellation-primitive`, `budget-probe-ledger-wire`, `model-preset-sticky-resolver`, `model-tag-auto-hook`, `model-tag-versioning`, `node-repl-persistent-kernel`, `message-batches-client-core`, `stage1-phase2-consume-and-vendor-glob-wire`, `git-directive-emit-leaf`, `git-directive-emit-protocol`, `dxt-user-config`, `vscode-chatsessions-surface`, `prefix-rule-dsl`, `structured-output-mode`.
-- **구현은 있지만 현재 broad enable 금지:** `three-way-restore`는 tag-selected file restore가 latest shadow anchor를 쓰는 안전성 결함이 있고, `identity-mid-session-prompt-rebuild`는 해당 module 자체는 unconsumed이지만 별도 inline identity refresh path가 live다. 후자를 기능 부재로 오판하면 안 된다.
+- **단순 turn-on 불가 (production selector/consumer 없음):** `bridge-attestation`, `jwks-agent-identity`, `dockersandbox`, `voice-input-stt-slice`, `streaming-boomerang`, `budget-probe-ledger-wire`, `model-preset-sticky-resolver`, `model-tag-auto-hook`, `model-tag-versioning`, `node-repl-persistent-kernel`, `message-batches-client-core`, `dxt-user-config`, `vscode-chatsessions-surface`, `prefix-rule-dsl`, `structured-output-mode`.
+- **구현은 있지만 현재 broad enable 금지:** `three-way-restore`는 tag-selected file restore를 SHA-pinned fail-closed로 수리했지만, `QUANTA_PER_TOOL_RECORD`+`QUANTA_SHADOW`와 명시 `/rewind-tool` 호출이 필요한 파괴적 opt-in이다. `identity-mid-session-prompt-rebuild`는 inline duplicate를 제거하고 runner-owned factory로 교체했다; hold는 기본값/UX 결정이지 배선 부재가 아니다.
 - **proof gap (조립/단위 rail만 확인):** bench knob 다수, session prewarm, stale-read guard, subagent tool variants, team coordination, tool interrupt block, untrusted envelope, surface-wire-r2. 이들은 false-wired로 판정하지 않았지만, real host-turn activation receipt 전에는 “켜면 잘 돈다”는 결론을 보류한다.
 
 실행한 focused rail은 core/CLI 186 pass, retrieval/session 56 pass, external/security 215 pass였고 모두 0 fail이다. 단일 suite 중 unrelated catalog guard는 `QUANTA_OBJECTIVE_TOOLS` uncatalogued와 `QUANTA_COVERAGE_TOOL` stale bookkeeping 때문에 RED이며, activation rail의 실패로 계산하지 않았다.

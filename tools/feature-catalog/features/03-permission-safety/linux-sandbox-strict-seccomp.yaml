@@ -1,0 +1,31 @@
+id: linux-sandbox-strict-seccomp
+title: Linux native sandbox strict seccomp + resource caps
+section: 3
+subsystem: OS sandbox — native Landlock/seccomp
+order: 191
+maturity: L3
+status: new
+purpose: |
+  Makes native Linux sandbox dispatch use the default-deny strict seccomp
+  profile by default and forwards memory and timeout limits to child rlimit
+  and alarm enforcement. The TypeScript boundary preserves an explicit lax
+  opt-in for diagnostics while absent configuration remains strict.
+evidence:
+  code:
+    - crates/linux-sandbox-native/src/lib.rs
+    - crates/linux-sandbox-native/src/seccomp.rs
+    - src/runtime/os-sandbox/landlock-native.ts
+    - src/runtime/os-sandbox/types.ts
+    - src/runtime/os-sandbox/denial-classify.ts
+  adrs:
+    - docs/decisions/0191-linux-sandbox-strict-mode.md
+  tests:
+    unit:
+      - tests/unit/os-sandbox-strict-seccomp-hellgate.test.ts
+      - tests/unit/os-sandbox-landlock-native-hellgate.test.ts
+    integration: []
+    contract: []
+knobs: []
+deliberate_hold:
+  reason: "The native binding lacks a cross-platform CI matrix and published platform packages."
+  promotion_path: "Add Linux ABI integration proof plus matrix-built native artifacts before claiming portable production availability."

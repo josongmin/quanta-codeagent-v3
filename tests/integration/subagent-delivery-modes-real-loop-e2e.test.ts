@@ -37,7 +37,6 @@
 
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
-import { runAgent } from "@/agent"
 import {
   createSubagentDeliveryController,
   createSubagentSteerFinalization,
@@ -78,13 +77,6 @@ const tick = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
 const settle = async (n = 8): Promise<void> => {
   for (let i = 0; i < n; i++) await tick()
 }
-
-/** Every tool_result body in a transcript, flattened to strings. */
-const toolResultTexts = (messages: readonly Message[]): string[] =>
-  messages
-    .flatMap((m) => m.content)
-    .filter((b) => b.type === "tool_result")
-    .map((b) => String((b as { content: unknown }).content))
 
 /** The runner's `SubagentResult.messages` is `unknown[]` (slice fence); the child
  *  loop actually produces `Message[]`. Narrow it for the transcript assertions. */
@@ -186,8 +178,10 @@ const sessionParent = (session: Session, llm: LLMPort, over: Partial<AgentConfig
  *  caller (no lineage / no ownTaskId ⇒ root authority), driven end-to-end. This
  *  is the tool the LLM would call; we invoke its `execute(...)` so the tool's
  *  request assembly (which OMITS `expectedTurnId`) is exercised. */
-const rootFollowupTool = (session: Session): Tool => {
-  const tools = buildSubagentIntrospectBlock(sessionParent(session, new NeverLLM()))
+const rootFollowupTool = (session: Session, stream?: RecordingStream): Tool => {
+  const tools = buildSubagentIntrospectBlock(
+    sessionParent(session, new NeverLLM(), stream !== undefined ? { stream } : {}),
+  )
   const t = tools.find((x) => x.name === "followup_task")
   if (t === undefined) throw new Error("followup_task tool was not built by the tier1 wiring")
   return t
@@ -373,7 +367,10 @@ describe("WS7 §1 — queue while busy: delivered at the child's NEXT turn, in-f
       }),
       newDeliveryId: (() => {
         let n = 0
-        return () => `del-p${(n += 1)}`
+        return () => {
+          n += 1
+          return `del-p${n}`
+        }
       })(),
       steerEnabled: false,
     })
@@ -510,17 +507,40 @@ describe("WS7 §3 — steer while busy: same-turn re-stream sees the injection, 
     // Hellaudit R3-HIGH-1: plant a SECRET in the steer body. Steer injects STRAIGHT
     // into the child model (no mailbox drain to scrub it later), so the tier1-wired
     // redactor MUST scrub it here — the raw key must NEVER reach the child.
-    const tool = rootFollowupTool(session)
+    const deliveryStream = new RecordingStream()
+    const tool = rootFollowupTool(session, deliveryStream)
     const STEER_MARKER = "steer-inject-payload-COURSE-993"
     const STEER_SECRET = `sk-ant-api03-${"A".repeat(95)}`
     const STEER_BODY = `${STEER_MARKER} apikey=${STEER_SECRET}`
     const out = await callFollowup(tool, { agentId: taskId, message: STEER_BODY, mode: "steer" })
 
-    // The tool reports accepted/steer_pending (delivered + triggered + steer).
+    // The tool reports admission only. It must preserve the correlation id and
+    // must not claim an effective mode before the final receipt exists.
     expect(out.ok).toBe(true)
-    const structured = out.structured as { effectiveMode?: string; triggered?: boolean }
-    expect(structured.effectiveMode).toBe("steer")
-    expect(structured.triggered).toBe(true)
+    const structured = out.structured as {
+      status?: string
+      deliveryId?: string
+      delivered?: boolean
+      triggered?: boolean
+      effectiveMode?: string
+    }
+    expect(structured.status).toBe("accepted")
+    expect(structured.deliveryId).toBeDefined()
+    if (typeof structured.deliveryId !== "string") throw new Error("missing delivery id")
+    expect(structured.delivered).toBe(false)
+    expect(structured.triggered).toBe(false)
+    expect(structured.effectiveMode).toBeUndefined()
+    expect(deliveryStream.events.filter((event) => event.type === "subagent_delivery")).toEqual([
+      {
+        type: "subagent_delivery",
+        phase: "admitted",
+        deliveryId: structured.deliveryId,
+        requestedMode: "steer",
+        status: "accepted",
+        targetTaskId: taskId,
+        targetTurnId: liveTurnId,
+      },
+    ])
 
     // Now release the held turn so it reaches the post-stream safe point, which
     // drains the admitted steer and re-streams the SAME turn.
@@ -671,7 +691,10 @@ describe("WS7 §5 — steer with a STALE expectedTurnId ⇒ typed queue downgrad
       }),
       newDeliveryId: (() => {
         let n = 0
-        return () => `del-s${(n += 1)}`
+        return () => {
+          n += 1
+          return `del-s${n}`
+        }
       })(),
       steerEnabled: true,
       steerRetention: session.retention,

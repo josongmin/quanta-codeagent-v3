@@ -40,7 +40,7 @@ evidence:
     - src/runtime/os-sandbox/linux.ts
     - src/runtime/os-sandbox/default.ts
     - src/runtime/os-sandbox/refusal.ts
-  adrs: [150]
+  adrs: [150, "docs/decisions/0159-linux-sandbox.md"]
   tests:
     unit:
       - tests/unit/os-sandbox-bubblewrap-hellgate.test.ts

@@ -6,6 +6,7 @@ import {
   buildFetchHandler,
   type FetchHandlerDeps,
 } from "@/apps/web-daemon/server/fetch-handler"
+import type { WSData } from "@/apps/web-daemon/server/ws-data"
 
 const handlerWith = (calls: string[]) =>
   buildFetchHandler({
@@ -47,7 +48,7 @@ describe("HELLGATE web-daemon auth routes", () => {
           method,
           headers: { authorization: "Bearer wrong-token" },
         }),
-        {} as Server,
+        {} as Server<WSData>,
       )
       expect(result?.status, `${method} ${path}`).toBe(401)
     }

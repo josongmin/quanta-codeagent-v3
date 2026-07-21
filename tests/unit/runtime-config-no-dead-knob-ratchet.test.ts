@@ -117,7 +117,7 @@ function extractFields(): string[] {
   for (const file of TYPES_FILES) {
     const text = readFileSync(file, "utf8")
     for (const m of text.matchAll(/^\s*readonly\s+([a-zA-Z][a-zA-Z0-9]*)\s*[?:]/gm)) {
-      names.add(m[1])
+      names.add(m[1]!)
     }
   }
   return [...names].sort()

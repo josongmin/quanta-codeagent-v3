@@ -1,5 +1,5 @@
 id: prompt-cache-1h-ttl
-title: 1-hour prompt-cache TTL — Anthropic `cache_control: { ttl: "1h" }` (cost optimization)
+title: '1-hour prompt-cache TTL — Anthropic `cache_control: { ttl: "1h" }` (cost optimization)'
 section: 8
 subsystem: LLM Anthropic Messages codec — prompt-cache retention
 order: 320

@@ -4,6 +4,13 @@ import type { Producer, RunContext, TrajectoryKind } from "@/shared"
 import { assertNever, errMessage, logger, makeEvent, toError } from "@/shared"
 import type { StreamPort } from "../ports"
 import type { AgentEvent } from "../types"
+import { communicationDataOf, isCommunicationDataEvent } from "./jsonl-recorder-communication-data"
+import {
+  llmRequestData,
+  recoveryData,
+  toolResultData,
+  usageData,
+} from "./jsonl-recorder-event-data"
 import type { DegradedRecord } from "./tee"
 
 export interface JsonlRecorderOpts {
@@ -584,6 +591,7 @@ const KIND_MAP: Record<RecordedEventType, TrajectoryKind> = {
   // memory, so the trajectory is the only guaranteed record. `reason:"peer_message"`
   // in `dataOf` keeps it greppable; the body is already redacted at the emit boundary.
   peer_message: "recovery",
+  subagent_delivery: "recovery",
   error: "error",
   usage: "llm_usage",
   done: "session_end",
@@ -601,17 +609,7 @@ const dataOf = (e: RecordedEvent): Record<string, unknown> => {
     case "turn_start":
       return { turn: e.turn }
     case "llm_request":
-      // RFC-0002 §5.2 llm_request contract: model id required, route metadata
-      // optional. The model still flows through the same redaction path as
-      // every other payload field.
-      return {
-        model: e.model,
-        ...(e.provider !== undefined ? { provider: e.provider } : {}),
-        ...(e.surfaceId !== undefined ? { surfaceId: e.surfaceId } : {}),
-        ...(e.transportId !== undefined ? { transportId: e.transportId } : {}),
-        ...(e.authMode !== undefined ? { authMode: e.authMode } : {}),
-        ...(e.policy !== undefined ? { policy: e.policy } : {}),
-      }
+      return llmRequestData(e)
     case "llm_continuation":
       return llmContinuationData(e)
     case "assistant_text":
@@ -621,22 +619,9 @@ const dataOf = (e: RecordedEvent): Record<string, unknown> => {
     case "tool_progress":
       return { id: e.id, name: e.name, message: e.message }
     case "tool_result":
-      // RFC-0002 §5.2 ToolResultData: keep name/ok/stdoutTail, add the
-      // optional evidence only when the AgentEvent carried it (conditional-set
-      // so redaction still flows through the single makeEvent source).
-      return {
-        name: e.name,
-        ok: e.ok,
-        stdoutTail: e.preview,
-        ...(e.durationMs !== undefined ? { durationMs: e.durationMs } : {}),
-        ...(e.stderrTail !== undefined ? { stderrTail: e.stderrTail } : {}),
-        ...(e.exitCode !== undefined ? { exitCode: e.exitCode } : {}),
-        ...(e.executedCommand !== undefined ? { executedCommand: e.executedCommand } : {}),
-        ...(e.fullLogPath !== undefined ? { fullLogPath: e.fullLogPath } : {}),
-      }
+      return toolResultData(e)
     case "recovery":
-      // RFC-0002 §5.2 recovery contract: reason required, detail optional.
-      return { reason: e.reason, ...(e.detail !== undefined ? { detail: e.detail } : {}) }
+      return recoveryData(e)
     case "context_compacted":
       // ADR-0075: archive entry payload — fromTurnId..toTurnId + summary +
       // ts + tokens. `reason:"context_compacted"` is added so this
@@ -658,13 +643,47 @@ const dataOf = (e: RecordedEvent): Record<string, unknown> => {
     case "error":
       return { message: e.message }
     case "usage":
-      return {
-        model: e.model,
-        inputTokens: e.inputTokens,
-        outputTokens: e.outputTokens,
-        ...(e.cacheReadTokens !== undefined ? { cacheReadTokens: e.cacheReadTokens } : {}),
-        costUsd: null,
-      }
+      return usageData(e)
+    default:
+      return controlDataOf(e)
+  }
+}
+
+type ControlDataEvent = Extract<
+  RecordedEvent,
+  {
+    type:
+      | "response_queued"
+      | "interrupted"
+      | "subagent_cancel"
+      | "plan_created"
+      | "plan_updated"
+      | "plan_snapshot"
+      | "plan_user_input_requested"
+      | "plan_user_input_resolved"
+      | "permission_escalation_requested"
+      | "permission_escalation_resolved"
+      | "mode_changed"
+      | "turn_diff_updated"
+      | "decision"
+      | "knobs_applied"
+      | "progress_update"
+      | "peer_message"
+      | "subagent_delivery"
+      | "done"
+  }
+>
+
+type FinalDataEvent = Extract<
+  ControlDataEvent,
+  {
+    type: "turn_diff_updated" | "decision" | "knobs_applied" | "progress_update" | "done"
+  }
+>
+
+const controlDataOf = (e: ControlDataEvent): Record<string, unknown> => {
+  if (isCommunicationDataEvent(e)) return communicationDataOf(e)
+  switch (e.type) {
     case "response_queued":
       return controlOpQueuedData(e)
     case "interrupted":
@@ -682,10 +701,6 @@ const dataOf = (e: RecordedEvent): Record<string, unknown> => {
     case "plan_user_input_resolved":
       return planUserInputResolvedData(e)
     case "permission_escalation_requested":
-      // ADR-0512 P3 — auditable permission request. Optional `justification`
-      // is conditionally spread so the recorded JSON is byte-exact (no
-      // `undefined` field). `reason:"escalation_requested"` keeps the line
-      // greppable apart from other recovery-kind events.
       return {
         reason: "escalation_requested",
         id: e.id,
@@ -700,10 +715,14 @@ const dataOf = (e: RecordedEvent): Record<string, unknown> => {
       return { reason: "escalation_resolved", id: e.id, decision: e.decision }
     case "mode_changed":
       return modeChangedData(e)
+    default:
+      return finalDataOf(e)
+  }
+}
+
+const finalDataOf = (e: FinalDataEvent): Record<string, unknown> => {
+  switch (e.type) {
     case "turn_diff_updated":
-      // ADR-0102 turn-diff payload: stats + diff body. `reason:"turn_diff"`
-      // keeps the recovery-kind line greppable apart from real recovery
-      // points (mirrors `in_progress` / `response_queued` etc.).
       return {
         reason: "turn_diff",
         turn: e.turn,
@@ -719,11 +738,6 @@ const dataOf = (e: RecordedEvent): Record<string, unknown> => {
     case "knobs_applied":
       return knobsAppliedData(e)
     case "progress_update":
-      // C2 (jun-4-communicate-update.md): structured-progress payload. Optional
-      // terminal fields are CONDITIONALLY spread so the recorded JSON is
-      // byte-exact (no `undefined` fields). `reason:"progress_update"` keeps the
-      // recovery-kind line greppable. Recorded (durable agent intent), unlike
-      // the transient `output_progress` token tick the recorder skips.
       return {
         reason: "progress_update",
         currentStep: e.currentStep,
@@ -731,29 +745,9 @@ const dataOf = (e: RecordedEvent): Record<string, unknown> => {
         ...(e.completedSubtitle !== undefined ? { completedSubtitle: e.completedSubtitle } : {}),
         ...(e.turn !== undefined ? { turn: e.turn } : {}),
       }
-    case "peer_message":
-      // Peer/side-agent message surfacing (jul-15 W2): durable record of inter-
-      // agent mail addressed to the session owner. `reason:"peer_message"` keeps
-      // the recovery-kind line greppable. `body` is ALREADY redacted at the emit
-      // boundary; the recorder's own redaction policy still applies on top. The
-      // optional `correlationId` is conditionally spread (byte-exact JSON).
-      return {
-        reason: "peer_message",
-        from: e.from,
-        to: e.to,
-        messageKind: e.kind,
-        body: e.body,
-        provenance: e.provenance.source,
-        ...(e.provenance.source === "side-agent" ? { daemonId: e.provenance.daemonId } : {}),
-        ...(e.correlationId !== undefined ? { correlationId: e.correlationId } : {}),
-        sentAt: e.sentAt,
-      }
     case "done":
       return { reason: e.reason, turns: e.turns }
     default:
-      // Exhaustiveness pin: a new AgentEvent variant must come back here and
-      // declare its trajectory `data` payload — without this the return type
-      // would silently widen to include `undefined` (a dropped payload).
       return assertNever(e, "AgentEvent")
   }
 }

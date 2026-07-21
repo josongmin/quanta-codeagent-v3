@@ -153,6 +153,21 @@ export const buildSubagentIntrospectBlock = (config: AgentConfig): Tool[] => {
     ...(config.subagentAgentMeta !== undefined ? { agentMeta: config.subagentAgentMeta } : {}),
     ...(delivery !== undefined ? { delivery } : {}),
     ...(config.mailboxAgentId !== undefined ? { callerLabel: config.mailboxAgentId } : {}),
+    onSteerAdmission: ({ deliveryId, targetTaskId, targetTurnId }) => {
+      try {
+        config.stream.emit({
+          type: "subagent_delivery",
+          phase: "admitted",
+          deliveryId,
+          requestedMode: "steer",
+          status: "accepted",
+          targetTaskId,
+          targetTurnId,
+        })
+      } catch {
+        // Best-effort observability: admission is already authoritative.
+      }
+    },
     // F-B (jul-7 audit) — scope list_agents enumeration by THIS agent's own lineage
     // so a child sees only its own subtree + owner-less host-seeded tasks. Absent
     // (root, no label) ⇒ unscoped list (top authority).

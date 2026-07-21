@@ -4,6 +4,8 @@
 >
 > **어딧 핵심 수치**: unwired/seam-only 라벨 41행 중 **18행이 실은 ENV-GATED-LIVE**(라벨만 stale), 진짜 dormant는 **21행**. repair-first 17 중 **11행은 blocker가 STALE**(이미 고쳐짐/배선됨). 진짜 신규 코드 갭은 **6건**, 통합대상 중복은 **5건**.
 
+> **2026-07-20 current-state addendum**: 아래 Track 목록은 당시 실행 계획이다. 현재 authority는 `default-off-ledger.yaml`과 `00-index.md`이며, live source 재감사 결과는 **164/172 wired (95.3%)**, unknown 0이다. `typed-event` bounded reader, stream cancellation, compaction `PostCompact` consumer는 이미 landed했고, `search_codebase`는 기본 lexical wire(semantic index opt-in과 별개)로 정정됐다. `fast-apply-merge`는 host-provided review authority를 `ToolContext`까지 전달하지만, env/model만으로는 계속 fail-closed다. `identity-mid-session-prompt-rebuild`는 inline duplicate를 runner factory로 대체했다. 남은 8건은 외부/product contract 4, lifecycle owner 없는 producer 3, loop producer 없는 transport seam 1이다. 따라서 아래의 “배선 가능” 목록을 현재 작업 지시로 해석하지 않는다.
+
 ---
 
 ## 어딧이 뒤집은 전제 (증거)
@@ -36,7 +38,7 @@
 - **SP-21 retrieval/semantic ADR-0254 포트**: `src/retrieval/semantic/{port,in-memory-index,index}.ts`의 text-in `SemanticIndex`는 live wire가 안 씀(live는 `@/retrieval/pipeline` vector-in). concrete impl `createInMemoryIndex` consumer 0. → 통합(pipeline 타입으로) 또는 삭제, `duplicate_of: search-pipeline`.
 - **SP-22 recovery-router-codex-spec**: `codexSpecRoute` 테이블이 SSOT(decorator-policy/retry/fallback 소비), `RecoveryRouter.route()`는 `recovery.ts:253` 한 곳만 — **router가 redundant path**. DI-slot 배선 대신 router를 policy로 흡수하거나 단일권위 명시.
 - **SP-23 .codex-plugin 2차 discovery**: live는 `.quanta/plugins`(`plugin-loader.ts`), `.codex-plugin` 스캐너(`plugin-discovery/discovery.ts`)는 mention `plugin://`에도 안 붙는 2차 구현 → 통합(하나의 discovery로).
-- **SP-24 stage1-phase2 orphan store**: live 파이프라인은 `@/memory/consolidate` store 사용, 레저가 가리키는 `@/agent/memory/stage1-store`+vendor-glob consume는 caller 0 → consolidate/delete 결정.
+- **SP-24 stage1-phase2 orphan store**: resolved by deleting the unconsumed `@/agent/memory/stage1-store` duplicate; live Phase1/Phase2 uses only the canonical `@/memory/consolidate` store, while vendor glob remains independently wired.
 - **SP-25 ratelimit DualWindowStore 죽은 half**: `parseDualWindowSnapshot`는 live(`stream-consume.ts:199`), per-account `DualWindowStore.observe/current`는 caller 0 → `.observe()`를 같은 헤더경로서 호출하거나 삭제.
 
 **검증**: god-code green, 삭제행은 `decision: delete-proven-duplicate`+duplicate_of/lifecycle_evidence, 삭제 후 typecheck+테스트 green, red-on-injection(삭제 seam import 복원→컴파일 실패로 dead 확증).
@@ -56,8 +58,8 @@
 
 라이브 소비자 없는 진짜 seam. SOTA++/ROI무관 = **내부 소비자를 만들 수 있는 것은 만들고, 외부의존은 forward-contract로 보존**. 각각 RFC+consumer 설계.
 
-- **내부 소비자 배선 가능(신규 작업 후보)**: streaming-boomerang/streaming-cancellation-primitive(loop이 AbortSignal 채택), template-literal-windsurf(barrel 노출+skill/playbook 소비), multi-source-rules-vendor-detector(rule-load서 detectAll), node-repl-persistent-kernel(도구 등록), budget-probe-ledger-wire(pipeline budget-gate 스테이지 구성), model-tag-auto-hook/versioning(retrieval 캐시 무효화 배선), codex-r2-observability-decorators(MetricsRegistry 스레드), compaction-visibility(post_compact 훅 구독자).
-- **외부의존 = forward-contract 보존(건드리면 손해)**: bridge-attestation(서명 시크릿), jwks-agent-identity(외부 IdP), message-batches-client-core(폴링 인프라), codex-r2-{sqlite-session-registry, multi-process-flock}(disk 레지스트리 selector), voice(mic 바이너리+STT), realtime-ws(유료 소켓), github-*(gh auth), dockersandbox(Docker 데몬).
+- **내부 소비자 배선 가능(신규 작업 후보)**: streaming-boomerang(loop lifecycle producer), template-literal-windsurf(barrel 노출+skill/playbook 소비), multi-source-rules-vendor-detector(rule-load서 detectAll), node-repl-persistent-kernel(도구 등록), budget-probe-ledger-wire(pipeline budget-gate 스테이지 구성), model-tag-auto-hook/versioning(retrieval 캐시 무효화 배선), codex-r2-observability-decorators(Production MetricsRegistry adapter + cache ownership 결정).
+- **외부의존 = forward-contract 보존(건드리면 손해)**: bridge-attestation(프로비저닝된 서명 시크릿 + preflight authority), jwks-agent-identity(외부 IdP), message-batches-client-core(폴링 인프라), codex-r2-{sqlite-session-registry, multi-process-flock}(disk 레지스트리 selector), voice(mic 바이너리+STT), realtime-ws(유료 소켓), github-*(gh auth), dockersandbox(Docker 데몬 + hardened profile 계약).
 - **model-preset-sticky-resolver**: SP-33이 소비자 신설로 해소(dormant→wired).
 
 ## Track 5 — efficacy A/B (operator, 코드갭 아님) 【SP-5x】

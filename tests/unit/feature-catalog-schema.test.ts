@@ -252,4 +252,43 @@ describe("loadFeatures / loadFeaturesStrict — filesystem", () => {
     await writeFile(join(dir, "broken.yaml"), "not a key line\n", "utf8")
     await expect(loadFeatures(dir)).rejects.toThrow(/broken\.yaml/)
   })
+
+  test("loadFeatures rejects bytes that the compact parser accepts but standard YAML forbids", async () => {
+    const dir = join(tmp, "non-standard-yaml")
+    await mkdir(dir, { recursive: true })
+    await writeFile(
+      join(dir, "reserved-scalar.yaml"),
+      [
+        "id: reserved-scalar",
+        "title: @/not-valid-unquoted-yaml",
+        "section: 1",
+        "subsystem: x",
+        "maturity: L3",
+        "purpose: x",
+        "",
+      ].join("\n"),
+      "utf8",
+    )
+    await expect(loadFeatures(dir)).rejects.toThrow(/YAML syntax failed.*reserved-scalar\.yaml/)
+  })
+
+  test("loadFeatures rejects duplicate mapping keys instead of last-key-wins", async () => {
+    const dir = join(tmp, "duplicate-standard-yaml")
+    await mkdir(dir, { recursive: true })
+    await writeFile(
+      join(dir, "duplicate-key.yaml"),
+      [
+        "id: duplicate-key",
+        "title: first title",
+        "title: second title",
+        "section: 1",
+        "subsystem: x",
+        "maturity: L3",
+        "purpose: x",
+        "",
+      ].join("\n"),
+      "utf8",
+    )
+    await expect(loadFeatures(dir)).rejects.toThrow(/YAML syntax failed.*duplicate-key\.yaml/)
+  })
 })

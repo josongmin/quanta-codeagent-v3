@@ -160,6 +160,23 @@ describe("SubagentControlRegistry (TurnWakeRegistry superset) — endpoint lifec
     expect(reg.endpointFor("dup")).toBeUndefined()
   })
 
+  test("legacy registration atomically replaces the whole endpoint cell — no split label/wake/endpoint authority", () => {
+    const reg = new TurnWakeRegistry()
+    const endpoint = stubEndpoint("root/old")
+    const disposeEndpoint = reg.registerEndpoint("mixed", endpoint)
+    const disposeLegacy = reg.register("mixed", () => "woke", "root/new")
+
+    expect(reg.labelOf("mixed")).toBe("root/new")
+    expect(reg.endpointFor("mixed")).toBeUndefined()
+    expect(reg.wake("mixed", "followup")).toBe("woke")
+
+    disposeEndpoint()
+    expect(reg.labelOf("mixed")).toBe("root/new")
+    expect(reg.wake("mixed", "followup")).toBe("woke")
+    disposeLegacy()
+    expect(reg.has("mixed")).toBe(false)
+  })
+
   test("legacy wake/labelOf still work for the current followup_task path (backward-compat)", () => {
     const reg = new TurnWakeRegistry()
     const gate = new SubagentTurnGate()

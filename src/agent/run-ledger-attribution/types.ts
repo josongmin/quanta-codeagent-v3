@@ -19,10 +19,13 @@
 
 import type { RunLedgerPort } from "@/agent/run-ledger"
 
-/** A single action a matcher can request against the ledger. Mirrors the
- *  three observable phases of a long-running run: open it (`start`), update
- *  its state (`touch`), or close it (`settle`). The wave-1 ledger is the
- *  authority on what each action means.
+/** A single action a matcher can request against the ledger. Most actions
+ * mirror the three observable phases of a long-running run: open it
+ * (`start`), update its state (`touch`), or close it (`settle`).
+ * `observe_mcp_task` is the constrained adapter action for MCP: its tool
+ * surface has no launch event, so the subscriber derives that same
+ * start/touch/settle sequence only from an authoritative task observation.
+ * The wave-1 ledger remains the authority on every resulting transition.
  *
  *  `exec` is NOT produced by the default matcher (no quanta tool surfaces an
  *  exec-ledger event today); the literal is kept here for forward-compat
@@ -46,6 +49,24 @@ export type LedgerAction =
       kind: "settle"
       id: string
       status: "completed" | "failed" | "stopped"
+      error?: string
+    }
+  | {
+      /**
+       * An MCP task state observed from an authoritative `get_mcp_task`
+       * result. MCP has no task-launch tool on this surface, so the first
+       * successful poll is the only truthful point at which we can register
+       * a task in the ledger. The subscriber creates an entry when absent,
+       * then maps this observation to start/touch/settle without inventing a
+       * state from an id alone.
+       */
+      kind: "observe_mcp_task"
+      id: string
+      owner: string
+      title: string
+      resumeAction?: string
+      status: "running" | "waiting" | "completed" | "failed" | "stopped"
+      waitingOn?: "tool"
       error?: string
     }
 

@@ -194,7 +194,7 @@ describe("resolveTurnLoopOutcome", () => {
     const resolution = await resolveTurnLoopOutcome(args)
 
     expect(resolution).toMatchObject({ kind: "finish", reason: "budget_exhausted" })
-    expect(args.cfg.mode).toBe("default")
+    expect((args.cfg as AgentConfig).mode).toBe("default")
     expect(stream.events).toContainEqual({
       type: "mode_changed",
       from: "plan",
@@ -225,7 +225,7 @@ describe("resolveTurnLoopOutcome", () => {
     const resolution = await resolveTurnLoopOutcome(args)
 
     expect(resolution).toEqual({ kind: "continue" })
-    expect(args.cfg.mode).toBe("default")
+    expect((args.cfg as AgentConfig).mode).toBe("default")
     expect(stream.events.filter((e) => e.type === "mode_changed")).toEqual([
       {
         type: "mode_changed",
@@ -267,7 +267,7 @@ describe("resolveTurnLoopOutcome", () => {
     const resolution = await resolveTurnLoopOutcome(args)
 
     expect(resolution).toEqual({ kind: "continue" })
-    expect(args.cfg.mode).toBe("default")
+    expect((args.cfg as AgentConfig).mode).toBe("default")
     expect(planStore.current()).toBeNull()
     expect(stream.events.filter((e) => e.type === "mode_changed")).toEqual([
       {

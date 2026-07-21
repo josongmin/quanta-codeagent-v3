@@ -2,8 +2,15 @@
 
 Status: Accepted (2026-05-26)
 Track: REPL surface / identity-mode last-mile (closes ADR-0291 gap)
-Slice: `src/apps/cli/repl/system-prompt-rebuilder.ts` (new) +
-`src/apps/cli/repl/ctx-adapters/identity-mode-adapter.ts` (extend)
+Slice: `src/runner/assemble/session-state.ts` (canonical owner) +
+`src/apps/cli/repl/ctx-adapters/identity-mode-adapter.ts` (surface adapter)
+
+## 2026-07-20 implementation addendum
+
+The former CLI-local rebuilder was removed. `SystemSource` already belonged to
+runner session state, so `SystemPromptRebuilderPort` moved beside it and host
+bootstrap now constructs and consumes the same canonical factory. This removes
+the inline duplicate while preserving the slash callback as a thin surface port.
 
 ## Context
 

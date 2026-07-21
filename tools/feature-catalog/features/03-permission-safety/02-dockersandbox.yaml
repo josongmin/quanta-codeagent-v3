@@ -4,23 +4,36 @@ section: 3
 subsystem: 런타임 샌드박스
 order: 2
 maturity: L4
-status: stable
+status: hold
 ui_surfaces: [n-a]
 monitoring: n-a
 modes: [n-a]
 configurable: static
 owners: ["@songmin"]
-labels: [absorbed:claude-code, surface:cli, security-touched, default-off]
+labels: [absorbed:claude-code, security-touched, default-off, seam-only]
 depends_on: [sandbox-policy, bash-timeout-cap, escalating-kill, guarded-spawn, os-sandbox-wire]
 surface_integration:
-  cli: full
+  cli: missing
   web: na
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-19"
   evidence:
-    cli: "runs in the interactive CLI — 2/2 evidence file(s) reachable from src/apps/cli/index.ts import graph"
-    web: "internal default-off Docker sandbox runtime backend; no browser affordance, user sees only tool.completed; not a UI feature"
-purpose: 'DockerSandbox — Sandbox.run() 풀 파이프라인 e2e: stub dockerBin로 실 Bun.spawn → 정책→argv→spawn→stdout/stderr 분리→exitCode→timeout→maxOutputBytes cap→SandboxUnavailableError→env allowlist→isAvailable() 5s kill guard. Docker daemon 의존 없이 BLOCKING gate에서 stub 바이너리로 spawn 경로를 통과 — contract 3 tests는 실 daemon, integration 10 tests는 stub.'
+    cli: "src/apps/cli/index.ts installs only the OS argv-wrapper (installCliSandbox); production has no `new DockerSandbox` consumer. The class is not selectable by QUANTA_SANDBOX."
+    web: "internal runtime backend only; no web consumer or affordance."
+wiring:
+  wireStatus: seam-only
+  activation: []
+  producer:
+    - module: src/runtime/sandbox.ts
+      exportedSymbol: DockerSandbox
+      role: "defines the fail-closed per-command Docker isolation backend"
+  consumer: []
+  contracts:
+    cli:
+      status: missing
+    web:
+      status: na
+purpose: 'DockerSandbox is a complete per-command Sandbox.run() backend: policy→docker argv→spawn→stdout/stderr→exit/timeout/output cap, with daemon-unavailable fail-closed, container env allowlisting, and a scrubbed host Docker-client environment. It is not a CLI shell selector: wiring it into the host bash path would replace the host toolchain with the image toolchain, so a separate explicitly-scoped consumer is required.'
 evidence:
   code:
     - src/runtime/sandbox.ts
@@ -29,7 +42,9 @@ evidence:
   tests:
     unit: []
     integration: [tests/integration/docker-sandbox-e2e.test.ts]
-    contract: []
+    contract: [tests/contract/sandbox-docker.test.ts]
 knobs: []
-deliberate_hold: null
-notes: '+ runAgent 통합 layer: sandbox-backed Tool dispatch에서 SandboxUnavailableError/기타 예외 → ok:false 매핑, 루프 abort 없음 — tool_result 채널 contract 폐쇄'
+deliberate_hold:
+  reason: 'No production consumer constructs DockerSandbox. A global replacement for runShell is unsafe: the verified node:22-slim image lacks the host Bun/git/rg toolchain, so it would break normal CLI development commands.'
+  promotion_path: 'Keep the backend seam-only until a separately scoped, image-pinned container tool owns lifecycle, workspace mount, and toolchain compatibility.'
+notes: '2026-07-19 local daemon contract: 18/18 passed across contract + integration suites, including real `--network none`, container env non-leak, and host Docker-client credential-scrub checks. The existing runAgent test proves a deliberately sandbox-backed tool maps backend failure to tool_result; it does not make DockerSandbox a production tool.'

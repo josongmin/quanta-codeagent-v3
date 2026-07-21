@@ -115,6 +115,7 @@ const stubSetup = (approvalDecisions: readonly ApprovalDecisionResult[]) => {
               },
             }
           },
+          cancel: async () => ({ revision: 0, seq: 0, events: [] }),
         },
         identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
         permission: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
@@ -137,6 +138,7 @@ const stubSetup = (approvalDecisions: readonly ApprovalDecisionResult[]) => {
             events: [],
             transcript: { messages: [...messages] },
           }),
+          messages: () => [],
         },
         side: {
           start: async () => ({

@@ -1,5 +1,5 @@
 id: replay-cmd-session-rewind
-title: `/replay <session-id> [--at N] [--from tc_x]` — 세션 JSONL 시간순 재생 (ADR-0239 Track R)
+title: '`/replay <session-id> [--at N] [--from tc_x]` — 세션 JSONL 시간순 재생 (ADR-0239 Track R)'
 section: 10
 subsystem: REPL slash — 사후 세션 trajectory time-travel replay
 order: 2392

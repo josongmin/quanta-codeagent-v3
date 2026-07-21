@@ -233,7 +233,7 @@ describe("container_exec tool — exit-code completion + head/tail cap (RFC §13
   test("exec-risk flags: not read-only, not concurrency-safe", () => {
     const tool = containerExecTool(fakePort(async () => ({ stdout: "", stderr: "", code: 0 })))
     expect(tool.isReadOnly()).toBe(false) // mutates container state → always-confirm tier
-    expect(tool.isConcurrencySafe()).toBe(false) // shared-container ordering hazard → serialize
+    expect(tool.isConcurrencySafe({ command: "true" })).toBe(false) // shared-container ordering hazard → serialize
   })
 
   test("empty command ⇒ rejected before exec", async () => {

@@ -11,7 +11,7 @@ modes: [interactive, headless, batch, daemon, ide, ci-bot]
 configurable: integrated
 owners: ["@songmin"]
 labels: ["surface:core", "default-off", "absorbed:cursor", "absorbed:codex"]
-depends_on: [memory-auto-trigger, stage1-store-agent-port]
+depends_on: [memory-auto-trigger, phase1-stage1-store]
 config_refs:
   env: [QUANTA_MEMORY_AUTO]
 surface_integration:
@@ -50,7 +50,6 @@ purpose: |
       candidate (`>` cap test, not `>=`)
     - oldest-first ordering deterministic on tie-break (V8 stable
       sort)
-configurable: integrated
 evidence:
   code:
     - src/memory/cross-session/port.ts

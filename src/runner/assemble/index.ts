@@ -84,12 +84,16 @@ export {
   type WiredSearchPipeline,
 } from "./search-pipeline"
 export {
+  type CreateSystemPromptRebuilderArgs,
   createIdentityModeSessionState,
   createPermissionModeSessionState,
+  createSystemPromptRebuilder,
   createSystemSource,
   createToolProfileSessionState,
   type IdentityModeSessionState,
   type PermissionModeSessionState,
+  SYSTEM_PROMPT_REBUILD_FALLBACK_PREFIX,
+  type SystemPromptRebuilderPort,
   type SystemSource,
   type ToolProfileSessionState,
 } from "./session-state"

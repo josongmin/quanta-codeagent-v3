@@ -72,7 +72,7 @@ const R_ENV_FROZEN: InstructionAtom = {
     "  an environment limitation: declare the environment unavailable for",
     "  verification and stop — your patch is the deliverable, not a working env.",
   ],
-  provenance: ["RFC jul-2-terminal-bench-levers/01", "ADR-0326 cached system prefix"],
+  provenance: ["environment-posture policy", "ADR-0326 cached system prefix"],
 }
 
 const R_STOP_ENV_FROZEN: InstructionAtom = {
@@ -89,7 +89,7 @@ const R_STOP_ENV_FROZEN: InstructionAtom = {
     "  Repeating the same install or env command will not unblock you. Switching",
     "  tactic means changing the code, not retrying the command.",
   ],
-  provenance: ["RFC jul-2-terminal-bench-levers/01"],
+  provenance: ["environment-posture policy"],
 }
 
 // ── The four universal honesty/search rails — apply in EVERY posture (no
@@ -231,7 +231,7 @@ const R_ENV_OWNED: InstructionAtom = {
     "  flags; re-probe after installing; a clean exit code on the verifying command is",
     "  the proof.",
   ],
-  provenance: ["RFC jul-2-terminal-bench-levers/01"],
+  provenance: ["environment-posture policy"],
 }
 
 const R_INSTALL_THRASH: InstructionAtom = {

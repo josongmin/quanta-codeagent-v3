@@ -34,7 +34,7 @@ const msgs: Message[] = [{ role: "user", content: [{ type: "text", text: "hi" }]
 describe("HELLGATE WS-1 — attachSessionToLive shared crown op", () => {
   test("attached: load → replace → onReplaced (BEFORE) → setPersistTarget; returns count", async () => {
     const order: string[] = []
-    let repointed: { id: string; meta: SessionMeta } | null = null
+    const persistTarget = { value: undefined as { id: string; meta: SessionMeta } | undefined }
     const out = await attachSessionToLive("s-1", {
       loadSession: async (id) => (id === "s-1" ? { meta: meta("s-1"), messages: msgs } : undefined),
       replaceTranscript: async (m) => {
@@ -46,12 +46,14 @@ describe("HELLGATE WS-1 — attachSessionToLive shared crown op", () => {
       },
       setPersistTarget: (t) => {
         order.push("setPersistTarget")
-        repointed = t
+        persistTarget.value = t
       },
     })
     expect(out).toEqual({ kind: "attached", sessionId: "s-1", messageCount: 1 })
     // ordering is load-bearing: onReplaced (surface commit) BEFORE persist repoint.
     expect(order).toEqual(["replace", "onReplaced:1", "setPersistTarget"])
+    const repointed = persistTarget.value
+    if (repointed === undefined) throw new Error("persist target was not repointed")
     expect(repointed).toEqual({ id: "s-1", meta: meta("s-1") })
   })
 
@@ -97,15 +99,16 @@ describe("HELLGATE WS-1 — attachSessionToLive shared crown op", () => {
   })
 
   test("onReplaced is OPTIONAL (web has no surface commit) — still repoints + attaches", async () => {
-    let repointedId: string | null = null
+    const persistTarget = { id: undefined as string | undefined }
     const out = await attachSessionToLive("s-web", {
       loadSession: async () => ({ meta: meta("s-web"), messages: msgs }),
       replaceTranscript: async (m) => m,
       setPersistTarget: (t) => {
-        repointedId = t.id
+        persistTarget.id = t.id
       },
     })
     expect(out).toEqual({ kind: "attached", sessionId: "s-web", messageCount: 1 })
-    expect(repointedId).toBe("s-web")
+    if (persistTarget.id === undefined) throw new Error("persist target was not repointed")
+    expect(persistTarget.id).toBe("s-web")
   })
 })

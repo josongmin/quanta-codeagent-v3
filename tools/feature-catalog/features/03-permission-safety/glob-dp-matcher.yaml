@@ -1,7 +1,7 @@
 id: glob-dp-matcher
 title: ReDoS-hardened glob DP matcher (skill activation + Cursor rule paths)
 section: 3
-subsystem: 권한·안전 — glob matching (Cursor .mdc / Claude paths: 흡수)
+subsystem: "권한·안전 — glob matching (Cursor .mdc / Claude paths: 흡수)"
 order: 50
 maturity: L4
 status: stable

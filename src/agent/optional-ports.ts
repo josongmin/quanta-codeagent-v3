@@ -677,8 +677,11 @@ const wireSubagentToolGates = <T extends OptionalPortBase>(base: T, env: Optiona
  *   - `applyModel`: `runtimeConfig().fastApplyModel` (`QUANTA_FAST_APPLY_MODEL`).
  *
  * Default-OFF byte-identical (RFC §1.2): gate unset / model absent / model
- * empty ⇒ `base` returned UNCHANGED (no port, no allocation). A pre-set
- * `fastApplyMerge` is preserved verbatim (caller-override-precedence).
+ * empty ⇒ `base` returned UNCHANGED (no port, no allocation). This function
+ * builds only the provider port; it deliberately does not invent a
+ * FastApplyMergeReviewSeam from a diff observer. Therefore normal hosts remain
+ * fail-closed before provider dispatch until a review owner is explicitly wired.
+ * A pre-set `fastApplyMerge` is preserved verbatim (caller-override-precedence).
  */
 const wireFastApplyMerge = <T extends OptionalPortBase>(base: T): T => {
   if (!runtimeConfig().fastApplyMerge) return base
@@ -754,47 +757,90 @@ const wireFollowupDeps = <T extends OptionalPortBase>(base: T): T => {
  * Default-OFF byte-identical: `enableSteer` unset ⇒ `base` returned verbatim (no
  * plane allocated ⇒ the `onReceipt` closure never exists). Caller-override-
  * precedence: a pre-set `steerPlane` is kept.
- * The receipt sink routes `degraded`/`cancelled` receipts onto the GLOBAL
- * operator-notice bus (Item 1, jul-18) so a steer that fell back to the mailbox
- * is operator-visible; `applied` is intentionally silent. A correlated
- * `SubagentDeliveryReceipt` UI/telemetry cascade (WS6, jul-15 `peer_message`) may
- * still layer on top. The exactly-once + mailbox-fallback invariant is enforced
- * by the finalization port itself regardless of the sink.
+ * The receipt sink routes every terminal receipt onto the GLOBAL operator-notice
+ * bus with its `deliveryId`. This gives admission and finalization one observable
+ * correlation key without making UI delivery part of control correctness. A
+ * dedicated transcript event may still layer on top.
  */
 export const wireSteerPlane = <T extends OptionalPortBase>(base: T): T => {
   const sub = (base as Partial<AgentConfig>).subagent
   if (sub === undefined || sub.enableSteer !== true || sub.steerPlane !== undefined) return base
   const mailbox = (base as Partial<AgentConfig>).subagentMailbox
   if (mailbox === undefined) return base
+  const stream = (base as Partial<AgentConfig>).stream
   const retention = makeSteerRetentionStore()
   const finalization = createSubagentSteerFinalization({
     store: retention,
     mailbox: mailbox as unknown as import("./subagent-delivery/controller").DeliveryMailboxPort,
-    // Item 1 (jul-18) — surface async steer receipts on the existing GLOBAL
-    // operator-notice bus. A steer that DEGRADED to the mailbox (or was
-    // cancelled) is an operator signal the no-op sink used to silently swallow.
-    // `applied` (success) fires NO notice: a multi-round steer would emit one per
-    // consumed step (spam) and success is not an operator alert. `emitOperator
-    // Notice` is a no-throw global (no sink installed ⇒ inert), so it can never
-    // poison the finalization path. WS6 may still layer a correlated peer_message
-    // UI cascade on top of this later — this bus is the operator-visible floor.
+    // Terminal receipts are correlated with the `deliveryId` returned by
+    // `followup_task`. `emitOperatorNotice` is observational and no-throw; the
+    // finalizer additionally contains any custom sink failure.
     onReceipt: (r) => {
       if (r.kind === "degraded") {
         emitOperatorNotice({
           severity: "warn",
           source: "subagent",
-          message: `steer to peer degraded to ${r.effectiveMode} (${r.reason})`,
+          message: `steer delivery ${r.deliveryId} degraded to ${r.effectiveMode} (${r.reason})`,
           hint: `delivered via mailbox msg ${r.messageId}`,
         })
       } else if (r.kind === "cancelled") {
         emitOperatorNotice({
           severity: "info",
           source: "subagent",
-          message: `steer cancelled (${r.reason})`,
+          message: `steer delivery ${r.deliveryId} cancelled (${r.reason})`,
+        })
+      } else if (r.kind === "failed") {
+        emitOperatorNotice({
+          severity: "error",
+          source: "subagent",
+          message: `steer delivery ${r.deliveryId} failed (${r.reason})`,
+        })
+      } else {
+        emitOperatorNotice({
+          severity: "info",
+          source: "subagent",
+          message: `steer delivery ${r.deliveryId} applied to turn ${r.targetTurnId}`,
         })
       }
-      // `applied` (success) ⇒ NO notice (see closure header).
+      if (stream === undefined) return
+      try {
+        if (r.kind === "applied") {
+          stream.emit({
+            type: "subagent_delivery",
+            phase: "finalized",
+            deliveryId: r.deliveryId,
+            requestedMode: "steer",
+            status: "applied",
+            effectiveMode: "steer",
+            targetTurnId: r.targetTurnId,
+          })
+        } else if (r.kind === "degraded") {
+          stream.emit({
+            type: "subagent_delivery",
+            phase: "finalized",
+            deliveryId: r.deliveryId,
+            requestedMode: "steer",
+            status: "degraded",
+            effectiveMode: "queue",
+            reason: r.reason,
+            messageId: r.messageId,
+          })
+        } else {
+          stream.emit({
+            type: "subagent_delivery",
+            phase: "finalized",
+            deliveryId: r.deliveryId,
+            requestedMode: "steer",
+            status: r.kind,
+            reason: r.reason,
+          })
+        }
+      } catch {
+        // Stream observation cannot change an already-finalized delivery.
+      }
     },
+    onReceiptError: (error) =>
+      logger.warn("subagent steer receipt sink failed", { error: String(error) }),
   })
   return { ...base, subagent: { ...sub, steerPlane: { retention, finalization } } } as T
 }

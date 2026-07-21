@@ -134,7 +134,8 @@ describe("handleFollowupTask — delivers to the resolved mailbox label (BUG#4)"
       followupDeps(registry, mailbox, wake, "root"),
     )
     // Delivered (honest degrade), but to the task-id phantom address, not root/N.
-    expect(out.kind).toBe("error") // no_waker degrade surfaces as an honest error
+    expect(out.kind).toBe("success")
+    if (out.kind === "success") expect(out.status).toBe("degraded")
     expect(mailbox.read(childLabel).map((m) => m.body)).toEqual([])
     expect(mailbox.read(taskId).map((m) => m.body)).toEqual(["do X"])
   })

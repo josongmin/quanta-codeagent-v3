@@ -35,7 +35,7 @@ evidence:
     - src/agent/subagent-persistence-store/jsonl-store.ts
     - src/agent/subagent-persistence-store/hydrating-scheduler.ts
     - src/agent/subagent-persistence-store/types.ts
-  adrs: [153]
+  adrs: [153, "docs/decisions/0158-subagent-persistence.md"]
   tests:
     unit:
       - tests/unit/subagent-persistence-hellgate.test.ts

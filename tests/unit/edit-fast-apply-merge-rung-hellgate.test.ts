@@ -101,7 +101,24 @@ const makeMerge = (
 
 const ORIGINAL = "alpha\nbeta\ngamma\n"
 
+const TEST_REVIEW_APPROVES = {
+  approve: async (): Promise<boolean> => true,
+}
+
 const ctxOf = (over: Partial<ToolContext> = {}): ToolContext => ({
+  cwd: "/",
+  signal: new AbortController().signal,
+  // Positive merge tests exercise a host-owned review decision; production
+  // contexts omit this seam unless their composition root owns the authority.
+  fastApplyMergeReview: TEST_REVIEW_APPROVES,
+  ...over,
+})
+
+/** Deliberately omit the reviewer rather than assigning `undefined`: this is
+ * the production-shaped context whose merge capability must fail closed. */
+const ctxWithoutMergeReview = (
+  over: Omit<Partial<ToolContext>, "fastApplyMergeReview"> = {},
+): ToolContext => ({
   cwd: "/",
   signal: new AbortController().signal,
   ...over,
@@ -151,6 +168,43 @@ describe("jun-7-misc 06 edit fast-apply MERGE rung hellgate", () => {
     expect(merge.calls).toHaveLength(0)
   })
 
+  test("EM-02b merge without a host review seam is fail-closed before provider dispatch", async () => {
+    const { port, files, writes } = makePort({ "a.ts": ORIGINAL })
+    const merge = makeMerge(() => ({ ok: true, merged: "alpha\nBETA\ngamma\n" }))
+    const tool = makeEditTool(port)
+    const res = await run(
+      tool,
+      { path: "a.ts", old_string: "beta-typo", new_string: "BETA" },
+      ctxWithoutMergeReview({ fastApplyMerge: merge.seam }),
+    )
+    expect(res.ok).toBe(false)
+    expect(merge.calls).toHaveLength(0)
+    expect(writes).toHaveLength(0)
+    expect(files.get("a.ts")).toBe(ORIGINAL)
+  })
+
+  test("EM-02c reviewer failure is fail-closed after proposal and before write", async () => {
+    const { port, files, writes } = makePort({ "a.ts": ORIGINAL })
+    const merge = makeMerge(() => ({ ok: true, merged: "alpha\nBETA\ngamma\n" }))
+    const tool = makeEditTool(port)
+    const res = await run(
+      tool,
+      { path: "a.ts", old_string: "beta-typo", new_string: "BETA" },
+      ctxOf({
+        fastApplyMerge: merge.seam,
+        fastApplyMergeReview: {
+          approve: async () => {
+            throw new Error("review authority unavailable")
+          },
+        },
+      }),
+    )
+    expect(res.ok).toBe(false)
+    expect(merge.calls).toHaveLength(1)
+    expect(writes).toHaveLength(0)
+    expect(files.get("a.ts")).toBe(ORIGINAL)
+  })
+
   test("EM-03 ON + correct merge ⇒ written via gated commit, diff sink sees before/after", async () => {
     const { port, files, writes } = makePort({ "a.ts": ORIGINAL })
     const MERGED = "alpha\nBETA-merged\ngamma\n"
@@ -170,14 +224,14 @@ describe("jun-7-misc 06 edit fast-apply MERGE rung hellgate", () => {
     expect(res.ok).toBe(true)
     expect(merge.calls).toHaveLength(1)
     // The sketch was derived from old/new — passed to the apply model.
-    expect(merge.calls[0]!.editSketch).toContain("BETA-merged")
+    expect(merge.calls[0]?.editSketch).toContain("BETA-merged")
     // Written via the NORMAL commit path.
     expect(writes).toHaveLength(1)
     expect(files.get("a.ts")).toBe(MERGED)
-    // The diff sink (the gated reviewer/diff surface) saw the verbatim before/after.
+    // The post-write observation sink saw the verbatim before/after.
     expect(captured).toHaveLength(1)
-    expect(captured[0]!.before).toBe(ORIGINAL)
-    expect(captured[0]!.after).toBe(MERGED)
+    expect(captured[0]?.before).toBe(ORIGINAL)
+    expect(captured[0]?.after).toBe(MERGED)
   })
 
   test("EM-04 RED: merge drops content (empty) ⇒ rejected, file UNCHANGED", async () => {
@@ -384,20 +438,11 @@ describe("jun-7-misc 06 edit fast-apply MERGE rung hellgate", () => {
     expect(files.get("a.ts")).toBe(ORIG)
   })
 
-  test("EM-14 KNOWN-GAP: content-drop merge is NOT deterministically caught, but the reviewer/diff backstop IS engaged", async () => {
-    // R2 adversarial finding (ticket §9.3 acknowledged limitation). The edit-scoped
-    // verification checks new_string PRESENCE and old_string ABSENCE — it cannot
-    // bound SEMANTIC DROP without a magic-threshold structural diff (forbidden by
-    // [[no-heuristics-only-validated]]). So a merge that lands new_string (here,
-    // inside a comment) while DROPPING unrelated real code passes the deterministic
-    // gate. This test PINS that the merge nonetheless reaches disk ONLY through the
-    // gated commit AND that the ToolDiffSink (the reviewer/diff backstop named in
-    // §4.c as the REAL safety net) is fed the verbatim before/after — so a human/
-    // reviewer can catch the drop. It is NEVER a side-channel blind write.
-    //
-    // If a future round adds a deterministic bounded-drop check, this test should
-    // FLIP to asserting res.ok === false + zero writes. Until then it locks the
-    // honest current behavior: accepted-but-surfaced, never silent.
+  test("EM-14 content-drop proposal requires an explicit reviewer decision before write", async () => {
+    // The deterministic gate cannot prove unrelated semantics were preserved:
+    // the proposed new text can land in a comment while real code disappears.
+    // A tool-diff sink is post-write observation, so only a pre-commit reviewer
+    // may authorize this path. The reviewer below sees the exact drop and denies.
     const ORIG = "function pay(){ transfer(amount) }\nconst x = 1\nconst y = 2\n"
     const { port, writes } = makePort({ "a.ts": ORIG })
     // Intended edit: x = 1 → x = 42. The merge lands "x = 42" in a COMMENT and
@@ -413,19 +458,20 @@ describe("jun-7-misc 06 edit fast-apply MERGE rung hellgate", () => {
         fastApplyMerge: merge.seam,
         toolCallId: "c",
         toolDiff: { capture: (i) => captured.push({ before: i.before, after: i.after }) },
+        fastApplyMergeReview: {
+          approve: async ({ before, after }) => {
+            expect(before).toBe(ORIG)
+            expect(after).toBe(DROPPED)
+            return false
+          },
+        },
       }),
     )
-    // Honest current behavior: the deterministic gate does NOT catch the drop.
-    expect(res.ok).toBe(true)
-    expect(writes).toHaveLength(1)
-    // BUT the backstop is engaged: the reviewer/diff sink saw the FULL before/after,
-    // so the dropped `function pay` line is visible to the gate that §4.c relies on.
-    expect(captured).toHaveLength(1)
-    expect(captured[0]!.before).toBe(ORIG)
-    expect(captured[0]!.after).toBe(DROPPED)
-    // The drop is surfaced, not hidden: before/after differ on the dropped line.
-    expect(captured[0]!.before).toContain("function pay")
-    expect(captured[0]!.after).not.toContain("function pay")
+    expect(res.ok).toBe(false)
+    expect(writes).toHaveLength(0)
+    // Review runs before the post-write observation sink, so denied proposals
+    // are neither persisted nor misrepresented as a successful diff frame.
+    expect(captured).toHaveLength(0)
   })
 
   test("EM-15 RED: pre-existing new_string + drop ⇒ rejected (landed-signal must be count-increase, not presence-anywhere)", async () => {

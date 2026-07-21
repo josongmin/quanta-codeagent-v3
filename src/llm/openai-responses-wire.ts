@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from "node:util"
 import { dispatchNoThrow, LLMError } from "@/shared"
 import type { LLMProvider } from "@/shared/errors"
 import { parseToolInputOrThrow } from "./adapters/shared"
-import type { LlmCheckpoint, PromptCacheRetention, ResponsesCheckpoint } from "./target-metadata"
+import type { LlmCheckpoint, ResponsesCheckpoint } from "./target-metadata"
 import type {
   Message,
   StreamEvent,
@@ -25,6 +25,9 @@ interface SSEEvent {
 interface ResponsesEvent {
   readonly type?: string
   readonly delta?: string
+  readonly message?: unknown
+  readonly progress?: unknown
+  readonly created_at?: unknown
   readonly item?: {
     type?: string
     id?: string
@@ -38,6 +41,8 @@ interface ResponsesEvent {
   readonly response?: {
     id?: string
     model?: string
+    created_at?: unknown
+    progress?: unknown
     usage?: {
       input_tokens?: number
       output_tokens?: number
@@ -181,6 +186,33 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 // newly-added host callback can't silently forget the guard.
 const notifyChunkArrival = (onChunk: (() => void) | undefined): void => {
   dispatchNoThrow(onChunk)
+}
+
+const toProviderCreatedAtMilliseconds = (value: unknown): number | undefined => {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return undefined
+  // Responses emits Unix seconds. StreamEvent timestamps use milliseconds;
+  // keep already-millisecond test/provider payloads intact as well.
+  return value < 10_000_000_000 ? value * 1000 : value
+}
+
+const responseInProgressEvent = (event: ResponsesEvent): StreamEvent => {
+  const message = typeof event.message === "string" ? event.message : undefined
+  const rawProgress = event.progress ?? event.response?.progress
+  const progress =
+    typeof rawProgress === "number" &&
+    Number.isFinite(rawProgress) &&
+    rawProgress >= 0 &&
+    rawProgress <= 1
+      ? rawProgress
+      : undefined
+  const createdAt = toProviderCreatedAtMilliseconds(event.created_at ?? event.response?.created_at)
+
+  return {
+    type: "response_in_progress",
+    ...(message === undefined ? {} : { message }),
+    ...(progress === undefined ? {} : { progress }),
+    ...(createdAt === undefined ? {} : { createdAt }),
+  }
 }
 
 export const flattenResponsesSystem = (system: SystemPromptInput | undefined): string => {
@@ -594,6 +626,11 @@ export async function* parseResponsesEvents(
 
     const event = json as ResponsesEvent
     const type = event.type
+
+    if (type === "response.in_progress") {
+      yield responseInProgressEvent(event)
+      continue
+    }
 
     if (type === "response.output_text.delta") {
       if (typeof event.delta === "string" && event.delta !== "") {

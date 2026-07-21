@@ -293,6 +293,43 @@ describe("list_agents — F-B lineage enumeration gate", () => {
 })
 
 describe("followup_task — RFC-04 / ADR-0437", () => {
+  test("tool surface emits one correlated steer admission observation without an effective mode", async () => {
+    const admissions: Array<{
+      deliveryId: string
+      targetTaskId: string
+      targetTurnId: string
+    }> = []
+    const tools = createIntrospectTools({
+      registry: new TaskRegistry(),
+      delivery: {
+        deliver: () => ({
+          kind: "accepted",
+          deliveryId: "del-observed",
+          requestedMode: "steer",
+          effect: "steer_pending",
+          targetTurnId: "turn-observed",
+        }),
+      },
+      callerLabel: "root",
+      onSteerAdmission: (notice) => admissions.push(notice),
+      enableFollowup: true,
+    })
+    const ev = await drive(tools[0] as Tool, {
+      agentId: "task-observed",
+      message: "steer me",
+      mode: "steer",
+    })
+
+    expect(ev.type).toBe("result")
+    expect(admissions).toEqual([
+      {
+        deliveryId: "del-observed",
+        targetTaskId: "task-observed",
+        targetTurnId: "turn-observed",
+      },
+    ])
+  })
+
   // WS3 migration (RFC jul-18 §4.4): `handleFollowupTask` no longer sequences
   // mailbox-send + wake itself — it consumes the delivery CONTROLLER. The setup
   // now registers a typed control ENDPOINT (whose `wake()`/`interrupt()` return
@@ -360,6 +397,35 @@ describe("followup_task — RFC-04 / ADR-0437", () => {
     })
     return { delivery, callerLabel: "parent" }
   }
+
+  test("steer admission stays pending and preserves deliveryId without claiming an effective mode", () => {
+    const out = handleFollowupTask(
+      { agentId: "child-steer", message: "change course", mode: "steer" },
+      {
+        callerLabel: "parent",
+        delivery: {
+          deliver: () => ({
+            kind: "accepted",
+            deliveryId: "del-steer-1",
+            requestedMode: "steer",
+            effect: "steer_pending",
+            targetTurnId: "turn-1",
+          }),
+        },
+      },
+    )
+
+    expect(out).toEqual({
+      kind: "success",
+      status: "accepted",
+      deliveryId: "del-steer-1",
+      delivered: false,
+      triggered: false,
+      requestedMode: "steer",
+      targetTurnId: "turn-1",
+    })
+    expect("effectiveMode" in out).toBe(false)
+  })
 
   // 7. delivers + triggers
   test("idle target: delivers via mailbox AND triggers (triggered:true)", () => {
@@ -431,12 +497,15 @@ describe("followup_task — RFC-04 / ADR-0437", () => {
     expect(s.mb.sent).toHaveLength(0)
   })
 
-  // 12. no-waker degradation
-  test("no live waker ⇒ cause:no_waker BUT mailbox delivery still happens", () => {
+  // 12. missing-control degradation
+  test("no live endpoint ⇒ successful degraded:control_unavailable because mailbox delivery happened", () => {
     const s = setup("no-register")
     const out = handleFollowupTask({ agentId: s.target, message: "queued-msg" }, deps(s))
-    expect(out.kind).toBe("error")
-    if (out.kind === "error") expect(out.cause).toBe("no_waker")
+    expect(out.kind).toBe("success")
+    if (out.kind === "success") {
+      expect(out.status).toBe("degraded")
+      if (out.status === "degraded") expect(out.reason).toBe("control_unavailable")
+    }
     // honest degradation: the message WAS delivered.
     expect(s.mb.sent).toHaveLength(1)
     expect(s.mb.sent[0]?.body).toBe("queued-msg")

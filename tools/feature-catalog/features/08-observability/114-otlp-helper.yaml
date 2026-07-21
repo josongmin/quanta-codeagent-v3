@@ -30,7 +30,7 @@ purpose: |
 evidence:
   code:
     - src/observability/metrics/otlp-helper.ts
-  adrs: ["docs/decisions/0155-otlp-helper.md"]
+  adrs: ["docs/decisions/0155-otlp-helper.md", "docs/decisions/0163-otel-resource-auto.md"]
   tests:
     unit:
       - tests/unit/observability-metrics-otlp-helper-hellgate.test.ts

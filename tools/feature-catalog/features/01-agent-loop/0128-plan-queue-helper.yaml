@@ -29,7 +29,7 @@ evidence:
   code:
     - src/agent/plan-queue.ts
     - src/observability/metrics/instrument-plan-queue.ts
-  adrs: [128, 167, 174, 221]
+  adrs: [128, 167, 174, 221, "docs/decisions/0174-plan-queue-lib-evaluation.md"]
   tests:
     unit:
       - tests/unit/plan-queue-hellgate.test.ts

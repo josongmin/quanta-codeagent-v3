@@ -28,7 +28,7 @@ function report(overrides: ReportOverrides = {}): AuditReport {
     totalSrcFiles: 0,
   }
   return {
-    orphanAdrs: overrides.orphanAdrs ?? [],
+    orphanAdrs: (overrides.orphanAdrs ?? []).map((number) => ({ number, status: "Accepted" })),
     orphanSrcFiles: overrides.orphanSrcFiles ?? [],
     emptyStubs: overrides.emptyStubs ?? [],
     counts: { ...baseCounts, ...(overrides.counts ?? {}) },

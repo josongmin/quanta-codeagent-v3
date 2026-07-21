@@ -153,6 +153,87 @@ interface RawServeChild {
   stderrText(): Promise<string>
 }
 
+interface RawServeOutputState {
+  readonly lines: string[]
+  readonly decoded: SessionTransportMessage[]
+  readonly waiters: Array<() => void>
+}
+
+const wakeRawServeWaiters = (waiters: Array<() => void>): void => {
+  for (const wake of waiters.splice(0)) wake()
+}
+
+const captureRawServeLine = (state: RawServeOutputState, line: string): void => {
+  if (line.length === 0) return
+  state.lines.push(line)
+  const message = tryDecodeSessionTransportMessage(line)
+  if (message !== undefined) state.decoded.push(message)
+}
+
+const pumpRawServeStdout = async (
+  stdout: ReadableStream<Uint8Array>,
+  state: RawServeOutputState,
+): Promise<void> => {
+  const reader = stdout.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ""
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      let newline = buffer.indexOf("\n")
+      while (newline !== -1) {
+        captureRawServeLine(state, buffer.slice(0, newline))
+        buffer = buffer.slice(newline + 1)
+        newline = buffer.indexOf("\n")
+      }
+      wakeRawServeWaiters(state.waiters)
+    }
+  } catch {
+    // Child died — pending waiters are woken below.
+  }
+  wakeRawServeWaiters(state.waiters)
+}
+
+const nextMatchingRawMessage = <T>(
+  decoded: readonly SessionTransportMessage[],
+  cursor: number,
+  pred: (message: SessionTransportMessage) => T | undefined,
+): { readonly cursor: number; readonly hit?: T } => {
+  let nextCursor = cursor
+  while (nextCursor < decoded.length) {
+    const message = decoded[nextCursor]
+    nextCursor += 1
+    if (message === undefined) continue
+    const hit = pred(message)
+    if (hit !== undefined) return { cursor: nextCursor, hit }
+  }
+  return { cursor: nextCursor }
+}
+
+const waitForRawMessage = async <T>(
+  child: ReturnType<typeof Bun.spawn<"pipe", "pipe", "pipe">>,
+  state: RawServeOutputState,
+  pred: (message: SessionTransportMessage) => T | undefined,
+): Promise<T> => {
+  let cursor = 0
+  while (true) {
+    const scan = nextMatchingRawMessage(state.decoded, cursor, pred)
+    cursor = scan.cursor
+    if (scan.hit !== undefined) return scan.hit
+    if (child.exitCode !== null || child.signalCode !== null) {
+      throw new Error(
+        `serve child exited (code=${child.exitCode} signal=${child.signalCode}) before the expected frame; lines=${JSON.stringify(state.lines)}`,
+      )
+    }
+    await new Promise<void>((resolve) => {
+      state.waiters.push(resolve)
+      setTimeout(resolve, 50)
+    })
+  }
+}
+
 const spawnRawServe = (args: {
   readonly entry?: string
   readonly argv?: readonly string[]
@@ -168,35 +249,8 @@ const spawnRawServe = (args: {
     stderr: "pipe",
   })
   const lines: string[] = []
-  const decoded: SessionTransportMessage[] = []
-  const waiters: Array<() => void> = []
-  void (async () => {
-    const reader = child.stdout.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ""
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        let nl = buffer.indexOf("\n")
-        while (nl !== -1) {
-          const line = buffer.slice(0, nl)
-          buffer = buffer.slice(nl + 1)
-          if (line.length > 0) {
-            lines.push(line)
-            const message = tryDecodeSessionTransportMessage(line)
-            if (message !== undefined) decoded.push(message)
-          }
-          nl = buffer.indexOf("\n")
-        }
-        for (const wake of waiters.splice(0)) wake()
-      }
-    } catch {
-      // Child died — pending waiters are woken by the next poll tick below.
-    }
-    for (const wake of waiters.splice(0)) wake()
-  })()
+  const outputState: RawServeOutputState = { lines, decoded: [], waiters: [] }
+  void pumpRawServeStdout(child.stdout, outputState)
   return {
     child,
     lines,
@@ -205,26 +259,7 @@ const spawnRawServe = (args: {
       void child.stdin.flush()
     },
     async waitFor(pred) {
-      let cursor = 0
-      while (true) {
-        while (cursor < decoded.length) {
-          const message = decoded[cursor]
-          cursor += 1
-          if (message !== undefined) {
-            const hit = pred(message)
-            if (hit !== undefined) return hit
-          }
-        }
-        if (child.exitCode !== null || child.signalCode !== null) {
-          throw new Error(
-            `serve child exited (code=${child.exitCode} signal=${child.signalCode}) before the expected frame; lines=${JSON.stringify(lines)}`,
-          )
-        }
-        await new Promise<void>((resolve) => {
-          waiters.push(resolve)
-          setTimeout(resolve, 50)
-        })
-      }
+      return await waitForRawMessage(child, outputState, pred)
     },
     async stderrText() {
       return await new Response(child.stderr).text()
@@ -537,7 +572,7 @@ describe("quanta serve --stdio — spawned session.v1 server (ticket 02)", () =>
       // stdout. This is the ticket-named risk scenario.
       writeFileSync(
         cassette,
-        [
+        `${[
           JSON.stringify({
             id: "replay",
             events: [
@@ -553,7 +588,7 @@ describe("quanta serve --stdio — spawned session.v1 server (ticket 02)", () =>
               { type: "message_stop", stop_reason: "end_turn" },
             ],
           }),
-        ].join("\n") + "\n",
+        ].join("\n")}\n`,
       )
       const raw = spawnRawServe({
         argv: ["serve", "--stdio", "--cwd", dir, "--permission-mode", "bypass"],

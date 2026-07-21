@@ -23,8 +23,10 @@
  *         cross-slice import) — keeps the slice fence honest.
  *   (vi)  Sub-stage errors propagate as `PipelineError` — they are NEVER
  *         swallowed (no silent partial results).
- *   (vii) `default-OFF` — nothing in @/agent or @/runner instantiates a
- *         pipeline at construction. Pure primitive; opt-in.
+ *   (vii) `assemblePipeline` is default-OFF — this primitive returns null
+ *         unless a preset is selected. The host-level search facade may still
+ *         compose a separate default lexical wire; that is a distinct product
+ *         contract and must not be hidden by this primitive test.
  *   (viii)`PipelineError` is a 6-arm closed union; exhaustive check at any
  *         consumer boundary triggers TS `never` on a missing arm.
  *
@@ -268,29 +270,14 @@ describe("pipeline composer hellgate", () => {
     expect(r1).toEqual(r2)
   })
 
-  test("HELL-PI-14 default-OFF — nothing in @/agent or @/runner imports from @/retrieval/pipeline", async () => {
-    // Source-text grep: the pipeline composer is a leaf primitive and MUST NOT
-    // be auto-wired into the dispatch loop. If someone wires it, this test
-    // forces them to renegotiate (default-OFF invariant). Match the import
-    // path specifically so we don't false-positive on the common identifier
-    // `compose` (used widely in src/).
-    const cwd = "/Users/songmin/quanta-codeagent-v3/.claude/worktrees/agent-a6ea5008cff520f1f"
-    const { spawnSync } = await import("node:child_process")
-    const out = spawnSync(
-      "grep",
-      [
-        "-r",
-        "-l",
-        "-E",
-        "from ['\"]@/retrieval/pipeline",
-        `${cwd}/src/agent`,
-        `${cwd}/src/runner`,
-        `${cwd}/src/apps`,
-      ],
-      { encoding: "utf8" },
-    )
-    // grep exits 1 with no matches. Either way, stdout must be empty.
-    expect((out.stdout || "").trim()).toBe("")
+  test("HELL-PI-14 assemblePipeline primitive is default-OFF when no preset is selected", async () => {
+    // The previous test grepped a deleted absolute worktree path, so it stayed
+    // green after the real runner began importing this module. Pin the actual
+    // contract instead: host-level lexical search is separately tested at
+    // HELL-IDX-22, while this lower-level composer must not self-enable.
+    const { assemblePipeline } = await import("@/runner/assemble/pipeline")
+    expect(assemblePipeline({})).toBeNull()
+    expect(assemblePipeline({ QUANTA_PIPELINE: "" })).toBeNull()
   })
 
   test("HELL-PI-15 PipelineError is a 6-arm closed exhaustive union", () => {

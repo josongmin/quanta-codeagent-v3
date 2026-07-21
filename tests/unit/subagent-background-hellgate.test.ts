@@ -343,6 +343,22 @@ describe("background subagent tools — C. tool surface", () => {
     expect(res.output).toMatch(/forked id=bg-[0-9a-f]+/)
   })
 
+  test("HELL-15b: subagent_fork rejects caller-supplied replay authorization metadata", async () => {
+    const { runner } = controlledRunner()
+    const tool = subagentForkTool(defaultBackgroundSubagentScheduler({ runner }))
+
+    const result = await drive(
+      tool,
+      { task: "repeat side effect", metadata: { idempotent: "true" } },
+      baseCtx(),
+    )
+
+    expect(result).toEqual({
+      ok: false,
+      output: expect.stringContaining("metadata.idempotent is reserved"),
+    })
+  })
+
   test("HELL-16: subagent_fork at cap → ok:false cap-exceeded", async () => {
     const { runner } = controlledRunner()
     const sched = defaultBackgroundSubagentScheduler({ runner, maxConcurrent: 1 })

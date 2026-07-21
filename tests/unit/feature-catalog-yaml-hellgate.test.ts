@@ -4,13 +4,10 @@
 //
 // Two rot classes this ratchet locks out:
 //
-//  (A) DUPLICATE MAPPING KEYS.  The in-house mini-YAML parser
-//      (tools/feature-catalog/yaml.ts) is last-key-wins: `obj[key] = value`
-//      silently overwrites. Several YAMLs declared `unit:` (or
-//      `integration:` / `contract:`) TWICE inside one `tests:` block, so the
-//      FIRST — often the fuller, authoritative — list was silently dropped at
-//      parse time with zero diagnostic. A raw-text scan (below) catches this
-//      class the parser is blind to.
+//  (A) DUPLICATE MAPPING KEYS. The compact parser's last-key-wins behavior
+//      would silently overwrite the first value, so `loadFeatures` now first
+//      requires standard YAML with unique keys. The raw-text scan below keeps
+//      a pinpointed regression signal for duplicated test evidence keys.
 //
 //  (B) STALE EVIDENCE PATHS.  Every evidence.code + evidence.tests.* citation
 //      must resolve to a real file on disk (mirrors `fc validate --strict`).
@@ -44,9 +41,8 @@ interface DupKeyHit {
 
 /**
  * Raw-text scan for a mapping key declared twice at the SAME indentation.
- * The mini-YAML parser can't see this (it overwrites), so we scan bytes.
- * A "same indent, same key" repeat inside a file is a duplicate-mapping-key
- * bug: YAML 1.2 forbids duplicate keys and our parser silently coalesces them.
+ * Standard-YAML validation rejects any duplicate first; this supplements that
+ * gate with a focused message for the test-evidence lists most prone to drift.
  */
 function isDupSensitive(key: string): boolean {
   return DUP_SENSITIVE_KEYS.includes(key as (typeof DUP_SENSITIVE_KEYS)[number])
@@ -159,7 +155,11 @@ describe("fc YAML hellgate — red-on-injection (has teeth)", () => {
   const FIXTURE_UNIT = "tests/unit/probe.test.ts" // a real file (no false path fail)
   const FIXTURE_FAKE = "tests/unit/this-fc-hellgate-fixture-does-not-exist-zzz.test.ts"
 
-  function fixtureYaml(): string {
+  function fixtureYaml({
+    withDuplicate = true,
+  }: {
+    readonly withDuplicate?: boolean
+  } = {}): string {
     return [
       "id: fc-hellgate-injection-probe",
       "title: injection probe",
@@ -170,9 +170,11 @@ describe("fc YAML hellgate — red-on-injection (has teeth)", () => {
       "evidence:",
       "  code: []",
       "  tests:",
-      // (1) duplicate `unit:` key at indent 4 → first list silently dropped
+      // (1) duplicate `unit:` key at indent 4 → first list silently dropped.
+      // The dangling-evidence rail below deliberately disables this separate
+      // syntax violation so it can reach its own assertion.
       `    unit: ["${FIXTURE_UNIT}"]`,
-      `    unit: ["${FIXTURE_UNIT}"]`,
+      ...(withDuplicate ? [`    unit: ["${FIXTURE_UNIT}"]`] : []),
       // (2) a fabricated dangling path
       `    integration: ["${FIXTURE_FAKE}"]`,
       "    contract: []",
@@ -205,7 +207,7 @@ describe("fc YAML hellgate — red-on-injection (has teeth)", () => {
       const featDir = join(dir, "01-agent-loop")
       const { mkdir } = await import("node:fs/promises")
       await mkdir(featDir, { recursive: true })
-      await writeFile(join(featDir, "probe.yaml"), fixtureYaml(), "utf8")
+      await writeFile(join(featDir, "probe.yaml"), fixtureYaml({ withDuplicate: false }), "utf8")
 
       const features = await loadFeaturesStrict(dir)
       expect(features.length).toBe(1)

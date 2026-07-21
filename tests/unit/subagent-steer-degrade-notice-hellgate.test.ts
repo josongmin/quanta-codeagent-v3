@@ -6,13 +6,12 @@
  * finalization port. Its `onReceipt` sink was a NO-OP, so async steer
  * `SubagentDeliveryReceipt`s (degraded → queue, cancelled) were silently
  * discarded — an operator never saw a steer that fell back to the mailbox.
- * The fix routes `degraded`/`cancelled` receipts onto the existing GLOBAL
- * operator-notice bus (no new event type, no protocol cascade).
+ * The fix routes every terminal receipt onto the existing GLOBAL operator-notice
+ * bus with the admission's deliveryId (no new event type, no protocol cascade).
  *
  * This is a PURE WIRING pin driven through the REAL `wireSteerPlane`:
  *   1. degrade  → EXACTLY ONE warn notice (source:"subagent", reason in msg).
- *   2. applied  → ZERO notices (paired control — success is not an operator
- *                 signal; a multi-round steer would spam one per step).
+ *   2. applied  → EXACTLY ONE correlated info notice.
  *   3. gates-off byte-identity → `wireSteerPlane` without `enableSteer` returns
  *                 the base identity (`===`), allocates no plane, emits nothing.
  */
@@ -25,6 +24,7 @@ import {
   installOperatorNoticeSink,
   type OperatorNotice,
 } from "@/shared"
+import type { AgentEvent } from "@/stream"
 
 // A minimal fake mailbox honoring `DeliveryMailboxPort.send` — the fallback path
 // re-enqueues the retained envelope and reads back the message id.
@@ -44,10 +44,13 @@ const fakeMailbox = () => {
 // Build the minimal base `wireSteerPlane` actually reads (`subagent` +
 // `subagentMailbox`). Cast through Partial<AgentConfig> — the function only
 // touches those two fields.
-const steerBase = (mailbox: unknown): AgentConfig =>
+const steerBase = (mailbox: unknown, events?: AgentEvent[]): AgentConfig =>
   ({
     subagent: { enableSteer: true },
     subagentMailbox: mailbox,
+    ...(events !== undefined
+      ? { stream: { emit: (event: AgentEvent) => events.push(event) } }
+      : {}),
   }) as unknown as AgentConfig
 
 const notices: OperatorNotice[] = []
@@ -72,11 +75,12 @@ describe("steer delivery-receipt observability wiring (jul-18 Item 1)", () => {
     expect(subWarns).toHaveLength(1)
     expect(subWarns[0]?.severity).toBe("warn")
     expect(subWarns[0]?.message).toContain("same_turn_budget_exhausted")
+    expect(subWarns[0]?.message).toContain("d1")
     // one mailbox fallback actually happened (the degrade is real, not spurious)
     expect(mailbox.sent).toHaveLength(1)
   })
 
-  test("paired control: applied steer → ZERO notices (success is not an operator signal)", () => {
+  test("applied steer → EXACTLY ONE correlated info notice", () => {
     installOperatorNoticeSink((n) => notices.push(n))
     const mailbox = fakeMailbox()
     const wired = wireSteerPlane(steerBase(mailbox))
@@ -86,7 +90,10 @@ describe("steer delivery-receipt observability wiring (jul-18 Item 1)", () => {
     plane.retention.retain("d2", { from: "childA", to: "childB", body: "hi" })
     plane.finalization.finalizeApplied("d2", "turn-42")
 
-    expect(notices).toHaveLength(0)
+    expect(notices).toHaveLength(1)
+    expect(notices[0]?.severity).toBe("info")
+    expect(notices[0]?.message).toContain("d2")
+    expect(notices[0]?.message).toContain("turn-42")
     // applied consumes the payload at the safe point — NO mailbox copy
     expect(mailbox.sent).toHaveLength(0)
   })
@@ -105,8 +112,52 @@ describe("steer delivery-receipt observability wiring (jul-18 Item 1)", () => {
     expect(subInfos).toHaveLength(1)
     expect(subInfos[0]?.severity).toBe("info")
     expect(subInfos[0]?.message).toContain("session_aborted")
+    expect(subInfos[0]?.message).toContain("d3")
     // cancelled ⇒ NO mailbox fallback (the child is gone; nothing to deliver)
     expect(mailbox.sent).toHaveLength(0)
+  })
+
+  test("mailbox failure → EXACTLY ONE correlated error notice, no throw", () => {
+    installOperatorNoticeSink((n) => notices.push(n))
+    const mailbox = {
+      send: () => {
+        throw new Error("mailbox down")
+      },
+    }
+    const wired = wireSteerPlane(steerBase(mailbox))
+    const plane = wired.subagent?.steerPlane
+    if (plane === undefined) throw new Error("steer plane was not wired")
+
+    plane.retention.retain("d-failed", { from: "childA", to: "childB", body: "retry" })
+    expect(() => plane.finalization.finalizeFallback("d-failed", "action_queue_full")).not.toThrow()
+
+    expect(notices).toHaveLength(1)
+    expect(notices[0]?.severity).toBe("error")
+    expect(notices[0]?.message).toContain("d-failed")
+    expect(notices[0]?.message).toContain("mailbox_error")
+  })
+
+  test("terminal receipts emit correlated finalized events on the session stream", () => {
+    const events: AgentEvent[] = []
+    const mailbox = fakeMailbox()
+    const wired = wireSteerPlane(steerBase(mailbox, events))
+    const plane = wired.subagent?.steerPlane
+    if (plane === undefined) throw new Error("steer plane was not wired")
+
+    plane.retention.retain("d-event", { from: "childA", to: "childB", body: "hi" })
+    plane.finalization.finalizeApplied("d-event", "turn-event")
+
+    expect(events).toEqual([
+      {
+        type: "subagent_delivery",
+        phase: "finalized",
+        deliveryId: "d-event",
+        requestedMode: "steer",
+        status: "applied",
+        effectiveMode: "steer",
+        targetTurnId: "turn-event",
+      },
+    ])
   })
 
   test("gates-off byte-identity: no enableSteer ⇒ base identity, no plane, zero notices", () => {

@@ -29,4 +29,9 @@
 export { type DetectorMeta, detectContextChanges } from "./detector"
 export { buildPersistentInjectionMessages } from "./inject"
 export { captureSnapshot, type TurnStateSnapshot } from "./snapshot"
+export {
+  type ContextEventStoreReader,
+  type ContextEventStoreReaderOptions,
+  createContextEventStoreReader,
+} from "./store-reader"
 export type { ContextEvent, TypedHistoryEventStorePort } from "./types"

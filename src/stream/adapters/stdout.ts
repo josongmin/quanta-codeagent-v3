@@ -11,6 +11,14 @@ const GREEN = "\x1b[32m"
 // `skill_scope_decision` `⊘ … (blocked)` line, never as a card.
 const YELLOW = "\x1b[33m"
 const RESET = "\x1b[0m"
+const SILENT_INTERLEAVED_EVENT_TYPES = new Set<AgentEvent["type"]>([
+  "output_progress",
+  "in_progress",
+  "ratelimit_snapshot",
+  "item_started",
+  "item_updated",
+  "item_completed",
+])
 
 /** Optional hook that rewrites the assistant text stream as it goes to
  *  stdout. The CLI surface injects an inline markdown highlighter
@@ -74,34 +82,35 @@ export class StdoutStream implements StreamPort {
     this.inText = true
   }
 
+  private isSilentInterleavedEvent(event: AgentEvent): boolean {
+    if (!this.inText && !this.inThinking) return false
+    return SILENT_INTERLEAVED_EVENT_TYPES.has(event.type)
+  }
+
+  private closeOpenTextRunsBefore(event: AgentEvent): void {
+    if (event.type !== "assistant_text" && this.inText) {
+      this.drainPainterTail()
+      this.write("\n")
+      this.inText = false
+    }
+    if (event.type !== "assistant_thinking" && this.inThinking) {
+      this.write("\n")
+      this.inThinking = false
+    }
+  }
+
   emit(event: AgentEvent): void {
     // Events that produce no visible stdout line — must not trigger the inText
     // flush or they insert a spurious \n between streaming text deltas.
     // output_progress fires on every token (live counter → status-bar only),
     // in_progress fires between deltas (heartbeat), item_* and ratelimit_snapshot
     // are all no-ops in the switch below.
-    if (
-      (this.inText || this.inThinking) &&
-      (event.type === "output_progress" ||
-        event.type === "in_progress" ||
-        event.type === "ratelimit_snapshot" ||
-        event.type === "item_started" ||
-        event.type === "item_updated" ||
-        event.type === "item_completed")
-    )
+    if (this.isSilentInterleavedEvent(event)) return
+    this.closeOpenTextRunsBefore(event)
+
+    if (isCoordinationEvent(event)) {
+      this.write(renderCoordinationEvent(event))
       return
-
-    if (event.type !== "assistant_text" && this.inText) {
-      this.drainPainterTail()
-      this.write("\n")
-      this.inText = false
-    }
-
-    // jun-11 (#11) — symmetric: close an open DIM reasoning run when any non-
-    // thinking event arrives (so the answer / tool line starts on its own line).
-    if (event.type !== "assistant_thinking" && this.inThinking) {
-      this.write("\n")
-      this.inThinking = false
     }
 
     switch (event.type) {
@@ -192,24 +201,6 @@ export class StdoutStream implements StreamPort {
         // the CLI spinner/status-bar (presence + N-left + reset-in), NOT this
         // line-oriented monitor. Ignored here for the same reason as
         // `output_progress` (a richer surface renders it in place).
-        break
-      case "response_queued":
-        this.write(renderResponseQueued(event))
-        break
-      case "interrupted":
-        this.write(renderInterrupted(event))
-        break
-      case "subagent_cancel":
-        this.write(renderSubagentCancel(event))
-        break
-      case "peer_message":
-        this.write(renderPeerMessage(event))
-        break
-      case "subagent_spawn":
-        this.write(renderSubagentSpawn(event))
-        break
-      case "subagent_status":
-        this.write(renderSubagentStatus(event))
         break
       case "plan_created":
         this.write(renderPlanCreated(event))
@@ -356,9 +347,7 @@ const renderPeerMessage = (event: Extract<AgentEvent, { type: "peer_message" }>)
       ? `sent by ${event.provenance.daemonId} — side agent finding`
       : `sent by ${event.from} — from another task [${event.kind}]`
   const head = `${DIM}✉ ${sanitizeLogText(label)}${RESET}\n`
-  const lines = redactStr(event.body)
-    .split("\n")
-    .map(sanitizeLogText)
+  const lines = redactStr(event.body).split("\n").map(sanitizeLogText)
   const shown = lines.slice(0, PEER_BODY_MAX_LINES)
   const extra = lines.length - shown.length
   const body = shown.map((l) => `${DIM}  ${l}${RESET}`).join("\n")
@@ -367,6 +356,16 @@ const renderPeerMessage = (event: Extract<AgentEvent, { type: "peer_message" }>)
       ? `\n${DIM}  … (+${extra} more line${extra === 1 ? "" : "s"} — subagent_read_messages to view)${RESET}`
       : ""
   return `${head}${body}${more}\n`
+}
+
+const renderSubagentDelivery = (
+  event: Extract<AgentEvent, { type: "subagent_delivery" }>,
+): string => {
+  const detail =
+    event.phase === "admitted"
+      ? `accepted for ${event.targetTaskId} turn ${event.targetTurnId}`
+      : `${event.status}${"effectiveMode" in event ? ` as ${event.effectiveMode}` : ""}${"reason" in event ? ` (${event.reason})` : ""}`
+  return `${DIM}⇢ steer delivery ${sanitizeLogText(event.deliveryId)} ${sanitizeLogText(detail)}${RESET}\n`
 }
 
 /** Multi-agent-panel SUBSTRATE — subagent lifecycle spawn line. Description is
@@ -395,6 +394,52 @@ const renderSubagentStatus = (event: Extract<AgentEvent, { type: "subagent_statu
       ? ""
       : `${preview === "" ? ":" : " |"} error=${oneLine(redactStr(event.error))}`
   return `${DIM}↳ subagent_status ${event.taskId} (${event.status}${turns})${preview}${error}${RESET}\n`
+}
+
+type CoordinationEvent = Extract<
+  AgentEvent,
+  {
+    type:
+      | "response_queued"
+      | "interrupted"
+      | "subagent_cancel"
+      | "peer_message"
+      | "subagent_delivery"
+      | "subagent_spawn"
+      | "subagent_status"
+  }
+>
+
+const COORDINATION_EVENT_TYPES = new Set<AgentEvent["type"]>([
+  "response_queued",
+  "interrupted",
+  "subagent_cancel",
+  "peer_message",
+  "subagent_delivery",
+  "subagent_spawn",
+  "subagent_status",
+])
+
+const isCoordinationEvent = (event: AgentEvent): event is CoordinationEvent =>
+  COORDINATION_EVENT_TYPES.has(event.type)
+
+const renderCoordinationEvent = (event: CoordinationEvent): string => {
+  switch (event.type) {
+    case "response_queued":
+      return renderResponseQueued(event)
+    case "interrupted":
+      return renderInterrupted(event)
+    case "subagent_cancel":
+      return renderSubagentCancel(event)
+    case "peer_message":
+      return renderPeerMessage(event)
+    case "subagent_delivery":
+      return renderSubagentDelivery(event)
+    case "subagent_spawn":
+      return renderSubagentSpawn(event)
+    case "subagent_status":
+      return renderSubagentStatus(event)
+  }
 }
 
 /** ALBB-21 — advisory budget-cap crossing banner (Claude Code / Codex cost-

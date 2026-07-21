@@ -41,7 +41,15 @@ import {
   validateInvariants,
 } from "./schema"
 import { applyAuditedVerdicts, deriveSurfaceIntegration } from "./surface-derive"
-import { formatTestAuditReport, runTestAuditFromDisk } from "./test-audit"
+import {
+  compareTestAuditBaseline,
+  formatTestAuditReport,
+  loadTestAuditBaseline,
+  runTestAuditFromDisk,
+  saveTestAuditBaseline,
+  type TestAuditBaselineComparison,
+  type TestAuditReport,
+} from "./test-audit"
 import { parseYaml, stringifyYaml } from "./yaml"
 
 const ROOT = process.cwd()
@@ -72,7 +80,7 @@ function usage(): never {
       "  judge [--min=L4] [--section=N] [--verbose] [--overclaimed]",
       "                              4-axis composite (monitoring/hellgate/wiring/structure) → solid/thin/overclaimed verdict",
       "  gates [--strict]            maturity-promotion-gate audit (warn / strict-fail)",
-      "  test-audit [--strict] [--max-per-rule N]   12-rule admissibility audit over tests/ (R1-3 + R5 + R8-10 enforced; R4/R6/R7/R11/R12 semantic-only)",
+      "  test-audit [--strict] [--update-baseline] [--max-per-rule N]   13-rule admissibility audit; strict rejects net-new violations",
       "  graph [--section N] [--id X] [--depth N]   emit DOT dependency DAG to stdout",
       "  reachability [--strict] [--symbols]    code-grounded: flag L4+ features unreachable (or --symbols dead-API) via real import graph",
     ].join("\n"),
@@ -321,7 +329,7 @@ async function collectAdrs(dir = "docs/decisions"): Promise<AdrRecord[]> {
     const number = Number(m[1])
     if (!Number.isFinite(number)) continue
     const text = await readFile(resolve(ROOT, dir, name), "utf8")
-    out.push({ number, status: parseAdrStatus(text) })
+    out.push({ number, path: `${dir}/${name}`, status: parseAdrStatus(text) })
   }
   return out.sort((a, b) => a.number - b.number)
 }
@@ -1035,13 +1043,22 @@ async function cmdQuery(argv: string[]): Promise<void> {
 
 // --- test-audit ------------------------------------------------------------
 
-async function cmdTestAudit(argv: string[]): Promise<void> {
+interface TestAuditArgs {
+  readonly strict: boolean
+  readonly updateBaseline: boolean
+  readonly maxPerRule: number
+}
+
+function parseTestAuditArgs(argv: string[]): TestAuditArgs {
   let strict = false
+  let updateBaseline = false
   let maxPerRule = 10
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i]
     if (a === "--strict") {
       strict = true
+    } else if (a === "--update-baseline") {
+      updateBaseline = true
     } else if (a === "--max-per-rule") {
       const v = argv[++i]
       const n = v !== undefined ? Number(v) : Number.NaN
@@ -1055,10 +1072,41 @@ async function cmdTestAudit(argv: string[]): Promise<void> {
       process.exit(2)
     }
   }
+  return { strict, updateBaseline, maxPerRule }
+}
+
+async function reconcileTestAuditBaseline(
+  report: TestAuditReport,
+  updateBaseline: boolean,
+): Promise<TestAuditBaselineComparison | null> {
+  const baselinePath = join(ROOT, "tools/feature-catalog/test-audit-baseline.json")
+  if (updateBaseline) {
+    const baseline = await saveTestAuditBaseline(report, baselinePath)
+    console.log(
+      `test-audit: baseline updated (${baseline.violations.length} violation fingerprint(s))`,
+    )
+    return null
+  }
+  const baseline = await loadTestAuditBaseline(baselinePath)
+  return compareTestAuditBaseline(report, baseline)
+}
+
+async function cmdTestAudit(argv: string[]): Promise<void> {
+  const { strict, updateBaseline, maxPerRule } = parseTestAuditArgs(argv)
   const { report } = await runTestAuditFromDisk(ROOT)
   console.log(formatTestAuditReport(report, { maxPerRule, showSemantic: true }))
-  if (strict && report.totalViolations > 0) {
-    console.error(`test-audit: ${report.totalViolations} violation(s) — strict`)
+  const comparison = await reconcileTestAuditBaseline(report, updateBaseline)
+  if (comparison === null) return
+  if (comparison.resolvedViolations.length > 0) {
+    console.warn(
+      `test-audit: ${comparison.resolvedViolations.length} baseline violation(s) resolved; run --update-baseline to tighten`,
+    )
+  }
+  if (strict && comparison.newViolations.length > 0) {
+    console.error(`test-audit: ${comparison.newViolations.length} net-new violation(s) — strict`)
+    for (const violation of comparison.newViolations.slice(0, maxPerRule)) {
+      console.error(`  ${violation.replaceAll("\t", "  ")}`)
+    }
     process.exit(1)
   }
 }

@@ -25,13 +25,8 @@ import { buildVoiceLiveCtx, voiceLiveEnabled } from "../voice-live-wire"
 const projectReplSlashCtxToContract = (c: ReplSlashCtx): Record<string, unknown> =>
   projectSlashCtx(c)
 
-/** Build the surface's slash dispatch closure: routes `/image` directly to
- *  the image-queue command (same fast-path the legacy `dispatchReplSlash`
- *  did) and forwards all others to `runSlashCommand` with the FULL
- *  augmented `SlashContext`. Default-OFF: when the convCheckpoint /
- *  sessionIo slots are absent, the spread omits them ⇒ the slash command
- *  itself prints "not wired" (byte-identical with the pre-wire path). */
-export const buildSurfaceDispatch = (args: {
+/** Live inputs consumed by the surface-owned slash dispatcher. */
+type SurfaceDispatchArgs = {
   readonly slashCtx: ReplSlashCtx
   readonly convCheckpointSlot: ConvCheckpointSlashState | undefined
   readonly sessionIo: SessionIoState
@@ -110,97 +105,68 @@ export const buildSurfaceDispatch = (args: {
    *  absent ⇒ slot omitted ⇒ `/presets` prints "not wired" (default-OFF
    *  byte-identical). */
   readonly presets?: SlashContext["presets"]
-}): ((input: string) => Promise<boolean>) => {
+}
+
+const optionalSlashSlot = <K extends keyof SlashContext>(
+  key: K,
+  value: SlashContext[K] | undefined,
+): Partial<Pick<SlashContext, K>> =>
+  value === undefined ? {} : ({ [key]: value } as Pick<SlashContext, K>)
+
+const buildLiveSlashContext = (args: SurfaceDispatchArgs): SlashContext => {
+  const retry = args.retry?.()
+  const automation = args.automation?.()
+  return {
+    out: (s) => process.stdout.write(s),
+    err: (s) => process.stderr.write(s),
+    cwd: process.cwd(),
+    ...projectReplSlashCtxToContract(args.slashCtx),
+    ...optionalSlashSlot("model", args.modelAdapter),
+    ...optionalSlashSlot("convCheckpoint", args.convCheckpointSlot),
+    sessionIo: args.sessionIo,
+    ...optionalSlashSlot("contextUsage", args.contextUsage),
+    ...optionalSlashSlot("voiceLive", args.voiceLive),
+    ...optionalSlashSlot("memory", args.memory),
+    ...optionalSlashSlot("dream", args.dream),
+    ...optionalSlashSlot("planQueue", args.planQueue),
+    ...optionalSlashSlot("workingState", args.workingState),
+    ...optionalSlashSlot("skillScope", args.skillScope),
+    ...optionalSlashSlot("retry", retry),
+    ...optionalSlashSlot("shadowOdb", args.shadowOdb),
+    ...optionalSlashSlot("conversationActions", args.conversationActions),
+    inboundMode: args.inboundMode,
+    ...optionalSlashSlot("mode", args.mode),
+    ...optionalSlashSlot("background", args.background),
+    ...optionalSlashSlot("automation", automation),
+    ...optionalSlashSlot("permissionInspect", args.permissionInspect),
+    ...optionalSlashSlot("goal", args.goal),
+    ...optionalSlashSlot("presets", args.presets),
+  }
+}
+
+const dispatchImage = (input: string, queue: ReplSlashCtx["imageQueue"]): boolean => {
+  if (queue === undefined) return false
+  runImageCmd(input, {
+    out: (s) => process.stdout.write(s),
+    err: (s) => process.stderr.write(s),
+    cwd: process.cwd(),
+    queue,
+  })
+  return true
+}
+
+/** Route `/image` through its queue fast path and all other registered slash
+ * commands through a freshly projected context. Optional slots are omitted,
+ * never installed as literal `undefined`, and late-bound getters are resolved
+ * once per invocation. */
+export const buildSurfaceDispatch = (
+  args: SurfaceDispatchArgs,
+): ((input: string) => Promise<boolean>) => {
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
     if (!isSlashCommand(head)) return false
-    if (head === "/image" && args.slashCtx.imageQueue !== undefined) {
-      runImageCmd(input, {
-        out: (s) => process.stdout.write(s),
-        err: (s) => process.stderr.write(s),
-        cwd: process.cwd(),
-        queue: args.slashCtx.imageQueue,
-      })
-      return true
-    }
-    const projected = projectReplSlashCtxToContract(args.slashCtx)
-    const ctx: SlashContext = {
-      out: (s) => process.stdout.write(s),
-      err: (s) => process.stderr.write(s),
-      cwd: process.cwd(),
-      ...projected,
-      // ADR-0292/0294 augmentations: spread by presence so absence omits the
-      // slot entirely (default-OFF byte-identical under
-      // exactOptionalPropertyTypes).
-      // Ticket 14 (§11.6) — `/model` picker adapter. Absent ⇒ slot omitted ⇒
-      // the command prints "not wired" (parity with /sticky-model default-OFF).
-      ...(args.modelAdapter !== undefined ? { model: args.modelAdapter } : {}),
-      ...(args.convCheckpointSlot !== undefined ? { convCheckpoint: args.convCheckpointSlot } : {}),
-      sessionIo: args.sessionIo,
-      // Live `/context` seam (Track D): when present, `/context` renders the
-      // segmented breakdown from the latest assembled prompt instead of the
-      // legacy placeholder. Absent ⇒ slot omitted ⇒ legacy fallback.
-      ...(args.contextUsage !== undefined ? { contextUsage: args.contextUsage } : {}),
-      // ADR-0442 `/voice-live` builder. Present only when the opt-in gate is
-      // set; absent ⇒ slot omitted ⇒ the slash prints "not wired" (byte-
-      // identical default-OFF).
-      ...(args.voiceLive !== undefined ? { voiceLive: args.voiceLive } : {}),
-      // `/memory` store slot: present iff a durable store was built. Absent ⇒
-      // slot omitted ⇒ the slash prints "memory store not wired".
-      ...(args.memory !== undefined ? { memory: args.memory } : {}),
-      // `/dream` (H16) manual-trigger slot: present iff the host wired the live
-      // cross-session dream trigger. Absent ⇒ slot omitted ⇒ the slash prints
-      // "auto-dream not wired in this surface" (default-OFF byte-identical).
-      ...(args.dream !== undefined ? { dream: args.dream } : {}),
-      // `/queue` plan-queue store: surface-owned, always present in the REPL.
-      ...(args.planQueue !== undefined ? { planQueue: args.planQueue } : {}),
-      // `/state` working-state snapshot getter: always wired (empty when the
-      // feature is off ⇒ renders an empty panel instead of "not wired").
-      ...(args.workingState !== undefined ? { workingState: args.workingState } : {}),
-      // ADR-0512 P3 — `/state` skill-scope getter: wired only when v2 is on (the
-      // getter yields undefined until the loop publishes ⇒ section omitted,
-      // byte-identical).
-      ...(args.skillScope !== undefined ? { skillScope: args.skillScope } : {}),
-      // `/retry-with` re-stream state: present only when the feature is on AND a
-      // turn has streamed (so there is a stream input to replay).
-      ...(() => {
-        const retry = args.retry?.()
-        return retry !== undefined ? { retry } : {}
-      })(),
-      // `/snapshot` shadow store: present only when QUANTA_SHADOW is on.
-      ...(args.shadowOdb !== undefined ? { shadowOdb: args.shadowOdb } : {}),
-      // `/cancel` + `/summarize-now` mid-turn control surface.
-      ...(args.conversationActions !== undefined
-        ? { conversationActions: args.conversationActions }
-        : {}),
-      // `/inbound` mode ref (always present in the REPL — seeded queue).
-      inboundMode: args.inboundMode,
-      // #13 — `/mode` posture wire. Present only when QUANTA_MODE_CYCLE is on;
-      // absent ⇒ slot omitted ⇒ `/mode` prints "not wired" (default-OFF).
-      ...(args.mode !== undefined ? { mode: args.mode } : {}),
-      // Ticket 18 (§V1) — `/background` read-only portal view. Present only when
-      // QUANTA_BG_TURN is on; absent ⇒ slot omitted ⇒ "not wired" (default-OFF).
-      ...(args.background !== undefined ? { background: args.background } : {}),
-      // B2 (jul-04) — `/cron` late-bound automation slot, resolved LIVE per
-      // dispatch (the loop installs it once the engine is minted). Undefined
-      // until installed ⇒ `/cron` prints "not wired" (default-OFF byte-identical).
-      ...(() => {
-        const automation = args.automation?.()
-        return automation !== undefined ? { automation } : {}
-      })(),
-      // UUX-4-04 — `/permission` live store view. Absent ⇒ stateless render.
-      ...(args.permissionInspect !== undefined
-        ? { permissionInspect: args.permissionInspect }
-        : {}),
-      // `/goal` (Codex parity) — shared objective store + thread id. Absent ⇒
-      // slot omitted ⇒ `/goal` prints "not wired" (default-OFF byte-identical).
-      ...(args.goal !== undefined ? { goal: args.goal } : {}),
-      // §9.6 `/presets` — shared sticky preset resolver (SAME instance the loop
-      // consults for role→model). Absent ⇒ slot omitted ⇒ `/presets` prints
-      // "not wired" (default-OFF byte-identical).
-      ...(args.presets !== undefined ? { presets: args.presets } : {}),
-    }
-    await runSlashCommand(input, ctx)
+    if (head === "/image" && dispatchImage(input, args.slashCtx.imageQueue)) return true
+    await runSlashCommand(input, buildLiveSlashContext(args))
     return true
   }
 }

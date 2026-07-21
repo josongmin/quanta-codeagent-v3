@@ -95,6 +95,9 @@ const countByStatus = (
   failed: items.filter((i) => i.status === "failed").length,
 })
 
+const submitErrorReason = (error: { readonly kind: string; readonly reason?: string }): string =>
+  error.kind === "invalid-spec" && error.reason !== undefined ? error.reason : error.kind
+
 /**
  * Build a {@link BatchRunPort} for AGENT-initiated batches: parse the CSV, run it
  * over an ephemeral {@link InMemoryJobStore} + the runner-backed dispatch, return
@@ -133,8 +136,7 @@ export const buildInMemoryBatchRunPort = (
     if (!submitted.ok) {
       return {
         ok: false,
-        reason:
-          submitted.error.kind === "invalid-spec" ? submitted.error.reason : submitted.error.kind,
+        reason: submitErrorReason(submitted.error),
       }
     }
     const jobId = submitted.value

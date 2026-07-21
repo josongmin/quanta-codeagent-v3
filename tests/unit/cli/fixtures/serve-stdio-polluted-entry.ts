@@ -7,4 +7,6 @@
 process.stdout.write("SERVE_STDIO_POLLUTION this line is not a session.v1 frame\n")
 
 // Boot the actual entry (it runs `main()` at module scope).
-await import("../../../../src/apps/cli/index.ts")
+await import("../../../../src/apps/cli/index")
+
+export {}

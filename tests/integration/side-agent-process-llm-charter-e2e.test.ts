@@ -20,7 +20,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, rmSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -47,6 +47,7 @@ const CHARTER_TASK = "scan /tmp for a stale lockfile and report it"
 const FIXTURE = fileURLToPath(
   new URL("../fixtures/side-agent-llm-charter.cassette.jsonl", import.meta.url),
 )
+const FIXTURE_BYTES = readFileSync(FIXTURE, "utf8")
 
 let CASSETTE_DIR: string
 let CASSETTE_PATH: string
@@ -103,10 +104,9 @@ const recordCassette = async (): Promise<void> => {
       `recording pass did not surface the sentinel finding (got ${JSON.stringify(finding)})`,
     )
   }
-  // Persist to the committed fixture so the cassette is a durable artifact.
+  // Keep the recording run hermetic: the spawned child consumes this temporary
+  // cassette, while the committed fixture remains immutable test evidence.
   await store.save(await store.load())
-  const fixtureStore = jsonlReplayStore({ path: FIXTURE })
-  await fixtureStore.save(await store.load())
 }
 
 beforeAll(async () => {
@@ -116,6 +116,7 @@ beforeAll(async () => {
 })
 
 afterAll(() => {
+  expect(readFileSync(FIXTURE, "utf8")).toBe(FIXTURE_BYTES)
   rmSync(CASSETTE_DIR, { recursive: true, force: true })
 })
 

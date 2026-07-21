@@ -22,7 +22,6 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
-import type { AgentConfig } from "@/agent"
 import { runAdmissibilityGate } from "@/agent/admissibility-gate"
 import type { ToolUseBlock } from "@/llm"
 import type { PermissionContext } from "@/permission"
@@ -40,8 +39,8 @@ const alwaysConfirmTool = (name: string): Tool => {
     execute: async function* () {
       yield { type: "result", result: { ok: true, output: "ran" } }
     },
+    hitlTier: (_input: unknown): "always-confirm" => "always-confirm",
   }
-  ;(tool as Tool & { hitlTier: () => string }).hitlTier = () => "always-confirm"
   return tool
 }
 
@@ -68,20 +67,20 @@ afterEach(() => {
   __resetDefaultPermissionStore()
 })
 
-const runGate = async (over: { hitl?: AgentConfig["hitl"]; confirm: () => void }) => {
+type GateConfig = Parameters<typeof runAdmissibilityGate>[1]
+
+const runGate = async (over: { hitl?: GateConfig["hitl"]; confirm: () => void }) => {
   const tool = alwaysConfirmTool("deployer")
-  const cfg = {
+  const cfg: GateConfig = {
     cwd: "/repo",
-    signal: new AbortController().signal,
     planMode: false,
-    permission: { mode: "acceptEdits" } as PermissionContext,
     registry: new ToolRegistry([tool]),
     onConfirm: async () => {
       over.confirm()
       return true
     },
     ...(over.hitl !== undefined ? { hitl: over.hitl } : {}),
-  } as AgentConfig
+  }
   return runAdmissibilityGate(
     call("deployer"),
     cfg,

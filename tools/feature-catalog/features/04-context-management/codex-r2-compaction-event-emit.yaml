@@ -10,7 +10,7 @@ monitoring: n-a
 modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
-labels: ["surface:core", "absorbed:codex", "default-off"]
+labels: ["surface:core", "absorbed:codex", "production-wired"]
 depends_on: [codex-r2-typed-event-store]
 surface_integration:
   cli: full
@@ -31,12 +31,15 @@ purpose: |
   `applyNonSuccessRecoveryAction` (reactive — trigger="mid_turn",
   reason="context_limit"). Both fire AFTER `wm.replace` confirms the
   compaction landed, NO-THROW (a thrown emitter is swallowed — pure
-  observability). AgentConfig.compactionEventEmit slot absent ⇒
-  byte-identical to legacy.
+  observability). Normal host assembly always supplies the typed-history
+  store and this emitter; `QUANTA_TYPED_EVENT_REPLAY` independently governs
+  whether stored compaction events enter a later turn's prompt.
 evidence:
   code:
     - src/memory/typed-event/types.ts
-    - src/agent/loop.ts
+    - src/agent/loop/compaction-wire.ts
+    - src/agent/codex-r2-wire-install/install.ts
+    - src/host/runtime/agent-config-assembler.ts
     - src/agent/context-change/inject.ts
   adrs:
     - docs/decisions/0324-compaction-typed-history-event.md
@@ -45,12 +48,13 @@ evidence:
     unit:
       - src/memory/typed-event/__tests__/in-memory-store.hellgate.test.ts
       - tests/unit/loop-reactive-compaction-emit-hellgate.test.ts
+      - tests/unit/composition-roots-codex-r2-wire-hellgate.test.ts
     integration: []
     contract: []
 knobs:
   - name: AgentConfig.compactionEventEmit
     type: '(event: CompactionEventVariant) => void'
-    default: 'undefined (no emit, byte-identical legacy)'
-    notes: 'When set, fires at both proactive (maybeCompact) and reactive (applyNonSuccessRecoveryAction) sites AFTER wm.replace lands. NO-THROW: a thrown emitter is swallowed.'
+    default: 'normal host assembly installs the typed-history emitter'
+    notes: 'Fires at proactive, reactive, micro, and manual compaction sites. Prompt replay is separately gated by QUANTA_TYPED_EVENT_REPLAY; a thrown emitter is swallowed.'
 deliberate_hold: null
 notes: 'Reactive site emits ONLY `context_limit` reason today (PTL trigger is by-construction context-limit). `token_budget` / `manual` producers require a future ADR — schema is already in place.'

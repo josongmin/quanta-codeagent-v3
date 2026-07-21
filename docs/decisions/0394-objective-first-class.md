@@ -97,7 +97,7 @@ import path.
 
 ## Alternatives considered
 
-- **Reuse `Stage1StorePortV2` (ADR-0216) shape** — rejected: that port is a
+- **Reuse the former `Stage1StorePortV2` (ADR-0216) shape** — rejected: that port was a
   Promise-returning `{ ok, value } | { ok:false, code }` discriminated result
   for a SQLite-backed memory record. The objective model is synchronous,
   in-process, and uses a null-degrade contract; conflating them would couple

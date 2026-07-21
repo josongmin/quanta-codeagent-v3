@@ -1,5 +1,5 @@
 id: decision-counter-sink
-title: `decision` AgentEvent → MetricsRegistry counter sink (`quanta.gate.{kind}.{outcome}.total`) (ADR-0270)
+title: '`decision` AgentEvent → MetricsRegistry counter sink (`quanta.gate.{kind}.{outcome}.total`) (ADR-0270)'
 section: 8
 subsystem: observability — gate-decision 카운터 집계 (in-process + OTLP 양쪽)
 order: 270

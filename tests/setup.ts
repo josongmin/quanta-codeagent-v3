@@ -1,5 +1,7 @@
 // Preloaded by bun test (see bunfig.toml). Keep global test setup here.
 import { afterEach, beforeEach } from "bun:test"
+import { __setBranchRunAgentForTest } from "@/agent/branch-search-runner"
+import { __setLspAvailabilityOverrideForTest } from "@/agent/lsp-bridge"
 import { __resetSpanSink } from "@/observability"
 import { __resetDefaultMetricSink } from "@/observability/metrics/in-memory-registry"
 import { __resetKnobOverrides, __resetRuntimeConfig, setTerminalIo } from "@/shared"
@@ -39,4 +41,12 @@ afterEach(() => {
   // A test that sets an override and forgets to clear it leaks the override (and
   // its version bump) into every later test's `runtimeConfig()` / knob read.
   __resetKnobOverrides()
+  // LSP availability overrides are test-only process globals. Reset both the
+  // override and its cache so an omitted local teardown cannot turn every later
+  // real binary probe into a fabricated unavailable result.
+  __setLspAvailabilityOverrideForTest(null)
+  // Branch-search candidate execution is injectable only through its local
+  // runner seam. Reset it here so a test cannot replace the real loop for a
+  // later file in a reused Bun worker.
+  __setBranchRunAgentForTest(null)
 })

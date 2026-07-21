@@ -36,6 +36,8 @@ runtime_cli_seed_mappings:
   QUANTA_COVERAGE_TOOL: code-coverage
   QUANTA_PROMPT_CACHE_STATUS: prompt-cache-observability
   QUANTA_SIDE_AGENT: background-side-agent
+  QUANTA_SUBAGENT_MAILBOX: subagent-read-inbox
+  QUANTA_PEER_MSG_SURFACE: peer-message-surfacing
 
 row_defaults: {}
 
@@ -116,7 +118,7 @@ rows:
     reachability: wired
     proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: behavioral-cost
-    decision: repair-first
+    decision: measure-first
     owner_seam: src/agent/approval-gate-wire/wire.ts
     rollback: approvalStateMachine 미주입
     duplicate_of: null
@@ -411,30 +413,6 @@ rows:
     rollback: unset QUANTA_INDEX
     duplicate_of: null
     lifecycle_evidence: null
-  - feature_id: codex-r2-compaction-event-emit
-    gate_owner: [AgentConfig.compactionEventEmit]
-    activation: port-present
-    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
-    risk: behavioral-cost
-    decision: hold
-    owner_seam: src/agent/loop.ts
-    rollback: slot 미주입
-    duplicate_of: null
-    lifecycle_evidence: null
-  - feature_id: codex-r2-context-change-injection-wire
-    gate_owner: [AgentConfig.contextEventsForTurn]
-    activation: port-present
-    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
-    risk: behavioral-cost
-    decision: hold
-    owner_seam: src/agent/context-change/inject.ts
-    rollback: slot 미주입
-    duplicate_of: null
-    lifecycle_evidence: null
   - feature_id: codex-r2-disk-persistence-and-env-swap
     gate_owner: [QUANTA_SESSION_REGISTRY_DISK_DIR]
     activation: env/config
@@ -460,15 +438,15 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: codex-r2-multi-process-flock
-    gate_owner: [DiskRegistryConfig.lock]
-    activation: unwired
+    gate_owner: [QUANTA_SESSION_REGISTRY_DISK_DIR]
+    activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: seam-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
-    owner_seam: src/agent/session-resource-registry/disk-adapter/file-lock.ts
-    rollback: disk registry 미구성
+    owner_seam: src/agent/session-resource-registry/disk-adapter/disk-store.ts
+    rollback: QUANTA_SESSION_REGISTRY_DISK_DIR unset
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: codex-r2-observability-decorators
@@ -480,7 +458,7 @@ rows:
     risk: behavioral-cost
     decision: hold
     owner_seam: src/observability/codex-r2-metrics/cache-metrics-decorator.ts
-    rollback: assemble auto-wrap 미배선
+    rollback: CLI MetricsRegistry 미주입 + prebuilt system cache bypass
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: codex-r2-plugin-system
@@ -520,15 +498,15 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: codex-r2-typed-event-store
-    gate_owner: [AgentConfig.typedEventStore]
-    activation: unwired
+    gate_owner: [QUANTA_TYPED_EVENT_REPLAY]
+    activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: producer-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: behavioral-cost
-    decision: hold
-    owner_seam: src/memory/typed-event/in-memory-store.ts
-    rollback: store 미주입
+    decision: measure-first
+    owner_seam: src/agent/codex-r2-wire-install/install.ts
+    rollback: QUANTA_TYPED_EVENT_REPLAY=0
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: collect-evidence
@@ -538,8 +516,8 @@ rows:
     reachability: wired
     proof: { on: real-loop, off_identity: real-loop, receipt: null }
     risk: security
-    decision: repair-first
-    owner_seam: src/tool/evidence/builder.ts
+    decision: measure-first
+    owner_seam: src/host/runtime/agent-arg-builder/gated-tool-ports.ts
     rollback: cfg.evidence 미주입
     duplicate_of: null
     lifecycle_evidence: null
@@ -556,15 +534,15 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: compaction-visibility
-    gate_owner: [AgentConfig.postCompactEmit]
-    activation: unwired
+    gate_owner: [QUANTA_COMMAND_HOOKS, QUANTA_COMMAND_HOOKS_ACK, PostCompact binding]
+    activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: producer-only
-    proof: { on: wire, off_identity: unit, receipt: null }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: behavioral-cost
-    decision: hold
-    owner_seam: src/agent/compaction.ts
-    rollback: callback 미주입
+    decision: measure-first
+    owner_seam: src/agent/loop/compaction-wire.ts
+    rollback: QUANTA_COMMAND_HOOKS=0
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: conflict-parser-lib
@@ -609,17 +587,18 @@ rows:
     # production (test-only). `QUANTA_SANDBOX` actually selects the OS-level
     # landlock/seatbelt sandbox, NOT this class; no selector ever constructs it.
     # So reachability wired→seam-only (Wave C's 5/20 spot-check missed this row).
-    # Held: strong container-isolation forward path, needs a live backend selector
-    # + a running Docker daemon.
+    # Held: strong container-isolation forward path, needs a live backend selector.
+    # Jul-19 local Docker daemon preflight + real contract passed, but that does
+    # not create a CLI consumer; no silent host-shell replacement is permitted.
     gate_owner: [DockerSandbox constructor caller]
     activation: unwired
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: seam-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: external-e2e, off_identity: unit, receipt: null }
     risk: security
     decision: hold
     owner_seam: src/runtime/sandbox.ts
-    rollback: unset QUANTA_SANDBOX
+    rollback: no production selector exists
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: dxt-user-config
@@ -662,11 +641,11 @@ rows:
     gate_owner: [QUANTA_EMBED_CACHE]
     activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: producer-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: provider-cost
     decision: hold
-    owner_seam: src/retrieval/cache/registry.ts
+    owner_seam: src/runner/assemble/pipeline.ts
     rollback: QUANTA_EMBED_CACHE=none
     duplicate_of: null
     lifecycle_evidence: null
@@ -707,15 +686,15 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: fast-apply-merge
-    gate_owner: [QUANTA_FAST_APPLY_MERGE, QUANTA_FAST_APPLY_MODEL]
-    activation: env/config
+    gate_owner: [QUANTA_FAST_APPLY_MERGE, QUANTA_FAST_APPLY_MODEL, FastApplyMergeReviewSeam DI]
+    activation: port-present
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: mutating
     decision: hold
-    owner_seam: src/agent/fast-apply-fallback/merge-runner.ts
-    rollback: 두 게이트 모두 미설정
+    owner_seam: src/agent/dispatch/tool-context.ts
+    rollback: 두 env gate 모두 미설정 또는 FastApplyMergeReviewSeam 미주입
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: fast-apply-wire
@@ -791,15 +770,15 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: git-directive-emit-leaf
-    gate_owner: [gitDirectiveSerializer caller-import]
-    activation: unwired
+    gate_owner: [QUANTA_GIT_DIRECTIVE_EMIT]
+    activation: env/config
     effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
-    reachability: seam-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
     owner_seam: src/agent/git-directives/serializer.ts
-    rollback: pure leaf(현행)
+    rollback: QUANTA_GIT_DIRECTIVE_EMIT=0
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: git-directive-emit-protocol
@@ -863,15 +842,15 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: identity-mid-session-prompt-rebuild
-    gate_owner: [onChange callback DI]
-    activation: unwired
+    gate_owner: [SessionBootstrapResult.refreshSystemPrompt, onIdentityModeChange]
+    activation: port-present
     effective_default: { cli: off, web: na, bench: na, headless: na, daemon: na }
-    reachability: consumer-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
-    owner_seam: src/apps/cli/repl/system-prompt-rebuilder.ts
-    rollback: onChange 미주입(state-only swap)
+    owner_seam: src/host/bootstrap/bootstrap-session.ts
+    rollback: onIdentityModeChange 미주입 또는 /identity 미호출
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: image-gen
@@ -1357,6 +1336,18 @@ rows:
     rollback: 정책 미주입
     duplicate_of: null
     lifecycle_evidence: null
+  - feature_id: peer-message-surfacing
+    gate_owner: [QUANTA_PEER_MSG_SURFACE, QUANTA_SUBAGENT_MAILBOX]
+    activation: host-seeded
+    effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/host/runtime/peer-message-sink-wire.ts
+    rollback: QUANTA_PEER_MSG_SURFACE=0
+    duplicate_of: null
+    lifecycle_evidence: null
   - feature_id: pipeline-composition-root-wire
     gate_owner: [QUANTA_PIPELINE]
     activation: env/config
@@ -1687,10 +1678,10 @@ rows:
     activation: port-present
     effective_default: { cli: off, web: off, bench: na, headless: off, daemon: na }
     reachability: wired
-    proof: { on: wire, off_identity: wire, receipt: null }
+    proof: { on: unit, off_identity: wire, receipt: null }
     risk: behavioral-cost
-    decision: repair-first
-    owner_seam: src/llm/streaming-events.ts
+    decision: measure-first
+    owner_seam: src/llm/openai-responses-wire.ts
     rollback: provider adapter가 이벤트 미방출
     duplicate_of: null
     lifecycle_evidence: null
@@ -1713,7 +1704,7 @@ rows:
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
-    decision: repair-first
+    decision: measure-first
     owner_seam: src/agent/run-ledger-attribution/subscriber.ts
     rollback: composition root가 hook 미구독
     duplicate_of: null
@@ -1755,15 +1746,15 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: search-pipeline-composer
-    gate_owner: [SearchPipeline caller-import]
-    activation: unwired
-    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: off }
-    reachability: seam-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    gate_owner: [QUANTA_PIPELINE, QUANTA_INDEX]
+    activation: env/config
+    effective_default: { cli: on, web: na, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: behavioral-cost
-    decision: hold
-    owner_seam: src/retrieval/pipeline/compose.ts
-    rollback: dispatch loop 자동배선 없음
+    decision: enable-now
+    owner_seam: src/runner/assemble/search-pipeline.ts
+    rollback: QUANTA_PIPELINE=none
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: semantic-search-port
@@ -1773,18 +1764,18 @@ rows:
     # text-in port had ZERO consumers. Deleted port.ts + in-memory-index.ts
     # (createInMemoryIndex 0 callers); the deterministic headless Embedder seam
     # survives (used live at pipeline.ts:41). tsc + fc check-evidence green.
-    gate_owner: [createHeadlessEmbedder caller-import]
-    activation: unwired
+    gate_owner: [QUANTA_PIPELINE semantic preset]
+    activation: env/config
     effective_default: { cli: off, web: na, bench: off, headless: off, daemon: off }
-    reachability: seam-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    reachability: wired
+    proof: { on: wire, off_identity: unit, receipt: null }
     # The text-in port was DELETED as a proven duplicate (Wave M); this row now
-    # tracks the surviving deterministic headless Embedder seam, which is a
-    # genuine dormant hold (used only by pipeline.ts:41's default embedder).
+    # tracks the surviving deterministic headless Embedder seam, consumed by
+    # the live runner pipeline preset assembly.
     risk: behavioral-cost
-    decision: hold
-    owner_seam: src/retrieval/semantic/headless-embedder.ts
-    rollback: consumer 없음(headless stub)
+    decision: measure-first
+    owner_seam: src/runner/assemble/pipeline.ts
+    rollback: QUANTA_PIPELINE=none
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: session-prewarm-ttfm
@@ -1883,18 +1874,6 @@ rows:
     rollback: QUANTA_SPINNER_STALL=off
     duplicate_of: null
     lifecycle_evidence: null
-  - feature_id: stage1-phase2-consume-and-vendor-glob-wire
-    gate_owner: [Stage1StorePort DI]
-    activation: unwired
-    effective_default: { cli: off, web: na, bench: off, headless: off, daemon: off }
-    reachability: seam-only
-    proof: { on: unit, off_identity: unit, receipt: null }
-    risk: behavioral-cost
-    decision: repair-first
-    owner_seam: src/agent/memory/stage1-store/sqlite.ts
-    rollback: stage1 store/vendor detector 미주입
-    duplicate_of: null
-    lifecycle_evidence: null
   - feature_id: stale-read-guard
     gate_owner: [QUANTA_STALE_READ_GUARD]
     activation: host-seeded
@@ -1920,37 +1899,15 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: streaming-cancellation-primitive
-    gate_owner: [toAbortSignal DI]
-    activation: unwired
+    gate_owner: [AgentConfig.streamCancellation]
+    activation: port-present
     effective_default: { cli: off, web: na, bench: off, headless: off, daemon: na }
-    reachability: seam-only
-    proof: { on: unit, off_identity: unit, receipt: null }
+    reachability: wired
+    proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: hold
-    owner_seam: src/agent/streaming-cancellation/default.ts
-    # jul-18 wire-attempt AUDIT (agent-loop investigation): held DELIBERATELY, not
-    # by neglect. The live abort path is a plain AbortSignal — composition root
-    # `new AbortController()` (bootstrap-session.ts:432) → `abort.signal` →
-    # `config.signal` (types.ts:170) → `llm.stream({signal})` (stream-consume.ts:371)
-    # + `streamingTurn({signal})` (stream-consume.ts:389). 33 bare `.abort()`
-    # producers across CLI/host/bench/headless/web feed it; NO downstream consumer
-    # reads a typed cancel cause off the loop's abort — cause is re-derived post-hoc
-    # from WHICH signal fired (`classifyTurnAbort` turn-gate.ts:34, `interruptedCategory`
-    # stop-category.ts:309). The primitive's 3 unique offerings are all currently
-    # unconsumed: (a) typed cause — no `cancel_rate{cause}` metric / recorder envelope
-    # wants it; (b) cleanup orchestration — teardown is owned by `ctx.disposeResources`
-    # (entry.ts:121, finally-guarded both paths); (c) partial salvage — the loop's
-    # own drop-oldest/conversation-cancel capture already handles partial turns.
-    # Wiring `toAbortSignal(controller.signal)` into `config.signal` today would
-    # DUPLICATE the abort-propagation mechanism while every producer still calls the
-    # bare `.abort()` (the cause channel would latch nothing) → VACUOUS wire. The
-    # live user-abort cause already flows through the sibling mid-turn-interruption
-    # slice (`MidTurnCancelCause`, default.ts:96-134), which IS wired
-    # (mid-turn-capture-wire.ts, QUANTA_MIDTURN_CAPTURE). Promotion is GATED on a
-    # real cause CONSUMER landing first (metrics counter or recorder outcome envelope)
-    # + retrofitting the 33 producers to `cancel(cause)`; until then a wire is
-    # dead-wire-risk, so this stays catalogued-not-hidden with its reason.
-    rollback: consumer 없음(현행) — wire=vacuous until a cause-consumer + producer retrofit land
+    owner_seam: src/agent/loop/stream-cancellation-wire.ts
+    rollback: streamCancellation 미주입
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: structured-output-mode
@@ -2013,15 +1970,15 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: subagent-read-inbox
-    gate_owner: [AgentConfig.subagentMailbox]
-    activation: port-present
-    effective_default: { cli: off, web: off, bench: off, headless: off, daemon: off }
+    gate_owner: [QUANTA_SUBAGENT_MAILBOX]
+    activation: host-seeded
+    effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
     proof: { on: wire, off_identity: unit, receipt: null }
     risk: behavioral-cost
-    decision: measure-first
+    decision: enable-now
     owner_seam: src/tool/subagent-mailbox/index.ts
-    rollback: subagentMailbox 미주입
+    rollback: QUANTA_SUBAGENT_MAILBOX=0
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: subagent-resume-replay
@@ -2031,9 +1988,9 @@ rows:
     reachability: wired
     proof: { on: unit, off_identity: unit, receipt: null }
     risk: behavioral-cost
-    decision: repair-first
-    owner_seam: src/agent/subagent-resume/resumer.ts
-    rollback: built-not-wired(consumer 없음)
+    decision: hold
+    owner_seam: src/runner/session-execution-plane.ts
+    rollback: QUANTA_SUBAGENT_RESUME 미설정
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: surface-composition-wire-r1

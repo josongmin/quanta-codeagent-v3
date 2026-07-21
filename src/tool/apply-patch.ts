@@ -305,8 +305,9 @@ export class FsJailFileSystemPort implements GuardedPatchFileSystemPort {
     try {
       await this.fs.stat(resolved)
       return true
-    } catch {
-      return false
+    } catch (e) {
+      if (isAbsentPathError(e)) return false
+      throw e
     }
   }
 
@@ -333,16 +334,27 @@ export class FsJailFileSystemPort implements GuardedPatchFileSystemPort {
     let st: Awaited<ReturnType<NodeFsLike["stat"]>>
     try {
       st = await this.fs.stat(resolved)
-    } catch {
-      // ENOENT / unreadable ⇒ no on-disk baseline to compare; not stale.
-      return { exists: false }
+    } catch (e) {
+      // Only a confirmed absent target has no baseline. Permission and I/O
+      // failures reach the shared guard, which rejects fail-closed.
+      if (isAbsentPathError(e)) return { exists: false }
+      throw e
     }
-    // A fake `stat` that omits `mtimeMs` (in-memory test port) has no on-disk
-    // baseline either ⇒ treat as not-stale (this path is reached ONLY when the
-    // host wired `ctx.readFileState`; the default-OFF apply never gets here).
-    if (typeof st.mtimeMs !== "number") return { exists: false }
+    // A success stat without a usable mtime cannot prove freshness. Treat it
+    // as an unavailable safety check so the shared guard rejects fail-closed.
+    if (typeof st.mtimeMs !== "number") {
+      throw new Error("FsJailFileSystemPort.statTarget requires stat.mtimeMs")
+    }
     return { exists: true, resolvedPath: resolved, mtimeMs: st.mtimeMs }
   }
+}
+
+/** A missing path is the sole fail-open stat outcome. Permission and I/O
+ * failures are safety-significant and must reach the caller unchanged. */
+const isAbsentPathError = (e: unknown): boolean => {
+  if (typeof e !== "object" || e === null || !("code" in e)) return false
+  const code = (e as { readonly code?: unknown }).code
+  return code === "ENOENT" || code === "ENOTDIR"
 }
 
 const schema = z.object({
@@ -410,7 +422,7 @@ async function guardedParseAndApply(
   // path below is byte-identical to today. This runs AFTER the git-guard and
   // BEFORE the critical-section commit — both pre-flight denies precede any FS
   // mutation, so a denied patch is NEVER a partial write.
-  const staleDeny = await guardStalePatchTargets(patch, port, ctx)
+  const staleDeny = await guardStalePatchTargets(patch, port, ctx, "apply_patch")
   if (staleDeny) return { deny: staleDeny }
   // A V4A patch is one user-visible mutating tool call, even if it has several
   // file operations. Check exactly once after all preflight guards and before

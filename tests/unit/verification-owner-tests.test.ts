@@ -8,7 +8,7 @@ describe("discoverVerificationOwnerTests", () => {
   test("returns a typed owner-near test plan with base-green public regression tests", async () => {
     const plan = await discoverVerificationOwnerTestsPlan(
       {
-        instance: { swebench: { baseCommit: "base" } },
+        instance: { swebench: { baseCommit: "base", instanceId: "owner-test", repo: "example/repo" } },
         ownerCandidates: ["pkg/core.py"],
         sandbox: "/tmp/fake-repo",
         timeoutMs: 1_000,
@@ -34,7 +34,9 @@ describe("discoverVerificationOwnerTests", () => {
     )
 
     expect(plan).toEqual({
-      commands: ["python -m pytest -p no:cacheprovider -q --no-header tests/test_core.py"],
+      commands: [
+        "uv run --no-project --python 3.11 --with pytest --with setuptools --with-editable . pytest -x -p no:cacheprovider -q --no-header tests/test_core.py",
+      ],
       testPaths: ["tests/test_core.py"],
       baseGreenTestPaths: ["tests/test_core.py"],
       primaryBaseState: "red",

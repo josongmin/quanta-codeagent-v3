@@ -35,7 +35,10 @@ const makeBareCfg = (): AgentConfig => {
 /** cfg fixture that captures `stream.emit` events so we can assert the
  *  ALBB-09 observability contract (a throwing producer surfaces ONE
  *  non-fatal `error` event) at the CLOSURE boundary. */
-const makeStreamCapturingCfg = (): { cfg: AgentConfig; events: Array<{ type: string; message?: string }> } => {
+const makeStreamCapturingCfg = (): {
+  cfg: AgentConfig
+  events: Array<{ type: string; message?: string }>
+} => {
   const events: Array<{ type: string; message?: string }> = []
   const cfg = {
     stream: { emit: (ev: { type: string; message?: string }) => events.push(ev) },
@@ -133,6 +136,59 @@ describe("ADR-0332 §C — compaction-event emit", () => {
     const events = store.snapshot()
     expect(events.length).toBe(1)
     expect(events[0]?.kind).toBe("compaction_event")
+  })
+
+  test("stored compaction replays only when the explicit opt-in is set", () => {
+    const store = createInMemoryTypedHistoryEventStore()
+    store.append({
+      kind: "compaction_event",
+      reason: "token_budget",
+      trigger: "pre_sampling",
+      tokensBefore: 12_000,
+      tokensAfter: 5_000,
+      messagesRemoved: 8,
+      at: 1_700_000_000_000,
+    })
+    const off = makeBareCfg()
+    installCodexR2Wires(off, { store, getSnapshot: () => makeSnapshot() })
+    expect(off.contextEventsForTurn?.()).toEqual([])
+
+    const on = makeBareCfg()
+    installCodexR2Wires(on, {
+      store,
+      getSnapshot: () => makeSnapshot(),
+      replayStoredEvents: true,
+    })
+    expect(on.contextEventsForTurn?.().map((event) => event.kind)).toEqual(["compaction_event"])
+  })
+
+  test("stored compaction is not delayed behind unrelated shared-store events", () => {
+    const store = createInMemoryTypedHistoryEventStore()
+    for (let i = 0; i < 16; i++) {
+      store.append({
+        kind: "context_update",
+        field: "cwd",
+        prev: `/before-${i}`,
+        next: `/after-${i}`,
+        at: i,
+      })
+    }
+    store.append({
+      kind: "compaction_event",
+      reason: "token_budget",
+      trigger: "pre_sampling",
+      tokensBefore: 12_000,
+      tokensAfter: 3_000,
+      messagesRemoved: 8,
+      at: 17,
+    })
+    const cfg = makeBareCfg()
+    installCodexR2Wires(cfg, {
+      store,
+      getSnapshot: () => makeSnapshot(),
+      replayStoredEvents: true,
+    })
+    expect(cfg.contextEventsForTurn?.().map((event) => event.kind)).toEqual(["compaction_event"])
   })
 })
 
@@ -255,7 +311,7 @@ describe("ADR-0332 §J — NO-THROW", () => {
     expect(cfg.contextEventsForTurn).toBeDefined()
     // Producer call also no-throw → empty array.
     const out = cfg.contextEventsForTurn?.() ?? null
-    expect(out).toEqual([])
+    expect(out ?? []).toEqual([])
   })
 
   test("getSnapshot throws ⇒ producer surfaces EXACTLY-ONE non-fatal error event (ALBB-09 observability)", () => {
@@ -272,9 +328,9 @@ describe("ADR-0332 §J — NO-THROW", () => {
       store,
     })
     // Call the raw closure directly (SEED first-turn path) — must not throw.
-    let out: readonly unknown[] | null = null
+    let out: readonly unknown[] = []
     expect(() => {
-      out = cfg.contextEventsForTurn?.() ?? null
+      out = cfg.contextEventsForTurn?.() ?? []
     }).not.toThrow()
     expect(out).toEqual([])
     // EXACTLY one error event, and it names the failure (not silently swallowed).

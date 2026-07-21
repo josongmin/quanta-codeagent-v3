@@ -70,10 +70,10 @@ const makeOdb = (over: Partial<ShadowOdb>): ShadowOdb => {
     restorePartial: ni("restorePartial") as ShadowOdb["restorePartial"],
     markVerified: ni("markVerified") as ShadowOdb["markVerified"],
     rewindToVerified: ni("rewindToVerified") as ShadowOdb["rewindToVerified"],
-    listSnapshots: ni("listSnapshots") as ShadowOdb["listSnapshots"],
-    rewindToRef: ni("rewindToRef") as ShadowOdb["rewindToRef"],
+    listSnapshots: over.listSnapshots ?? (ni("listSnapshots") as ShadowOdb["listSnapshots"]),
+    rewindToRef: over.rewindToRef ?? (ni("rewindToRef") as ShadowOdb["rewindToRef"]),
     restorePartialFromRef: ni("restorePartialFromRef") as ShadowOdb["restorePartialFromRef"],
-    diffSinceRef: ni("diffSinceRef") as ShadowOdb["diffSinceRef"],
+    diffSinceRef: over.diffSinceRef ?? (ni("diffSinceRef") as ShadowOdb["diffSinceRef"]),
     cleanup: ni("cleanup") as ShadowOdb["cleanup"],
   }
 }
@@ -84,7 +84,6 @@ const makeOdb = (over: Partial<ShadowOdb>): ShadowOdb => {
 const makeStoreSpy = (snapshot: Message[] | null) => {
   const restoreCalls: string[] = []
   const store = {
-    // biome-ignore lint/suspicious/noExplicitAny: minimal structural spy
     record: () => {},
     restore: (tag: string): readonly Message[] | null => {
       restoreCalls.push(tag)
@@ -107,9 +106,16 @@ describe("restoreBoth REAL composition — files OK / task FAILS (partial)", () 
   test("PARTIAL-1: task snapshot missing ⇒ ok:false but filesChanged preserved (files stayed restored)", async () => {
     let rewinds = 0
     const odb = makeOdb({
-      diffSinceLast: async () => "diff --git a/src/a.ts b/src/a.ts\n@@ -1 +1 @@\n-x\n+y\n",
-      rewindToLast: async () => {
+      listSnapshots: async () => [
+        { ref: "refs/quanta/snapshots/last-registered", sha: "abc123", timestampSec: 1 },
+      ],
+      diffSinceRef: async () => ({
+        snap: { ref: "refs/quanta/snapshots/last-registered", sha: "abc123", timestampSec: 1 },
+        diff: "diff --git a/src/a.ts b/src/a.ts\n@@ -1 +1 @@\n-x\n+y\n",
+      }),
+      rewindToRef: async () => {
         rewinds += 1
+        return { ref: "refs/quanta/snapshots/last-registered", sha: "abc123", timestampSec: 1 }
       },
     })
     const { store, restoreCalls } = makeStoreSpy(null) // task leg will fail
@@ -145,8 +151,14 @@ describe("restoreBoth REAL composition — files OK / task FAILS (partial)", () 
 describe("restoreBoth REAL composition — files FAIL short-circuits task", () => {
   test("SHORTCIRCUIT-1: files rewind throws ⇒ task leg NEVER consulted, outcome = files error", async () => {
     const odb = makeOdb({
-      diffSinceLast: async () => "",
-      rewindToLast: async () => {
+      listSnapshots: async () => [
+        { ref: "refs/quanta/snapshots/last-registered", sha: "abc123", timestampSec: 1 },
+      ],
+      diffSinceRef: async () => ({
+        snap: { ref: "refs/quanta/snapshots/last-registered", sha: "abc123", timestampSec: 1 },
+        diff: "",
+      }),
+      rewindToRef: async () => {
         throw new ShadowOdbError("merge-in-progress", "MERGE_HEAD exists")
       },
     })
@@ -178,8 +190,18 @@ describe("restoreBoth REAL composition — files FAIL short-circuits task", () =
     // `[]` is a real observation, not a spy that never records). Here the file
     // leg SUCCEEDS so the task leg IS reached — the same spy records it.
     const odb = makeOdb({
-      diffSinceLast: async () => "",
-      rewindToLast: async () => {},
+      listSnapshots: async () => [
+        { ref: "refs/quanta/snapshots/last-registered", sha: "abc123", timestampSec: 1 },
+      ],
+      diffSinceRef: async () => ({
+        snap: { ref: "refs/quanta/snapshots/last-registered", sha: "abc123", timestampSec: 1 },
+        diff: "",
+      }),
+      rewindToRef: async () => ({
+        ref: "refs/quanta/snapshots/last-registered",
+        sha: "abc123",
+        timestampSec: 1,
+      }),
     })
     const { store, restoreCalls } = makeStoreSpy([
       { role: "user", content: [{ type: "text", text: "snap" }] },

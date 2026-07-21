@@ -1,5 +1,5 @@
 id: memory-fence-cleanup
-title: @/memory → @/llm slice fence cleanup — dead REMOVE-ME stub deleted
+title: "@/memory → @/llm slice fence cleanup — dead REMOVE-ME stub deleted"
 section: 5
 subsystem: 장기 메모리 — slice boundary hygiene (Slice S9 Part A)
 order: 75

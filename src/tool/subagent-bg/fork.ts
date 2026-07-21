@@ -22,7 +22,13 @@ export const subagentForkInputSchema = z.object({
   metadata: z
     .record(z.string(), z.string())
     .optional()
-    .describe("Free-form caller metadata pairs (e.g. {origin:'ci'})."),
+    .refine((metadata) => metadata?.idempotent === undefined, {
+      message: "metadata.idempotent is reserved; caller metadata cannot authorize restart replay",
+      path: ["idempotent"],
+    })
+    .describe(
+      "Free-form caller metadata pairs (e.g. {origin:'ci'}); replay-authorization keys are reserved.",
+    ),
 })
 export type SubagentForkInput = z.infer<typeof subagentForkInputSchema>
 

@@ -3,7 +3,7 @@
  *   client. fetchJwks → cache (TTL 1h) → verify (Web Crypto API). RS256 + ES256
  *   whitelist. verify NEVER throws — all rejections are typed VerifyResult.
  *
- * HELLGATE — 15 adversarial proofs:
+ * HELLGATE — 16 adversarial proofs:
  *   B1  fetchJwks parses well-formed JWKS document
  *   B2  fetchJwks throws JwksFetchError on 4xx HTTP response
  *   B3  fetchJwks throws JwksFetchError on invalid JSON body
@@ -19,6 +19,7 @@
  *   B13 verify returns ok:false reason="unsupported-alg" for HS256 header
  *   B14 default-OFF byte-identical — barrel import does not touch dispatch
  *   B15 100-verify perf budget — cached path stays under 500ms
+ *   B16 JWK algorithm/use/key_ops/key-family declarations are enforced
  */
 import { describe, expect, test } from "bun:test"
 import {
@@ -390,5 +391,30 @@ describe("B. JWKS verify", () => {
     }
     const elapsed = performance.now() - start
     expect(elapsed).toBeLessThan(500)
+  })
+
+  test("B16 — declared JWK algorithm, use, key_ops, and family bind verification", async () => {
+    const { publicJwk, privateKey } = await generateRsaKeypair()
+    const jwt = await signJwt(
+      { alg: "RS256", kid: "rsa-1", typ: "JWT" },
+      { sub: "agent-bound-key" },
+      privateKey,
+      "RS256",
+    )
+    const hostileKeys: readonly JsonWebKey[] = [
+      { ...publicJwk, alg: "ES256" },
+      { ...publicJwk, use: "enc" },
+      { ...publicJwk, key_ops: ["sign"] },
+      { ...publicJwk, kty: "EC", crv: "P-256" },
+    ]
+    for (const [index, key] of hostileKeys.entries()) {
+      const url = `https://issuer.test/jwks-metadata-${index}`
+      const { fn } = stubFetch({
+        [url]: { status: 200, body: JSON.stringify({ keys: [key] }) },
+      })
+      const client = defaultJwksClient({ fetchImpl: fn, jwksUrl: url })
+      await client.fetchJwks(url)
+      expect(await client.verify(jwt)).toEqual({ ok: false, reason: "signature-invalid" })
+    }
   })
 })

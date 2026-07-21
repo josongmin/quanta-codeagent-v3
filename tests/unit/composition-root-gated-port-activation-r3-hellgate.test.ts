@@ -55,6 +55,7 @@ const DRIVEN = [
   "QUANTA_IMAGE_GEN",
   "QUANTA_OFFICE_AUTHORING",
   "QUANTA_PROGRESS_UPDATE",
+  "QUANTA_EVIDENCE",
   "QUANTA_PTY_ATTACH",
   "QUANTA_PTY_BACKEND",
   "QUANTA_APPSHOT",
@@ -236,6 +237,22 @@ describe("composition-root progressUpdate — QUANTA_PROGRESS_UPDATE", () => {
     )
     expect(res.ok).toBe(true)
     expect(emitted.length).toBe(1)
+  })
+})
+
+// ─────────────────────────── evidence (Keystone) ──────────────────────────
+
+describe("composition-root evidence — QUANTA_EVIDENCE", () => {
+  test("OFF omits collect_evidence; ON installs it through the real host registry composition", () => {
+    const baseline = baselineNames()
+    expect(toolNamed(baseline, "collect_evidence")).toBe(false)
+
+    process.env.QUANTA_EVIDENCE = "1"
+    const on = registryNamesFromRoot()
+    expect(toolNamed(on, "collect_evidence")).toBe(true)
+    // Paired control: the gate may add only its own high-risk tool, never widen
+    // the rest of the composition-root registry.
+    expect(on.filter((name) => !baseline.includes(name))).toEqual(["collect_evidence"])
   })
 })
 

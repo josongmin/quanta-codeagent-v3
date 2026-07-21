@@ -14,8 +14,8 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { RunContext, TrajectoryEvent } from "@/shared"
-import { JsonlRecorder } from "@/stream"
 import type { AgentEvent } from "@/stream"
+import { JsonlRecorder } from "@/stream"
 
 let dir: string
 beforeEach(() => {
@@ -84,5 +84,49 @@ describe("W2-1 — peer_message trajectory recording", () => {
     rec.close()
     const raw = readFileSync(path, "utf8")
     expect(raw).not.toContain("AKIAIOSFODNN7EXAMPLE")
+  })
+})
+
+describe("subagent_delivery trajectory recording", () => {
+  test("admission and finalization are durable correlated recovery records", () => {
+    const path = join(dir, "delivery.jsonl")
+    const rec = new JsonlRecorder(path, { ctx: CTX, ...clocks() })
+    rec.emit({
+      type: "subagent_delivery",
+      phase: "admitted",
+      deliveryId: "del-record",
+      requestedMode: "steer",
+      status: "accepted",
+      targetTaskId: "task-record",
+      targetTurnId: "turn-record",
+    })
+    rec.emit({
+      type: "subagent_delivery",
+      phase: "finalized",
+      deliveryId: "del-record",
+      requestedMode: "steer",
+      status: "failed",
+      reason: "mailbox_error",
+    })
+    rec.close()
+
+    const delivery = readLines(path).filter(
+      (line) => (line.data as { reason?: string } | undefined)?.reason === "subagent_delivery",
+    )
+    expect(delivery).toHaveLength(2)
+    expect(delivery.map((line) => line.data)).toEqual([
+      expect.objectContaining({
+        deliveryId: "del-record",
+        phase: "admitted",
+        status: "accepted",
+        targetTaskId: "task-record",
+      }),
+      expect.objectContaining({
+        deliveryId: "del-record",
+        phase: "finalized",
+        status: "failed",
+        deliveryReason: "mailbox_error",
+      }),
+    ])
   })
 })

@@ -146,6 +146,7 @@ export const AGENT_EVENT_TYPES = [
   "subagent_spawn",
   "subagent_status",
   "peer_message",
+  "subagent_delivery",
   "plan_created",
   "plan_updated",
   "plan_snapshot",
@@ -448,6 +449,45 @@ export type AgentEvent =
       correlationId?: string
       sentAt: number
       provenance: { source: "peer" } | { source: "side-agent"; daemonId: string }
+    }
+  // Correlated targeted-steer lifecycle. Admission and finalization are separate
+  // events sharing one deliveryId; an admitted event never claims an effective
+  // mode. The final arm is emitted only by the delivery finalization authority.
+  | {
+      type: "subagent_delivery"
+      phase: "admitted"
+      deliveryId: string
+      requestedMode: "steer"
+      status: "accepted"
+      targetTaskId: string
+      targetTurnId: string
+    }
+  | {
+      type: "subagent_delivery"
+      phase: "finalized"
+      deliveryId: string
+      requestedMode: "steer"
+      status: "applied"
+      effectiveMode: "steer"
+      targetTurnId: string
+    }
+  | {
+      type: "subagent_delivery"
+      phase: "finalized"
+      deliveryId: string
+      requestedMode: "steer"
+      status: "degraded"
+      effectiveMode: "queue"
+      reason: string
+      messageId: string
+    }
+  | {
+      type: "subagent_delivery"
+      phase: "finalized"
+      deliveryId: string
+      requestedMode: "steer"
+      status: "cancelled" | "failed"
+      reason: string
     }
   // Plan-mode cluster (P3, 2026-05-23): plan created / updated / late-attach
   // snapshot. Carries the structural mirror of @/agent/plan/types.ts (see top

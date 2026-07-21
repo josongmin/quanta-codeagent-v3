@@ -1,5 +1,5 @@
 id: decision-emit-phase2-admissibility
-title: `decision` event emit Phase 2 — admissibility-gate (permission/rule/hook) wire (ADR-0267)
+title: "`decision` event emit Phase 2 — admissibility-gate (permission/rule/hook) wire (ADR-0267)"
 section: 3
 subsystem: permission/rule/hook 게이트 — decision-emit Phase 2 (`runAdmissibilityGate` 내부)
 order: 267

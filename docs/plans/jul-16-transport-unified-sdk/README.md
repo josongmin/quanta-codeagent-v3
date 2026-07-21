@@ -8,7 +8,7 @@
 
 **R3 최종 (2026-07-16)**: R2-후 편집 11건 자체가 미검증이라 3라운드째 투입(적대어딧 ≥3회 하드룰) — F1-F9 반영 9건 전부 정상, 신규 코드 인용 2건 line-exact, 잔여 = MED 2(02 acceptance 3-way 스코프 충돌 조건화 / 03-A↔04 방향 규칙 명시)·LOW 4(버전스큐 구제 모집단을 "구 피어 공히"로 대칭화, resumeFromSeq 다이어그램 잔여 토큰, 05 의존 +01, MASTER §7 단서) → **전부 반영 완료. 판정: CLEAN — 계획 문서로서 수렴 종료.** 다음 감사 표면은 구현물(01 S0 스파이크부터).
 
-**구현 closeout (2026-07-19, HEAD `7d8aa9fd6` 기준)**: 01–05와 인접 W1-B/W4-b/P8가 전부 랜딩됐다. 후속 어딧의 B1/H/P0/C/J/B-MED-7/sqlite 권한도 닫혔다. `serve --stdio`는 approve/deny/연속 2회 approval까지 실제 child spawn 경로로 직접 봉인했다. live 후속표는 [audit-followups-jul17.md](audit-followups-jul17.md)다.
+**구현 closeout (2026-07-19)**: 01–05와 인접 W1-B/W4-b/P8가 전부 랜딩됐다. 후속 어딧의 B1/H/P0/C/J/B-MED-7/sqlite 권한도 닫혔다. `serve --stdio`는 approve/deny/연속 2회 approval까지 실제 child spawn 경로로 직접 봉인했다. live 후속표는 [audit-followups-jul17.md](audit-followups-jul17.md)다.
 
 | 티켓 | 내용 | Effort | 상태 (07-19) | 의존 |
 |---|---|---|---|---|

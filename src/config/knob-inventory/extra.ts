@@ -15,6 +15,16 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
       "General-CLI default env posture. OFF ⇒ 'frozen' (SWE-bench don't-install/stop-when-env-blocked, byte-identical). ON ⇒ 'default' (install-permitted local-dev posture; the user's own machine, not a graded sandbox). Prompt-text-only; NEVER touches SandboxPolicy.",
     readSite: "agent/system-prompt/default-builder.ts",
   },
+  {
+    envKey: "QUANTA_TYPED_EVENT_REPLAY",
+    kind: "bool",
+    default: false,
+    group: "memory",
+    home: "runtime-config",
+    describe:
+      "Replay bounded stored compaction events into the next turn's context envelope. Opt-in because it changes model-visible context; unset leaves typed history append-only. Other event variants retain their direct owners and are consumed without duplicate replay.",
+    readSite: "host/runtime/agent-config-assembler.ts",
+  },
   // tool gates (env-flag) — gate string lives in the tool-surface manifest SSOT;
   // declared here so the orphan ratchet sees the read (ADR-0503 P1).
   {
@@ -575,7 +585,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     home: "runtime-config",
     describe:
       "ADR-0231 radar proposal-queue: producer hook + /radar surface (default-OFF; opt-in UX).",
-    readSite: "apps/cli/repl/surface-compose.ts",
+    readSite: "apps/cli/repl/surface-compose/wire-builders.ts",
   },
   {
     envKey: "QUANTA_RADAR_FILE",
@@ -584,7 +594,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "agent-feature",
     home: "runtime-config",
     describe: "Radar jsonl store path (set ⇒ persistent 0600 file store; unset ⇒ in-memory).",
-    readSite: "apps/cli/repl/surface-compose.ts",
+    readSite: "apps/cli/repl/surface-compose/wire-builders.ts",
   },
   {
     envKey: "QUANTA_RADAR_TASK_MS",
@@ -843,5 +853,99 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     describe:
       "On-disk session event-log directory (W4-b). Set \u21d2 kernel session events persist as append-only JSONL at <dir>/<sessionId>.jsonl and seq issuance resumes from the on-disk tip after a restart (the substrate wire connect({resume}) replays from \u2014 ticket 05). Unset/blank \u21d2 the in-memory event log, byte-identical zero-disk default.",
     readSite: "host/runtime/persistence.ts",
+  },
+  {
+    envKey: "QUANTA_IMAGE_SANITIZATION",
+    kind: "bool",
+    default: false,
+    group: "llm",
+    home: "runtime-config",
+    describe:
+      "Enable the image-sanitization retry adapter for the CLI REPL. Unset leaves the provider path unchanged.",
+    readSite: "apps/cli/repl/surface-compose/runtime-compose.ts",
+  },
+  {
+    envKey: "QUANTA_MENTION_APP_PLUGIN",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "Enable @@app and plugin:// mention dependencies at the host resolver composition root.",
+    readSite: "host/runtime/internal/mention-app-plugin-deps.ts",
+  },
+  {
+    envKey: "QUANTA_PEER_MSG_SURFACE",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe: "Surface attributed peer and side-agent mailbox messages to the session transcript.",
+    readSite: "host/runtime/peer-message-sink-wire.ts",
+  },
+  {
+    envKey: "QUANTA_PRECOMPACT_CONFIRM",
+    kind: "bool",
+    default: false,
+    group: "permission",
+    home: "runtime-config",
+    describe: "Ask for operator confirmation before context compaction in the CLI surface.",
+    readSite: "apps/cli/repl/surface-compose/core-state.ts",
+  },
+  {
+    envKey: "QUANTA_SERVE_STDIO",
+    kind: "bool",
+    default: false,
+    group: "integration",
+    home: "runtime-config",
+    describe: "Maturity gate for the stdio serving transport; only the exact value 1 enables it.",
+    readSite: "apps/cli/serve-stdio-cmd.ts",
+  },
+  {
+    envKey: "QUANTA_SHADOW_VERIFY",
+    kind: "bool",
+    default: false,
+    group: "security",
+    home: "runtime-config",
+    describe: "Enable the shadow-workspace verification slot in the CLI composition root.",
+    readSite: "apps/cli/repl/surface-compose/core-state.ts",
+  },
+  {
+    envKey: "QUANTA_TURN_DIFF",
+    kind: "bool",
+    default: false,
+    group: "observability",
+    home: "runtime-config",
+    describe: "Attach per-turn git-diff observability to the CLI REPL runtime.",
+    readSite: "apps/cli/repl/surface-compose/runtime-compose.ts",
+  },
+  {
+    envKey: "QUANTA_VENDOR_RULES",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "Load trusted multi-vendor repository glob rules into interactive, headless, and IDE mode presets.",
+    readSite: "apps/agent/mode-presets/interactive.ts",
+  },
+  {
+    envKey: "QUANTA_WEB_ALLOW_UNAUTHENTICATED_WILDCARD",
+    kind: "bool",
+    default: false,
+    group: "web-daemon",
+    home: "runtime-config",
+    describe:
+      "Explicitly acknowledge an unauthenticated wildcard web-daemon bind; loopback remains the safe default.",
+    readSite: "apps/web-daemon/index.ts",
+  },
+  {
+    envKey: "QUANTA_WORKING_STATE",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe: "Enable the CLI working-state panel and its /state projection.",
+    readSite: "apps/cli/repl/surface-compose/core-state.ts",
   },
 ]

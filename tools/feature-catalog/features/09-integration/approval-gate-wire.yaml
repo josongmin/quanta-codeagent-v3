@@ -18,7 +18,7 @@ surface_integration:
   cli: full
   web: partial
   method: audited
-  verified: "2026-06-09"
+  verified: "2026-07-19"
   evidence:
     cli: "runs in the interactive CLI — 4/4 evidence file(s) reachable from src/apps/cli/index.ts import graph"
     web: "default-OFF attribution wire; when host injects ports its ApprovalRequest reaches the web-only ObservabilityPane (ApprovalsList/ObjectiveCard.blockers/RunColumn.waiting) via the ADR-0408 observability-emitter, not the B1 bridge; reviewer decision collapses to 2-verb approve/deny on the web approval card"
@@ -26,9 +26,10 @@ purpose: |
   Closed-port adapter (`createApprovalGate({ approvalSM?, now? })`) that wraps
   `ApprovalStateMachinePort.request` + `settle` around a host-supplied HITL
   resolver. Admissibility-gate imports + wraps `reviewAction` at `reviewAndDecide`
-  so every reviewer escalation lands as a first-class ApprovalRequest attributed
-  to the per-thread Objective.blockers + Run Ledger.waiting() — closing the gap
-  ADR-0403 opened (port shipped, no production caller).
+  so every reviewer escalation creates its ApprovalRequest before awaiting the
+  reviewer, keeping the unresolved prompt visible in per-thread
+  Objective.blockers + Run Ledger.waiting(), then settles the same record on a
+  terminal decision or resolver error.
 
   Default-OFF: `opts.approvalStateMachine === undefined` ⇒ byte-identical legacy
   resolver passthrough, zero SM calls, `approvalId === ""`. A host opting into
@@ -61,12 +62,19 @@ evidence:
       - tests/unit/admissibility-hellgate.test.ts
       - tests/unit/admissibility-gate.test.ts
       - tests/unit/approval-attribution-gap-hellgate.test.ts
+      - tests/unit/admissibility-gate-coalesce-r4-followup-hellgate.test.ts
       - tests/unit/host/runtime-approval-pending-leak-hellgate.test.ts
     integration: []
     contract: []
 knobs: []
 deliberate_hold: null
 notes: |
+  Pending-lifecycle invariant (2026-07-19): request precedes the reviewer
+  await. The kernel-deferred bridge cancels the provisional local record and
+  mints the kernel id, so only the host-resolvable kernel id is active; the
+  cancelled provisional record remains terminal history because the state
+  machine has no id-migration primitive.
+
   Reviewer ⇒ ApprovalDecision mapping reduces multi-verb to 2-arm
   (`isAllowed(dec.outcome) ? approve : deny`); `modify` is reserved for a
   future modify-capable reviewer. The downstream gate still consumes the full

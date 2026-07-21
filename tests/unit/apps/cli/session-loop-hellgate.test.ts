@@ -255,6 +255,7 @@ const buildSetup = async (
                   turn: { outcome, messages: outcome.messages },
                 }
               },
+              cancel: async () => ({ revision: 0, seq: 0, events: [] }),
             },
             identity: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
             permission: { set: async () => ({ revision: 0, seq: 0, events: [] }) },
@@ -265,6 +266,7 @@ const buildSetup = async (
                 bridgeState.messages = [...messages]
                 return { revision: 3, seq: 3, events: [], transcript: { messages: [...messages] } }
               },
+              messages: () => bridgeState.messages,
             },
             side: {
               start: async () => ({
@@ -315,6 +317,7 @@ const buildSetup = async (
     briefStore: { get: () => false, set: () => undefined, snapshot: () => false },
     llm: llmStub,
     planMode: false,
+    providerRateLimitRemainingPercent: undefined,
     metrics: undefined as never,
     state: undefined as never,
     mcpClients: [],
@@ -782,6 +785,7 @@ describe("session-loop — type contract shape lock (compile-time)", () => {
       notifyCwdBasename: true,
       contextWarning: true,
       planQueueStore: true,
+      objectiveStore: true,
       inTurnStdin: true,
       conversationActions: true,
       inboundMode: true,

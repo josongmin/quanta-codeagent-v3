@@ -36,7 +36,7 @@ crash/torn·lock·seq·replay·누출·게이트·v1정직성 7축 실행 repro 
 ## jul-19 3바퀴 어딧 (β/γ API rate-limit 즉사 → 직접 검증)
 α(정확성)·β(통합)·γ(보안) 병렬 3바퀴가 서버 rate-limit으로 2회 즉사 → 직접 실행검증+코드리딩으로 대체. **최근 미검종합 랜딩(04·B-MED-7·02approval·J-MED-1) 견고**.
 
-**검증 통과**: 04 strip 4경로(sendReplay→sendMessages 단일 chokepoint, durable 포함)·codec 8종 exhaustive·B-MED-7 exact-match(approvalId 내용 무관)·04 크기캡 4MiB 정확·correlator 전 arm 공존(70pass)·closePeer 누수0(peers.delete GC)·02 deny(web-daemon e2e 커버, wire-defer 동일 kernel 경로).
+**검증 통과**: 04 strip 4경로(sendReplay→sendMessages 단일 chokepoint, durable 포함)·codec 8종 exhaustive·B-MED-7 exact-match(approvalId 내용 무관)·04 크기캡 4MiB 정확·correlator 전 arm 공존(70pass)·closePeer 누수0(peers.delete GC)·02 approve/deny/연속 2회 approval(10/10 real-spawn).
 
 | # | 심각도 | 내용 | 처리 |
 |---|---|---|---|

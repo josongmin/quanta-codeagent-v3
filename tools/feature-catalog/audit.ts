@@ -30,6 +30,9 @@ export interface AuditInputs {
 
 export interface AdrRecord {
   readonly number: number
+  /** Repository-relative ADR filename. Required for filesystem-backed audits;
+   *  optional so pure callers can still model a numeric-only ADR fixture. */
+  readonly path?: string
   /** Verbatim status string from ADR front-matter (e.g. "Accepted", "Proposed",
    *  "Skipped", "Reference-only"). Unknown / unparseable → empty string. */
   readonly status: string
@@ -37,7 +40,7 @@ export interface AdrRecord {
 
 export interface AuditReport {
   /** Accepted ADRs with no `evidence.adrs` reference in any feature. */
-  readonly orphanAdrs: readonly number[]
+  readonly orphanAdrs: readonly AdrRecord[]
   /** Src files not referenced by any feature's `evidence.code`. */
   readonly orphanSrcFiles: readonly string[]
   /** Features whose evidence is fully empty (code:[] AND adrs:[] AND no test
@@ -68,9 +71,9 @@ export function runAudit(input: AuditInputs): AuditReport {
   const referencedSrc = collectReferencedSrc(input.features)
 
   const orphanAdrs = input.adrs
-    .filter((a) => a.status === "Accepted" && !referencedAdrs.has(a.number))
-    .map((a) => a.number)
-    .sort((a, b) => a - b)
+    .filter((a) => a.status === "Accepted" && !isReferencedAdr(a, input.adrs, referencedAdrs))
+    .slice()
+    .sort((a, b) => a.number - b.number || (a.path ?? "").localeCompare(b.path ?? ""))
 
   const orphanSrcFiles = input.srcFiles
     .filter((p) => !referencedSrc.has(p))
@@ -107,15 +110,44 @@ export function isEmptyStub({ evidence }: LoadedFeature["feature"]): boolean {
   return true
 }
 
-function collectReferencedAdrs(features: readonly LoadedFeature[]): ReadonlySet<number> {
-  const out = new Set<number>()
+interface ReferencedAdrs {
+  readonly numbers: ReadonlySet<number>
+  readonly paths: ReadonlySet<string>
+}
+
+function collectReferencedAdrs(features: readonly LoadedFeature[]): ReferencedAdrs {
+  const numbers = new Set<number>()
+  const paths = new Set<string>()
   for (const { feature } of features) {
     for (const ref of feature.evidence.adrs) {
+      if (typeof ref === "string" && ref.includes("/")) {
+        paths.add(normalizeAdrPath(ref))
+        const number = parseAdrReference(ref)
+        if (number !== null) numbers.add(number)
+        continue
+      }
       const number = parseAdrReference(ref)
-      if (number !== null) out.add(number)
+      if (number !== null) numbers.add(number)
     }
   }
-  return out
+  return { numbers, paths }
+}
+
+/** Exact path evidence is mandatory when ADR filenames reuse a number. A
+ * numeric reference cannot distinguish two accepted decisions with that
+ * number, so treating it as evidence for both would hide an orphan. */
+function isReferencedAdr(
+  adr: AdrRecord,
+  adrs: readonly AdrRecord[],
+  referenced: ReferencedAdrs,
+): boolean {
+  if (adr.path && referenced.paths.has(normalizeAdrPath(adr.path))) return true
+  const sameNumber = adrs.filter((candidate) => candidate.number === adr.number).length
+  return sameNumber === 1 && referenced.numbers.has(adr.number)
+}
+
+function normalizeAdrPath(path: string): string {
+  return path.replace(/^\.\//, "").replace(/\\\\/g, "/")
 }
 
 function collectReferencedSrc(features: readonly LoadedFeature[]): ReadonlySet<string> {
@@ -156,7 +188,10 @@ export function formatAuditReport(r: AuditReport): string {
   )
   lines.push("")
   lines.push(`orphan ADRs (Accepted, no fc reference): ${r.counts.orphanAdrs}`)
-  for (const n of r.orphanAdrs) lines.push(`  ADR-${String(n).padStart(4, "0")}`)
+  for (const adr of r.orphanAdrs) {
+    const label = `ADR-${String(adr.number).padStart(4, "0")}`
+    lines.push(`  ${adr.path ? `${label} (${adr.path})` : label}`)
+  }
   lines.push("")
   lines.push(`empty stubs (code:[] adrs:[] tests:[]): ${r.counts.emptyStubs}`)
   for (const s of r.emptyStubs.slice(0, 20)) lines.push(`  ${s.path}  (${s.id})`)

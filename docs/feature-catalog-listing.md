@@ -1,5 +1,9 @@
 # Feature Catalog — 타입별 전체 리스팅 (jun-06 자동생성)
 
+> Archived snapshot. This file is not maintained against the live feature
+> catalog; use `tools/feature-catalog/features/**/*.yaml` and the generated
+> `docs/10.feature-catalog.md` for current inventory and activation claims.
+
 총 **871 feature** / 13 카테고리. status: stable 547 · new 294 · refined 22 · hold 8. maturity: L5 41 · L4 490 · L3 226 · L2 108 · L1 6.
 범례: 🆕 new · ⏸ hold · ✨ refined · (공백) stable
 
@@ -358,12 +362,10 @@
 - · `L4` tier
 - · `L4` QUANTA_MEMORY[_PATH/_EMBED/_EMBED_MODEL/_RECALL_LIMIT/_DISTILL/_CONSOLIDATE/_SEL
 - · `L5` '`snapshot()` deep-copy'
-- 🆕 `L3` Stage1 → Phase 2 consume wire + vendor-rule glob wire (ADR-0233)
 - ✨ `L5` Per-string 캡 + empty-patch refine
 - 🆕 `L3` semantic index 실 embedder + pluggable vector-store backend (ADR-0392, ADR-0424)
 - · `L4` Codex 2-phase memory consolidator — per-thread distill + cross-session synthesizer
 - · `L4` Memory learning default-ON via session factory (ADR-0413)
-- · `L3` ADR-0216 Stage1StorePortV2 (agent-side, no-throw, 4-verb persist seam)
 - 🆕 `L3` auto-dream — cross-session memory consolidation trigger (H16)
 - · `L4` Session-end consolidator hook — runMemoryConsolidatorHook (no-throw L4 wire)
 - · `L4` Consolidator distill-input redaction port — abstracted seam for Phase 1 LLM

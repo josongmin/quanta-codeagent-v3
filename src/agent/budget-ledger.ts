@@ -291,6 +291,46 @@ type MutableCost = {
   cacheWriteTokens: number
 }
 
+const SESSION_HARD_PREFIX = "session-hard:"
+const DAILY_HARD_PREFIX = "daily-hard:"
+
+const reconstructHardBreach = (
+  kind: "session-hard" | "daily-hard",
+  scope: string,
+  limit: number | undefined,
+  liveTotal: number,
+): BudgetBreach | undefined => {
+  if (limit === undefined) return undefined
+  return { kind, limit, observed: liveTotal < limit ? limit : liveTotal, scope }
+}
+
+const hardBreachForKey = (
+  key: string,
+  policy: BudgetPolicy,
+  perSession: ReadonlyMap<string, MutableCost>,
+  perDay: ReadonlyMap<string, MutableCost>,
+): BudgetBreach | undefined => {
+  if (key.startsWith(SESSION_HARD_PREFIX)) {
+    const scope = key.slice(SESSION_HARD_PREFIX.length)
+    return reconstructHardBreach(
+      "session-hard",
+      scope,
+      policy.sessionHardLimit,
+      perSession.get(scope)?.totalCost ?? 0,
+    )
+  }
+  if (key.startsWith(DAILY_HARD_PREFIX)) {
+    const scope = key.slice(DAILY_HARD_PREFIX.length)
+    return reconstructHardBreach(
+      "daily-hard",
+      scope,
+      policy.dailyHardLimit,
+      perDay.get(scope)?.totalCost ?? 0,
+    )
+  }
+  return undefined
+}
+
 type RetainedEvent = {
   event: UsageEvent
   cost: MutableCost
@@ -740,37 +780,9 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
       //    smaller (or zero) total; reporting `observed < limit` would be an
       //    internally inconsistent breach. The breach genuinely fired, so the
       //    observed-at-stop is at least the limit.
-      const reconstruct = (
-        kind: "session-hard" | "daily-hard",
-        scope: string,
-        limit: number | undefined,
-        liveTotal: number,
-      ): BudgetBreach | undefined => {
-        if (limit === undefined) return undefined
-        return { kind, limit, observed: liveTotal < limit ? limit : liveTotal, scope }
-      }
       for (const key of fired) {
-        const SESSION = "session-hard:"
-        const DAILY = "daily-hard:"
-        if (key.startsWith(SESSION)) {
-          const scope = key.slice(SESSION.length)
-          const b = reconstruct(
-            "session-hard",
-            scope,
-            policy.sessionHardLimit,
-            perSession.get(scope)?.totalCost ?? 0,
-          )
-          if (b !== undefined) return b
-        } else if (key.startsWith(DAILY)) {
-          const scope = key.slice(DAILY.length)
-          const b = reconstruct(
-            "daily-hard",
-            scope,
-            policy.dailyHardLimit,
-            perDay.get(scope)?.totalCost ?? 0,
-          )
-          if (b !== undefined) return b
-        }
+        const breach = hardBreachForKey(key, policy, perSession, perDay)
+        if (breach !== undefined) return breach
       }
       return undefined
     },

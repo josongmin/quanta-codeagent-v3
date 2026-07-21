@@ -634,6 +634,7 @@ export type {
   CriticalSectionSeam,
   DeferredHandle,
   DeferredToolResult,
+  FastApplyMergeReviewSeam,
   FileHistorySink,
   GitWriteGuard,
   HITLTier,

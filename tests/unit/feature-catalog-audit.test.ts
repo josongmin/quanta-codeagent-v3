@@ -149,7 +149,7 @@ describe("runAudit — orphan ADRs", () => {
         { number: 3, status: "Accepted" },
       ],
     }
-    expect(runAudit(inputs).orphanAdrs).toEqual([3])
+    expect(runAudit(inputs).orphanAdrs.map((adr) => adr.number)).toEqual([3])
   })
 
   test("string ADR references count when they encode the ADR number", () => {
@@ -172,7 +172,7 @@ describe("runAudit — orphan ADRs", () => {
         { number: 9, status: "Accepted" },
       ],
     }
-    expect(runAudit(inputs).orphanAdrs).toEqual([9])
+    expect(runAudit(inputs).orphanAdrs.map((adr) => adr.number)).toEqual([9])
   })
 
   test("Proposed / Skipped / Reference-only ADRs are NOT considered orphans", () => {
@@ -199,7 +199,56 @@ describe("runAudit — orphan ADRs", () => {
         { number: 9, status: "Accepted" },
       ],
     }
-    expect(runAudit(inputs).orphanAdrs).toEqual([2, 5, 9])
+    expect(runAudit(inputs).orphanAdrs.map((adr) => adr.number)).toEqual([2, 5, 9])
+  })
+
+  test("a duplicated ADR number needs exact path evidence", () => {
+    const inputs: AuditInputs = {
+      features: [
+        loaded(
+          feature({
+            evidence: {
+              code: [],
+              adrs: [18],
+              tests: { unit: [], integration: [], contract: [] },
+            },
+          }),
+        ),
+      ],
+      srcFiles: [],
+      adrs: [
+        { number: 18, path: "docs/decisions/0018-first.md", status: "Accepted" },
+        { number: 18, path: "docs/decisions/0018-second.md", status: "Accepted" },
+      ],
+    }
+    expect(runAudit(inputs).orphanAdrs.map((adr) => adr.path)).toEqual([
+      "docs/decisions/0018-first.md",
+      "docs/decisions/0018-second.md",
+    ])
+  })
+
+  test("exact path evidence resolves only the matching duplicated ADR", () => {
+    const inputs: AuditInputs = {
+      features: [
+        loaded(
+          feature({
+            evidence: {
+              code: [],
+              adrs: ["docs/decisions/0018-first.md"],
+              tests: { unit: [], integration: [], contract: [] },
+            },
+          }),
+        ),
+      ],
+      srcFiles: [],
+      adrs: [
+        { number: 18, path: "docs/decisions/0018-first.md", status: "Accepted" },
+        { number: 18, path: "docs/decisions/0018-second.md", status: "Accepted" },
+      ],
+    }
+    expect(runAudit(inputs).orphanAdrs.map((adr) => adr.path)).toEqual([
+      "docs/decisions/0018-second.md",
+    ])
   })
 })
 

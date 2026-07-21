@@ -26,19 +26,19 @@ import {
   parseBoolKnob,
   parseEffort,
 } from "@/agent"
+import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import {
   defaultIdentityProvider,
   IDENTITY_MODES,
-  isIdentityMode,
   type IdentityMode,
+  isIdentityMode,
 } from "@/agent/identity"
-import { defaultFocusChainTracker, type FocusChainPort } from "@/agent/focus-chain"
 import {
   buildSystemPromptForMode,
   defaultModeVariantRegistry,
+  type ModeVariantKey,
   promptSurfaceProfileForRunMode,
   resolveCliDefaultEnvPosture,
-  type ModeVariantKey,
 } from "@/agent/system-prompt"
 import {
   ALL_TOOL_PROFILE_NAMES,
@@ -53,6 +53,7 @@ import type { PermissionContext } from "@/permission"
 import {
   createIdentityModeSessionState,
   createPermissionModeSessionState,
+  createSystemPromptRebuilder,
   createSystemSource,
   createToolProfileSessionState,
   type IdentityModeSessionState,
@@ -61,7 +62,7 @@ import {
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { isPathLikeToken } from "@/runner/orchestrate"
 import { openSessionEgressProxy } from "@/runtime/network-proxy"
-import { errMessage, gateOn, runtimeConfigFromEnv, type Logger, logger } from "@/shared"
+import { errMessage, gateOn, type Logger, logger, runtimeConfigFromEnv } from "@/shared"
 import {
   type BootstrapFeatures,
   type SessionBootstrapDeps,
@@ -198,25 +199,34 @@ const buildSessionStatePorts = (args: {
   // interactive-CLL prompt seam (`quanta` REPL), distinct from the agent-arg-builder path —
   // it MUST honor the knob too or a developer who sets it still gets the frozen (SWE) posture.
   const envPosture = resolveCliDefaultEnvPosture(args.env)
-  const buildPromptFromIdentityMode = (): string => {
-    const mode = identityModeState.get()
+  const buildPromptFromIdentityMode = (mode: IdentityMode | undefined, cwd: string): string => {
     if (mode === "onboarding") {
-      return buildSystemPrompt(args.cwd, {
+      return buildSystemPrompt(cwd, {
         persona: args.persona,
         identity: defaultIdentityProvider().identityFor(mode),
         envPosture,
       })
     }
     return buildSystemPromptForMode({
-      mode,
+      mode: mode ?? identityModeState.getPromptMode(),
       registry: identityModeState.registry,
       persona: args.persona,
       envPosture,
     })
   }
+  const rebuilder = createSystemPromptRebuilder({
+    mode: () => identityModeState.get(),
+    cwd: args.cwd,
+    baseBuilder: buildPromptFromIdentityMode,
+  })
+  // An identity mode cell is always available to the surface, but only the
+  // default-OFF gate authorizes it to replace the current prompt. The CLI
+  // supplies initial identity lines when enabled, so their presence is not a
+  // valid proxy for whether the live mode transition is authorized.
+  const modeDrivenSystemPrompt = gateOn(args.env, "QUANTA_IDENTITY")
   const systemSource = createSystemSource(
-    args.identity === undefined && gateOn(args.env, "QUANTA_IDENTITY")
-      ? buildPromptFromIdentityMode()
+    modeDrivenSystemPrompt
+      ? rebuilder.rebuild()
       : buildSystemPrompt(args.cwd, {
           persona: args.persona,
           envPosture,
@@ -224,7 +234,8 @@ const buildSessionStatePorts = (args: {
         }),
   )
   const refreshSystemPrompt = (): void => {
-    systemSource.set(buildPromptFromIdentityMode())
+    if (!modeDrivenSystemPrompt) return
+    systemSource.set(rebuilder.rebuild())
   }
   return {
     toolProfileState,
@@ -637,9 +648,7 @@ const buildToolingBundle = (
     // local cost fraction above. Reads the SAME session meter, whose provider tap
     // the loop feeds from `x-ratelimit-*` response headers. Absent meter ⇒ the
     // provider arm stays unarmed (byte-identical).
-    budgetMeter !== undefined
-      ? () => budgetMeter.providerRateLimitRemainingPercent()
-      : undefined,
+    budgetMeter !== undefined ? () => budgetMeter.providerRateLimitRemainingPercent() : undefined,
   )
 
   const mcpSurface = deps.buildMcpSurfaceInfo({

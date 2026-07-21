@@ -10,7 +10,7 @@ monitoring: n-a
 modes: [n-a]
 configurable: n-a
 owners: ["@songmin"]
-labels: ["surface:core", "absorbed:codex", "default-off"]
+labels: ["surface:core", "absorbed:codex", "production-wired"]
 depends_on: [codex-r2-typed-event-store]
 surface_integration:
   cli: full
@@ -31,8 +31,10 @@ purpose: |
   ADR-0329 closure factory `createContextEventsProducer({store,
   getSnapshot, sessionId?})` ties the wire to a sessionId — cursor =
   `at+1` exclusive, atomic prev-snapshot advance, first-call baseline-only.
-  ALL three slots absent ⇒ byte-identical to pre-ADR-0327 path (pinned by
-  hellgate).
+  Lower-level callers can omit all three slots for byte-identical legacy
+  behavior, while normal interactive host assembly supplies the store and
+  live snapshot closure. The per-turn active-skill cursor makes actual skill
+  activation changes reachable rather than freezing the snapshot at `[]`.
 evidence:
   code:
     - src/agent/context-change/detector.ts
@@ -55,4 +57,4 @@ evidence:
     contract: []
 knobs: []
 deliberate_hold: null
-notes: 'Producer (loop-side wire) lives in AgentConfig.contextEventsForTurn slot — NO-THROW closure pattern. The `<system-reminder>` tail still rides at the messages end (ADR-0004 cache-prefix invariant unchanged).'
+notes: 'Normal interactive host assembly installs the NO-THROW contextEventsForTurn closure. The `<system-reminder>` tail still rides at the messages end (ADR-0004 cache-prefix invariant unchanged).'

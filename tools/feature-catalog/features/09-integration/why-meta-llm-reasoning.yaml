@@ -1,5 +1,5 @@
 id: why-meta-llm-reasoning
-title: `/why <toolCallId|last>` — 기록된 tool-call에 대한 meta-LLM reasoning chain (ADR-0271)
+title: '`/why <toolCallId|last>` — 기록된 tool-call에 대한 meta-LLM reasoning chain (ADR-0271)'
 section: 9
 subsystem: REPL slash — 사후 reasoning 질의 (meta LLM call)
 order: 271

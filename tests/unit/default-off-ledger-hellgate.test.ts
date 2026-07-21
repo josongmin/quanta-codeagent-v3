@@ -17,7 +17,7 @@ describe("DOF-00 default-off authority ledger hellgate", () => {
     const ledger = await loadDefaultOffLedger(LEDGER_PATH)
     const report = await checkDefaultOffLedger(ledger, { catalogDir: CATALOG_DIR })
 
-    expect(report.runtimeCliSeedCount).toBe(28)
+    expect(report.runtimeCliSeedCount).toBe(30)
     expect(report.eligibleFeatureIds.length).toBeGreaterThanOrEqual(150)
     expect(report.eligibleFeatureIds).toEqual([...report.eligibleFeatureIds].sort())
     // DOF-00 completion invariant: every eligible row resolves every surface
@@ -33,15 +33,17 @@ describe("DOF-00 default-off authority ledger hellgate", () => {
     const ledger = await loadDefaultOffLedger(LEDGER_PATH)
     const missing = clone(ledger)
     const removed = missing.rows.shift()
-    expect(removed).toBeDefined()
+    if (removed === undefined) throw new Error("fixture ledger must contain a row")
     expect((await checkDefaultOffLedger(missing, { catalogDir: CATALOG_DIR })).errors).toContain(
-      `missing eligible row: ${removed?.feature_id}`,
+      `missing eligible row: ${removed.feature_id}`,
     )
 
     const duplicate = clone(ledger)
-    duplicate.rows.push(structuredClone(duplicate.rows[0]))
+    const first = duplicate.rows[0]
+    if (first === undefined) throw new Error("fixture ledger must contain a row")
+    duplicate.rows.push(structuredClone(first))
     expect((await checkDefaultOffLedger(duplicate, { catalogDir: CATALOG_DIR })).errors).toContain(
-      `duplicate feature_id: ${duplicate.rows[0]?.feature_id}`,
+      `duplicate feature_id: ${first.feature_id}`,
     )
   })
 

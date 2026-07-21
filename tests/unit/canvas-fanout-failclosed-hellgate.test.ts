@@ -29,7 +29,10 @@ import { describe, expect, test } from "bun:test"
 import { createCanvasArtifactSource } from "@/../src/apps/web-daemon/canvas-artifact-source"
 import { createCanvasEmitter } from "@/../src/apps/web-daemon/canvas-emitter"
 import { type FanoutError, fanOutIsolated } from "@/../src/apps/web-daemon/canvas-fanout"
-import { createCanvasToolDiffSource } from "@/../src/apps/web-daemon/canvas-tool-diff-source"
+import {
+  type CapturedToolDiff,
+  createCanvasToolDiffSource,
+} from "@/../src/apps/web-daemon/canvas-tool-diff-source"
 import { createCanvasUsageSource } from "@/../src/apps/web-daemon/canvas-usage-source"
 import type {
   ContextUsageBreakdown,
@@ -48,6 +51,7 @@ const artifactRef: ArtifactRef = {
   kind: "image",
   mimeType: "image/png",
   locator: "quanta-artifact://art-1",
+  createdAt: "2026-07-19T00:00:00.000Z",
 }
 
 const snapshot: PromptAssembledSnapshot = {
@@ -158,7 +162,7 @@ describe("B. tool-diff source", () => {
   test("B1 ISOLATION + SURFACING", () => {
     const seen: FanoutError[] = []
     const src = createCanvasToolDiffSource({ onSubscriberError: (e) => seen.push(e) })
-    const sibling: (typeof diffInput)[] = []
+    const sibling: CapturedToolDiff[] = []
     src.subscribe(() => {
       throw new Error("bad-conn")
     })

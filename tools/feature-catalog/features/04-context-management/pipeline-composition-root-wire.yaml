@@ -23,8 +23,9 @@ surface_integration:
 purpose: |
   `assemblePipeline(env)` reads `QUANTA_PIPELINE` (closed 6-arm enum:
   `none` | `lexical-only` | `semantic-only` | `parallel-rrf` |
-  `semantic-then-rerank` | `budget-aware`) and either returns a wired
-  `SearchPipeline` or `null` (default-OFF). For each non-`none` preset
+  `semantic-then-rerank` | `budget-aware`) and returns the default lexical
+  `SearchPipeline` unless the explicit `none` kill-switch is selected. For
+  each non-`none` preset
   the helper wires the sibling slices it needs (`@/retrieval/lexical`,
   `@/retrieval/semantic`, `@/retrieval/reranker`, `@/retrieval/cache`,
   `@/retrieval/batching`) and adapts their slice ports to the pipeline's
@@ -33,10 +34,10 @@ purpose: |
   The assembled handle rides into `AgentConfig.searchPipeline` (helper-
   only slot — loop never reads it). The companion `searchCodebaseTool`
   factory ships a defineTool-shaped tool that delegates to the pipeline
-  when wired and yields a typed `ok:false` "no pipeline wired" otherwise
-  (mirrors `web_search`). Default-OFF byte-identical: with no env set,
-  the slot is OMITTED under `exactOptionalPropertyTypes` and the
-  surface is bit-for-bit identical to the pre-ADR path.
+  when wired and yields a typed `ok:false` "no pipeline wired" only when the
+  operator selects `QUANTA_PIPELINE=none` (mirrors `web_search`). The default
+  CLI surface receives lexical `search_codebase`; `QUANTA_INDEX=on` upgrades
+  that same facade to semantic/hybrid behavior rather than registering it.
 evidence:
   code:
     - src/runner/assemble/search-pipeline.ts
@@ -51,8 +52,11 @@ evidence:
     contract: []
 knobs:
   - name: QUANTA_PIPELINE
-    default: 'none = default-OFF'
+    default: 'lexical-only when unset; none is the explicit kill-switch'
     purpose: 'preset selector (none|lexical-only|semantic-only|parallel-rrf|semantic-then-rerank|budget-aware)'
+  - name: QUANTA_INDEX
+    default: 'off'
+    purpose: 'promotes the default lexical facade to the hybrid/semantic index path; it does not control tool registration'
   - name: QUANTA_EMBED_CACHE
     default: 'none'
     purpose: 'forwarded to resolveEmbedCacheFromEnv (in-memory|sqlite|none)'

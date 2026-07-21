@@ -154,7 +154,7 @@ export const makeApplyPatchStructuredTool = (fs?: GuardedPatchFileSystemPort): T
         return
       }
 
-      const staleDeny = await guardStalePatchTargets(parsed, port, ctx)
+      const staleDeny = await guardStalePatchTargets(parsed, port, ctx, "apply_patch_structured")
       if (staleDeny !== null) {
         yield staleDeny
         return

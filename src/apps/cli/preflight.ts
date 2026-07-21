@@ -31,7 +31,6 @@
  */
 
 import { readFile } from "node:fs/promises"
-import * as path from "node:path"
 import {
   applyPatch,
   PatchAnchorNotFoundError,
@@ -42,6 +41,7 @@ import {
 } from "@/patch"
 import type { ToolAction } from "@/permission"
 import { emitOperatorNotice, errMessage, gateOn } from "@/shared"
+import { FsJailError, resolveJailed } from "@/storage"
 // The SAME matchers the `edit` tool runs — reused so a preview verdict can never
 // drift from the real apply. `@/tool/edit` is a library slice; `apps/cli` (the
 // entrypoint) is allowed to import it (the slice fence only blocks the reverse).
@@ -79,7 +79,9 @@ export const preflightApplyWarning = async (
   opts: PreflightOptions,
 ): Promise<string | undefined> => {
   const reader = opts.readFile ?? defaultReadFile
-  const resolve = (p: string): string => (path.isAbsolute(p) ? p : path.resolve(opts.cwd, p))
+  // Preview reads must cross the same jail constructor as the eventual tool.
+  // Otherwise approval can inspect a path execution will necessarily reject.
+  const resolve = (p: string): string => resolveJailed(p, opts.cwd)
   try {
     switch (action.tool) {
       case "edit":
@@ -153,9 +155,13 @@ const preflightEdit = async (
   let source: string
   try {
     source = await reader(resolve(filePath))
-  } catch {
-    // edit requires an existing file; a missing target is a hard miss.
-    return `${WARN} edit ${filePath} — file not found; the edit will fail`
+  } catch (e) {
+    if (e instanceof FsJailError) return jailWarning("edit", filePath)
+    if (isAbsentReadError(e)) {
+      // edit requires an existing file; a missing target is a hard miss.
+      return `${WARN} edit ${filePath} — file not found; the edit will fail`
+    }
+    return `${WARN} edit ${filePath} — cannot safely inspect the target; the tool may reject it`
   }
 
   const exact = applyExactEdit(source, oldString, newString, replaceAll, ranges)
@@ -213,8 +219,9 @@ class PreflightPatchPort implements PatchFileSystemPort {
     try {
       await this.reader(this.resolve(p))
       return true
-    } catch {
-      return false
+    } catch (e) {
+      if (isAbsentReadError(e)) return false
+      throw e
     }
   }
 
@@ -244,6 +251,7 @@ const preflightApplyPatch = async (
     // Only the KNOWN patch-failure classes mean "won't apply" — surface those.
     // An unexpected internal error is a preview bug, not an apply verdict, so it
     // stays silent (the outer try/catch already collapses it to undefined too).
+    if (e instanceof FsJailError) return jailWarning(toolName)
     if (
       e instanceof PatchParseError ||
       e instanceof PatchApplyError ||
@@ -254,6 +262,9 @@ const preflightApplyPatch = async (
           ? "one or more files may fail while clean siblings can still apply"
           : "will not cleanly apply"
       return `${WARN} ${toolName} — ${verdict}: ${errMessage(e)}`
+    }
+    if (!isAbsentReadError(e)) {
+      return `${WARN} ${toolName} — cannot safely inspect a target; the tool may reject it`
     }
     // WS-G (UUX-6-16) — an unexpected internal error is a preview bug, not an
     // apply verdict; the verdict stays silent but the degrade is latched once.
@@ -271,7 +282,23 @@ const preflightApplyPatch = async (
  *  stderr is piped/captured. */
 const WARN = "⚠ pre-flight:"
 
+/** A jailed execution would hard-deny this target. Preview reports that
+ * deterministically and never invokes its reader on an escaped path. */
+const jailWarning = (toolName: string, path?: string): string =>
+  `${WARN} ${toolName}${path === undefined ? "" : ` ${path}`} — target is outside the workspace jail; the tool will reject it`
+
 const defaultReadFile = (p: string): Promise<string> => readFile(p, "utf8")
+
+/** Only confirmed absence maps to a normal preflight "file not found" verdict.
+ * Permission/I/O failures remain explicit uncertainty instead of a misleading
+ * clean preview or a silent false-negative existence check. */
+const isAbsentReadError = (e: unknown): boolean => {
+  if (typeof e === "object" && e !== null && "code" in e) {
+    const code = (e as { readonly code?: unknown }).code
+    if (code === "ENOENT" || code === "ENOTDIR") return true
+  }
+  return e instanceof Error && /\bENOENT\b|\bENOTDIR\b/.test(e.message)
+}
 
 const asRecord = (v: unknown): Record<string, unknown> | undefined =>
   v !== null && typeof v === "object" && !Array.isArray(v)

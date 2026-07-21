@@ -38,7 +38,9 @@ describe("containerExecOverIpc — JSON-line bridge to the hands process", () =>
     const { duplex, push, written } = makeDuplex()
     const port = containerExecOverIpc(duplex)
     const pr = port.exec("ls -la /")
-    expect(parse(written[0])).toEqual({ id: 0, type: "exec", command: "ls -la /" })
+    const firstFrame = written[0]
+    if (firstFrame === undefined) throw new Error("bridge did not write an exec frame")
+    expect(parse(firstFrame)).toEqual({ id: 0, type: "exec", command: "ls -la /" })
     push(JSON.stringify({ id: 0, type: "exec_result", stdout: "total 0", stderr: "", code: 0 }))
     expect(await pr).toEqual({ stdout: "total 0", stderr: "", code: 0 })
   })
@@ -64,8 +66,11 @@ describe("containerExecOverIpc — JSON-line bridge to the hands process", () =>
     const port = containerExecOverIpc(duplex)
     const a = port.exec("A")
     const b = port.exec("B")
-    expect(parse(written[0]).id).toBe(0)
-    expect(parse(written[1]).id).toBe(1)
+    const firstFrame = written[0]
+    const secondFrame = written[1]
+    if (firstFrame === undefined || secondFrame === undefined) throw new Error("missing concurrent exec frames")
+    expect(parse(firstFrame).id).toBe(0)
+    expect(parse(secondFrame).id).toBe(1)
     // respond to B (id 1) FIRST, then A (id 0)
     push(JSON.stringify({ id: 1, type: "exec_result", stdout: "B-out", stderr: "", code: 0 }))
     push(JSON.stringify({ id: 0, type: "exec_result", stdout: "A-out", stderr: "", code: 0 }))

@@ -28,6 +28,18 @@ import { voterQuorumVerifier } from "./multi-voter"
 import { canAdmitChildDepth, childDepthOf, effectiveCap, SpawnLineageError } from "./spawn-depth"
 import type { AgentConfig } from "./types"
 
+// `runAgent` is a process-wide module export. Test files that mock that module
+// leak their fake into unrelated loop consumers when Bun reuses a worker. Keep
+// the sole fork boundary locally swappable instead; the test setup resets this
+// slot after every case. Do not initialize this with `runAgent`: this module is
+// in a tolerated loop → features → runner → loop cycle, so the imported binding
+// can still be in its TDZ during module initialization.
+let runBranchCandidateAgentOverride: typeof runAgent | null = null
+
+export const __setBranchRunAgentForTest = (candidate: typeof runAgent | null): void => {
+  runBranchCandidateAgentOverride = candidate
+}
+
 /** Build a candidate-scoped `runAgent` fork. Each candidate runs in its own
  *  isolated workspace at depth+1 with the seed's model/promptHint applied, and
  *  with `branchSearch` STRIPPED so a candidate can never recursively fan out
@@ -75,7 +87,7 @@ export const bindBranchRunCandidate = (config: AgentConfig): RunCandidate => {
       depth: childDepth,
       messages: [{ role: "user", content: [{ type: "text", text: `${task}${hint}` }] }],
     }
-    const outcome = await runAgent(child)
+    const outcome = await (runBranchCandidateAgentOverride ?? runAgent)(child)
     return { kind: "completed", turns: outcome.turns }
   }
 }

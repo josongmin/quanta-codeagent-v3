@@ -154,7 +154,7 @@ const makeUsageSource = (
 }
 
 const REAL_USAGE: ContextUsageBreakdown = {
-  segments: [{ id: "system", tokens: 42 }],
+  segments: [{ id: "System", tokens: 42, chars: 42, color: "cyan" }],
   total: 42,
   max: 1000,
   model: "stub-model",
@@ -259,7 +259,9 @@ describe("DOF-10 authenticated operator flow — ONE revision, real daemon + DOF
     expect(canvasDecoded?.kind).toBe("context.usage")
     if (canvasDecoded?.kind === "context.usage") {
       expect(canvasDecoded.total).toBe(42)
-      expect(canvasDecoded.segments).toEqual([{ id: "system", tokens: 42 }])
+      expect(canvasDecoded.segments).toEqual([
+        { id: "System", tokens: 42 },
+      ])
     }
 
     // ---- OBSERVABILITY: fire the captured tick ⇒ a real observability.snapshot ----
@@ -539,7 +541,7 @@ describe("DOF-10 authenticated operator flow — ONE revision, real daemon + DOF
     await wait(60)
 
     const nextView: ContextUsageBreakdown = {
-      segments: [{ id: "system", tokens: 99 }],
+      segments: [{ id: "System", tokens: 99, chars: 99, color: "cyan" }],
       total: 99,
       max: 1000,
       model: "stub-model",

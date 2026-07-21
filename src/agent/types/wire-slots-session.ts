@@ -519,6 +519,19 @@ export interface WireSlotsSessionConfig {
    */
   streamTimeoutPolicy?: import("../stream-timeout").TimeoutPolicy
   /**
+   * ADR-0177 typed cancellation bridge for one LLM sampling stream. When set,
+   * the loop projects this controller onto the provider's `AbortSignal`,
+   * relays the existing session signal as `external`, and drives the returned
+   * events through `cancellableStream` so registered cleanup handlers receive
+   * a salvaged partial result. Absent keeps the pre-existing raw stream and
+   * session signal path exactly unchanged.
+   *
+   * This is deliberately a host-owned controller rather than a global switch:
+   * a caller that wants typed causes owns the cancellation decision; ordinary
+   * CLI/web sessions do not construct it.
+   */
+  streamCancellation?: import("../streaming-cancellation").CancellationController
+  /**
    * ADR-0203 wire (helper-only slot) — typed error classifier + 5-arm retry
    * router. Caller-side composition: when set, the CLI/host wires the slot
    * into `RetryingLLM({ errorRouting: cfg.errorRouting, ... })` so the

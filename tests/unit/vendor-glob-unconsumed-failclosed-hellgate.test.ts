@@ -1,13 +1,9 @@
 /**
- * DOF-40 — vendor-detector ↔ glob-rules PARTIAL fail-closed hellgate.
+ * DOF-40 — vendor-detector ↔ glob-rules fail-closed hellgate.
  *
- * The `stage1-phase2-consume-and-vendor-glob-wire` / `multi-source-rules-
- * vendor-detector` features are SEAM-ONLY: no production caller invokes
- * `loadGlobRulesWithVendors`; the live glob load path (src/apps/cli/
- * rule-indicator.ts) calls the legacy `loadGlobRules(cwd)`. Because the
- * consume path is not fully wired to a product surface, the hardening
- * requirement is fail-closed: when the enabled arm DOES drop a candidate
- * vendor rule, that drop MUST be explicit — never a silent swallow.
+ * The multi-source vendor detector is production-wired into prompt assembly
+ * under `QUANTA_VENDOR_RULES`. When its enabled arm drops a candidate vendor
+ * rule, that drop MUST be explicit — never a silent swallow.
  *
  * Pre-hardening, `loadGlobRulesWithVendors` did `detected = result.rules`
  * and discarded `DetectionResult.errors` entirely, plus every compose-time

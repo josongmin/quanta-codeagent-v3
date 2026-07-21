@@ -30,7 +30,7 @@
     }
   },
   "fc": {
-    "empty_stubs_max": 1,
+    "empty_stubs_max": 0,
     "orphan_adrs_grandfathered": [],
     "updated_at": "2026-06-03T05:00:21.322Z",
     "l3_reachability_grandfathered": [
@@ -38,7 +38,6 @@
       "bench-full-remote-ami",
       "bench-leaderboard-analyze",
       "bridge-attestation",
-      "bug-fix-proposal-queue",
       "color-palettes",
       "cross-subagent-todo-readback",
       "darwin-vz-native-scaffold",
@@ -51,7 +50,6 @@
       "n-phase-hitl",
       "otlp-helper",
       "patch-hygiene-knob",
-      "pr-output-sink-redaction",
       "primary-rail-knob",
       "repair-escalation-knob",
       "retry-transient-knob",

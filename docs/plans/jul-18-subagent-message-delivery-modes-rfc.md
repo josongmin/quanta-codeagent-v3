@@ -261,13 +261,19 @@ export type SubagentDeliveryReceipt =
       readonly kind: "cancelled"
       readonly reason: "target_settled" | "session_aborted"
     }
+  | {
+      readonly deliveryId: string
+      readonly kind: "failed"
+      readonly reason: "mailbox_error"
+    }
 ```
 
 The controller mints `deliveryId` through an injected id factory. Tests use a deterministic
 factory; production may use the repository's existing crypto id posture. Acceptance and final
 receipt share that id. Every `accepted` delivery must produce exactly one final `applied`,
-`degraded`, or `cancelled` receipt. Session finalization closes any still-pending delivery; it
-must not leave an admission permanently unresolved.
+`degraded`, `cancelled`, or `failed` receipt. A throwing fallback mailbox is a terminal
+`failed(mailbox_error)`, not an exception or a false degrade. Session finalization closes any
+still-pending delivery; it must not leave an admission permanently unresolved.
 
 ### 3.4 Ordering and exactly-once model injection
 
@@ -336,7 +342,9 @@ planner semantics; no second fallback table is allowed.
 ### 4.2 Sanctioned child control endpoint
 
 Migrate `TurnWakeRegistry` into a typed `SubagentControlRegistry` in the same owner slice. This
-is a replacement, not a parallel registry. Each running child registers one endpoint:
+is a replacement, not a parallel registry. The compatibility `register(waker)` API and typed
+endpoint API are variants of one atomic per-task registration cell; endpoint, label, and wake
+authority may never live in independent maps. Each running child registers one endpoint:
 
 ```ts
 export interface SubagentControlEndpoint {
@@ -417,28 +425,33 @@ header remains `[teammate <from> — untrusted] ...` for every effective mode.
 
 ### 4.6 Observability
 
-When jul-15's `peer_message` event exists, extend it with outcome facts:
+The caller tool returns `status:"accepted"`, `deliveryId`, and `targetTurnId` for steer admission;
+it must return `delivered:false`, `triggered:false`, and no `effectiveMode` until finalization.
+Every terminal receipt is emitted on the global operator-notice bus with the same `deliveryId`.
+The existing stream cascade carries a dedicated `subagent_delivery` event rather than
+overloading the content-bearing `peer_message` event:
 
 ```ts
 {
+  type: "subagent_delivery",
   deliveryId,
   phase, // admitted | finalized
   requestedMode,
+  status, // accepted | applied | degraded | cancelled | failed
   effectiveMode?, // finalized only
-  effect,
-  degradeReason?,
-  cancelReason?,
-  targetTaskId,
+  reason?, // degrade / cancel / failure
+  messageId?, // queue fallback only
+  targetTaskId?, // admission
   targetTurnId?,
-  admissionToFinalMs?
 }
 ```
 
 Emit each phase only after its owning component has determined that phase. UI text must render
 effective behavior,
 e.g. `steer requested; queued because expected_turn_mismatch`, never merely `steered` from the
-request field. Recorder, protocol projection, CLI timeline, web bridge, and debug tracer are one
-consumer cascade and land in the same commit.
+request field. Recorder, item projection, stdout, and CLI timeline are one consumer cascade and
+land in the same commit. A surface that does not render that stream remains an activation gap,
+not a reason to collapse delivery truth at the owner.
 
 Admission and finalization are separate phases on the same `deliveryId`; consumers must tolerate
 the final phase arriving after the caller tool result. Metrics use bounded mode/reason/effect
@@ -470,8 +483,9 @@ delivery ids are event fields only, never metric labels.
 10. **Tool ignores abort signal**: interrupt is cooperative. The outcome promises that the
    per-turn signal fired, not that an arbitrary external process was force-killed. Surface this
    latency bound in docs/telemetry.
-11. **Throwing mailbox/control/sink**: controller converts to a typed failure/degrade; UI emission
-   never changes delivery behavior.
+11. **Throwing mailbox/control/sink**: controller converts mailbox failure to a terminal correlated
+   `failed(mailbox_error)` receipt; a throwing receipt/UI sink is contained and never changes
+   delivery behavior or escapes into the child loop.
 12. **Mailbox burst**: mailbox quota and per-turn drain cap remain authoritative. Wake coalescing
    cannot drop or reorder mailbox payloads.
 13. **Snapshot/replay**: mode is command metadata, not mailbox snapshot state. Existing mailbox
@@ -712,7 +726,7 @@ The RFC is implemented only when all are true:
    at the post-stream safe point with a correlated applied receipt, without abort or duplicate
    mailbox copy,
 5. every accepted steer terminates in exactly one correlated final receipt, including
-   interruption, budget exhaustion, and session teardown,
+   interruption, budget exhaustion, session teardown, and mailbox adapter failure,
 6. remote-steer admission and extra same-turn rounds are bounded; overflow preserves the payload
    through one typed mailbox fallback,
 7. interrupt uses a resettable per-turn controller and never terminal `forceStop`,

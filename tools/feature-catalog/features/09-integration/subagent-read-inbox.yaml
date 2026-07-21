@@ -52,11 +52,11 @@ purpose: |
   (ADR-0416) and `subagent_read_messages` (ADR-0419) bound to the SAME port.
   Default-OFF byte-identical (RFC §1.2): absent slot ⇒ neither tool registered.
 
-  Slice fence: unchanged from ADR-0416 — the read tool lives in
-  `src/tool/subagent-mailbox/index.ts` and imports ONLY `@/agent/subagent-mailbox`
-  types, `../types` (Tool / ToolContext / ToolEvent / ToolResult), `@/shared`
-  (errMessage), and `zod`. NEVER `@/agent` core. The sealed
-  `src/agent/subagent-mailbox/*` substrate is UNMODIFIED.
+  Slice fence: the read tool shares `src/tool/subagent-mailbox/index.ts`'s
+  narrow consumer port and accepts the host mailbox structurally at the Tier-1
+  composition seam. It imports only `../types` (Tool / ToolContext / ToolEvent /
+  ToolResult), `@/shared` (errMessage), and `zod`; it never imports `@/agent`.
+  The sealed `src/agent/subagent-mailbox/*` substrate is UNMODIFIED.
 evidence:
   code:
     - src/tool/subagent-mailbox/index.ts

@@ -6,7 +6,7 @@ production = false
 disable = false
 
 [test]
-preload = ["./tests/setup.ts"]
+preload = ["./tests/preload-clean-source-js.ts", "./tests/setup.ts"]
 coverage = false
 # Hellgate-enforced: only TypeScript test sources. Any .test.js found under tests/
 # is a stale emit artifact (likely from an old build step / worktree pollution).

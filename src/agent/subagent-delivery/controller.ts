@@ -146,25 +146,38 @@ export interface RetainedSteer {
 }
 
 /** A monotonic single-slot-per-delivery retention store shared by the controller
- *  (registers at admission) and the finalization port (reads/deletes at close).
- *  `take` is remove-and-return so a delivery can be closed EXACTLY ONCE. */
+ *  (registers at admission) and the finalization port (claim/commit at close).
+ *  The finalizer observes the payload before committing deletion so adapter
+ *  failure can still terminate with a correlated typed receipt. */
 export interface SteerRetentionStore {
   retain(deliveryId: string, entry: RetainedSteer): void
-  take(deliveryId: string): RetainedSteer | undefined
+  /** Atomically moves a pending slot to `claimed`. A duplicate/re-entrant claim
+   *  returns undefined, preventing a second mailbox send or receipt. */
+  claim(deliveryId: string): RetainedSteer | undefined
+  /** Removes a previously claimed slot after its terminal result is known. */
+  commit(deliveryId: string): boolean
   has(deliveryId: string): boolean
   size(): number
 }
 
 export const makeSteerRetentionStore = (): SteerRetentionStore => {
-  const map = new Map<string, RetainedSteer>()
+  type Slot =
+    | { readonly state: "pending"; readonly entry: RetainedSteer }
+    | { readonly state: "claimed"; readonly entry: RetainedSteer }
+  const map = new Map<string, Slot>()
   return {
     retain(deliveryId, entry): void {
-      map.set(deliveryId, entry)
+      map.set(deliveryId, { state: "pending", entry })
     },
-    take(deliveryId): RetainedSteer | undefined {
-      const entry = map.get(deliveryId)
-      if (entry !== undefined) map.delete(deliveryId)
-      return entry
+    claim(deliveryId): RetainedSteer | undefined {
+      const slot = map.get(deliveryId)
+      if (slot?.state !== "pending") return undefined
+      map.set(deliveryId, { state: "claimed", entry: slot.entry })
+      return slot.entry
+    },
+    commit(deliveryId): boolean {
+      const slot = map.get(deliveryId)
+      return slot?.state === "claimed" ? map.delete(deliveryId) : false
     },
     has(deliveryId): boolean {
       return map.has(deliveryId)
@@ -181,6 +194,9 @@ export interface SteerFinalizationDeps {
   /** Where a correlated final {@link SubagentDeliveryReceipt} is delivered (the
    *  host wires the tool-result / observability sink). */
   readonly onReceipt: (receipt: SubagentDeliveryReceipt) => void
+  /** Optional observability hook for a broken receipt adapter. It is diagnostic
+   *  only: neither it nor `onReceipt` may alter delivery/finalization behavior. */
+  readonly onReceiptError?: (error: unknown) => void
 }
 
 /**
@@ -191,32 +207,57 @@ export interface SteerFinalizationDeps {
  *   - `finalizeFallback`  ⇒ the ONE mailbox fallback from the retained envelope +
  *                            one `degraded` receipt with the typed reason.
  *   - `finalizeCancelled` ⇒ one `cancelled` receipt; NO mailbox copy.
- * `take` empties the retention slot so a stale/duplicate finalize is inert (no
- * second receipt, no second send).
+ *   - a throwing mailbox adapter ⇒ one terminal `failed(mailbox_error)` receipt.
+ * The slot is committed exactly once after the terminal outcome is known. A
+ * stale/duplicate finalize is inert (no second receipt, no second send).
  */
 export const createSubagentSteerFinalization = (
   deps: SteerFinalizationDeps,
 ): SubagentSteerFinalizationPort => {
-  const { store, mailbox, onReceipt } = deps
+  const { store, mailbox, onReceipt, onReceiptError } = deps
+  const emitReceipt = (receipt: SubagentDeliveryReceipt): void => {
+    try {
+      onReceipt(receipt)
+    } catch (error) {
+      // A UI/telemetry adapter is observational. Report it when possible, but
+      // never let either diagnostic sink poison the child loop or duplicate a
+      // delivery that has already reached its terminal state.
+      try {
+        onReceiptError?.(error)
+      } catch {
+        // Last-resort containment: there is no lower delivery authority to call.
+      }
+    }
+  }
   return {
     finalizeApplied(deliveryId, targetTurnId): void {
       // The retained payload was consumed by the model at the safe point — DROP
       // it (no mailbox copy) and emit the correlated applied receipt.
-      if (!store.has(deliveryId)) return
-      store.take(deliveryId)
-      onReceipt({ deliveryId, kind: "applied", effectiveMode: "steer", targetTurnId })
+      if (store.claim(deliveryId) === undefined) return
+      store.commit(deliveryId)
+      emitReceipt({ deliveryId, kind: "applied", effectiveMode: "steer", targetTurnId })
     },
     finalizeFallback(deliveryId, reason): void {
-      const retained = store.take(deliveryId)
+      const retained = store.claim(deliveryId)
       if (retained === undefined) return // stale / never-admitted ⇒ inert
-      const msg = mailbox.send({
-        from: retained.from,
-        to: retained.to,
-        kind: "request",
-        body: retained.body,
-        ...(retained.correlationId !== undefined ? { correlationId: retained.correlationId } : {}),
-      })
-      onReceipt({
+      let msg: { readonly id: string }
+      try {
+        msg = mailbox.send({
+          from: retained.from,
+          to: retained.to,
+          kind: "request",
+          body: retained.body,
+          ...(retained.correlationId !== undefined
+            ? { correlationId: retained.correlationId }
+            : {}),
+        })
+      } catch {
+        store.commit(deliveryId)
+        emitReceipt({ deliveryId, kind: "failed", reason: "mailbox_error" })
+        return
+      }
+      store.commit(deliveryId)
+      emitReceipt({
         deliveryId,
         kind: "degraded",
         effectiveMode: "queue",
@@ -226,9 +267,9 @@ export const createSubagentSteerFinalization = (
       })
     },
     finalizeCancelled(deliveryId, reason): void {
-      if (!store.has(deliveryId)) return
-      store.take(deliveryId)
-      onReceipt({ deliveryId, kind: "cancelled", reason })
+      if (store.claim(deliveryId) === undefined) return
+      store.commit(deliveryId)
+      emitReceipt({ deliveryId, kind: "cancelled", reason })
     },
   }
 }

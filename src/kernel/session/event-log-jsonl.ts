@@ -83,8 +83,8 @@ export interface JsonlSessionEventLogOptions {
   readonly dir: string
   /** Session id — becomes the file name, so it is charset-validated. */
   readonly sessionId: string
-  /** Recovery/reclaim diagnostics sink. Defaults to a stderr line (matches the
-   *  scheduler's `[kernel.session]` diagnostic style). Injectable for tests. */
+  /** Recovery/reclaim diagnostics sink. The composition root owns any terminal
+   *  rendering; absent sink is deliberately silent. */
   readonly warn?: (message: string) => void
 }
 
@@ -116,9 +116,7 @@ export const isDurableSessionEventLog = (
  *  short slugs — this is a guard, not a codec.) */
 const SESSION_ID_SAFE = /^[A-Za-z0-9._-]+$/
 
-const defaultWarn = (message: string): void => {
-  process.stderr.write(`[kernel.session.event-log] ${message}\n`)
-}
+const defaultWarn = (): void => {}
 
 const isPidAlive = (pid: number): boolean => {
   try {

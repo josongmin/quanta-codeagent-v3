@@ -7,12 +7,10 @@
  *     16-byte random nonce
  *   - injectable `clock` for test-time TTL determinism
  *   - injectable `onEvent` for the 9-event lifecycle stream (default no-op)
- *   - secret fallback: when no `secret` is supplied, falls back to the literal
- *     `"test-secret"` string with a one-shot `logger.warn` — keeps unit tests
- *     and headless smoke from panicking but makes a real-deployment misconfig
- *     visible in the log.
+ *   - fail-closed secret validation: construction rejects a missing, blank, or
+ *     shorter-than-32-byte HMAC secret before any token can be minted
  *
- * Plane discipline: imports `node:crypto` + `@/shared/logger` ONLY. No
+ * Plane discipline: imports `node:crypto` + `@/shared` ONLY. No
  * `@/agent`, no `@/permission`, no `@/observability`.
  *
  * NO-THROW: `preflight` never throws; internal failures surface as
@@ -20,23 +18,25 @@
  */
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto"
 import { errMessage } from "@/shared"
-import { logger } from "@/shared/logger"
 import type { BridgeAttestor } from "./port"
-import type {
-  AttestEvent,
-  AttestEventSink,
-  AttestRequest,
-  AttestResult,
-  PolicyTable,
-  StsToken,
+import {
+  AttestError,
+  type AttestEvent,
+  type AttestEventSink,
+  type AttestRequest,
+  type AttestResult,
+  attestationScopeFor,
+  type PolicyTable,
+  type StsToken,
 } from "./types"
 
 /**
- * Constructor options. All fields optional with documented defaults — the
- * hellgate suite asserts every default by symbol.
+ * Constructor options. Policy, clock, and event sink have documented defaults;
+ * signing material is required so this adapter cannot silently mint forgeable
+ * tokens.
  */
 export interface DefaultAttestorOpts {
-  /** HMAC-SHA256 signing secret. MISSING → falls back to `"test-secret"` + warn. */
+  /** HMAC-SHA256 signing secret. Required and at least 32 UTF-8 bytes. */
   readonly secret?: string
   /** action → verdict table. Default `{}` (every action → prompt-user). */
   readonly policyTable?: PolicyTable
@@ -44,23 +44,67 @@ export interface DefaultAttestorOpts {
   readonly clock?: () => number
   /** 9-event stream subscriber. Default no-op (default-OFF). */
   readonly onEvent?: AttestEventSink
+  /** Maximum accepted age of a remote preflight request. Default 5 minutes. */
+  readonly maxRequestAgeMs?: number
+  /** Maximum accepted future clock skew for a remote preflight. Default 30s. */
+  readonly maxFutureSkewMs?: number
 }
 
-/** Fallback secret when none supplied — visibly mis-configured. */
-const FALLBACK_SECRET = "test-secret"
+/** Minimum entropy-bearing HMAC key material. SHA-256's 256-bit output is the
+ * security target; accepting short convenience strings would make a future
+ * production caller trivially forgeable. */
+const MIN_SECRET_BYTES = 32
 
 // STS token TTL — 5 minutes by default. Matches AWS STS short-lived
 // credential convention; long enough for typical preflight→action latency,
 // short enough to bound exposure on accidental leak.
 const DEFAULT_STS_TOKEN_TTL_MS = 300_000
+const DEFAULT_MAX_REQUEST_AGE_MS = 300_000
+const DEFAULT_MAX_FUTURE_SKEW_MS = 30_000
 
-/** Warn once per process when fallback secret is used. */
-let warnedFallback = false
-
-/** Reset the one-shot fallback warning latch — test-only helper. */
-export const __resetFallbackWarnedForTests = (): void => {
-  warnedFallback = false
+const requireSecret = (secret: string | undefined): string => {
+  if (secret === undefined || secret.trim().length === 0) {
+    throw new AttestError(
+      "bridge attestor requires a non-empty HMAC signing secret",
+      "misconfigured",
+    )
+  }
+  if (Buffer.byteLength(secret, "utf8") < MIN_SECRET_BYTES) {
+    throw new AttestError(
+      `bridge attestor HMAC signing secret must be at least ${MIN_SECRET_BYTES} UTF-8 bytes`,
+      "misconfigured",
+    )
+  }
+  return secret
 }
+
+const requireNonNegativeMs = (value: number, label: string): number => {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new AttestError(
+      `bridge attestor ${label} must be a finite non-negative millisecond value`,
+      "misconfigured",
+    )
+  }
+  return value
+}
+
+const isFreshRequest = (
+  requestedAt: number,
+  now: number,
+  maxRequestAgeMs: number,
+  maxFutureSkewMs: number,
+): boolean =>
+  Number.isFinite(requestedAt) &&
+  requestedAt >= now - maxRequestAgeMs &&
+  requestedAt <= now + maxFutureSkewMs
+
+const isWellFormedRequest = (req: AttestRequest): boolean =>
+  typeof req.agentId === "string" &&
+  req.agentId.length > 0 &&
+  typeof req.action === "string" &&
+  req.action.length > 0 &&
+  typeof req.resource === "string" &&
+  req.resource.length > 0
 
 /** Build the canonical signing payload — kept centralised so mint + verify
  *  hash identical bytes. */
@@ -131,19 +175,18 @@ const nextRequestId = (clock: () => number): string =>
  * concurrent attestors (e.g. per-session).
  */
 export const defaultAttestor = (opts: DefaultAttestorOpts = {}): BridgeAttestor => {
-  let secret = opts.secret ?? ""
-  if (secret.length === 0) {
-    secret = FALLBACK_SECRET
-    if (!warnedFallback) {
-      warnedFallback = true
-      logger.warn(
-        "[bridge-attest] no secret supplied — falling back to test-secret. This is INSECURE for production.",
-      )
-    }
-  }
+  const secret = requireSecret(opts.secret)
   const policyTable: PolicyTable = opts.policyTable ?? {}
   const clock = opts.clock ?? Date.now
   const onEvent: AttestEventSink = opts.onEvent ?? (() => {})
+  const maxRequestAgeMs = requireNonNegativeMs(
+    opts.maxRequestAgeMs ?? DEFAULT_MAX_REQUEST_AGE_MS,
+    "maxRequestAgeMs",
+  )
+  const maxFutureSkewMs = requireNonNegativeMs(
+    opts.maxFutureSkewMs ?? DEFAULT_MAX_FUTURE_SKEW_MS,
+    "maxFutureSkewMs",
+  )
   const revoked = new Set<string>()
 
   const emit = (ev: AttestEvent): void => {
@@ -187,10 +230,10 @@ export const defaultAttestor = (opts: DefaultAttestorOpts = {}): BridgeAttestor 
     return reason !== undefined ? { kind: "prompt-user", reason } : { kind: "prompt-user" }
   }
 
-  /** Handle an `allow` verdict — mints a 5-minute STS token by default; caller
-   *  can `mintToken` separately if a different TTL is needed. */
+  /** Handle an `allow` verdict — mints the sole public issuance path's
+   *  canonical 5-minute STS token. */
   const handleAllow = async (requestId: string, req: AttestRequest): Promise<AttestResult> => {
-    const scope = `${req.action}:${req.resource}`
+    const scope = attestationScopeFor(req)
     const stsToken = await mintTokenInternal(scope, DEFAULT_STS_TOKEN_TTL_MS, requestId)
     emit({ kind: "preflight-granted", requestId, at: clock(), scope })
     emit({ kind: "attest-audit", requestId, at: clock(), summary: `allow: ${scope}` })
@@ -202,6 +245,10 @@ export const defaultAttestor = (opts: DefaultAttestorOpts = {}): BridgeAttestor 
     const at = clock()
     emit({ kind: "preflight-requested", requestId, at, action: req.action })
     try {
+      if (!isWellFormedRequest(req)) return handleDeny(requestId, "invalid preflight request")
+      if (!isFreshRequest(req.requestedAt, at, maxRequestAgeMs, maxFutureSkewMs)) {
+        return handleDeny(requestId, "preflight request timestamp outside allowed freshness window")
+      }
       const verdict = policyTable[req.action] ?? { kind: "prompt-user" as const }
       if (verdict.kind === "deny") return handleDeny(requestId, verdict.reason)
       if (verdict.kind === "prompt-user") return handlePromptUser(requestId, verdict.reason)
@@ -212,11 +259,6 @@ export const defaultAttestor = (opts: DefaultAttestorOpts = {}): BridgeAttestor 
       emit({ kind: "attest-audit", requestId, at: clock(), summary: `error: ${error}` })
       return { kind: "deny", reason: `preflight failed: ${error}` }
     }
-  }
-
-  const mintToken = async (scope: string, ttlMs: number): Promise<StsToken> => {
-    const requestId = nextRequestId(clock)
-    return mintTokenInternal(scope, ttlMs, requestId)
   }
 
   const verify = async (token: string, scope: string): Promise<boolean> => {
@@ -255,5 +297,5 @@ export const defaultAttestor = (opts: DefaultAttestorOpts = {}): BridgeAttestor 
     }
   }
 
-  return { preflight, mintToken, verify, revoke }
+  return { preflight, verify, revoke }
 }

@@ -28,10 +28,13 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs"
+import * as nodeFs from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { parsePatch } from "@/patch"
 import type { ToolContext, ToolResult } from "@/tool"
-import { applyPatchTool } from "@/tool/apply-patch"
+import { applyPatchTool, FsJailFileSystemPort, type NodeFsLike } from "@/tool/apply-patch"
+import { guardStalePatchTargets } from "@/tool/patch-mutation-safety"
 import { ReadFileState } from "@/tool/stale-read-guard"
 
 const root = mkdtempSync(join(tmpdir(), "apply-patch-stale-"))
@@ -207,11 +210,7 @@ describe("apply_patch stale-read-guard parity (ADR-0474)", () => {
     state.record(file, recorded)
     bumpMtimeForward(file, 5000)
 
-    const patch = [
-      "*** Begin Patch",
-      "*** Delete File: doomed.txt",
-      "*** End Patch",
-    ].join("\n")
+    const patch = ["*** Begin Patch", "*** Delete File: doomed.txt", "*** End Patch"].join("\n")
 
     const r = await run({ patch }, dir, state)
 
@@ -226,12 +225,9 @@ describe("apply_patch stale-read-guard parity (ADR-0474)", () => {
   test("(v) Add target is never staleness-checked ⇒ applies ok:true with guard wired", async () => {
     const dir = tmpSub("add-not-checked")
     const state = new ReadFileState() // empty: nothing recorded
-    const patch = [
-      "*** Begin Patch",
-      "*** Add File: fresh.txt",
-      "+hello",
-      "*** End Patch",
-    ].join("\n")
+    const patch = ["*** Begin Patch", "*** Add File: fresh.txt", "+hello", "*** End Patch"].join(
+      "\n",
+    )
 
     const r = await run({ patch }, dir, state)
 
@@ -271,5 +267,90 @@ describe("apply_patch stale-read-guard parity (ADR-0474)", () => {
     expect(r.failure).toEqual({ mode: "rejected", reason: "stale_read" })
     expect(readFileSync(src, "utf8")).toBe(ORIGINAL)
     expect(existsSync(join(dir, "dst.txt"))).toBe(false)
+  })
+
+  test("(vii) EACCES while statting a stale target fails closed before any write", async () => {
+    const dir = tmpSub("stat-eacces")
+    const file = join(dir, "f.txt")
+    writeFileSync(file, ORIGINAL)
+    const state = new ReadFileState()
+    state.record(file, 1)
+    let stats = 0
+    const fs: NodeFsLike = {
+      readFile: (p, encoding) => nodeFs.readFile(p, encoding),
+      writeFile: (p, content, encoding) => nodeFs.writeFile(p, content, encoding),
+      unlink: (p) => nodeFs.unlink(p),
+      rename: (from, to) => nodeFs.rename(from, to),
+      mkdir: (p, options) => nodeFs.mkdir(p, options),
+      stat: async (p) => {
+        if (stats++ === 0) {
+          const error = Object.assign(new Error("permission denied"), { code: "EACCES" })
+          throw error
+        }
+        return nodeFs.stat(p)
+      },
+    }
+    const port = new FsJailFileSystemPort({ jailRoot: dir, fs })
+
+    const deny = await guardStalePatchTargets(
+      parsePatch(updatePatch("f.txt")),
+      port,
+      { readFileState: state },
+      "apply_patch",
+    )
+
+    expect(deny?.type).toBe("result")
+    if (deny?.type !== "result") return
+    expect(deny.result.failure).toEqual({ mode: "rejected", reason: "stale_read_check_failed" })
+    expect(readFileSync(file, "utf8")).toBe(ORIGINAL)
+  })
+
+  test("(viii) a stat result without mtime fails closed before any write", async () => {
+    const dir = tmpSub("stat-no-mtime")
+    const file = join(dir, "f.txt")
+    writeFileSync(file, ORIGINAL)
+    const state = new ReadFileState()
+    state.record(file, 1)
+    const fs: NodeFsLike = {
+      readFile: (p, encoding) => nodeFs.readFile(p, encoding),
+      writeFile: (p, content, encoding) => nodeFs.writeFile(p, content, encoding),
+      unlink: (p) => nodeFs.unlink(p),
+      rename: (from, to) => nodeFs.rename(from, to),
+      mkdir: (p, options) => nodeFs.mkdir(p, options),
+      stat: async (p) => {
+        const stat = await nodeFs.stat(p)
+        return { isFile: () => stat.isFile(), isDirectory: () => stat.isDirectory() }
+      },
+    }
+    const port = new FsJailFileSystemPort({ jailRoot: dir, fs })
+
+    const deny = await guardStalePatchTargets(
+      parsePatch(updatePatch("f.txt")),
+      port,
+      { readFileState: state },
+      "apply_patch",
+    )
+
+    expect(deny?.type).toBe("result")
+    if (deny?.type !== "result") return
+    expect(deny.result.failure).toEqual({ mode: "rejected", reason: "stale_read_check_failed" })
+    expect(readFileSync(file, "utf8")).toBe(ORIGINAL)
+  })
+
+  test("(ix) existence checks do not convert EACCES into a false absent verdict", async () => {
+    const dir = tmpSub("exists-eacces")
+    const fs: NodeFsLike = {
+      readFile: (p, encoding) => nodeFs.readFile(p, encoding),
+      writeFile: (p, content, encoding) => nodeFs.writeFile(p, content, encoding),
+      unlink: (p) => nodeFs.unlink(p),
+      rename: (from, to) => nodeFs.rename(from, to),
+      mkdir: (p, options) => nodeFs.mkdir(p, options),
+      stat: async () => {
+        throw Object.assign(new Error("permission denied"), { code: "EACCES" })
+      },
+    }
+    const port = new FsJailFileSystemPort({ jailRoot: dir, fs })
+
+    await expect(port.exists("f.txt")).rejects.toMatchObject({ code: "EACCES" })
   })
 })

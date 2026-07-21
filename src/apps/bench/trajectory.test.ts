@@ -47,10 +47,11 @@ const withDebugGate = async (on: boolean, fn: () => Promise<void>): Promise<void
 
 const fakeLlm = {
   complete: async function* () {},
+  stream: async function* () {},
   provider: "openai" as const,
   model: "gpt-test",
-  surfaceId: "bench",
-  transportId: "openai",
+  surfaceId: "openai-responses" as const,
+  transportId: "public" as const,
   authMode: "api-key" as const,
 }
 
@@ -113,7 +114,9 @@ describe("patchRunMeta", () => {
       const { readdirSync } = await import("node:fs")
       const files = readdirSync(trajDir).filter((f) => f.endsWith(".meta.json"))
       expect(files).toHaveLength(1)
-      const raw = await readFile(join(trajDir, files[0]), "utf8")
+      const file = files[0]
+      if (file === undefined) throw new Error("trajectory meta file was not written")
+      const raw = await readFile(join(trajDir, file), "utf8")
       const meta = JSON.parse(raw)
       expect(meta.instanceId).toBe(instanceId)
       expect(meta.verdict).toMatchObject({ passed: true, patchBytes: 512 })
