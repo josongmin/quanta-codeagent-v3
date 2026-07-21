@@ -219,10 +219,11 @@ const buildSessionStatePorts = (args: {
     cwd: args.cwd,
     baseBuilder: buildPromptFromIdentityMode,
   })
-  // An identity mode cell is always available to the surface, but it may not
-  // own the current prompt. Preserve the original system prompt unless the
-  // default-OFF identity gate selected the mode-driven source at bootstrap.
-  const modeDrivenSystemPrompt = args.identity === undefined && gateOn(args.env, "QUANTA_IDENTITY")
+  // An identity mode cell is always available to the surface, but only the
+  // default-OFF gate authorizes it to replace the current prompt. The CLI
+  // supplies initial identity lines when enabled, so their presence is not a
+  // valid proxy for whether the live mode transition is authorized.
+  const modeDrivenSystemPrompt = gateOn(args.env, "QUANTA_IDENTITY")
   const systemSource = createSystemSource(
     modeDrivenSystemPrompt
       ? rebuilder.rebuild()

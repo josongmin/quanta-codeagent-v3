@@ -33,14 +33,14 @@
  * identity text AND drops the old. The two identity bodies share no substring
  * (locked by identity-hellgate: every line appears in exactly one mode).
  *
- * RED-ON-INJECTION: the final case neuters `refreshSystemPrompt` (replaces it with
- * a no-op AND stops mutating identityModeState mid-turn) ⇒ turn 2 keeps the OLD
- * prefix ⇒ the "carries the NEW mode" assertion goes RED. This proves the test
- * fails when the wire is cut, not vacuously.
+ * RED-ON-INJECTION: the final case mutates identityModeState but omits
+ * `refreshSystemPrompt` ⇒ turn 2 keeps the OLD prefix ⇒ the "carries the NEW
+ * mode" assertion goes RED. This proves the test fails when the wire is cut,
+ * not vacuously.
  */
 
 import { describe, expect, test } from "bun:test"
-import type { IdentityMode } from "@/agent/identity"
+import { defaultIdentityProvider, type IdentityMode } from "@/agent/identity"
 import { buildSystemPromptForMode, defaultModeVariantRegistry } from "@/agent/system-prompt"
 import {
   bootstrapSession,
@@ -189,6 +189,7 @@ const makeRuntime = (env: Record<string, string | undefined>): SessionRuntimeCon
 
 const IDENTITY_ENV = { QUANTA_IDENTITY: "1", QUANTA_IDENTITY_MODE: "default" }
 const DEFAULT_OFF_IDENTITY_ENV = { QUANTA_IDENTITY_MODE: "default" }
+const cliDefaultIdentity = (): readonly string[] => defaultIdentityProvider().identityFor("default")
 
 // One REPL turn through the REAL per-turn seam: buildAgentConfigFromBase does the
 // FRESH `systemSource.get()` read, then runAgent. Returns the new full transcript
@@ -210,7 +211,7 @@ const runOneTurn = async (
 }
 
 describe("identity mid-session prompt rebuild — real 2-turn e2e", () => {
-  test("default-OFF: /identity changes session state but never replaces the original system prompt", async () => {
+  test("default-OFF: identity state changes never replace the original system prompt", async () => {
     __resetRuntimeConfig()
     const llm = new CapturingLLM()
     const boot = await bootstrapSession(
@@ -242,7 +243,11 @@ describe("identity mid-session prompt rebuild — real 2-turn e2e", () => {
     __resetRuntimeConfig()
     const llm = new CapturingLLM()
     // REAL bootstrap ⇒ REAL identityModeState + systemSource + refreshSystemPrompt.
-    const boot = await bootstrapSession(makeFakeDeps(llm), makeRuntime(IDENTITY_ENV), {})
+    const boot = await bootstrapSession(
+      makeFakeDeps(llm, { pickIdentity: cliDefaultIdentity }),
+      makeRuntime(IDENTITY_ENV),
+      {},
+    )
 
     // Sanity: the bootstrap seeded the system from mode "default".
     expect(boot.system).toContain(DEFAULT_FINGERPRINT)
@@ -293,7 +298,11 @@ describe("identity mid-session prompt rebuild — real 2-turn e2e", () => {
     // the primary test's `t2.toContain(AUDIT_FINGERPRINT)` would fail exactly like this.
     __resetRuntimeConfig()
     const llm = new CapturingLLM()
-    const boot = await bootstrapSession(makeFakeDeps(llm), makeRuntime(IDENTITY_ENV), {})
+    const boot = await bootstrapSession(
+      makeFakeDeps(llm, { pickIdentity: cliDefaultIdentity }),
+      makeRuntime(IDENTITY_ENV),
+      {},
+    )
     const base = buildBaseFromBootstrap({
       boot,
       stream: { emit: () => undefined },
