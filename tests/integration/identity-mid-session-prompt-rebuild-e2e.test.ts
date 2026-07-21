@@ -22,11 +22,11 @@
  *     └─ buildAgentConfigFromBase → `system: systemSource?.get() ?? system`  (FRESH read)
  *       └─ runAgent(config)  → FakeLLM captures StreamInput.system for that turn
  *
- * The mid-session swap is driven through the REAL `/identity set <mode>` command
- * handler — `buildIdentityModeAdapter` wired EXACTLY as the REPL composes it
- * (`setActive: identityModeState.set`, `onChange: refreshSystemPrompt`, mirroring
- * `slash-surface.ts#maybeIdentity` + `surface-compose.ts:802`). So `adapter.set("audit")`
- * fires the genuine chain: im.set → onChange() → refreshSystemPrompt() → systemSource.set(...).
+ * The mid-session swap exercises the host-owned transition directly:
+ * `identityModeState.set("audit")` → `refreshSystemPrompt()` → `systemSource.set(...)`.
+ * The CLI adapter is separately covered in its allowed CLI-unit slice; this
+ * integration rail proves the host-to-next-turn contract without importing an
+ * application-slice internal.
  *
  * NON-VACUOUS (paired within ONE run): turn 1's captured system carries the OLD
  * ("default") identity text; turn 2's — after the swap — carries the NEW ("audit")
@@ -47,7 +47,6 @@ import {
   type SessionBootstrapDeps,
   type SessionRuntimeConfigShape,
 } from "@/host/bootstrap"
-import { buildIdentityModeAdapter } from "@/apps/cli/repl/ctx-adapters/identity-mode-adapter"
 import { buildBaseFromBootstrap } from "@/host/runtime/internal/context-binding/base"
 import { runRuntimeTurn } from "@/host/runtime/internal/context-binding/turn-runner"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
@@ -76,7 +75,9 @@ const systemText = (s: StreamInput["system"] | undefined): string => {
   if (typeof s === "string") return s
   // Cached/blocked system envelope (array of { type:"text", text }).
   if (Array.isArray(s)) {
-    return s.map((b) => (b !== null && typeof b === "object" && "text" in b ? String(b.text) : "")).join("\n")
+    return s
+      .map((b) => (b !== null && typeof b === "object" && "text" in b ? String(b.text) : ""))
+      .join("\n")
   }
   return JSON.stringify(s)
 }
@@ -160,9 +161,7 @@ const makeFakeDeps = (
   return { ...base, ...overrides }
 }
 
-const makeRuntime = (
-  env: Record<string, string | undefined>,
-): SessionRuntimeConfigShape => ({
+const makeRuntime = (env: Record<string, string | undefined>): SessionRuntimeConfigShape => ({
   provider: "openai" as never,
   model: "test-model",
   mode: "default" as never,
@@ -189,6 +188,7 @@ const makeRuntime = (
 })
 
 const IDENTITY_ENV = { QUANTA_IDENTITY: "1", QUANTA_IDENTITY_MODE: "default" }
+const DEFAULT_OFF_IDENTITY_ENV = { QUANTA_IDENTITY_MODE: "default" }
 
 // One REPL turn through the REAL per-turn seam: buildAgentConfigFromBase does the
 // FRESH `systemSource.get()` read, then runAgent. Returns the new full transcript
@@ -210,6 +210,34 @@ const runOneTurn = async (
 }
 
 describe("identity mid-session prompt rebuild — real 2-turn e2e", () => {
+  test("default-OFF: /identity changes session state but never replaces the original system prompt", async () => {
+    __resetRuntimeConfig()
+    const llm = new CapturingLLM()
+    const boot = await bootstrapSession(
+      makeFakeDeps(llm),
+      makeRuntime(DEFAULT_OFF_IDENTITY_ENV),
+      {},
+    )
+    const initialSystem = boot.systemSource.get()
+    const base = buildBaseFromBootstrap({
+      boot,
+      stream: { emit: () => undefined },
+      onConfirm: async () => false,
+    })
+
+    const afterT1 = await runOneTurn(base, [], "first user message")
+    boot.identityModeState.set("audit")
+    boot.refreshSystemPrompt()
+    expect(boot.identityModeState.get()).toBe("audit")
+    expect(boot.systemSource.get()).toBe(initialSystem)
+
+    await runOneTurn(base, afterT1, "second user message")
+    expect(llm.seenSystem).toHaveLength(2)
+    expect(systemText(llm.seenSystem[0])).toBe(initialSystem)
+    expect(systemText(llm.seenSystem[1])).toBe(initialSystem)
+    __resetRuntimeConfig()
+  })
+
   test("turn 2 (after /identity set audit) system carries the NEW mode; turn 1 had the old", async () => {
     __resetRuntimeConfig()
     const llm = new CapturingLLM()
@@ -230,18 +258,9 @@ describe("identity mid-session prompt rebuild — real 2-turn e2e", () => {
     // ── TURN 1 (old identity: "default") ──────────────────────────────────────
     const afterT1 = await runOneTurn(base, [], "first user message")
 
-    // ── mid-session /identity set audit — driven through the REAL slash handler.
-    //    Wire the adapter EXACTLY as the REPL does: authoritative session cell as
-    //    setActive, refreshSystemPrompt as onChange. adapter.set fires the genuine
-    //    im.set → onChange() → refreshSystemPrompt() → systemSource.set(...) chain.
-    const adapter = buildIdentityModeAdapter({
-      registry: boot.identityModeState.registry,
-      getActive: () => boot.identityModeState.get(),
-      setActive: (mode) => boot.identityModeState.set(mode),
-      onChange: boot.refreshSystemPrompt,
-    })
-    const setResult = adapter.set("audit")
-    expect(setResult).toBe("ok")
+    // ── mid-session identity transition through the host-owned state seam. ─────
+    boot.identityModeState.set("audit")
+    boot.refreshSystemPrompt()
     // The authoritative cell flipped AND the shared systemSource was rebuilt.
     expect(boot.identityModeState.get()).toBe("audit")
     expect(boot.systemSource.get()).toContain(AUDIT_FINGERPRINT)
@@ -283,21 +302,10 @@ describe("identity mid-session prompt rebuild — real 2-turn e2e", () => {
 
     const afterT1 = await runOneTurn(base, [], "first user message")
 
-    // NEUTERED wire: adapter with a NO-OP onChange and NO setActive mutation —
-    // this models "refreshSystemPrompt was disconnected / the per-turn read went
-    // stale". The systemSource is never rebuilt.
-    const brokenAdapter = buildIdentityModeAdapter({
-      registry: boot.identityModeState.registry,
-      getActive: () => boot.identityModeState.get(),
-      // setActive intentionally OMITTED (adapter falls back to its own private
-      // `active` var) so the authoritative cell + systemSource are untouched.
-      onChange: () => {
-        /* neutered — no systemSource.set */
-      },
-    })
-    brokenAdapter.set("audit")
-    // Proof the wire is actually cut: the shared cell + systemSource are unchanged.
-    expect(boot.identityModeState.get()).toBe("default")
+    // NEUTERED wire: state flips but refresh is intentionally omitted, so the
+    // shared system source stays stale despite the next turn's fresh read.
+    boot.identityModeState.set("audit")
+    expect(boot.identityModeState.get()).toBe("audit")
     expect(boot.systemSource.get()).toContain(DEFAULT_FINGERPRINT)
 
     await runOneTurn(base, afterT1, "second user message")

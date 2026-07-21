@@ -219,8 +219,12 @@ const buildSessionStatePorts = (args: {
     cwd: args.cwd,
     baseBuilder: buildPromptFromIdentityMode,
   })
+  // An identity mode cell is always available to the surface, but it may not
+  // own the current prompt. Preserve the original system prompt unless the
+  // default-OFF identity gate selected the mode-driven source at bootstrap.
+  const modeDrivenSystemPrompt = args.identity === undefined && gateOn(args.env, "QUANTA_IDENTITY")
   const systemSource = createSystemSource(
-    args.identity === undefined && gateOn(args.env, "QUANTA_IDENTITY")
+    modeDrivenSystemPrompt
       ? rebuilder.rebuild()
       : buildSystemPrompt(args.cwd, {
           persona: args.persona,
@@ -229,6 +233,7 @@ const buildSessionStatePorts = (args: {
         }),
   )
   const refreshSystemPrompt = (): void => {
+    if (!modeDrivenSystemPrompt) return
     systemSource.set(rebuilder.rebuild())
   }
   return {

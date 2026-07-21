@@ -34,6 +34,7 @@
  *      mode the registry would reject — keeps `/identity` help honest.
  */
 import { describe, expect, test } from "bun:test"
+import type { IdentityMode } from "@/agent/identity"
 import {
   MODE_VARIANT_KEYS,
   type ModeVariantKey,
@@ -50,7 +51,7 @@ const fakeRegistry: SystemPromptVariantRegistry = {
   variantFor: (mode) => ({ mode, identity: [`identity-for-${mode}`] }),
 }
 
-const builder = (mode: ModeVariantKey | undefined, cwd: string): string =>
+const builder = (mode: IdentityMode | undefined, cwd: string): string =>
   `SYS(cwd=${cwd}, mode=${mode ?? "<undef>"})`
 
 describe("ADR-0302 — system-prompt rebuilder", () => {
