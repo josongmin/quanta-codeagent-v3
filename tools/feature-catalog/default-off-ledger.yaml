@@ -1939,13 +1939,32 @@ rows:
     duplicate_of: null
     lifecycle_evidence: null
   - feature_id: subagent-fs-ownership-enforce
-    # SECURITY FIX (jul-19, Wave Q): the repair-first blocker was a REAL false
-    # fence — `extractWriteEffects` only saw a top-level `path`, so `apply_patch`/
-    # `apply_patch_structured` (targets inside `input.patch`) + `scripted_replace`
-    # (`input.file`) escaped a fenced subagent's owned subtree entirely. Fixed via
-    # `patchWriteEffects` (closed V4A op parse: add/delete/update+moveTo) + `file`
-    # duck-read, unioned into dispatch consultOwnership. Heuristic-free,
-    # red-on-injection proven, OFF byte-identical. The fence now genuinely enforces.
+    # SECURITY FIX (jul-19 → jul-26 → jul-27, 3 audit rounds): the repair-first
+    # blocker was a REAL false fence. `extractWriteEffects` only saw a top-level
+    # `path`, so writes whose target lived elsewhere escaped a fenced subagent's
+    # owned subtree. Closed in THREE passes as audits enumerated the full universe:
+    #   jul-19 — `apply_patch`/`apply_patch_structured` (target inside `input.patch`)
+    #            via `patchWriteEffects`; `scripted_replace` (`input.file`) duck-read.
+    #   jul-26 — `image_gen.outputPath`/`shadow_restore_partial.paths[]` via
+    #            `fieldWriteEffects`; `lsp_rename_apply`/`shadow_rewind`/
+    #            `mcp_read_resource` FAIL-CLOSED (targets not statically knowable).
+    #   jul-27 — objective enumeration found MORE: `appshot_verify.out_dir` (field);
+    #            `node_repl`/`skill_create`/`mcp_connector_install` FAIL-CLOSED.
+    # STRUCTURAL RATCHET (jul-27): `OWNERSHIP_WRITE_CLASSIFICATION` (SSOT) +
+    # `ownership-fence-drift-hellgate.test.ts` cross-check EVERY write-capable tool
+    # (mutating-table FS kinds ∪ gated risk:"mutating" manifest) — a new unclassified
+    # write tool now FAILS CI, ending the whack-a-mole. Heuristic-free,
+    # red-on-injection proven (both universes + runtime-set drift), OFF byte-identical.
+    #   jul-27 (round 3, HIGH) — the fence did not COMPOSE across the subagent spawn
+    #   boundary: a fenced parent could spawn a child (default-ON `agent`) with no
+    #   owned_surfaces ⇒ child unfenced ⇒ full escape. Fixed by `narrowChildOwnership`
+    #   (child ≤ parent: owned ⊆ parent or inherit, forbidden = parent ∪ child,
+    #   enforced sticks) wired into buildChildBase.
+    # HONEST SCOPE (not overclaimed): sound for structured writers (leaf/patch/field)
+    # + fail-closed writers; BEST-EFFORT for the `shell` class (bash `$VAR`/computed
+    # targets are an accepted FN — bash is BASE default-ON, so reachable in a default
+    # fenced subagent). `node_repl` is fail-closed precisely because shell best-effort
+    # can't bound arbitrary Node `fs`. isolation:'worktree' remains the hard boundary.
     gate_owner: [QUANTA_FS_OWNERSHIP_ENFORCE]
     activation: env/config
     effective_default: { cli: off, web: na, bench: na, headless: off, daemon: off }

@@ -25,7 +25,7 @@
  * zero content events increments the counter. Once the counter reaches K
  * (default {@link DEFAULT_EMPTY_STREAM_BREAKER_K} = 2) the breaker throws a
  * TERMINAL, non-retryable {@link LLMError} (kind `bad_request`, which is in
- * `src/agent/retry.ts` FATAL_KINDS and the recovery-router `fatal` action)
+ * `src/agent/retry.ts` FATAL_KINDS and the codex-spec-router `fatal` action)
  * instead of letting the transient-retry path loop. An optional short backoff is
  * awaited before re-opening a route that has at least one prior empty, so a
  * throttling endpoint is not hammered.
@@ -219,7 +219,7 @@ export const withEmptyStreamCircuitBreaker = (
       ...(cause !== undefined ? { cause } : {}),
     })
     // `bad_request` is a FATAL (never-retry) kind: src/agent/retry.ts FATAL_KINDS
-    // and the recovery-router `fatal` action. This makes the breaker's verdict
+    // and the codex-spec-router `fatal` action. This makes the breaker's verdict
     // terminal everywhere, so the transient-retry path stops instead of looping.
     // `provider` is carried only when it is one of the narrow LLMProvider tags
     // (LLMPort.provider is a wider `string`); the message itself is the SSOT.

@@ -47,14 +47,22 @@ const ANSI_OSC_DCS_APC_RE = /\u001b\][\s\S]*?(?:\u0007|\u001b\\)|\u001b[PX^_][\s
 const ANSI_CSI_RE = /\u001b\[[0-9;?]*[ -/]*[@-~]/g
 // biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately matches C0/C1 control chars to strip them.
 const CONTROL_RE = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f]/g
-/** Bidi controls + zero-width + soft hyphen (U+00AD) + lone surrogates
- *  (U+D800-U+DFFF).
+/** Bidi controls + zero-width + soft hyphen (U+00AD). (Lone surrogates are
+ *  handled separately by LONE_SURROGATE_RE so VALID astral pairs survive.)
  *  Soft hyphen is invisible but splits grep-anchored alert tokens. Lone
  *  surrogates corrupt UTF-8 at the terminal level (R6 audit-M closure —
  *  NFKC throws on lone surrogates, the try/catch fallback leaves them in
  *  the raw stream, and no other regex catches them). NFKC does not
  *  decompose any of these. */
-const BIDI_ZW_RE = /[\u00ad\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff\ud800-\udfff]/g
+const BIDI_ZW_RE = /[\u00ad\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g
+/** LONE (unpaired) surrogates ONLY. Lone surrogates corrupt UTF-8 at the terminal
+ *  level (R6 audit-M closure \u2014 NFKC throws on them, the try/catch fallback leaves
+ *  them in the raw stream, no other regex catches them). CRITICAL: a plain
+ *  `[\ud800-\udfff]` char-class ALSO strips both halves of every VALID surrogate
+ *  PAIR \u2014 destroying all astral chars (emoji, CJK-Ext, math alphanumerics), which
+ *  the project's own `sliceWholeChars`/truncation defense exists to preserve. This
+ *  lookaround removes ONLY the unpaired halves and leaves valid pairs intact. */
+const LONE_SURROGATE_RE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g
 
 const normalizeNfkc = (s: string): string => {
   try {
@@ -73,3 +81,4 @@ export const sanitizeLogText = (s: string): string =>
     .replace(ANSI_CSI_RE, "")
     .replace(CONTROL_RE, "?")
     .replace(BIDI_ZW_RE, "")
+    .replace(LONE_SURROGATE_RE, "")

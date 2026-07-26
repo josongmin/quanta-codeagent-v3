@@ -8,7 +8,7 @@
  *
  * `classify(e)` is the ROUTER boundary — it consumes any thrown value (a
  * pre-wrapped `LLMError`, a raw `Error`, a string, etc.) and returns a tag
- * without allocating. The recovery router (`src/llm/retry/recovery-router.ts`)
+ * without allocating. The codex spec router (`src/llm/retry/codex-spec-router.ts`)
  * branches on that tag. Keeping the two seams separate matters because:
  *   1. The router sees errors that did NOT come from an LLM adapter
  *      (e.g. a sandbox tool failure carried in a downstream try/catch), so it

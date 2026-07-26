@@ -78,7 +78,7 @@ export class PermissionDeniedError extends QuantaError {
  * Codex-spec additions (ADR-0214 — typed-error enum 11→16 absorption of Codex
  * 0.131.0-alpha.9's `CodexErr` taxonomy). These five kinds carry actionable
  * routing signal that the prior 11-kind set conflated into `unknown` or
- * `bad_request`. All five MUST be mapped explicitly by `recovery-router.ts`
+ * `bad_request`. All five MUST be mapped explicitly by `codex-spec-router.ts`
  * (the exhaustiveness check in `codexSpecRoute` will fail compile if a new
  * kind is added without a route):
  *   - `context_window_exceeded`  Prompt > model context window. Same-turn
@@ -137,7 +137,7 @@ export type LLMErrorKind =
   | "unknown"
   // Codex-spec additions (ADR-0214). Order matters only for readability; the
   // union is set-equivalent. Adding a new kind requires extending
-  // `recovery-router.ts`'s switch (exhaustiveness check enforces this).
+  // `codex-spec-router.ts`'s switch (exhaustiveness check enforces this).
   | "context_window_exceeded"
   | "cyber_policy"
   | "too_many_failed_attempts"
