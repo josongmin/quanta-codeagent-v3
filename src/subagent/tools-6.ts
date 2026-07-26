@@ -164,12 +164,15 @@ export const SpawnAgentInputSchema = z
      *  scope). REQUIRES the workspace to be a git repo — otherwise falls back to
      *  no isolation (shares the parent cwd). Absent ⇒ shares the parent cwd. */
     isolation: z.enum(["none", "worktree"]).optional(),
-    /** Files/paths the child should confine reads/edits to. ADVISORY — injected
-     *  into the child's seed as intent guidance, NOT enforced by the tool layer.
-     *  Pair with `isolation:"worktree"` for a hard (filesystem) write boundary. */
+    /** Files/paths the child should confine reads/edits to. Advisory (seed intent
+     *  guidance) by default; HARD-ENFORCED at the tool-dispatch write seam under
+     *  `QUANTA_FS_OWNERSHIP_ENFORCE` (write outside ⇒ DENIED; a spawned grandchild
+     *  can only narrow this, never widen). Pair with `isolation:"worktree"` for a
+     *  hard (filesystem) write boundary regardless. */
     owned_surfaces: z.array(z.string().min(1)).max(128).optional(),
-    /** Files/paths the child should avoid. ADVISORY (seed guidance, NOT
-     *  system-enforced); pairs with `owned_surfaces`. */
+    /** Files/paths the child should avoid. Advisory by default; HARD-ENFORCED under
+     *  `QUANTA_FS_OWNERSHIP_ENFORCE` (forbidden wins over owned; inherited by
+     *  children); pairs with `owned_surfaces`. */
     forbidden_surfaces: z.array(z.string().min(1)).max(128).optional(),
     /** Coarse role: `read` / `edit` / `review` — derives a default tool
      *  allowlist when `tool_filter` is absent. */

@@ -348,9 +348,16 @@ const renderPeerMessage = (event: Extract<AgentEvent, { type: "peer_message" }>)
       : `sent by ${event.from} — from another task [${event.kind}]`
   const head = `${DIM}✉ ${sanitizeLogText(label)}${RESET}\n`
   const lines = redactStr(event.body).split("\n").map(sanitizeLogText)
-  const shown = lines.slice(0, PEER_BODY_MAX_LINES)
+  // `maxLines` (lowercase) is an ARRAY line-count bound, NOT a char cap — the
+  // lowercase local keeps the surrogate-safe-truncation ratchet (which flags
+  // `.slice(0, CAP)` char-cuts) from false-positiving on this line slice.
+  const maxLines = PEER_BODY_MAX_LINES
+  const shown = lines.slice(0, maxLines)
   const extra = lines.length - shown.length
-  const body = shown.map((l) => `${DIM}  ${l}${RESET}`).join("\n")
+  // Bound WIDTH per line too, not just line COUNT: a single-line body (no `\n`)
+  // from any producer would otherwise wrap-flood the terminal. `oneLine` clamps
+  // to 160 chars — the same width bound every other renderer here uses.
+  const body = shown.map((l) => `${DIM}  ${oneLine(l)}${RESET}`).join("\n")
   const more =
     extra > 0
       ? `\n${DIM}  … (+${extra} more line${extra === 1 ? "" : "s"} — subagent_read_messages to view)${RESET}`

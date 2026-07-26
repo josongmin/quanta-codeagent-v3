@@ -10,7 +10,7 @@ import {
 } from "./coordination-broker-wire"
 import { isMutatingMode } from "./mode"
 import type { NamedAgentDefinition, NamedAgentResolver } from "./named-agent-registry"
-import { buildOwnershipPolicy } from "./ownership-policy"
+import { buildOwnershipPolicy, narrowChildOwnership } from "./ownership-policy"
 import type { AgentMode } from "./prompt"
 import { childDepthOf } from "./spawn-depth"
 import { resolveChildEffort, resolveChildLlm } from "./subagent-runner-overrides"
@@ -142,12 +142,17 @@ const buildChildBase = (
   const filtered = filterRegistry(parent.registry, req.toolFilter, req.extraTools)
   const registry =
     toolNamespace === undefined ? filtered : namespaceRegistry(filtered, toolNamespace, mailboxId)
-  const ownershipPolicy = buildOwnershipPolicy({
+  // SECURITY: compose the child's requested surfaces with the PARENT's fence so
+  // the child can only NARROW it, never widen/escape it. A fenced parent spawning
+  // a child with no/omitted surfaces makes the child INHERIT the parent boundary
+  // (not fall to unfenced) — closes the spawn-boundary bypass (jul-27 audit HIGH).
+  const requestedPolicy = buildOwnershipPolicy({
     ...(req.ownedSurfaces ? { owned: req.ownedSurfaces } : {}),
     ...(req.forbiddenSurfaces ? { forbidden: req.forbiddenSurfaces } : {}),
     cwd,
     enforced: childRuntime.fsOwnershipEnforce,
   })
+  const ownershipPolicy = narrowChildOwnership(parent.ownershipPolicy, requestedPolicy)
   const messages: Message[] = [
     { role: "user", content: [{ type: "text", text: buildSeedPrompt(req) }] },
   ]

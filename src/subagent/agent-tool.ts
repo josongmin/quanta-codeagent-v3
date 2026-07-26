@@ -67,16 +67,20 @@ export const agentSchema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      "Files/paths the child should confine its reads/edits to. ADVISORY: injected " +
-        "into the child's seed as guidance — NOT enforced by the tool layer. Pair with " +
-        "isolation:'worktree' for a hard (filesystem) write boundary.",
+      "Files/paths the child should confine its reads/edits to. Advisory (seed " +
+        "guidance) by default; HARD-ENFORCED at the tool-dispatch write seam when " +
+        "QUANTA_FS_OWNERSHIP_ENFORCE is set (a write outside is DENIED, and a spawned " +
+        "grandchild can only narrow this boundary, never widen it). Pair with " +
+        "isolation:'worktree' for a hard (filesystem) write boundary regardless.",
     ),
   forbidden_surfaces: z
     .array(z.string())
     .optional()
     .describe(
-      "Files/paths the child should avoid. ADVISORY (seed guidance, NOT system-enforced) — " +
-        "pairs with owned_surfaces; use isolation:'worktree' for hard isolation.",
+      "Files/paths the child should avoid. Advisory by default; HARD-ENFORCED under " +
+        "QUANTA_FS_OWNERSHIP_ENFORCE (forbidden always wins over owned; a child inherits " +
+        "the parent's forbidden set). Pairs with owned_surfaces; use isolation:'worktree' " +
+        "for hard isolation regardless.",
     ),
   continue_from: z
     .string()

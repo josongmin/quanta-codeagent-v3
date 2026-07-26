@@ -40,6 +40,7 @@ import {
   ITEM_DELTA_KIND_BY_ITEM_TYPE,
   type ItemStreamCore,
   type ItemStreamItemType,
+  sanitizeLogText,
 } from "@/shared"
 import type { AgentEvent, PlanDeltaReadonlyMirror, PlanReadonlyMirror } from "./types"
 
@@ -236,8 +237,14 @@ export class ItemStreamProjector {
    * unique item id keeps concurrent messages distinct within a turn.
    */
   private onPeerMessage(ev: Extract<AgentEvent, { type: "peer_message" }>): ItemStreamCore[] {
-    const itemId = `item-peer-${ev.from}-${ev.sentAt}-${this.index}`
-    const text = `${ev.from}→${ev.to} [${ev.kind}] ${ev.body}`
+    // Belt-and-suspenders anti-forge on the web/session item wire: `from`/`to`/
+    // `kind` are runner-minted today (never model input) but sanitized anyway; and
+    // `body` is sanitized here too — the emit-boundary redactor DEFAULTS TO IDENTITY
+    // (surface-notify), so a host that doesn't wire a sanitizing redactor would
+    // otherwise let control chars reach the web `text`. (Astral chars survive — the
+    // sanitizer strips only control/escape/bidi/lone-surrogate sequences.)
+    const itemId = `item-peer-${sanitizeLogText(ev.from)}-${ev.sentAt}-${this.index}`
+    const text = `${sanitizeLogText(ev.from)}→${sanitizeLogText(ev.to)} [${sanitizeLogText(ev.kind)}] ${sanitizeLogText(ev.body)}`
     return [
       { phase: "started", itemId, itemType: "peerMessage", index: this.index++ },
       { phase: "completed", itemId, itemType: "peerMessage", text },

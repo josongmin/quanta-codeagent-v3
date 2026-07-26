@@ -28,7 +28,12 @@ import { deny, isSessionApprovalRequiredError } from "./dispatch-helpers"
 import { checkDispatchAllowed } from "./dispatch-seam-guard"
 import type { DispatchResult } from "./dispatch-types"
 import { resolveCollaborationMode } from "./mode"
-import { checkWriteEffects, patchWriteEffects } from "./ownership-policy"
+import {
+  checkWriteEffects,
+  fieldWriteEffects,
+  isUnfenceableWriteTool,
+  patchWriteEffects,
+} from "./ownership-policy"
 import { reproDoubtStep } from "./repro-doubt-guard"
 import { toolGenAiAttrs, withActiveSpanScope } from "./session-resources"
 import type { AgentConfig } from "./types"
@@ -320,9 +325,12 @@ const PRE_FLIGHT_CONSULTS: readonly ((
 
 /** §20.4 (ticket-12) — subagent FS ownership ENFORCEMENT. After the admissibility
  *  gate, before execute: a child carrying an enforced owned/forbidden policy is
- *  HARD-blocked from writing outside its owned set / inside its forbidden set
- *  (every write-effect incl. bash `sed -i`/redirect via the shared extractor,
- *  re-canonicalized symlink-safe). Default-OFF: no policy / `enforced !== true` ⇒
+ *  HARD-blocked from writing outside its owned set / inside its forbidden set.
+ *  Write-effects come from the leaf (path/file + LITERAL bash `sed -i`/redirect —
+ *  best-effort, `$VAR`/computed shell targets are an accepted FN), patch tools,
+ *  and field tools; unfenceable writers are fail-closed first (see
+ *  `isUnfenceableWriteTool`). All re-canonicalized symlink-safe. Default-OFF: no
+ *  policy / `enforced !== true` ⇒
  *  returns null (byte-identical). */
 const consultOwnership = (
   call: ToolUseBlock,
@@ -331,6 +339,19 @@ const consultOwnership = (
   isReadOnly: boolean,
 ): DispatchResult | null => {
   if (config.ownershipPolicy?.enforced !== true) return null
+  // FAIL-CLOSED: write-capable tools whose FS targets are not statically knowable
+  // at dispatch (lsp_rename_apply's server-computed edits, shadow_rewind's whole
+  // snapshot, mcp_read_resource's server-derived blob path) cannot be proven
+  // in-bounds — deny rather than silently pass (or under-report to a misleading
+  // anchor). All are GATED, so a default fenced subagent is unaffected.
+  if (isUnfenceableWriteTool(call.name)) {
+    return deny(
+      call.id,
+      `subagent ownership boundary: '${call.name}' writes to targets not statically knowable at dispatch — unfenceable under ownership enforcement, denied`,
+      "ownership-policy-denied",
+      stackDenyReason("unfenceable write under subagent ownership fence"),
+    )
+  }
   const own = checkWriteEffects(
     [
       // top-level `path`/`file` + shell targets (circumvention leaf) …
@@ -339,8 +360,12 @@ const consultOwnership = (
       // the leaf cannot see — closes the apply_patch/apply_patch_structured false
       // fence (a fenced subagent otherwise escapes its owned set via apply_patch).
       ...patchWriteEffects(call.name, call.input, config.cwd),
+      // … and the field-carrying structured writers (image_gen `outputPath`,
+      // shadow_restore_partial `paths[]`) whose targets the leaf also can't read.
+      ...fieldWriteEffects(call.name, call.input, config.cwd),
     ],
     config.ownershipPolicy,
+    config.cwd,
   )
   if (own.allowed) return null
   return deny(
