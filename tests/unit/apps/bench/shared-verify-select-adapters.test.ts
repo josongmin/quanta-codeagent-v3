@@ -1,9 +1,24 @@
 import { describe, expect, test } from "bun:test"
-import { readdirSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..", "..")
-const APP_DRIVER_SRC = readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8")
+// The app bench driver was split (refactor/bench-driver-lanes) into
+// `src/apps/bench/eval/driver/*.ts` lane modules — pure code motion. The
+// shared-adapter routing + evidence-packet import these strings pin now live
+// across the barrel + lane modules, so aggregate the barrel + every
+// `driver/*.ts` lane source (dir absent pre-split ⇒ just the barrel). The
+// `.not.toContain` guards below still hold across the aggregate because the
+// lane modules sit one level deeper (`./repair/…`, `../…`), never `./…`.
+const APP_DRIVER_DIR = join(REPO_ROOT, "src/apps/bench/eval/driver")
+const APP_DRIVER_SRC = [
+  readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8"),
+  ...(existsSync(APP_DRIVER_DIR)
+    ? readdirSync(APP_DRIVER_DIR)
+        .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+        .map((f) => readFileSync(join(APP_DRIVER_DIR, f), "utf8"))
+    : []),
+].join("\n")
 // The runner core driver was split (jul-02) into `./driver/*` submodules (pure
 // code motion). The regression-oracle / repo-regression-discovery adapter wiring
 // the runner core OWNS (and the app delegates to) now lives in those submodules,

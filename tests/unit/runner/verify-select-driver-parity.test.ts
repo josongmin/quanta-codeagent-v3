@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { readdirSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
@@ -17,7 +17,23 @@ const DRIVER_SRC = [
     .filter((f) => f.endsWith(".ts"))
     .map((f) => readFileSync(join(DRIVER_DIR, f), "utf8")),
 ].join("\n")
-const APP_DRIVER_SRC = readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8")
+// The app bench driver was split (refactor/bench-driver-lanes) into
+// `src/apps/bench/eval/driver/*.ts` lane modules — pure code motion. The
+// verify-select orchestration these strings pin (`runSelectionPhase`, the
+// selection ports, the app-main dispatch) now lives across those lane modules
+// (selection.ts / repair.ts / app-main.ts / agent-phase.ts). Aggregate the
+// barrel + every `driver/*.ts` lane source so the "app driver ORCHESTRATES X"
+// parity assertions still resolve against the app-owned code, unchanged in
+// intent by the file split (mirrors the runner-side DRIVER_SRC glob above).
+const APP_DRIVER_DIR = join(REPO_ROOT, "src/apps/bench/eval/driver")
+const APP_DRIVER_SRC = [
+  readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8"),
+  ...(existsSync(APP_DRIVER_DIR)
+    ? readdirSync(APP_DRIVER_DIR)
+        .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+        .map((f) => readFileSync(join(APP_DRIVER_DIR, f), "utf8"))
+    : []),
+].join("\n")
 
 describe("runner verify-select and patch-budget driver parity", () => {
   test("the verify-select orchestrator still executes the knob instead of silently ignoring it", () => {
