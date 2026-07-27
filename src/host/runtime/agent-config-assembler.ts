@@ -105,6 +105,7 @@ import type { WebSearchProvider } from "@/tool/web"
 import { providerFromEnv } from "@/tool/web/providers"
 import { buildAppshotPortWire } from "./appshot-port-wire"
 import { persistBudgetLedger } from "./budget-ledger-persist"
+import { applyCapabilityWires, buildCapabilityWires } from "./capability-wire-registry"
 import { buildAppPluginMentionDeps } from "./internal/mention-app-plugin-deps"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
 import { maybeWirePeerMessageSurface } from "./peer-message-sink-wire"
@@ -476,39 +477,13 @@ const parseAssemblerPositiveInt = (raw: string | undefined): number | undefined 
   return Number.isInteger(n) && n > 0 ? n : undefined
 }
 
-/** Open the optional agent-capability slots (browser / objective / mailbox /
- *  web_search / background-subagent) in one call. Keeps `assembleAgentConfig`
- *  under the cognitive-complexity cap; each helper is independently env-gated,
- *  caller-override-safe, and a no-op when its gate/resource is absent. */
+/** Open the optional agent-capability slots by folding {@link CAPABILITY_WIRES}
+ *  in a single ordered loop (each entry env-gated, caller-override-safe, no-op
+ *  when absent). `config` (the derived runtime-config) is computed ONCE and
+ *  threaded via the context — byte-identical to the prior per-call arity. */
 const wireOptionalCapabilitySlots = (cfg: AgentConfig, env: AssemblerEnv): void => {
   const config = runtimeConfigFromEnv(env)
-  maybeWireBrowser(cfg, env)
-  // G1 — runs AFTER maybeWireBrowser so it can read the freshly-wired
-  // `cfg.browser.port`; no-op unless QUANTA_APPSHOT=1 AND a browser is present.
-  maybeWireAppshot(cfg, env)
-  maybeWireObjective(cfg, env)
-  maybeWireMailbox(cfg, env)
-  // jul-15 W2 — decorate the mailbox with the peer-message SURFACE notifier
-  // BEFORE side-agent (so daemon findings surface) and BEFORE the team wrap (so a
-  // denied cross-team send never reaches the display seam). No-op unless
-  // QUANTA_PEER_MSG_SURFACE is on AND a mailbox is present (byte-identical default).
-  maybeWirePeerMessageSurface(cfg, env)
-  maybeWireWebSearch(cfg, env)
-  maybeWireBackgroundSubagent(cfg, env, config)
-  maybeWireReadFileState(cfg, env)
-  maybeWireDiagnostics(cfg, env)
-  maybeWireSkillMcp(cfg, env)
-  maybeWirePromptCacheObserver(cfg, env)
-  maybeWireVcsEventSink(cfg, env)
-  maybeWireProgressSink(cfg, env)
-  // ADR-0399 — operator switch (`QUANTA_PII_REDACTION=1`) that populates
-  // `cfg.redaction.pii` so the dispatch masking chokepoint becomes reachable.
-  // Absent ⇒ no pii block ⇒ byte-identical default-OFF (the secret branch of
-  // the same RedactionConfig is untouched).
-  maybeWirePiiRedaction(cfg, env)
-  maybeWireSideAgent(cfg, config)
-  maybeWireWriteBudget(cfg, config)
-  maybeWireBudgetLedger(cfg, env)
+  applyCapabilityWires(CAPABILITY_WIRES, cfg, { env, config })
 }
 
 /** Parse a USD cost cap (`QUANTA_BUDGET_LEDGER_*_USD`) from the env bag: a
@@ -868,6 +843,31 @@ const wireSessionResourcesAndCodexR2 = (cfg: AgentConfig, env: AssemblerEnv): vo
       }),
   })
 }
+
+/** Declarative capability-wire registry (ADR-0303; same pattern as
+ *  `PRE_FLIGHT_CONSULTS`). Built ONCE at init; `buildCapabilityWires` runs
+ *  `assertWireOrder` so a reorder breaking a "runs AFTER" contract fails loudly.
+ *  Array order === the legacy call sequence ⇒ byte-identical. Declared AFTER its
+ *  `maybeWire*` helpers (TDZ). */
+const CAPABILITY_WIRES = buildCapabilityWires({
+  maybeWireBrowser,
+  maybeWireAppshot,
+  maybeWireObjective,
+  maybeWireMailbox,
+  maybeWirePeerMessageSurface,
+  maybeWireWebSearch,
+  maybeWireBackgroundSubagent,
+  maybeWireReadFileState,
+  maybeWireDiagnostics,
+  maybeWireSkillMcp,
+  maybeWirePromptCacheObserver,
+  maybeWireVcsEventSink,
+  maybeWireProgressSink,
+  maybeWirePiiRedaction,
+  maybeWireSideAgent,
+  maybeWireWriteBudget,
+  maybeWireBudgetLedger,
+})
 
 export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): AgentConfig => {
   const policy: ModePolicy = MODE_PRESETS[req.mode]
