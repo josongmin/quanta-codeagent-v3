@@ -233,9 +233,12 @@ export const isUnfenceableWriteTool = (toolName: string): boolean =>
  * fix were both INCOMPLETE (each closed the tools someone happened to remember),
  * because nothing tied the fence's closed tool-sets back to the registry's actual
  * write-capable universe. `ownership-fence-drift-hellgate.test.ts` cross-checks
- * this map against BOTH universes — `MUTATING_TOOL_TABLE` (write_filesystem /
- * bash_mutating / git_mutating kinds) AND the gated tool-surface manifest
- * (risk:"mutating") — so a NEW write tool that isn't classified here fails CI.
+ * this map against THREE universes — `MUTATING_TOOL_TABLE` (write_filesystem /
+ * bash_mutating / git_mutating kinds), the gated tool-surface manifest
+ * (risk:"mutating"), AND the LIVE base registry (every `buildDefaultTools()` tool
+ * with `isReadOnly()===false`) — so a NEW write tool that isn't classified here
+ * fails CI, whether it drifts in via the plan-mode table, the risk tag, or the
+ * runtime read-only SSOT.
  *
  * Classes (how the fence handles the tool's write target):
  *   · `leaf`        — target is a top-level `path`/`file` string → `extractWriteEffects`.
@@ -255,11 +258,13 @@ export const isUnfenceableWriteTool = (toolName: string): boolean =>
  *      circumvention.ts §5). `bash` is a BASE default-ON tool, so this is
  *      reachable in a DEFAULT fenced subagent — the fence is sound for structured
  *      writers, best-effort for shell.
- *   2. A gated write tool absent from BOTH universes above (e.g. a future LSP
- *      mutator not in the mutating table and not risk-tagged) would escape the
- *      drift guard's universe check — but it is still caught by the map's own
- *      internal-consistency assertions the moment it is added to any runtime set,
- *      and the two-universe net covers every tool that exists today.
+ *   2. A GATED write tool absent from ALL THREE universes (e.g. a future LSP
+ *      mutator not in the mutating table, not risk:"mutating", and not a base tool)
+ *      would escape the drift guard's universe check — but it is still caught by
+ *      the map's own internal-consistency assertions the moment it is added to any
+ *      runtime set. (BASE write tools are now fully covered by Universe 3, which
+ *      checks the live `isReadOnly()` SSOT directly.) The three-universe net covers
+ *      every tool that exists today.
  * These are documented boundaries, not a completeness claim.
  */
 export type OwnershipWriteClass = "leaf" | "patch" | "field" | "shell" | "fail-closed" | "non-fs"
@@ -339,6 +344,13 @@ export const OWNERSHIP_WRITE_CLASSIFICATION: Readonly<Record<string, OwnershipWr
     team_create: "non-fs", // in-session team registry
     team_delete: "non-fs",
     mcp_connector_list: "non-fs", // read/list connectors
+    session_config: "non-fs", // session effort store, no FS
+    // BASE `test_runner` self-reports isReadOnly()===false and exposes
+    // extractShellCommand (its `command`/derived `path` run through the shell), so
+    // any redirect write is caught by the shell extractor — classified `shell`.
+    // (Distinct from the gated `run_tests`; NOTE the mode.ts MUTATING_TOOL_TABLE
+    // lists test_runner as read-only `null`, a known benign discrepancy.)
+    test_runner: "shell",
   })
 
 /** The runtime fence sets, exposed for the drift-guard test to assert they agree

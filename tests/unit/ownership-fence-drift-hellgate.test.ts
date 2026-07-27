@@ -29,7 +29,7 @@ import {
   OWNERSHIP_WRITE_CLASSIFICATION,
   ownershipWriteSets,
 } from "@/agent/ownership-policy"
-import { GATED_TOOLS } from "@/tool"
+import { buildDefaultTools, GATED_TOOLS } from "@/tool"
 
 const CLASSIFIED = new Set(Object.keys(OWNERSHIP_WRITE_CLASSIFICATION))
 
@@ -58,6 +58,21 @@ describe("ownership fence — SSOT covers Universe 2 (gated risk:mutating manife
       for (const g of entry.group ?? []) gatedMutating.add(g)
     }
     const unclassified = [...gatedMutating].filter((name) => !CLASSIFIED.has(name)).sort()
+    expect(unclassified).toEqual([])
+  })
+})
+
+describe("ownership fence — SSOT covers Universe 3 (live BASE registry isReadOnly)", () => {
+  test("every BASE tool with isReadOnly()===false is classified", () => {
+    // Closes residual-limit #2 for the ALWAYS-PRESENT base tools: risk-tag drift
+    // (manifest `risk` vs live `isReadOnly()`) can't hide a base write tool from
+    // the fence — the runtime SSOT (`isReadOnly()`) is checked directly. Base
+    // tools need no ports, so this instantiates the real registry with none.
+    const unclassified = buildDefaultTools()
+      .filter((t) => !t.isReadOnly())
+      .map((t) => t.name)
+      .filter((name) => !CLASSIFIED.has(name))
+      .sort()
     expect(unclassified).toEqual([])
   })
 })

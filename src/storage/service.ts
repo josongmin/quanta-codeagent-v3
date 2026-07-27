@@ -1,8 +1,10 @@
-import { lstatSync, readlinkSync } from "node:fs"
 import { mkdir, rename, stat, unlink } from "node:fs/promises"
-import { dirname, isAbsolute, resolve } from "node:path"
+import { dirname, resolve } from "node:path"
 import { QuantaError, runtimeConfig } from "@/shared"
 import { writeFileAtomic as writeFileAtomicRaw } from "./atomic-write"
+// The symlink-aware create-then-escape defense is the ONE shared core (jul-27
+// DRY audit — was byte-duplicated here + in fs-jail-lib.ts).
+import { lexicalNormalize, realResolve } from "./canonicalize-core"
 import type { FileInfo } from "./types"
 
 /** Raised when a tool's filesystem access escapes its `ctx.cwd` jail root.
@@ -150,91 +152,12 @@ const emitJailDeny = (offendingPath: string, jailRoot: string): void => {
 declare const JailBrand: unique symbol
 export type JailedPath = string & { readonly [JailBrand]: true }
 
-/** Normalize an absolute path to its canonical segment list (collapsing `.`
- *  and resolving `..` lexically). Returns the cleaned absolute path. */
-const lexicalNormalize = (abs: string): string => {
-  const out: string[] = []
-  for (const seg of abs.split("/")) {
-    if (seg === "" || seg === ".") continue
-    if (seg === "..") {
-      out.pop()
-      continue
-    }
-    out.push(seg)
-  }
-  return `/${out.join("/")}`
-}
-
 /** True iff `child` is the jail root itself or strictly inside it. Compared on
  *  segment boundaries so `/jailX` cannot pass a `/jail` root. */
 const isInside = (root: string, child: string): boolean => {
   if (child === root) return true
   const prefix = root === "/" ? "/" : `${root}/`
   return child.startsWith(prefix)
-}
-
-/** Max symlink hops {@link realResolve} expands before giving up. Mirrors the
- *  kernel's typical `MAXSYMLINKS` (40) — far past any legitimate chain, but
- *  bounded so a symlink CYCLE among dangling links cannot spin forever. */
-const MAX_SYMLINK_HOPS = 40
-
-/**
- * Canonicalize `abs` for the jail boundary check, resolving symlinks EVEN WHEN
- * THEIR TARGET DOES NOT YET EXIST.
- *
- * SECURITY-CRITICAL. The previous implementation only consulted
- * `realpathSync(ancestor)` and, on failure, climbed past the segment and
- * re-appended the tail LEXICALLY. That silently treated a *dangling* symlink
- * (e.g. `jail/esc -> /outside/absent`) as a plain directory name, so a path
- * UNDER it (`jail/esc/pwned.txt`) normalized back "inside" the jail — yet a
- * later write, once the target appeared, landed OUTSIDE. A dangling symlink to
- * an out-of-jail location is the classic create-then-escape vector.
- *
- * This version walks the path segment-by-segment from the root. For each
- * existing component we `lstat` it: a SYMLINK has its `readlink` target
- * expanded (resolved against the symlink's parent, absolute targets honoured)
- * and re-walked — whether or not that target currently exists. Non-symlink
- * components (real dirs/files, or not-yet-created leaves) are appended
- * literally. The result is the fully symlink-expanded path; the caller's
- * `isInside` containment check then sees the REAL destination, dangling or not.
- *
- * Bounded by {@link MAX_SYMLINK_HOPS} so a symlink cycle cannot loop forever
- * (on the cap we fall back to the lexical normalize, which is conservative —
- * an unresolvable cycle is not a valid in-jail path anyway). */
-const realResolve = (abs: string): string => {
-  let pending = abs.split("/").filter(Boolean)
-  const resolved: string[] = []
-  let hops = 0
-  while (pending.length > 0) {
-    const seg = pending.shift() as string
-    if (seg === ".") continue
-    if (seg === "..") {
-      resolved.pop()
-      continue
-    }
-    const current = `/${[...resolved, seg].join("/")}`
-    let link: string | undefined
-    try {
-      if (lstatSync(current).isSymbolicLink()) link = readlinkSync(current)
-    } catch {
-      // Component does not exist yet (a not-yet-created leaf/parent). It cannot
-      // be a symlink, so append it literally and keep walking.
-    }
-    if (link === undefined) {
-      resolved.push(seg)
-      continue
-    }
-    if (++hops > MAX_SYMLINK_HOPS) return lexicalNormalize(abs)
-    // Expand the symlink. An ABSOLUTE target replaces the whole walked prefix;
-    // a RELATIVE target resolves against the symlink's PARENT (`resolved`, which
-    // does NOT yet include `seg`). In both cases we reset `resolved` and re-queue
-    // the new prefix PLUS the remaining `pending` so `..`/`.` in the target and
-    // the rest of the path are re-walked uniformly through the loop's own logic.
-    const prefix = isAbsolute(link) ? link : `/${[...resolved, link].join("/")}`
-    resolved.length = 0
-    pending = [...prefix.split("/").filter(Boolean), ...pending]
-  }
-  return `/${resolved.join("/")}`
 }
 
 /** Enforce the jail: resolve `requested` against `baseDir`, lexically and via

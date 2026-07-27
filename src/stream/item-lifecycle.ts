@@ -60,8 +60,53 @@ export class ItemLifecycleTracker {
       case "turn_start":
       case "done":
         return this.closeAll()
-      default:
+      // Transient events produce NO lifecycle item. LISTED EXPLICITLY (not a bare
+      // `default`) so a NEW content-bearing AgentEvent arm can't silently drop from
+      // the item-lifecycle plane: an unhandled arm makes `ev` non-`never` at the
+      // pin below → COMPILE ERROR, forcing a deliberate classification.
+      case "session_start":
+      case "llm_request":
+      case "llm_continuation":
+      case "assistant_thinking":
+      case "in_progress":
+      case "tool_progress":
+      case "skill_scope_decision":
+      case "permission_escalation_requested":
+      case "permission_escalation_resolved":
+      case "recovery":
+      case "context_compacted":
+      case "error":
+      case "usage":
+      case "output_progress":
+      case "response_queued":
+      case "interrupted":
+      case "subagent_cancel":
+      case "subagent_spawn":
+      case "subagent_status":
+      case "peer_message":
+      case "subagent_delivery":
+      case "plan_created":
+      case "plan_updated":
+      case "plan_snapshot":
+      case "item_started":
+      case "item_updated":
+      case "item_completed":
+      case "plan_user_input_requested":
+      case "plan_user_input_resolved":
+      case "mode_changed":
+      case "turn_diff_updated":
+      case "decision":
+      case "knobs_applied":
+      case "progress_update":
+      case "ratelimit_snapshot":
+      case "budget_breach":
         return []
+      default: {
+        // Exhaustiveness pin (runtime-safe: no throw).
+        const _exhaustive: never = ev
+        void _exhaustive
+        return []
+      }
     }
   }
 

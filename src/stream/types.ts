@@ -163,7 +163,7 @@ export const AGENT_EVENT_TYPES = [
   "ratelimit_snapshot",
   "budget_breach",
   "done",
-] as const
+] as const satisfies readonly AgentEvent["type"][]
 
 export type AgentEventType = (typeof AGENT_EVENT_TYPES)[number]
 

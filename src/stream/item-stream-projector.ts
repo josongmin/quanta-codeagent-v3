@@ -102,13 +102,49 @@ export class ItemStreamProjector {
       case "turn_start":
       case "done":
         return this.closeAll()
-      default:
-        // Transient / telemetry events (in_progress, output_progress, usage,
-        // ratelimit_snapshot, knobs_applied, …) MUST NOT close an open reasoning
-        // run — they interleave with thinking deltas and a premature close would
-        // spuriously split one reasoning item into several. Only the answer, a
-        // tool call, or a turn boundary ends reasoning.
+      // Transient / telemetry events produce NO item — they interleave with
+      // thinking deltas and a premature close would spuriously split one reasoning
+      // item. LISTED EXPLICITLY (not a bare `default`) so a NEW content-bearing
+      // AgentEvent arm can't silently vanish from the item stream: an unhandled
+      // arm makes `ev` non-`never` at the exhaustiveness pin below → COMPILE ERROR,
+      // forcing a deliberate "surface it as an item, or add it here" decision.
+      // (This makes the plan-events regression the comment above warns about
+      // structurally impossible.)
+      case "session_start":
+      case "llm_request":
+      case "llm_continuation":
+      case "in_progress":
+      case "skill_scope_decision":
+      case "permission_escalation_requested":
+      case "permission_escalation_resolved":
+      case "recovery":
+      case "context_compacted":
+      case "error":
+      case "usage":
+      case "output_progress":
+      case "response_queued":
+      case "interrupted":
+      case "subagent_spawn":
+      case "subagent_status":
+      case "item_started":
+      case "item_updated":
+      case "item_completed":
+      case "plan_user_input_requested":
+      case "plan_user_input_resolved":
+      case "mode_changed":
+      case "turn_diff_updated":
+      case "decision":
+      case "knobs_applied":
+      case "progress_update":
+      case "ratelimit_snapshot":
+      case "budget_breach":
         return []
+      default: {
+        // Exhaustiveness pin (runtime-safe: no throw in the hot stream path).
+        const _exhaustive: never = ev
+        void _exhaustive
+        return []
+      }
     }
   }
 

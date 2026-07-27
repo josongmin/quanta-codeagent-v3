@@ -309,6 +309,10 @@ const SECRET_VALUE_RES: readonly RegExp[] = [
   // `sk-proj-…`/`sk-svcacct-…` — all start `sk-` so the broadened `sk-[\w-]`
   // class (now allowing `-`) subsumes every variant.
   /\bsk-[A-Za-z0-9_-]{8,}/,
+  // Stripe live/test secret + restricted keys (`sk_live_`/`rk_live_`/…) — the
+  // `sk-` class above is dash-prefixed and does NOT catch these underscore forms
+  // (parity with @/security redactSecrets; pinned by redaction-parity-hellgate).
+  /\b(?:sk_live_|sk_test_|rk_live_|rk_test_)[A-Za-z0-9]{20,}\b/,
   /\bghp_[A-Za-z0-9]{8,}/,
   // Fine-grained GitHub PAT + the OAuth/app/server/user token families.
   /\bgithub_pat_[A-Za-z0-9_]{8,}/,
