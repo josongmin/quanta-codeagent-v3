@@ -289,6 +289,32 @@ describe("keymap-golden — FALL-THROUGH cases (the naive refactor breaks these)
     expect(result).toBe("abc")
     expect(opened).toBe(0)
   })
+
+  // REGRESSION (jul-28 independent adversarial audit): splitting the ctrl+x chord
+  // into TWO bindings let the dispatcher re-evaluate the "arm" binding after the
+  // "clear" binding fell through — so `ctrl+x ctrl+x` RE-LATCHED and a following
+  // `ctrl+e` wrongly opened the editor. The original `if/else-if` cannot do that.
+  test("ctrl-x ctrl-x ctrl-e: 2nd ctrl-x does NOT re-arm; editor stays closed", async () => {
+    let opened = 0
+    const port = {
+      openDraft: async (t: string) => {
+        opened += 1
+        return { text: t, changed: false }
+      },
+    }
+    const { result } = await run({ prompt: "› ", openEditor: port }, async (s) => {
+      s.typeStr("ab")
+      s.key(undefined, { name: "x", ctrl: true }) // arm the chord
+      s.key(undefined, { name: "x", ctrl: true }) // 2nd ctrl-x: clears latch, must NOT re-arm
+      s.key(undefined, { name: "e", ctrl: true }) // ctrl-e now: latch clear ⇒ NOT a chord (=end)
+      s.retn()
+    })
+    expect(opened).toBe(0) // was 1 under the 2-binding regression
+    expect(result).toBe("ab")
+  })
+  // (positive control — the chord DOES open the editor — is covered by the
+  // dedicated raw-line-reader-editor.hellgate.test.ts, which drives the async
+  // editor round-trip correctly.)
 })
 
 describe("keymap-golden — precedence: ctrl-c / ctrl-d always win", () => {

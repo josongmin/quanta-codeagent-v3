@@ -28,11 +28,25 @@
  */
 
 import { describe, expect, it } from "bun:test"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const root = (rel: string) => join(import.meta.dir, "../../", rel)
 const read = (rel: string) => readFileSync(root(rel), "utf8")
+/** Read a `driver.ts` barrel PLUS every `driver/*.ts` lane sibling (the barrel
+ *  was split into lane modules — refactor/bench-driver-lanes). Without this the
+ *  answer-key gold-needle guard below goes BLIND to code that moved out of the
+ *  barrel (e.g. the 828-line selection orchestration → driver/selection.ts). */
+const readDriverAggregate = (barrelRel: string): string => {
+  const dirRel = barrelRel.replace(/\.ts$/, "")
+  const dirAbs = root(dirRel)
+  const lanes = existsSync(dirAbs)
+    ? readdirSync(dirAbs)
+        .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+        .map((f) => readFileSync(join(dirAbs, f), "utf8"))
+    : []
+  return [read(barrelRel), ...lanes].join("\n")
+}
 
 // Every source file that declares a static string injected into the agent prompt.
 // jul-02 god-file split: the `*_STEER` / `SWEBENCH_DIRECTIVE*` prompt constants were
@@ -159,7 +173,9 @@ describe("no-benchmark-overfit-steer ratchet", () => {
     // None of these strings is built from the denylists above — flask + a fresh
     // repo path + per-instance framing. A denylist-only ratchet would MISS them.
     const novelOverfits = [
-      "for the " + "flask routing issue, edit src/" + "flask/blueprints.py so register() returns the adapter",
+      "for the " +
+        "flask routing issue, edit src/" +
+        "flask/blueprints.py so register() returns the adapter",
       "rca " + "target gate: patch lib/" + "requests/adapters.py for the redirect case",
       "for the pandas groupby " + "issue change pandas/core/groupby/ops.py",
     ]
@@ -170,7 +186,8 @@ describe("no-benchmark-overfit-steer ratchet", () => {
     }
     // …and the detector does NOT false-positive on a generic method steer that
     // merely NAMES a framework as a tool-performance example (the find-refs case).
-    const benign = "prefer find_references over lsp_references which times out on large repos like sympy/django"
+    const benign =
+      "prefer find_references over lsp_references which times out on large repos like sympy/django"
     expect(detectOverfitSignals(benign)).toEqual([])
   })
 
@@ -179,9 +196,9 @@ describe("no-benchmark-overfit-steer ratchet", () => {
     // the SCAN+DETECT pipeline (not just the detector) catches one. Synthetic
     // source — the real driver.ts is left untouched.
     const injected = [
-      "const SIMPLICITY_STEER = \"prefer the simplest existing mechanism.\"",
+      'const SIMPLICITY_STEER = "prefer the simplest existing mechanism."',
       "const COLORMAP_STEER =",
-      "  \"for the matplotlib colormap issue, edit lib/mpl/cm.py register() and colors.py __eq__\"",
+      '  "for the matplotlib colormap issue, edit lib/mpl/cm.py register() and colors.py __eq__"',
     ].join("\n")
     const found = extractSteerBodies(injected)
     expect(found.map((s) => s.name).sort()).toEqual(["COLORMAP_STEER", "SIMPLICITY_STEER"])
@@ -214,7 +231,9 @@ describe("no-benchmark-overfit-steer ratchet", () => {
   })
 
   it("no bench-selection source matches candidate patches against gold file paths/symbols", () => {
-    const files = ["src/runner/batch/eval/driver.ts", "src/apps/bench/eval/driver.ts"].map(read)
+    const files = ["src/runner/batch/eval/driver.ts", "src/apps/bench/eval/driver.ts"].map(
+      readDriverAggregate,
+    )
     const needles = [
       "db/backends/" + "mysql/operations.py",
       "db/backends/" + "postgresql/client.py",

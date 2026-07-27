@@ -189,26 +189,31 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
   },
 
   // ── RFC-11 — ctrl+x ctrl+e chord (only when openEditor is wired) ───────────
-  {
-    when: (c) => c.opts.openEditor !== undefined && c.pendingCtrlX.value,
-    run: (c) => {
-      c.pendingCtrlX.value = false
-      if (c.key.ctrl === true && c.key.name === "e") {
-        c.runExternalEdit()
-        return "handled"
-      }
-      // Any other key after ctrl-x: abandon the chord, FALL THROUGH so the key
-      // reaches its normal handler below.
-      return "fallthrough"
-    },
-  },
+  // ONE binding (NOT two) so the original `if (pendingCtrlX) … else if (ctrl+x)`
+  // MUTUAL EXCLUSION is preserved. Splitting it into two bindings was a real
+  // regression: after the "latch was set" arm cleared `pendingCtrlX` and fell
+  // through, the dispatcher re-evaluated the "arm the latch" binding's `when` —
+  // which now matched the just-cleared state — so `ctrl+x ctrl+x` RE-LATCHED and
+  // a following `ctrl+e` wrongly opened the editor. Capturing the entry-state in a
+  // single handler makes the two arms un-re-matchable (pinned by the golden
+  // ctrl+x-ctrl+x-ctrl+e case).
   {
     when: (c) =>
       c.opts.openEditor !== undefined &&
-      !c.pendingCtrlX.value &&
-      c.key.ctrl === true &&
-      c.key.name === "x",
+      (c.pendingCtrlX.value || (c.key.ctrl === true && c.key.name === "x")),
     run: (c) => {
+      if (c.pendingCtrlX.value) {
+        // latch WAS set — consume the chord
+        c.pendingCtrlX.value = false
+        if (c.key.ctrl === true && c.key.name === "e") {
+          c.runExternalEdit()
+          return "handled"
+        }
+        // Any other key after ctrl-x (INCLUDING a 2nd ctrl+x): abandon the chord,
+        // do NOT re-arm, FALL THROUGH so the key reaches its normal handler below.
+        return "fallthrough"
+      }
+      // latch was NOT set, key is ctrl+x → arm the chord.
       c.pendingCtrlX.value = true
       return "handled"
     },
