@@ -190,6 +190,16 @@ export const assembleChildConfig = (
   // then admits exactly that pass and denies anything deeper (fail-closed under a
   // widened policy). `childDepthOf` on a well-formed non-negative int never throws.
   const passDepth = childDepthOf({ depth: daemonDepth })
+  // SECURITY BOUNDARY (honest, documented): this OS-PROCESS daemon is a fresh
+  // ROOT config — the spawning parent's `ownershipPolicy` (QUANTA_FS_OWNERSHIP_
+  // ENFORCE) is NOT carried across the process fork (only `depth` crosses, via
+  // WORKER_PARENT_DEPTH_ENV). So a fenced parent spawning an OS-process side-agent
+  // gets an UNFENCED daemon. Bounded by: both gates default-OFF (QUANTA_SIDE_AGENT
+  // + QUANTA_SIDE_AGENT_PROCESS) AND the read-biased SIDE_AGENT_READONLY_TOOLS
+  // default filter. Full parity would require serializing owned/forbidden across
+  // the fork (like depth) — deferred (disproportionate for a default-OFF² path);
+  // the in-process spawn boundary (the audited HIGH) IS composed via
+  // narrowChildOwnership. Distinct from the in-process fence — do not conflate.
   return {
     llm,
     registry: new ToolRegistry(buildDefaultTools()),

@@ -79,6 +79,13 @@ export const bindBranchRunCandidate = (config: AgentConfig): RunCandidate => {
     }
     const llm = seed.modelOverride?.port ?? baseLlm
     const hint = seed.promptHint ? `\n\n<branch-hint>${seed.promptHint}</branch-hint>` : ""
+    // SECURITY: the candidate inherits the parent's `ownershipPolicy` VERBATIM via
+    // the spread — the same fence binds the candidate as the parent (candidates
+    // carry NO per-candidate owned/forbidden input, so this IS the correct
+    // narrowing: `narrowChildOwnership(parent, undefined) === parent`). This path
+    // deliberately does NOT enter `buildChildConfig`. INVARIANT: branch_search must
+    // never gain a per-candidate surface input WITHOUT routing through
+    // `narrowChildOwnership` — pinned by branch-search-ownership-inherit-hellgate.
     const child: AgentConfig = {
       ...parentSansBranch,
       llm,
