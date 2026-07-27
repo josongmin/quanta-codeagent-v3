@@ -4,7 +4,7 @@
  *  from the parent module so importers stay byte-compatible. `State` is the
  *  internal reader machine state; `longestCommonPrefix` is a pure helper. */
 
-import type { AtState } from "../at-autocomplete"
+import { type AtState, createAtState } from "../at-autocomplete"
 import type { PasteSegment } from "./paste-display"
 
 export interface CandidateDescriptor {
@@ -62,6 +62,51 @@ export interface State {
    *  (`name:"return"`) is the second half of a CRLF and is dropped so the
    *  buffer keeps a single `\n` per line break. */
   pasteLastCR: boolean
+}
+
+/** Fresh reader `State` for one `readLine` call — every field at its initial
+ *  value. Factored out of the driver so the executor body stays thin. */
+export const createReaderState = (): State => ({
+  buf: "",
+  cursor: 0,
+  candidates: [],
+  selectedIdx: -1,
+  listOpen: false,
+  reserved: 0,
+  historyDraft: null,
+  searchMode: false,
+  searchQuery: "",
+  searchMatch: "",
+  heredocOpen: false,
+  heredocFence: "",
+  heredocLines: [],
+  at: createAtState(),
+  pasteSegments: [],
+  pasting: false,
+  pasteAnchor: 0,
+  pasteText: "",
+  pasteLastCR: false,
+})
+
+/** Recompute + auto-open the slash-completion list for the current buffer.
+ *  Mirrors Codex: the list auto-opens as soon as `buf` starts with `/` and at
+ *  least one candidate matches; the selection is clamped in-bounds. Pure over
+ *  `state` + the optional completer (no terminal). */
+export const refreshSlashCandidates = (
+  state: State,
+  completer: ((line: string) => readonly string[]) | undefined,
+): void => {
+  if (completer === undefined) {
+    state.candidates = []
+    return
+  }
+  state.candidates = state.buf.startsWith("/") ? completer(state.buf) : []
+  state.listOpen = state.candidates.length > 0
+  if (state.listOpen && state.selectedIdx < 0) state.selectedIdx = 0
+  if (!state.listOpen) state.selectedIdx = -1
+  if (state.selectedIdx >= state.candidates.length) {
+    state.selectedIdx = state.candidates.length - 1
+  }
 }
 
 export const longestCommonPrefix = (candidates: readonly string[]): string => {
