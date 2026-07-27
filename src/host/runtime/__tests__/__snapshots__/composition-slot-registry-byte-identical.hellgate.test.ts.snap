@@ -1073,7 +1073,7 @@ maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
-toolProfile :: obj{resolver=obj{resolve=fn},defaultName=str:"readonly"}"
+toolProfile :: obj{resolver=obj{resolve=fn},defaultName=str:"minimal"}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — tool profile flag: tool profile flag :: assembled 1`] = `
@@ -1090,7 +1090,7 @@ maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
-toolProfile :: obj{resolver=obj{resolve=fn},defaultName=str:"readonly"}
+toolProfile :: obj{resolver=obj{resolve=fn},defaultName=str:"minimal"}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
@@ -1206,7 +1206,7 @@ maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
-delegation :: obj{delegator=obj{delegate=fn,listModes=fn,describeMode=fn},modes=arr[str:"general"]}"
+delegation :: obj{delegator=obj{delegate=fn,listModes=fn,describeMode=fn},modes=arr[str:"explore"]}"
 `;
 
 exports[`composition slot-registry — byte-identical hellgate fingerprint stable — delegate modes flag: delegate modes flag :: assembled 1`] = `
@@ -1223,7 +1223,7 @@ maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
-delegation :: obj{delegator=obj{delegate=fn,listModes=fn,describeMode=fn},modes=arr[str:"general"]}
+delegation :: obj{delegator=obj{delegate=fn,listModes=fn,describeMode=fn},modes=arr[str:"explore"]}
 modePolicy :: obj{mode=str:"interactive",permission=obj{kind=str:"reviewer-backed"},termination=obj{kind=str:"user-stop"},sandbox=obj{kind=str:"user-cwd"},output=obj{kind=str:"stdout-chat"},externalDeps=obj{kind=str:"host"},toolSurface=obj{kind=str:"full"},promptPack=obj{kind=str:"assistant"},memory=obj{kind=str:"persistent"},observation=obj{kind=str:"stream-only"},network=obj{kind=str:"open"},gitWrite=obj{kind=str:"free"},secrets=obj{kind=str:"host-env"}}
 budgetMeter :: obj{dials=obj{maxTurns=num,maxRetries=num,maxConsecutiveFailures=num},caps=obj{},exhaustion=str:"stop",clock=fn,startedAtMs=num,turns=num,modelCalls=num,toolCalls=num,shellCommands=num,testRuns=num,inputTokens=num,outputTokens=num,reasoningTokens=num,filesChanged=num,patchBytes=num,retries=num,consecutiveFailures=num,costUsdAccum=num,costUsdThisTurn=num,providerRateLimitRemainingPct=undefined}
 lspDiagnosticsHookEnabled :: bool:false
@@ -1485,7 +1485,7 @@ maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
-toolProfile :: obj{resolver=obj{resolve=fn},defaultName=str:"readonly"}
+toolProfile :: obj{resolver=obj{resolve=fn},defaultName=str:"minimal"}
 focusChain :: obj{tracker=obj{setTodos=fn,tickTurn=fn,getInjection=fn,peekInjection=fn,getDriftWarning=fn,markDone=fn,snapshotTodos=fn,currentTurn=fn},reinjectEveryN=num}
 objective :: obj{set=fn,get=fn,updateStatus=fn,markUsageLimited=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
 shadowVerify :: obj{verify=fn}
@@ -1510,7 +1510,7 @@ maxTurns :: num
 signal :: obj{}
 searchPipeline :: obj{search=fn}
 stickyModelStore :: obj{store=obj{get=fn,set=fn,load=fn}}
-toolProfile :: obj{resolver=obj{resolve=fn},defaultName=str:"readonly"}
+toolProfile :: obj{resolver=obj{resolve=fn},defaultName=str:"minimal"}
 focusChain :: obj{tracker=obj{setTodos=fn,tickTurn=fn,getInjection=fn,peekInjection=fn,getDriftWarning=fn,markDone=fn,snapshotTodos=fn,currentTurn=fn},reinjectEveryN=num}
 objective :: obj{set=fn,get=fn,updateStatus=fn,markUsageLimited=fn,addBlocker=fn,clearBlocker=fn,setNextActions=fn,markCriterion=fn,recordUsage=fn,list=fn,toSnapshot=fn,fromSnapshot=fn}
 shadowVerify :: obj{verify=fn}

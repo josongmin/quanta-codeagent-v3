@@ -219,7 +219,10 @@ const buildFor = (
     ...partial,
   }
   const base = buildBaseFromArgs(p)
-  const assembled = assembleAgentConfig({ mode: p.mode, base, dials: p.dials }, process.env)
+  const assembled = assembleAgentConfig(
+    { mode: p.mode, base, ...(p.dials !== undefined ? { dials: p.dials } : {}) },
+    process.env,
+  )
   return {
     base: fingerprint(base as unknown as Record<string, unknown>),
     assembled: fingerprint(assembled as unknown as Record<string, unknown>),
@@ -267,10 +270,10 @@ const MATRIX: ReadonlyArray<{
   { name: "pii redaction", gates: { QUANTA_PII_REDACTION: "1" } },
   // ── partial-flag (CLI `--flag`) variations (base side) ──
   { name: "sticky model flag", gates: {}, partial: { stickyModel: true } },
-  { name: "tool profile flag", gates: {}, partial: { toolProfile: "readonly" } },
+  { name: "tool profile flag", gates: {}, partial: { toolProfile: "minimal" } },
   { name: "focus chain flag", gates: {}, partial: { focusChainEvery: 3 } },
   { name: "fork session flag", gates: {}, partial: { forkSession: true } },
-  { name: "delegate modes flag", gates: {}, partial: { delegateModes: ["general"] } },
+  { name: "delegate modes flag", gates: {}, partial: { delegateModes: ["explore"] } },
   { name: "identity mode flag", gates: {}, partial: { identityMode: "default" } },
   { name: "batch mode", gates: {}, partial: { mode: "batch" } },
   // ── realistic multi-feature combos ──
@@ -305,7 +308,7 @@ const MATRIX: ReadonlyArray<{
   {
     name: "combo: base flags + env gates together",
     gates: { QUANTA_ARTIFACT_STORE: "1", QUANTA_OBSERVABILITY: "on" },
-    partial: { stickyModel: true, focusChainEvery: 5, toolProfile: "readonly" },
+    partial: { stickyModel: true, focusChainEvery: 5, toolProfile: "minimal" },
   },
 ]
 
