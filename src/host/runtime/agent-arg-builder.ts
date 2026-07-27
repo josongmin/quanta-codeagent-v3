@@ -74,6 +74,7 @@ import {
   resolvePrewarmSlot,
 } from "./agent-arg-builder-config-slots"
 import { createArtifactPreviewResolver } from "./artifact-preview-resolver"
+import { type BaseSlotContext, foldBaseSlots } from "./base-slot-registry"
 
 export { installCommandHooksIntoBase } from "./agent-arg-builder/command-hooks-wire"
 // ADR-0303 god-module split — re-export the relocated composition-root clusters'
@@ -545,6 +546,165 @@ const attachExecutionPlaneSlots = (
   }
 }
 
+/**
+ * ADR-0303 slot-registry refactor — resolve the identity/system prompt PLUS
+ * every default-OFF feature slot's shared state, in ONE call. Extracted verbatim
+ * from `buildBaseFromArgs` (the ~25 `const resolveX(...)` locals) so that
+ * keystone stays lean; each per-slot resolver call is unchanged, so the returned
+ * values are byte-identical to the inline block.
+ *
+ * Returns the seed-facing values the base literal reads directly —
+ * `system` / `promptSurfaceProfile` (identity wire), `profilePermissionMode`
+ * (permission), and the three `buildBaseRegistry` inputs (`sandboxProfile`,
+ * `permissionPatternSlice`, `fileHistorySlice`) — PLUS `slotCtx`, the
+ * {@link BaseSlotContext} the declarative fold ({@link foldBaseSlots}) consumes.
+ * `automationSlot` + `artifactRegistry` live on `slotCtx` (they feed both the
+ * registry AND a folded slot); the caller destructures them back off it.
+ */
+const resolveBaseSlotState = (
+  env: NodeJS.ProcessEnv,
+  p: AssembleRequestPartial,
+  cwd: string,
+  /** The SINGLE search wire built once by the caller (so the registry, the
+   *  disposer, and the `searchPipeline` slot all reference the SAME instance —
+   *  never a second `buildSearchPipelineFromEnv` call with its own indexer). */
+  searchWire: ReturnType<typeof buildSearchPipelineFromEnv>,
+): {
+  readonly system: string
+  // Non-undefined (mirrors `resolveIdentitySystemPrompt`'s return) so the seed
+  // literal satisfies `exactOptionalPropertyTypes` — the identity wire ALWAYS
+  // yields a concrete surface profile (no empty-string sentinel).
+  readonly promptSurfaceProfile: ReturnType<
+    typeof resolveIdentitySystemPrompt
+  >["promptSurfaceProfile"]
+  readonly profilePermissionMode: ReturnType<typeof resolvePermissionProfileWiring>["mode"]
+  readonly sandboxProfile: ReturnType<typeof resolveSandboxProfileFromEnv>
+  readonly permissionPatternSlice: ReturnType<typeof resolvePermissionPatternSlice>
+  readonly fileHistorySlice: ReturnType<typeof resolveFileHistorySlice>
+  readonly slotCtx: BaseSlotContext
+} => {
+  // ADR-0236 identity wire — `--identity-mode <m>` (precedence #1) ⇒ build
+  // via the mode-variant registry; else fall back to the ADR-0198
+  // `QUANTA_IDENTITY=1` env (precedence #2); else the run-mode prompt pack
+  // still renders a non-empty base prompt (no empty-string sentinel).
+  const { system, identityModeVariant, promptSurfaceProfile } = resolveIdentitySystemPrompt(
+    p.identityMode,
+    env,
+    {
+      runMode: p.mode,
+      cwd,
+    },
+  )
+  // ADR-0236 — composition-root mega-wire slots. All default-OFF: each helper
+  // returns `undefined` when the operator did NOT opt in; spread conditionally
+  // so `exactOptionalPropertyTypes` does NOT see a literal `undefined`.
+  const stickyModelStore = resolveStickyModelStore(p.stickyModel)
+  const toolProfile = resolveToolProfile(p.toolProfile)
+  const focusChain = resolveFocusChain(p.focusChainEvery)
+  // ADR-0279 — automation engine composition-root wire. Returns `null`
+  // when `QUANTA_AUTOMATION !== "on"` (default-OFF byte-identical legacy);
+  // when on, returns a fully-wired slot the loop-helpers ticker consumes
+  // (ADR-0240). The default tools also gain `automation_update` when the
+  // engine is present (ADR-0280; conditional registration below).
+  const automationSlot = resolveAutomation(env)
+  // ADR-0297 — composition-root projection of `QUANTA_SANDBOX` into the
+  // bash tool factory's HITL tier. Pure: same env → same profile (or
+  // `undefined` ⇒ tier degrades to `always-confirm`). The boot path
+  // `installCliSandbox` reads the SAME env separately for the shell-
+  // spawn wrapper; both reads share `resolveSandboxProfileFromEnv` so
+  // they agree.
+  const sandboxProfile = resolveSandboxProfileFromEnv(env)
+  // ADR-0428 jun-02 wire — DIRECT env read of `QUANTA_NETWORK_PROXY` at the
+  // composition root (mirrors `resolveMemoryConfigFromEnv`; this surface builds
+  // its base WITHOUT `applyKnobs`). The helper returns a SPREAD-READY slot
+  // (`{}` when off) so the base literal carries NO extra branch. Sets
+  // `base.networkProxy` so `runAgent` constructs the live `LoopbackEgressProxy`
+  // and threads `proxyEnv` into the bash-tool child spawn. Absent / "0" / empty
+  // ⇒ `{}` ⇒ slot omitted ⇒ NO proxy, child env byte-identical (RFC §1.2).
+  const networkProxySlot = resolveNetworkProxySlot(env)
+  // ADR-0452 jun-02 wire — `QUANTA_PREWARM` → `AgentConfig.prewarm` slot
+  // (resolved by the extracted `resolvePrewarmSlot` helper; default-OFF).
+  const prewarmSlot = resolvePrewarmSlot(env)
+  // RFC jun-17 — `QUANTA_LSP_PREWARM` → `AgentConfig.lspPrewarm` slot (double-
+  // gated on the nav tools being enabled; default-OFF).
+  const lspPrewarmSlot = resolveLspPrewarmSlot(env)
+  // ADR-0404 + ADR-0415 — composition-root observability slots. Single helper
+  // call: gate ON ⇒ mints the canonical HookBus (the same bus the loop emits
+  // `post_tool_use` to), wires attribution onto it, and returns the four ports
+  // + `hooks`. Gate OFF ⇒ `{}` (byte-identical legacy; the knobs layer still
+  // owns the `QUANTA_BENCH_HOOKS` bus).
+  const observabilitySlots = resolveObservabilitySlots(env)
+  // Track A2 + GAP2 — composition-root named-permission-profile wiring, resolved
+  // in ONE call (manager = forward-compat per-thread slot; mode = behavior-LIVE
+  // PermissionContext override derived from the profile's approval pillar). Both
+  // honor flag-wins precedence + fail-closed throw on an unknown name. Absent ⇒
+  // both undefined ⇒ byte-identical legacy.
+  const { managerSlot: permissionProfileSlot, mode: profilePermissionMode } =
+    resolvePermissionProfileWiring(p.permissionProfile, env)
+  // CLUSTER D #5 — BASELINE-SEED RESIDUAL CLOSED. Build ONE per-session
+  // PatternGrantStore + its no-widen propose port (default-OFF: `undefined`
+  // unless QUANTA_REMEMBER_PATTERNS=1). The SAME store is threaded into BOTH
+  // `buildBaseRegistry` (the `permission_propose_pattern` tool) AND
+  // `AgentConfig.permissionPatternStore` (the admissibility-gate). The gate
+  // grows the store's BASELINE via user approvals (`store.grant`); the propose
+  // tool refines within it via `store.recordProposed` (no-widen). Absent ⇒ the
+  // store slot is omitted (no auto-pass, no cascade) AND the tool is absent —
+  // byte-identical to today's no-pattern behaviour.
+  const permissionPatternSlice = resolvePermissionPatternSlice()
+  // file_history_rewind — mint the SHARED per-file snapshot slice ONCE (store +
+  // sink over the same store) when QUANTA_FILE_HISTORY is on. The store wires the
+  // `file_history_rewind` tool (read side, via buildBaseRegistry → buildGatedToolPorts);
+  // the sink wires `AgentConfig.fileHistory` (write side, the write/edit capture).
+  // Absent ⇒ both omitted ⇒ no capture, no tool — byte-identical.
+  const fileHistorySlice = resolveFileHistorySlice()
+  // A2 — mint the SHARED per-session artifact registry ONCE (behind
+  // QUANTA_ARTIFACT_STORE). The SAME instance backs (1) the `artifact_*` tools +
+  // generation-tool `artifactSink` (via `buildBaseRegistry` → `buildGatedToolPorts`)
+  // and (2) `base.artifactRegistry` (the capability bit + the turn runner's
+  // `artifact.ready` producer drain). Absent ⇒ both omitted (byte-identical).
+  const artifactRegistry = resolveArtifactRegistrySlice(env)
+  // A2 — the host-side READ-ONLY preview resolver over the SAME registry (jailed
+  // to the workspace cwd). Minted next to the registry so a future IPC handler can
+  // serve `quanta-artifact://<id>` bytes read-only. Absent ⇒ no preview channel.
+  const artifactPreviewResolver =
+    artifactRegistry !== undefined
+      ? createArtifactPreviewResolver({ registry: artifactRegistry, jailRoot: cwd })
+      : undefined
+  return {
+    system,
+    promptSurfaceProfile,
+    profilePermissionMode,
+    sandboxProfile,
+    permissionPatternSlice,
+    fileHistorySlice,
+    // The BaseSlotContext the declarative fold consumes. Field order here is
+    // irrelevant (the fold reads by name); the RESOLVER ARRAY order in
+    // `base-slot-registry.ts` is what preserves the byte-identical key order.
+    slotCtx: {
+      p,
+      networkProxySlot,
+      retrievalStack: buildRetrievalStackFromEnv(env),
+      // The SAME wire the caller built (registry + disposer + pipeline share it).
+      searchWire,
+      identityModeVariant,
+      stickyModelStore,
+      toolProfile,
+      focusChain,
+      prewarmSlot,
+      lspPrewarmSlot,
+      localEnvSlot: localEnvSlotOf(p),
+      namedAgentResolverSlot: namedAgentResolverSlotOf(p),
+      automationSlot,
+      observabilitySlots,
+      permissionProfileSlot,
+      permissionPatternStoreSlot: permissionPatternStoreSlot(permissionPatternSlice),
+      fileHistorySinkSlot: fileHistorySinkSlot(fileHistorySlice),
+      artifactRegistry,
+      artifactPreviewResolver,
+    },
+  }
+}
+
 /** Build the `AgentConfig` base from CLI args. Per-mode runners can override
  *  individual fields (e.g. ci-bot replaces `registry` with the restricted
  *  git+gh tool set), but having a baseline avoids each runner duplicating
@@ -612,12 +772,11 @@ export const buildBaseFromArgs = (
       }
     },
   }
-  const retrievalStack = buildRetrievalStackFromEnv(env)
   // ADR-0277/0278 — product search surface wire. Generic repo search is
   // lexical by default and upgrades to hybrid when `QUANTA_INDEX=on`; an
-  // explicit `QUANTA_PIPELINE=none` is the kill-switch. The returned tool is
-  // registered into the base registry below, and the helper-only pipeline slot
-  // is spread into AgentConfig for any future pipeline consumers.
+  // explicit `QUANTA_PIPELINE=none` is the kill-switch. Built ONCE here (the
+  // SAME instance is threaded into the registry, the disposer, AND the
+  // `searchPipeline` slot via `resolveBaseSlotState` — never a second build).
   const searchWire = buildSearchPipelineFromEnv(env, cwd)
   // L5 M-11 — thread THIS process's wire teardown (delta-scan interval +
   // indexer) up to `runMain`'s `finally` via the disposer collector, instead
@@ -625,200 +784,64 @@ export const buildBaseFromArgs = (
   if (searchWire !== null && disposers !== undefined) {
     disposers.push(() => searchWire.dispose())
   }
-  // ADR-0236 identity wire — `--identity-mode <m>` (precedence #1) ⇒ build
-  // via the mode-variant registry; else fall back to the ADR-0198
-  // `QUANTA_IDENTITY=1` env (precedence #2); else the run-mode prompt pack
-  // still renders a non-empty base prompt (no empty-string sentinel).
-  const { system, identityModeVariant, promptSurfaceProfile } = resolveIdentitySystemPrompt(
-    p.identityMode,
-    env,
-    {
-      runMode: p.mode,
-      cwd,
-    },
-  )
-  // ADR-0236 — composition-root mega-wire slots. All default-OFF: each helper
-  // returns `undefined` when the operator did NOT opt in; spread conditionally
-  // so `exactOptionalPropertyTypes` does NOT see a literal `undefined`.
-  const stickyModelStore = resolveStickyModelStore(p.stickyModel)
-  const toolProfile = resolveToolProfile(p.toolProfile)
-  const focusChain = resolveFocusChain(p.focusChainEvery)
-  // ADR-0279 — automation engine composition-root wire. Returns `null`
-  // when `QUANTA_AUTOMATION !== "on"` (default-OFF byte-identical legacy);
-  // when on, returns a fully-wired slot the loop-helpers ticker consumes
-  // (ADR-0240). The default tools also gain `automation_update` when the
-  // engine is present (ADR-0280; conditional registration below).
-  const automationSlot = resolveAutomation(env)
-  // ADR-0297 — composition-root projection of `QUANTA_SANDBOX` into the
-  // bash tool factory's HITL tier. Pure: same env → same profile (or
-  // `undefined` ⇒ tier degrades to `always-confirm`). The boot path
-  // `installCliSandbox` reads the SAME env separately for the shell-
-  // spawn wrapper; both reads share `resolveSandboxProfileFromEnv` so
-  // they agree.
-  const sandboxProfile = resolveSandboxProfileFromEnv(env)
-  // ADR-0428 jun-02 wire — DIRECT env read of `QUANTA_NETWORK_PROXY` at the
-  // composition root (mirrors `resolveMemoryConfigFromEnv`; this surface builds
-  // its base WITHOUT `applyKnobs`). The helper returns a SPREAD-READY slot
-  // (`{}` when off) so the base literal carries NO extra branch (keeps
-  // `buildBaseFromArgs` under biome's cognitive-complexity cap). Sets
-  // `base.networkProxy` so `runAgent` constructs the live `LoopbackEgressProxy`
-  // and threads `proxyEnv` into the bash-tool child spawn. Absent / "0" / empty
-  // ⇒ `{}` ⇒ slot omitted ⇒ NO proxy, child env byte-identical (RFC §1.2).
-  const networkProxySlot = resolveNetworkProxySlot(env)
-  // ADR-0452 jun-02 wire — `QUANTA_PREWARM` → `AgentConfig.prewarm` slot
-  // (resolved by the extracted `resolvePrewarmSlot` helper; default-OFF).
-  const prewarmSlot = resolvePrewarmSlot(env)
-  // RFC jun-17 — `QUANTA_LSP_PREWARM` → `AgentConfig.lspPrewarm` slot (double-
-  // gated on the nav tools being enabled; default-OFF).
-  const lspPrewarmSlot = resolveLspPrewarmSlot(env)
-  // ADR-0404 + ADR-0415 — composition-root observability slots. Single helper
-  // call: gate ON ⇒ mints the canonical HookBus (the same bus the loop emits
-  // `post_tool_use` to), wires attribution onto it, and returns the four ports
-  // + `hooks`. Gate OFF ⇒ `{}` (byte-identical legacy; the knobs layer still
-  // owns the `QUANTA_BENCH_HOOKS` bus). One spread keeps `buildBaseFromArgs`
-  // under biome's cognitive-complexity cap.
-  const observabilitySlots = resolveObservabilitySlots(env)
-  // Track A2 + GAP2 — composition-root named-permission-profile wiring, resolved
-  // in ONE call (manager = forward-compat per-thread slot; mode = behavior-LIVE
-  // PermissionContext override derived from the profile's approval pillar). Both
-  // honor flag-wins precedence + fail-closed throw on an unknown name. Absent ⇒
-  // both undefined ⇒ byte-identical legacy.
-  const { managerSlot: permissionProfileSlot, mode: profilePermissionMode } =
-    resolvePermissionProfileWiring(p.permissionProfile, env)
-  // CLUSTER D #5 — BASELINE-SEED RESIDUAL CLOSED. Build ONE per-session
-  // PatternGrantStore + its no-widen propose port (default-OFF: `undefined`
-  // unless QUANTA_REMEMBER_PATTERNS=1). The SAME store is threaded into BOTH
-  // `buildBaseRegistry` (the `permission_propose_pattern` tool) AND
-  // `AgentConfig.permissionPatternStore` (the admissibility-gate). The gate
-  // grows the store's BASELINE via user approvals (`store.grant`); the propose
-  // tool refines within it via `store.recordProposed` (no-widen). Absent ⇒ the
-  // store slot is omitted (no auto-pass, no cascade) AND the tool is absent —
-  // byte-identical to today's no-pattern behaviour.
-  const permissionPatternSlice = resolvePermissionPatternSlice()
-  // file_history_rewind — mint the SHARED per-file snapshot slice ONCE (store +
-  // sink over the same store) when QUANTA_FILE_HISTORY is on. The store wires the
-  // `file_history_rewind` tool (read side, via buildBaseRegistry → buildGatedToolPorts);
-  // the sink wires `AgentConfig.fileHistory` (write side, the write/edit capture).
-  // Absent ⇒ both omitted ⇒ no capture, no tool — byte-identical.
-  const fileHistorySlice = resolveFileHistorySlice()
-  // A2 — mint the SHARED per-session artifact registry ONCE (behind
-  // QUANTA_ARTIFACT_STORE). The SAME instance backs (1) the `artifact_*` tools +
-  // generation-tool `artifactSink` (via `buildBaseRegistry` → `buildGatedToolPorts`)
-  // and (2) `base.artifactRegistry` (the capability bit + the turn runner's
-  // `artifact.ready` producer drain). Absent ⇒ both omitted (byte-identical).
-  const artifactRegistry = resolveArtifactRegistrySlice(env)
-  // A2 — the host-side READ-ONLY preview resolver over the SAME registry (jailed
-  // to the workspace cwd). Minted next to the registry so a future IPC handler can
-  // serve `quanta-artifact://<id>` bytes read-only. Absent ⇒ no preview channel.
-  const artifactPreviewResolver =
-    artifactRegistry !== undefined
-      ? createArtifactPreviewResolver({ registry: artifactRegistry, jailRoot: cwd })
-      : undefined
-  // ADR-0236 — `--no-auto-background`: future hosts that wire `autoBackground`
-  // by default can call `resolveAutoBackgroundOverride(p.noAutoBackground)` to
-  // hard-force the slot OFF. Today no host defaults it on, so the flag has no
-  // immediate effect — it lives in the parsed args so a follow-up host can
-  // consume `p.noAutoBackground` to skip its own wiring. Documented for
-  // forward-compat; absent on the returned base.
-  const base: AssembleRequest["base"] = {
-    llm,
-    // DIP: route through the factory (no app-specific ports at this baseline
-    // entry — modes/CLI wire their own fs/diagnostics ports). Behavior is
-    // byte-identical to the `defaultTools` singleton.
-    registry: buildBaseRegistry({
-      env,
-      automationSlot,
-      sandboxProfile,
-      searchWire,
-      seams,
-      permissionPatternSlice,
-      fileHistorySlice,
-      llm,
-      artifactRegistry,
-    }),
-    stream,
-    promptSurfaceProfile,
-    // GAP2 — when a named permission profile is selected the live permission
-    // mode is DERIVED from its approval pillar; absent ⇒ the historical
-    // `acceptEdits` default (byte-identical).
-    permission: { mode: profilePermissionMode ?? "acceptEdits" },
-    messages: [],
+  // ADR-0303 slot-registry refactor — resolve every default-OFF slot's shared
+  // state (identity/system, the ~18 feature slots, the registry inputs) in ONE
+  // call. `resolveBaseSlotState` returns the seed-facing values (system /
+  // promptSurfaceProfile / profilePermissionMode + the three registry inputs)
+  // PLUS the `BaseSlotContext` the fold consumes. Extracted verbatim so this
+  // keystone stays lean; every per-slot resolver call is unchanged.
+  const {
     system,
-    cwd,
-    maxTurns: p.dials?.maxTurns ?? 30,
-    // T01 (audit L5 H-2): use the composition-root's REAL cancellation signal
-    // when injected (SIGINT-wired in `runMain`). The `?? new AbortController()`
-    // is NOT a live-path placeholder — it is the fallback only for callers that
-    // construct a base without a composition root (kept so the field stays
-    // typed-required). Production always passes the live signal.
-    signal: signal ?? new AbortController().signal,
-    // ADR-0159 wire: when the operator opted in (QUANTA_RETRIEVAL_HYBRID=1),
-    // hand the surface-built stack to every mode runner via the shared base.
-    // Absent ⇒ slot is omitted entirely (`exactOptionalPropertyTypes` → no
-    // `undefined` literal on the config) and the loop is byte-identical.
-    // ADR-0428 jun-02 wire — default-OFF socket-level egress proxy. The slot is
-    // `{}` when off (resolved above), so this spread adds no branch here.
-    ...networkProxySlot,
-    ...(retrievalStack !== undefined ? { retrievalStack } : {}),
-    // ADR-0277/0278 — helper-only search pipeline slot. The loop does not read
-    // it directly; surfaces/tooling consume the registered `search_codebase`
-    // tool, and future retrieval-aware helpers may use the same pipeline.
-    ...(searchWire !== null ? { searchPipeline: searchWire.pipeline } : {}),
-    // ADR-0236 — composition-root mega-wire slots (default-OFF; spread
-    // conditionally to preserve `exactOptionalPropertyTypes`).
-    ...(identityModeVariant !== undefined ? { identityModeVariant } : {}),
-    ...(stickyModelStore !== undefined ? { stickyModelStore } : {}),
-    ...(toolProfile !== undefined ? { toolProfile } : {}),
-    ...(focusChain !== undefined ? { focusChain } : {}),
-    // ADR-0452 — spread-ready prewarm slot (`{}` when off ⇒ no branch here,
-    // keeps `buildBaseFromArgs` under biome's cognitive-complexity cap).
-    ...prewarmSlot,
-    ...lspPrewarmSlot,
-    // ADR-0455 — spread-ready local-env slot resolved at the (async) root and
-    // carried on the partial (`{}` when absent ⇒ ambient env byte-identical;
-    // shell.ts applies it via the existing `applyLocalEnv` seam, allowlist-
-    // governed).
-    ...localEnvSlotOf(p),
-    // Named-agent registry resolver loaded at the (async) root and carried on the
-    // partial (`{}` when absent ⇒ spawn path byte-identical; the subagent runner
-    // reads it off `AgentConfig.namedAgentResolver` and an absent resolver / empty
-    // registry never matches a spawn).
-    ...namedAgentResolverSlotOf(p),
-    // ADR-0279 — spread the automation slot conditionally (default-OFF;
-    // `exactOptionalPropertyTypes` — no `undefined` literal on the config).
-    ...(automationSlot !== null ? { automationEngine: automationSlot } : {}),
-    // ADR-0404 + ADR-0415 — composition-root observability slots (objective +
-    // shadowVerify + the ADR-0413-promoted runLedger / approvalStateMachine +
-    // the canonical `hooks` bus attribution subscribed to). Default-OFF: `{}`
-    // when `QUANTA_OBSERVABILITY !== "on"` ⇒ AgentConfig byte-identical legacy.
-    ...observabilitySlots,
-    // Track A2 — publish the named-permission-profile manager so a future loop
-    // consumer can read the per-thread layered policy. Default-OFF: absent ⇒
-    // slot omitted (`exactOptionalPropertyTypes` — no `undefined` literal).
-    ...permissionProfileSlot,
-    // CLUSTER D #5 — share the SAME PatternGrantStore the propose tool received
-    // (via `buildBaseRegistry` above) with the admissibility-gate. The gate
-    // writes the user/policy baseline via `cascadeOnApprove` → `grantAndCascade`
-    // → `store.grant(...)` on a user approval, and reads coverage via
-    // `autoPassByPatterns`. The propose tool can therefore only refine what the
-    // user already approved. Spread-ready slot (`{}` when off ⇒ no branch here ⇒
-    // gate byte-identical: no auto-pass, no cascade). `permissionAllowDangerous`
-    // stays unset ⇒ dangerous actions ALWAYS go through the reviewer.
-    ...permissionPatternStoreSlot(permissionPatternSlice),
-    // file_history_rewind — surface the capture sink so the dispatch seam threads
-    // it onto `ctx.fileHistory`; write/edit then record each new file version into
-    // the SAME store `file_history_rewind` reads. `{}` when off ⇒ no branch here ⇒
-    // `ctx.fileHistory` absent ⇒ capture is a no-op (byte-identical).
-    ...fileHistorySinkSlot(fileHistorySlice),
-    // A2 — lift the SHARED artifact registry onto the base so (1) the capability
-    // manifest sets `artifacts: true` iff present and (2) the turn runner drains
-    // it into `result.artifacts` (the `artifact.ready` producer). Same instance
-    // the tool ports use. `{}` when off ⇒ capability false, no producer.
-    ...(artifactRegistry !== undefined ? { artifactRegistry } : {}),
-    // A2 — lift the read-only preview resolver (same shared registry). `{}` when
-    // off ⇒ no preview channel (byte-identical).
-    ...(artifactPreviewResolver !== undefined ? { artifactPreviewResolver } : {}),
-  }
+    promptSurfaceProfile,
+    profilePermissionMode,
+    sandboxProfile,
+    permissionPatternSlice,
+    fileHistorySlice,
+    slotCtx,
+  } = resolveBaseSlotState(env, p, cwd, searchWire)
+  const { automationSlot, artifactRegistry } = slotCtx
+  // ADR-0303 slot-registry refactor — the REQUIRED base fields are the seed (in
+  // their exact prior literal order); the ~18 default-OFF conditional slots are
+  // folded in via `BASE_SLOT_RESOLVERS` (declarative array, applied in order).
+  // Object insertion order is preserved key-for-key, so the assembled base is
+  // byte-identical to the prior hand-written literal (the byte-identical hellgate
+  // pins this). Adding a slot = ONE array entry in `base-slot-registry.ts` (OCP).
+  const base: AssembleRequest["base"] = foldBaseSlots(
+    {
+      llm,
+      // DIP: route through the factory (no app-specific ports at this baseline
+      // entry — modes/CLI wire their own fs/diagnostics ports). Behavior is
+      // byte-identical to the `defaultTools` singleton.
+      registry: buildBaseRegistry({
+        env,
+        automationSlot,
+        sandboxProfile,
+        searchWire,
+        seams,
+        permissionPatternSlice,
+        fileHistorySlice,
+        llm,
+        artifactRegistry,
+      }),
+      stream,
+      promptSurfaceProfile,
+      // GAP2 — when a named permission profile is selected the live permission
+      // mode is DERIVED from its approval pillar; absent ⇒ the historical
+      // `acceptEdits` default (byte-identical).
+      permission: { mode: profilePermissionMode ?? "acceptEdits" },
+      messages: [],
+      system,
+      cwd,
+      maxTurns: p.dials?.maxTurns ?? 30,
+      // T01 (audit L5 H-2): use the composition-root's REAL cancellation signal
+      // when injected (SIGINT-wired in `runMain`). The `?? new AbortController()`
+      // is NOT a live-path placeholder — it is the fallback only for callers that
+      // construct a base without a composition root (kept so the field stays
+      // typed-required). Production always passes the live signal.
+      signal: signal ?? new AbortController().signal,
+    },
+    slotCtx,
+  )
 
   attachExecutionPlaneSlots(base, p)
   // ADR-0454 — install disk-configured command hooks onto base.hooks (default-OFF
