@@ -2,11 +2,7 @@
   "_comment": "FROZEN god-code ratchet allowlist (SE-metric). Grandfathered violations only. NEVER add — split the code instead. REMOVE an entry when its file/function drops below threshold (the ratchet only goes DOWN). Regenerate via tools/god-code/detect.ts.",
   "godModuleMaxLines": 1000,
   "godFunctionMaxLines": 150,
-  "modules": [
-    "src/apps/bench/eval/driver.ts",
-    "src/lsp/adapters/base.ts",
-    "src/runner/batch/eval/llm-evidence-packet.ts"
-  ],
+  "modules": ["src/lsp/adapters/base.ts", "src/runner/batch/eval/llm-evidence-packet.ts"],
   "functions": [
     "src/agent/approval-state-machine/store.ts::createApprovalStateMachine",
     "src/agent/budget-ledger.ts::defaultBudgetLedger",

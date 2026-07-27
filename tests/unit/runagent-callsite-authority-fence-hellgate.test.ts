@@ -117,11 +117,13 @@ const ALLOWLIST: readonly Allowed[] = [
   // (The runner core's `driver/agent-phase.ts` was a DEAD duplicate of the app
   //  driver's agent phase — ZERO runtime callers after the dead orchestrator
   //  triad was deleted (D3) — so it was removed; the LIVE agent-phase run lives
-  //  in `src/apps/bench/eval/driver.ts` below.)
+  //  in the app driver's `driver/agent-phase.ts` lane below. The app bench driver
+  //  was split (refactor/bench-driver-lanes) into `driver/*.ts` lane modules —
+  //  the `runAgent` top-level run moved verbatim into the agent-phase lane.)
   {
-    path: "src/apps/bench/eval/driver.ts",
+    path: "src/apps/bench/eval/driver/agent-phase.ts",
     kind: "host-eval-entry",
-    why: "Bench eval app driver — top-level run per task (agent phase + orchestration).",
+    why: "Bench eval app driver agent-phase lane — top-level run per task (agent phase).",
   },
   {
     path: "src/apps/eval/synthetic/runner.ts",

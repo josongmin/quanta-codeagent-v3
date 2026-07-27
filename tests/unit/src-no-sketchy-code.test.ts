@@ -78,6 +78,12 @@ const RULES: readonly Rule[] = [
         "Injection-first (jul-01 A1): `process.env` is ONLY the default for the injected `env` param of `bridgeDatasetFamilyToEnv` (tests pass a fake env); the flag→QUANTA_SWEBENCH_DATASET_FAMILY bridge writes that injected param at the bench composition root. Same DI-boundary posture as runner/batch/eval/run-health.ts.",
       "apps/bench/eval/driver.ts":
         "LSP-nav opt-in probe (`QUANTA_LSP_TOOLS=full`) — same gate as CLI; tools register harmlessly without a server. Same posture as the bench CLI's env reads.",
+      "apps/bench/eval/driver/agent-phase.ts":
+        "God-module split of apps/bench/eval/driver.ts (already allowlisted, refactor/bench-driver-lanes) — the agent-phase lane owns the same bench-only opt-in env gates (QUANTA_BENCH_TENTATIVE / QUANTA_CAPTURE_DEBUG) + emitKnobsApplied(process.env)/wireOptionalAgentPorts(process.env) launch-time reads, moved verbatim; downstream logic receives resolved values. Same posture as the prior apps/bench/eval/driver.ts entry.",
+      "apps/bench/eval/driver/selection.ts":
+        "God-module split of apps/bench/eval/driver.ts (already allowlisted, refactor/bench-driver-lanes) — the verify-select lane owns the same bench-only opt-in env gates (QUANTA_BENCH_FAMILY_COVERAGE / _NONEMPTY_FALLBACK / _FAMILY_COVERAGE_COEDIT) + resolveBenchKnobs({envVars: process.env}) posture resolution, moved verbatim; downstream logic receives resolved values. Same posture as the prior apps/bench/eval/driver.ts entry.",
+      "apps/bench/eval/driver/repair.ts":
+        "God-module split of apps/bench/eval/driver.ts (already allowlisted, refactor/bench-driver-lanes) — the repair lane resolves the effective bench posture via resolveBenchKnobs({envVars: process.env}) at round entry, moved verbatim; downstream logic receives resolved values. Same posture as the prior apps/bench/eval/driver.ts entry.",
       "runner/batch/eval/driver.ts":
         "Extracted batch core keeps the same bench-only opt-in env gates (`QUANTA_BENCH_*`) while the app surface becomes thin. Same posture as the prior apps/bench/eval/driver.ts entry; follow-up work can move these dials behind typed config.",
       "runner/batch/eval/driver/config-build.ts":

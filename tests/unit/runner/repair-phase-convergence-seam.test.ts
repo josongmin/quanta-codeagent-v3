@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 /**
@@ -29,7 +29,28 @@ const REPO_ROOT = join(import.meta.dir, "..", "..", "..")
 // assertions at the module that actually owns the code.
 const RUNNER = readFileSync(join(REPO_ROOT, "src/runner/batch/eval/driver/repair-phase.ts"), "utf8")
 const RUNNER_BARREL = readFileSync(join(REPO_ROOT, "src/runner/batch/eval/driver.ts"), "utf8")
-const APP = readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8")
+// The app bench driver was split (refactor/bench-driver-lanes) into
+// `src/apps/bench/eval/driver/*.ts` lane modules — pure code motion. The app's
+// `runRepairPhase` ORCHESTRATOR moved verbatim to the `driver/repair.ts` lane;
+// slice its region from that module. The deletion guards (`.not.toContain`) run
+// against the barrel + every lane source so a re-inlined breadth/snapshot
+// helper is caught wherever it lands (dir absent pre-split ⇒ just the barrel).
+const APP_DRIVER_DIR = join(REPO_ROOT, "src/apps/bench/eval/driver")
+const APP_REPAIR_LANE = join(APP_DRIVER_DIR, "repair.ts")
+const APP = [
+  readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8"),
+  ...(existsSync(APP_DRIVER_DIR)
+    ? readdirSync(APP_DRIVER_DIR)
+        .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+        .map((f) => readFileSync(join(APP_DRIVER_DIR, f), "utf8"))
+    : []),
+].join("\n")
+// The `runRepairPhase` region is sliced from the lane that OWNS it: the
+// `driver/repair.ts` module post-split, else the barrel pre-split (the
+// orchestrator hasn't moved yet).
+const APP_REPAIR_SRC = existsSync(APP_REPAIR_LANE)
+  ? readFileSync(APP_REPAIR_LANE, "utf8")
+  : readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8")
 
 /** Slice the app driver's `runRepairPhase` region: from the `runRepairPhase`
  *  marker to the next top-level `const`/`export const` (column-0). The runner
@@ -44,7 +65,7 @@ const repairPhaseRegion = (src: string, startMarker: string): string => {
   return endRel === -1 ? rest : rest.slice(0, endRel)
 }
 
-const APP_REGION = repairPhaseRegion(APP, "const runRepairPhase = async (")
+const APP_REGION = repairPhaseRegion(APP_REPAIR_SRC, "const runRepairPhase = async (")
 
 describe("repair-phase convergence seam (shared helpers, single SSOT)", () => {
   test("the app orchestrator delegates runRepairPhase to the shared breadth + snapshot helpers", () => {

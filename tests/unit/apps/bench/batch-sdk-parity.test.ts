@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, test } from "bun:test"
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
@@ -32,7 +32,20 @@ afterAll(() => {
 
 describe("T5 batch SDK parity", () => {
   test("batch driver consumes the sdk runtime and keeps direct bootstrap out", () => {
-    const source = readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8")
+    // The app bench driver was split (refactor/bench-driver-lanes) into
+    // `src/apps/bench/eval/driver/*.ts` lane modules — pure code motion. The SDK
+    // runtime wiring these strings pin now lives in the agent-phase lane module,
+    // so aggregate the barrel + every `driver/*.ts` lane source (dir absent
+    // pre-split ⇒ just the barrel).
+    const APP_DRIVER_DIR = join(REPO_ROOT, "src/apps/bench/eval/driver")
+    const source = [
+      readFileSync(join(REPO_ROOT, "src/apps/bench/eval/driver.ts"), "utf8"),
+      ...(existsSync(APP_DRIVER_DIR)
+        ? readdirSync(APP_DRIVER_DIR)
+            .filter((f) => f.endsWith(".ts") && !f.endsWith(".test.ts"))
+            .map((f) => readFileSync(join(APP_DRIVER_DIR, f), "utf8"))
+        : []),
+    ].join("\n")
 
     expect(source).toContain('from "@/sdk/runtime"')
     expect(source).toContain("await createRuntime(")

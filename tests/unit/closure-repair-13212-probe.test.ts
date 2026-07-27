@@ -25,8 +25,8 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { pytestReportPathFor } from "@/agent/repro-test/execute"
 import type { PrimaryRailStep } from "@/agent/closure"
+import { pytestReportPathFor } from "@/agent/repro-test/execute"
 import { buildClosureSession } from "@/runner/batch/eval/closure-session"
 import { benchPostureFromState, resolveBenchKnobs } from "@/runner/batch/eval/knobs-bench"
 import { benchShouldRunRepairPhase } from "@/runner/batch/eval/repair-phase-policy"
@@ -213,8 +213,11 @@ describe("Part C — repair loop wires readFile to runRepairRounds (shared SSOT)
 
   test("the app orchestrator delegates repair rounds to the shared helper (inherit the wiring)", () => {
     // The app orchestrator cannot silently drop the readFile wiring without also
-    // dropping the delegation — which this binds RED.
-    expect(read("src/apps/bench/eval/driver.ts")).toContain("runRepairRoundsInSnapshot({")
+    // dropping the delegation — which this binds RED. The app bench driver was
+    // split (refactor/bench-driver-lanes) into `driver/*.ts` lane modules — pure
+    // code motion; the `runRepairPhase` orchestrator moved verbatim into the
+    // `driver/repair.ts` lane, so read the delegation from the lane that owns it.
+    expect(read("src/apps/bench/eval/driver/repair.ts")).toContain("runRepairRoundsInSnapshot({")
     // The runner core still DEFINES + EXPORTS the shared helper (single SSOT) even
     // though its dead per-instance orchestrator (the old caller) was deleted.
     expect(read("src/runner/batch/eval/driver/repair-phase.ts")).toContain(
