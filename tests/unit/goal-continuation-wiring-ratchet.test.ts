@@ -8,10 +8,24 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
 import { join } from "node:path"
 
-const sessionLoopPath = join(import.meta.dir, "..", "..", "src", "apps", "cli", "repl", "session-loop.ts")
+const replDir = join(import.meta.dir, "..", "..", "src", "apps", "cli", "repl")
+const loopDir = join(replDir, "session-loop")
+// The `runSessionLoop` god-fn split (b17ce99aa) relocated the ticker
+// construction from `session-loop.ts` into a `session-loop/*.ts` lane. Aggregate
+// the entrypoint + every lane so this reachability pin follows the code instead
+// of going vacuous the moment a wire moves between lanes.
+const readSessionLoopAggregate = (): string =>
+  [
+    join(replDir, "session-loop.ts"),
+    ...readdirSync(loopDir)
+      .filter((f) => f.endsWith(".ts"))
+      .map((f) => join(loopDir, f)),
+  ]
+    .map((p) => readFileSync(p, "utf8"))
+    .join("\n")
 
 /** Match an invocation with an object argument; imports, comments, and a bare
  * identifier do not satisfy the reachability obligation. */
@@ -19,7 +33,7 @@ const tickerCalls = (source: string): readonly number[] =>
   [...source.matchAll(/\bstartGoalContinuationTicker\s*\(\s*\{/g)].map((match) => match.index ?? -1)
 
 describe("goal-continuation host wiring ratchet", () => {
-  const source = readFileSync(sessionLoopPath, "utf8")
+  const source = readSessionLoopAggregate()
 
   test("the interactive session loop has exactly one live ticker construction", () => {
     // Anti-vacuum floor: a zero-match regex drift must fail rather than silently

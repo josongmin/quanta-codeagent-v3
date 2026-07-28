@@ -17,13 +17,26 @@
  *      refactor that reverts any leg to a static `{ mode }` mirror trips here.
  */
 import { describe, expect, test } from "bun:test"
-import { readFileSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import type { PermissionContext } from "@/permission"
 import { createPermissionModeSessionState } from "@/runner/assemble"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const read = (path: string): string => readFileSync(join(REPO_ROOT, path), "utf8")
+// The `runSessionLoop` god-fn split (b17ce99aa) moved the per-turn posture-sync
+// wiring out of `session-loop.ts` into a `session-loop/*.ts` lane; aggregate the
+// entrypoint + every lane so this behavior pin follows the code, not the file.
+const SESSION_LOOP_REL = "src/apps/cli/repl/session-loop"
+const readSessionLoopAggregate = (): string =>
+  [
+    `${SESSION_LOOP_REL}.ts`,
+    ...readdirSync(join(REPO_ROOT, SESSION_LOOP_REL))
+      .filter((f) => f.endsWith(".ts"))
+      .map((f) => `${SESSION_LOOP_REL}/${f}`),
+  ]
+    .map(read)
+    .join("\n")
 
 describe("mode-cycle permission authority hellgate (ADR-0303)", () => {
   test("engine cell backs permission.mode as a LIVE accessor (next-turn authority)", () => {
@@ -80,7 +93,7 @@ describe("mode-cycle permission authority hellgate (ADR-0303)", () => {
   })
 
   test("CLI loop syncs the mode-cycle posture into the engine cell before each turn", () => {
-    const loop = read("src/apps/cli/repl/session-loop.ts")
+    const loop = readSessionLoopAggregate()
     // The per-turn sync runs as the `beforeTurn` host hook handed to the shared
     // runner-owned driver (ADR-0303 hoist): read the slash-local mode-cycle,
     // write the engine-owned permissionModeState BEFORE the turn. Assert the

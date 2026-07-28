@@ -13,11 +13,24 @@
  *   3. headless drives turns THROUGH it (gaining the approval loop).
  */
 import { describe, expect, test } from "bun:test"
-import { existsSync, readFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 
 const REPO_ROOT = join(import.meta.dir, "..", "..")
 const read = (p: string): string => readFileSync(join(REPO_ROOT, p), "utf8")
+// The `runSessionLoop` god-fn split (b17ce99aa) moved the driver call out of
+// `session-loop.ts` into a `session-loop/*.ts` lane; aggregate the entrypoint +
+// every lane so the "drives THROUGH the shared driver" pin follows the code.
+const SESSION_LOOP_REL = "src/apps/cli/repl/session-loop"
+const readSessionLoopAggregate = (): string =>
+  [
+    `${SESSION_LOOP_REL}.ts`,
+    ...readdirSync(join(REPO_ROOT, SESSION_LOOP_REL))
+      .filter((f) => f.endsWith(".ts"))
+      .map((f) => `${SESSION_LOOP_REL}/${f}`),
+  ]
+    .map(read)
+    .join("\n")
 
 const DRIVER = "src/runner/orchestrate/session-turn-driver.ts"
 
@@ -39,7 +52,7 @@ describe("session turn-driver thin-surface hellgate (ADR-0303)", () => {
   })
 
   test("the CLI session-loop drives turns THROUGH the shared driver, not an inline loop", () => {
-    const loop = read("src/apps/cli/repl/session-loop.ts")
+    const loop = readSessionLoopAggregate()
     expect(loop).toContain("driveSessionTurn")
     // the inline approval-resolution helpers must NOT be re-introduced in the surface
     expect(loop).not.toContain("const resolvePendingApproval")

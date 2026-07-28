@@ -53,25 +53,13 @@ export interface SessionLoopBootstrap {
  *  registration order, and default-OFF gate is byte-identical. The mutable
  *  `surfaceState` is threaded through `state` so the closures reassign the SAME
  *  binding the branches read. */
-export const bootstrapSessionLoop = async (
-  deps: RunSessionLoopDeps,
-  state: LoopStateHolder,
-): Promise<SessionLoopBootstrap> => {
-  const {
-    setup,
-    ux,
-    registerReplaceMessages,
-    registerSessionSwitch,
-    registerSideConversationStart,
-    registerPlanQueueSendNow,
-    registerAutomationSlash,
-    runtimeFacadeCompose,
-    playbookSeam,
-    playbookCliFlag,
-    searchPipelineDispose,
-    notify,
-  } = deps
-  const { abort, runtimeContext, state: featureState, idMeta } = setup
+/** Phase 1 — prompt-source plumbing: the external queue (seeded BEFORE the loop
+ *  so it wins the prompt-source race), the heartbeat-bound enqueue, and the
+ *  mid-turn capture wrapper. Extracted from `bootstrapSessionLoop` to keep it
+ *  under the god-fn ceiling; pure wiring, construction order preserved. */
+const buildPromptPlumbing = (deps: RunSessionLoopDeps, state: LoopStateHolder) => {
+  const { setup } = deps
+  const { runtimeContext } = setup
 
   const externalPromptQueue = new ExternalPromptQueue()
   // ADR-0528 L2 (auto-reinject) — seed prompts BEFORE the interactive loop's
@@ -115,6 +103,21 @@ export const bootstrapSessionLoop = async (
     midTurnVisibleKnob: runtimeConfig().midTurnVisible,
     midTurnApprovalChannel: setup.midTurnApprovalChannel,
   })
+  return { externalPromptQueue, enqueueWithHeartbeat, withInTurnCapture }
+}
+
+/** Phase 2 — automation engine + runtime compose. Mints the `/cron` engine
+ *  (LATE-BINDING the slash slot the instant it exists), strips the bootstrap
+ *  ticker so the REPL stays the SINGLE interval owner (ALBB-14), and folds the
+ *  engine into the runtime-facade compose payload. Also reads the identity /
+ *  tool-profile cells the facade + session seed from. */
+const buildAutomationCompose = (
+  deps: RunSessionLoopDeps,
+  enqueueWithHeartbeat: ReturnType<typeof heartbeatEnqueueHandler>,
+) => {
+  const { setup } = deps
+  const { runtimeContext } = setup
+
   const liveAutomationSlot =
     runtimeContext.automationEngine() ??
     assembleAutomation(
@@ -129,8 +132,8 @@ export const bootstrapSessionLoop = async (
   // B2 (jul-04 CLI-surfacing) `/cron` — LATE-BIND the automation slash slot the
   // instant the engine exists (minted HERE, after compose time). Absent engine ⇒
   // never called ⇒ `/cron` stays "not wired" (default-OFF byte-identical).
-  if (liveAutomationSlot !== undefined && registerAutomationSlash !== undefined) {
-    registerAutomationSlash(createCronSlashAdapter({ engine: liveAutomationSlot.engine }))
+  if (liveAutomationSlot !== undefined && deps.registerAutomationSlash !== undefined) {
+    deps.registerAutomationSlash(createCronSlashAdapter({ engine: liveAutomationSlot.engine }))
   }
   const activeIdentityModeState = runtimeContext.identityModeState()
   const activeToolProfileState = runtimeContext.toolProfileState()
@@ -142,10 +145,37 @@ export const bootstrapSessionLoop = async (
   const runtimeCompose =
     composeAutomationEngine !== undefined
       ? {
-          ...(runtimeFacadeCompose ?? {}),
+          ...(deps.runtimeFacadeCompose ?? {}),
           automationEngine: composeAutomationEngine,
         }
-      : runtimeFacadeCompose
+      : deps.runtimeFacadeCompose
+  return { liveAutomationSlot, runtimeCompose, activeIdentityModeState, activeToolProfileState }
+}
+
+export const bootstrapSessionLoop = async (
+  deps: RunSessionLoopDeps,
+  state: LoopStateHolder,
+): Promise<SessionLoopBootstrap> => {
+  const {
+    setup,
+    ux,
+    registerReplaceMessages,
+    registerSessionSwitch,
+    registerSideConversationStart,
+    registerPlanQueueSendNow,
+    playbookSeam,
+    playbookCliFlag,
+    searchPipelineDispose,
+    notify,
+  } = deps
+  const { abort, runtimeContext, state: featureState, idMeta } = setup
+
+  const { externalPromptQueue, enqueueWithHeartbeat, withInTurnCapture } = buildPromptPlumbing(
+    deps,
+    state,
+  )
+  const { liveAutomationSlot, runtimeCompose, activeIdentityModeState, activeToolProfileState } =
+    buildAutomationCompose(deps, enqueueWithHeartbeat)
 
   // L5 H-7 — single close stack + drain + init guard.
   const { closeStack, drainCloseStack, guardInit } = createCloseStackController()
