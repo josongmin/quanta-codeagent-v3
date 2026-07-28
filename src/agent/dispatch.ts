@@ -4,7 +4,6 @@ import {
   endSpan,
   getSpanSink,
   mergeAttrs,
-  previewPayload,
   QUANTA_ATTRS,
   SPAN_NAMES,
   type Span,
@@ -36,6 +35,7 @@ import {
 } from "./ownership-policy"
 import { reproDoubtStep } from "./repro-doubt-guard"
 import { toolGenAiAttrs, withActiveSpanScope } from "./session-resources"
+import { contentCaptureEnabled, redactThenPreview } from "./span-content-redact"
 import type { AgentConfig } from "./types"
 
 export type { DispatchResult } from "./dispatch-types"
@@ -574,19 +574,23 @@ const toolSpanAttrs = (name: string, callId: string, input?: unknown) =>
   attrs({
     [QUANTA_ATTRS.tool.name]: name,
     [QUANTA_ATTRS.tool.callId]: callId,
-    ...(input !== undefined && getSpanSink() !== null
-      ? { [QUANTA_ATTRS.tool.input]: previewPayload(input) }
+    // SECURITY: the tool input (bash command / apply_patch body / edited path) can
+    // carry a secret. Attach it ONLY when the content-capture knob is on, and
+    // REDACT-before-truncate (T-D1) — matching the LLM-sampling span path. Was a
+    // raw `previewPayload` gated on sink-presence only = unredacted secret egress.
+    ...(input !== undefined && getSpanSink() !== null && contentCaptureEnabled()
+      ? { [QUANTA_ATTRS.tool.input]: redactThenPreview(input) }
       : {}),
   })
 
 /** Build the close-attrs for a `handle_tool_call` span: the terminal status,
- *  plus a truncated preview of the tool OUTPUT when a sink is listening. Keeps
- *  the two `endSpan` sites (success / error) consistent. */
+ *  plus a REDACTED, truncated preview of the tool OUTPUT when the content-capture
+ *  knob is on. Keeps the two `endSpan` sites (success / error) consistent. */
 const toolCloseAttrs = (status: "success" | "error", output?: unknown) =>
   attrs({
     [QUANTA_ATTRS.tool.status]: status,
-    ...(output !== undefined && getSpanSink() !== null
-      ? { [QUANTA_ATTRS.tool.output]: previewPayload(output) }
+    ...(output !== undefined && getSpanSink() !== null && contentCaptureEnabled()
+      ? { [QUANTA_ATTRS.tool.output]: redactThenPreview(output) }
       : {}),
   })
 

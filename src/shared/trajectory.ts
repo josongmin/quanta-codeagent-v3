@@ -323,7 +323,10 @@ const SECRET_VALUE_RES: readonly RegExp[] = [
   /\bglpat-[A-Za-z0-9_-]{8,}/,
   // Google API key.
   /\bAIza[A-Za-z0-9_-]{20,}/,
-  /\bAKIA[0-9A-Z]{16}\b/,
+  // AWS access-key id family: long-term `AKIA` + temporary/session `ASIA`,
+  // role `AROA`, user `AIDA` (parity with @/security redactSecrets — trajectory
+  // was AKIA-only, so session/role creds leaked on the JSONL/Plane-B sink).
+  /\b(?:AKIA|ASIA|AROA|AIDA)[0-9A-Z]{16}\b/,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
   // JWT: three base64url segments separated by dots.
   /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/,

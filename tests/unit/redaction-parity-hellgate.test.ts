@@ -33,6 +33,11 @@ const CORPUS: ReadonlyArray<readonly [label: string, secret: string]> = [
   // 35 chars after `AIza` (security's kind is exactly `{35}\b`; trajectory is ≥20).
   ["google-api", "AIzaSyAbcdEFGH1234ijklMNOP5678qrstUVWXY"],
   ["aws-akid", "AKIAIOSFODNN7EXAMPLE"],
+  // AWS temporary/session (ASIA), role (AROA), user (AIDA) key ids — trajectory
+  // was AKIA-only until jul-28 (session creds leaked on the JSONL sink).
+  ["aws-session", "ASIAIOSFODNN7EXAMPLE"],
+  ["aws-role", "AROAIOSFODNN7EXAMPLE"],
+  ["aws-user", "AIDAIOSFODNN7EXAMPLE"],
   // FULL `Authorization: Bearer …` — security intentionally narrows to the header
   // form (avoids false-positives on the word "Bearer"); trajectory catches it too.
   ["bearer-header", "Authorization: Bearer abcdEFGH1234ijklMNOP5678qrst"],

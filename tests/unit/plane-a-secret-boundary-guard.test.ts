@@ -147,27 +147,26 @@ describe("T-E1 — redaction primitives agree on the secret (anti-vacuity)", () 
 })
 
 /**
- * T-E1 preview-site coverage (ticket note: "this guard would have CAUGHT the
- * T-D1 preview leak — sequence it to also cover the preview site").
- *
- * KNOWN GAP, owned by T-D1 (NOT this ticket): `closeSamplingSpan`
- * (`src/agent/loop-helpers.ts`) builds `promptPreview`/`completionPreview` via
- * `previewPayload` (`src/observability/payload-preview.ts`) gated on `sinkActive`
- * ONLY — with NO redaction and NO content-knob. `previewPayload` passes strings
- * through (truncated, unredacted). So an OTLP-content path CAN emit a raw secret
- * once a span sink is live. T-E1's scope forbids editing `loop-helpers.ts` /
- * `src/observability/*`, so the FIX is T-D1's (re-gate the previews behind the
- * content knob + redaction). This todo is the visible, greppable tracker so the
- * boundary guard "covers" the preview site without a false-green pass.
+ * T-D1 preview-site coverage — CLOSED (jul-28). Both OTLP span-content preview
+ * paths now REDACT-before-truncate + gate on the content knob via the ONE shared
+ * `redactThenPreview` (`src/agent/span-content-redact.ts`):
+ *   · LLM-sampling span — `closeSamplingSpan` (loop-helpers.ts) [fixed earlier].
+ *   · TOOL-dispatch span — `toolSpanAttrs`/`toolCloseAttrs` (dispatch.ts) [jul-28;
+ *     was raw `previewPayload(input)` gated on sink-presence only = a bash command
+ *     / apply_patch body carrying a token left the process unredacted].
+ * The `previewPayload` PRIMITIVE itself is intentionally non-redacting (bounded
+ * truncation only); redaction is the caller's job through `redactThenPreview`.
  */
-describe("T-E1 — OTLP-content preview site (T-D1-owned gap)", () => {
-  test("previewPayload does NOT redact today — documents the leak the boundary tracks", async () => {
+describe("T-D1 — OTLP-content preview site redacts (CLOSED)", () => {
+  test("the previewPayload PRIMITIVE does NOT redact (bounded truncation only, by design)", async () => {
     const { previewPayload } = await import("@/observability")
-    // Assert the CURRENT (leaky) reality so this test is honest + non-flaky: the
-    // preview passes the secret through. When T-D1 re-gates + redacts the
-    // previews, THIS assertion flips — flag to convert it to a redaction assert.
     expect(previewPayload(`prompt ${SECRET}`).includes(SECRET)).toBe(true)
   })
 
-  test.todo("T-D1: promptPreview/completionPreview must pass through redactValue/redactSecrets", () => {})
+  test("the span-content path (redactThenPreview) SCRUBS the secret", async () => {
+    const { redactThenPreview } = await import("@/agent/span-content-redact")
+    // both a bare string and a structured tool-input object must be scrubbed
+    expect(redactThenPreview(`prompt ${SECRET}`).includes(SECRET)).toBe(false)
+    expect(redactThenPreview({ command: `curl -H 'x: ${SECRET}'` }).includes(SECRET)).toBe(false)
+  })
 })

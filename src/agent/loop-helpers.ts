@@ -12,8 +12,6 @@ import {
   endSpan,
   GEN_AI_ATTRS,
   getSpanSink,
-  PREVIEW_MAX,
-  previewPayload,
   providerOf,
   type Span,
   type SpanStatus,
@@ -26,7 +24,7 @@ import {
 } from "@/observability/metrics/instrument-genai"
 import { type TickOutcome, tickScheduler } from "@/scheduler/automation-engine"
 import { type RedactionHit, type RedactionOrigin, redactSecrets } from "@/security"
-import { gateOn, writeStderr, writeStdout } from "@/shared"
+import { writeStderr, writeStdout } from "@/shared"
 import { defaultGitRunner } from "@/tool/git"
 import { buildCapEnforcer } from "./cap-enforcer"
 import { DedupGate } from "./dispatch-dedup"
@@ -36,6 +34,7 @@ import type { LocalizePhaseState } from "./localize-phase-guard"
 import type { AgentMode } from "./prompt"
 import type { ReproDoubtState } from "./repro-doubt-guard"
 import { buildLocalizePhase, buildReproDoubt } from "./session-resources"
+import { contentCaptureEnabled, redactForSpan, redactThenPreview } from "./span-content-redact"
 import { extractSeedMessages, isUserInputSubmission } from "./submission"
 import type { AgentConfig } from "./types"
 
@@ -543,24 +542,8 @@ export const buildSamplingSpanAttrs = (
  *  `gen_ai.input.messages` / `gen_ai.output.messages` / `gen_ai.system_instructions`
  *  content attrs AND the (also-redacted, also-knobbed) prompt/completion previews.
  *  Unset / falsy ⇒ NO content leaves the process (byte-identical). */
-const CONTENT_CAPTURE_ENV = "QUANTA_OTEL_CAPTURE_CONTENT"
-const contentCaptureEnabled = (): boolean => gateOn(process.env, CONTENT_CAPTURE_ENV)
-
-/** Redact a text payload for the OBSERVE/OTLP content plane (Plane B). The
- *  cassette (Plane A) stays UNredacted — this function is only reached on the
- *  span-content path, never on the recording path. Origin `tool_result` is the
- *  general content-observation origin the rollup already understands. */
-const redactForSpan = (text: string): string => redactSecrets(text, { origin: "tool_result" }).text
-
-/** Redact a structured payload for the span-content plane, redacting the FULL
- *  stringified value BEFORE truncating (T-D1 leak fix). `previewPayload(v,
- *  Infinity)` gives the whitespace-collapsed, UNtruncated string; we redact THAT
- *  (so a secret straddling the `PREVIEW_MAX` boundary is scrubbed as a whole —
- *  never leaking its un-redacted head), then re-preview to `PREVIEW_MAX` to
- *  restore the bounded `… (+N)` shape. Redact-before-truncate is the only order
- *  that closes the boundary-straddle leak. */
-const redactThenPreview = (value: unknown): string =>
-  previewPayload(redactForSpan(previewPayload(value, Number.POSITIVE_INFINITY)), PREVIEW_MAX)
+// Span-content (Plane B) redaction is the ONE shared helper (jul-28): the tool
+// span path (dispatch.ts) redacts identically. See span-content-redact.ts.
 
 /** Map a single content block to the pinned GenAI `parts[]` element
  *  (`{type:"text",content}|{type:"tool_call",…}|{type:"tool_call_response",…}`).
