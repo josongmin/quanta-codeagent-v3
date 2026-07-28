@@ -20,7 +20,6 @@
     "src/apps/cli/cost-panel.ts::createCostPanel",
     "src/apps/cli/index.ts::main",
     "src/apps/cli/mcp-server-setup.ts::assembleAndServe",
-    "src/apps/cli/repl/session-loop.ts::runSessionLoop",
     "src/apps/cli/repl/session-setup.ts::setupSession",
     "src/apps/eval/grounding/compare.ts::buildGroundingComparison",
     "src/apps/eval/grounding/compare.ts::evaluateGroundingRegression",
