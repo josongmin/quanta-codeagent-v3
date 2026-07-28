@@ -43,7 +43,7 @@
  *  tool's authority or creating a reverse runtime dependency. */
 
 import { z } from "zod"
-import { errMessage } from "@/shared"
+import { errMessage, escapeBodyForLine } from "@/shared"
 import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 
 /** The mailbox protocol this LLM-facing surface actually consumes. It is
@@ -259,8 +259,7 @@ export type SubagentReadMessagesInput = z.infer<typeof subagentReadMessagesSchem
  *  line; without this, a body containing a newline + a fake `victim→root
  *  [response] …` line would be parsed by the reading model as a SEPARATE
  *  message (sender spoofing). Newlines/CR collapse to the literal two-char
- *  `\n`; the 8 KB body content is otherwise preserved verbatim. */
-const escapeBodyForLine = (body: string): string => body.replace(/\r\n|\r|\n/g, "\\n")
+ *  `\n` via the shared `escapeBodyForLine`; the 8 KB body is otherwise verbatim. */
 
 /** Render one inbox message to a concise model-facing line:
  *  `from→to [kind] body (id, correlationId?)`. One line per message — the body

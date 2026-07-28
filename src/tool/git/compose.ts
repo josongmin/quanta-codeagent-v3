@@ -17,8 +17,10 @@
  *  The author LLM is INJECTED via the tool factory (`gitComposeCommitTool(
  *  runner, authorLLM)`), exactly like `delegate(port)` and unlike
  *  `git_review_diff` (which reaches a sub-agent through `ctx.reviewerAgent`).
- *  `@/tool/git` already imports `@/llm` types nowhere else, so the import is
- *  type-only (`LLMPort` / `assembleFromEvents`) — no agent/subagent coupling.
+ *  The only VALUE reach into `@/llm` is `assembleFromEvents` (a pure event-fold),
+ *  imported from its specific module `@/llm/assemble` — a reviewed allow-listed
+ *  edge; the tool-slice fence denies the `@/llm` barrel wholesale otherwise. No
+ *  agent/subagent coupling; `LLMPort` is injected via the factory.
  *
  *  ## Default-OFF seam
  *
@@ -37,7 +39,10 @@
  *  structured payload so the model can decide whether to use it). */
 
 import type { LLMPort, Message, StreamEvent } from "@/llm"
-import { assembleFromEvents } from "@/llm"
+// VALUE import of the pure `StreamEvent[]`→turn fold, from its specific module
+// (NOT the @/llm barrel) so the tool-slice fence can DENY `@/llm` wholesale while
+// allow-listing this one reviewed edge (@/llm/assemble). See slice-boundary-configs.
+import { assembleFromEvents } from "@/llm/assemble"
 import { byteCompare, errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"

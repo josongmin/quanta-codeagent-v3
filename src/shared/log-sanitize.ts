@@ -82,3 +82,10 @@ export const sanitizeLogText = (s: string): string =>
     .replace(CONTROL_RE, "?")
     .replace(BIDI_ZW_RE, "")
     .replace(LONE_SURROGATE_RE, "")
+
+/** Anti-line-injection escape for ONE-LINE records (mailbox/transcript lines):
+ *  fold CR/LF into a literal `\n` so an embedded newline in an (already redacted)
+ *  body can't forge a second line. The ONE shared copy (jul-28 — was byte-
+ *  duplicated in @/agent/subagent-mailbox/peer-inbox.ts + @/tool/subagent-mailbox,
+ *  two slices that cannot cross-import, so @/shared is the only legal home). */
+export const escapeBodyForLine = (body: string): string => body.replace(/\r\n|\r|\n/g, "\\n")

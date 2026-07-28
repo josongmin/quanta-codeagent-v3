@@ -20,13 +20,15 @@
  *      decider on this).
  * Returns `null` when the inbox is empty (so the loop appends nothing).
  *
- * SLICE FENCE: imports ONLY `@/llm` (the `Message` type) + sibling `./types`.
+ * SLICE FENCE: imports ONLY `@/llm` (the `Message` type), `@/shared`
+ * (`escapeBodyForLine`, the universal leaf), + sibling `./types`.
  * The redactor is INJECTED (`redact?: (s)=>string`, default identity) so this
  * slice never imports `@/security` — the host wires the real redactor under the
  * `QUANTA_TEAM_PEER_MSG` knob. Pure, deterministic, no clock / no randomness.
  */
 
 import type { Message } from "@/llm"
+import { escapeBodyForLine } from "@/shared"
 import type { MailboxMessage, MailboxPort } from "./types"
 
 /** Default per-turn injection cap. A flooded inbox does not blow the context
@@ -41,9 +43,8 @@ const DEFAULT_PER_TURN_LIMIT = 32
 const identityRedact = (s: string): string => s
 
 /** Collapse newlines/CR to the literal two-char `\n` so a hostile/garbled body
- *  cannot forge an additional injected line (mirrors the tool slice's
- *  `escapeBodyForLine`, applied AFTER redaction so the two compose). */
-const escapeBodyForLine = (body: string): string => body.replace(/\r\n|\r|\n/g, "\\n")
+ *  cannot forge an additional injected line (the shared `escapeBodyForLine`,
+ *  applied AFTER redaction so the two compose). */
 
 /**
  * THE one peer-message sanitizer/formatter (RFC jul-18 §4.5). Redacts secrets

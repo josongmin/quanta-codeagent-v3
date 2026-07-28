@@ -58,6 +58,11 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       // OTLP content plane only when a span sink is also live. (loop-helpers.ts is
       // ALSO in `stdioAllowFiles` above for the git-directive sink default.)
       "loop-helpers.ts",
+      // `span-content-redact.ts` (jul-28) is the ONE shared home of that same
+      // `contentCaptureEnabled()` gate — extracted from loop-helpers so the
+      // LLM-sampling AND tool-dispatch span paths redact identically. Same
+      // sanctioned default-OFF gate-at-a-seam read.
+      "span-content-redact.ts",
       // `loop/control-poll.ts` gates the DEFAULT-OFF control-request drain on
       // `isControlRequestEnabled(slot.env ?? process.env)` — the `process.env`
       // token is ONLY the DI fallback for the injected `slot.env` (tests pass a
@@ -98,6 +103,7 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
       "@/permission",
       "@/lsp",
       "@/stream",
+      "@/llm",
     ],
     // Documented carve-outs:
     //  • coverage_check tool consumes the @/observability/coverage sub-barrel
@@ -108,8 +114,11 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
     //    adapter from @/observability/patch-trace HERE — the SINGLE runtime
     //    binding of the `quanta.patch.*` vocabulary — so `@/patch` itself stays
     //    a pure leaf with no `@/observability` value import.
+    //  • git_compose_{commit,pr} value-import `assembleFromEvents` (a pure
+    //    StreamEvent[]→turn fold) from @/llm/assemble; the @/llm barrel is denied
+    //    wholesale so no OTHER tool→llm value edge lands silently (jul-28 audit).
     // Reviewed exceptions.
-    allowImports: ["@/observability/coverage", "@/observability/patch-trace"],
+    allowImports: ["@/observability/coverage", "@/observability/patch-trace", "@/llm/assemble"],
     // debug/port.ts is a process SPAWNER (DAP adapters / `node --inspect-brk`): it
     // must pass the parent env to the child so PATH resolves node/lldb/dlv — the
     // same env-boundary carve-out as runner.ts. The gate VALUES come from cfg; only

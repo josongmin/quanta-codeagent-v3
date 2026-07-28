@@ -93,7 +93,7 @@ export type {
   LlmContinuationObservation,
   LlmRequestObservation,
 } from "./llm-route-types"
-export { sanitizeLogText } from "./log-sanitize"
+export { escapeBodyForLine, sanitizeLogText } from "./log-sanitize"
 export type { LogCallSite, Logger, LogLevel } from "./logger"
 export {
   __resetLoggerRateLimit,
