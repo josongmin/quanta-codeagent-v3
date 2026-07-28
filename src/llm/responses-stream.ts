@@ -9,6 +9,7 @@ import {
   parseResponsesSSEFrames,
   type ResponsesCompletionMeta,
   type ResponsesInputItem,
+  type ResponsesOutputItemDone,
   strictExtensionTail,
 } from "./openai-responses-wire"
 import type { ResponsesContinuationStore } from "./responses-continuation-store"
@@ -429,6 +430,218 @@ const buildCheckpoint = (args: {
   })
 }
 
+/** jun-6 account-ratelimit-snapshot — best-effort success-path header capture
+ *  (mirrors the Anthropic adapter's `.withResponse()` hook). Present ONLY when
+ *  the loop wired the hook. A faulty quota consumer must never break the live
+ *  stream. Absent ⇒ no call, byte-identical to pre-feature. */
+const captureResponseHeaders = (res: Response, config: ResponsesStreamConfig): void => {
+  if (config.input.onResponseHeaders === undefined) return
+  try {
+    config.input.onResponseHeaders((name) => res.headers.get(name))
+  } catch {
+    // swallow — header capture is non-essential observability.
+  }
+}
+
+/** Throw the classified {@link LLMError} for a non-OK response (reads + logs the
+ *  provider error body for the diagnostic). The bodyless-200 (`res.body === null`)
+ *  check stays INLINE at the call site so TS narrows `res.body` for the parser. */
+const assertResponsesResponseOk = async (
+  res: Response,
+  config: ResponsesStreamConfig,
+): Promise<void> => {
+  if (res.ok) return
+  const text = await readBodyTextOrLog(res, config.provider)
+  throw new LLMError(
+    `${config.provider} responses request failed: ${res.status} ${res.statusText}` +
+      (text ? ` — ${text.slice(0, 200)}` : ""),
+    { kind: responsesStatusToKind(res.status), statusCode: res.status, provider: config.provider },
+  )
+}
+
+/** jun-20 throttle-swallow guard: a 200 that streams ZERO content AND never
+ *  completes is a silently-swallowed transport throttle, NOT a valid empty turn —
+ *  reclassify as a RETRYABLE `rate_limit` so the loop's backoff spaces retries
+ *  (else the agent fires the next request straight into the same window). Only
+ *  the truly-empty prepare-only case (no content + no completion + a benign/absent
+ *  terminal stop_reason) throws; a partial stream or an intentional content_filter/
+ *  max_tokens terminator is left alone. */
+const assertResponsesNonEmptyStreamOrThrow = (
+  config: ResponsesStreamConfig,
+  prepared: ResponsesPreparedRequest,
+  state: {
+    readonly sawContentEvent: boolean
+    readonly completed: ResponsesCompletionMeta | null
+    readonly terminalStopReason: string | undefined
+  },
+): void => {
+  if (
+    state.sawContentEvent ||
+    state.completed !== null ||
+    !(state.terminalStopReason === "end_turn" || state.terminalStopReason === undefined)
+  ) {
+    return
+  }
+  if (config.continuationStore !== undefined && prepared.routeKey !== undefined) {
+    config.continuationStore.clear(prepared.routeKey)
+  }
+  throw new LLMError(
+    `${config.provider} responses stream produced no content and no completion event ` +
+      `(empty/truncated stream — likely transport throttle); retrying with backoff`,
+    { kind: "rate_limit", provider: config.provider },
+  )
+}
+
+/** H15 — persist THIS turn's captured reasoning for the next turn's re-emit.
+ *  Default-OFF byte-identity: skipped unless carry-over is on AND a store is
+ *  wired AND a routeKey resolved. `put` REPLACES (latest supersedes); an empty
+ *  capture CLEARS so a no-reasoning turn does not re-feed a stale chain. */
+const persistResponsesReasoningCarryover = (
+  config: ResponsesStreamConfig,
+  prepared: ResponsesPreparedRequest,
+  capturedReasoning: readonly ResponsesInputItem[],
+): void => {
+  const store = config.reasoningCarryoverStore
+  if (
+    config.reasoningCarryover !== true ||
+    store === undefined ||
+    prepared.routeKey === undefined
+  ) {
+    return
+  }
+  if (capturedReasoning.length > 0) store.put(prepared.routeKey, capturedReasoning)
+  else store.clear(prepared.routeKey)
+}
+
+/** Persist the continuation (prompt-cache resume) baseline for this route when
+ *  the store is wired + resume is enabled + a responseId landed; clears the route
+ *  otherwise. Terminal — no yields follow, so its early returns just end the
+ *  persist (byte-identical to the inline block). */
+const persistResponsesContinuation = (
+  config: ResponsesStreamConfig,
+  prepared: ResponsesPreparedRequest,
+  completed: ResponsesCompletionMeta | null,
+  outputItems: readonly ResponsesInputItem[],
+  resumable: boolean,
+): void => {
+  const store = config.continuationStore
+  if (store === undefined || !canPersistContinuation(prepared, store)) return
+  const responseId =
+    completed !== null && typeof completed.responseId === "string"
+      ? completed.responseId
+      : undefined
+  if (typeof responseId !== "string" || responseId === "") {
+    store.clear(prepared.routeKey)
+    return
+  }
+  store.put({
+    routeKey: prepared.routeKey,
+    responseId,
+    requestFingerprint: prepared.requestFingerprint,
+    inputItems: prepared.fullInputItems,
+    outputItems,
+    resumable,
+  })
+}
+
+/** Per-turn mutable accumulator the parser callbacks populate + the post-loop
+ *  persisters read back. `outputItems` = normalized resume baseline; `captured
+ *  reasoning` = H15 re-emittable items; `resumable` gated off by any reasoning /
+ *  un-normalizable item; `completed` = the terminal meta. */
+interface ResponsesStreamAccumulator {
+  readonly outputItems: ResponsesInputItem[]
+  readonly capturedReasoning: ResponsesInputItem[]
+  resumable: boolean
+  completed: ResponsesCompletionMeta | null
+}
+
+/** The accumulator + the three `parseResponsesEvents` callbacks that populate it.
+ *  Extracted so the surface reads as a thin frame loop; the callback BODIES are
+ *  byte-identical to the inline versions (H15 reasoning capture, output-item
+ *  normalization + resume gating, on-checkpoint). */
+const buildResponsesStreamAccumulator = (
+  config: ResponsesStreamConfig,
+): {
+  readonly acc: ResponsesStreamAccumulator
+  readonly callbacks: {
+    readonly onCompleted: (meta: ResponsesCompletionMeta) => void
+    readonly onOutputItemDone: (item: ResponsesOutputItemDone) => void
+    readonly onReasoning: () => void
+  }
+} => {
+  const acc: ResponsesStreamAccumulator = {
+    outputItems: [],
+    capturedReasoning: [],
+    resumable: true,
+    completed: null,
+  }
+  return {
+    acc,
+    callbacks: {
+      onCompleted: (meta) => {
+        acc.completed = meta
+        if ((meta.usage?.reasoning ?? 0) > 0) acc.resumable = false
+        if (typeof meta.responseId === "string" && meta.responseId !== "") {
+          buildCheckpoint({
+            input: config.input,
+            model: config.model,
+            transportId: config.transportId,
+            meta,
+          })
+        }
+      },
+      onOutputItemDone: (item) => {
+        // H15 — capture the re-emittable reasoning item (present ONLY when
+        // carry-over is on and the item carried usable `encrypted_content`).
+        // ORTHOGONAL to the resume/baseline path: a reasoning item still has
+        // `normalized === null`, so resumability is unchanged.
+        if (item.reasoningItem !== undefined) acc.capturedReasoning.push(item.reasoningItem)
+        if (item.normalized === null) {
+          acc.resumable = false
+          return
+        }
+        acc.outputItems.push(item.normalized)
+      },
+      onReasoning: () => {
+        acc.resumable = false
+      },
+    },
+  }
+}
+
+/** The retry `reason` string for a rejected resume: `resume_rejected` when the
+ *  status is on the disable-resume set (the server refused the resume), else
+ *  `stale_previous_response`. */
+const resumeRetryReason = (
+  status: number,
+  disableResumeOnStatuses: ReadonlySet<number> | undefined,
+): "resume_rejected" | "stale_previous_response" =>
+  disableResumeOnStatuses?.has(status) === true ? "resume_rejected" : "stale_previous_response"
+
+/** Rebuild the prepared request as a FULL (non-resumed) retry after a resume was
+ *  rejected: drop the resume linkage, use the full body/input, and stamp a
+ *  `full_retry` continuation event. Byte-identical to the inline rebuild. */
+const buildFullRetryPrepared = (
+  prepared: ResponsesPreparedRequest,
+  config: ResponsesStreamConfig,
+  status: number,
+): ResponsesPreparedRequest => ({
+  body: prepared.fullBody,
+  fullBody: prepared.fullBody,
+  ...(prepared.routeKey !== undefined ? { routeKey: prepared.routeKey } : {}),
+  ...(prepared.requestFingerprint !== undefined
+    ? { requestFingerprint: prepared.requestFingerprint }
+    : {}),
+  ...(prepared.fullInputItems !== undefined ? { fullInputItems: prepared.fullInputItems } : {}),
+  continuationEvent: continuationEvent({
+    transportId: config.transportId,
+    phase: "retry",
+    mode: "full_retry",
+    reason: resumeRetryReason(status, config.disableResumeOnStatuses),
+    statusCode: status,
+  }),
+})
+
 export async function* streamResponsesSurface(
   config: ResponsesStreamConfig,
 ): AsyncIterable<StreamEvent> {
@@ -481,80 +694,23 @@ export async function* streamResponsesSurface(
         transportId: config.transportId,
         phase: "retry",
         mode: "full_retry",
-        reason:
-          disableResumeOnStatuses?.has(res.status) === true
-            ? "resume_rejected"
-            : "stale_previous_response",
+        reason: resumeRetryReason(res.status, disableResumeOnStatuses),
         statusCode: res.status,
       })
-      prepared = {
-        body: prepared.fullBody,
-        fullBody: prepared.fullBody,
-        ...(prepared.routeKey !== undefined ? { routeKey: prepared.routeKey } : {}),
-        ...(prepared.requestFingerprint !== undefined
-          ? { requestFingerprint: prepared.requestFingerprint }
-          : {}),
-        ...(prepared.fullInputItems !== undefined
-          ? { fullInputItems: prepared.fullInputItems }
-          : {}),
-        continuationEvent: continuationEvent({
-          transportId: config.transportId,
-          phase: "retry",
-          mode: "full_retry",
-          reason:
-            disableResumeOnStatuses?.has(res.status) === true
-              ? "resume_rejected"
-              : "stale_previous_response",
-          statusCode: res.status,
-        }),
-      }
+      prepared = buildFullRetryPrepared(prepared, config, res.status)
       res = await postBody(prepared.body)
     }
 
-    if (!res.ok) {
-      // L6 M4: the provider error body carries the actionable diagnostic. A
-      // silent `.catch(() => "")` discards it on a read failure — keep the
-      // status/kind classification, but log WHY the body was unreadable so an
-      // operator isn't left with a bare status code.
-      const text = await readBodyTextOrLog(res, config.provider)
-      throw new LLMError(
-        `${config.provider} responses request failed: ${res.status} ${res.statusText}` +
-          (text ? ` — ${text.slice(0, 200)}` : ""),
-        {
-          kind: responsesStatusToKind(res.status),
-          statusCode: res.status,
-          provider: config.provider,
-        },
-      )
-    }
+    await assertResponsesResponseOk(res, config)
     if (res.body === null) {
       throw new LLMError(`${config.provider} responses stream has no body`, {
         kind: "stream_corrupt",
         provider: config.provider,
       })
     }
+    captureResponseHeaders(res, config)
 
-    // jun-6 account-ratelimit-snapshot — OPTIONAL success-path header capture
-    // (mirrors the Anthropic adapter's `.withResponse()` hook). Present ONLY
-    // when the loop wired the hook (gate QUANTA_RATELIMIT_PROACTIVE ON). The
-    // raw `Response`'s `headers.get` is the case-insensitive accessor the
-    // snapshot parser expects. Best-effort: a faulty quota consumer must never
-    // break the live stream. Absent ⇒ no call, byte-identical to pre-feature.
-    if (config.input.onResponseHeaders !== undefined) {
-      try {
-        config.input.onResponseHeaders((name) => res.headers.get(name))
-      } catch {
-        // swallow — header capture is non-essential observability.
-      }
-    }
-
-    const outputItems: ResponsesInputItem[] = []
-    // H15 — captured re-emittable reasoning items for THIS turn. Stays empty
-    // unless carry-over is on AND the wire surfaces `item.reasoningItem` (which
-    // it only does when on). Order-preserving (append in stream order).
-    const capturedReasoning: ResponsesInputItem[] = []
-    let resumable = true
-    let completed: ResponsesCompletionMeta | null = null
+    const { acc, callbacks } = buildResponsesStreamAccumulator(config)
     const rawFrames = parseResponsesSSEFrames(res.body) as AsyncIterable<{
       readonly event?: string
       readonly data: string
@@ -589,33 +745,7 @@ export async function* streamResponsesSurface(
         // (the wire's `onOutputItemDone` payload is the legacy 2-field shape and
         // `reasoningItem` is never surfaced ⇒ byte-identical).
         ...(config.reasoningCarryover === true ? { reasoningCarryover: true } : {}),
-        onCompleted: (meta) => {
-          completed = meta
-          if ((meta.usage?.reasoning ?? 0) > 0) resumable = false
-          if (typeof meta.responseId === "string" && meta.responseId !== "") {
-            buildCheckpoint({
-              input: config.input,
-              model: config.model,
-              transportId: config.transportId,
-              meta,
-            })
-          }
-        },
-        onOutputItemDone: (item) => {
-          // H15 — capture the re-emittable reasoning item (present ONLY when
-          // carry-over is on and the item carried usable `encrypted_content`).
-          // This is ORTHOGONAL to the resume/baseline path below: a reasoning
-          // item still has `normalized === null`, so resumability is unchanged.
-          if (item.reasoningItem !== undefined) capturedReasoning.push(item.reasoningItem)
-          if (item.normalized === null) {
-            resumable = false
-            return
-          }
-          outputItems.push(item.normalized)
-        },
-        onReasoning: () => {
-          resumable = false
-        },
+        ...callbacks,
       })) {
         // `message_stop` is the synthetic stream-terminator the parser emits even
         // for a 0-content stream — it is NOT content. Only a real content event
@@ -634,73 +764,13 @@ export async function* streamResponsesSurface(
       throw error
     }
 
-    // jun-20 (overnight RCA) — STRUCTURAL throttle-swallow fix. A 200 response
-    // that streams ZERO content events and never sends `response.completed` is
-    // NOT a valid empty turn: under OAuth load the endpoint accepts the request
-    // then closes the stream in ~220ms with nothing (a silently-swallowed
-    // throttle). Pre-fix this returned normally → the agent loop saw a completed-
-    // empty turn and immediately fired the NEXT request into the same throttle
-    // window (measured 2026-06-20: ~12 prepare-only calls in 10s, NO backoff →
-    // burned turns → empty patch on ~8 instances). Reclassify as a RETRYABLE
-    // `rate_limit` so the loop's exponential-jitter backoff (src/agent/retry.ts,
-    // RETRYABLE_KINDS) actually spaces the retries out. Guarded on
-    // `!sawContentEvent` so a PARTIAL stream (content then drop) is untouched —
-    // only the truly-empty prepare-only case throws. Aborts already threw above.
-    if (
-      !sawContentEvent &&
-      (completed as ResponsesCompletionMeta | null) === null &&
-      (terminalStopReason === "end_turn" || terminalStopReason === undefined)
-    ) {
-      if (config.continuationStore !== undefined && prepared.routeKey !== undefined) {
-        config.continuationStore.clear(prepared.routeKey)
-      }
-      throw new LLMError(
-        `${config.provider} responses stream produced no content and no completion event ` +
-          `(empty/truncated stream — likely transport throttle); retrying with backoff`,
-        { kind: "rate_limit", provider: config.provider },
-      )
-    }
-
-    // H15 — persist this turn's captured reasoning for the NEXT turn's re-emit.
-    // Independent of the continuation (prompt-cache resume) store: carry-over
-    // works on the full-body path too. Default-OFF byte-identity: this whole
-    // block is skipped unless carry-over is on, a store is wired, AND a routeKey
-    // resolved. `put` REPLACES the route's items (latest reasoning supersedes),
-    // and an empty capture CLEARS the route so a turn that produced no reasoning
-    // does not re-feed a stale chain.
-    const carryoverStore = config.reasoningCarryoverStore
-    if (
-      config.reasoningCarryover === true &&
-      carryoverStore !== undefined &&
-      prepared.routeKey !== undefined
-    ) {
-      if (capturedReasoning.length > 0) carryoverStore.put(prepared.routeKey, capturedReasoning)
-      else carryoverStore.clear(prepared.routeKey)
-    }
-
-    const continuationStore = config.continuationStore
-    if (continuationStore === undefined || !canPersistContinuation(prepared, continuationStore)) {
-      return
-    }
-
-    const completedMeta = completed as ResponsesCompletionMeta | null
-    const responseId =
-      completedMeta !== null && typeof completedMeta.responseId === "string"
-        ? completedMeta.responseId
-        : undefined
-    if (typeof responseId !== "string" || responseId === "") {
-      continuationStore.clear(prepared.routeKey)
-      return
-    }
-
-    continuationStore.put({
-      routeKey: prepared.routeKey,
-      responseId,
-      requestFingerprint: prepared.requestFingerprint,
-      inputItems: prepared.fullInputItems,
-      outputItems,
-      resumable,
+    assertResponsesNonEmptyStreamOrThrow(config, prepared, {
+      sawContentEvent,
+      completed: acc.completed,
+      terminalStopReason,
     })
+    persistResponsesReasoningCarryover(config, prepared, acc.capturedReasoning)
+    persistResponsesContinuation(config, prepared, acc.completed, acc.outputItems, acc.resumable)
   } catch (error) {
     if (
       request.controller.signal.aborted &&

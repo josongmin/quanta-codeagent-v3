@@ -35,7 +35,6 @@
     "src/kernel/session/reducer.ts::reduceSessionCommand",
     "src/llm/openai-responses-wire.ts::parseResponsesEvents",
     "src/llm/responses-stream.ts::prepareResponsesContinuationRequest",
-    "src/llm/responses-stream.ts::streamResponsesSurface",
     "src/observability/metrics/in-memory-registry.ts::defaultMetricsRegistry",
     "src/observability/otel-exporter.ts::otelHttpExporter",
     "src/observability/prompt-cache/default.ts::defaultPromptCacheObserver",
