@@ -153,6 +153,8 @@ const RULES: readonly Rule[] = [
         "ENV PROPAGATION — the exec-command bridge spreads the parent env INTO the spawned bash child (`{ ...process.env, ...input.env }`) so PATH/HOME resolve for the subprocess; pass-through to a child, not a feature read. Same spawner env-boundary posture as subagent/handlers-6.ts and tool/git/runner.ts.",
       "agent/loop-helpers.ts":
         'DEFAULT-OFF gate at a seam — reads the OTel content-capture gate `gateOn(process.env, "QUANTA_OTEL_CAPTURE_CONTENT")` at the span-close boundary. Unset/falsy ⇒ NO content leaves the process (byte-identical); the redacted OTLP content plane is armed only when the gate is on AND a span sink is live. Same sanctioned default-OFF gate-at-a-seam class as tool/web/providers/from-env.ts; mirrored in the @/agent slice-boundary envAllowFiles.',
+      "agent/span-content-redact.ts":
+        'DEFAULT-OFF gate at a seam — the ONE shared home of `contentCaptureEnabled()` (`gateOn(process.env, "QUANTA_OTEL_CAPTURE_CONTENT")`), extracted VERBATIM from loop-helpers.ts (already allowlisted) so the LLM-sampling AND tool-dispatch span paths gate identically. Unset/falsy ⇒ NO content leaves the process (byte-identical). Same sanctioned default-OFF gate-at-a-seam class; mirrored in the @/agent slice-boundary envAllowFiles.',
       "agent/loop/control-poll.ts":
         "Injection-first DEFAULT-OFF gate — `isControlRequestEnabled(slot.env ?? process.env)`: `process.env` is ONLY the DI fallback for the injected `slot.env` (tests pass a fake env). An absent controlRequest slot OR gate-off ⇒ the port is never even queried (byte-identical). Same injection-first gate-at-a-seam posture as connectors/marketplace-policy.ts; mirrored in the @/agent slice-boundary envAllowFiles.",
       "tool/container-exec/tool.ts":
@@ -202,8 +204,14 @@ const RULES: readonly Rule[] = [
       "apps/cli/memory-cmd.ts": "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
       "apps/cli/repl.ts":
         "REPL composition root — same posture as apps/cli/internal.ts (CLI feature-flag bootstrap).",
-      "apps/cli/repl/session-loop.ts":
-        "REPL session-loop composition root — same posture as repl.ts.",
+      "apps/cli/repl/session-loop/interactive-setup.ts":
+        "God-fn split of session-loop.ts runSessionLoop (already allowlisted) — the interactive-setup lane owns the composition-root env reads (ndjson/prompt-suggestion/autorun/reactor gates, envPort wiring) moved VERBATIM; downstream logic receives resolved values. Same REPL composition-root posture as session-loop.ts.",
+      "apps/cli/repl/session-loop/wiring-installs.ts":
+        "God-fn split of session-loop.ts runSessionLoop — the wiring-installs lane owns the same composition-root env-gated wire installs, moved verbatim. Same posture as session-loop.ts.",
+      "apps/cli/repl/session-loop/turn-driver.ts":
+        "God-fn split of session-loop.ts runSessionLoop — the turn-driver lane threads launch-time env into the per-turn driver, moved verbatim. Same posture as session-loop.ts.",
+      "apps/cli/repl/session-loop/bootstrap.ts":
+        "God-fn split of session-loop.ts runSessionLoop — the bootstrap lane owns the composition-root env reads, moved verbatim. Same posture as session-loop.ts.",
       "apps/cli/repl/session-runtime-config.ts":
         "REPL session-runtime-config composition root — same posture as repl.ts.",
       "apps/cli/rewind-cmd.ts": "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
@@ -536,8 +544,8 @@ const RULES: readonly Rule[] = [
         "Plugin-lifecycle restart-window default (60s) — documented inline; matches platform supervisor convention for restart-budget windows.",
       "apps/cli/idle-monitor.ts":
         "Idle minutes→ms conversion (`n * 60_000`) — surface helper, not a wall-clock policy literal.",
-      "apps/cli/repl/session-loop.ts":
-        "Goal-pill elapsed ms→minutes conversion (`Math.floor(view.elapsedMs / 60_000)`) used only to build a minute-resolution dedup KEY for the surface chip — display unit conversion, not a wall-clock policy literal. Same posture as apps/cli/idle-monitor.ts / status-pills.ts.",
+      "apps/cli/repl/session-loop/interactive-setup.ts":
+        "Goal-pill elapsed ms→minutes conversion (`Math.floor(view.elapsedMs / 60_000)`) used only to build a minute-resolution dedup KEY for the surface chip — display unit conversion, not a wall-clock policy literal. Moved verbatim from session-loop.ts by the runSessionLoop god-fn split. Same posture as apps/cli/idle-monitor.ts / status-pills.ts.",
       "apps/cli/status-pills.ts":
         "`formatElapsed` ms→minutes conversion (`Math.floor(ms / 60_000)`) for the surface goal chip's `2h 7m` display — surface unit conversion, not a wall-clock policy literal. Same posture as apps/cli/idle-monitor.ts.",
       "apps/cli/web-cmd.ts":
