@@ -2,19 +2,12 @@ import { randomBytes } from "node:crypto"
 import { readdir, rename, unlink } from "node:fs/promises"
 import { pathToFileURL } from "node:url"
 import type { Subprocess } from "bun"
-import { PUMP_DEATH_EXIT_GRACE_MS } from "@/plugin-isolation"
-import { errMessage, logger, sliceTailWholeChars } from "@/shared"
+import { logger } from "@/shared"
 import type { LspPort } from "../ports"
 import type { CodeAction, CodeActionWorkspaceEdit } from "../ports/code-action-port"
 import type { FormatRange, TextEdit as FormatTextEdit } from "../ports/format-port"
 import type { RenameWorkspaceEdit } from "../ports/rename-apply-port"
 import type { SignatureInfo } from "../ports/signature-help-port"
-import { buildLspServerEnv, resolveLspMemBudgetMb } from "../server-mem-budget"
-import {
-  type LspRssWatchdogHandle,
-  resolveLspRssBudgetMb,
-  startLspRssWatchdog,
-} from "../server-rss-watchdog"
 import type {
   CallHierarchyEntry,
   Diagnostic,
@@ -31,12 +24,11 @@ import {
   type LspClientOptions,
   type LspClientSpec,
   type LspProcessTreeSignal,
-  OPEN_DOC_CACHE_MAX,
-  STDERR_TAIL_MAX,
 } from "./base/config"
+import { DiagnosticsHub } from "./base/diagnostics-hub"
+import { DocumentTracker } from "./base/document-tracker"
 import { isUnsupportedError, LspRequestError } from "./base/errors"
 import {
-  abortError,
   codeActionFilterFor,
   flattenDocumentSymbol,
   flattenHoverContents,
@@ -46,7 +38,6 @@ import {
   isResponse,
   isSymbolInformationList,
   mapCodeAction,
-  mapDiagnostic,
   mapSignature,
   mapSymbolInformation,
   mapWorkspaceSymbolEntry,
@@ -63,7 +54,6 @@ import {
 import type {
   InitializeResult,
   PendingRequest,
-  PublishDiagnosticsParams,
   RawCallHierarchyItem,
   RawCallHierarchyResult,
   RawCodeActionResult,
@@ -78,8 +68,10 @@ import type {
   RawWorkspaceSymbolResult,
   WorkspaceConfigurationParams,
 } from "./base/raw-types"
+import { RequestCorrelator } from "./base/request-correlator"
+import { LspTransport } from "./base/transport"
 import { resolveWorkspaceConfiguration, toWorkspaceFolder } from "./base/workspace"
-import { encodeMessage, type JsonRpcMessage, type JsonRpcResponse, MessageReader } from "./jsonrpc"
+import type { JsonRpcMessage, JsonRpcResponse } from "./jsonrpc"
 
 export type { LspClientOptions, LspClientSpec } from "./base/config"
 // Re-export the complete original public surface so every importer of
@@ -94,117 +86,97 @@ const LSP_PROCESS_KILL_GRACE_MS = 2_000
  *  `textDocument/didOpen` then await `textDocument/publishDiagnostics` →
  *  `shutdown` → `exit` → kill. Requests are correlated by an incrementing id
  *  with per-request timeouts; all pending work is rejected if the process
- *  dies, so there are never unhandled rejections or leaked timers. */
+ *  dies, so there are never unhandled rejections or leaked timers.
+ *
+ *  The transport (subprocess + pumps + RSS watchdog), request correlation,
+ *  per-session diagnostics, and open-document LRU are each owned by a
+ *  collaborator ({@link LspTransport}, {@link RequestCorrelator},
+ *  {@link DiagnosticsHub}, {@link DocumentTracker}); this class composes them
+ *  and wires the read-pump fan-out. */
 export class LspClient implements LspPort {
-  private readonly command: string[]
-  private readonly cwd: string
   private readonly requestTimeoutMs: number
   private readonly workspaceFolders: readonly string[]
   private readonly workspaceConfiguration: Readonly<Record<string, unknown>>
-  private readonly processTreeKiller: LspClientOptions["processTreeKiller"]
   private readonly spec: LspClientSpec
 
-  private proc: Subprocess<"pipe", "pipe", "pipe"> | null = null
-  /** RSS watchdog over `proc` — kills a server whose total resident memory blows
-   *  past the budget (off-heap pyright OOM that `--max-old-space-size` cannot
-   *  catch). null when disabled (budget 0) or before start. */
-  private rssWatchdog: LspRssWatchdogHandle | null = null
-  private reader = new MessageReader()
-  private nextId = 1
-  private readonly pending = new Map<number, PendingRequest>()
-  private readonly diagnosticsByUri = new Map<string, Diagnostic[]>()
-  private readonly diagnosticsWaiters = new Map<string, Array<(d: Diagnostic[]) => void>>()
-  /** Open-document cache for long-lived sessions. Tracks the last synced text
-   *  and LSP version so a reused client emits `didChange` instead of serving
-   *  stale buffers after an on-disk edit. Iteration order is recency (LRU):
-   *  {@link syncOpenDocument} re-inserts on every touch and bounds the size to
-   *  {@link OPEN_DOC_CACHE_MAX} so a long session can't retain unbounded text. */
-  private readonly opened = new Map<string, { version: number; text: string }>()
-  private readPump: Promise<void> | null = null
-  private stderrPump: Promise<void> | null = null
+  private readonly transport: LspTransport
+  private readonly correlator: RequestCorrelator
+  private readonly diagnosticsHub: DiagnosticsHub
+  private readonly documents: DocumentTracker
+
   private stopped = false
-  private exited = false
-  /** Bounded tail of the server's most recent stderr (decoded). The drain pump
-   *  exists to keep the OS pipe empty (deadlock guard); we ALSO retain the tail
-   *  so an unexpected exit (crash / OOM SIGKILL) logs the reason the server
-   *  printed — formerly every stderr byte was discarded, so a dying pyright left
-   *  no diagnosable trace. Capped at {@link STDERR_TAIL_MAX}. */
-  private stderrTail = ""
   serverInfo: LspServerInfo | null = null
+
+  // --- Delegating views onto collaborator-owned state --------------------
+  // Kept as instance accessors under the original field names so both the
+  // internals below AND the in-process test seams (which reach `this.proc`,
+  // `this.opened`, `this.pending`, `this.diagnosticsByUri`,
+  // `this.diagnosticsWaiters` via casts) observe the exact same objects.
+  /** Live subprocess handle (owned by {@link LspTransport}). The setter lets a
+   *  test subclass inject a fake transport (`self.proc = { stdin }`). */
+  protected get proc(): Subprocess<"pipe", "pipe", "pipe"> | null {
+    return this.transport.proc
+  }
+  protected set proc(value: Subprocess<"pipe", "pipe", "pipe"> | null) {
+    this.transport.proc = value
+  }
+  private get exited(): boolean {
+    return this.transport.exited
+  }
+  private set exited(value: boolean) {
+    this.transport.exited = value
+  }
+  private get pending(): Map<number, PendingRequest> {
+    return this.correlator.pending
+  }
+  private get diagnosticsByUri(): Map<string, Diagnostic[]> {
+    return this.diagnosticsHub.diagnosticsByUri
+  }
+  private get diagnosticsWaiters(): Map<string, Array<(d: Diagnostic[]) => void>> {
+    return this.diagnosticsHub.diagnosticsWaiters
+  }
+  private get opened(): Map<string, { version: number; text: string }> {
+    return this.documents.opened
+  }
+  private get command(): string[] {
+    return this.transport.command
+  }
+  private get cwd(): string {
+    return this.transport.cwd
+  }
 
   constructor(spec: LspClientSpec, options: LspClientOptions = {}) {
     this.spec = spec
-    this.command = options.command ?? spec.defaultCommand
-    this.cwd = options.cwd ?? process.cwd()
+    const command = options.command ?? spec.defaultCommand
+    const cwd = options.cwd ?? process.cwd()
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS
     this.workspaceFolders = options.workspaceFolders ?? []
     this.workspaceConfiguration = options.workspaceConfiguration ?? {}
-    this.processTreeKiller = options.processTreeKiller
+
+    this.transport = new LspTransport(command, cwd, options.processTreeKiller, {
+      onMessage: (msg) => this.dispatch(msg),
+      isStopped: () => this.stopped,
+      failAllPending: (reason) => this.failAllPending(reason),
+    })
+    this.correlator = new RequestCorrelator({
+      requestTimeoutMs: this.requestTimeoutMs,
+      isExited: () => this.exited,
+      isStopped: () => this.stopped,
+      send: (payload) => this.send(payload),
+      sendNotification: (method, params) => this.sendNotification(method, params),
+    })
+    this.diagnosticsHub = new DiagnosticsHub(this.requestTimeoutMs)
+    this.documents = new DocumentTracker({
+      sendNotification: (method, params) => this.sendNotification(method, params),
+      languageIdFor: (filePath) => this.spec.languageIdFor(filePath),
+      forgetDiagnostics: (uri) => this.diagnosticsByUri.delete(uri),
+    })
   }
 
   async start(signal?: AbortSignal): Promise<void> {
     throwIfAborted(signal, "LSP start")
     if (this.proc) return
-    this.proc = Bun.spawn(this.command, {
-      cwd: this.cwd,
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-      // Cap the V8 old-space heap of Node-based servers (pyright /
-      // typescript-language-server) so one can never OOM the host: a large repo
-      // balloons pyright's heap, and with bench concurrency + warm-pool-retained
-      // servers the combined RSS OOM-killed a 64GB box (jun-26). DEFAULT-ON 4096
-      // MB; `QUANTA_LSP_MEM_BUDGET_MB=0` opts out (env passed through unchanged,
-      // byte-identical). Non-Node servers (clangd/gopls/rust-analyzer) ignore
-      // NODE_OPTIONS — harmless. Read here (not via runtime-config) to match
-      // base.ts already sourcing process.{pid,cwd} directly at the spawn site.
-      env: buildLspServerEnv(process.env, resolveLspMemBudgetMb(process.env)),
-    })
-    this.readPump = this.pumpStdout()
-    // Drain stderr to completion so a verbose language server (tsserver /
-    // Pyright debug output) can never fill the OS stderr pipe (~64KB) and block
-    // its own next stderr write — which would stall the stdout JSON-RPC channel
-    // and hang every pending request to its `requestTimeoutMs`. Bytes are
-    // discarded; this is purely a deadlock guard. Mirrors the stdout pump.
-    this.stderrPump = this.drainStderr()
-    this.watchExit()
-
-    // DEFENSIVE guard for OFF-heap RSS runaway: `--max-old-space-size` (above)
-    // caps only V8 old-space, so a server whose memory grows OUTSIDE old-space
-    // (external / ArrayBuffer / native) can still climb RSS to the host limit
-    // without Node ever throwing its own heap OOM. This watchdog kills such a
-    // runaway tree → the pool degrades that cwd to no-LSP (grep/read still work)
-    // and the host survives. NOTE (jun-28): budget DEFAULT (8GB) sits ABOVE the
-    // 4GB heap cap, so it does NOT govern an ON-heap balloon (that self-OOMs at
-    // 247 first — measured on xarray); this guard is for the off-heap path only.
-    // Opt out with QUANTA_LSP_RSS_BUDGET_MB=0.
-    const rssBudgetMb = resolveLspRssBudgetMb(process.env)
-    const pid = this.proc.pid
-    if (rssBudgetMb > 0 && typeof pid === "number") {
-      logger.info("lsp: RSS watchdog armed", {
-        command: this.command[0],
-        pid,
-        budgetMb: rssBudgetMb,
-      })
-      this.rssWatchdog = startLspRssWatchdog({
-        pid,
-        budgetMb: rssBudgetMb,
-        onExceed: (rssMb) => {
-          logger.warn("lsp: server RSS over budget — killing to protect host", {
-            command: this.command[0],
-            cwd: this.cwd,
-            rssMb: Math.round(rssMb),
-            budgetMb: rssBudgetMb,
-          })
-          // SIGKILL the runaway tree IMMEDIATELY — a graceful stop() would await
-          // a `shutdown` request (up to requestTimeoutMs) while the server keeps
-          // ballooning and could still OOM the box. The proc death cascades into
-          // watchExit (fails pending) → the pool's reactive teardown.
-          const proc = this.proc
-          if (proc) this.signalServerProcess(proc, "SIGKILL")
-        },
-      })
-    }
+    this.transport.spawn(() => this.onProcessExit())
 
     const onAbort = () => {
       void this.stop().catch(() => undefined)
@@ -580,8 +552,8 @@ export class LspClient implements LspPort {
   async stop(): Promise<void> {
     if (this.stopped) return
     this.stopped = true
-    this.rssWatchdog?.stop()
-    this.rssWatchdog = null
+    this.transport.rssWatchdog?.stop()
+    this.transport.rssWatchdog = null
     const proc = this.proc
 
     // Close every doc we lazily opened so the server's per-URI state is freed
@@ -595,8 +567,7 @@ export class LspClient implements LspPort {
     // document text or diagnostics (the maps would otherwise live until GC even
     // though the session is over). Waiters are settled by `failAllPending` /
     // their own timeout; clearing the registry just frees the keys.
-    this.diagnosticsByUri.clear()
-    this.diagnosticsWaiters.clear()
+    this.diagnosticsHub.clear()
 
     if (!proc) return
 
@@ -618,11 +589,11 @@ export class LspClient implements LspPort {
       } catch {
         // stdin may already be closed
       }
-      const exited = await this.waitForProcessExit(proc, LSP_PROCESS_KILL_GRACE_MS)
+      const exited = await this.transport.waitForProcessExit(proc, LSP_PROCESS_KILL_GRACE_MS)
       if (!exited) this.signalServerProcess(proc, "SIGKILL")
       await proc.exited.catch(() => undefined)
-      await this.readPump?.catch(() => undefined)
-      await this.stderrPump?.catch(() => undefined)
+      await this.transport.readPump?.catch(() => undefined)
+      await this.transport.stderrPump?.catch(() => undefined)
       this.proc = null
     }
   }
@@ -630,27 +601,7 @@ export class LspClient implements LspPort {
   // --- internals -----------------------------------------------------------
 
   private waitForDiagnostics(uri: string): Promise<Diagnostic[]> {
-    const existing = this.diagnosticsByUri.get(uri)
-    if (existing) return Promise.resolve(existing)
-
-    return new Promise<Diagnostic[]>((resolve) => {
-      const waiters = this.diagnosticsWaiters.get(uri) ?? []
-      let settled = false
-      const settle = (d: Diagnostic[]) => {
-        if (settled) return
-        settled = true
-        clearTimeout(timer)
-        resolve(d)
-      }
-      const timer = setTimeout(() => {
-        // No publish within the bound: treat as "no diagnostics" rather than
-        // hang. Servers emit an empty array for clean files, but a timeout is
-        // the safety net if a notification is somehow missed.
-        settle(this.diagnosticsByUri.get(uri) ?? [])
-      }, this.requestTimeoutMs)
-      waiters.push(settle)
-      this.diagnosticsWaiters.set(uri, waiters)
-    })
+    return this.diagnosticsHub.waitForDiagnostics(uri)
   }
 
   /** Send a JSON-RPC request and resolve with the server's `result`.
@@ -661,46 +612,7 @@ export class LspClient implements LspPort {
    *  and rejects with {@link LspRequestError} when the server returns an
    *  error (so callers can inspect the JSON-RPC code). */
   protected sendRequest(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
-    const id = this.nextId++
-    const payload =
-      params === undefined ? { jsonrpc: "2.0", id, method } : { jsonrpc: "2.0", id, method, params }
-    return new Promise<unknown>((resolve, reject) => {
-      // Lifecycle guard: if the server has already exited or we've stopped,
-      // reject immediately instead of registering a pending entry whose
-      // `send()` would silently no-op (stdin gone) and only fail on timeout —
-      // a needless `requestTimeoutMs` hang. Mirrors McpClient.request().
-      // `shutdown` is exempt: stop() issues it after setting `stopped`.
-      if ((this.exited || this.stopped) && method !== "shutdown") {
-        reject(new Error(`LSP request "${method}" issued after server stopped/exited`))
-        return
-      }
-      if (signal?.aborted) {
-        reject(abortError(`LSP request "${method}"`))
-        return
-      }
-      const timer = setTimeout(() => {
-        if (!this.pending.delete(id)) return
-        entry.detachAbort?.()
-        reject(new Error(`LSP request "${method}" timed out after ${this.requestTimeoutMs}ms`))
-      }, this.requestTimeoutMs)
-      const entry: PendingRequest = { resolve, reject, timer, method }
-      if (signal) {
-        const onAbort = () => {
-          if (!this.takePending(id)) return
-          this.sendNotification("$/cancelRequest", { id })
-          reject(abortError(`LSP request "${method}"`))
-        }
-        signal.addEventListener("abort", onAbort, { once: true })
-        entry.detachAbort = () => signal.removeEventListener("abort", onAbort)
-      }
-      this.pending.set(id, entry)
-      const sendError = this.send(payload)
-      if (sendError) {
-        const pending = this.takePending(id)
-        if (!pending) return
-        pending.reject(sendError)
-      }
-    })
+    return this.correlator.sendRequest(method, params, signal)
   }
 
   /** Send a JSON-RPC notification. Same test-seam rationale as
@@ -814,143 +726,14 @@ export class LspClient implements LspPort {
   }
 
   private send(payload: unknown): Error | null {
-    const stdin = this.proc?.stdin
-    if (!stdin) {
-      const err = new Error("LSP transport unavailable: stdin closed")
-      logger.warn("lsp: failed to write to server stdin", { error: err.message })
-      return err
-    }
-    try {
-      stdin.write(encodeMessage(payload))
-      return null
-    } catch (e) {
-      const err = e instanceof Error ? e : new Error(errMessage(e))
-      logger.warn("lsp: failed to write to server stdin", { error: err.message })
-      return new Error(`LSP transport write failed: ${err.message}`)
-    }
+    return this.transport.write(payload)
   }
 
   private signalServerProcess(
     proc: Subprocess<"pipe", "pipe", "pipe">,
     signal: LspProcessTreeSignal,
   ): void {
-    const pid = proc.pid
-    if (this.processTreeKiller !== undefined && typeof pid === "number" && pid > 0) {
-      try {
-        this.processTreeKiller.signalTree(pid, signal)
-        return
-      } catch (e) {
-        // injected killer is expected no-throw; keep stop() defensive anyway.
-        logger.warn("lsp: process-tree signal threw (defensive)", {
-          pid,
-          signal,
-          error: errMessage(e),
-        })
-      }
-    }
-    try {
-      proc.kill(signal)
-    } catch (e) {
-      // process may have already exited
-      logger.warn("lsp: proc.kill threw (likely already exited)", {
-        pid,
-        signal,
-        error: errMessage(e),
-      })
-    }
-  }
-
-  private async waitForProcessExit(
-    proc: Subprocess<"pipe", "pipe", "pipe">,
-    timeoutMs: number,
-  ): Promise<boolean> {
-    let exited = false
-    await Promise.race([
-      proc.exited
-        .then(() => {
-          exited = true
-        })
-        .catch(() => {
-          exited = true
-        }),
-      new Promise<void>((resolve) => {
-        setTimeout(resolve, timeoutMs).unref?.()
-      }),
-    ])
-    return exited
-  }
-
-  private async pumpStdout(): Promise<void> {
-    const proc = this.proc
-    const stdout = proc?.stdout
-    if (!proc || !stdout) return
-    let pumpError: unknown = null
-    try {
-      for await (const chunk of stdout) {
-        for (const msg of this.reader.push(chunk)) {
-          this.dispatch(msg)
-        }
-      }
-    } catch (e) {
-      pumpError = e
-    }
-    const detail = pumpError === null ? "stdout closed (EOF)" : errMessage(pumpError)
-    // A natural server exit closes stdout (settling this pump) BEFORE Bun sets
-    // `proc.exitCode` and fans out `proc.exited` — by MORE than one microtask
-    // (EOF can beat the exit by a full macrotask hop). Judging liveness with no
-    // yield therefore misfires the "stdout pump died" warn on EVERY normal
-    // shutdown. Run the SAME bounded exit-settlement race the Bun spawner and
-    // the MCP stdio transport use (shared {@link PUMP_DEATH_EXIT_GRACE_MS})
-    // before judging: a natural/killed exit wins in sub-millisecond and stays
-    // quiet; a genuine wedge (stdout closed, server alive forever) times out
-    // and still warns.
-    if (typeof proc.exitCode !== "number" && !proc.killed) {
-      await Promise.race([
-        proc.exited.catch(() => undefined),
-        new Promise<void>((r) => {
-          setTimeout(r, PUMP_DEATH_EXIT_GRACE_MS).unref?.()
-        }),
-      ])
-    }
-    // A pump that ends during a deliberate stop() or after process death is
-    // routine — stop()/watchExit() already fail the pending set. Otherwise the
-    // read channel died while the server process still LIVES: the client is
-    // half-dead and every pending + future request would silently burn its full
-    // `requestTimeoutMs`. Mirror send()'s warn and propagate the same
-    // exit/fail-pending the process-death path takes. A clean early EOF and a
-    // stream error are the same defect from the caller's view — both land here.
-    if (this.stopped || this.exited || proc.exitCode !== null || proc.killed) {
-      logger.debug("lsp: stdout pump ended", { error: detail })
-      return
-    }
-    logger.warn("lsp: stdout pump died while the server process is alive", { error: detail })
-    this.exited = true
-    this.failAllPending(new Error(`LSP transport read channel closed: ${detail}`))
-  }
-
-  /** Background drain of the server's stderr. A verbose server (tsserver /
-   *  Pyright debug logs) that fills the OS stderr pipe would block on its next
-   *  stderr write, stop answering stdout JSON-RPC, and hang every pending
-   *  request to timeout. Reading to completion keeps the pipe empty; bytes are
-   *  discarded (deadlock guard, not a diagnostics sink). Tolerant of a test
-   *  subclass whose `proc` has no stderr (same guard as {@link pumpStdout}). */
-  private async drainStderr(): Promise<void> {
-    const stderr = this.proc?.stderr
-    if (!stderr || typeof stderr === "number") return
-    const decoder = new TextDecoder()
-    try {
-      for await (const chunk of stderr) {
-        // Keep the pipe empty (deadlock guard) AND retain a bounded tail: when the
-        // server dies, the reason it prints here (crash stack / OOM notice) is the
-        // ONLY diagnosable signal — formerly discarded. Cap so a verbose server
-        // (pyright debug output) can't grow it unbounded.
-        const text = decoder.decode(chunk as Uint8Array, { stream: true })
-        if (text.length > 0)
-          this.stderrTail = sliceTailWholeChars(this.stderrTail + text, STDERR_TAIL_MAX)
-      }
-    } catch (e) {
-      logger.debug("lsp: stderr drain ended", { error: errMessage(e) })
-    }
+    this.transport.signalServerProcess(proc, signal)
   }
 
   private dispatch(msg: JsonRpcMessage): void {
@@ -1004,79 +787,15 @@ export class LspClient implements LspPort {
   }
 
   private resolvePending(msg: JsonRpcResponse): void {
-    const id = typeof msg.id === "number" ? msg.id : Number(msg.id)
-    const entry = this.takePending(id)
-    if (!entry) return
-    if (msg.error) {
-      entry.reject(new LspRequestError(entry.method, msg.error))
-    } else {
-      entry.resolve(msg.result)
-    }
+    this.correlator.resolvePending(msg)
   }
 
   private onPublishDiagnostics(params: unknown): void {
-    const p = params as PublishDiagnosticsParams | undefined
-    if (!p || typeof p.uri !== "string" || !Array.isArray(p.diagnostics)) return
-    const mapped = p.diagnostics.map((d) => mapDiagnostic(p.uri, d))
-    this.diagnosticsByUri.set(p.uri, mapped)
-    const waiters = this.diagnosticsWaiters.get(p.uri)
-    if (waiters && waiters.length > 0) {
-      this.diagnosticsWaiters.delete(p.uri)
-      for (const w of waiters) w(mapped)
-    }
+    this.diagnosticsHub.onPublishDiagnostics(params)
   }
 
   private syncOpenDocument(filePath: string, uri: string, text: string): string {
-    const existing = this.opened.get(uri)
-    if (!existing) {
-      this.sendNotification("textDocument/didOpen", {
-        textDocument: { uri, languageId: this.spec.languageIdFor(filePath), version: 1, text },
-      })
-      this.opened.set(uri, { version: 1, text })
-      this.evictOpenDocsToCap(uri)
-      return uri
-    }
-    // Re-insert so the Map's insertion order tracks recency (LRU): the most
-    // recently touched doc moves to the tail, the eviction victim is the head.
-    this.opened.delete(uri)
-    if (existing.text === text) {
-      this.opened.set(uri, existing)
-      return uri
-    }
-    const version = existing.version + 1
-    this.sendNotification("textDocument/didChange", {
-      textDocument: { uri, version },
-      contentChanges: [{ text }],
-    })
-    this.opened.set(uri, { version, text })
-    return uri
-  }
-
-  /** Bound the per-session open-doc cache: while it exceeds {@link
-   *  OPEN_DOC_CACHE_MAX}, `didClose` and forget the least-recently-touched
-   *  document (Map iteration order = insertion order = recency, because
-   *  {@link syncOpenDocument} re-inserts on every touch). Never evicts the
-   *  just-touched `keep` URI. Forgetting drops its retained text AND its
-   *  URI-keyed diagnostics so neither map grows without bound. */
-  private evictOpenDocsToCap(keep: string): void {
-    while (this.opened.size > OPEN_DOC_CACHE_MAX) {
-      let victim: string | undefined
-      for (const uri of this.opened.keys()) {
-        if (uri !== keep) {
-          victim = uri
-          break
-        }
-      }
-      if (victim === undefined) return
-      this.forgetDocument(victim)
-    }
-  }
-
-  /** Close one open document and drop every per-session trace of it. */
-  private forgetDocument(uri: string): void {
-    this.sendNotification("textDocument/didClose", { textDocument: { uri } })
-    this.opened.delete(uri)
-    this.diagnosticsByUri.delete(uri)
+    return this.documents.syncOpenDocument(filePath, uri, text)
   }
 
   private sendServerResult(id: number | string, result: unknown): void {
@@ -1087,62 +806,45 @@ export class LspClient implements LspPort {
     this.send({ jsonrpc: "2.0", id, error: { code, message } })
   }
 
-  private watchExit(): void {
+  /** Process-exit handler (wired into {@link LspTransport.spawn}). Rejects
+   *  in-flight requests, waits for the stderr drain, then classifies the exit
+   *  by its status for the log level. */
+  private async onProcessExit(): Promise<void> {
     const proc = this.proc
     if (!proc) return
-    const onExit = async () => {
-      this.exited = true
-      this.rssWatchdog?.stop()
-      this.rssWatchdog = null
-      // Reject in-flight requests FIRST so callers never hang on a dead server.
-      this.failAllPending(new Error("LSP server exited"))
-      // Then let the stderr drain finish before logging, so the retained tail
-      // holds the server's LAST words (its crash/OOM reason) instead of racing
-      // the exit event and logging an empty tail.
-      await this.stderrPump?.catch(() => undefined)
-      // Classify by the EXIT STATUS, never by `this.stopped`: a crash triggers
-      // the pool's reactive teardown (`stopClient → stop()`), which sets
-      // `stopped=true` — so gating on it would DOWNGRADE the very crash we want to
-      // surface (measured jun-21: a pyright OOM logged at debug, invisible). A
-      // clean `exit 0`, or the `SIGTERM` our own stop() sends, is expected →
-      // debug. Anything else — a non-zero exit (crash) or a signal we did NOT
-      // send (SIGKILL ⇒ the kernel OOM-killer; large repos blow past node's
-      // default heap) — is a real death worth a WARN with the stderr tail.
-      const expected = proc.exitCode === 0 || proc.signalCode === "SIGTERM"
-      const detail = {
-        command: this.command[0],
-        cwd: this.cwd,
-        exitCode: proc.exitCode,
-        signal: proc.signalCode,
-        stderrTail: this.stderrTail.slice(-2_000),
-      }
-      if (expected) logger.debug("lsp: server exited", detail)
-      else logger.warn("lsp: server exited UNEXPECTEDLY", detail)
+    this.exited = true
+    this.transport.rssWatchdog?.stop()
+    this.transport.rssWatchdog = null
+    // Reject in-flight requests FIRST so callers never hang on a dead server.
+    this.failAllPending(new Error("LSP server exited"))
+    // Then let the stderr drain finish before logging, so the retained tail
+    // holds the server's LAST words (its crash/OOM reason) instead of racing
+    // the exit event and logging an empty tail.
+    await this.transport.stderrPump?.catch(() => undefined)
+    // Classify by the EXIT STATUS, never by `this.stopped`: a crash triggers
+    // the pool's reactive teardown (`stopClient → stop()`), which sets
+    // `stopped=true` — so gating on it would DOWNGRADE the very crash we want to
+    // surface (measured jun-21: a pyright OOM logged at debug, invisible). A
+    // clean `exit 0`, or the `SIGTERM` our own stop() sends, is expected →
+    // debug. Anything else — a non-zero exit (crash) or a signal we did NOT
+    // send (SIGKILL ⇒ the kernel OOM-killer; large repos blow past node's
+    // default heap) — is a real death worth a WARN with the stderr tail.
+    const expected = proc.exitCode === 0 || proc.signalCode === "SIGTERM"
+    const detail = {
+      command: this.command[0],
+      cwd: this.cwd,
+      exitCode: proc.exitCode,
+      signal: proc.signalCode,
+      stderrTail: this.transport.stderrTail.slice(-2_000),
     }
-    void proc.exited.then(onExit).catch(onExit)
+    if (expected) logger.debug("lsp: server exited", detail)
+    else logger.warn("lsp: server exited UNEXPECTEDLY", detail)
   }
 
   private failAllPending(reason: Error): void {
-    for (const [, entry] of this.pending) {
-      clearTimeout(entry.timer)
-      entry.detachAbort?.()
-      entry.reject(reason)
-    }
-    this.pending.clear()
+    this.correlator.failAll(reason)
     // Unblock any diagnostics waiters with an empty result so callers that
     // raced a shutdown resolve instead of hanging forever.
-    for (const [, waiters] of this.diagnosticsWaiters) {
-      for (const w of waiters) w([])
-    }
-    this.diagnosticsWaiters.clear()
-  }
-
-  private takePending(id: number): PendingRequest | undefined {
-    const entry = this.pending.get(id)
-    if (!entry) return undefined
-    this.pending.delete(id)
-    clearTimeout(entry.timer)
-    entry.detachAbort?.()
-    return entry
+    this.diagnosticsHub.failAll()
   }
 }

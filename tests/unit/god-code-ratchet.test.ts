@@ -41,8 +41,12 @@ describe("god-code ratchet (SE size metric)", () => {
   const currentFunctions = new Set(
     detectGodFunctions(files, GOD_FUNCTION_MAX_LINES).map((f) => f.key),
   )
-  const allowModules = new Set(allowlist.modules)
-  const allowFunctions = new Set(allowlist.functions)
+  // `new Set<string>(...)`: the `modules` allowlist is now empty (the last
+  // grandfathered god-module — src/lsp/adapters/base.ts — was split out), which
+  // TypeScript's JSON-import inference narrows to `never[]`; widen so the
+  // `.has(f)` membership test below still typechecks against string keys.
+  const allowModules = new Set<string>(allowlist.modules)
+  const allowFunctions = new Set<string>(allowlist.functions)
 
   test("thresholds match the frozen allowlist (config drift guard)", () => {
     expect(allowlist.godModuleMaxLines).toBe(GOD_MODULE_MAX_LINES)
