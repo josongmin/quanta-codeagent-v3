@@ -63,6 +63,51 @@ Truth is the current working tree, 2026-07-19; no commit receipt is claimed (con
 - Consolidations (proven duplicates deleted): retrieval/semantic ADR-0254 port (Wave M), recovery-router wrapper + ratelimit dead-store half (Wave P) — all byte-identical, tests green.
 - Whole-tree typecheck remains RED on pre-existing/concurrent test-shape errors outside these owner seams; it is not promoted to a completion receipt.
 
+### 2026-07-28 follow-up — god-code / security / DRY campaign state
+
+- Completed scope: user-owned work is finished and pushed at `065baa442`. Note the Git object carries a future commit date (`2026-07-29`) relative to this board snapshot (`2026-07-28`); use the hash, not the date, as the receipt. Content-wise this closed 5 god-module retirements (`driver`, `raw-line-reader`, `llm-evidence-packet`, `streamResponsesSurface`, `runSessionLoop`), 2 security fixes (OTLP tool-span leak, AWS session-key parity), DRY + NUL hygiene (`escapeBodyForLine`, tool→llm fence), and the post-split `src-no-sketchy` allowlist repoint. Owned-file ratchets are clean; net `process.env` delta stayed 0.
+- Campaign residue is now five items, but only three are genuine future work. `serve-stdio` is an external landing dependency; `dead-wire` was a stale-memory false positive and is closed.
+
+1. `serve-stdio` / full-fidelity ratchet red
+Background: `src/apps/cli/serve-stdio-cmd.ts` (481 LOC; introduced at `a83e28cd4`) and the `fullFidelityEnabled(process.env)` reads in `src/kernel/session/state.ts` and `src/sdk/runtime/session/engine.ts` (from `bbd289d4`) are the remaining source of the current `src-no-sketchy` / surface-coupling / raw-env pressure.
+Purpose: restore main CI to green without baking stale exceptions into the tree.
+Action: no local change. The active worktree `agent-serve-stdio-impl` at `1d77c2869` is already deleting `serve-stdio-cmd.ts` and removing the duplicated full-fidelity reads; wait for that landing.
+Current judgment: not this scope; touching it here would be wrong. Adding allowlist entries would go stale on deletion, and source edits would collide with the in-flight removal.
+ROI/risk: zero local ROI; the landing is the only durable fix.
+Owner: `serve-stdio` session / worktree.
+
+2. `src/lsp/adapters/base.ts` god-module (1148 LOC)
+Background: this is the last grandfathered god-module entry; it is the stateful `LspClient` hot path, not a pure helper.
+Purpose: drive god-module count to 0 and finish the campaign honestly.
+Action: split by collaborator/lifecycle owner (`LspConnection`, document/open-file tracking, transport/process lifecycle) rather than moving lines mechanically.
+Current judgment: defer to a dedicated session. The pure mappers are already extracted; what remains is fragile process/transport state. This file previously hid real bugs that only a real pyright end-to-end path exposed.
+ROI/risk: metric win is real, but regression risk is high unless behavior is pinned first.
+Owner: user, with a separate hellgate before surgery.
+
+3. 46 grandfathered god-functions
+Background: the allowlist still carries 46 `>150`-line functions.
+Purpose: reduce genuine god-functions, not game the metric.
+Action: triage first; separate true oversized logic from factory-closure patterns that count large because they hold multiple methods in one closure.
+Current judgment: do not start with blanket extraction. Most entries are likely overcount artifacts, so forced splits would create fake progress and extra indirection.
+ROI/risk: low ROI until a measure-first triage exists; only a small subset is likely worth real decomposition.
+Owner: unassigned pending triage.
+
+4. Repo-wide lint backlog (~1000 Biome errors)
+Background: the repo still carries a large global lint backlog.
+Purpose: eventually reach lint-clean without trampling concurrent work.
+Action: keep the current rule: fix only owned files opportunistically. Do not run repo-wide `biome --write` while 40+ worktrees are live.
+Current judgment: broad auto-write is churn-hazard, not cleanup. This belongs to a coordinated, mostly single-owner window.
+ROI/risk: medium upside, high collision risk if done as a sweep.
+Owner: coordination problem; for now each session owns only its touched files.
+
+5. dead-wire 2 items
+Background: an earlier note marked two candidates as "unwired".
+Purpose: avoid deleting real forward seams on stale memory.
+Action: none. Re-check closed both: `preset-specs` is phantom in current source, and `recordDiff` is a documented forward seam at `src/agent/session-resources.ts:196` ("future tool routes numstat through `collector.recordDiff(...)`").
+Current judgment: closed as false positive; there is nothing to delete or wire.
+ROI/risk: no ROI; deleting either would be an own-goal.
+Owner: none.
+
 ### Parallel wave receipts (2026-07-16, 6 disjoint owner-seam leaves, base b92b3798f)
 
 All new tests run per-file green in the current working tree (`.ts` confirmed to win bun resolution over the 2501 stale gitignored `.js`, so no shadowing hazard):
