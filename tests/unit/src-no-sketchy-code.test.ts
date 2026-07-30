@@ -106,8 +106,8 @@ const RULES: readonly Rule[] = [
         "Injection-first: `process.env` is ONLY the default for the injected `env` param (`opts.env ?? process.env`); the QUANTA_BENCH_HEALTH_ABORT gate is read off that param via gateDisabled, never module-level. Same bench-only opt-in gate posture as runner/batch/eval/driver.ts; tests inject a fake env.",
       "lsp/server-mem-budget.ts":
         "Injection-first: `process.env` is ONLY the default for the injected `env` param; resolves the QUANTA_LSP_MEM_BUDGET_MB heap cap at LSP-spawn time and downstream gets the resolved budget. Same DI-boundary posture as the CLI gate wires; tests pass a fake env.",
-      "lsp/adapters/base.ts":
-        "ENV PROPAGATION — passes the parent's `process.env` into `buildLspServerEnv` so the spawned language-server child inherits it (plus the NODE_OPTIONS heap cap); pass-through to a child, not a feature read. Same posture as runtime/shell.ts / tool/git/runner.ts.",
+      "lsp/adapters/base/transport.ts":
+        "ENV PROPAGATION at the LSP spawn site (god-module split of lsp/adapters/base.ts — the transport collaborator now owns process spawn/lifecycle, reads moved VERBATIM). Passes the parent's `process.env` into `buildLspServerEnv` so the spawned language-server child inherits it (plus the NODE_OPTIONS heap cap), and threads it as the call-boundary arg to the PURE `resolveLspMemBudgetMb`/`resolveLspRssBudgetMb` resolvers (each allowlisted separately). Pass-through to a child + DI-boundary arg, not a feature read. Same posture as runtime/shell.ts / tool/git/runner.ts.",
       "apps/bench/remote/box-session/ec2-lifecycle.ts":
         "Bench full-remote launch dial (QUANTA_FULL_REMOTE_READY_POLLS) read at box-provision time; same bench-only opt-in env posture as runner/batch/eval/driver.ts. Downstream gets the resolved poll count.",
       "apps/bench/remote/box-session/types.ts":
@@ -157,6 +157,10 @@ const RULES: readonly Rule[] = [
         'DEFAULT-OFF gate at a seam — the ONE shared home of `contentCaptureEnabled()` (`gateOn(process.env, "QUANTA_OTEL_CAPTURE_CONTENT")`), extracted VERBATIM from loop-helpers.ts (already allowlisted) so the LLM-sampling AND tool-dispatch span paths gate identically. Unset/falsy ⇒ NO content leaves the process (byte-identical). Same sanctioned default-OFF gate-at-a-seam class; mirrored in the @/agent slice-boundary envAllowFiles.',
       "agent/loop/control-poll.ts":
         "Injection-first DEFAULT-OFF gate — `isControlRequestEnabled(slot.env ?? process.env)`: `process.env` is ONLY the DI fallback for the injected `slot.env` (tests pass a fake env). An absent controlRequest slot OR gate-off ⇒ the port is never even queried (byte-identical). Same injection-first gate-at-a-seam posture as connectors/marketplace-policy.ts; mirrored in the @/agent slice-boundary envAllowFiles.",
+      "kernel/session/state.ts":
+        'DEFAULT-OFF gate at a seam — `fullFidelityEnabled(process.env)` (= `gateOn(env, "QUANTA_SESSION_FULL_FIDELITY")` via the @/shared gate SSOT) decides whether the state view projects the extra `lastTokenUsage` field. Unset/falsy ⇒ the field is omitted (byte-identical wire). `fullFidelityEnabled` is PURE (takes the env bag), so raw `process.env` is only its call-boundary argument. Same sanctioned default-OFF gate-at-a-seam class as agent/loop-helpers.ts.',
+      "sdk/runtime/session/engine.ts":
+        'DEFAULT-OFF gate at a seam — `fullFidelityEnabled(process.env)` (= `gateOn(env, "QUANTA_SESSION_FULL_FIDELITY")` via the @/shared gate SSOT) decides whether the transport bridge advertises `fullFidelity`. Unset/falsy ⇒ the strip stays on for every peer (byte-identical default-OFF wire). Same sanctioned default-OFF gate-at-a-seam class as agent/loop-helpers.ts / kernel/session/state.ts.',
       "tool/container-exec/tool.ts":
         "DEFAULT-OFF dial resolved at module load — `resolveStreamCap(process.env)` reads the per-stream output cap `QUANTA_TB_STREAM_CAP`; unset/≤0 ⇒ the fixed 8K default (byte-identical). `resolveStreamCap` is PURE (takes the env bag), so the raw `process.env` is only its call-boundary argument. Same env-at-call-boundary posture as runner/diff-ops.ts; mirrored (path-scoped) in the @/tool slice-boundary envAllowFiles.",
       // jun-09 long-tail (§4.3/§1.6/§2.5/P16/ci-bot wiring) — injection-first DI
@@ -187,6 +191,8 @@ const RULES: readonly Rule[] = [
         "Surface-only rule indicator (read-only mirror of repo-rules/glob-rules loaders). Same DI fallback posture as status-pills.ts — `opts.env ?? process.env` at the composition root, tests inject explicit env. Not a feature read of a runtimeConfig-validated knob.",
       "apps/cli/diff-preview.ts":
         "Surface presentation read (NO_COLOR / FORCE_COLOR) at TTY paint boundary; same posture as shell-stream-painter.ts.",
+      "apps/cli/serve-stdio-cmd.ts":
+        "CLI sub-command entry (`quanta serve --stdio`, session.v1 stdio server). Composition root: spreads the parent env into the SessionBootstrapDeps / spawned child (`env: process.env`, `homeDir: process.env.HOME`), threads `process.env` as the DI arg to `pickProvider`/`tryCreateLLM`, and guards the subcommand behind the `QUANTA_SERVE_STDIO` entry flag. Downstream host/llm modules accept env explicitly. Same CLI-entry composition-root posture as login-cmd.ts / attach-cmd.ts.",
       "apps/cli/edit-message-cmd.ts":
         "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
       "apps/cli/edit-plan-cmd.ts":
@@ -525,6 +531,10 @@ const RULES: readonly Rule[] = [
     pattern:
       /String\(\s*(?:e|err|error|caught|ex|reason|cause)(?:\.(?:message|stack|toString\(\)))?\s*\)\.(?:includes|match|search|indexOf|startsWith|endsWith|split|exec)\(|\.test\(\s*String\(\s*(?:e|err|error|caught|ex|reason|cause)(?:\.(?:message|stack|toString\(\)))?\s*\)\s*\)|`\$\{\s*(?:e|err|error|caught|ex|reason|cause)(?:\.(?:message|stack|toString\(\)))?\s*\}`\.(?:includes|match|search|indexOf|startsWith|endsWith|split|exec)\(|\(\s*""\s*\+\s*(?:e|err|error|caught|ex|reason|cause)(?:\.(?:message|stack|toString\(\)))?\s*\)\.(?:includes|match|search|indexOf|startsWith|endsWith|split|exec)\(/,
     why: "Don't classify errors by stringified text — branch on the typed field instead (`e instanceof LspRequestError && e.code === …`, `LLMError.kind`/`statusCode`). Same contract as the `.message.includes(` ban.",
+    allowlist: {
+      "scheduler/automation-engine/sqlite/operations.ts":
+        "NO typed form exists — SQLite surfaces a UNIQUE-constraint violation with a generic code (`SQLITE_CONSTRAINT_UNIQUE`) that does NOT identify WHICH index failed; the index name (`idx_automations_live_heartbeat_thread`) lives ONLY in the message text, so the substring is the sole discriminator between the heartbeat-occupied race and any other future unique constraint. The `input.kind === 'heartbeat'` guard already scopes intent, and the broad catch is deliberately code-agnostic so detection can't silently break on a driver code-string change. This is the rule's sanctioned 'typed form does not exist' exception (see the rule comment), not error-text routing of an LLM/typed error.",
+    },
   },
   {
     id: "no-undocumented-magic-timeout",
