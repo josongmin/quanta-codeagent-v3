@@ -29,6 +29,7 @@
 
 import { readFile } from "node:fs/promises"
 import { join } from "node:path"
+import { errMessage } from "@/shared"
 import { logger } from "@/shared/logger"
 import { buildProjectEnvUvRunArgv } from "../corpus/project-env"
 import type { Instance } from "../types"
@@ -90,7 +91,10 @@ export const readRepoTestFiles = async (
   const out: RepoTextFile[] = []
   for (const path of paths) {
     if (!isPythonTestFile(path)) continue
-    const text = await readFile(join(sandbox, path), "utf8").catch(() => null)
+    const text = await readFile(join(sandbox, path), "utf8").catch((e) => {
+      logger.warn(`regression-discovery.readRepoTestFile[${path}]: ${errMessage(e)}`)
+      return null
+    })
     if (text !== null) out.push({ path, text })
   }
   return out
@@ -256,7 +260,10 @@ export const probeRepoTestOnCurrentTree = async (
   )
   const result = await oracle
     .run({ tests: [args.test], sandbox: args.sandbox, timeoutMs: args.timeoutMs })
-    .catch(() => null)
+    .catch((e) => {
+      logger.warn(`regression-discovery.probeOnCurrentTree[${args.test}]: ${errMessage(e)}`)
+      return null
+    })
   return toRegressionGreen([args.test], result)
 }
 
@@ -284,7 +291,10 @@ export const collectBaseGreenRepoTests = async (
     if (!(await resetToBase(args.sandbox, baseCommit, args.timeoutMs))) return null
     const r = await oracle
       .run({ tests: [test], sandbox: args.sandbox, timeoutMs: args.timeoutMs })
-      .catch(() => null)
+      .catch((e) => {
+        logger.warn(`regression-discovery.collectBaseGreen.perTest[${test}]: ${errMessage(e)}`)
+        return null
+      })
     return toRegressionGreen([test], r)
   }
 
@@ -294,7 +304,10 @@ export const collectBaseGreenRepoTests = async (
       runBatch: async (tests) => {
         const r = await batchOracle
           .run({ tests, sandbox: args.sandbox, timeoutMs: args.timeoutMs })
-          .catch(() => null)
+          .catch((e) => {
+            logger.warn(`regression-discovery.collectBaseGreen.runBatch: ${errMessage(e)}`)
+            return null
+          })
         return r === null ? null : { ran: r.ran, failed: r.failed }
       },
       perTest: runOneBaseTest,
@@ -498,7 +511,10 @@ export const makeDiscoveredRepoRegressionWitness = (
   const runOneBaseTest = async (test: string): Promise<boolean | null> => {
     if (baseCommit === undefined) return null
     if (!(await resetToBase(sandbox, baseCommit, timeoutMs))) return null
-    const r = await oracle.run({ tests: [test], sandbox, timeoutMs }).catch(() => null)
+    const r = await oracle.run({ tests: [test], sandbox, timeoutMs }).catch((e) => {
+      logger.warn(`regression-discovery.runOneBaseTest[${test}]: ${errMessage(e)}`)
+      return null
+    })
     return toRegressionGreen([test], r)
   }
 
@@ -513,7 +529,10 @@ export const makeDiscoveredRepoRegressionWitness = (
         ? Promise.resolve(false)
         : resetToBase(sandbox, baseCommit, timeoutMs),
     runBatch: async (tests) => {
-      const r = await batchOracle.run({ tests, sandbox, timeoutMs }).catch(() => null)
+      const r = await batchOracle.run({ tests, sandbox, timeoutMs }).catch((e) => {
+        logger.warn(`regression-discovery.batchPorts.runBatch: ${errMessage(e)}`)
+        return null
+      })
       return r === null ? null : { ran: r.ran, failed: r.failed }
     },
     perTest: runOneBaseTest,
@@ -559,7 +578,10 @@ export const makeDiscoveredRepoRegressionWitness = (
           // verdict ⇒ `null`) is `"infra"`, NOT a `"red"` regression. Only a real
           // executed fail/non-verdict (`false`) bars. `toRegressionGreen` already
           // maps a non-verdict run to `null`, so the infra/red split is exact.
-          const r = await oracle.run({ tests: [test], sandbox: sb, timeoutMs }).catch(() => null)
+          const r = await oracle.run({ tests: [test], sandbox: sb, timeoutMs }).catch((e) => {
+            logger.warn(`regression-discovery.executeWitnessOnPatched[${test}]: ${errMessage(e)}`)
+            return null
+          })
           return toWitnessRunVerdict(toRegressionGreen([test], r))
         }),
     })

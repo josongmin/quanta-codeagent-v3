@@ -88,8 +88,9 @@ export const writeEventRow = (deps: Deps, sessionId: string, event: TypedHistory
       $bytes: bytes,
       $payload: JSON.stringify(event),
     })
-  } catch {
+  } catch (e) {
     // NO-THROW — silent drop on disk side; in-memory append already ran.
+    logger.warn("session_registry.write_event_row_failed", { sessionId, cause: errMessage(e) })
   }
 }
 
@@ -117,8 +118,9 @@ export const writeCacheRow = (
       $built: builtAt,
       $bytes: bytes,
     })
-  } catch {
+  } catch (e) {
     // NO-THROW.
+    logger.warn("session_registry.write_cache_row_failed", { sessionId, cause: errMessage(e) })
   }
 }
 
@@ -132,7 +134,8 @@ export const readEvents = (deps: Deps, sessionId: string): readonly TypedHistory
       if (ev !== null) out.push(ev)
     }
     return out
-  } catch {
+  } catch (e) {
+    logger.warn("session_registry.read_events_failed", { sessionId, cause: errMessage(e) })
     return []
   }
 }
@@ -148,7 +151,8 @@ export const readCache = (
       const decoded = rowToCache(r)
       return { key: decoded.key, text: decoded.entry.text }
     })
-  } catch {
+  } catch (e) {
+    logger.warn("session_registry.read_cache_failed", { sessionId, cause: errMessage(e) })
     return []
   }
 }
@@ -179,8 +183,9 @@ export const wrapStore = (
     try {
       deps.db.query(DELETE_EVENTS_SQL).run(sessionId)
       recomputeSessionBytes(deps, sessionId)
-    } catch {
+    } catch (e) {
       // NO-THROW.
+      logger.warn("session_registry.clear_events_failed", { sessionId, cause: errMessage(e) })
     }
   },
 })
@@ -211,8 +216,9 @@ export const wrapCache = (
     try {
       deps.db.query(DELETE_CACHE_ENTRY_SQL).run(sessionId, String(key))
       recomputeSessionBytes(deps, sessionId)
-    } catch {
+    } catch (e) {
       // NO-THROW.
+      logger.warn("session_registry.invalidate_cache_failed", { sessionId, cause: errMessage(e) })
     }
   },
   clearAll(reason) {
@@ -220,8 +226,9 @@ export const wrapCache = (
     try {
       deps.db.query(DELETE_CACHE_SESSION_SQL).run(sessionId)
       recomputeSessionBytes(deps, sessionId)
-    } catch {
+    } catch (e) {
       // NO-THROW.
+      logger.warn("session_registry.clear_all_cache_failed", { sessionId, cause: errMessage(e) })
     }
   },
   stats() {
@@ -242,8 +249,9 @@ export const mintResources = (deps: Deps, sessionId: string): SessionResources =
     for (const { key, text } of readCache(deps, sessionId)) {
       innerCache.getOrBuild(key, () => text)
     }
-  } catch {
+  } catch (e) {
     // NO-THROW: replay failure leaves the fresh pair as-is.
+    logger.warn("session_registry.rehydrate_failed", { sessionId, cause: errMessage(e) })
   }
   return {
     store: wrapStore(deps, innerStore, sessionId),
@@ -254,8 +262,9 @@ export const mintResources = (deps: Deps, sessionId: string): SessionResources =
 export const touchRow = (deps: Deps, sessionId: string, t: number): void => {
   try {
     deps.stmts.touchSession.run({ $sid: sessionId, $touched: t })
-  } catch {
+  } catch (e) {
     // NO-THROW.
+    logger.warn("session_registry.touch_row_failed", { sessionId, cause: errMessage(e) })
   }
 }
 
@@ -273,7 +282,8 @@ export const getOrCreate = (deps: Deps, sessionId: string): SessionResources => 
     deps.entries.set(sessionId, { resources, lastTouched: t })
     touchRow(deps, sessionId, t)
     return resources
-  } catch {
+  } catch (e) {
+    logger.warn("session_registry.get_or_create_failed", { sessionId, cause: errMessage(e) })
     // Worst case: degraded one-shot pair, unmirrored. The closed-port
     // contract says NO-THROW so we hand back a functional pair even
     // though the registry could not register it.
@@ -288,7 +298,8 @@ export const peek = (deps: Deps, sessionId: string): SessionResources | null => 
   try {
     const hit = deps.entries.get(sessionId)
     return hit !== undefined ? hit.resources : null
-  } catch {
+  } catch (e) {
+    logger.warn("session_registry.peek_failed", { sessionId, cause: errMessage(e) })
     return null
   }
 }
@@ -298,8 +309,9 @@ export const evict = (deps: Deps, sessionId: string): void => {
     deps.entries.delete(sessionId)
     // FK cascade drops dependent events + cache_entries.
     deps.stmts.deleteSession.run(sessionId)
-  } catch {
+  } catch (e) {
     // NO-THROW.
+    logger.warn("session_registry.evict_failed", { sessionId, cause: errMessage(e) })
   }
 }
 

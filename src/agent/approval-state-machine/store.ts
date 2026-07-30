@@ -183,7 +183,8 @@ const newestBlockerId = (objective: ObjectivePort, threadId: string): string | n
     if (!Array.isArray(blockers) || blockers.length === 0) return null
     const last = blockers[blockers.length - 1]
     return last && isString(last.id) ? last.id : null
-  } catch {
+  } catch (e) {
+    logger.warn(`approval-state.attr.newestBlockerId: ${errMessage(e)}`)
     return null
   }
 }
@@ -200,7 +201,8 @@ const attributeObjective = (
     const updated = objective.addBlocker(threadId, { reason, waitingOn: "user" })
     if (updated === null) return null
     return newestBlockerId(objective, threadId)
-  } catch {
+  } catch (e) {
+    logger.warn(`approval-state.attr.attributeObjective: ${errMessage(e)}`)
     return null
   }
 }
@@ -225,7 +227,8 @@ const attributeLedger = (
     })
     ledger.touch(approvalId, { status: "waiting", waitingOn: "user" })
     return approvalId
-  } catch {
+  } catch (e) {
+    logger.warn(`approval-state.attr.attributeLedger: ${errMessage(e)}`)
     return null
   }
 }
@@ -305,8 +308,9 @@ export const createApprovalStateMachine = (opts?: {
         requests.delete(r.id)
         over -= 1
       }
-    } catch {
+    } catch (e) {
       // NO-THROW — eviction is best-effort hygiene, never breaks the port.
+      logger.warn(`approval-state.attr.evictIfOverCap: ${errMessage(e)}`)
     }
   }
 
@@ -388,7 +392,8 @@ export const createApprovalStateMachine = (opts?: {
       }
       if (cur.status !== "pending") return cur
       return store(fn(cur))
-    } catch {
+    } catch (e) {
+      logger.warn(`approval-state.attr.onlyIfPending[${op}]: ${errMessage(e)}`)
       return null
     }
   }
@@ -428,7 +433,8 @@ export const createApprovalStateMachine = (opts?: {
           ...(blockerId !== null ? { blockerId } : {}),
           ...(runEntryId !== null ? { runEntryId } : {}),
         })
-      } catch {
+      } catch (e) {
+        logger.warn(`approval-state.attr.request: ${errMessage(e)}`)
         // Fall back to an empty pending — the port contract forbids throwing.
         return store(
           buildPending(
@@ -497,7 +503,8 @@ export const createApprovalStateMachine = (opts?: {
       try {
         if (!isString(id)) return null
         return requests.get(id) ?? null
-      } catch {
+      } catch (e) {
+        logger.warn(`approval-state.attr.get: ${errMessage(e)}`)
         return null
       }
     },
@@ -508,7 +515,8 @@ export const createApprovalStateMachine = (opts?: {
         const out: ApprovalRequest[] = []
         for (const r of requests.values()) if (matchesFilter(r, f)) out.push(r)
         return Object.freeze(out)
-      } catch {
+      } catch (e) {
+        logger.warn(`approval-state.attr.list: ${errMessage(e)}`)
         return Object.freeze([])
       }
     },
@@ -520,7 +528,8 @@ export const createApprovalStateMachine = (opts?: {
     toSnapshot(): ApprovalSnapshot {
       try {
         return Object.freeze({ approvals: Object.freeze([...requests.values()]) })
-      } catch {
+      } catch (e) {
+        logger.warn(`approval-state.attr.toSnapshot: ${errMessage(e)}`)
         return Object.freeze({ approvals: Object.freeze([]) })
       }
     },
@@ -535,8 +544,9 @@ export const createApprovalStateMachine = (opts?: {
           const clean = cleanSnapshotEntry(e)
           if (clean !== null) requests.set(clean.id, clean)
         }
-      } catch {
+      } catch (e) {
         // leave whatever survived; never throw
+        logger.warn(`approval-state.attr.fromSnapshot: ${errMessage(e)}`)
       }
     },
   }
