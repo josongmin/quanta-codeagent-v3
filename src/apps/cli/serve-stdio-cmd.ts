@@ -39,7 +39,7 @@ import type { ImageBlock, LLMPort, Message } from "@/llm"
 import { DEFAULT_MODEL, pickProvider, tryCreateLLM } from "@/llm"
 import { isPermissionMode, type PermissionMode } from "@/permission"
 import type { ResolveResumeInput, ResumeResolution } from "@/runner/orchestrate/resume-fsm"
-import { errMessage } from "@/shared"
+import { errMessage, gateOnStrict } from "@/shared"
 import type { StreamPort } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
 
@@ -356,8 +356,10 @@ export const runServeStdioCmd = async (
 
   // 2. STRICT maturity gate. Direct env read (NOT CLI_FEATURE_GATES — the
   //    absent-⇒"1" seed would default-ON this half-built surface). Default-OFF
-  //    byte-identity: nothing assembled, stdout untouched.
-  if (process.env.QUANTA_SERVE_STDIO !== "1") {
+  //    byte-identity: nothing assembled, stdout untouched. `gateOnStrict` is the
+  //    EXACT-"1" SSOT (=== "1"), byte-identical to the old `!== "1"` while
+  //    routing through the shared gate vocabulary.
+  if (!gateOnStrict(process.env, "QUANTA_SERVE_STDIO")) {
     io.err(
       "quanta serve --stdio disabled (set QUANTA_SERVE_STDIO=1). This is a maturity gate for an early transport surface, not a security boundary.\n",
     )
