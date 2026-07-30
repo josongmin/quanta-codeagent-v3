@@ -218,13 +218,20 @@ describe("S5 hook hardening — per-handler timeout", () => {
 })
 
 describe("S5 hook hardening — DoS caps", () => {
-  test("registering MAX_HANDLERS_PER_EVENT (64) handlers succeeds", () => {
+  test("registering MAX_HANDLERS_PER_EVENT (64) handlers succeeds", async () => {
     const bus = new HookBus()
-    for (let i = 0; i < MAX_HANDLERS_PER_EVENT; i++) {
-      bus.on("turn_start", () => undefined)
-    }
-    // No throw — 64 fits exactly.
-    expect(true).toBe(true)
+    let fired = 0
+    // 64 fits exactly — none of these registrations may throw.
+    expect(() => {
+      for (let i = 0; i < MAX_HANDLERS_PER_EVENT; i++) {
+        bus.on("turn_start", () => {
+          fired++
+        })
+      }
+    }).not.toThrow()
+    // All 64 registered handlers are live — an emit fans out to every one.
+    await bus.emit({ type: "turn_start", turn: 1 })
+    expect(fired).toBe(MAX_HANDLERS_PER_EVENT)
   })
 
   test("registering a 65th handler throws HookRegistrationError", () => {
@@ -235,16 +242,23 @@ describe("S5 hook hardening — DoS caps", () => {
     expect(() => bus.on("turn_start", () => undefined)).toThrow(HookRegistrationError)
   })
 
-  test("the cap is PER EVENT (not global) — sibling events stay unaffected", () => {
+  test("the cap is PER EVENT (not global) — sibling events stay unaffected", async () => {
     const bus = new HookBus()
     for (let i = 0; i < MAX_HANDLERS_PER_EVENT; i++) {
       bus.on("turn_start", () => undefined)
     }
-    // session_start is independent — still has 0/64 capacity.
-    for (let i = 0; i < 10; i++) {
-      bus.on("session_start", () => undefined)
-    }
-    expect(true).toBe(true)
+    // session_start is independent — a full turn_start bucket must NOT block it,
+    // and its own bucket has the full 0/64 capacity to spare.
+    let sessionHandlers = 0
+    expect(() => {
+      for (let i = 0; i < 10; i++) {
+        bus.on("session_start", () => {
+          sessionHandlers++
+        })
+      }
+    }).not.toThrow()
+    await bus.emit({ type: "session_start", sessionId: "s1" })
+    expect(sessionHandlers).toBe(10)
   })
 
   test("HookRegistrationError carries an actionable name + message", () => {
@@ -264,25 +278,39 @@ describe("S5 hook hardening — DoS caps", () => {
     }
   })
 
-  test("knob QUANTA_HOOK_MAX_HANDLERS raises the cap", () => {
+  test("knob QUANTA_HOOK_MAX_HANDLERS raises the cap", async () => {
     process.env.QUANTA_HOOK_MAX_HANDLERS = "128"
     __resetRuntimeConfig()
     const bus = new HookBus()
-    for (let i = 0; i < 100; i++) {
-      bus.on("turn_start", () => undefined)
-    }
-    // 100 < 128 — no throw.
-    expect(true).toBe(true)
+    let fired = 0
+    // 100 > default 64 but < the knob-raised cap of 128 — must NOT throw.
+    expect(() => {
+      for (let i = 0; i < 100; i++) {
+        bus.on("turn_start", () => {
+          fired++
+        })
+      }
+    }).not.toThrow()
+    await bus.emit({ type: "turn_start", turn: 1 })
+    expect(fired).toBe(100)
   })
 
-  test("constructor option maxHandlers WINS over QUANTA knob", () => {
+  test("constructor option maxHandlers WINS over QUANTA knob", async () => {
     process.env.QUANTA_HOOK_MAX_HANDLERS = "10"
     __resetRuntimeConfig()
     const bus = new HookBus(undefined, { maxHandlers: 200 })
-    for (let i = 0; i < 150; i++) {
-      bus.on("turn_start", () => undefined)
-    }
-    expect(true).toBe(true)
+    let fired = 0
+    // Knob says 10, constructor says 200 — 150 registrations prove the
+    // constructor option wins (env cap of 10 would have thrown at the 11th).
+    expect(() => {
+      for (let i = 0; i < 150; i++) {
+        bus.on("turn_start", () => {
+          fired++
+        })
+      }
+    }).not.toThrow()
+    await bus.emit({ type: "turn_start", turn: 1 })
+    expect(fired).toBe(150)
   })
 
   test("a 1MB+1 payload is TRUNCATED (not thrown) — graceful degradation", async () => {

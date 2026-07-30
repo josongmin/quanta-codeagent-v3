@@ -195,9 +195,12 @@ describe("B. gate OFF ⇒ byte-identical (no attach even with declared deps)", (
   })
 
   test("B2 — no skillMcpSession on the config ⇒ pure no-op", async () => {
-    // Should not throw; nothing to assert but the absence of error + carriers.
-    await reconcileSkillMcpDepsForTurn({} as AgentConfig, skillWithBothDeps)
-    expect(true).toBe(true)
+    // A config that carries NO skillMcpSession must be a graceful no-op: the
+    // reconcile resolves (returns undefined) instead of throwing on the missing
+    // session carrier.
+    await expect(
+      reconcileSkillMcpDepsForTurn({} as AgentConfig, skillWithBothDeps),
+    ).resolves.toBeUndefined()
   })
 })
 
@@ -330,17 +333,23 @@ describe("D. malformed / hostile inputs degrade gracefully (never throw, never b
   })
 
   test("D4 — session.reconcile that THROWS is swallowed (turn proceeds)", async () => {
+    let reconcileCalled = false
     const throwingSession = {
       reconcile: async () => {
+        reconcileCalled = true
         throw new Error("coordinator exploded")
       },
       shutdownAll: async () => {},
       attachedIdentities: () => [],
     }
     const config = { skillMcpSession: throwingSession } as unknown as AgentConfig
-    // The hook wraps the coordinator — this must resolve, not reject.
-    await reconcileSkillMcpDepsForTurn(config, skillWithBothDeps)
-    expect(true).toBe(true)
+    // The hook wraps the coordinator — the throwing reconcile IS reached (proving
+    // we exercised the swallow path, not an early return) yet the call resolves
+    // instead of rejecting the turn.
+    await expect(
+      reconcileSkillMcpDepsForTurn(config, skillWithBothDeps),
+    ).resolves.toBeUndefined()
+    expect(reconcileCalled).toBe(true)
   })
 
   test("D5 — failed launch (ready:false) ⇒ untracked, no crash, retried NEXT turn", async () => {
