@@ -36,6 +36,13 @@ const APP_NAMES: ReadonlySet<string> = new Set(
 //    may-22-unified-agent-runtime / Phase 4+; see the batch.ts docblock.)
 const ALLOWED_CROSS_SURFACE_IMPORTS = new Set<string>([
   "agent/mode-presets/batch.ts -> @/apps/bench/eval",
+  // `quanta serve --stdio` reuses the headless surface's session opener
+  // (`openHeadlessRuntimeSession` + `RecordingStream`) via a lazy `await
+  // import("@/apps/headless")` — the stdio server IS a headless-style session
+  // runner, so it genuinely shares that runtime helper rather than duplicating
+  // it. Sanctioned reuse (same class as the batch→bench/eval edge); the
+  // permanent home-move below src/apps/ is tracked with the serve-stdio refactor.
+  "cli/serve-stdio-cmd.ts -> @/apps/headless",
 ])
 
 const toPosix = (path: string): string => path.replaceAll("\\", "/")
