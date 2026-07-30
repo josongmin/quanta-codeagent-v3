@@ -64,6 +64,19 @@ const isExempt = (path: string): boolean =>
   // process.env at the composition root (strict QUANTA_GITHUB_WEBHOOK gate +
   // secret/port/session) before any assembly. Same exemption class.
   path.endsWith("src/apps/cli/webhook-server-setup.ts") ||
+  // ADR-0024 CLI-bootstrap flag accessors — `internal/argv.ts` is the god-module
+  // split of `apps/cli/internal.ts` and holds ONLY pure `process.argv`/`process.env`
+  // launch-flag readers (QUANTA_STATE_PATH / QUANTA_RESUME / QUANTA_OBSERVE_DIR are
+  // `--state`/`--resume`/`--observe-dir` accessors read ONCE at CLI startup; the
+  // QUANTA_AST_GREP read is the documented `=== "full"` literal-toggle alias that
+  // GATE_TRUTHY cannot express). These are launch params, NOT tunable dials a
+  // `/config set` should intercept — routing them through runtimeConfig would be
+  // meaningless (they gate startup wiring, not a live setting). Same composition-root
+  // posture the SIBLING `src-no-sketchy-code.test.ts` already grants this exact file
+  // ("God-module split of apps/cli/internal.ts — pure process.argv/process.env CLI
+  // flag accessors") AND that this ratchet's own burn-down note calls out as reads
+  // that "legitimately STAY raw" (launch-params RESUME/STATE_PATH/OBSERVE_DIR).
+  path.endsWith("src/apps/cli/internal/argv.ts") ||
   path.endsWith("src/runner/batch/report.ts") ||
   path.includes("src/apps/bench/") ||
   path.includes("src/runner/batch/eval/") ||
@@ -116,7 +129,14 @@ const scan = (): { total: number; byFile: Record<string, number> } => {
 // SKILLS_DIR, COMPACT_MODEL, MODEL_FALLBACK, MCP_AUTORESTART, MD_MODE,
 // SHELL_SNAPSHOT_SHELL) — routing those would NOT be byte-identical, so they wait
 // for a per-read accessor that preserves the legacy "" quirk.
-const CEILING = 50
+// Then 50 → 49 (jul-30) by EXEMPTING the ADR-0024 CLI-bootstrap flag-accessor
+// module `apps/cli/internal/argv.ts` (its 4 reads — STATE_PATH / RESUME /
+// OBSERVE_DIR launch params + the AST_GREP `=== "full"` literal-toggle alias — are
+// composition-root, NOT tunable dials; see the `isExempt` note). This is a genuine
+// reduction (a composition-root re-classification, NOT a ceiling bump to silence a
+// count): the ceiling drops to the new floor per the decreasing-ratchet contract so
+// a re-introduced raw read of a PRODUCTION-slice knob still trips the guard.
+const CEILING = 49
 
 describe("no-raw-process.env-knob ratchet (ADR-0503 P4)", () => {
   test(`raw process.env.QUANTA_* reads stay <= ${CEILING} (decreasing burn-down)`, () => {
