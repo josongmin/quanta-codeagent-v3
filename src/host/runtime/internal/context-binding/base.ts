@@ -3,6 +3,7 @@ import { wireOptionalAgentPorts } from "@/agent/optional-ports"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { Message } from "@/llm"
 import type { CapabilityManifest } from "@/protocol/session"
+import { getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import { wireInteractiveKnobs } from "@/runner/assemble"
 import type {
   IdentityModeSessionState,
@@ -50,11 +51,15 @@ export const wireRuntimePorts = (
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): RuntimeBase => {
   const wired = sanitizeRuntimeBase(wireOptionalAgentPorts(base, env))
+  const withBgShellRegistry =
+    wired.bgShellRegistry === undefined
+      ? sanitizeRuntimeBase({ ...wired, bgShellRegistry: getBashBgRegistry() })
+      : wired
   // T01 — resolve QUANTA_ITEM_STREAM here (env in scope) and stamp it onto the
   // base so the per-turn stream port can mint a projector without re-reading env.
   const withItemStream = itemStreamEnabled(env)
-    ? sanitizeRuntimeBase({ ...wired, itemStream: true })
-    : wired
+    ? sanitizeRuntimeBase({ ...withBgShellRegistry, itemStream: true })
+    : withBgShellRegistry
   // Ticket 04 — resolve QUANTA_SESSION_FULL_FIDELITY at the SAME boundary and stamp
   // it so the per-turn bridge carries the full tool payload (default-OFF absent).
   return fullFidelityEnabled(env)

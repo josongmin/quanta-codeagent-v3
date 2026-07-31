@@ -104,6 +104,7 @@ export const makeFakeCliHitlDeps = (overrides: Partial<FakeCliHitlDeps> = {}): F
   idleMonitor: makeFakeIdleMonitor(),
   rejectCounter: makeFakeRejectCounter(),
   channel: makeScriptedChannel([]).channel,
+  cwd: "/tmp/quanta-cli-hitl-fake",
   ...overrides,
 })
 

@@ -5,7 +5,8 @@
  * production callers: a `bash` command sent to the BACKGROUND (`timeout_behavior:
  * "background"`) registers a live shell that outlives the turn, and at session
  * end NOTHING reaped it — the detached `bash -lc "npm run dev"` (and its tree)
- * leaked past the agent. The fix calls `getBashBgRegistry().killAll()` from
+ * leaked past the agent. The fix wires the background-shell registry on
+ * `AgentConfig.bgShellRegistry` and calls `killAll()` from
  * `cleanupFinishedSession` (next to the microcompact-map leak fix), no-throw
  * wrapped like the sibling disposals.
  *
@@ -60,10 +61,11 @@ const makeNeverExitingProc = (): BashSubprocess & { killCount: number } => {
 
 /** Minimal `AgentConfig`-shaped stub: only the fields `cleanupFinishedSession`
  *  reads (stream sink + sessionId + the optional dispose hooks, all absent). */
-const cfgStub = (sink: { emit: (e: unknown) => void }) =>
+const cfgStub = (sink: { emit: (e: unknown) => void }, bgShellRegistry?: { killAll(): Promise<void> }) =>
   ({
     sessionId: "sess-killall",
     stream: sink,
+    ...(bgShellRegistry !== undefined ? { bgShellRegistry } : {}),
   }) as never
 
 describe("session-end killAll wiring (M1)", () => {
@@ -83,7 +85,7 @@ describe("session-end killAll wiring (M1)", () => {
 
     const emitted: unknown[] = []
     await cleanupFinishedSession({
-      cfg: cfgStub({ emit: (e) => emitted.push(e) }),
+      cfg: cfgStub({ emit: (e) => emitted.push(e) }, registry),
       features: {} as never,
     })
 
@@ -103,7 +105,9 @@ describe("session-end killAll wiring (M1)", () => {
     const emitted: unknown[] = []
     await expect(
       cleanupFinishedSession({
-        cfg: cfgStub({ emit: (e) => emitted.push(e) }),
+        cfg: cfgStub({ emit: (e) => emitted.push(e) }, {
+          killAll: () => Promise.reject(new Error("boom")),
+        }),
         features: {} as never,
       }),
     ).resolves.toBeUndefined()

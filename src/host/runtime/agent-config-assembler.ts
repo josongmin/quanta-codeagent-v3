@@ -91,6 +91,7 @@ import {
 } from "@/observability/codex-r2-metrics"
 import { defaultPromptCacheObserver } from "@/observability/prompt-cache"
 import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
+import { getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
 import { gateOn, runtimeConfigFromEnv } from "@/shared"
@@ -923,6 +924,7 @@ export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): Ag
     const networkGuard = networkDispatchGuardFor(req, policy)
     if (networkGuard !== undefined) cfg.dispatchGuard = networkGuard
   }
+  if (cfg.bgShellRegistry === undefined) cfg.bgShellRegistry = getBashBgRegistry()
   // ADR-0427 + jun-03 — open the optional agent-capability slots (browser /
   // objective / mailbox / web_search / background-subagent). Each is env-gated +
   // caller-override-safe + byte-identical when its gate/resource is absent (see

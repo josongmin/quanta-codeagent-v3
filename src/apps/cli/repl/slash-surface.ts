@@ -58,6 +58,9 @@ export interface ReplaySlashState {
  *  optional so surfaces can omit unsupported adapters and keep the existing
  *  "not wired" behavior. */
 export type ReplSlashCtx = Partial<{
+  /** Optional cwd override for legacy/test slash dispatchers. Absent ⇒ the
+   *  shell-entry ambient cwd (`process.cwd()`) is preserved. */
+  cwd: string
   skills: () => Promise<SkillRow[]>
   idle: IdleMonitor
   imageQueue: ImageQueue
@@ -726,11 +729,12 @@ export const dispatchReplSlash = async (
 ): Promise<boolean> => {
   const head = input.split(/\s+/)[0] ?? ""
   if (!isSlashCommand(head)) return false
+  const cwd = slashCtx?.cwd ?? process.cwd()
   if (head === "/image" && slashCtx?.imageQueue !== undefined) {
     runImageCmd(input, {
       out: (s) => process.stdout.write(s),
       err: (s) => process.stderr.write(s),
-      cwd: process.cwd(),
+      cwd,
       queue: slashCtx.imageQueue,
     })
     return true
@@ -738,7 +742,7 @@ export const dispatchReplSlash = async (
   await runSlashCommand(input, {
     out: (s) => process.stdout.write(s),
     err: (s) => process.stderr.write(s),
-    cwd: process.cwd(),
+    cwd,
     ...projectSlashCtx(slashCtx),
   })
   return true

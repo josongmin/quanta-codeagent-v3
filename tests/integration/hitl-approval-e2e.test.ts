@@ -128,6 +128,7 @@ const makeHarness = (opts: { interactive: boolean }): Harness => {
       },
     } as never,
     channel,
+    cwd: "/repo",
   })
 
   const confirmSlot: { current: (a: never) => Promise<unknown> } = {
@@ -361,6 +362,7 @@ describe("HITL e2e — deferred CLI fallback prompt carries the 'always' verb en
         idleMonitor: { markActive: () => undefined } as never,
         rejectCounter: { recordAccept: () => undefined, recordDeny: () => undefined } as never,
         channel: h.channel,
+        cwd: "/repo",
       })(approval as never)
       await h.type("a")
       const decision = (await promptRun) as { decision?: string; scope?: string } | string

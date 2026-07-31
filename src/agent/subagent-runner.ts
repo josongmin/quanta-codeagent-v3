@@ -72,61 +72,27 @@
  */
 
 import type { Message } from "@/llm"
-import { projectToSubagentObservation } from "@/protocol/subagent"
 import { isGitRepo, withWorktree } from "@/runtime"
-import {
-  type AgentMetaRegistry,
-  assignNickname,
-  type SubagentLifecycleEvent,
-  SubagentTurnGate,
-  type TaskRegistry,
-} from "@/subagent"
+import { SubagentTurnGate } from "@/subagent"
 import type { SubagentRequest, SubagentResult, SubagentRunner } from "../subagent/types"
-import type { ConversationActionPort } from "./conversation-action"
-import { createConversationActionSurface } from "./conversation-action-surface"
 import { runAgent } from "./loop"
 import { canExposeSpawnTools, childDepthOf, effectiveCap, SpawnLineageError } from "./spawn-depth"
 import { emitSpawnDepthDecision } from "./spawn-depth-telemetry"
-import {
-  type ChildControlSurface,
-  createChildControlEndpoint,
-  createChildControlSurface,
-} from "./subagent-control-endpoint"
-import type { SubagentControlEndpoint, SubagentSteerSubmission } from "./subagent-delivery/ports"
 import { buildChildConfig } from "./subagent-runner-child-config"
+import {
+  allocateChildMailboxIds,
+  buildSubagentRunId,
+  childIdentityState,
+  recordChildNickname,
+  type ChildMailboxIds,
+} from "./subagent-runner-identity"
+import { ensureLineageTask, installSubagentEmitter } from "./subagent-runner-lineage"
 import type { ToolNamespaceStrategy } from "./subagent-tool-namespace"
+import { maybeRegisterChildTeam, maybeUnregisterChildTeam } from "./subagent-runner-team"
+import { type ChildControlWiring, registerChildWaker } from "./subagent-runner-waker"
 import type { AgentConfig, AgentOutcome } from "./types"
 
 export { UnknownSubagentModelError } from "./subagent-runner-overrides"
-
-/** WS2 (RFC jul-18 §4.2) — the child steer-queue hard bound. A remote-steer
- *  burst that overflows this degrades ONCE to a mailbox queue (`action_queue_full`,
- *  handled by WS3); the surface never grows past it. */
-const CHILD_STEER_QUEUE_CAPACITY = 8
-/** WS2 — the child steer max input size (bytes), reused by the steer authority.
- *  Mirrors the `followup_task` 8KB message cap so a delivered steer body and a
- *  mailbox message share one ceiling. */
-const CHILD_STEER_MAX_INPUT_BYTES = 8192
-
-/** WS2 — the control bits threaded onto the child config ONLY when the control
- *  capability is wired (a shared wake registry + a `req.taskId`). The child
- *  loop reads `conversationActionPort` (drains one action per turn) and writes
- *  `activeTurnRef.current` (the endpoint's steer closure reads it). Absent ⇒ the
- *  prior child config shape (RFC §4.2 RED rail). */
-interface ChildControlWiring {
-  /** MED-2 — threaded onto the child config ONLY when the steer plane exists
-   *  (gate ON). Steer OFF ⇒ absent (byte-identical to the pre-jul-18 followup
-   *  child; the wake/interrupt endpoint needs neither). */
-  readonly conversationActionPort?: ConversationActionPort
-  readonly activeTurnRef?: NonNullable<AgentConfig["activeTurnRef"]>
-  /** The bounded steer-submission surface (retained for the loop drain). */
-  readonly steerSurface: ChildControlSurface
-  /** WS4 — the loop-facing steer drain view + finalization port, threaded onto
-   *  the child config ONLY when the session steer plane exists (gate ON). Absent
-   *  ⇒ the child loop runs NO safe-point drain (byte-identical default-OFF). */
-  readonly childSteerDrain?: NonNullable<AgentConfig["childSteerDrain"]>
-  readonly steerFinalization?: NonNullable<AgentConfig["steerFinalization"]>
-}
 
 // RFC jul-13 §4.2 (rev.4 MIN-CAP) — the runner's depth ceiling is the SAME
 // `effectiveCap(opts.maxDepth) = min(spawnDepthCap() policy, opts.maxDepth ?? +∞)`
@@ -200,7 +166,7 @@ interface ChildExecution {
   subagentId: string
   requestedCwd: string
   isolate: boolean
-  mailboxIds: { agentId: string; parentId: string }
+  mailboxIds: ChildMailboxIds
   toolNamespace: ToolNamespaceStrategy | undefined
   turnGate: SubagentTurnGate | undefined
   control: ChildControlWiring | undefined
@@ -241,125 +207,6 @@ const executeChild = async ({
     run(configAt(worktreePath)),
   )
   return toResult(outcome.value)
-}
-
-/** RFC jun-6 (DELTA #2) — register a spawned child into its parent's team.
- *  Registry failures are bookkeeping-only and must not fail the spawn. */
-const maybeRegisterChildTeam = (parent: AgentConfig, childLabel: string): void => {
-  const registry = parent.teamRegistry
-  if (registry === undefined) return
-  const team = registry.teamOf(parent.mailboxAgentId ?? "root")
-  if (team === undefined) return
-  try {
-    registry.addMember(team, childLabel)
-  } catch {
-    // Team membership does not own the child execution lifecycle.
-  }
-}
-
-/** RFC jun-6 (DELTA #2) — SYMMETRIC teardown for {@link maybeRegisterChildTeam}.
- *  A finished child must LEAVE the parent's team: without this the roster grows
- *  unbounded over a session (every spawn adds, nothing removes) and the stale
- *  member keeps appearing in the team's broadcast-scope roster (`membersOf`) and
- *  passing `sameTeam`, so mail addressed to a dead child lingers undelivered.
- *  `removeMember` is a NO-OP when the child re-homed itself to another team
- *  (the registry guards `teamByAgent.get(child) === team`), so a child that
- *  ran `team_create` keeps its chosen team. NO-THROW: a teardown hiccup must
- *  never mask the child's real result. */
-const maybeUnregisterChildTeam = (parent: AgentConfig, childLabel: string): void => {
-  const registry = parent.teamRegistry
-  if (registry === undefined) return
-  const parentLabel = parent.mailboxAgentId ?? "root"
-  const team = registry.teamOf(parentLabel)
-  if (team === undefined) return
-  try {
-    registry.removeMember(team, childLabel)
-  } catch {
-    // bookkeeping only — never fail a teardown on a registry hiccup
-  }
-}
-
-interface SharedChildIdentityState {
-  readonly nextOrdinalByParent: Map<string, number>
-  nextSpawnSeq: number
-}
-
-const sharedChildIdentityStates = new WeakMap<object, SharedChildIdentityState>()
-
-const childIdentityAnchor = (parent: AgentConfig): object | undefined => {
-  const candidate =
-    parent.subagentTurnWake ??
-    parent.teamRegistry ??
-    parent.subagentMailbox ??
-    parent.subagentAgentMeta ??
-    parent.subagent?.taskRegistry
-  return typeof candidate === "object" && candidate !== null ? candidate : undefined
-}
-
-const childIdentityState = (parent: AgentConfig): SharedChildIdentityState | undefined => {
-  const anchor = childIdentityAnchor(parent)
-  if (anchor === undefined) return undefined
-  const existing = sharedChildIdentityStates.get(anchor)
-  if (existing !== undefined) return existing
-  const created: SharedChildIdentityState = { nextOrdinalByParent: new Map(), nextSpawnSeq: 0 }
-  sharedChildIdentityStates.set(anchor, created)
-  return created
-}
-
-const allocateChildMailboxIds = (
-  parentLabel: string,
-  shared: SharedChildIdentityState | undefined,
-  local: { childOrdinal: number; spawnSeq: number },
-): { agentId: string; parentId: string; spawnSeq: number } => {
-  if (shared !== undefined) {
-    const ordinal = shared.nextOrdinalByParent.get(parentLabel) ?? 0
-    shared.nextOrdinalByParent.set(parentLabel, ordinal + 1)
-    const spawnSeq = shared.nextSpawnSeq
-    shared.nextSpawnSeq += 1
-    return { agentId: `${parentLabel}/${ordinal}`, parentId: parentLabel, spawnSeq }
-  }
-  const ordinal = local.childOrdinal
-  local.childOrdinal += 1
-  const spawnSeq = local.spawnSeq
-  local.spawnSeq += 1
-  return { agentId: `${parentLabel}/${ordinal}`, parentId: parentLabel, spawnSeq }
-}
-
-const buildSubagentRunId = (
-  depth: number,
-  mailboxAgentId: string,
-  spawnSeq: number,
-  now: () => number,
-): string => {
-  const safeMailboxId = mailboxAgentId.replace(/[^A-Za-z0-9_-]/g, "_")
-  return `sub-d${depth}-${safeMailboxId}-${now().toString(36)}-${spawnSeq.toString(36)}`
-}
-
-/** §20.3 — record a DISPLAY nickname for a freshly-spawned child in the host's
- *  `AgentMetaRegistry` side-table (the `list_agents` label source, keyed by the
- *  registry TASK id `rec.id`). The child's STABLE id stays the ordinal mailbox
- *  label (`root/0`); the nickname is a human-friendly maestro name
- *  DETERMINISTICALLY derived from that STABLE mailbox id via `assignNickname`
- *  (FNV-1a seed ⇒ same id always maps to the same name, so a recorded session
- *  re-mints identical labels). Prefers an explicit `agentType` (more
- *  informative) over the nickname, falling back to the nickname so an un-typed
- *  child shows "Karajan" instead of a bare description prefix. No-op when the
- *  host did not wire `subagentAgentMeta`, OR the spawn has no registry `taskId`
- *  to key on (foreground/legacy path) ⇒ byte-identical (the meta table stays
- *  empty exactly as before and `list_agents` keeps its `agentType`/description
- *  fallback). This is the wiring that turns `assignNickname` from dead code into
- *  the live display path. */
-const recordChildNickname = (
-  agentMeta: AgentMetaRegistry | undefined,
-  taskId: string | undefined,
-  mailboxAgentId: string,
-  depth: number,
-  agentType: string | undefined,
-): void => {
-  if (agentMeta === undefined || taskId === undefined || taskId.length === 0) return
-  const nickname = assignNickname(mailboxAgentId)
-  const label = agentType !== undefined && agentType.length > 0 ? agentType : nickname
-  agentMeta.set(taskId, { depth, label })
 }
 
 type ChildDepthAdmission = { readonly childDepth: number } | { readonly denied: SubagentResult }
@@ -406,109 +253,6 @@ const admitChildDepth = (parent: AgentConfig, maxDepth: number): ChildDepthAdmis
     decision: "admitted",
   })
   return { childDepth }
-}
-
-/**
- * Multi-agent-panel SUBSTRATE — install the shared registry's lifecycle emit
- * sink from `parent.onSubagentEvent` (mirror of the `onAgentState` tap). The
- * registry emits its duck-declared {@link SubagentLifecycleEvent}; this closure
- * projects it to a `@/protocol/subagent` `SubagentObservation` (re-scrubbed,
- * defense-in-depth) before handing it to the host sink. No-op when either the
- * sink OR the shared registry is absent (byte-identical OFF). Idempotent:
- * setting the SAME sink twice (two runners over one registry) is harmless.
- */
-const installSubagentEmitter = (parent: AgentConfig): void => {
-  const sink = parent.onSubagentEvent
-  const registry = parent.subagent?.taskRegistry
-  if (sink === undefined || registry === undefined) return
-  registry.setEmitter((event: SubagentLifecycleEvent) => {
-    // The lifecycle event is structurally a subset of `AgentEvent`; the
-    // projector maps + re-redacts it. A null (unexpected type) is dropped.
-    const obs = projectToSubagentObservation(
-      event as Parameters<typeof projectToSubagentObservation>[0],
-    )
-    if (obs !== null) sink(obs)
-  })
-}
-
-/**
- * Multi-agent-panel SUBSTRATE — ensure the spawned child has a lineage
- * `TaskRecord` in the shared registry, and return the child's effective task id
- * (its OWN id, to thread as `spawnedAsTaskId`). This is the seam that makes
- * `registry.list()` reconstruct a real parent→child TREE.
- *
- *   - No shared registry ⇒ `undefined` (foreground/legacy path stays
- *     byte-identical: nothing registered, no `spawnedAsTaskId` threaded).
- *   - `req.taskId` already set (background / 6-tool pre-registered by the tool
- *     layer) ⇒ STAMP the lineage edge (`parentTaskId` / `depth` / `mailboxLabel`)
- *     onto that existing record (mutating it in place; the emit already fired at
- *     its `register()`), and return it.
- *   - `req.taskId` absent (foreground spawn) ⇒ REGISTER a fresh lineage record
- *     (emitting `subagent_spawn` if a sink is wired) and return its id.
- *
- * `parentTaskId` is `parent.spawnedAsTaskId` — undefined at the root ⇒ the
- * direct child is root-level.
- */
-const ensureLineageTask = (
-  parent: AgentConfig,
-  req: SubagentRequest,
-  childDepth: number,
-  mailboxLabel: string,
-):
-  | { registry: TaskRegistry; taskId: string; settle: (result: SubagentResult) => void }
-  | undefined => {
-  const registry = parent.subagent?.taskRegistry
-  if (registry === undefined) return undefined
-  const parentTaskId = parent.spawnedAsTaskId
-  const description = req.prompt.slice(0, 120)
-  if (req.taskId !== undefined) {
-    // Background / 6-tool: the tool layer already `register()`ed this id. Stamp
-    // the lineage edge onto the existing record so the tree is complete. Do NOT
-    // re-register (that would reset status + double-emit).
-    const existing = registry.get(req.taskId)
-    if (existing !== undefined) {
-      const stamped = existing as {
-        parentTaskId?: string
-        depth: number
-        mailboxLabel?: string
-      }
-      if (parentTaskId !== undefined) stamped.parentTaskId = parentTaskId
-      stamped.depth = childDepth
-      stamped.mailboxLabel = mailboxLabel
-      // The tool layer already emitted a provisional `depth:0` / no-parent spawn
-      // at its `register()` (lineage wasn't known yet). Re-emit the CORRECTED
-      // spawn so the web panel's tree reflects the real parent/depth (no-op when
-      // the panel is OFF — no emitter — so this stays byte-identical).
-      registry.restampSpawn(req.taskId)
-    }
-    // Its settle is owned by the tool layer's `.then(complete)` chain — we do
-    // NOT settle it here (return a no-op settle so the caller never double-settles).
-    return { registry, taskId: req.taskId, settle: () => {} }
-  }
-  // Foreground: register a fresh lineage record ONLY when a panel observer is
-  // wired (`onSubagentEvent`). Without it, a foreground spawn keeps its historical
-  // synthetic id with NO registry entry — so `registry.list()` (⇒ the LLM
-  // `task_list` tool, `/agents`, `/activity`, LRU) is byte-identical when the
-  // panel feature is OFF. The panel opts into foreground visibility via the sink.
-  // (Background/6-tool records are registered by the tool layer regardless and
-  // only get their lineage edge STAMPED above — benign for existing consumers,
-  // which read depth from AgentMeta, not the record — so those stay ungated and
-  // the CLI `/agents --tree` still reconstructs the background spawn tree.)
-  if (parent.onSubagentEvent === undefined) return undefined
-  const taskId = registry.newId()
-  registry.register({
-    id: taskId,
-    description,
-    ...(req.agentType !== undefined ? { agentType: req.agentType } : {}),
-    ...(parentTaskId !== undefined ? { parentTaskId } : {}),
-    depth: childDepth,
-    mailboxLabel,
-  })
-  return {
-    registry,
-    taskId,
-    settle: (result: SubagentResult): void => registry.complete(taskId, result),
-  }
 }
 
 /**
@@ -671,104 +415,6 @@ export const createSubagentRunner = (
       // child re-homed itself or no registry is wired (byte-identical default).
       maybeUnregisterChildTeam(parent, mailboxIds.agentId)
     }
-  }
-}
-
-/**
- * ADR-0437 follow-up + WS2 (RFC jul-18 §4.2) — mint a per-child
- * {@link SubagentTurnGate} + a bounded {@link ChildControlSurface} + the child
- * {@link ConversationActionSurface}, build ONE typed
- * {@link SubagentControlEndpoint} over that private state, and register it into
- * the host's shared control registry under the child's registry task id.
- *
- * Returns `undefined` when there is no wake substrate (`wake` registry absent)
- * OR no task id to key on — both cases are the byte-identical default-OFF path:
- * NO gate, NO conversation-action surface, and NO `activeTurnRef` are wired onto
- * the child (the prior child config shape), so its loop finishes immediately on
- * completion exactly as before (RFC §4.2 RED rail). When wired, the returned
- * `gate` + `control` bundle are threaded onto the child config and `dispose`
- * MUST be called when the child loop ends (unregisters the endpoint AND its
- * derived legacy waker + label, and releases any park).
- */
-const registerChildWaker = (
-  parent: AgentConfig,
-  taskId: string | undefined,
-  mailboxLabel: string,
-): { gate: SubagentTurnGate; control: ChildControlWiring; dispose: () => void } | undefined => {
-  const wake = parent.subagentTurnWake
-  if (wake === undefined || taskId === undefined) return undefined
-  const gate = new SubagentTurnGate()
-  // The child's generic control queue (cancel/summarize/steer-injection seam)
-  // AND its active-turn holder. The loop OWNS `.current` (writes a fresh header
-  // per turn); the endpoint's steer closure only READS it. Allocated ONLY here,
-  // on the wired path — the default-OFF child never gets one (byte-identical).
-  const actionSurface = createConversationActionSurface()
-  // The bounded typed steer-submission surface (retains deliveryId + envelope).
-  const steerSurface = createChildControlSurface({
-    steerConfig: { maxInputBytes: CHILD_STEER_MAX_INPUT_BYTES },
-    capacity: CHILD_STEER_QUEUE_CAPACITY,
-  })
-  // The typed endpoint over the child's PRIVATE state. `wake("followup")` is the
-  // gate's idle/busy wake (identical to the legacy waker); `interrupt()` maps
-  // gate state to the closed outcome; `steer()` delegates to the bounded surface.
-  const endpoint: SubagentControlEndpoint = createChildControlEndpoint({
-    gate,
-    surface: steerSurface,
-    activeTurnRef: actionSurface.activeTurnRef,
-    mailboxLabel,
-    wake: (reason: string) => gate.wake(reason),
-  })
-  // Register the typed endpoint (superset of the legacy waker): the registry
-  // derives the `followup_task`-facing waker from it and binds the mailbox label
-  // so `followup_task` reaches the child's real inbox (`root/N`), not its task
-  // id (BUG#4 fix). Last-writer-safe disposal.
-  const unregister = wake.registerEndpoint(taskId, endpoint)
-  // WS4 — thread the loop-facing steer drain view + finalization port ONLY when
-  // the session steer plane exists (QUANTA_SUBAGENT_STEER on). Absent ⇒ the child
-  // loop runs no post-stream safe-point drain (byte-identical default-OFF).
-  const steerPlane = parent.subagent?.steerPlane
-  const steerWiring =
-    steerPlane !== undefined
-      ? {
-          childSteerDrain: {
-            drainSteers: (): readonly SubagentSteerSubmission[] => steerSurface.drainSteers(),
-            pendingSteers: (): number => steerSurface.pendingSteers(),
-          },
-          steerFinalization: steerPlane.finalization,
-        }
-      : {}
-  return {
-    gate,
-    control: {
-      steerSurface,
-      // MED-2 (hellaudit R1) — thread the loop-facing conversation-action port +
-      // active-turn ref onto the child config ONLY when the steer plane exists
-      // (QUANTA_SUBAGENT_STEER on). RFC §9: with steer OFF a followup-only child is
-      // byte-identical to the pre-jul-18 followup baseline (no extra mid-turn
-      // conversation-action drain). The endpoint is still registered for
-      // wake/interrupt (both gate-backed); its steer/currentTurnId reads are never
-      // reached with steer OFF (controller `steerEnabled` false ⇒ mode_disabled).
-      ...(steerPlane !== undefined
-        ? {
-            conversationActionPort: actionSurface.port,
-            activeTurnRef: actionSurface.activeTurnRef,
-          }
-        : {}),
-      ...steerWiring,
-    },
-    dispose: (): void => {
-      unregister()
-      gate.dispose()
-      // WS4 (RFC §5.9) — session teardown: an accepted steer still admitted but
-      // never consumed must terminate in EXACTLY ONE `cancelled` receipt (no stale
-      // callback). Drain the surface and finalize each with `session_aborted`.
-      // No-op when no steer plane (byte-identical) or the queue is empty.
-      if (steerPlane !== undefined) {
-        for (const s of steerSurface.drainSteers()) {
-          steerPlane.finalization.finalizeCancelled(s.deliveryId, "session_aborted")
-        }
-      }
-    },
   }
 }
 

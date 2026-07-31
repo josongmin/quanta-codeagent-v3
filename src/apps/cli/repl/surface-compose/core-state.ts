@@ -80,11 +80,11 @@ export const buildSurfaceCoreState = (
       ? buildPerToolCheckpointWire({
           shadowOdb,
           conversationStore: convStore,
-          workspace: process.cwd(),
+          workspace: setup.cwd,
         })
       : undefined
   const shadowVerify = isEnvTruthy(env.QUANTA_SHADOW_VERIFY)
-    ? createShadowVerify(createShadowVerifyAdapters(process.cwd()))
+    ? createShadowVerify(createShadowVerifyAdapters(setup.cwd))
     : undefined
   const conversationActions = isEnvTruthy(env.QUANTA_CONVERSATION_ACTIONS)
     ? createConversationActionSurface()

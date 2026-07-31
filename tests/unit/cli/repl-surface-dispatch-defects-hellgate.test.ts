@@ -30,9 +30,16 @@
  *    HELL-ARGS-05: `--mode interactive` needs none of them.
  */
 
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { AgentArgsError, parseAgentArgs } from "../../../src/apps/agent/cli-args"
-import { projectSlashCtx, type ReplSlashCtx } from "../../../src/apps/cli/repl/slash-surface"
+import {
+  dispatchReplSlash,
+  projectSlashCtx,
+  type ReplSlashCtx,
+} from "../../../src/apps/cli/repl/slash-surface"
 import { extractApplyPatchPaths } from "../../../src/apps/cli/repl/surface-compose"
 
 /* ------------------------------------------------------------------ */
@@ -128,6 +135,24 @@ describe("HELL-PROJ — slash projector SSOT", () => {
     expect(projected.textInbox).toBe(textInbox)
     // No spurious extra keys leaked.
     expect(Object.keys(projected).sort()).toEqual(["skills", "textInbox"])
+  })
+
+  test("HELL-PROJ-04: legacy dispatch honors slashCtx.cwd, not ambient process.cwd()", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "quanta-repl-slash-cwd-"))
+    const origOut = process.stdout.write.bind(process.stdout)
+    let out = ""
+    process.stdout.write = ((chunk: unknown): boolean => {
+      out += String(chunk)
+      return true
+    }) as typeof process.stdout.write
+    try {
+      const handled = await dispatchReplSlash("/hooks", { cwd } as ReplSlashCtx)
+      expect(handled).toBe(true)
+    } finally {
+      process.stdout.write = origOut
+    }
+    expect(out).toContain(`${cwd}/settings.json`)
+    expect(out).not.toContain(`${process.cwd()}/settings.json`)
   })
 })
 

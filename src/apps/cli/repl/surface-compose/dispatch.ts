@@ -27,6 +27,7 @@ const projectReplSlashCtxToContract = (c: ReplSlashCtx): Record<string, unknown>
 
 /** Live inputs consumed by the surface-owned slash dispatcher. */
 type SurfaceDispatchArgs = {
+  readonly sessionCwd: string
   readonly slashCtx: ReplSlashCtx
   readonly convCheckpointSlot: ConvCheckpointSlashState | undefined
   readonly sessionIo: SessionIoState
@@ -119,7 +120,7 @@ const buildLiveSlashContext = (args: SurfaceDispatchArgs): SlashContext => {
   return {
     out: (s) => process.stdout.write(s),
     err: (s) => process.stderr.write(s),
-    cwd: process.cwd(),
+    cwd: args.sessionCwd,
     ...projectReplSlashCtxToContract(args.slashCtx),
     ...optionalSlashSlot("model", args.modelAdapter),
     ...optionalSlashSlot("convCheckpoint", args.convCheckpointSlot),
@@ -144,12 +145,16 @@ const buildLiveSlashContext = (args: SurfaceDispatchArgs): SlashContext => {
   }
 }
 
-const dispatchImage = (input: string, queue: ReplSlashCtx["imageQueue"]): boolean => {
+const dispatchImage = (
+  input: string,
+  sessionCwd: string,
+  queue: ReplSlashCtx["imageQueue"],
+): boolean => {
   if (queue === undefined) return false
   runImageCmd(input, {
     out: (s) => process.stdout.write(s),
     err: (s) => process.stderr.write(s),
-    cwd: process.cwd(),
+    cwd: sessionCwd,
     queue,
   })
   return true
@@ -165,7 +170,8 @@ export const buildSurfaceDispatch = (
   return async (input: string): Promise<boolean> => {
     const head = input.split(/\s+/)[0] ?? ""
     if (!isSlashCommand(head)) return false
-    if (head === "/image" && dispatchImage(input, args.slashCtx.imageQueue)) return true
+    if (head === "/image" && dispatchImage(input, args.sessionCwd, args.slashCtx.imageQueue))
+      return true
     await runSlashCommand(input, buildLiveSlashContext(args))
     return true
   }

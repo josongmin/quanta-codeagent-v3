@@ -1,5 +1,3 @@
-import { isAbsolute, resolve } from "node:path"
-import * as readline from "node:readline/promises"
 import {
   type ConfirmDecision,
   createOnConfirmReviewerPort,
@@ -13,535 +11,39 @@ import type { SessionBootstrapResult } from "@/host/bootstrap"
 import { wireSecurityRailsForOverlay } from "@/host/runtime/security-rails-wire"
 import type { ResponsesContinuationStore } from "@/llm"
 import {
-  // #20 (durable prefix grants) — the persistent, cross-session trust-scope
-  // registry the gate consults + the [P] verb mints into.
-  APPROVAL_LADDER,
-  CircumventionTracker,
   createPersistentTrustScopeRegistry,
   type PermissionStore,
-  parseApprovalLadderName,
-  // #20 — the operator-facing program token a `session_prefix` grant would cover
-  // (null when this command cannot be safely prefix-granted).
-  prefixGrantLabel,
   type ReviewerSandboxProfile,
-  selectDefaultReviewer,
   setAutoApprovalReviewObserver,
   type ToolAction,
   type TrustScopeRegistry,
 } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
-import { splitHunks } from "@/runner/diff-ops"
-import { applyHunkSelection } from "@/runner/hunk-apply"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
-import { gateOn, runtimeConfig, runtimeConfigFromEnv } from "@/shared"
+import { gateOn, runtimeConfigFromEnv } from "@/shared"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import type { WorktreeSlotHandle } from "@/tool"
-import {
-  type ActionDiff,
-  computeActionDiff,
-  diffPreviewEnabled,
-  renderActionDiff,
-} from "../diff-preview"
 import type { IdleMonitor } from "../idle-monitor"
 import { buildShellSnapshotConfig, buildSummarizerLlm } from "../internal"
-// #19 — approval-time applicability pre-flight (edit/apply_patch).
-import { preflightApplyWarning, preflightCheckEnabled } from "../preflight"
 import type { RejectCounter } from "../reject-counter"
-import { parseHunkSelection, renderHunkChoices, shapePartialDecision } from "./hunk-select"
+import {
+  buildAdmissibility,
+  ladderAutoReviewEnabled,
+} from "./cli-admissibility-compose"
+import {
+  askLine,
+  buildBackgroundConsentPort,
+  buildCliApprovalPrompt,
+  buildCliOnConfirm,
+} from "./cli-approval-prompt"
 import {
   createMidTurnApprovalChannel,
   type MidTurnApprovalChannel,
   registerMidTurnApprovalChannel,
 } from "./mid-turn-approval-channel"
 import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-ports"
-
-// MID-TURN FIX (jun-10): when an in-turn keystroke reader owns stdin (a turn is
-// streaming), opening a second ad-hoc `readline` here fights it and the prompt
-// fail-closes to deny ("입력창이 안 떠서"). When `channel.active`, route through
-// the in-turn reader's captured line instead of a conflicting readline. Between
-// turns (`active` false) keep the ad-hoc readline (byte-identical legacy).
-const askLine = async (
-  channel: MidTurnApprovalChannel,
-  prompt: string,
-  label = "prompt",
-): Promise<string> => {
-  if (channel.active) {
-    // C2 (jul-10 audit) — the channel is a FIFO ask queue: render the prompt
-    // in `onActive` (fired when THIS ask becomes head — synchronously for the
-    // single-ask case, byte-identical to the old render-then-await), so a
-    // concurrent ask never prints its prompt over an unanswered one.
-    const result = await channel.awaitLine(undefined, label, () => process.stderr.write(prompt))
-    if (result.kind === "line") return result.line
-    // WS-A (jul-10, UUX-1-22) — a RELEASED prompt (turn canceled/backgrounded/
-    // ended with the ask unanswered) maps to the same fail-closed "" the callers
-    // already treat as deny, but NEVER silently: the operator sees WHY the
-    // prompt vanished, and the outcome is attributed to the release — not to a
-    // decision they never made.
-    const why = result.cause === "turn_teardown" ? "turn ended" : "canceled by its consumer"
-    process.stderr.write(
-      `\n[quanta] ${label} prompt released unanswered (${why}) — treated as deny/fail-closed.\n`,
-    )
-    return ""
-  }
-  const adhoc = readline.createInterface({ input: process.stdin, output: process.stderr })
-  try {
-    return await adhoc.question(prompt)
-  } finally {
-    adhoc.close()
-  }
-}
-
-/** T03 — is the AGENT reviewer (guardian) the operator's chosen posture? True
- *  when the strict `QUANTA_AUTO_REVIEW` gate is on OR a named approval-ladder
- *  rung whose `approvalsReviewer` is `agent` is selected (only `guardian-approvals`
- *  is). The ladder SSOT is the single source of the reviewer axis. False ⇒
- *  byte-identical legacy reviewer selection + no auto-review notice. */
-const ladderAutoReviewEnabled = (): boolean => {
-  const rung = parseApprovalLadderName(runtimeConfig().approvalLadder)
-  return (
-    runtimeConfig().autoReview ||
-    (rung !== undefined && APPROVAL_LADDER[rung].approvalsReviewer === "agent")
-  )
-}
-
-/** ADR-0296 PROMPT mode — the deadline consent gate, bound to the mid-turn
- *  approval `channel`. When `QUANTA_BASH_AUTO_BACKGROUND=prompt`, the bash tool
- *  calls this AT the deadline; `y`/`yes` ⇒ detach into the bg registry, anything
- *  else ⇒ kill (legacy timeout). Default-OFF for kill/background modes (never
- *  invoked), byte-identical when unread. */
-const buildBackgroundConsentPort =
-  (channel: MidTurnApprovalChannel) =>
-  async (info: { readonly command: string; readonly elapsedMs: number }): Promise<boolean> => {
-    const shown = info.command.length > 60 ? `${info.command.slice(0, 60)}…` : info.command
-    const secs = Math.max(1, Math.round(info.elapsedMs / 1000))
-    const ans = (
-      await askLine(
-        channel,
-        `Command still running after ${secs}s: ${shown}\nMove to background? [y]es / [N]o (kill) `,
-        "background-consent",
-      )
-    )
-      .trim()
-      .toLowerCase()
-    return ans === "y" || ans === "yes"
-  }
-
-interface CliHitlDeps {
-  readonly idleMonitor: IdleMonitor
-  readonly rejectCounter: RejectCounter
-  readonly channel: MidTurnApprovalChannel
-  // #19 — session cwd, so the pre-flight resolves relative edit/apply_patch
-  // targets against the SAME base the tool's jail uses. OPTIONAL: a caller that
-  // omits it (deferred-prompt builder / tests) falls back to `process.cwd()` —
-  // the pre-flight is best-effort, so a slightly-off base only risks a
-  // missed/extra warning, never correctness.
-  readonly cwd?: string
-  // #20 (durable prefix grants) — when set (gate `QUANTA_TRUST_SCOPE` on), the
-  // confirm offers a [P] verb that mints a DURABLE program-token grant into this
-  // registry (persisted across sessions); the SAME registry is on the gate
-  // config so a later session ask-skips matching commands. Absent ⇒ no [P] verb.
-  readonly trustScope?: { registry: TrustScopeRegistry; projectKey: string }
-}
-
-/** Shared inline 4-verb prompt for a skill-scope ESCALATION (`scopeContext`
- *  present): allow once / allow session / deny / deny+steer — the same verbs
- *  the web card offers (ADR-0512 P3). Used by BOTH the inline confirm (live
- *  operator, jun-10) and the deferred approval prompt (fallback path), so the
- *  CLI's escalation wording/verbs can never fork between the two routes. */
-interface EscalationScopeView {
-  readonly activeSkill: string
-  readonly tool: string
-  readonly reason: string
-  readonly justification?: string | undefined
-}
-
-/** UUX-2-18 (CLI half) — the ONE deny-steer text reader. An EMPTY steer answer
- *  re-prompts ONCE ("steer text required (or N to deny)") instead of silently
- *  degrading to a plain deny — the operator chose the steer verb; a phantom ""
- *  must never eat their intent. Still-empty / "N" ⇒ `undefined` (plain deny —
- *  the normalizer SSOT would strip a "" steer anyway; this is the UX half).
- *  Shared by the escalation arm AND the normal verb prompt (no fork copy). */
-const askSteerText = async (deps: CliHitlDeps): Promise<string | undefined> => {
-  // Audit R3 MED-1 — a channel RELEASE mid-steer (turn tore down between the
-  // verb answer and the steer text) must NOT re-prompt: the re-ask would land
-  // on `active=false` and open an ad-hoc readline on the REAL stdin — an
-  // orphan reader that hangs the approval and steals the next between-turns
-  // line. Detect the release by the active-flag flip around the ask and
-  // fail-closed to a plain deny (askLine already printed the release notice).
-  const wasActive = deps.channel.active
-  const first = (await askLine(deps.channel, "Steer (what to do instead): ", "approval")).trim()
-  if (first.length > 0) return first
-  if (wasActive && !deps.channel.active) return undefined // released ⇒ plain deny
-  const second = (
-    await askLine(deps.channel, "steer text required (or N to deny): ", "approval")
-  ).trim()
-  if (second.length === 0 || second.toLowerCase() === "n") return undefined
-  return second
-}
-
-const promptEscalationVerbs = async (
-  deps: CliHitlDeps,
-  scope: EscalationScopeView,
-  // C2 (jul-10 audit) — site context (diff preview / preflight warning) rides
-  // the SAME activation-rendered prompt so a queued escalation never prints
-  // its context over an unanswered earlier ask. "" ⇒ byte-identical.
-  contextHeader = "",
-): Promise<ConfirmDecision> => {
-  const header =
-    `Skill '${scope.activeSkill}' scope — tool '${scope.tool}' is out of scope.\n` +
-    `  reason: ${scope.reason}\n` +
-    (scope.justification !== undefined ? `  rationale: ${scope.justification}\n` : "")
-  const ans = (
-    await askLine(
-      deps.channel,
-      `${contextHeader}${header}Allow [o]nce / allow [s]ession / [d]eny / deny+s[t]eer? [o/s/D/t] `,
-      "approval",
-    )
-  )
-    .trim()
-    .toLowerCase()
-  deps.idleMonitor.markActive()
-  if (ans === "o") {
-    deps.rejectCounter.recordAccept()
-    return { decision: "allow", scope: "once" }
-  }
-  if (ans === "s") {
-    deps.rejectCounter.recordAccept()
-    return { decision: "allow", scope: "session" }
-  }
-  if (ans === "t") {
-    const steer = await askSteerText(deps)
-    deps.rejectCounter.recordDeny()
-    return steer !== undefined ? { decision: "deny_and_steer", steer } : { decision: "deny" }
-  }
-  deps.rejectCounter.recordDeny()
-  return { decision: "deny" }
-}
-
-/** UUX-1-06 (A-r2) — the ONE shared NORMAL-approval verb prompt (PromptSpec-
- *  lite). Both the inline confirm ({@link buildCliOnConfirm}) and the deferred
- *  fallback ({@link buildCliApprovalPrompt}) render + answer-map through THIS
- *  helper, so the verb set can never fork between the two routes again.
- *  Verbs that structurally need the full `ToolAction` are DECLARED as
- *  capability flags (absent ⇒ not offered), never copy-forked:
- *   - `hunk`        — [h]unk-select needs the action's previewable diff;
- *   - `prefixLabel` — [p]/[P] prefix grants need the action's shellCommand. */
-interface NormalVerbCaps {
-  /** Prompt subject: the tool name (inline) or "pending action" (deferred). */
-  readonly subject: string
-  /** C2 (jul-10 audit) — site context printed ABOVE the verb line (approval
-   *  header / diff preview / preflight warning / team-escalation header),
-   *  bundled INTO the ask's prompt so it renders at head activation with it —
-   *  a queued ask's context can never interleave over an unanswered prompt. */
-  readonly contextHeader?: string
-  /** [h]unk-select capability (inline-only — needs the ToolAction). */
-  readonly hunk?: { readonly diff: ActionDiff; readonly ids: string[] }
-  /** [p] prefix-grant capability (inline-only — needs `shellCommand`). */
-  readonly prefixLabel?: string | null
-  /** [P] durable prefix capability (needs a wired trust-scope registry). */
-  readonly durable?: boolean
-}
-
-type NormalVerbAnswer =
-  | { readonly kind: "allow"; readonly scope?: "session" }
-  | { readonly kind: "allow_prefix"; readonly durable: boolean }
-  | { readonly kind: "hunk_select" }
-  | { readonly kind: "deny"; readonly steer?: string }
-
-const renderNormalVerbPrompt = (caps: NormalVerbCaps): string => {
-  const context = caps.contextHeader ?? ""
-  const prefixLabel = caps.prefixLabel ?? null
-  const durable = caps.durable === true && prefixLabel !== null
-  // T05 — append the [h]unk-select verb when a per-hunk option exists.
-  const hunkVerb = caps.hunk !== undefined ? " / [h]unk-select" : ""
-  return durable
-    ? `${context}Allow ${caps.subject}? [y]es / [a]lways session / [p] \`${prefixLabel}\` this session / [P] \`${prefixLabel}\` ALL sessions / [N]o / deny+s[t]eer${hunkVerb}: `
-    : prefixLabel !== null
-      ? `${context}Allow ${caps.subject}? [y]es / [a]lways session / [p] always \`${prefixLabel}\` cmds / [N]o / deny+s[t]eer${hunkVerb}: `
-      : `${context}Allow ${caps.subject}? [y]es / [a]lways session / [N]o / deny+s[t]eer${hunkVerb}: `
-}
-
-const promptNormalApprovalVerbs = async (
-  deps: CliHitlDeps,
-  caps: NormalVerbCaps,
-): Promise<NormalVerbAnswer> => {
-  const prefixLabel = caps.prefixLabel ?? null
-  const durable = caps.durable === true && prefixLabel !== null
-  // Capture the RAW answer too: the prefix verbs are case-SENSITIVE ([p] this
-  // session vs [P] all sessions) and the lowercased `ans` cannot tell them
-  // apart — so the durable check reads `raw` and runs BEFORE the `ans` "p"
-  // check (a typed "P" lowercases to "p", so durable must win first).
-  const raw = (await askLine(deps.channel, renderNormalVerbPrompt(caps), "approval")).trim()
-  const ans = raw.toLowerCase()
-  deps.idleMonitor.markActive()
-  // T05 — [h] drives the per-hunk picker (only offered when the cap is set).
-  if (caps.hunk !== undefined && ans === "h") return { kind: "hunk_select" }
-  if (ans === "y" || ans === "yes") {
-    deps.rejectCounter.recordAccept()
-    return { kind: "allow" }
-  }
-  if (ans === "a" || ans === "always") {
-    deps.rejectCounter.recordAccept()
-    return { kind: "allow", scope: "session" }
-  }
-  if (durable && raw === "P") {
-    deps.rejectCounter.recordAccept()
-    return { kind: "allow_prefix", durable: true }
-  }
-  if (prefixLabel !== null && ans === "p") {
-    deps.rejectCounter.recordAccept()
-    return { kind: "allow_prefix", durable: false }
-  }
-  if (ans === "t") {
-    const steer = await askSteerText(deps)
-    deps.rejectCounter.recordDeny()
-    return steer !== undefined ? { kind: "deny", steer } : { kind: "deny" }
-  }
-  deps.rejectCounter.recordDeny()
-  return { kind: "deny" }
-}
-
-/** T05 — when `QUANTA_HUNK_APPROVAL` is ON, compute the previewed mutation's
- *  `(path, before, after)` so the confirm prompt can offer per-hunk selection.
- *  Returns the diff + its atomic hunk ids ONLY when there are ≥2 hunks (a single
- *  hunk has no meaningful subset — accept/deny already covers it). `undefined`
- *  ⇒ the prompt is byte-identical to the pre-T05 flow. Best-effort: any failure
- *  (unsupported tool, read error, apply_patch) degrades to whole-call. */
-const maybeHunkOption = async (
-  deps: CliHitlDeps,
-  action: ToolAction,
-): Promise<{ diff: ActionDiff; ids: string[] } | undefined> => {
-  if (!runtimeConfig().hunkApproval) return undefined
-  // Best-effort, fully fenced: this runs INSIDE the blocking confirm prompt, so a
-  // throw here must NEVER crash/hang the approval. computeActionDiff is already
-  // try/catch'd internally, but the splitHunks/map below sit outside it — wrap the
-  // whole body so any unexpected failure degrades to whole-call (undefined).
-  try {
-    const cwd = deps.cwd ?? process.cwd()
-    const reader = (p: string): Promise<string> => {
-      const abs = isAbsolute(p) ? p : resolve(cwd, p)
-      return Bun.file(abs).text()
-    }
-    const diff = await computeActionDiff(action, { readFile: reader })
-    if (diff === undefined) return undefined
-    const ids = splitHunks(diff.before, diff.after).map((h) => h.id)
-    if (ids.length < 2) return undefined
-    return { diff, ids }
-  } catch {
-    return undefined
-  }
-}
-
-/** T05 — drive the interactive hunk picker after the operator chose `[h]`.
- *  Renders the numbered hunks, reads the selection, and either (a) returns a
- *  plain allow when ALL hunks are accepted (let the original tool run), (b) a
- *  plain deny when NONE are, or (c) applies the chosen subset via the executor
- *  (atomic + mode-preserving + staleness-guarded) and returns the shaped
- *  `deny_and_steer` so the model learns exactly what landed. */
-const runHunkSelect = async (
-  deps: CliHitlDeps,
-  diff: ActionDiff,
-  ids: string[],
-): Promise<boolean | ConfirmDecision> => {
-  // C2 — the hunk listing is this ask's own prompt copy: bundled so it renders
-  // at head activation (a queued ask between the verb answer and this picker
-  // would otherwise have the listing printed over ITS unanswered prompt).
-  const raw = await askLine(
-    deps.channel,
-    `${renderHunkChoices(diff.before, diff.after)}\nAccept which hunks? [1-${ids.length}] (e.g. "1,3" / "all" / "none"): `,
-  )
-  deps.idleMonitor.markActive()
-  const selected = parseHunkSelection(raw, ids)
-  if (selected.length === ids.length) {
-    // Whole-call accept — let the original tool apply normally (no executor).
-    deps.rejectCounter.recordAccept()
-    return true
-  }
-  if (selected.length === 0) {
-    deps.rejectCounter.recordDeny()
-    return false
-  }
-  const cwd = deps.cwd ?? process.cwd()
-  const path = isAbsolute(diff.path) ? diff.path : resolve(cwd, diff.path)
-  const result = await applyHunkSelection({
-    path,
-    before: diff.before,
-    after: diff.after,
-    selectedHunkIds: selected,
-  })
-  // A successful partial apply is an operator ACCEPT (they kept something), even
-  // though the vehicle is a deny_and_steer for the original whole-call.
-  if (result.status === "applied") deps.rejectCounter.recordAccept()
-  else deps.rejectCounter.recordDeny()
-  return shapePartialDecision(result, selected, ids, diff.path)
-}
-
-/** jun-10 HITL restructure — the INLINE confirm a live operator answers AT THE
- *  GATE. With `approvalProtocol.interactive` set (below), the runtime approval
- *  controller delegates a mid-turn "ask" here instead of throwing
- *  `RuntimeApprovalRequiredError` — so the turn is NEVER aborted + re-run for
- *  an approval (the deferred round-trip re-paid the full prompt, ~140k input
- *  tokens per approval in real sessions; web/SDK surfaces keep it).
- *
- *  Plain confirms offer the SOTA 4-verb set (Claude Code / Cursor baseline):
- *    [y]es              — allow this call only
- *    [a]lways session   — allow + standing session grant for this actionKey
- *                         (shell-aware, minted by the runtime controller; the
- *                         CC "don't ask again this session" verb — makes a
- *                         parallel `agent` fan-out a ONE-keystroke approval)
- *    [N]o               — deny (default on empty/unknown answer — fail closed)
- *    deny+s[t]eer       — deny AND carry a corrective instruction the loop
- *                         injects as the next user message (Cursor
- *                         REJECT_AND_TELL; the gate already supports it)
- *  An escalation (`scopeContext`) routes to the dedicated o/s/D/t verb set. */
-/** C2 (jul-10 audit) — the confirm's pre-ask site context (diff preview +
- *  preflight apply warning), ACCUMULATED instead of written: it renders as
- *  part of the ask's prompt at channel-head activation, so a confirm queued
- *  behind an unanswered ask never prints its context over that prompt.
- *  Content and order are byte-identical to the old direct writes.
- *  #19 — the warning follows the diff so the operator approves with eyes
- *  open. Both default-gated; OFF ⇒ "" ⇒ byte-identical prompt. */
-const buildConfirmContext = async (deps: CliHitlDeps, action: ToolAction): Promise<string> => {
-  let context = ""
-  if (diffPreviewEnabled()) {
-    const preview = await renderActionDiff(action)
-    if (preview !== undefined) context += `${preview}\n`
-  }
-  if (preflightCheckEnabled()) {
-    const warning = await preflightApplyWarning(action, { cwd: deps.cwd ?? process.cwd() })
-    if (warning !== undefined) context += `${warning}\n`
-  }
-  return context
-}
-
-const buildCliOnConfirm =
-  (deps: CliHitlDeps) =>
-  async (action: ToolAction): Promise<boolean | ConfirmDecision> => {
-    let context = await buildConfirmContext(deps, action)
-    const scope = action.scopeContext
-    if (scope !== undefined) {
-      // ToolAction's scopeContext omits the tool name (it lives on the action) —
-      // re-attach it so the shared prompt renders the same header both routes.
-      return promptEscalationVerbs(deps, { ...scope, tool: action.tool }, context)
-    }
-    // UUX-6-12 — a TEAM-BROKER escalation (a worker subagent's soft-denied tool
-    // routed to this leader's authority) must NAME who is asking + what for; a
-    // bare `Allow <tool>?` would have the operator widen a worker's permission
-    // blind. Context header only — the verb set below stays the shared SSOT.
-    // Absent (every non-broker confirm) ⇒ byte-identical prompt.
-    const team = action.teamEscalation
-    if (team !== undefined) {
-      context +=
-        `Subagent '${team.workerId}' asks to run '${action.tool}' — scope: ${team.scope}\n` +
-        `  reason: ${team.reason}\n`
-    }
-    // T05 — offer the [h]unk-select verb ONLY when QUANTA_HUNK_APPROVAL is ON
-    // AND this mutation decomposes into ≥2 previewable hunks. Absent ⇒ the
-    // prompt is byte-identical to the pre-T05 flow (no [h] offered).
-    const hunkOption = await maybeHunkOption(deps, action)
-    // #20 — offer the PREFIX verb ([p] "always allow `<program> …` this
-    // session") ONLY when this action is a single simple shell command whose
-    // program token can be safely prefix-granted. For a complex/chained command
-    // or a non-shell tool `prefixGrantLabel` returns null ⇒ the prompt is
-    // byte-identical to the pre-#20 4-verb prompt (no tempting an unsafe grant).
-    const prefixLabel =
-      typeof action.shellCommand === "string" && action.shellCommand.length > 0
-        ? prefixGrantLabel(`${action.tool}|${action.shellCommand}`)
-        : null
-    // #20 durable — the [P] verb is offered ONLY when a prefix is safe AND a
-    // persistent trust-scope registry is wired (gate `QUANTA_TRUST_SCOPE` on).
-    const durable = prefixLabel !== null && deps.trustScope !== undefined
-    // UUX-1-06 — render + answer-map through the SHARED verb helper (the
-    // deferred prompt consumes the same one); only the DECISION SHAPING below
-    // is inline-specific (ConfirmDecision vs the wire union).
-    const answer = await promptNormalApprovalVerbs(deps, {
-      subject: action.tool,
-      ...(context.length > 0 ? { contextHeader: context } : {}),
-      ...(hunkOption !== undefined ? { hunk: hunkOption } : {}),
-      prefixLabel,
-      durable,
-    })
-    switch (answer.kind) {
-      case "hunk_select":
-        // Structurally gated: the helper only returns this when the cap was set.
-        return hunkOption !== undefined
-          ? runHunkSelect(deps, hunkOption.diff, hunkOption.ids)
-          : false
-      case "allow":
-        return answer.scope === "session" ? { decision: "allow", scope: "session" } : true
-      case "allow_prefix":
-        // #20 durable — [P] mints a DURABLE program-token grant into the
-        // persistent registry (survives across sessions) AND allows this
-        // session (session_prefix).
-        if (answer.durable && deps.trustScope !== undefined && prefixLabel !== null) {
-          deps.trustScope.registry.grant(deps.trustScope.projectKey, {
-            tool: action.tool,
-            scope: "project",
-            commandPattern: prefixLabel,
-          })
-        }
-        return { decision: "allow", scope: "session_prefix" }
-      case "deny":
-        return answer.steer !== undefined
-          ? { decision: "deny_and_steer", steer: answer.steer }
-          : false
-    }
-  }
-
-const buildCliApprovalPrompt =
-  (deps: CliHitlDeps) =>
-  async (approval: PendingApprovalView): Promise<ApprovalDecisionResult> => {
-    // ADR-0512 P3 — a skill-scope ESCALATION approval (carries `scopeContext`)
-    // offers the FULL 4-verb prompt so allow_once (no widen) and deny_and_steer
-    // (corrective steer) are genuinely reachable on the CLI — matching the yellow
-    // escalation card (shared verbatim with the inline confirm via
-    // {@link promptEscalationVerbs}). A NORMAL approval keeps the byte-identical
-    // `[y/N]` prompt. With `approvalProtocol.interactive` this path is the
-    // FALLBACK only (a confirm raised outside any turn scope) — the live-operator
-    // route answers inline at the gate and never mints a pending approval.
-    const scope = approval.scopeContext
-    if (scope !== undefined) {
-      const decision = await promptEscalationVerbs(deps, scope)
-      if (decision.decision === "allow") {
-        return {
-          decision: "approve",
-          ...(decision.scope !== undefined ? { scope: decision.scope } : {}),
-        }
-      }
-      if (decision.decision === "deny_and_steer") {
-        return { decision: "deny", steer: decision.steer }
-      }
-      return { decision: "deny" }
-    }
-    // UUX-1-06 (A-r2) — the deferred NORMAL arm offers the SAME verbs the
-    // inline confirm offers, via the SAME helper: [y]/[a]lways-session/[N]/
-    // deny+s[t]eer. It only has a `PendingApprovalView` (no ToolAction), so the
-    // ToolAction-bound capabilities ([p]/[P] prefix, [h]unk, diff preview) are
-    // structurally ABSENT — declared by omitting the caps, never copy-forked.
-    // A deny+steer maps onto the wire union; the session-turn-driver threads
-    // the steer to `session.approval.respond` ⇒ the host lease carries it.
-    // C2 — the "Approval required" header is this ask's own prompt copy:
-    // bundled so it renders at head activation, never over an unanswered ask.
-    const answer = await promptNormalApprovalVerbs(deps, {
-      subject: "pending action",
-      contextHeader: `Approval required: ${approval.reason}\n`,
-    })
-    switch (answer.kind) {
-      case "allow":
-        // jun-10 — "[a]lways session" resolves approve+scope:"session" so the
-        // runtime controller mints the standing grant (one abort+re-run
-        // round-trip per key per session, not per ask).
-        return answer.scope === "session" ? { decision: "approve", scope: "session" } : "approve"
-      case "deny":
-        return answer.steer !== undefined ? { decision: "deny", steer: answer.steer } : "deny"
-      default:
-        // allow_prefix / hunk_select are unreachable without their caps —
-        // fail CLOSED if the helper ever regresses.
-        return "deny"
-    }
-  }
 
 export interface ComposeCliRuntimeContextArgs {
   readonly boot: SessionBootstrapResult
@@ -566,8 +68,6 @@ export interface CliRuntimeContextBindings {
    *  when the load failed (the gate then has no store either). */
   readonly permissionStore: PermissionStore | undefined
 }
-
-type RuntimeContextAdmissibility = ReturnType<RuntimeContext["admissibility"]>
 
 interface RuntimeConfirmSlot {
   current: (action: ToolAction) => Promise<boolean | ConfirmDecision>
@@ -699,99 +199,6 @@ const buildBootstrapContextArgs = (args: {
       // counter (default-OFF byte-identical).
       ...(writeBudget !== undefined ? { writeBudget } : {}),
     },
-  }
-}
-
-// ALBB-11 — exported so the comp-root HITL wiring hellgate can drive the REAL
-// producer (not a hand-passed Set) and assert the `allowlistEscalated` mint.
-export const buildAdmissibility = (args: {
-  readonly boot: SessionBootstrapResult
-  readonly onConfirm: (action: ToolAction) => Promise<boolean | ConfirmDecision>
-  readonly sandboxProfile: ReviewerSandboxProfile
-  readonly permissionStore: PermissionStore | undefined
-  readonly autoReview: ReturnType<typeof createClassifierBackedAutoReview> | undefined
-  readonly materializeReviewerAgent: () => ReturnType<
-    SessionBootstrapResult["materializeReviewerAgent"]
-  >
-}): RuntimeContextAdmissibility => {
-  const { boot, onConfirm, sandboxProfile, permissionStore, autoReview, materializeReviewerAgent } =
-    args
-  const userReviewerPort = createOnConfirmReviewerPort({ onConfirm })
-  // T03 (feature 03-guardian) — route approvals to the side-agent guardian when
-  // the operator opts into the agent reviewer. Driven through the SINGLE approval-
-  // ladder SSOT: `QUANTA_APPROVAL_LADDER=<name>` selects a rung and the rung's OWN
-  // `approvalsReviewer` field decides (only `guardian-approvals` is `agent`);
-  // `QUANTA_AUTO_REVIEW=1` is the strict shortcut for that one rung. Default
-  // (neither set / a `user` rung / unknown / `custom`) ⇒ `autoReviewEnabled` stays
-  // false ⇒ `selectDefaultReviewer` is byte-identical (reviewer = user / legacy).
-  //
-  // We do NOT seed a per-thread `ThreadPermission` here: a thread record makes the
-  // permission stack (`evaluateStack`) resolve allow/deny directly and never reach
-  // the reviewer, so a posture record would DEFEAT guardian routing. Routing the
-  // reviewer tier (below) keeps the gate's `ask` → guardian path intact. HARD_DENY
-  // still runs BEFORE the guardian (see `@/permission/policy`).
-  const autoReviewEnabled = ladderAutoReviewEnabled()
-  const threadPermission = permissionStore?.getThread(boot.sessionId)
-  const reviewerAgent = materializeReviewerAgent()
-  const guardianReview =
-    reviewerAgent !== undefined
-      ? boot.createSubagentBackedGuardianReview({
-          reviewer: reviewerAgent,
-          signal: boot.abort.signal,
-        })
-      : undefined
-  // jun-7-misc 03 (ADR-0497) — the per-action TYPED assessor is SELECTED here only
-  // when the strict `QUANTA_GUARDIAN_ASSESSOR` knob is on AND a reviewer agent
-  // exists. Knob off ⇒ `guardianAssess` stays undefined and is never spread into
-  // the port options, so the reviewer port is byte-identical to the binary path.
-  const guardianAssess =
-    reviewerAgent !== undefined && runtimeConfig().guardianAssessor
-      ? boot.createSubagentBackedGuardianAssess({
-          reviewer: reviewerAgent,
-          signal: boot.abort.signal,
-        })
-      : undefined
-  const reviewerPort =
-    autoReview !== undefined || guardianReview !== undefined || guardianAssess !== undefined
-      ? createOnConfirmReviewerPort({
-          onConfirm,
-          ...(autoReview !== undefined ? { autoReview } : {}),
-          ...(guardianReview !== undefined ? { guardianReview } : {}),
-          ...(guardianAssess !== undefined ? { guardianAssess } : {}),
-        })
-      : userReviewerPort
-  // §3.2 (ticket-04a) — mint the tool-switch CIRCUMVENTION tracker ONLY when the
-  // strict `QUANTA_CIRCUMVENT_DETECT` knob is on. Session-scoped (one per
-  // bootstrap): it accumulates prior soft-denies across turns so the gate can
-  // catch a Bash command that writes a file a prior Edit/Write deny protects.
-  // The detection/gate/classifier were fully built but DEAD (never instantiated)
-  // — this is the missing comp-root mint. Knob off ⇒ undefined ⇒ never spread ⇒
-  // the gate's circumvention precheck never arms (byte-identical legacy).
-  const circumventionTracker = runtimeConfig().circumventDetect
-    ? new CircumventionTracker()
-    : undefined
-  // ALBB-11 (ADR-0070 / Round-4) — mint ONE run-scoped dedup Set per session
-  // bootstrap. Every `?.`/`!== undefined` guard on `opts.allowlistEscalated` in
-  // hitl.ts (single-shot dedup, concurrent coalesce, post-approve record) is
-  // inert until the LIVE producer mints this Set — tests hand-passed one, so the
-  // coalesce hellgate stayed green while production ran the legacy re-prompt-
-  // every-time path. The coalesce WeakMap (`pendingReviewsByRun`, hitl.ts:144)
-  // is keyed by THIS handle, so a fresh Set per session gives naturally-isolated
-  // dedup state that GC's with the session — NO explicit clear/recycle needed.
-  const allowlistEscalated = new Set<string>()
-  return {
-    ...(permissionStore !== undefined ? { permissionStore } : {}),
-    reviewerPort,
-    allowlistEscalated,
-    defaultReviewer: selectDefaultReviewer({
-      threadPermission,
-      permissionMode: boot.mode,
-      sandboxProfile,
-      hasAutoReview: autoReview !== undefined,
-      hasGuardianReview: guardianReview !== undefined,
-      autoReviewEnabled,
-    }),
-    ...(circumventionTracker !== undefined ? { circumventionTracker } : {}),
   }
 }
 
@@ -978,7 +385,7 @@ export const composeCliRuntimeContext = async (
       idleMonitor: boot.idleMonitor as IdleMonitor,
       rejectCounter: boot.rejectCounter as RejectCounter,
       channel: midTurnApprovalChannel,
-      cwd: boot.cwd, // #19 (unused by the deferred prompt; CliHitlDeps shares the shape)
+      cwd: boot.cwd, // session-resolved cwd for preflight/hunk reads in the shared prompt helpers
     }),
     midTurnApprovalChannel,
     runtimeContext,
@@ -995,3 +402,5 @@ export const __testing = {
   buildCliOnConfirm,
   buildCliApprovalPrompt,
 }
+
+export { buildAdmissibility } from "./cli-admissibility-compose"

@@ -126,6 +126,7 @@ describe("D12 — uncaught turn-loop throw still disposes session resources", ()
       llm: throwingLlm(),
       sessionId: "d12-throw-dispose",
       sideAgentDaemons: daemons,
+      bgShellRegistry: bgRegistry,
     } as unknown as AgentConfig
 
     // The uncaught approval throw must propagate OUT of runAgent (it skips

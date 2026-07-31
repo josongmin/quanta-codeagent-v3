@@ -218,6 +218,7 @@ describe("B2 /cron — REAL buildSurfaceDispatch late-bind getter (red-on-inject
       ...({} as Parameters<typeof buildReplSlashCtx>[0]),
     } as Parameters<typeof buildReplSlashCtx>[0])
     const dispatch = buildSurfaceDispatch({
+      sessionCwd: process.cwd(),
       slashCtx,
       convCheckpointSlot: undefined,
       sessionIo: buildDefaultSessionIo(),

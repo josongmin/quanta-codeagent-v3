@@ -1,6 +1,5 @@
 import type { Message } from "@/llm"
 import type { TurnTiming } from "@/observability"
-import { getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import type { RedactionHit, RedactionOrigin } from "@/security"
 import { errMessage } from "@/shared"
 import {
@@ -137,7 +136,7 @@ export const disposeSessionResources = async (args: {
   // the registry holds it for the whole process lifetime. No-throw wrapped like
   // the sibling disposals above.
   try {
-    await getBashBgRegistry().killAll()
+    await args.cfg.bgShellRegistry?.killAll()
   } catch (e) {
     args.cfg.stream.emit({ type: "error", message: `bg-shell reap failed: ${errMessage(e)}` })
   }

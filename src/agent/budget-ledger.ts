@@ -74,6 +74,8 @@
 
 import { MODEL_RATE_CARD, type ModelPrice } from "@/observability/pricing"
 
+const COMPACT_PREFIX_THRESHOLD = 1024
+
 /** Per-model pricing. All values in USD per 1 million tokens. */
 export interface ModelPricing {
   /** Standard input tokens (per 1M). */
@@ -621,7 +623,9 @@ export const defaultBudgetLedger = (opts?: BudgetLedgerOpts): BudgetLedger => {
 
   const compactPrefixIfNeeded = (): void => {
     if (start === 0) return
-    if (start < 1024 && start * 2 < events.length) return
+    // Wait until the dead prefix is meaningfully amortized before shifting the
+    // backing array; otherwise frequent single-step evictions churn copies.
+    if (start < COMPACT_PREFIX_THRESHOLD && start * 2 < events.length) return
     events.splice(0, start)
     start = 0
   }

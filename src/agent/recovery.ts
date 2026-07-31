@@ -1,5 +1,5 @@
 import { type assembleFromEvents, codexSpecRoute, isRefusalStopReason } from "@/llm"
-import { LLMError } from "@/shared"
+import { assertNever, LLMError } from "@/shared"
 import { DEFAULT_REFUSAL_FALLBACK_PROMPT } from "./refusal-fallback"
 import { classifyLLMError, isPromptTooLong } from "./retry"
 import type { StopAction, StopReasonPolicy } from "./stop-reason"
@@ -249,7 +249,8 @@ const decideTypedStreamError = (
   // Preserve the existing provider-message PTL signal: many adapters can only
   // classify the HTTP status as bad_request even though the body names overflow.
   if (isPromptTooLong(error)) return { do: "compact" }
-  switch (codexSpecRoute(error.kind)) {
+  const action = codexSpecRoute(error.kind)
+  switch (action) {
     case "reactive_compaction":
       return { do: "compact" }
     case "hitl_handoff":
@@ -265,6 +266,8 @@ const decideTypedStreamError = (
       rec.streamRetries += 1
       return { do: "backoff", attempt }
     }
+    default:
+      return assertNever(action, "RecoveryRoute")
   }
 }
 

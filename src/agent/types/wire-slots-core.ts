@@ -434,6 +434,10 @@ export interface WireSlotsCoreConfig {
    *  (`@/tool/side-agent` `SideAgentDaemonPort`) so `@/agent` need not import
    *  `@/side-agent` concretely. */
   sideAgentDaemons?: import("@/tool/side-agent").SideAgentDaemonPort
+  /** Session-scoped background-shell registry teardown seam. The composition
+   *  root wires the host singleton; the loop only needs the narrow killAll port,
+   *  which keeps session-end disposal testable and slice-local. */
+  bgShellRegistry?: { killAll(): Promise<void> }
   /** ADR-0472 — OPTIONAL diagnostics provider for the edit-repair lint-delta.
    *  When present (host wired an LSP diagnostics source) AND
    *  `runtimeConfig().editRepairLoop` is on, the dispatch seam brackets a

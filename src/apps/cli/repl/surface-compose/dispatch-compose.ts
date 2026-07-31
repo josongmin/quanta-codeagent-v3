@@ -67,6 +67,7 @@ export const buildSurfaceDispatchWire = (
   }
 
   const dispatchSlash = buildSurfaceDispatch({
+    sessionCwd: setup.cwd,
     slashCtx,
     convCheckpointSlot,
     sessionIo: mutable.sessionIo,

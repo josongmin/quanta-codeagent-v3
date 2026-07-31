@@ -308,6 +308,14 @@ const consultPlanModeSeam = (
   )
 }
 
+type PreAdmissibilityConsult = (
+  call: ToolUseBlock,
+  config: AgentConfig,
+  collab: ReturnType<typeof resolveCollaborationMode>,
+) => DispatchResult | null
+
+const PRE_ADMISSIBILITY_CONSULTS: readonly PreAdmissibilityConsult[] = [consultPlanModeSeam]
+
 /** The uniform pre-flight consults, in canonical order (dedup → localize-phase →
  *  test-scope → dispatch-guard). Each is default-OFF (returns null unless its
  *  feature is wired), consulted BEFORE the admissibility gate so a rejected call
@@ -376,6 +384,15 @@ const consultOwnership = (
   )
 }
 
+type PostAdmissibilityConsult = (
+  call: ToolUseBlock,
+  config: AgentConfig,
+  shellCommand: string | null,
+  isReadOnly: boolean,
+) => DispatchResult | null
+
+const POST_ADMISSIBILITY_CONSULTS: readonly PostAdmissibilityConsult[] = [consultOwnership]
+
 /** Span-free dispatch body (extracted so the outer wrap keeps a single control
  *  flow). Reads as a linear spine: unknown-tool guard → plan-mode seam → uniform
  *  pre-flight consults → action build → admissibility gate → ownership consult →
@@ -399,8 +416,10 @@ const dispatchToolInner = async (
   // Plan-mode seam consulted BEFORE the dedup/admissibility gates (dispatch-time,
   // stateless — a `default`⇒`plan` transition only affects later calls).
   const collab = resolveCollaborationMode(config)
-  const planShort = consultPlanModeSeam(call, config, collab)
-  if (planShort) return planShort
+  for (const consult of PRE_ADMISSIBILITY_CONSULTS) {
+    const short = consult(call, config, collab)
+    if (short) return short
+  }
 
   // Uniform pre-flights (dedup, localize-phase, test-scope, dispatch-guard) —
   // consulted in order, first non-null short-circuits before any gate work.
@@ -444,8 +463,10 @@ const dispatchToolInner = async (
     },
   })
   if (gated) return gated
-  const ownershipShort = consultOwnership(call, config, shellCommand, action.isReadOnly)
-  if (ownershipShort) return ownershipShort
+  for (const consult of POST_ADMISSIBILITY_CONSULTS) {
+    const short = consult(call, config, shellCommand, action.isReadOnly)
+    if (short) return short
+  }
   // SECURITY: the rewrite is applied AFTER the permission / HARD_DENY gates ran
   // on the original input. A hook is operator-authored local code at the trust
   // level of the permission config itself, so this is intentional (the model
