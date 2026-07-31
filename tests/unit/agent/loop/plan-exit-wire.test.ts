@@ -23,7 +23,10 @@ const makeStore = (): PlanStore => {
   let n = 0
   const store = createInMemoryPlanStore({
     now: () => NOW,
-    idGen: () => `t-${(n += 1)}`,
+    idGen: () => {
+      n += 1
+      return `t-${n}`
+    },
   })
   store.create({ name: "P", overview: "o", todos: [{ content: "s1" }] })
   return store

@@ -94,6 +94,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
       // Thinking must precede the answer in the output stream.
       expect(scr.indexOf("REASONING_TRACE")).toBeLessThan(scr.indexOf("ANSWER the result is 42"))
       // Thinking block was rendered DIM (\x1b[2m…\x1b[0m) — visible in raw output.
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally matches the ESC (U+001B) byte of the ANSI DIM ("\x1b[2m") sequence to assert the reasoning trace was rendered dim in the raw PTY stream
       expect(c.output()).toMatch(/\x1b\[2m[^\x1b]*REASONING_TRACE/)
     },
     T,

@@ -115,6 +115,7 @@ describe("ALBB-14 §Automation — shared-lifecycle ticker delivery", () => {
   //          makes this RED (no timer ⇒ handler never called).
   test("A4: createRunAgentContext arms the shared-lifecycle ticker and delivers a fire", async () => {
     const inertLLM: LLMPort = {
+      // biome-ignore lint/correctness/useYield: stream must be an async generator to satisfy LLMPort; this inert stub throws if streamed and never yields
       async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
         throw new Error("unexpected stream() call")
       },

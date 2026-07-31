@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type AgentConfig,
   probeRepoMap,
   REPO_MAP_DEFAULT_MAX_CHARS,
   REPO_MAP_DEFAULT_MAX_DEPTH,
@@ -134,7 +135,9 @@ describe("repo-map — bench surface now in SURFACES", () => {
     const knob = repoMapKnob
     const parsed = knob.parse("1")
     expect(parsed).not.toBeUndefined()
-    const baseCfg = { llm: {} as any, registry: {} as any } as any
+    // Inert partial config: applyRepoMap only reads/writes the repoMap slot, so
+    // the empty llm/registry stubs are cast (through unknown) to the real shape.
+    const baseCfg = { llm: {}, registry: {} } as unknown as AgentConfig
     const ctx = { surface: "bench" as const }
     const result = knob.apply(baseCfg, parsed!, ctx)
     expect(result.repoMap).toBeDefined()

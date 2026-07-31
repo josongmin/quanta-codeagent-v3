@@ -256,16 +256,29 @@ export const parseNodeTest = (output: string): TestRunResult => {
   }
   lines.forEach((raw, idx) => {
     const l = raw.trim()
-    let m: RegExpExecArray | null
-    if ((m = /^\(fail\)\s+(.+?)(?:\s+\[[\d.]+\s*m?s\])?$/.exec(l)) !== null)
-      markAt(idx, m[1]!) // bun
-    else if ((m = /^[✖✗✕×]\s+(.+?)\s+\([\d.]+\s*ms\)$/.exec(l)) !== null)
-      markAt(idx, m[1]!) // node:test / jest / vitest (timed: `✖ name (4 ms)`)
-    else if ((m = /^not ok \d+ - (.+)$/.exec(l)) !== null)
-      markAt(idx, m[1]!) // TAP
-    else if ((m = /^[✕×]\s+(.+)$/.exec(l)) !== null)
-      markAt(idx, m[1]!) // jest/vitest without timing (✕ U+2715, NOT node:test's ✖)
-    else if ((m = /^●\s+(.+)$/.exec(l)) !== null) markAt(idx, m[1]!) // jest DEFAULT reporter bullet (● U+25CF) — `● Suite › test`
+    // Each reporter shape is tried in priority order; the first match wins.
+    const bun = /^\(fail\)\s+(.+?)(?:\s+\[[\d.]+\s*m?s\])?$/.exec(l)
+    if (bun !== null) {
+      markAt(idx, bun[1]!) // bun
+      return
+    }
+    const timed = /^[✖✗✕×]\s+(.+?)\s+\([\d.]+\s*ms\)$/.exec(l)
+    if (timed !== null) {
+      markAt(idx, timed[1]!) // node:test / jest / vitest (timed: `✖ name (4 ms)`)
+      return
+    }
+    const tap = /^not ok \d+ - (.+)$/.exec(l)
+    if (tap !== null) {
+      markAt(idx, tap[1]!) // TAP
+      return
+    }
+    const untimed = /^[✕×]\s+(.+)$/.exec(l)
+    if (untimed !== null) {
+      markAt(idx, untimed[1]!) // jest/vitest without timing (✕ U+2715, NOT node:test's ✖)
+      return
+    }
+    const jestBullet = /^●\s+(.+)$/.exec(l)
+    if (jestBullet !== null) markAt(idx, jestBullet[1]!) // jest DEFAULT reporter bullet (● U+25CF) — `● Suite › test`
   })
   // mocha uses neither shape — it prints a `N failing` count + numbered `N) name`
   // entries (summary list first, then per-failure detail). Harvest exactly

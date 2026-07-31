@@ -27,6 +27,7 @@ const BATCH_RULE_MARKER = "[R-NO-EXPLORE-OVER-EDIT]"
 const stubLlm: LLMPort = {
   model: "stub",
   // eslint-disable-next-line require-yield
+  // biome-ignore lint/correctness/useYield: stream must be an async generator to satisfy the LLM port; this wiring-test stub throws without yielding
   async *stream() {
     throw new Error("stub llm should not be streamed in a wiring test")
   },

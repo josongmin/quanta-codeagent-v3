@@ -28,6 +28,7 @@ describe("same-turn-engine #14 post-prep abort recheck", () => {
     const registry = new ToolRegistry([])
     const config = {
       llm: {
+        // biome-ignore lint/correctness/useYield: stream must be an async generator to satisfy LLMPort; this stub sets a flag and returns without yielding
         stream: async function* () {
           streamCalled = true
         },
@@ -107,6 +108,7 @@ describe("same-turn-engine #14 post-prep abort recheck", () => {
     const registry = new ToolRegistry([])
     const config = {
       llm: {
+        // biome-ignore lint/correctness/useYield: stream must be an async generator to satisfy LLMPort; this stub aborts then throws without yielding
         stream: async function* () {
           ctrl.abort()
           throw new Error("provider observed abort")

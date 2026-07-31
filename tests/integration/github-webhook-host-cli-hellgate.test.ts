@@ -192,7 +192,9 @@ const runHost = (
   publish: PublishReactorWatchTriggerFn,
   io: WebhookServerCmdIo,
   sessionId = "test-session",
-  extra?: Partial<WebhookServerCmdDeps>,
+  // Allow an EXPLICIT `undefined` per key so a test can override the hermetic
+  // in-memory default back to unset and exercise the production durable store.
+  extra?: { [K in keyof WebhookServerCmdDeps]?: WebhookServerCmdDeps[K] | undefined },
 ): { done: Promise<number>; stop: () => void } => {
   const deps: WebhookServerCmdDeps = {
     buildTransport: () => bound.transport,
@@ -201,7 +203,13 @@ const runHost = (
     // Hermetic default: in-memory dedup (no real-fs write). Tests that need the
     // DURABLE cross-restart behaviour pass `extra.buildDeliveryStore`.
     buildDeliveryStore: () => createDeliveryStore(),
-    ...extra,
+  }
+  // Apply overrides. An EXPLICIT `undefined` clears the key (deletes it) so the
+  // production default kicks in downstream — exactOptionalPropertyTypes forbids
+  // storing a literal `undefined`, but omission is the equivalent runtime state.
+  for (const [k, v] of Object.entries(extra ?? {})) {
+    if (v === undefined) delete deps[k as keyof WebhookServerCmdDeps]
+    else Object.assign(deps, { [k]: v })
   }
   const prev = process.env.QUANTA_GITHUB_WEBHOOK_SESSION
   process.env.QUANTA_GITHUB_WEBHOOK_SESSION = sessionId
@@ -490,10 +498,9 @@ describe("quanta webhook HOST — gate, secret fence, poll→publish pump", () =
       const io1 = makeIo()
       // Explicit undefined overrides the in-memory hermetic default in runHost,
       // letting the production durable store kick in (cross-restart dedup test).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const h1 = runHost(b1t, spy1.fn, io1.io, "dd-session", {
         buildDeliveryStore: undefined,
-      } as any)
+      })
       await waitUntil(() => b1t.port() !== 0)
       const r1 = await postWebhook(b1t.port(), body, headers)
       expect(r1.status).toBe(202)
@@ -508,10 +515,9 @@ describe("quanta webhook HOST — gate, secret fence, poll→publish pump", () =
       const spy2 = makeSpyPublish()
       const io2 = makeIo()
       // Same explicit-undefined override for run 2 (same cross-restart test).
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const h2 = runHost(b2t, spy2.fn, io2.io, "dd-session", {
         buildDeliveryStore: undefined,
-      } as any)
+      })
       await waitUntil(() => b2t.port() !== 0)
       const r2 = await postWebhook(b2t.port(), body, headers)
       // dedup short-circuits at the slice → 202 "duplicate", and crucially no publish

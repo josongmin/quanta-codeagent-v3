@@ -54,6 +54,7 @@ class RecordingStream implements StreamPort {
 
 class ThrowingLLM implements LLMPort {
   constructor(private readonly error: unknown) {}
+  // biome-ignore lint/correctness/useYield: stream must be an async generator to satisfy LLMPort; this stub throws without yielding
   async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
     throw this.error
   }

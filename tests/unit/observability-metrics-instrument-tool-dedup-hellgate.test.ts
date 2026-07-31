@@ -733,6 +733,7 @@ describe("defaultToolCallCache — combined drift message (ADR-0183)", () => {
     const m = defaultMetricsRegistry()
     const warnCalls: string[] = []
     // Spy console.warn to assert we do NOT fall back to it.
+    // biome-ignore lint/suspicious/noConsole: this test captures the real console.warn to spy on it and assert the drift-warn port is used INSTEAD of the console fallback; restored in finally
     const origConsoleWarn = console.warn
     let consoleWarnCount = 0
     console.warn = () => {

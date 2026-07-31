@@ -180,6 +180,7 @@ describe("instrumentTool", () => {
     const t = instrumentTool(
       fakeTool({
         // eslint-disable-next-line require-yield
+        // biome-ignore lint/correctness/useYield: execute must be an async generator to satisfy Tool; this stub throws without yielding
         async *execute() {
           throw new Error("boom")
         },

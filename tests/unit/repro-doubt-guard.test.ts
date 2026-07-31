@@ -13,7 +13,12 @@
  * byte-identical no-op), fires the steer at most once, and resets on every edit.
  */
 import { describe, expect, test } from "bun:test"
-import { createReproDoubtState, REPRO_DOUBT_STEER, reproDoubtStep } from "@/agent/repro-doubt-guard"
+import {
+  createReproDoubtState,
+  REPRO_DOUBT_STEER,
+  type ReproDoubtConfig,
+  reproDoubtStep,
+} from "@/agent/repro-doubt-guard"
 
 const cfg = { stuckRuns: 5 }
 
@@ -44,10 +49,16 @@ describe("repro-doubt-guard", () => {
   })
 
   test("no-op when stuckRuns is invalid (0 / non-integer)", () => {
-    for (const bad of [{ stuckRuns: 0 }, { stuckRuns: -1 }, { stuckRuns: 2.5 }, {}]) {
+    const badConfigs: ReproDoubtConfig[] = [
+      { stuckRuns: 0 },
+      { stuckRuns: -1 },
+      { stuckRuns: 2.5 },
+      {},
+    ]
+    for (const bad of badConfigs) {
       const s = createReproDoubtState()
-      const r1 = reproDoubtStep(s, "edit", bad as any)
-      const r2 = reproDoubtStep(r1.state, "bash", bad as any)
+      const r1 = reproDoubtStep(s, "edit", bad)
+      const r2 = reproDoubtStep(r1.state, "bash", bad)
       expect(r1.steer).toBeUndefined()
       expect(r2.steer).toBeUndefined()
     }

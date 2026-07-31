@@ -13,7 +13,9 @@
  * it into `child`) ⇒ the candidate runs UNFENCED and this test goes RED.
  */
 import { describe, expect, test } from "bun:test"
+import type { RunCandidate } from "@/agent/branch-search"
 import { buildOwnershipPolicy } from "@/agent/ownership-policy"
+import type { AgentConfig } from "@/agent/types"
 
 const { __setBranchRunAgentForTest, bindBranchRunCandidate } = await import(
   "@/agent/branch-search-runner"
@@ -26,18 +28,19 @@ const fence = buildOwnershipPolicy({
   enforced: true,
 })
 
-// biome-ignore lint/suspicious/noExplicitAny: inert config/param stubs for the fork boundary
-const rootConfig = (over: Record<string, unknown> = {}): any =>
-  ({ depth: 0, cwd: "/repo", llm: {}, ownershipPolicy: fence, ...over }) as any
-// biome-ignore lint/suspicious/noExplicitAny: inert candidate-invocation params
-const candidateArgs = (): any =>
+// Inert partial stubs for the fork boundary: only the fields the ownership
+// path reads are populated; the rest of the real shape is irrelevant here, so
+// we cast the partial through `unknown` to the exact port types.
+const rootConfig = (over: Record<string, unknown> = {}): AgentConfig =>
+  ({ depth: 0, cwd: "/repo", llm: {}, ownershipPolicy: fence, ...over }) as unknown as AgentConfig
+const candidateArgs = (): Parameters<RunCandidate>[0] =>
   ({
     seed: {},
     workspace: "/tmp/ws",
     task: "do X",
     baseLlm: {},
     signal: new AbortController().signal,
-  }) as any
+  }) as unknown as Parameters<RunCandidate>[0]
 
 describe("branch_search candidate inherits the parent FS-ownership fence (funnel-bypass is safe)", () => {
   test("the forked child carries the parent's EXACT ownershipPolicy", async () => {

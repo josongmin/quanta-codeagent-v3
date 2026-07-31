@@ -52,9 +52,12 @@ const fakeAdapterTransport = (): DapTransport => {
             send({ type: "event", event: "initialized" })
             break
           case "setBreakpoints":
-            initialized
-              ? ((bpSet = true), respond({ breakpoints: [{ verified: true }] }))
-              : respond(undefined, false, "too early")
+            if (initialized) {
+              bpSet = true
+              respond({ breakpoints: [{ verified: true }] })
+            } else {
+              respond(undefined, false, "too early")
+            }
             break
           case "configurationDone":
             if (!bpSet) {

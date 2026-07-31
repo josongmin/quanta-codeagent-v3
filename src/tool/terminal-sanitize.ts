@@ -50,6 +50,7 @@ const LONE_SURROGATE_RE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff
 // here, so no raw CSI/OSC opener byte survives. CR U+000D is DELIBERATELY matched
 // (defanged to `^M`): a bare/mid-line CR moves the cursor to column 0 and is an
 // OVERWRITE-forge control.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: this sanitizer deliberately matches C0 (U+0000-U+0008, U+000B-U+001F), DEL (U+007F) and C1 (U+0080-U+009F) control bytes to defang them into visible caret/hex notation
 const CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g
 
 /** Rewrite one matched control char to its visible caret/hex notation: a C0

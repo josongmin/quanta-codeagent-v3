@@ -52,7 +52,14 @@ const makeClient = (lastEventId: string | null, hasGetter = true) => {
     },
     ...(hasGetter ? { getLastEventId: () => lastEventId } : {}),
   }
-  return { client, crash: (r?: string) => handlers.forEach((h) => h(r)) }
+  return {
+    client,
+    crash: (r?: string) => {
+      handlers.forEach((h) => {
+        h(r)
+      })
+    },
+  }
 }
 
 const CONFIG: McpServerConfig = { name: "srv", command: [], url: "https://mcp.example" }

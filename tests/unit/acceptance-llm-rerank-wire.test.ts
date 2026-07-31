@@ -53,6 +53,7 @@ describe("buildLlmRerankFromPort", () => {
   test("fail-open: a throwing stream ⇒ null (deterministic stands)", async () => {
     const llm: LLMPort = {
       // eslint-disable-next-line require-yield
+      // biome-ignore lint/correctness/useYield: stream must be an async generator to satisfy LLMPort; this stub throws to exercise the fail-open path without yielding
       async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
         throw new Error("stream blew up")
       },

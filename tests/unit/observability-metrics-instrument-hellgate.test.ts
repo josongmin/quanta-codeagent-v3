@@ -107,6 +107,7 @@ describe("instrumentLlmProvider", () => {
   test("HELL-LLM-4: failure increments stream.failures.total on throw", async () => {
     const m = defaultMetricsRegistry()
     const throwing = fakeLlmProvider({
+      // biome-ignore lint/correctness/useYield: stream must be an async generator to satisfy the provider port; this stub throws without yielding
       async *stream() {
         throw Object.assign(new Error("boom"), { code: "stream-failed" })
       },

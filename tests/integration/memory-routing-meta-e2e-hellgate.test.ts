@@ -219,12 +219,28 @@ describe("§10.6 recall weighting — live recallContext seam (env-gated)", () =
     const placedOn: string[] = []
     const placedOff: string[] = []
     await recallContext(
-      { store, now, onPlaced: (p) => p.forEach((x) => placedOn.push(x.recordId)) },
+      {
+        store,
+        now,
+        onPlaced: (p) => {
+          p.forEach((x) => {
+            placedOn.push(x.recordId)
+          })
+        },
+      },
       "build front door",
       { limit: 5, routing: { cwd: HERE } },
     )
     await recallContext(
-      { store, now, onPlaced: (p) => p.forEach((x) => placedOff.push(x.recordId)) },
+      {
+        store,
+        now,
+        onPlaced: (p) => {
+          p.forEach((x) => {
+            placedOff.push(x.recordId)
+          })
+        },
+      },
       "build front door",
       { limit: 5 },
     )

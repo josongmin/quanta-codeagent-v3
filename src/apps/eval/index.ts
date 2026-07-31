@@ -34,7 +34,6 @@ import {
   buildGroundingRegressionResult,
   buildGroundingReport,
   buildGroundingRouteMatrixGateResult,
-  evaluateGroundingRegression,
   GROUNDING_CORPORA,
   GROUNDING_GATE_PROFILES,
   GROUNDING_MODES,

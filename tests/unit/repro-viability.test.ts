@@ -54,10 +54,9 @@ const textStream = (text: string): LLMPort["stream"] => {
 }
 
 const throwingStream: LLMPort["stream"] = () =>
+  // biome-ignore lint/correctness/useYield: must be an async generator to satisfy LLMPort["stream"]; this stub throws immediately to exercise the error path and never yields
   (async function* () {
     throw new Error("stream boom")
-    // eslint-disable-next-line no-unreachable
-    yield undefined as never
   })()
 
 const spyPort = (): { port: LLMPort; calls: () => number } => {

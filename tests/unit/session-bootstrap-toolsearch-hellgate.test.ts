@@ -15,6 +15,7 @@ afterAll(async () => {
 })
 
 const inertLLM: LLMPort = {
+  // biome-ignore lint/correctness/useYield: stream must be an async generator to satisfy LLMPort; this inert stub throws if streamed and never yields
   async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
     throw new Error("unexpected stream() call")
   },

@@ -229,7 +229,9 @@ describe("topologicalSort: acyclic graphs", () => {
     expect(out.length).toBe(25)
     // every dep precedes its dependent
     const positions = new Map<string, number>()
-    out.forEach((id, idx) => positions.set(id, idx))
+    out.forEach((id, idx) => {
+      positions.set(id, idx)
+    })
     for (const it of items) {
       for (const dep of it.dependencies) {
         const depPos = positions.get(dep)

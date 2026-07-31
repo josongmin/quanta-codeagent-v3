@@ -56,7 +56,11 @@ const REPORT_NO_ERROR = {
 const runGrade = async (
   report: unknown,
   opts?: { failLogScp?: boolean },
-): Promise<{ issued: Issued[]; outcome: Awaited<ReturnType<typeof grade>>; outDir: string }> => {
+): Promise<{
+  issued: Issued[]
+  outcome: Awaited<ReturnType<ReturnType<typeof createSshBackend>["grade"]>>
+  outDir: string
+}> => {
   const outDir = mkdtempSync(join(tmpdir(), "grade-errlog-"))
   const reportPath = join(outDir, "quanta.run-xyz.json")
   const { spawn, issued } = makeMockSpawn((cmd, args) => {
@@ -77,7 +81,6 @@ const runGrade = async (
     spawn,
     sleep: async () => {},
   })
-  const grade = backend.grade
   const outcome = await backend.grade("/tmp/preds.jsonl", {
     datasetPath: "/tmp/instances.jsonl",
     runId: "run-xyz",

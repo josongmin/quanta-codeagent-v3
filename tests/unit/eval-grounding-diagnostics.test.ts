@@ -33,6 +33,7 @@ class JsonLLM implements LLMPort {
 class AuthErrorLLM implements LLMPort {
   readonly provider = "chatgpt-oauth"
   readonly model = "gpt-4.1"
+  // biome-ignore lint/correctness/useYield: stream must be an async generator to satisfy LLMPort; this stub throws an auth error without yielding
   async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
     throw new Error("401 Unauthorized token_invalidated")
   }
