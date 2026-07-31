@@ -9,13 +9,6 @@
  */
 
 import { describe, expect, it } from "bun:test"
-import {
-  ALL_ACTIVATION_POLICIES,
-  ALL_DELIVERY_MODES,
-  isDeliveryMode,
-  parseActivationPolicy,
-  parseDeliveryMode,
-} from "@/shared"
 import { ALL_REJECTION_REASONS, type SteerRejectionReason } from "@/agent/steer-reasons"
 import {
   ALL_DELIVERY_DEGRADE_REASONS,
@@ -23,6 +16,13 @@ import {
   type DeliveryDegradeReason,
   steerRejectionToDelivery,
 } from "@/agent/subagent-delivery/types"
+import {
+  ALL_ACTIVATION_POLICIES,
+  ALL_DELIVERY_MODES,
+  isDeliveryMode,
+  parseActivationPolicy,
+  parseDeliveryMode,
+} from "@/shared"
 
 describe("WS1 delivery contract — mode parsing", () => {
   it("accepts exactly the three canonical modes", () => {

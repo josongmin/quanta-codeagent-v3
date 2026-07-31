@@ -39,9 +39,7 @@ export const buildReproViabilityPrompt = (
   reproSources: readonly string[],
   capturedPatch: string,
 ): string => {
-  const sources = reproSources
-    .map((s, i) => `### Reproducing test #${i + 1}\n${s}`)
-    .join("\n\n")
+  const sources = reproSources.map((s, i) => `### Reproducing test #${i + 1}\n${s}`).join("\n\n")
   return [
     "You are judging whether a candidate patch is STRUCTURALLY capable of making the",
     "reproducing test below pass. This is a fix-free viability check: decide whether the",

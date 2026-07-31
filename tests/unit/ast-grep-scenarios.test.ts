@@ -19,9 +19,9 @@ import { execSync } from "node:child_process"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { z } from "zod"
-import { astGrepTool } from "@/tool/ast-grep"
+import type { z } from "zod"
 import type { ToolContext, ToolEvent } from "@/tool"
+import { astGrepTool } from "@/tool/ast-grep"
 
 // ─── binary probe (sync, once) ──────────────────────────────────────────────
 
@@ -35,10 +35,7 @@ try {
 
 // ─── helper: drain the execute generator ────────────────────────────────────
 
-async function runTool(
-  input: unknown,
-  cwd: string,
-): Promise<{ ok: boolean; output: string }> {
+async function runTool(input: unknown, cwd: string): Promise<{ ok: boolean; output: string }> {
   const ctx: ToolContext = { cwd, signal: new AbortController().signal }
   let last: { ok: boolean; output: string } = { ok: false, output: "no result" }
   for await (const ev of astGrepTool.execute(input as never, ctx) as AsyncIterable<ToolEvent>) {
@@ -211,7 +208,9 @@ describe("S-FMT-1: output line format matches /^.+:\\d+: .+/", () => {
 
     // Red-on-injection: remove the `${m.file}:${line + 1}: ${text}` format in
     // execute() → lines have no colon-separated structure; regex fails.
-    const matchLines = result.output.split("\n").filter((l) => l.trim().length > 0 && !l.startsWith("..."))
+    const matchLines = result.output
+      .split("\n")
+      .filter((l) => l.trim().length > 0 && !l.startsWith("..."))
     expect(matchLines.length).toBeGreaterThan(0)
     for (const line of matchLines) {
       expect(line).toMatch(/^.+:\d+: .+/)
@@ -483,7 +482,10 @@ describe("S-LANG-1: language='typescript' with .ts file → valid results", () =
     // Red-on-injection: break the --lang argument construction (e.g. add a
     // spurious space) → ast-grep rejects the flag; exitCode > 1; ok:false;
     // this test fails.
-    const result = await runTool({ pattern: "console.log($A)", path: file, language: "typescript" }, tmpDir)
+    const result = await runTool(
+      { pattern: "console.log($A)", path: file, language: "typescript" },
+      tmpDir,
+    )
     expect(result.ok).toBe(true)
     expect(typeof result.output).toBe("string")
   })

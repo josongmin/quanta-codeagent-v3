@@ -9,8 +9,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { CORE_RULES } from "./prompt-rules/core"
 import { buildSystemPrompt } from "./prompt"
+import { CORE_RULES } from "./prompt-rules/core"
 
 const rEnvText = (): string => {
   const rule = CORE_RULES.find((r) => r.id === "R-ENV")
@@ -69,7 +69,9 @@ describe("A3 — defect-gated repro-first directive in the operating-principles 
   test("GUARD: the directive is CONDITIONAL on a defect/repro task — NOT unconditional", () => {
     // The line must open with a gate so it never fires on feature / refactor /
     // Q&A turns (the over-fire the audit flagged).
-    expect(prompt).toContain("When (and ONLY when) the task is fixing a defect or reproducing a bug")
+    expect(prompt).toContain(
+      "When (and ONLY when) the task is fixing a defect or reproducing a bug",
+    )
     // And it explicitly carves out the non-defect kinds.
     expect(prompt).toContain(
       "For a feature,\n  refactor, or a question, this does not apply — do not manufacture a repro.",

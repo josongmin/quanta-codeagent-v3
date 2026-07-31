@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { isBenchReproArtifactBasename } from "@/runner/batch/eval/repro-artifacts"
 import { HYGIENE_ALLOWLIST } from "@/agent/closure/patch-hygiene"
+import { isBenchReproArtifactBasename } from "@/runner/batch/eval/repro-artifacts"
 import {
-  REPRO_CANONICAL_BASENAME,
   isReproArtifactBasename,
   isReproScriptBasename,
+  REPRO_CANONICAL_BASENAME,
   reproScriptBasename,
 } from "./scaffold-patterns"
 
@@ -31,7 +31,9 @@ describe("repro scaffold SSOT", () => {
   // feeds (crypto UUID + the no-crypto fallback `Date-pid-i-counter`) MUST be recognized — else
   // a generated repro leaks past the artifact/anchor/hygiene filters.
   test("generator id forms (uuid + Date-pid fallback) are recognized by the SCRIPT predicate", () => {
-    expect(isReproScriptBasename(reproScriptBasename(0, "a1b2c3d4-0000-4000-8000-000000000000"))).toBe(true)
+    expect(
+      isReproScriptBasename(reproScriptBasename(0, "a1b2c3d4-0000-4000-8000-000000000000")),
+    ).toBe(true)
     expect(isReproScriptBasename(reproScriptBasename(2, "1782726785470-12345-2-7"))).toBe(true)
   })
 

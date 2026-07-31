@@ -53,7 +53,11 @@ describe("T04 — migration-imported hook lands review-gated (import→persist�
         homeDir,
         projectDir,
         converted: [
-          { type: "hooks", ok: true, value: [{ event: "PreToolUse", commands: ["external-scan.sh"] }] },
+          {
+            type: "hooks",
+            ok: true,
+            value: [{ event: "PreToolUse", commands: ["external-scan.sh"] }],
+          },
         ],
       })
       expect(result.persisted).toBe(true)

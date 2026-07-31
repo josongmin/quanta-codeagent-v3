@@ -23,7 +23,6 @@ import { describe, expect, test } from "bun:test"
 import { BENCH } from "@/config/knob-inventory/bench"
 import type { KnobInventoryEntry } from "@/config/knob-inventory/types"
 import type { AnyKnobSchema } from "@/config/knob-schema/contracts"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 import { deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
 import {
   lspCheapSchema,
@@ -36,10 +35,11 @@ import {
   verifySelectProofRequiredSchema,
   verifySelectRiskGateSchema,
 } from "@/config/knob-schema/schemas/bench-gap-1"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
+import { lspKnob } from "@/runner/knobs/knobs/lsp"
 // Live registry knobs (their parse is the ground truth).
 import { lspCheapKnob } from "@/runner/knobs/knobs/lsp-cheap"
 import { lspSteerKnob } from "@/runner/knobs/knobs/lsp-steer"
-import { lspKnob } from "@/runner/knobs/knobs/lsp"
 import { mustPassKnob } from "@/runner/knobs/knobs/must-pass"
 import { skillsKnob } from "@/runner/knobs/knobs/skills"
 import { verifySelectCounterfactualKnob } from "@/runner/knobs/knobs/verify-select-counterfactual"
@@ -211,8 +211,15 @@ describe("Pillar A GAP-1 derive parity — RED on injection (overrides have teet
 describe("Pillar A derive parity (gap-1) — FULL-Knob data parity (BURN-DOWN gate)", () => {
   const FULL_KNOB_DIVERGENT_CEILING = 0 // lower to 0 once every schema is reconciled
   const project = (k: AnyKnob): Record<string, unknown> => ({
-    id: k.id, envKey: k.envKey, category: k.category, surfaces: [...k.surfaces],
-    describe: k.describe, default: k.default, costMultiplier: k.costMultiplier, unit: k.unit, source: k.source,
+    id: k.id,
+    envKey: k.envKey,
+    category: k.category,
+    surfaces: [...k.surfaces],
+    describe: k.describe,
+    default: k.default,
+    costMultiplier: k.costMultiplier,
+    unit: k.unit,
+    source: k.source,
   })
   const mismatches: string[] = []
   for (const { name, schema, knob } of PAIRS) {

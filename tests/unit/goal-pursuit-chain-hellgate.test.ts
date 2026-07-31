@@ -31,10 +31,7 @@ const TID = "thread-e2e"
 
 /** A minimal SlashContext carrying only what `/goal` reads: out + the shared
  *  objective slot. Mirrors what the surface will inject via dispatch. */
-const ctxWith = (
-  port: ObjectivePort,
-  out: (s: string) => void,
-): SlashContext => ({
+const ctxWith = (port: ObjectivePort, out: (s: string) => void): SlashContext => ({
   out,
   err: () => {},
   cwd: "/tmp",
@@ -44,10 +41,7 @@ const ctxWith = (
 /** Idle probes that all pass, plus a `resume` that captures the enqueued turn's
  *  text by reading the goal back out of the store (exactly what the real
  *  session-loop `resume` does: `enqueueWithHeartbeat(objective.get(tid).goal)`). */
-const drivenBy = (
-  port: ObjectivePort,
-  enqueued: string[],
-): GoalContinuationProbes => ({
+const drivenBy = (port: ObjectivePort, enqueued: string[]): GoalContinuationProbes => ({
   objective: port,
   resume: async (tid) => {
     const g = port.get(tid)?.goal
@@ -89,7 +83,10 @@ describe("Pursuing-goal chain — /goal → store → ticker → resume", () => 
     const timer = fakeTimer()
 
     // 1. user: /goal ship the whole feature
-    const code = await goalCmd.run(["ship", "the", "whole", "feature"], ctxWith(store, (s) => out.push(s)))
+    const code = await goalCmd.run(
+      ["ship", "the", "whole", "feature"],
+      ctxWith(store, (s) => out.push(s)),
+    )
     expect(code).toBe(0)
 
     // 2. the objective is recorded active in the shared store
@@ -119,7 +116,10 @@ describe("Pursuing-goal chain — /goal → store → ticker → resume", () => 
     const enqueued: string[] = []
     const timer = fakeTimer()
 
-    await goalCmd.run(["do", "the", "thing"], ctxWith(store, () => {}))
+    await goalCmd.run(
+      ["do", "the", "thing"],
+      ctxWith(store, () => {}),
+    )
     startGoalContinuationTicker({
       enabled: true,
       threadId: TID,
@@ -132,7 +132,10 @@ describe("Pursuing-goal chain — /goal → store → ticker → resume", () => 
 
     // user pauses the pursuit
     const out: string[] = []
-    await goalCmd.run(["clear"], ctxWith(store, (s) => out.push(s)))
+    await goalCmd.run(
+      ["clear"],
+      ctxWith(store, (s) => out.push(s)),
+    )
     expect(out.join("")).toContain("paused")
     expect(store.get(TID)?.status).toBe("paused")
 
@@ -149,7 +152,10 @@ describe("Pursuing-goal chain — /goal → store → ticker → resume", () => 
     const enqueued: string[] = []
     const timer = fakeTimer()
 
-    await goalCmd.run(["finish", "the", "migration"], ctxWith(store, () => {}))
+    await goalCmd.run(
+      ["finish", "the", "migration"],
+      ctxWith(store, () => {}),
+    )
     startGoalContinuationTicker({
       enabled: true,
       threadId: TID,
@@ -187,9 +193,15 @@ describe("Pursuing-goal chain — /goal → store → ticker → resume", () => 
 
   test("/goal with no arg reports the active objective", async () => {
     const store = createObjectiveStore()
-    await goalCmd.run(["measure", "twice"], ctxWith(store, () => {}))
+    await goalCmd.run(
+      ["measure", "twice"],
+      ctxWith(store, () => {}),
+    )
     const out: string[] = []
-    await goalCmd.run([], ctxWith(store, (s) => out.push(s)))
+    await goalCmd.run(
+      [],
+      ctxWith(store, (s) => out.push(s)),
+    )
     const text = out.join("")
     expect(text).toContain("Pursuing goal: measure twice")
     expect(text).toContain("active")

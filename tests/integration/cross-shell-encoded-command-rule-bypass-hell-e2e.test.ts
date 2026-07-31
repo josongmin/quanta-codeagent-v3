@@ -96,8 +96,7 @@ const runGate = async (
 
 /** PowerShell `-EncodedCommand` payloads are base64 of UTF-16LE. Build the
  *  real wire format an attacker would emit so the test is not strawman. */
-const pwshEncoded = (script: string): string =>
-  Buffer.from(script, "utf16le").toString("base64")
+const pwshEncoded = (script: string): string => Buffer.from(script, "utf16le").toString("base64")
 
 const DENY_RM = 'deny ["rm", "-rf"]\n'
 
@@ -191,7 +190,7 @@ describe("cross-shell encoded-command rule bypass — hellgate (Branch B: design
   // ── Direct argv DENY still works for the NON-wrapper PowerShell-native form ─
   // If a deny rule is written against the pwsh-native argv (no encoding), it
   // fires normally — confirming the gap is the ENCODING, not pwsh per se.
-  test("CONTROL: `deny [\"pwsh\",\"-EncodedCommand\"]` DOES deny any -EncodedCommand invocation (operator can opt in)", async () => {
+  test('CONTROL: `deny ["pwsh","-EncodedCommand"]` DOES deny any -EncodedCommand invocation (operator can opt in)', async () => {
     // An operator who wants to ban encoded pwsh outright CAN express it at the
     // argv level (block the flag, not the payload). This is the deterministic,
     // heuristic-free mitigation available today.

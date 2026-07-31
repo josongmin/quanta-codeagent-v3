@@ -45,7 +45,9 @@ describe("pytest sidecar repro outcome", () => {
         report({
           collected: 1,
           exitstatus: 1,
-          reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "Failed" }],
+          reports: [
+            { nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "Failed" },
+          ],
         }),
       ),
     ).toBe("reproduced")
@@ -57,7 +59,9 @@ describe("pytest sidecar repro outcome", () => {
         report({
           collected: 1,
           exitstatus: 1,
-          reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "TypeError" }],
+          reports: [
+            { nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "TypeError" },
+          ],
         }),
       ),
     ).toBe("reproduced")
@@ -83,7 +87,9 @@ describe("pytest sidecar repro outcome", () => {
         report({
           collected: 1,
           exitstatus: 1,
-          reports: [{ nodeid: "t.py::test_x", when: "setup", outcome: "failed", exc_type: "RuntimeError" }],
+          reports: [
+            { nodeid: "t.py::test_x", when: "setup", outcome: "failed", exc_type: "RuntimeError" },
+          ],
         }),
       ),
     ).toBe("exec_failed")
@@ -107,7 +113,9 @@ describe("pytest sidecar repro outcome", () => {
         report({
           collected: 1,
           exitstatus: 1,
-          reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "ImportError" }],
+          reports: [
+            { nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "ImportError" },
+          ],
         }),
       ),
     ).toBe("exec_failed")
@@ -120,7 +128,12 @@ describe("pytest sidecar repro outcome", () => {
           collected: 1,
           exitstatus: 1,
           reports: [
-            { nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "ModuleNotFoundError" },
+            {
+              nodeid: "t.py::test_x",
+              when: "call",
+              outcome: "failed",
+              exc_type: "ModuleNotFoundError",
+            },
           ],
         }),
       ),
@@ -133,7 +146,9 @@ describe("pytest sidecar repro outcome", () => {
         report({
           collected: 1,
           exitstatus: 1,
-          reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "SyntaxError" }],
+          reports: [
+            { nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "SyntaxError" },
+          ],
         }),
       ),
     ).toBe("exec_failed")
@@ -181,7 +196,9 @@ describe("pytest sidecar repro outcome", () => {
     expect(classifyPytestReportText(report({ collected: 0, exitstatus: 5 }))).toBe("unknown")
     expect(classifyPytestReportText(report({ collected: 1, exitstatus: 3 }))).toBe("other")
     expect(classifyPytestReportText("1 failed in 0.1s")).toBe("exec_failed")
-    expect(classifyPytestExecutionReport(parsePytestExecutionReport("not json"))).toBe("exec_failed")
+    expect(classifyPytestExecutionReport(parsePytestExecutionReport("not json"))).toBe(
+      "exec_failed",
+    )
   })
 
   test("patched-side resolution is unchanged: a green test is 'resolved', never affected by this change", () => {
@@ -203,7 +220,9 @@ describe("pytest sidecar repro outcome", () => {
         report({
           collected: 1,
           exitstatus: 1,
-          reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "TypeError" }],
+          reports: [
+            { nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "TypeError" },
+          ],
         }),
       ),
     ).not.toBe("resolved")
@@ -283,7 +302,11 @@ describe("repro classify → vote admission (end-to-end witness)", () => {
 
     // OLD behaviour: dropped. This is the teeth — if someone reverts the fix the
     // raw-exception reproduction silently vanishes from the oracle.
-    const old: ReproTestSample = { source: src, stdout: "", outcome: oldAssertionOnlyClassify(sidecar) }
+    const old: ReproTestSample = {
+      source: src,
+      stdout: "",
+      outcome: oldAssertionOnlyClassify(sidecar),
+    }
     expect(old.outcome).toBe("exec_failed")
     expect(selectReproTest([old]).reproducedCount).toBe(0)
   })

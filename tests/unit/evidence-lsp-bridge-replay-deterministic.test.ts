@@ -21,7 +21,7 @@ import { describe, expect, test } from "bun:test"
 import { isAbsolute } from "node:path"
 import { buildEvidence } from "@/tool/evidence/builder"
 import type { StaticEvidence } from "@/tool/evidence/types"
-import type { Toolchain, TestRunResult } from "@/tool/testrun"
+import type { TestRunResult, Toolchain } from "@/tool/testrun"
 
 const RUST: Toolchain = { kind: "rust", command: ["cargo", "test"], parser: "cargo" }
 
@@ -83,7 +83,10 @@ describe("DETERMINISTIC: buildEvidence fuses a REPLAYED LSP static section", () 
   })
 
   test("a replayed null (server had no answer) ⇒ static:null, no crash", async () => {
-    const pkt = await buildEvidence("/work/proj", sources(async () => null))
+    const pkt = await buildEvidence(
+      "/work/proj",
+      sources(async () => null),
+    )
     expect(pkt.static).toBeNull()
     expect(pkt.failure?.test_name).toContain("fail_test") // rest of the packet still built
   })

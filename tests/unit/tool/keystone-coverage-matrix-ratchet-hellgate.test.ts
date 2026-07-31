@@ -23,13 +23,31 @@ const fsWith = (present: string[], pytest = false) => ({
 
 describe("keystone coverage matrix — drift ratchet (DoD §1)", () => {
   test("FAILURE axis: each language marker detects its {kind, parser}", async () => {
-    expect(await detectToolchain("/p", fsWith(["go.mod"]))).toMatchObject({ kind: "go", parser: "go" })
-    expect(await detectToolchain("/p", fsWith(["Cargo.toml"]))).toMatchObject({ kind: "rust", parser: "cargo" })
-    expect(await detectToolchain("/p", fsWith(["package.json"]))).toMatchObject({ kind: "node", parser: "node" })
-    expect(await detectToolchain("/p", fsWith(["CMakeLists.txt"]))).toMatchObject({ kind: "cpp", parser: "ctest" })
+    expect(await detectToolchain("/p", fsWith(["go.mod"]))).toMatchObject({
+      kind: "go",
+      parser: "go",
+    })
+    expect(await detectToolchain("/p", fsWith(["Cargo.toml"]))).toMatchObject({
+      kind: "rust",
+      parser: "cargo",
+    })
+    expect(await detectToolchain("/p", fsWith(["package.json"]))).toMatchObject({
+      kind: "node",
+      parser: "node",
+    })
+    expect(await detectToolchain("/p", fsWith(["CMakeLists.txt"]))).toMatchObject({
+      kind: "cpp",
+      parser: "ctest",
+    })
     // python: unittest by default, pytest when installed (canRun probe true).
-    expect(await detectToolchain("/p", fsWith(["pyproject.toml"]))).toMatchObject({ kind: "python", parser: "python-unittest" })
-    expect(await detectToolchain("/p", fsWith(["pyproject.toml"], true))).toMatchObject({ kind: "python", parser: "pytest" })
+    expect(await detectToolchain("/p", fsWith(["pyproject.toml"]))).toMatchObject({
+      kind: "python",
+      parser: "python-unittest",
+    })
+    expect(await detectToolchain("/p", fsWith(["pyproject.toml"], true))).toMatchObject({
+      kind: "python",
+      parser: "pytest",
+    })
   })
 
   test("STATIC axis: each language extension maps to its LSP server", () => {
@@ -58,7 +76,11 @@ describe("keystone coverage matrix — drift ratchet (DoD §1)", () => {
     // never crashes on an unrecognized kind.
     for (const kind of Object.keys(carriers) as Toolchain["kind"][]) {
       const tc: Toolchain = { kind, command: [], parser: "generic" }
-      const r = await defaultRuntimePort({ command: "x", test_name: "t" }, tc, "/nonexistent-cwd-xyz")
+      const r = await defaultRuntimePort(
+        { command: "x", test_name: "t" },
+        tc,
+        "/nonexistent-cwd-xyz",
+      )
       expect(r).toBeNull() // no file/line ⇒ graceful null (not a throw)
     }
   })

@@ -43,7 +43,12 @@ export const detectJsRunner = (pkgJson: string | null): JsRunner => {
 /** Build the SINGLE-PROCESS `node --inspect-brk` argv for the runner, or `null`
  *  when the runner can't be driven single-process (vitest). `file` is the
  *  absolute failing-test file. */
-export const nodeInspectArgv = (runner: JsRunner, node: string, file: string, port: number): readonly string[] | null => {
+export const nodeInspectArgv = (
+  runner: JsRunner,
+  node: string,
+  file: string,
+  port: number,
+): readonly string[] | null => {
   const brk = `--inspect-brk=${port}`
   switch (runner) {
     case "node":

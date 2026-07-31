@@ -25,11 +25,7 @@ const userToolResult = (toolUseId: string): Message => ({
 describe("ALBB-06 in-flight tool correlation", () => {
   test("COMPLETED tool (has a later tool_result) ⇒ NOT reported in flight", () => {
     // path-(a): turn-boundary abort AFTER the tool already landed its result.
-    const wm: Message[] = [
-      userText("t"),
-      assistantToolUse("x", "write"),
-      userToolResult("x"),
-    ]
+    const wm: Message[] = [userText("t"), assistantToolUse("x", "write"), userToolResult("x")]
     const turn = captureInterruptedTurn(wm, "signal_abort", 1)
     // field-level: nothing in flight
     expect(turn.inFlightTools ?? []).toEqual([])

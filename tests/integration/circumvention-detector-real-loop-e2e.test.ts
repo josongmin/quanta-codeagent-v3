@@ -6,8 +6,8 @@ import { runAgent } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import {
   CIRCUMVENTION_TAXONOMY_LINE,
-  type ClassifierPort,
   CircumventionTracker,
+  type ClassifierPort,
   type PermissionContext,
 } from "@/permission"
 import { __resetRuntimeConfig } from "@/shared"
@@ -66,9 +66,7 @@ const systemText = (input: StreamInput): string => {
 }
 
 const transcriptText = (input: StreamInput): string =>
-  input.messages
-    .flatMap((m) => m.content.map((b) => (b.type === "text" ? b.text : "")))
-    .join(" ")
+  input.messages.flatMap((m) => m.content.map((b) => (b.type === "text" ? b.text : ""))).join(" ")
 
 const toolUse = (id: string, name: string, input: unknown): StreamEvent[] => [
   { type: "tool_use_start", id, name },
@@ -212,7 +210,10 @@ describe("circumvention-detector — real loop + fake LLM, cross-turn denied-eff
     // Real dispatch surfaced a denial tool_result for the circumventing call.
     const denied = out.messages.flatMap((m) =>
       m.content.filter(
-        (b) => b.type === "tool_result" && b.is_error === true && b.content.includes("circumvention advisory present"),
+        (b) =>
+          b.type === "tool_result" &&
+          b.is_error === true &&
+          b.content.includes("circumvention advisory present"),
       ),
     )
     expect(denied.length).toBeGreaterThanOrEqual(1)

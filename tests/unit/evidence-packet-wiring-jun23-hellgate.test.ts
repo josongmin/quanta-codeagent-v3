@@ -189,7 +189,14 @@ describe("A5 — summarizeReproVoteOutcomes (drain projection)", () => {
             schema: 1,
             collected: 1,
             exitstatus: 1,
-            reports: [{ nodeid: "t.py::test_x", when: "call", outcome: "failed", exc_type: "AssertionError" }],
+            reports: [
+              {
+                nodeid: "t.py::test_x",
+                when: "call",
+                outcome: "failed",
+                exc_type: "AssertionError",
+              },
+            ],
           }),
         )
         return { code: 1, stdout: "Issue reproduced\n", stderr: "tb\n" }
@@ -225,7 +232,9 @@ describe("A5 — summarizeReproVoteOutcomes (drain projection)", () => {
         "reproduced",
         "reproduced",
       ])
-      expect(persisted[0]?.samples?.every((sample) => sample.sidecarReport !== undefined)).toBe(true)
+      expect(persisted[0]?.samples?.every((sample) => sample.sidecarReport !== undefined)).toBe(
+        true,
+      )
     })
   })
 

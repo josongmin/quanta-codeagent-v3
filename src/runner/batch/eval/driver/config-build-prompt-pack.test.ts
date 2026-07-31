@@ -18,8 +18,8 @@ import { buildSystemPrompt } from "@/agent"
 import type { LLMPort } from "@/llm"
 import type { StreamPort } from "@/stream"
 import type { Instance } from "../../types"
-import type { RunInstanceDeps } from "./context-types"
 import { buildConfig } from "./config-build"
+import type { RunInstanceDeps } from "./context-types"
 import { composeBaseText } from "./prompt-directives"
 
 const BATCH_RULE_MARKER = "[R-NO-EXPLORE-OVER-EDIT]"
@@ -99,7 +99,13 @@ describe("verify axis (jul-4) — QUANTA_BENCH_REPRODUCE_FIRST gates reproduce-f
   }
   const systemFor = (instance: Instance): string => {
     const sandbox = process.cwd()
-    const config = buildConfig(instance, makeDeps(), sandbox, new AbortController().signal, nullStream)
+    const config = buildConfig(
+      instance,
+      makeDeps(),
+      sandbox,
+      new AbortController().signal,
+      nullStream,
+    )
     return String(config.system)
   }
 
@@ -136,7 +142,9 @@ describe("verify axis (P6) — QUANTA_SWE_HIDDEN_GRADER gates grader-only + supp
     }
   }
   const sysFor = (i: Instance): string =>
-    String(buildConfig(i, makeDeps(), process.cwd(), new AbortController().signal, nullStream).system)
+    String(
+      buildConfig(i, makeDeps(), process.cwd(), new AbortController().signal, nullStream).system,
+    )
 
   test("ON + SWE ⇒ [R-GRADER-ONLY] present AND every local-verification body rule suppressed (conflict fix WIRING)", () => {
     withGrader("1", () => {
@@ -145,7 +153,9 @@ describe("verify axis (P6) — QUANTA_SWE_HIDDEN_GRADER gates grader-only + supp
       expect(sys).not.toContain("first reproduce the failure with the smallest")
       expect(sys).not.toContain("Completion bar: finish only when")
       // R4 self-audit: the Verification report block also presupposes a local run — suppressed too
-      expect(sys).not.toContain("Verification report (use when you ran or considered running verification)")
+      expect(sys).not.toContain(
+        "Verification report (use when you ran or considered running verification)",
+      )
       expect(sys).not.toContain(REPRODUCE_FIRST_MARKER) // opposite posture never coexists
     })
   })
@@ -154,7 +164,9 @@ describe("verify axis (P6) — QUANTA_SWE_HIDDEN_GRADER gates grader-only + supp
       const sys = sysFor(makeSwebenchInstance(process.cwd()))
       expect(sys).not.toContain("[R-GRADER-ONLY]")
       expect(sys).toContain("Completion bar: finish only when")
-      expect(sys).toContain("Verification report (use when you ran or considered running verification)")
+      expect(sys).toContain(
+        "Verification report (use when you ran or considered running verification)",
+      )
     })
   })
 
@@ -222,7 +234,9 @@ describe("verify axis (P6) — QUANTA_SWE_HIDDEN_GRADER gates grader-only + supp
         // SYSTEM auto-adopts grader-only and drops every local-verification demand …
         expect(sys).toContain("[R-GRADER-ONLY]")
         expect(sys).not.toContain("Completion bar: finish only when")
-        expect(sys).not.toContain("Verification report (use when you ran or considered running verification)")
+        expect(sys).not.toContain(
+          "Verification report (use when you ran or considered running verification)",
+        )
         // … and the USER directive is NOEXEC — the two agree, no conflict.
         expect(user).toContain(NOEXEC_POSTURE)
         expect(user).not.toContain(FULL_VERIFY_DEMAND)

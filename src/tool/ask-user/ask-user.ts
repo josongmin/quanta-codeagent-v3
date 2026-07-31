@@ -139,7 +139,7 @@ export const askUserTool = (port: AskUserPort): Tool<AskUserInput> => ({
     "free text (kind:string), yes/no (kind:boolean), a number/integer, a single " +
     "pick (kind:select, options:[…]), or a multi-pick (kind:multiselect). Each " +
     "select/multiselect option may be a bare string OR a structured chip " +
-    '{label,description?,preview?} (the label is the chosen value); add an optional ' +
+    "{label,description?,preview?} (the label is the chosen value); add an optional " +
     "short `header` chip to label the question. Use it when you genuinely need a " +
     "decision only the user can make — NOT for routine choices you can resolve " +
     "yourself or from the code. If the user is not reachable (headless), the call " +

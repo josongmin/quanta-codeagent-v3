@@ -20,13 +20,7 @@ export type PromptBaseSystem = "default" | "caller_provided"
 export type PromptHookContextMode = "none" | "before_user" | "after_system" | "both"
 export type PromptSummaryPrefix = "none" | "conversation_summary" | "continuation_summary"
 export type TurnPolicyToolChoiceKind = "auto" | "any" | "none" | "tool"
-export type PromptSurfacePack =
-  | "interactive"
-  | "ide"
-  | "headless"
-  | "daemon"
-  | "batch"
-  | "ci-bot"
+export type PromptSurfacePack = "interactive" | "ide" | "headless" | "daemon" | "batch" | "ci-bot"
 export type PromptSurfaceEnvPosture = "frozen" | "owned" | "default"
 /** ADR-0538 — the 8 instruction-graph channels, redeclared here (names only) so
  *  the redaction-safe `PromptPolicySnapshot` can group fired atoms by channel

@@ -1,6 +1,6 @@
+import { describe, expect, it } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, it } from "bun:test"
 import {
   baseReceipt,
   classifyBaseMwe,
@@ -16,7 +16,9 @@ const TEST_SRC = join(REPO_ROOT, "tests/unit/mwe-proof.test.ts")
 
 describe("classifyBaseMwe", () => {
   it("no extractable MWE ⇒ not_found", () => {
-    expect(classifyBaseMwe({ found: false, ran: false, reproducedFailure: false })).toBe("not_found")
+    expect(classifyBaseMwe({ found: false, ran: false, reproducedFailure: false })).toBe(
+      "not_found",
+    )
     // found=false dominates even if downstream flags are (impossibly) set true.
     expect(classifyBaseMwe({ found: false, ran: true, reproducedFailure: true })).toBe("not_found")
   })

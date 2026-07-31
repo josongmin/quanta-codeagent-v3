@@ -9,10 +9,10 @@
  * whole-cassette re-PUT).
  */
 
+import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, it } from "bun:test"
 import type { RemoteBackend } from "@/shared/remote-store"
 import { segmentStore } from "@/shared/remote-store"
 import type { StreamEvent, StreamInput } from "../../types"
@@ -77,11 +77,7 @@ describe("s3ReplayStore — load order + byte fidelity", () => {
     const be = fakeBackend()
     const store = s3ReplayStore({ store: segmentStore(be, "cassette/abc") })
 
-    const recs = [
-      recordFor("alpha", "A"),
-      recordFor("bravo", "B"),
-      recordFor("charlie", "C"),
-    ]
+    const recs = [recordFor("alpha", "A"), recordFor("bravo", "B"), recordFor("charlie", "C")]
     for (const r of recs) await store.append(r)
 
     const loaded = await store.load()

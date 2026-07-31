@@ -22,7 +22,11 @@ const ev = (type: string, extra: Record<string, unknown> = {}): SessionEvent =>
 
 describe("bench driver terminal-event resolution — ALBB-04 turn.aborted", () => {
   test("a turn.aborted terminal IS recognized (was missed ⇒ driver threw, discarding the patch)", () => {
-    const events = [ev("turn.started"), ev("tool.invoked"), ev("turn.aborted", { message: "deadline" })]
+    const events = [
+      ev("turn.started"),
+      ev("tool.invoked"),
+      ev("turn.aborted", { message: "deadline" }),
+    ]
     const terminal = lastTerminalTurnEventOf(events)
     expect(terminal?.type).toBe("turn.aborted")
   })

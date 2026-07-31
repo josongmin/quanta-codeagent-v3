@@ -389,7 +389,8 @@ const truncateSession = async (
     // file is over its share, the other keeps its full body.
     const halfBudget = Math.floor(maxBytes / 2)
     const eventsBudget = events.bytes > halfBudget ? halfBudget : events.bytes
-    const cacheBudget = cache.bytes > maxBytes - eventsBudget ? maxBytes - eventsBudget : cache.bytes
+    const cacheBudget =
+      cache.bytes > maxBytes - eventsBudget ? maxBytes - eventsBudget : cache.bytes
 
     if (events.bytes > eventsBudget) {
       if (await truncateFileAtomic(eventsPath, events, eventsBudget, hooks)) touched = true

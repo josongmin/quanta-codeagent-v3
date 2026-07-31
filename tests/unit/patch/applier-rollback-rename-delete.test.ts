@@ -125,7 +125,9 @@ describe("[F5] applyPatch — transactional rollback across rename + delete thro
       "*** End Patch",
     ].join("\n")
 
-    await expect(applyPatch(parsePatch(text), fs)).rejects.toThrow(/partial-rename failure|rolled back/)
+    await expect(applyPatch(parsePatch(text), fs)).rejects.toThrow(
+      /partial-rename failure|rolled back/,
+    )
 
     // WHOLE patch is all-or-nothing: A back to original, src back to original,
     // and dst.txt must NOT survive (the leaked destination is reaped).
@@ -173,7 +175,9 @@ describe("[F5] applyPatch — transactional rollback across rename + delete thro
       "+src-edited",
       "*** End Patch",
     ].join("\n")
-    await expect(applyPatch(parsePatch(text), fs)).rejects.toThrow(/partial-rename failure|rolled back/)
+    await expect(applyPatch(parsePatch(text), fs)).rejects.toThrow(
+      /partial-rename failure|rolled back/,
+    )
     expect(fs.snapshot()).toEqual({ "src.txt": "src-original\n" })
   })
 })

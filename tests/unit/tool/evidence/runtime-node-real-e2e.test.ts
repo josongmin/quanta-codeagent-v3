@@ -12,8 +12,8 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { buildEvidence } from "@/tool/evidence/builder"
 import { defaultRuntimePort } from "@/tool/evidence"
+import { buildEvidence } from "@/tool/evidence/builder"
 import { runToolchain, type Toolchain } from "@/tool/testrun"
 
 const has = (b: string, ...a: string[]): boolean => {
@@ -50,7 +50,11 @@ D("defaultRuntimePort — REAL Node runtime via CDP (fourth language, non-DAP ca
 
     // Run the real failure via `node --test` (node:test output → parseNodeTest);
     // runtime re-runs the file under `node --inspect-brk` via CDP.
-    const tc: Toolchain = { kind: "node", command: ["node", "--test", "m.test.mjs"], parser: "node" }
+    const tc: Toolchain = {
+      kind: "node",
+      command: ["node", "--test", "m.test.mjs"],
+      parser: "node",
+    }
     const pkt = await buildEvidence(dir, {
       detect: async () => tc,
       runTests: (t, c) => runToolchain(t, c),
@@ -67,6 +71,6 @@ D("defaultRuntimePort — REAL Node runtime via CDP (fourth language, non-DAP ca
     expect(result?.value).toBe("10")
     // DAP-parity extras carried over the CDP carrier: type + per-frame structure.
     expect((result?.type ?? "").length).toBeGreaterThan(0)
-    expect((pkt.runtime?.frames?.length ?? 0)).toBeGreaterThan(0)
+    expect(pkt.runtime?.frames?.length ?? 0).toBeGreaterThan(0)
   }, 60_000)
 })

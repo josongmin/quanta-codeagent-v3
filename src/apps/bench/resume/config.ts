@@ -17,9 +17,7 @@ export interface ResumeConfig {
   campaignId: string
 }
 
-export const resolveResumeConfig = (
-  env: Record<string, string | undefined>,
-): ResumeConfig => {
+export const resolveResumeConfig = (env: Record<string, string | undefined>): ResumeConfig => {
   const bucket = env.QUANTA_BENCH_RESUME_S3_BUCKET
   const region = env.AWS_REGION ?? env.QUANTA_FULL_REMOTE_REGION
   // exactOptionalPropertyTypes: omit the optional keys rather than set them to
@@ -38,6 +36,5 @@ export const resolveResumeConfig = (
  * with no bucket is NOT active — callers must treat it as off rather than
  * fabricate a default bucket.
  */
-export const resumeActive = (
-  c: ResumeConfig,
-): c is ResumeConfig & { bucket: string } => c.enabled && !!c.bucket
+export const resumeActive = (c: ResumeConfig): c is ResumeConfig & { bucket: string } =>
+  c.enabled && !!c.bucket

@@ -14,15 +14,15 @@ export {
 } from "./gate"
 export { installCommandHooks } from "./install"
 export {
+  defaultHookApprovalsPath,
+  type HookApprovalRecord,
+  HookReviewStore,
+  hookBindingKey,
+} from "./review-store"
+export {
   type CommandHookEvent,
   runCommandHooks,
 } from "./runner"
-export {
-  defaultHookApprovalsPath,
-  type HookApprovalRecord,
-  hookBindingKey,
-  HookReviewStore,
-} from "./review-store"
 export { createSandboxCommandHookExec } from "./sandbox-exec"
 export {
   bindingsFromHookEvents,

@@ -19,8 +19,8 @@ import { describe, expect, test } from "bun:test"
 import { createActivityStore, createWorkflowSink } from "@/activity"
 import { buildSubagentConfig } from "@/apps/cli/internal"
 import { projectSlashCtx } from "@/apps/cli/repl/slash-surface"
-import type { SlashContext } from "@/apps/cli/slash-contract"
 import { SURFACE_SLASH_COMMANDS } from "@/apps/cli/slash/registry-surface"
+import type { SlashContext } from "@/apps/cli/slash-contract"
 
 const activityCmd = () => {
   const cmd = SURFACE_SLASH_COMMANDS.find((c) => c.name === "/activity")
@@ -42,7 +42,11 @@ const captureCtx = (over: Partial<SlashContext>): { ctx: SlashContext; out: stri
 describe("Activity Spine e2e wiring (tree-green)", () => {
   test("E1 — WRITE path: buildSubagentConfig threads the EXACT store instance", () => {
     const store = createActivityStore()
-    const cfg = buildSubagentConfig(undefined, { QUANTA_SUBAGENT: "1", QUANTA_WORKFLOW: "1" }, store)
+    const cfg = buildSubagentConfig(
+      undefined,
+      { QUANTA_SUBAGENT: "1", QUANTA_WORKFLOW: "1" },
+      store,
+    )
     // === identity: the same object run_workflow's deps will receive (the tool
     // build reads `config.subagent.activityStore`).
     expect(cfg?.activityStore).toBe(store)

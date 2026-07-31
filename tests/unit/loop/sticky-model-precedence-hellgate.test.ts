@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { resolveSkillTurnOverride } from "@/agent/loop/skill-gate"
-import type { LLMPort } from "@/llm"
 import type { AgentConfig } from "@/agent/types"
+import type { LLMPort } from "@/llm"
 
 /**
  * sticky-model-loop-consume (L3) leaf-unit hellgate.

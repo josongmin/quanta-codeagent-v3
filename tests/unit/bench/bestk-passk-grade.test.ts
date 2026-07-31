@@ -17,13 +17,13 @@
 
 import { describe, expect, test } from "bun:test"
 import {
-  type CandidatePoolFs,
-  type Prediction,
-  type SlotKey,
   aggregateBestKPassK,
   buildSlotPredictions,
+  type CandidatePoolFs,
+  type Prediction,
   parseCandFilename,
   runBestKPassKGrade,
+  type SlotKey,
   scanCandidatePool,
 } from "@/apps/bench/analyze/bestk-passk-grade"
 import type { GradeBackend, GradeOptions, GradeOutcome } from "@/apps/bench/remote/backend"
@@ -46,13 +46,19 @@ describe("bestKPassKGap is OBSERVE-ONLY — live report byte-identical (default-
   test("RED-on-injection: a report WITH the field would serialize it (guard has teeth)", () => {
     // Prove the golden above is not vacuous — if a writer ever set the field, it
     // WOULD appear in the JSON (so the `in`/`includes` assertions actually bite).
-    const injected = { ...buildReport(meta, [base]), bestKPassKGap: { k: 1, passK: 1, bestK: 0, gap: 1 } }
+    const injected = {
+      ...buildReport(meta, [base]),
+      bestKPassKGap: { k: 1, passK: 1, bestK: 0, gap: 1 },
+    }
     expect(JSON.stringify(injected).includes("bestKPassKGap")).toBe(true)
   })
 })
 
 /** In-memory fs over a { dir -> [names] } + { path -> text } map. Fail-loud on absence. */
-const makeFs = (dirs: Record<string, string[]>, files: Record<string, string>): CandidatePoolFs => ({
+const makeFs = (
+  dirs: Record<string, string[]>,
+  files: Record<string, string>,
+): CandidatePoolFs => ({
   listDir: (dir) => {
     const key = dir.replace(/\/+$/, "")
     const entry = dirs[key]
@@ -166,7 +172,13 @@ describe("buildSlotPredictions", () => {
 describe("aggregateBestKPassK", () => {
   const pool = new Map([
     ["a", [{ round: 0, index: 0, patchPath: "/a0" }]],
-    ["b", [{ round: 0, index: 0, patchPath: "/b0" }, { round: 1, index: 0, patchPath: "/b1" }]],
+    [
+      "b",
+      [
+        { round: 0, index: 0, patchPath: "/b0" },
+        { round: 1, index: 0, patchPath: "/b1" },
+      ],
+    ],
     ["c", [{ round: 0, index: 0, patchPath: "/c0" }]],
   ])
   const outcome = (resolved: string[]): GradeOutcome => ({

@@ -128,7 +128,10 @@ const transportFromSocket = (socket: Socket, onClose?: () => void): DapTransport
 /** Connect to a TCP DAP adapter, RETRYING until it is listening or the budget
  *  elapses (a freshly-spawned adapter isn't accepting connections instantly).
  *  Rejects (never hangs) when the budget runs out. */
-export const connectTcpTransport = async (spec: TcpConnectSpec, onClose?: () => void): Promise<DapTransport> => {
+export const connectTcpTransport = async (
+  spec: TcpConnectSpec,
+  onClose?: () => void,
+): Promise<DapTransport> => {
   const deadline = Date.now() + (spec.connectTimeoutMs ?? DEFAULT_TCP_CONNECT_TIMEOUT_MS)
   for (;;) {
     try {
@@ -146,7 +149,8 @@ export const connectTcpTransport = async (spec: TcpConnectSpec, onClose?: () => 
       })
       return transportFromSocket(socket, onClose)
     } catch (e) {
-      if (Date.now() >= deadline) throw new Error(`dap: TCP connect to ${spec.host}:${spec.port} failed: ${errMessage(e)}`)
+      if (Date.now() >= deadline)
+        throw new Error(`dap: TCP connect to ${spec.host}:${spec.port} failed: ${errMessage(e)}`)
       await new Promise((r) => setTimeout(r, 100))
     }
   }
@@ -175,13 +179,20 @@ export const spawnTcpDebugAdapter = async (spec: TcpAdapterSpawnSpec): Promise<D
     stderr: "ignore",
   })
   try {
-    return await connectTcpTransport({ host, port, ...(spec.connectTimeoutMs !== undefined ? { connectTimeoutMs: spec.connectTimeoutMs } : {}) }, () => {
-      try {
-        child.kill()
-      } catch {
-        // best-effort
-      }
-    })
+    return await connectTcpTransport(
+      {
+        host,
+        port,
+        ...(spec.connectTimeoutMs !== undefined ? { connectTimeoutMs: spec.connectTimeoutMs } : {}),
+      },
+      () => {
+        try {
+          child.kill()
+        } catch {
+          // best-effort
+        }
+      },
+    )
   } catch (e) {
     try {
       child.kill()
@@ -211,12 +222,15 @@ const discoverInspectorWs = async (port: number, deadline: number): Promise<stri
     try {
       const res = await fetch(`http://127.0.0.1:${port}/json/list`)
       const list = (await res.json()) as Array<{ webSocketDebuggerUrl?: string }>
-      const ws = Array.isArray(list) ? list.find((e) => typeof e.webSocketDebuggerUrl === "string")?.webSocketDebuggerUrl : undefined
+      const ws = Array.isArray(list)
+        ? list.find((e) => typeof e.webSocketDebuggerUrl === "string")?.webSocketDebuggerUrl
+        : undefined
       if (ws !== undefined) return ws
     } catch {
       // endpoint not up yet
     }
-    if (Date.now() >= deadline) throw new Error(`cdp: node inspector on :${port} did not expose a ws endpoint in time`)
+    if (Date.now() >= deadline)
+      throw new Error(`cdp: node inspector on :${port} did not expose a ws endpoint in time`)
     await new Promise((r) => setTimeout(r, 100))
   }
 }
@@ -246,7 +260,9 @@ export const spawnNodeCdpInspector = async (spec: NodeCdpSpawnSpec): Promise<Cdp
     const ws = new WebSocket(wsUrl)
     await new Promise<void>((resolve, reject) => {
       ws.addEventListener("open", () => resolve(), { once: true })
-      ws.addEventListener("error", () => reject(new Error("cdp: websocket connect failed")), { once: true })
+      ws.addEventListener("error", () => reject(new Error("cdp: websocket connect failed")), {
+        once: true,
+      })
     })
     // A mid-session WS error must not throw uncaught — the client's pending
     // requests resolve via dispose/timeout (mirrors the TCP transport's guard).
@@ -255,7 +271,10 @@ export const spawnNodeCdpInspector = async (spec: NodeCdpSpawnSpec): Promise<Cdp
     })
     return {
       send: (data) => ws.send(data),
-      onData: (cb) => ws.addEventListener("message", (e: MessageEvent) => cb(typeof e.data === "string" ? e.data : String(e.data))),
+      onData: (cb) =>
+        ws.addEventListener("message", (e: MessageEvent) =>
+          cb(typeof e.data === "string" ? e.data : String(e.data)),
+        ),
       close: () => {
         try {
           ws.close()

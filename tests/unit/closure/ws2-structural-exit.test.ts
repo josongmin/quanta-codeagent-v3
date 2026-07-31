@@ -5,10 +5,11 @@
  * decideEscalation `sibling_coverage_missing`. Pinned as ONE chain so a break
  * anywhere (feeder anchor logic, packet provenance, owner-admission, gate) trips.
  */
+
+import { describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 import { resolveOwnerSiblings } from "@/agent/closure"
 import { decideEscalation } from "@/agent/repair-escalation"
 import { buildClosureSession } from "@/runner/batch/eval/closure-session"
@@ -18,8 +19,14 @@ describe("WS2 structural exit (feeder → owner-family → sibling_coverage_miss
     const dir = mkdtempSync(join(tmpdir(), "ws2-struct-"))
     try {
       // Two backends define the SAME method `runshell` (the #14315 shape).
-      writeFileSync(join(dir, "base.py"), "class Base:\n    def runshell(self, parameters):\n        pass\n")
-      writeFileSync(join(dir, "pg.py"), "class PG(Base):\n    def runshell(self, parameters):\n        pass\n")
+      writeFileSync(
+        join(dir, "base.py"),
+        "class Base:\n    def runshell(self, parameters):\n        pass\n",
+      )
+      writeFileSync(
+        join(dir, "pg.py"),
+        "class PG(Base):\n    def runshell(self, parameters):\n        pass\n",
+      )
       // Issue mentions `runshell` in PROSE (extractSymbols would return []).
       const problemStatement = "database client runshell doesn't respect os.environ values"
       const stage1Files = [{ file: "base.py", score: 5 }]

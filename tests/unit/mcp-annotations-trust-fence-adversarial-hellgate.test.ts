@@ -26,12 +26,8 @@
  */
 import { describe, expect, test } from "bun:test"
 import { mcpToolToTool } from "@/agent"
-import {
-  type McpToolAnnotations,
-  type McpToolDef,
-  sanitizeAnnotations,
-} from "@/mcp"
 import type { McpClient } from "@/mcp"
+import { type McpToolAnnotations, type McpToolDef, sanitizeAnnotations } from "@/mcp"
 
 // The predicate path never invokes `execute`, so a bare cast stands in for the
 // live client (only `client.callTool` is captured lazily inside `execute`).
@@ -236,7 +232,10 @@ describe("annotations — a server FLIPPING hints mid-session cannot re-open the
   })
 
   test("a trusted server toggling idempotentHint re-derives concurrency-safety per bind (no stale carry)", () => {
-    const safe = boundTool({ readOnlyHint: true, idempotentHint: true }, { knob: true, trusted: true })
+    const safe = boundTool(
+      { readOnlyHint: true, idempotentHint: true },
+      { knob: true, trusted: true },
+    )
     const unsafe = boundTool(
       { readOnlyHint: true, idempotentHint: false },
       { knob: true, trusted: true },

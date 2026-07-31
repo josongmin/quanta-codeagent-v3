@@ -192,10 +192,7 @@ export const composeLLMCore = (input: ComposeLlmInput): LLMPort => {
   // terminal throw as an `error:` summary. Env override: QUANTA_LLM_STREAM_TRACE_MS
   // (0 ⇒ disabled; absent ⇒ DEFAULT_STREAM_TRACE_INTERVAL_MS).
   const traceMs = runtimeConfig().llmStreamTraceMs
-  finalLLM = withStreamProgressTrace(
-    finalLLM,
-    traceMs !== undefined ? { intervalMs: traceMs } : {},
-  )
+  finalLLM = withStreamProgressTrace(finalLLM, traceMs !== undefined ? { intervalMs: traceMs } : {})
   return finalLLM
 }
 

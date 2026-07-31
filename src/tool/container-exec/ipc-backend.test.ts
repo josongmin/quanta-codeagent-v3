@@ -68,7 +68,8 @@ describe("containerExecOverIpc — JSON-line bridge to the hands process", () =>
     const b = port.exec("B")
     const firstFrame = written[0]
     const secondFrame = written[1]
-    if (firstFrame === undefined || secondFrame === undefined) throw new Error("missing concurrent exec frames")
+    if (firstFrame === undefined || secondFrame === undefined)
+      throw new Error("missing concurrent exec frames")
     expect(parse(firstFrame).id).toBe(0)
     expect(parse(secondFrame).id).toBe(1)
     // respond to B (id 1) FIRST, then A (id 0)
@@ -170,10 +171,12 @@ describe("containerExecOverIpc — B1 per-command deadline (host-synthesized tim
     const port = containerExecOverIpc(duplex)
     const r = await port.exec("sleep 600", undefined, 10) // hands never answers
     expect(r).toEqual({ stdout: null, stderr: null, code: 124, timedOut: true })
-    expect(written.map(parse).filter((m) => m.id === 0).map((m) => m.type)).toEqual([
-      "exec",
-      "cancel",
-    ])
+    expect(
+      written
+        .map(parse)
+        .filter((m) => m.id === 0)
+        .map((m) => m.type),
+    ).toEqual(["exec", "cancel"])
   })
 
   test("a result BEFORE the deadline wins — and the cleared timer never sends a late cancel", async () => {

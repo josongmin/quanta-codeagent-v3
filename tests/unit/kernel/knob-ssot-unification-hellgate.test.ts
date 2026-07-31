@@ -18,13 +18,13 @@
  * REPLACES the hand-written knob/inventory/bootstrap (not duplicates them).
  */
 
+import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 import { repoMapSchema } from "@/config/knob-schema/schemas/bench-loop"
 import { reproTestSchema } from "@/config/knob-schema/schemas/bench-repro"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
 import { reproTestKnob } from "@/runner/knobs/knobs/repro-test"
 

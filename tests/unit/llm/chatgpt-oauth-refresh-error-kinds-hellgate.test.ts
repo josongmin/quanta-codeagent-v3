@@ -283,9 +283,10 @@ const refreshSuccessBody = {
  *  /codex/models; we fail there with a sentinel so the test terminates without
  *  needing a full SSE body, while still proving the in-memory token was USED
  *  (the buggy path threw at `ensureFreshToken` and never reached /models). */
-const refreshSucceedsThenModelsSentinel = (
-  counters: { tokenHits: number; modelsHit: boolean },
-): FetchLike => {
+const refreshSucceedsThenModelsSentinel = (counters: {
+  tokenHits: number
+  modelsHit: boolean
+}): FetchLike => {
   return async (url) => {
     if (url.includes("/oauth/token")) {
       counters.tokenHits += 1

@@ -51,7 +51,10 @@ import { ToolRegistry } from "@/tool"
 const writeTool: Tool = {
   name: "write",
   description: "write tool",
-  inputSchema: z.object({ path: z.string(), contents: z.string().optional() }) as z.ZodType<unknown>,
+  inputSchema: z.object({
+    path: z.string(),
+    contents: z.string().optional(),
+  }) as z.ZodType<unknown>,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   hitlTier: (): "always-confirm" => "always-confirm",
@@ -121,12 +124,8 @@ const waveOf = (
   allowlistEscalated,
 })
 
-const dispatch = (
-  c: AgentConfig,
-  input: unknown,
-  id: string,
-  wave: AdmissibilityWaveAOptions,
-) => runAdmissibilityGate(call(input, id), c, { mode: "bypass" }, actionOf(input), undefined, wave)
+const dispatch = (c: AgentConfig, input: unknown, id: string, wave: AdmissibilityWaveAOptions) =>
+  runAdmissibilityGate(call(input, id), c, { mode: "bypass" }, actionOf(input), undefined, wave)
 
 describe("ALBB-11 — non-shell escalation key must be target-specific (HITL over-approval)", () => {
   test("approving write{path:A} does NOT auto-admit write{path:B} — reviewer re-prompted", async () => {

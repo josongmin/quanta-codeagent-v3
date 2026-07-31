@@ -24,13 +24,13 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import "@/runner/knobs/knobs"
+import type { IssueDeclaredExpected } from "@/agent/verification-plan/extract-issue-declared-expected"
 import {
   buildPublicDeclaredExpectedPort,
   matchCandidateAgainstDeclaredExpected,
 } from "@/runner/batch/eval/declared-expected-matcher"
 import { resolveBenchKnobs } from "@/runner/batch/eval/driver"
 import { benchPostureFromState } from "@/runner/batch/eval/knobs-bench"
-import type { IssueDeclaredExpected } from "@/agent/verification-plan/extract-issue-declared-expected"
 import type { Candidate } from "@/runner/batch/eval/selection-types"
 import { __resetKnobOverrides } from "@/shared/knob-overrides"
 
@@ -120,6 +120,8 @@ describe("dynamic-message-matcher — projection drives the live matcher exactly
       "@@ -1 +1 @@",
       '+raise ValueError(f"TimeSeries object is invalid - expected {required} as the first columns")',
     ].join("\n")
-    expect(matchCandidateAgainstDeclaredExpected(correct, publicExpected(V), { dynamicSkeleton: on })).toBeNull()
+    expect(
+      matchCandidateAgainstDeclaredExpected(correct, publicExpected(V), { dynamicSkeleton: on }),
+    ).toBeNull()
   })
 })

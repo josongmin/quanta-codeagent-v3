@@ -6,8 +6,8 @@ import {
 } from "@/agent/verification-plan/extract-issue-repro"
 import type { Instance } from "../types"
 import { execArgv } from "./exec"
-import { preferredReproExecRuntime, resolveReproAdapter } from "./repro-adapter"
 import { resetToBase, withCandidatePatch } from "./rematerialize"
+import { preferredReproExecRuntime, resolveReproAdapter } from "./repro-adapter"
 import type { Candidate } from "./selection-executor"
 
 const ISSUE_SMOKE_FILE = ".quanta-issue-smoke.py"

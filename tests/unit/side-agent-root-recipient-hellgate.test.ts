@@ -46,6 +46,7 @@
 
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
+import { pollPeerInbox } from "@/agent/loop/control-poll"
 import { wireSideAgentDaemons } from "@/agent/side-agent-runner"
 import {
   createPeerInboxDrain,
@@ -54,7 +55,6 @@ import {
   ROOT_MAILBOX_AGENT_ID,
   rootMailboxRecipient,
 } from "@/agent/subagent-mailbox"
-import { pollPeerInbox } from "@/agent/loop/control-poll"
 import { type AssembleRequest, assembleAgentConfig } from "@/host/runtime/agent-config-assembler"
 import type { SubagentRunner } from "@/subagent"
 
@@ -214,7 +214,12 @@ describe("W1-a — assembler wires a SHARED side-agent mailbox the root can drai
     // observe the assembler's private `mainRecipient` — see the file's COVERAGE
     // BOUNDARY note (that literal is correct-by-construction via the shared
     // `rootMailboxRecipient` SSOT; its failure mode is arm 1, its read id arm 2).
-    mailbox.send({ from: "sa-daemon-1", to: ROOT_MAILBOX_AGENT_ID, kind: "broadcast", body: "finding X" })
+    mailbox.send({
+      from: "sa-daemon-1",
+      to: ROOT_MAILBOX_AGENT_ID,
+      kind: "broadcast",
+      body: "finding X",
+    })
 
     const drained = createPeerInboxDrain(mailbox).drainFor(rootMailboxRecipient(cfg.mailboxAgentId))
     expect(drained).not.toBeNull()

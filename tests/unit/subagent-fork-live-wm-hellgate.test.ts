@@ -30,13 +30,11 @@ import type { SubagentRequest, SubagentResult } from "@/subagent"
 // runner into every other test file sharing the process.
 const capturedPrompts: string[] = []
 
-const runnerSpy = spyOn(runnerModule, "createSubagentRunner").mockImplementation(
-  (() =>
-    async (req: SubagentRequest): Promise<SubagentResult> => {
-      capturedPrompts.push(req.prompt)
-      return { ok: true, finalText: "done", turns: 1 }
-    }) as unknown as typeof runnerModule.createSubagentRunner,
-)
+const runnerSpy = spyOn(runnerModule, "createSubagentRunner").mockImplementation((() =>
+  async (req: SubagentRequest): Promise<SubagentResult> => {
+    capturedPrompts.push(req.prompt)
+    return { ok: true, finalText: "done", turns: 1 }
+  }) as unknown as typeof runnerModule.createSubagentRunner)
 
 // Import AFTER the spy so the block closes over the spy runner.
 const { buildSubagentBlock } = await import("@/agent/tier1/subagent")

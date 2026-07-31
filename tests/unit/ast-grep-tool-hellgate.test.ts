@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { z } from "zod"
+import type { z } from "zod"
 import { astGrepTool } from "@/tool/ast-grep"
 import { BASE_TOOL_NAMES, GATED_TOOLS } from "@/tool/surface/manifest"
 

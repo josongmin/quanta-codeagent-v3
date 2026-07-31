@@ -24,7 +24,12 @@ describe("decideOwnerAdmission", () => {
     const d = decideOwnerAdmission({
       packet: packet({
         candidates: [
-          { file: "src/core/parser.ts", score: 5, sources: ["stage1", "owner-resolve"], symbols: ["parse"] },
+          {
+            file: "src/core/parser.ts",
+            score: 5,
+            sources: ["stage1", "owner-resolve"],
+            symbols: ["parse"],
+          },
           { file: "src/util/log.ts", score: 1, sources: ["stage1"], symbols: [] },
         ],
       }),
@@ -60,8 +65,18 @@ describe("decideOwnerAdmission", () => {
     const d = decideOwnerAdmission({
       packet: packet({
         candidates: [
-          { file: "src/codec/encode.ts", score: 5, sources: ["stage1", "owner-resolve"], symbols: ["encode"] },
-          { file: "src/codec/decode.ts", score: 3, sources: ["stage1", "owner-resolve"], symbols: ["decode"] },
+          {
+            file: "src/codec/encode.ts",
+            score: 5,
+            sources: ["stage1", "owner-resolve"],
+            symbols: ["encode"],
+          },
+          {
+            file: "src/codec/decode.ts",
+            score: 3,
+            sources: ["stage1", "owner-resolve"],
+            symbols: ["decode"],
+          },
         ],
       }),
     })
@@ -103,7 +118,9 @@ describe("decideOwnerAdmission", () => {
   test("single corroborated owner, no runner-up ⇒ admit, single-site", () => {
     const d = decideOwnerAdmission({
       packet: packet({
-        candidates: [{ file: "src/lone.ts", score: 5, sources: ["stage1", "issue-file"], symbols: [] }],
+        candidates: [
+          { file: "src/lone.ts", score: 5, sources: ["stage1", "issue-file"], symbols: [] },
+        ],
       }),
     })
     expect(d.admit).toBe(true)
@@ -287,7 +304,12 @@ describe("decideOwnerAdmission clean mode (T-OWN-12)", () => {
     const inputs = [
       packet({
         candidates: [
-          { file: "src/core/parser.ts", score: 5, sources: ["stage1", "owner-resolve"], symbols: ["parse"] },
+          {
+            file: "src/core/parser.ts",
+            score: 5,
+            sources: ["stage1", "owner-resolve"],
+            symbols: ["parse"],
+          },
           { file: "src/util/log.ts", score: 1, sources: ["stage1"], symbols: [] },
         ],
       }),

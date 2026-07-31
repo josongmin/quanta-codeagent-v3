@@ -177,10 +177,7 @@ const runBridged = async (tool: Tool, input: unknown): Promise<ToolResult> => {
 /** Poll the supervisor snapshot until it reports HEALTHY again (or the deadline
  *  trips). Real timers drive the respawn, so we spin the event loop and re-read
  *  the live snapshot. Returns the last-seen state for diagnostics. */
-const waitForHealthy = async (
-  sup: McpReconnectSupervisor,
-  deadlineMs: number,
-): Promise<string> => {
+const waitForHealthy = async (sup: McpReconnectSupervisor, deadlineMs: number): Promise<string> => {
   const start = Date.now()
   let state = sup.snapshot().state
   while (Date.now() - start < deadlineMs) {
@@ -296,32 +293,35 @@ describe("MCP auto-restart — REAL process crash → transparent supervised res
       undefined,
       {
         supervisorDepsFor: (config) =>
-          realSchedulerDeps((cfg) => {
-            spawnCount += 1
-            const real = new McpClient(cfg) as SupervisableMcpClient
-            if (spawnCount === 1) {
-              // First client (initial start) is the real, working process so the
-              // session boots HEALTHY exactly like the GREEN path.
-              return real
-            }
-            // Every RESPAWN is sabotaged: its `start()` throws, so the supervisor
-            // can never reach HEALTHY again — the transparent swap is neutered.
-            // A DELEGATING wrapper (not an object spread) so `stop`/`listTools`/
-            // `onExit` still forward to the real client — the ONLY behavioral
-            // delta from the GREEN path is that `start()` throws. (We stop the
-            // real subprocess it spawned so we don't leak it.)
-            const sabotaged: SupervisableMcpClient = {
-              async start(): Promise<void> {
-                await real.stop().catch(() => undefined)
-                throw new Error("sabotaged respawn: start disabled")
-              },
-              listTools: () => real.listTools(),
-              callTool: (name, args, opts) => real.callTool(name, args, opts),
-              stop: () => real.stop(),
-              onExit: (handler) => real.onExit(handler),
-            }
-            return sabotaged
-          }, (s) => states.push(s.state)),
+          realSchedulerDeps(
+            (cfg) => {
+              spawnCount += 1
+              const real = new McpClient(cfg) as SupervisableMcpClient
+              if (spawnCount === 1) {
+                // First client (initial start) is the real, working process so the
+                // session boots HEALTHY exactly like the GREEN path.
+                return real
+              }
+              // Every RESPAWN is sabotaged: its `start()` throws, so the supervisor
+              // can never reach HEALTHY again — the transparent swap is neutered.
+              // A DELEGATING wrapper (not an object spread) so `stop`/`listTools`/
+              // `onExit` still forward to the real client — the ONLY behavioral
+              // delta from the GREEN path is that `start()` throws. (We stop the
+              // real subprocess it spawned so we don't leak it.)
+              const sabotaged: SupervisableMcpClient = {
+                async start(): Promise<void> {
+                  await real.stop().catch(() => undefined)
+                  throw new Error("sabotaged respawn: start disabled")
+                },
+                listTools: () => real.listTools(),
+                callTool: (name, args, opts) => real.callTool(name, args, opts),
+                stop: () => real.stop(),
+                onExit: (handler) => real.onExit(handler),
+              }
+              return sabotaged
+            },
+            (s) => states.push(s.state),
+          ),
       },
     )
     try {

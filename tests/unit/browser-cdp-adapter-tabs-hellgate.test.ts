@@ -45,7 +45,11 @@ const DOM_FIXTURE = {
 
 const spawnerThatFinds = (): ProcessSpawner => ({
   which: (cmd) => (cmd === "google-chrome" ? "/usr/bin/google-chrome" : null),
-  spawn: (): SpawnedProcess => ({ pid: 4242, kill: () => {}, exited: new Promise<number>(() => {}) }),
+  spawn: (): SpawnedProcess => ({
+    pid: 4242,
+    kill: () => {},
+    exited: new Promise<number>(() => {}),
+  }),
 })
 const fsReady = (): BrowserFs => ({
   existsSync: () => false,
@@ -81,7 +85,8 @@ const tabTransport = (sends: Sent[]): CdpTransport => ({
       if (m.method === "Runtime.evaluate") {
         const expr = m.params.expression ?? ""
         if (expr === "document.title") return { result: { value: "Tab Page" } }
-        if (expr.includes("walk(document.body")) return { result: { value: JSON.stringify(DOM_FIXTURE) } }
+        if (expr.includes("walk(document.body"))
+          return { result: { value: JSON.stringify(DOM_FIXTURE) } }
         return { result: { value: null } }
       }
       return {}
@@ -90,7 +95,10 @@ const tabTransport = (sends: Sent[]): CdpTransport => ({
       onMsg(JSON.stringify({ id: m.id, result: replyFor(m) }))
       if (m.method === "Page.navigate") {
         setTimeout(
-          () => onMsg(JSON.stringify({ method: "Page.loadEventFired", params: {}, sessionId: m.sessionId })),
+          () =>
+            onMsg(
+              JSON.stringify({ method: "Page.loadEventFired", params: {}, sessionId: m.sessionId }),
+            ),
           0,
         )
       }
@@ -101,8 +109,18 @@ const tabTransport = (sends: Sent[]): CdpTransport => ({
       },
       close: () => {},
       send: (raw) => {
-        const parsed = JSON.parse(raw) as { id: number; method: string; sessionId?: string; params?: { expression?: string } }
-        const m: Sent = { id: parsed.id, method: parsed.method, sessionId: parsed.sessionId, params: parsed.params ?? {} }
+        const parsed = JSON.parse(raw) as {
+          id: number
+          method: string
+          sessionId?: string
+          params?: { expression?: string }
+        }
+        const m: Sent = {
+          id: parsed.id,
+          method: parsed.method,
+          sessionId: parsed.sessionId,
+          params: parsed.params ?? {},
+        }
         sends.push(m)
         queueMicrotask(() => respond(m))
       },

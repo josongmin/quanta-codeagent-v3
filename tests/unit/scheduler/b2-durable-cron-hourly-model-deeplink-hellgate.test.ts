@@ -40,9 +40,6 @@ import {
 } from "@/scheduler/automation-engine"
 import { buildThreadDeeplink, parseThreadDeeplink } from "@/scheduler/deeplink"
 import { computeNextFire } from "@/scheduler/next-fire"
-import { buildDefaultTools } from "@/tool"
-import { threadsHandoffTool } from "@/tool/threads_handoff"
-import type { ToolContext, ToolEvent } from "@/tool/types"
 import { parseRRule } from "@/scheduler/rrule-parser"
 import {
   AUTOMATION_ENV_FLAG,
@@ -50,6 +47,9 @@ import {
   assembleAutomation,
 } from "@/scheduler/runtime-wire"
 import type { AgentLoopPort, RRule } from "@/scheduler/types"
+import { buildDefaultTools } from "@/tool"
+import { threadsHandoffTool } from "@/tool/threads_handoff"
+import type { ToolContext, ToolEvent } from "@/tool/types"
 
 const ruleOf = (s: string): RRule => {
   const r = parseRRule(s)

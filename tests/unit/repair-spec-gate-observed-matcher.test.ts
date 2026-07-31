@@ -16,16 +16,14 @@
 
 import { describe, expect, test } from "bun:test"
 import type { ExecObservation } from "@/agent/closure"
-import {
-  type IssueDeclaredExpected,
-  PUBLIC_ISSUE_TEXT_PROVENANCE,
-} from "@/agent/verification-plan"
+import { type IssueDeclaredExpected, PUBLIC_ISSUE_TEXT_PROVENANCE } from "@/agent/verification-plan"
 import { evaluateDeclaredExpectedAgainstObserved } from "@/runner/batch/eval/declared-expected-matcher"
 
-const declared = (
-  kind: IssueDeclaredExpected["kind"],
-  value: string,
-): IssueDeclaredExpected => ({ kind, value, provenance: PUBLIC_ISSUE_TEXT_PROVENANCE })
+const declared = (kind: IssueDeclaredExpected["kind"], value: string): IssueDeclaredExpected => ({
+  kind,
+  value,
+  provenance: PUBLIC_ISSUE_TEXT_PROVENANCE,
+})
 
 const obs = (stdout: string, stderr = "", exitCode = 0): ExecObservation => ({
   exitCode,
@@ -70,16 +68,11 @@ describe("evaluateDeclaredExpectedAgainstObserved — repair spec gate", () => {
 
   test("latex/symbolic kinds behave the same (literal in output)", () => {
     expect(
-      evaluateDeclaredExpectedAgainstObserved(
-        declared("symbolic", "(1,)"),
-        obs("result = (1,)\n"),
-      ),
+      evaluateDeclaredExpectedAgainstObserved(declared("symbolic", "(1,)"), obs("result = (1,)\n")),
     ).toEqual({ evaluable: true, matched: true })
     expect(
-      evaluateDeclaredExpectedAgainstObserved(
-        declared("symbolic", "(1,)"),
-        obs("result = []\n"),
-      ).matched,
+      evaluateDeclaredExpectedAgainstObserved(declared("symbolic", "(1,)"), obs("result = []\n"))
+        .matched,
     ).toBe(false)
   })
 
@@ -101,8 +94,7 @@ describe("evaluateDeclaredExpectedAgainstObserved — repair spec gate", () => {
 
   test("ABSTAIN on an empty declared value ⇒ fail-open", () => {
     expect(
-      evaluateDeclaredExpectedAgainstObserved(declared("stdout", "   "), obs("anything"))
-        .evaluable,
+      evaluateDeclaredExpectedAgainstObserved(declared("stdout", "   "), obs("anything")).evaluable,
     ).toBe(false)
   })
 

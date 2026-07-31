@@ -104,9 +104,7 @@ function benchRequest(workdir: string): StreamInput {
         ],
       },
     ],
-    tools: [
-      { name: "read_file", description: "read a file", input_schema: { type: "object" } },
-    ],
+    tools: [{ name: "read_file", description: "read a file", input_schema: { type: "object" } }],
   }
 }
 

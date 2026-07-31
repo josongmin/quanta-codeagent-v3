@@ -40,7 +40,12 @@ describe("buildSystemPrompt — envPosture (RFC jul-2)", () => {
     const owned = buildSystemPrompt(undefined, { envPosture: "owned" })
     expect(owned).not.toBe(frozen)
     // The shared universal rails survive the swap.
-    for (const id of ["[R-SEARCH-FIRST]", "[R-READ-FAILURE]", "[R-NO-THRASH]", "[R-FAILURE-MODE]"]) {
+    for (const id of [
+      "[R-SEARCH-FIRST]",
+      "[R-READ-FAILURE]",
+      "[R-NO-THRASH]",
+      "[R-FAILURE-MODE]",
+    ]) {
       expect(frozen).toContain(id)
       expect(owned).toContain(id)
     }

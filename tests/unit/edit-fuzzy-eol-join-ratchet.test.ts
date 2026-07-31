@@ -97,13 +97,15 @@ describe("R-D6 — fuzzy-splice byte-preservation ratchet (mixed-EOL fix)", () =
   })
 
   test("RED: a whole-file `.join(detectEol(source))` reassembly is FLAGGED", () => {
-    expect(wholeFileReassemblyJoins("next: next.join(detectEol(source)),").length).toBeGreaterThan(0)
+    expect(wholeFileReassemblyJoins("next: next.join(detectEol(source)),").length).toBeGreaterThan(
+      0,
+    )
   })
 
   test("GREEN: the replacement-region `splitLines(repl).join(eol)` form is NOT flagged", () => {
-    expect(wholeFileReassemblyJoins("const replText = splitLines(repl).join(eol) + lastEol")).toEqual(
-      [],
-    )
+    expect(
+      wholeFileReassemblyJoins("const replText = splitLines(repl).join(eol) + lastEol"),
+    ).toEqual([])
   })
 
   test("RED: removing the byte-splice (no `source.slice`) is detected by usesByteSplice", () => {

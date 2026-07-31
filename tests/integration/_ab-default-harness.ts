@@ -65,7 +65,7 @@ import { runAgent } from "@/agent"
 import { wireOptionalAgentPorts } from "@/agent/optional-ports"
 import type { AgentConfig, AgentOutcome } from "@/agent/types"
 import type { Message } from "@/llm"
-import { RecordingStream, withTimeout } from "./_harness"
+import { type RecordingStream, withTimeout } from "./_harness"
 
 /** A scripted, deterministic scenario. The factory is called ONCE PER SIDE so
  *  each side gets a FRESH llm/stream/config (no shared mutable state can leak

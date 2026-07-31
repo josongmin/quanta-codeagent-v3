@@ -18,8 +18,8 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { __resetRuntimeConfig } from "@/shared"
 import { benchWorkRoot } from "../../corpus/paths"
-import { cleanupSandbox, copyRepo, createSandbox } from "../sandbox"
 import type { Instance } from "../../types"
+import { cleanupSandbox, copyRepo, createSandbox } from "../sandbox"
 
 let TMP_HOME: string
 const ORIG_HOME = process.env.QUANTA_BENCH_HOME

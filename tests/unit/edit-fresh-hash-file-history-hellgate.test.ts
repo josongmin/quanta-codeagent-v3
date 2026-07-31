@@ -43,7 +43,7 @@
  *  This file does NOT touch any existing test file or any src file. */
 
 import { afterAll, describe, expect, test } from "bun:test"
-import { readFileSync, mkdtempSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { defaultFileSystemPort, resolveJailed } from "@/storage"
@@ -171,7 +171,10 @@ describe("jul-13 file_history_rewind restore × edit-fresh-hash baseline refresh
     // Chained edit, NO re-read: old_string is v1's token (content-match passes only
     // because the restore actually wrote v1's bytes). Survives the guard ONLY because
     // restore refreshed the baseline.
-    const r2 = await runEdit({ path, old_string: "FROM_V1", new_string: "EDITED_AFTER_RESTORE" }, ctx)
+    const r2 = await runEdit(
+      { path, old_string: "FROM_V1", new_string: "EDITED_AFTER_RESTORE" },
+      ctx,
+    )
     expect(r2.ok).toBe(true)
     expect(r2.failure).toBeUndefined()
     expect(readFileSync(path, "utf8")).toContain("EDITED_AFTER_RESTORE")
@@ -202,7 +205,10 @@ describe("jul-13 file_history_rewind restore × edit-fresh-hash baseline refresh
     expect(statSync(key).mtimeMs).toBeGreaterThan(readTimeMtime)
 
     // The chained no-re-read edit is now vetoed stale_read (the defeat, un-cured).
-    const r2 = await runEdit({ path, old_string: "FROM_V1", new_string: "EDITED_AFTER_RESTORE" }, ctx)
+    const r2 = await runEdit(
+      { path, old_string: "FROM_V1", new_string: "EDITED_AFTER_RESTORE" },
+      ctx,
+    )
     expect(r2.ok).toBe(false)
     expect(r2.failure?.mode).toBe("rejected")
     expect((r2.failure as { reason?: string } | undefined)?.reason).toBe("stale_read")
@@ -258,7 +264,10 @@ describe("jul-13 file_history_rewind restore × edit-fresh-hash baseline refresh
     expect(statSync(key).mtimeMs).toBeGreaterThan(state.recordedMtime(key) as number)
 
     // The guard still fires on the external change — the refresh did not disable TOCTOU.
-    const r2 = await runEdit({ path, old_string: "FROM_V1", new_string: "EDITED_AFTER_RESTORE" }, ctx)
+    const r2 = await runEdit(
+      { path, old_string: "FROM_V1", new_string: "EDITED_AFTER_RESTORE" },
+      ctx,
+    )
     expect(r2.ok).toBe(false)
     expect(r2.failure?.mode).toBe("rejected")
     expect((r2.failure as { reason?: string } | undefined)?.reason).toBe("stale_read")

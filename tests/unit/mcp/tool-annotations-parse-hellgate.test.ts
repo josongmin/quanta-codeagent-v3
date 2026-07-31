@@ -155,7 +155,7 @@ describe("F2 — unsupportedTypeMarker (unknown content-block types never silent
     expect(unsupportedTypeMarker([])).toBe("")
   })
 
-  test('an `audio` block ⇒ visible omission marker with count + type', () => {
+  test("an `audio` block ⇒ visible omission marker with count + type", () => {
     expect(unsupportedTypeMarker([{ type: "audio", data: "X", mimeType: "audio/wav" }])).toBe(
       '\n[mcp: 1 block(s) of unsupported type "audio" omitted]',
     )

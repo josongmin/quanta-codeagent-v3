@@ -10,8 +10,7 @@
 import { describe, expect, test } from "bun:test"
 import { createTentativeRecorder } from "../../../src/runner/batch/eval/tentative-patch"
 
-const SRC = (tag: string) =>
-  `diff --git a/src/foo.py b/src/foo.py\n@@ -1 +1 @@\n-old\n+${tag}\n`
+const SRC = (tag: string) => `diff --git a/src/foo.py b/src/foo.py\n@@ -1 +1 @@\n-old\n+${tag}\n`
 
 describe("tentative-patch recorder — selection policy", () => {
   test("clean finish + non-empty final → returns the final UNTOUCHED (byte-identical), even with verified candidates present", () => {

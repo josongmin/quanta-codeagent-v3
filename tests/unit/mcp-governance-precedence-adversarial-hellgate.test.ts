@@ -226,7 +226,11 @@ describe("governance — filterMcpServersByPolicy boundary semantics", () => {
   })
 
   test("original order + references preserved for kept servers", () => {
-    const servers = [{ name: "a", tag: 1 }, { name: "b", tag: 2 }, { name: "c", tag: 3 }]
+    const servers = [
+      { name: "a", tag: 1 },
+      { name: "b", tag: 2 },
+      { name: "c", tag: 3 },
+    ]
     const res = filterMcpServersByPolicy(servers, { enabledServers: [], deniedServers: ["b"] })
     expect(res.kept).toEqual([servers[0]!, servers[2]!])
     expect(res.kept[0]).toBe(servers[0]!) // same reference, not a copy

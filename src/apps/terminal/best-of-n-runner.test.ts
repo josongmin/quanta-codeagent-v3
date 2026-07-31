@@ -209,11 +209,19 @@ describe("best-of-N runner — N≥2 picks the L1-verified candidate, not the fa
 describe("adaptive early-stop (RFC jul-3) — best-of-N is COST-GATED, not a fixed fan-out", () => {
   test("isConfidentCleanPass: verified-pass w/o follow-up = true; nudged pass / fail / unverifiable = false", () => {
     const rep = (v?: VerificationStamp): TerminalBrainReport => ({
-      instruction: "x", turns: 1, tokens: { input: 0, output: 0 }, cost_usd: 0, final: "",
+      instruction: "x",
+      turns: 1,
+      tokens: { input: 0, output: 0 },
+      cost_usd: 0,
+      final: "",
       ...(v !== undefined ? { verification: v } : {}),
     })
-    expect(isConfidentCleanPass(rep({ state: "verified-pass", evidence: "", followUpFired: false }))).toBe(true)
-    expect(isConfidentCleanPass(rep({ state: "verified-pass", evidence: "", followUpFired: true }))).toBe(false) // needed the nudge ⇒ uncertain
+    expect(
+      isConfidentCleanPass(rep({ state: "verified-pass", evidence: "", followUpFired: false })),
+    ).toBe(true)
+    expect(
+      isConfidentCleanPass(rep({ state: "verified-pass", evidence: "", followUpFired: true })),
+    ).toBe(false) // needed the nudge ⇒ uncertain
     expect(isConfidentCleanPass(rep({ state: "unverifiable", evidence: "" }))).toBe(false)
     expect(isConfidentCleanPass(rep({ state: "verified-fail", evidence: "" }))).toBe(false)
     expect(isConfidentCleanPass(rep(undefined))).toBe(false)
@@ -221,12 +229,23 @@ describe("adaptive early-stop (RFC jul-3) — best-of-N is COST-GATED, not a fix
   })
 
   test("P2 (audit R1): with a self-test receipt present, a confident stop REQUIRES self-test green", () => {
-    const rep = (v: VerificationStamp, st?: { executed: boolean; green: boolean }): TerminalBrainReport => ({
-      instruction: "x", turns: 1, tokens: { input: 0, output: 0 }, cost_usd: 0, final: "",
+    const rep = (
+      v: VerificationStamp,
+      st?: { executed: boolean; green: boolean },
+    ): TerminalBrainReport => ({
+      instruction: "x",
+      turns: 1,
+      tokens: { input: 0, output: 0 },
+      cost_usd: 0,
+      final: "",
       verification: v,
       ...(st !== undefined ? { selfTest: st } : {}),
     })
-    const cleanStamp: VerificationStamp = { state: "verified-pass", evidence: "", followUpFired: false }
+    const cleanStamp: VerificationStamp = {
+      state: "verified-pass",
+      evidence: "",
+      followUpFired: false,
+    }
     // polyglot class: gameable stamp says pass, but the authored self-test did NOT go green ⇒ NOT confident.
     expect(isConfidentCleanPass(rep(cleanStamp, { executed: true, green: false }))).toBe(false)
     // never even ran a self-test ⇒ not confident (the receipt is present but empty).
@@ -242,11 +261,19 @@ describe("adaptive early-stop (RFC jul-3) — best-of-N is COST-GATED, not a fix
       v: VerificationStamp,
       st: { executed: boolean; green: boolean; flippedFromRed?: boolean },
     ): TerminalBrainReport => ({
-      instruction: "x", turns: 1, tokens: { input: 0, output: 0 }, cost_usd: 0, final: "",
+      instruction: "x",
+      turns: 1,
+      tokens: { input: 0, output: 0 },
+      cost_usd: 0,
+      final: "",
       verification: v,
       selfTest: st,
     })
-    const cleanStamp: VerificationStamp = { state: "verified-pass", evidence: "", followUpFired: false }
+    const cleanStamp: VerificationStamp = {
+      state: "verified-pass",
+      evidence: "",
+      followUpFired: false,
+    }
     // A green reached only after switching from a red self-test (F4 flip) is suspect ⇒ NOT confident,
     // even though verified-pass + green both hold — the two signals no longer independently agree.
     expect(

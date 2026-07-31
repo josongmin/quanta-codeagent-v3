@@ -68,7 +68,11 @@ const TS_FIX_PATCH = [
 ].join("\n")
 
 const writeDataset = (path: string): void => {
-  const id = path.split("/").at(-1)?.replace(/\.jsonl$/, "") ?? "fixture"
+  const id =
+    path
+      .split("/")
+      .at(-1)
+      ?.replace(/\.jsonl$/, "") ?? "fixture"
   writeFileSync(path, `${JSON.stringify({ instance_id: `fixture__${id}`, patch: TS_FIX_PATCH })}\n`)
 }
 
@@ -236,8 +240,7 @@ describe("BUG 1 — detached poll bounds box death (no forever spin)", () => {
     // The liveness confirmation actually queried describe-instances State.Name.
     expect(
       calls.some(
-        (c) =>
-          c.cmd === "aws" && c.args.includes("Reservations[0].Instances[0].State.Name"),
+        (c) => c.cmd === "aws" && c.args.includes("Reservations[0].Instances[0].State.Name"),
       ),
     ).toBe(true)
   })

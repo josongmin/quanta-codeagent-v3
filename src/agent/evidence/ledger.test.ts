@@ -94,9 +94,7 @@ describe("EvidenceLedger — snapshot + card shape", () => {
     const bare = l.add(card())
     expect("location" in bare).toBe(false)
     expect("revealHandle" in bare).toBe(false)
-    const rich = l.add(
-      card({ location: { file: "fib.py", lineStart: 3 }, revealHandle: "raw-42" }),
-    )
+    const rich = l.add(card({ location: { file: "fib.py", lineStart: 3 }, revealHandle: "raw-42" }))
     expect(rich.location).toEqual({ file: "fib.py", lineStart: 3 })
     expect(rich.revealHandle).toBe("raw-42")
   })

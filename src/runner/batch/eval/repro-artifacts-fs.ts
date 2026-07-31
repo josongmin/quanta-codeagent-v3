@@ -10,11 +10,11 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import {
-  reproArtifactVoteRoundDir,
   makeReproArtifactSink,
-  reproArtifactInstanceDir,
   type ReproArtifactSink,
   type ReproArtifactWritePort,
+  reproArtifactInstanceDir,
+  reproArtifactVoteRoundDir,
 } from "./repro-artifacts-sink"
 
 /** Build an fs-backed write port rooted at `rootDir`. Each `writeFile(relPath)`

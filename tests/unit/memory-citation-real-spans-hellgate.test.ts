@@ -22,7 +22,7 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { type MemoryWriteGuardArm, lineSpanOf, memoryTools } from "@/agent/memory-tools"
+import { lineSpanOf, type MemoryWriteGuardArm, memoryTools } from "@/agent/memory-tools"
 import { InMemoryStore } from "@/memory"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 
@@ -149,7 +149,14 @@ describe("B3 (2) citation provenance", () => {
 
   test("memory_search WITHOUT reuseRule ⇒ no note braces (byte-identical omit)", async () => {
     const store = new InMemoryStore([
-      { id: "m1", kind: "fact", text: "alpha\nbeta MATCH", tags: [], createdAt: 1, importance: 0.7 },
+      {
+        id: "m1",
+        kind: "fact",
+        text: "alpha\nbeta MATCH",
+        tags: [],
+        createdAt: 1,
+        importance: 0.7,
+      },
     ])
     const tools = memoryTools({ store, lineCitations: true })
     const ev = await run(byName(tools, "memory_search"), { query: "MATCH" })

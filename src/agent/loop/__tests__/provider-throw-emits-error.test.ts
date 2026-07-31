@@ -17,9 +17,9 @@
 import { describe, expect, test } from "bun:test"
 import type { Message } from "@/llm"
 import { createWorkingMemory } from "@/memory"
+import type { AgentConfig } from "../../types"
 import { resolveContextEventsForTurn } from "../compaction-wire"
 import { resolveMentionInjectionMessages } from "../context-assembler"
-import type { AgentConfig } from "../../types"
 
 type Emitted = { type: string; message?: string }
 

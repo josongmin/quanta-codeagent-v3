@@ -48,7 +48,11 @@ describe("resolveSwebenchPipSpec (Live grading fix)", () => {
   })
 
   test("Verified / Pro names never read as Live (no false-positive)", () => {
-    for (const name of ["princeton-nlp/SWE-bench_Verified", "ScaleAI/SWE-bench_Pro", "alive.jsonl"]) {
+    for (const name of [
+      "princeton-nlp/SWE-bench_Verified",
+      "ScaleAI/SWE-bench_Pro",
+      "alive.jsonl",
+    ]) {
       expect(isLiveDataset(name)).toBe(false)
     }
   })
@@ -108,7 +112,8 @@ describe("ensureBoxSwebenchShimCurrent — stale-shim self-heal on reuse", () =>
       log: () => {},
       ssh: async (cmd: string) => {
         cmds.push(cmd)
-        if (cmd.startsWith("cat ~/swebench-python")) return { code: 0, stdout: onBoxShim, stderr: "" }
+        if (cmd.startsWith("cat ~/swebench-python"))
+          return { code: 0, stdout: onBoxShim, stderr: "" }
         return { code: 0, stdout: "1.2.3", stderr: "" } // write / warm succeed
       },
       // biome-ignore lint/suspicious/noExplicitAny: minimal BoxSession stub for a pure-ish unit

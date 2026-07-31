@@ -48,9 +48,9 @@ describe("adaptive phase packet live evidence (jun-23)", () => {
       expect(packet.stage).toBe("phase_routing")
       expect(packet.candidateEditSurface?.touchedFiles).toContain("widget.ts")
       expect(packet.candidateEditSurface?.touchedSymbols).toBeDefined()
-      expect(packet.staticFacts.some((fact) => fact.kind === "static_witness_unsupported_language")).toBe(
-        true,
-      )
+      expect(
+        packet.staticFacts.some((fact) => fact.kind === "static_witness_unsupported_language"),
+      ).toBe(true)
       expect(packet.missingEvidence.some((missing) => missing.kind === "static_witness")).toBe(true)
 
       const rendered = renderLlmEvidencePacket(packet)
@@ -91,9 +91,9 @@ describe("adaptive phase packet live evidence (jun-23)", () => {
       expect(packet.stage).toBe("phase_routing")
       expect(packet.candidateEditSurface?.touchedFiles).toEqual(["widget.ts"])
       expect(packet.candidateEditSurface?.touchedSymbols).toEqual(["render"])
-      expect(packet.staticFacts.some((fact) => fact.kind === "static_witness_unsupported_language")).toBe(
-        true,
-      )
+      expect(
+        packet.staticFacts.some((fact) => fact.kind === "static_witness_unsupported_language"),
+      ).toBe(true)
 
       const rendered = renderLlmEvidencePacket(packet)
       expect(rendered).toContain("phase_routing")

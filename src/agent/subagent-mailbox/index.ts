@@ -28,14 +28,14 @@ export {
   type TeamMembershipGate,
   teamScopedMailbox,
 } from "./team-scoped"
-export {
-  ROOT_MAILBOX_AGENT_ID,
-  rootMailboxRecipient,
-} from "./types"
 export type {
   CreateSubagentMailboxOptions,
   MailboxMessage,
   MailboxMessageKind,
   MailboxPort,
   MailboxSnapshot,
+} from "./types"
+export {
+  ROOT_MAILBOX_AGENT_ID,
+  rootMailboxRecipient,
 } from "./types"

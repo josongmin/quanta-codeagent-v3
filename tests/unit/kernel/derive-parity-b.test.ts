@@ -21,9 +21,8 @@
 import { describe, expect, test } from "bun:test"
 import { BENCH } from "@/config/knob-inventory/bench"
 import type { KnobInventoryEntry } from "@/config/knob-inventory/types"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
-import { deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
 import type { AnyKnobSchema } from "@/config/knob-schema/contracts"
+import { deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
 import {
   adversarialReproSchema,
   chaMultisiteGeneralSchema,
@@ -42,6 +41,7 @@ import {
   verifySelectLlmRiskGateSchema,
   verifySelectSchema,
 } from "@/config/knob-schema/schemas/bench-b"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 // Live registry knobs (their parse is the ground truth).
 import { adversarialReproKnob } from "@/runner/knobs/knobs/adversarial-repro"
 import { chaMultisiteGeneralKnob } from "@/runner/knobs/knobs/cha-multisite-general"
@@ -118,20 +118,52 @@ interface Pair {
 }
 
 const PAIRS: readonly Pair[] = [
-  { name: "spec-fidelity-invariant", schema: specFidelityInvariantSchema, knob: asAnyKnob(specFidelityInvariantKnob) },
-  { name: "dynamic-message-matcher", schema: dynamicMessageMatcherSchema, knob: asAnyKnob(dynamicMessageMatcherKnob) },
+  {
+    name: "spec-fidelity-invariant",
+    schema: specFidelityInvariantSchema,
+    knob: asAnyKnob(specFidelityInvariantKnob),
+  },
+  {
+    name: "dynamic-message-matcher",
+    schema: dynamicMessageMatcherSchema,
+    knob: asAnyKnob(dynamicMessageMatcherKnob),
+  },
   { name: "forward-localize", schema: forwardLocalizeSchema, knob: asAnyKnob(forwardLocalizeKnob) },
-  { name: "cha-multisite-steer", schema: chaMultisiteSteerSchema, knob: asAnyKnob(chaMultisiteSteerKnob) },
-  { name: "cha-multisite-general", schema: chaMultisiteGeneralSchema, knob: asAnyKnob(chaMultisiteGeneralKnob) },
+  {
+    name: "cha-multisite-steer",
+    schema: chaMultisiteSteerSchema,
+    knob: asAnyKnob(chaMultisiteSteerKnob),
+  },
+  {
+    name: "cha-multisite-general",
+    schema: chaMultisiteGeneralSchema,
+    knob: asAnyKnob(chaMultisiteGeneralKnob),
+  },
   { name: "paired-control", schema: pairedControlSchema, knob: asAnyKnob(pairedControlKnob) },
-  { name: "model-lane-diversity", schema: modelLaneDiversitySchema, knob: asAnyKnob(modelLaneDiversityKnob) },
+  {
+    name: "model-lane-diversity",
+    schema: modelLaneDiversitySchema,
+    knob: asAnyKnob(modelLaneDiversityKnob),
+  },
   { name: "closure-repair", schema: closureRepairSchema, knob: asAnyKnob(closureRepairKnob) },
   { name: "patch-budget", schema: patchBudgetSchema, knob: asAnyKnob(patchBudgetKnob) },
-  { name: "patch-budget-strict", schema: patchBudgetStrictSchema, knob: asAnyKnob(patchBudgetStrictKnob) },
-  { name: "adversarial-repro", schema: adversarialReproSchema, knob: asAnyKnob(adversarialReproKnob) },
+  {
+    name: "patch-budget-strict",
+    schema: patchBudgetStrictSchema,
+    knob: asAnyKnob(patchBudgetStrictKnob),
+  },
+  {
+    name: "adversarial-repro",
+    schema: adversarialReproSchema,
+    knob: asAnyKnob(adversarialReproKnob),
+  },
   { name: "verify-select", schema: verifySelectSchema, knob: asAnyKnob(verifySelectKnob) },
   { name: "localize-budget", schema: localizeBudgetSchema, knob: asAnyKnob(localizeBudgetKnob) },
-  { name: "regression-max-tests", schema: regressionMaxTestsSchema, knob: asAnyKnob(regressionMaxTestsKnob) },
+  {
+    name: "regression-max-tests",
+    schema: regressionMaxTestsSchema,
+    knob: asAnyKnob(regressionMaxTestsKnob),
+  },
   {
     name: "verify-select-concurrency",
     schema: verifySelectConcurrencySchema,
@@ -198,8 +230,15 @@ describe("Pillar A derive parity (slice B) — default-OFF proof", () => {
 describe("Pillar A derive parity (slice B) — FULL-Knob data parity (BURN-DOWN gate)", () => {
   const FULL_KNOB_DIVERGENT_CEILING = 0 // lower to 0 once every schema is reconciled
   const project = (k: AnyKnob): Record<string, unknown> => ({
-    id: k.id, envKey: k.envKey, category: k.category, surfaces: [...k.surfaces],
-    describe: k.describe, default: k.default, costMultiplier: k.costMultiplier, unit: k.unit, source: k.source,
+    id: k.id,
+    envKey: k.envKey,
+    category: k.category,
+    surfaces: [...k.surfaces],
+    describe: k.describe,
+    default: k.default,
+    costMultiplier: k.costMultiplier,
+    unit: k.unit,
+    source: k.source,
   })
   const mismatches: string[] = []
   for (const { name, schema, knob } of PAIRS) {
@@ -238,7 +277,9 @@ describe("Pillar A derive parity (slice B) — RED on injection (the assert has 
   test("a wrong enum-mode parse diverges from the live knob", () => {
     // The live llm-risk-gate accepts only shadow/on/1/true; a parser that also
     // accepted "yes" would diverge — prove the parity probe would catch it.
-    expect(verifySelectLlmRiskGateSchema.parse("yes")).toEqual(verifySelectLlmRiskGateKnob.parse("yes"))
+    expect(verifySelectLlmRiskGateSchema.parse("yes")).toEqual(
+      verifySelectLlmRiskGateKnob.parse("yes"),
+    )
     expect(verifySelectLlmRiskGateSchema.parse("shadow")).toBe("shadow")
     expect(verifySelectLlmRiskGateSchema.parse("on")).toBe("on")
   })

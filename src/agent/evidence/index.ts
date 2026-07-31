@@ -4,6 +4,10 @@
  * parsed tool output into this layer. DEFAULT-OFF: no consumer until an entry point
  * opts in behind a knob, so the raw-append path stays byte-identical.
  */
+
+export { ingestRawObservation, ingestTestFrames, type ParsedTestFrame } from "./ingest"
+export { createEvidenceLedger } from "./ledger"
+export { renderEvidenceDigest } from "./reducer"
 export type {
   EvidenceCard,
   EvidenceCardInput,
@@ -13,6 +17,3 @@ export type {
   EvidenceLocation,
   EvidenceSource,
 } from "./types"
-export { createEvidenceLedger } from "./ledger"
-export { ingestRawObservation, ingestTestFrames, type ParsedTestFrame } from "./ingest"
-export { renderEvidenceDigest } from "./reducer"

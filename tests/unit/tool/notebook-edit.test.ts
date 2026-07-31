@@ -10,7 +10,12 @@ import { describe, expect, test } from "bun:test"
 import { editNotebook } from "@/tool/notebook-edit"
 
 const nb = (cells: unknown[]): string =>
-  JSON.stringify({ nbformat: 4, nbformat_minor: 5, metadata: { kernelspec: { name: "python3" } }, cells })
+  JSON.stringify({
+    nbformat: 4,
+    nbformat_minor: 5,
+    metadata: { kernelspec: { name: "python3" } },
+    cells,
+  })
 const codeCell = (src: string, id = "c1") => ({
   cell_type: "code",
   id,
@@ -19,9 +24,15 @@ const codeCell = (src: string, id = "c1") => ({
   execution_count: null,
   outputs: [],
 })
-const mdCell = (src: string, id = "m1") => ({ cell_type: "markdown", id, source: src.split(/(?<=\n)/), metadata: {} })
+const mdCell = (src: string, id = "m1") => ({
+  cell_type: "markdown",
+  id,
+  source: src.split(/(?<=\n)/),
+  metadata: {},
+})
 
-const parse = (json: string) => JSON.parse(json) as { cells: { cell_type: string; source: unknown }[] }
+const parse = (json: string) =>
+  JSON.parse(json) as { cells: { cell_type: string; source: unknown }[] }
 const cellText = (c: { source: unknown }): string =>
   typeof c.source === "string" ? c.source : (c.source as string[]).join("")
 
@@ -60,11 +71,25 @@ describe("editNotebook — str_replace within a cell", () => {
   })
 
   test("match not found ⇒ typed error", () => {
-    expect(editNotebook(nb([codeCell("x\n")]), { kind: "str_replace", cell: 0, oldStr: "zzz", newStr: "q" }).ok).toBe(false)
+    expect(
+      editNotebook(nb([codeCell("x\n")]), {
+        kind: "str_replace",
+        cell: 0,
+        oldStr: "zzz",
+        newStr: "q",
+      }).ok,
+    ).toBe(false)
   })
 
   test("cell index out of range ⇒ typed error", () => {
-    expect(editNotebook(nb([codeCell("x\n")]), { kind: "str_replace", cell: 9, oldStr: "x", newStr: "y" }).ok).toBe(false)
+    expect(
+      editNotebook(nb([codeCell("x\n")]), {
+        kind: "str_replace",
+        cell: 9,
+        oldStr: "x",
+        newStr: "y",
+      }).ok,
+    ).toBe(false)
   })
 })
 
@@ -82,7 +107,12 @@ describe("editNotebook — insert / delete", () => {
   })
 
   test("insert at end (index = length) appends", () => {
-    const r = editNotebook(nb([mdCell("# title\n")]), { kind: "insert", index: 1, cellType: "markdown", source: "tail\n" })
+    const r = editNotebook(nb([mdCell("# title\n")]), {
+      kind: "insert",
+      index: 1,
+      cellType: "markdown",
+      source: "tail\n",
+    })
     expect(r.ok).toBe(true)
     if (r.ok) expect(parse(r.json).cells).toHaveLength(2)
   })
@@ -110,10 +140,18 @@ describe("editNotebook — NEVER throws on malformed input", () => {
     expect(editNotebook('{"foo":1}', { kind: "delete", cell: 0 }).ok).toBe(false)
   })
   test("preserves notebook-level metadata + nbformat version", () => {
-    const r = editNotebook(nb([codeCell("x\n")]), { kind: "insert", index: 0, cellType: "code", source: "y\n" })
+    const r = editNotebook(nb([codeCell("x\n")]), {
+      kind: "insert",
+      index: 0,
+      cellType: "code",
+      source: "y\n",
+    })
     expect(r.ok).toBe(true)
     if (!r.ok) return
-    const out = JSON.parse(r.json) as { nbformat: number; metadata: { kernelspec: { name: string } } }
+    const out = JSON.parse(r.json) as {
+      nbformat: number
+      metadata: { kernelspec: { name: string } }
+    }
     expect(out.nbformat).toBe(4)
     expect(out.metadata.kernelspec.name).toBe("python3")
   })

@@ -235,8 +235,10 @@ const betterFamilyCoverageTieBreak = (
   const rightClass = familyCoverageClassOf(right)
   if (leftClass !== rightClass) return leftClass > rightClass
   if (leftClass !== 0) return false
-  return (left.familyCoverageMissing?.length ?? Number.POSITIVE_INFINITY) <
+  return (
+    (left.familyCoverageMissing?.length ?? Number.POSITIVE_INFINITY) <
     (right.familyCoverageMissing?.length ?? Number.POSITIVE_INFINITY)
+  )
 }
 
 const chooseBestCandidate = (

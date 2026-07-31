@@ -26,7 +26,7 @@
  *   truncation leaves a marker `… <N bytes truncated>`.
  */
 import { hasPytestFailureMarkers, pinPytestAssertion } from "./pytest-assertion-pin"
-import { combinedFailureTailOf, type BuildRepairContextArgs } from "./types"
+import { type BuildRepairContextArgs, combinedFailureTailOf } from "./types"
 
 const DEFAULT_MAX = 12000
 
@@ -69,7 +69,10 @@ const renderValidationGate = (args: {
   exitCode: number | undefined
   maxCmdBytes: number
 }): string[] => {
-  const cmd = args.cmd === undefined || args.cmd === "" ? "(missing command)" : trimHead(args.cmd, args.maxCmdBytes)
+  const cmd =
+    args.cmd === undefined || args.cmd === ""
+      ? "(missing command)"
+      : trimHead(args.cmd, args.maxCmdBytes)
   switch (args.source) {
     case "primary_rail":
       if (args.cmdWithheld) {

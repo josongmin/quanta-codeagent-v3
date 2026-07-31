@@ -168,8 +168,7 @@ describe("repair-round llm evidence", () => {
     expect(
       out.packet.missingEvidence.some(
         (m) =>
-          m.kind === "verification_command" &&
-          m.reason === "validation_gate_missing_command_text",
+          m.kind === "verification_command" && m.reason === "validation_gate_missing_command_text",
       ),
     ).toBe(false)
     expect(out.seedMsg).toContain("Command: (withheld: hidden verification selector)")

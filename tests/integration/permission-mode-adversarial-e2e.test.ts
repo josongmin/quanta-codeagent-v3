@@ -15,8 +15,8 @@ import type { AgentConfig } from "@/agent"
 import { buildInteractiveTurnAssembler } from "@/apps/web-daemon/runtime-factory"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
-import type { HITLTier } from "@/shared"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
+import type { HITLTier } from "@/shared"
 import { StdoutStream } from "@/stream"
 import { type Tool, type ToolEvent, ToolRegistry } from "@/tool"
 
@@ -179,7 +179,11 @@ describe("permission-mode switch — adversarial e2e", () => {
     const counts = { n: 0 }
     const { session, turn } = await harness({
       tools: [tool("danger", counts)],
-      scripts: [...turnCalling("danger", "a"), ...turnCalling("danger", "b"), ...turnCalling("danger", "c")],
+      scripts: [
+        ...turnCalling("danger", "a"),
+        ...turnCalling("danger", "b"),
+        ...turnCalling("danger", "c"),
+      ],
       onConfirm: async () => false, // default/declined ⇒ gated out
     })
     await turn("t1") // default ⇒ asked+declined ⇒ not run
@@ -197,7 +201,11 @@ describe("permission-mode switch — adversarial e2e", () => {
     const counts = { n: 0 }
     const { session, turn } = await harness({
       tools: [tool("danger", counts)],
-      scripts: [...turnCalling("danger", "a"), ...turnCalling("danger", "b"), ...turnCalling("danger", "c")],
+      scripts: [
+        ...turnCalling("danger", "a"),
+        ...turnCalling("danger", "b"),
+        ...turnCalling("danger", "c"),
+      ],
       onConfirm: async () => false,
     })
     await session.permission.set("bypass")

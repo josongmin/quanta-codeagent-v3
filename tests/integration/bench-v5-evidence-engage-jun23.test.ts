@@ -4,11 +4,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { runInstance } from "../../src/apps/bench/eval"
+import type { Instance } from "../../src/apps/bench/types"
 import {
   drainReproVoteOutcomes,
   resetReproVoteOutcomes,
 } from "../../src/runner/batch/eval/repair/repro-vote"
-import type { Instance } from "../../src/apps/bench/types"
 import { scopedEnv } from "../_support/scoped-env"
 
 /**
@@ -200,7 +200,11 @@ describe("bench v5 evidence ENGAGE (jun-23)", () => {
         mkdirSync(repo, { recursive: true })
         writeFileSync(join(repo, "calc.py"), "def add(a, b):\n    return a - b\n")
         const llm = new CapturingRouteLLM()
-        const result = await runInstance(calcInstance(repo), { llm, maxTurns: 5, timeoutMs: 30_000 })
+        const result = await runInstance(calcInstance(repo), {
+          llm,
+          maxTurns: 5,
+          timeoutMs: 30_000,
+        })
         expect(result.adaptiveRoute?.outcome).toBe("finalize")
         expect(llm.routePrompts.length).toBeGreaterThanOrEqual(1)
         // The EXACT bytes the router-model was shown carry the coherent contract.
@@ -211,7 +215,9 @@ describe("bench v5 evidence ENGAGE (jun-23)", () => {
           expect(prompt).not.toContain('"stage": "selection_explanation"')
           expect(prompt).not.toContain("explain_selection_outcome")
         }
-        expect(llm.routePrompts.some((prompt) => prompt.includes('"candidateEditSurface"'))).toBe(true)
+        expect(llm.routePrompts.some((prompt) => prompt.includes('"candidateEditSurface"'))).toBe(
+          true,
+        )
       })
     }),
     20_000,
@@ -236,7 +242,11 @@ describe("bench v5 evidence ENGAGE (jun-23)", () => {
         // instead assert the negative: after the run the sink is empty because
         // the driver drained it, and the result carries no foreign outcomes.)
         const llm = new CapturingRouteLLM()
-        const result = await runInstance(calcInstance(repo), { llm, maxTurns: 5, timeoutMs: 30_000 })
+        const result = await runInstance(calcInstance(repo), {
+          llm,
+          maxTurns: 5,
+          timeoutMs: 30_000,
+        })
         // No repro-vote validator ran (no reproducing set) ⇒ field omitted, NOT a
         // stale/foreign tally. This proves reset+drain leave no cross-instance residue.
         expect(result.reproVoteOutcomes).toBeUndefined()

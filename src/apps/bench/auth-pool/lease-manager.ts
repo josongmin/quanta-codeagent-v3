@@ -148,10 +148,7 @@ export class AuthLeaseManager {
         if (result.rateLimited) {
           state.consecutiveRateLimited += 1
           const baseSec = state.entry.cooldownBaseSec ?? DEFAULT_COOLDOWN_BASE_SEC
-          const sec = Math.min(
-            MAX_COOLDOWN_SEC,
-            baseSec * 2 ** (state.consecutiveRateLimited - 1),
-          )
+          const sec = Math.min(MAX_COOLDOWN_SEC, baseSec * 2 ** (state.consecutiveRateLimited - 1))
           state.cooldownUntil = this.now() + sec * 1000
         } else if (result.completed) {
           state.consecutiveRateLimited = 0

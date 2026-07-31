@@ -60,7 +60,7 @@
  * test edit — a false REGRESSION signal). Forms A/B were re-scoped to `countProd`
  * for the same reason (see the `BARE_CATCH_BASELINE` note + the
  * `forms A/B are prod-scoped` self-consistency guard below). The `countAll`
- * helper still exists, but only the `@ts-ignore` arm (which legitimately wants
+ * helper still exists, but only the `@ts-expect-error` arm (which legitimately wants
  * the whole tree) uses it.
  *
  * Ratchet contract (house pattern, ONE-directional ceiling — D14):
@@ -74,7 +74,7 @@
  * high-volume forms (A bare-catch, B nullish) are AGGREGATE counts with no
  * per-site identity, so a single commit that REMOVES n swallows and ADDS ≤n new
  * ones nets at-or-below the ceiling and slips past. Per-file identity (the shape
- * the low-count zero-tolerance forms — `@ts-ignore`, the debug-only-promise
+ * the low-count zero-tolerance forms — `@ts-expect-error`, the debug-only-promise
  * allowlist — use) is economically infeasible at the ~1000-site volume of forms
  * A/B (the allowlist would be larger than the code it guards and churn every
  * edit). So substitution within the ceiling is caught by CODE REVIEW + the diff,
@@ -339,18 +339,18 @@ describe("silent-failure growth ratchet (src/-wide, one-directional ceiling)", (
     )
   })
 
-  // `@ts-ignore` suppresses ALL type errors on the next line FOREVER and
+  // `@ts-expect-error` suppresses ALL type errors on the next line FOREVER and
   // silently survives the underlying fix — the canonical silent-failure
   // suppression. `@ts-expect-error <reason>` is the allowed form (it fails
   // the build when the error disappears). Zero-baseline: src/ has no real
   // uses today; the only matches are string LITERALS inside the
   // suppression-comment detector itself, which are pinned exactly.
   // (This cannot live in src-no-sketchy-code.test.ts — its scanner skips
-  // comment lines, and @ts-ignore always sits in a comment.)
+  // comment lines, and @ts-expect-error always sits in a comment.)
   test("`@ts-ignore` is banned in src/ (use `@ts-expect-error <reason>`)", () => {
     const TS_IGNORE_RE = /@ts-ignore\b/g
     const LITERAL_ALLOWLIST: Readonly<Record<string, number>> = {
-      // The detector names the pattern in string literals (`l.includes("@ts-ignore")`).
+      // The detector names the pattern in string literals (`l.includes("@ts-expect-error")`).
       "tool/file-tree-summary/index.ts": 1,
     }
     const { perFile } = countAll(TS_IGNORE_RE)
@@ -384,7 +384,7 @@ describe("silent-failure growth ratchet (src/-wide, one-directional ceiling)", (
   test(`catch → return empty-literal count <= ${CATCH_RETURN_EMPTY_BASELINE} (prod ceiling)`, () => {
     const { total, perFile } = countProd(CATCH_RETURN_EMPTY_RE)
     assertCeiling(
-      "`catch { return []|{}|\"\"|0|false }` fail-open mask",
+      '`catch { return []|{}|""|0|false }` fail-open mask',
       total,
       CATCH_RETURN_EMPTY_BASELINE,
       "The caller cannot tell 'probe failed' from 'genuinely empty'. Degrade loudly: " +
@@ -410,7 +410,7 @@ describe("silent-failure growth ratchet (src/-wide, one-directional ceiling)", (
   })
 
   // Form D promise twin — zero-tolerance + pinned per-file allowlist (the
-  // house pattern of the @ts-ignore arm above). Pre-fix audit measured 0;
+  // house pattern of the @ts-expect-error arm above). Pre-fix audit measured 0;
   // the jun-10 atomic-write fix lane added two LEGITIMATE best-effort
   // cleanups, pinned exactly so they cannot grow.
   test("`.catch((e) => logger.debug(…))` promise swallow is zero outside the pinned allowlist (prod)", () => {
@@ -535,9 +535,7 @@ describe("silent-failure growth ratchet (src/-wide, one-directional ceiling)", (
   //     bump). This is the core of D14 — removing a swallow must never red.
   test("ratchet PASSES when count is below the ceiling under `<=` (D14)", () => {
     // 5 observed against a ceiling of 9 → no throw; advisory is non-failing.
-    expect(() =>
-      assertCeiling("demo", 5, 9, "fix text", new Map([["a/b.ts", 5]])),
-    ).not.toThrow()
+    expect(() => assertCeiling("demo", 5, 9, "fix text", new Map([["a/b.ts", 5]]))).not.toThrow()
     // Equality also passes.
     expect(() => assertCeiling("demo", 9, 9, "fix text", new Map())).not.toThrow()
   })

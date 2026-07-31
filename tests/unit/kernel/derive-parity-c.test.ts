@@ -27,7 +27,6 @@ import { describe, expect, test } from "bun:test"
 import { BENCH } from "@/config/knob-inventory/bench"
 import type { KnobInventoryEntry } from "@/config/knob-inventory/types"
 import type { AnyKnobSchema } from "@/config/knob-schema/contracts"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 import { deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
 import {
   closeoutGuardSchema,
@@ -37,6 +36,7 @@ import {
   verifySelectReproSchema,
   workingStateSchema,
 } from "@/config/knob-schema/schemas/bench-c"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 // Live registry knobs (their parse is the ground truth).
 import { closeoutGuardKnob } from "@/runner/knobs/knobs/closeout-guard"
 import { hooksKnob } from "@/runner/knobs/knobs/hooks"

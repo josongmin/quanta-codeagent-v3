@@ -20,13 +20,13 @@
  */
 import { describe, expect, test } from "bun:test"
 import type { TurnContextInput } from "../../../src/agent/prompt"
-import { PacketBlindnessViolation } from "../../../src/runner/batch/eval/llm-evidence-packet"
 import {
   describeForkExperiments,
   FORK_EXPERIMENTS,
   type ForkExperiment,
   resolveForkExperiments,
 } from "../../../src/apps/bench/eval/fork-experiments"
+import { PacketBlindnessViolation } from "../../../src/runner/batch/eval/llm-evidence-packet"
 
 /** Build a minimal real `TurnContextInput`. Only `baseMessages` is exercised by
  *  the mutators; the rest is cast to satisfy TS without dragging the full type. */

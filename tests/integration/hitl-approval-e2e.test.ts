@@ -26,11 +26,11 @@ import { join } from "node:path"
 import { z } from "zod"
 import type { AgentConfig } from "@/agent"
 import { type AdmissibilityAction, runAdmissibilityGate } from "@/agent/admissibility-gate"
-import { __testing as composeTesting } from "@/apps/cli/repl/runtime-context-compose"
 import {
   createMidTurnApprovalChannel,
   type MidTurnApprovalChannel,
 } from "@/apps/cli/repl/mid-turn-approval-channel"
+import { __testing as composeTesting } from "@/apps/cli/repl/runtime-context-compose"
 import { __testing as approvalTesting } from "@/host/runtime/internal/context-binding"
 import type { ToolUseBlock } from "@/llm"
 import { __resetDefaultPermissionStore, type PermissionContext } from "@/permission"

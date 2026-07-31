@@ -4,15 +4,15 @@ import { type CapabilityNegotiator, defaultNegotiator } from "./capabilities"
 import {
   serverSupportsCompletions,
   serverSupportsPrompts,
-  serverSupportsResources,
   serverSupportsResourceSubscribe,
+  serverSupportsResources,
   serverSupportsTasks,
 } from "./client/capabilities-gate"
 import { isUnauthorizedError, McpError, unsupported } from "./client/errors"
 import {
-  dispatch as routeInbound,
   type InboundRouterContext,
   type PendingRequest,
+  dispatch as routeInbound,
 } from "./client/inbound-router"
 import { initializeWithDowngrade, pinNegotiatedVersion } from "./client/negotiate"
 import {
@@ -41,12 +41,12 @@ import type {
   McpResourceTemplate,
 } from "./resources"
 import {
+  directResourceChildren,
   type McpPromptResult,
   type McpResource,
   type McpResourceContent,
   type McpResourceObserver,
   type McpResult,
-  directResourceChildren,
   parseCompletionResult,
   parsePromptGet,
   parsePromptList,

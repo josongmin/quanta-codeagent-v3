@@ -25,14 +25,14 @@
  */
 
 import { describe, expect, mock, test } from "bun:test"
-import type { StatusBar } from "../status-bar"
-import type { TurnIndicator } from "../turn-indicator"
-import type { TurnSummaryCollector } from "../turn-summary"
 import { createBackgroundTurnPortal } from "../repl/background-turn-portal"
 import type { ConversationActionSurface } from "../repl/conversation-action-surface"
 import { shouldWireBackground } from "../repl/session-loop"
 import { installTurnCancel } from "../repl/turn-cancel-install"
 import { runOneTurn } from "../repl/turn-runner"
+import type { StatusBar } from "../status-bar"
+import type { TurnIndicator } from "../turn-indicator"
+import type { TurnSummaryCollector } from "../turn-summary"
 
 type Key = { name?: string; ctrl?: boolean }
 type KeyListener = (str: string | undefined, key: Key | undefined) => void
@@ -70,14 +70,10 @@ const makeFakeStdin = (): {
   }
 }
 
-const fakeStatusBar = (): StatusBar =>
-  ({ transient: () => {} }) as unknown as StatusBar
+const fakeStatusBar = (): StatusBar => ({ transient: () => {} }) as unknown as StatusBar
 
 /** Run the FSM against an injected stdin by temporarily swapping process.stdin. */
-const withFakeStdin = <T>(
-  fake: ReturnType<typeof makeFakeStdin>,
-  fn: () => T,
-): T => {
+const withFakeStdin = <T>(fake: ReturnType<typeof makeFakeStdin>, fn: () => T): T => {
   const orig = Object.getOwnPropertyDescriptor(process, "stdin")
   Object.defineProperty(process, "stdin", { value: fake.stdin, configurable: true })
   try {
@@ -178,8 +174,7 @@ describe("(B) turn-runner — Ctrl+B backgrounds a never-resolving body", () => 
     let movedAbort: AbortController | undefined
 
     // The body NEVER resolves — only a Ctrl+B can settle the turn.
-    const body = (_sig: AbortSignal): Promise<{ ok: true }> =>
-      new Promise<{ ok: true }>(() => {})
+    const body = (_sig: AbortSignal): Promise<{ ok: true }> => new Promise<{ ok: true }>(() => {})
 
     const ind = fakeIndicator()
     const runP = withFakeStdin(fake, () =>

@@ -33,7 +33,9 @@ const schema = z.object({
   symbol: z
     .string()
     .min(1)
-    .describe("The identifier to find references for (matched as a whole word, literal — no regex)"),
+    .describe(
+      "The identifier to find references for (matched as a whole word, literal — no regex)",
+    ),
   path: z
     .string()
     .optional()
@@ -80,7 +82,9 @@ export const buildFindRefsArgv = (input: Input, jailedPath?: string): string[] =
 const buildDefMatchers = (symbol: string): { decl: RegExp; assign: RegExp } => {
   const s = symbol.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
   return {
-    decl: new RegExp(`\\b(?:def|class|function|fn|func|interface|type|struct|trait|enum)\\s+${s}\\b`),
+    decl: new RegExp(
+      `\\b(?:def|class|function|fn|func|interface|type|struct|trait|enum)\\s+${s}\\b`,
+    ),
     assign: new RegExp(`^\\s*${s}\\s*(?::[^=]|=(?![=]))`),
   }
 }
@@ -136,7 +140,10 @@ export const formatFindRefs = (stdout: string, symbol: string): string => {
   )
   const fileLines = files
     .filter((_, index) => index < FILE_CAP)
-    .map(([f, s]) => `  ${f} — ${s.count} ref${s.count === 1 ? "" : "s"}${s.hasDef ? " (def here)" : ""}`)
+    .map(
+      ([f, s]) =>
+        `  ${f} — ${s.count} ref${s.count === 1 ? "" : "s"}${s.hasDef ? " (def here)" : ""}`,
+    )
     .join("\n")
   const fileMore =
     files.length > FILE_CAP

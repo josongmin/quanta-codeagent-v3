@@ -71,7 +71,10 @@ const ruleFor = (strategy: VerifyStrategy, id: string): PromptRule => ({
 export const REPRODUCE_FIRST_RULE: PromptRule = ruleFor("reproduce-first", "R-REPRODUCE-FIRST")
 
 /** General/CLI: run the narrowest check that exercises the change, after each edit. */
-export const VERIFY_AFTER_EDIT_RULE: PromptRule = ruleFor("verify-after-edit", "R-VERIFY-AFTER-EDIT")
+export const VERIFY_AFTER_EDIT_RULE: PromptRule = ruleFor(
+  "verify-after-edit",
+  "R-VERIFY-AFTER-EDIT",
+)
 
 /** SWE hidden-grader: local verification is DISABLED. NO-LEAK: the grader is named
  *  only inside a forbid clause. Active ⇒ `buildSystemPrompt` also suppresses the

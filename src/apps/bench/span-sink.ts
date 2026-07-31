@@ -133,10 +133,7 @@ export interface SpanSinkDeps {
  *   bare `/abs/path`      ⇒ file adapter
  * Back-compat: `QUANTA_OTEL_SAVE=/path` ⇒ `file:/path`. Unset/empty ⇒ noop.
  */
-export const resolveSpanSink = (
-  env: NodeJS.ProcessEnv,
-  deps: SpanSinkDeps = {},
-): SpanSinkPort => {
+export const resolveSpanSink = (env: NodeJS.ProcessEnv, deps: SpanSinkDeps = {}): SpanSinkPort => {
   const legacy =
     env.QUANTA_OTEL_SAVE !== undefined && env.QUANTA_OTEL_SAVE !== ""
       ? `file:${env.QUANTA_OTEL_SAVE}`

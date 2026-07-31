@@ -19,7 +19,10 @@ import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 
 const hasDebugpy = (): boolean => {
   try {
-    return Bun.spawnSync(["python3", "-c", "import debugpy"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
+    return (
+      Bun.spawnSync(["python3", "-c", "import debugpy"], { stdout: "ignore", stderr: "ignore" })
+        .exitCode === 0
+    )
   } catch {
     return false
   }
@@ -52,7 +55,11 @@ const debugProgram = async (
   const ctx = { cwd: dir, signal: opts.signal ?? new AbortController().signal } as ToolContext
   const input: Record<string, unknown> = {
     program: target,
-    breakpoints: bps.map((b) => ({ file: target, line: b.line, ...(b.condition ? { condition: b.condition } : {}) })),
+    breakpoints: bps.map((b) => ({
+      file: target,
+      line: b.line,
+      ...(b.condition ? { condition: b.condition } : {}),
+    })),
     ...(opts.adapterCommand ? { adapterCommand: opts.adapterCommand } : { adapter: "python" }),
     ...(opts.evaluate !== undefined ? { evaluate: opts.evaluate } : {}),
     ...(opts.stopOnEntry !== undefined ? { stopOnEntry: opts.stopOnEntry } : {}),
@@ -91,7 +98,9 @@ const debugMultiFile = async (
 D("debug_inspect — REAL debugpy e2e battery", () => {
   test("basic: stop + locals + evaluated expr", async () => {
     const r = await debugProgram(
-      ["def f(n):", "    total = sum(range(n))", "    return total  # line 3", "print(f(5))"].join("\n"),
+      ["def f(n):", "    total = sum(range(n))", "    return total  # line 3", "print(f(5))"].join(
+        "\n",
+      ),
       { line: 3, evaluate: "total + 100" },
     )
     expect(r.ok).toBe(true)
@@ -103,7 +112,12 @@ D("debug_inspect — REAL debugpy e2e battery", () => {
 
   test("multibyte/unicode locals are byte-accurate through the real chunked stream", async () => {
     const r = await debugProgram(
-      ['msg = "안녕 세계 🌍 テスト"', 'd = {"한국": 1, "日本": 2}', "z = 0  # line 3", "print(msg)"].join("\n"),
+      [
+        'msg = "안녕 세계 🌍 テスト"',
+        'd = {"한국": 1, "日本": 2}',
+        "z = 0  # line 3",
+        "print(msg)",
+      ].join("\n"),
       { line: 3 },
     )
     expect(r.ok).toBe(true)
@@ -113,7 +127,14 @@ D("debug_inspect — REAL debugpy e2e battery", () => {
 
   test("deep nested call stack assembles in order (top frame locals only)", async () => {
     const r = await debugProgram(
-      ["def a(n): return b(n)", "def b(n): return c(n)", "def c(n):", "    r = n * 2  # line 4", "    return r", "print(a(21))"].join("\n"),
+      [
+        "def a(n): return b(n)",
+        "def b(n): return c(n)",
+        "def c(n):",
+        "    r = n * 2  # line 4",
+        "    return r",
+        "print(a(21))",
+      ].join("\n"),
       { line: 4 },
     )
     expect(r.ok).toBe(true)
@@ -140,7 +161,9 @@ D("debug_inspect — REAL debugpy e2e battery", () => {
 
   test("complex data structures (nested dict/list) render", async () => {
     const r = await debugProgram(
-      ["data = {'items': [1, 2, {'k': 'v'}], 'n': 3}", "stop = True  # line 2", "print(data)"].join("\n"),
+      ["data = {'items': [1, 2, {'k': 'v'}], 'n': 3}", "stop = True  # line 2", "print(data)"].join(
+        "\n",
+      ),
       { line: 2 },
     )
     expect(r.ok).toBe(true)
@@ -151,7 +174,12 @@ D("debug_inspect — REAL debugpy e2e battery", () => {
 
   test("never-executed breakpoint (uncalled fn) ⇒ exited, not a hang", async () => {
     const r = await debugProgram(
-      ["def never():", "    secret = 1  # line 2 (never runs)", "    return secret", "print('done')"].join("\n"),
+      [
+        "def never():",
+        "    secret = 1  # line 2 (never runs)",
+        "    return secret",
+        "print('done')",
+      ].join("\n"),
       { line: 2 },
     )
     expect(r.ok).toBe(true)
@@ -179,7 +207,12 @@ D("debug_inspect — REAL debugpy e2e battery", () => {
 
   test("program receives args (sys.argv)", async () => {
     const r = await debugProgram(
-      ["import sys", "argv = sys.argv", "marker = 1  # line 3 (argv now bound)", "print(argv)"].join("\n"),
+      [
+        "import sys",
+        "argv = sys.argv",
+        "marker = 1  # line 3 (argv now bound)",
+        "print(argv)",
+      ].join("\n"),
       { line: 3, args: ["hello", "42"] },
     )
     expect(r.ok).toBe(true)
@@ -201,7 +234,14 @@ D("debug_inspect — REAL debugpy e2e battery", () => {
 
   test("CONDITIONAL breakpoint only stops when the condition is truthy", async () => {
     const r = await debugProgram(
-      ["def run():", "    found = -1", "    for i in range(10):", "        found = i  # line 4", "    return found", "print(run())"].join("\n"),
+      [
+        "def run():",
+        "    found = -1",
+        "    for i in range(10):",
+        "        found = i  # line 4",
+        "    return found",
+        "print(run())",
+      ].join("\n"),
       { breakpoints: [{ line: 4, condition: "i == 3" }] },
     )
     expect(r.ok).toBe(true)
@@ -212,7 +252,12 @@ D("debug_inspect — REAL debugpy e2e battery", () => {
     const r = await debugMultiFile(
       {
         "helper.py": ["def helper(x):", "    y = x * 10  # line 2", "    return y"].join("\n"),
-        "main.py": ["from helper import helper", "def go():", "    return helper(7)", "print(go())"].join("\n"),
+        "main.py": [
+          "from helper import helper",
+          "def go():",
+          "    return helper(7)",
+          "print(go())",
+        ].join("\n"),
       },
       "main.py",
       [{ file: "helper.py", line: 2 }],
@@ -246,7 +291,10 @@ D("debug_inspect — REAL debugpy e2e battery", () => {
   }, 30_000)
 
   test("missing program file ⇒ resolves (exited), never hangs", async () => {
-    const r = await debugProgram("unused = 1\n", { line: 1, program: "/tmp/nonexistent-prog-zzz.py" })
+    const r = await debugProgram("unused = 1\n", {
+      line: 1,
+      program: "/tmp/nonexistent-prog-zzz.py",
+    })
     expect(r.ok).toBe(true)
     expect(r.output).toContain("ran to completion")
   }, 30_000)
@@ -266,7 +314,10 @@ const lldbDapPath = (): string | undefined => {
     /* not macOS / no xcrun */
   }
   try {
-    if (Bun.spawnSync(["lldb-dap", "--help"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0) return "lldb-dap"
+    if (
+      Bun.spawnSync(["lldb-dap", "--help"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
+    )
+      return "lldb-dap"
   } catch {
     /* not on PATH */
   }
@@ -274,7 +325,9 @@ const lldbDapPath = (): string | undefined => {
 }
 const hasClang = (): boolean => {
   try {
-    return Bun.spawnSync(["clang", "--version"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
+    return (
+      Bun.spawnSync(["clang", "--version"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
+    )
   } catch {
     return false
   }
@@ -288,17 +341,28 @@ DL("debug_inspect — REAL lldb-dap e2e (C, second language)", () => {
     const csrc = join(dir, "prog.c")
     const bin = join(dir, "prog")
     writeFileSync(csrc, src)
-    const r = Bun.spawnSync(["clang", "-g", "-O0", "-o", bin, csrc], { stdout: "pipe", stderr: "pipe" })
+    const r = Bun.spawnSync(["clang", "-g", "-O0", "-o", bin, csrc], {
+      stdout: "pipe",
+      stderr: "pipe",
+    })
     if (r.exitCode !== 0) throw new Error(`clang failed: ${r.stderr.toString()}`)
     return { dir, bin, csrc }
   }
-  const runC = async (bin: string, csrc: string, cwd: string, bp: { line: number; condition?: string }, evaluate?: string): Promise<ToolResult> => {
+  const runC = async (
+    bin: string,
+    csrc: string,
+    cwd: string,
+    bp: { line: number; condition?: string },
+    evaluate?: string,
+  ): Promise<ToolResult> => {
     const tool = makeDebugInspectTool()
     const ctx = { cwd, signal: new AbortController().signal } as ToolContext
     const input = {
       program: bin,
       adapterCommand: [LLDB], // resolved lldb-dap (macOS Xcode path / PATH)
-      breakpoints: [{ file: csrc, line: bp.line, ...(bp.condition ? { condition: bp.condition } : {}) }],
+      breakpoints: [
+        { file: csrc, line: bp.line, ...(bp.condition ? { condition: bp.condition } : {}) },
+      ],
       ...(evaluate ? { evaluate } : {}),
     }
     let r: ToolResult | undefined
@@ -310,7 +374,18 @@ DL("debug_inspect — REAL lldb-dap e2e (C, second language)", () => {
 
   test("C: stops at breakpoint, reports stack + locals + evaluated expr", async () => {
     const { dir, bin, csrc } = compile(
-      ["#include <stdio.h>", "int add(int a, int b) {", "    int sum = a + b;  // line 3", "    return sum;", "}", "int main() {", "    int r = add(20, 22);", "    printf(\"%d\\n\", r);", "    return 0;", "}"].join("\n"),
+      [
+        "#include <stdio.h>",
+        "int add(int a, int b) {",
+        "    int sum = a + b;  // line 3",
+        "    return sum;",
+        "}",
+        "int main() {",
+        "    int r = add(20, 22);",
+        '    printf("%d\\n", r);',
+        "    return 0;",
+        "}",
+      ].join("\n"),
     )
     const r = await runC(bin, csrc, dir, { line: 3 }, "a + b")
     expect(r.ok).toBe(true)
@@ -323,7 +398,17 @@ DL("debug_inspect — REAL lldb-dap e2e (C, second language)", () => {
 
   test("C: conditional breakpoint in a loop stops at the matching iteration", async () => {
     const { dir, bin, csrc } = compile(
-      ["#include <stdio.h>", "int main() {", "    int acc = 0;", "    for (int i = 0; i < 10; i++) {", "        acc += i;  // line 5", "    }", "    printf(\"%d\\n\", acc);", "    return 0;", "}"].join("\n"),
+      [
+        "#include <stdio.h>",
+        "int main() {",
+        "    int acc = 0;",
+        "    for (int i = 0; i < 10; i++) {",
+        "        acc += i;  // line 5",
+        "    }",
+        '    printf("%d\\n", acc);',
+        "    return 0;",
+        "}",
+      ].join("\n"),
     )
     const r = await runC(bin, csrc, dir, { line: 5, condition: "i == 4" })
     expect(r.ok).toBe(true)
@@ -332,7 +417,11 @@ DL("debug_inspect — REAL lldb-dap e2e (C, second language)", () => {
 
   test("C: never-hit breakpoint ⇒ exited, no hang (terminate-at-bp robustness)", async () => {
     const { dir, bin, csrc } = compile(
-      ["#include <stdio.h>", "int dead(void) { return 99; }  // line 2 (never called)", "int main() { printf(\"ok\\n\"); return 0; }"].join("\n"),
+      [
+        "#include <stdio.h>",
+        "int dead(void) { return 99; }  // line 2 (never called)",
+        'int main() { printf("ok\\n"); return 0; }',
+      ].join("\n"),
     )
     const r = await runC(bin, csrc, dir, { line: 2 })
     expect(r.ok).toBe(true)
@@ -345,7 +434,9 @@ DL("debug_inspect — REAL lldb-dap e2e (C, second language)", () => {
 //    DWARF comp_dir uses the canonical path; on macOS /tmp → /private/tmp). ──
 const hasCargo = (): boolean => {
   try {
-    return Bun.spawnSync(["cargo", "--version"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
+    return (
+      Bun.spawnSync(["cargo", "--version"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
+    )
   } catch {
     return false
   }
@@ -357,17 +448,54 @@ DR("debug_inspect — REAL Rust e2e via lldb-dap (third language)", () => {
     // realpath the dir so the breakpoint path matches rustc's DWARF comp_dir.
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "dap-rs-")))
     mkdirSync(join(dir, "src"), { recursive: true })
-    writeFileSync(join(dir, "Cargo.toml"), ['[package]', 'name = "t"', 'version = "0.1.0"', 'edition = "2021"', "", "[[bin]]", 'name = "t"', 'path = "src/main.rs"'].join("\n"))
+    writeFileSync(
+      join(dir, "Cargo.toml"),
+      [
+        "[package]",
+        'name = "t"',
+        'version = "0.1.0"',
+        'edition = "2021"',
+        "",
+        "[[bin]]",
+        'name = "t"',
+        'path = "src/main.rs"',
+      ].join("\n"),
+    )
     const rs = join(dir, "src", "main.rs")
-    writeFileSync(rs, ["fn compute(n: i32) -> i32 {", "    let mut total = 0;", "    for i in 0..n {", "        total += i;  // line 4", "    }", "    total", "}", "fn main() {", "    let r = compute(5);", '    println!("{}", r);', "}"].join("\n"))
-    const build = Bun.spawnSync(["cargo", "build", "-q"], { cwd: dir, stdout: "pipe", stderr: "pipe", env: { ...process.env, PATH: `${process.env.HOME}/.cargo/bin:${process.env.PATH}` } })
+    writeFileSync(
+      rs,
+      [
+        "fn compute(n: i32) -> i32 {",
+        "    let mut total = 0;",
+        "    for i in 0..n {",
+        "        total += i;  // line 4",
+        "    }",
+        "    total",
+        "}",
+        "fn main() {",
+        "    let r = compute(5);",
+        '    println!("{}", r);',
+        "}",
+      ].join("\n"),
+    )
+    const build = Bun.spawnSync(["cargo", "build", "-q"], {
+      cwd: dir,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, PATH: `${process.env.HOME}/.cargo/bin:${process.env.PATH}` },
+    })
     expect(build.exitCode).toBe(0)
     const bin = join(dir, "target", "debug", "t")
     const tool = makeDebugInspectTool()
     const ctx = { cwd: dir, signal: new AbortController().signal } as ToolContext
     let r: ToolResult | undefined
     for await (const ev of tool.execute(
-      { program: bin, adapterCommand: [LLDB], breakpoints: [{ file: rs, line: 4 }], evaluate: "n" } as never,
+      {
+        program: bin,
+        adapterCommand: [LLDB],
+        breakpoints: [{ file: rs, line: 4 }],
+        evaluate: "n",
+      } as never,
       ctx,
     ) as AsyncIterable<ToolEvent>)
       if (ev.type === "result") r = ev.result
@@ -388,7 +516,9 @@ DR("debug_inspect — REAL Rust e2e via lldb-dap (third language)", () => {
 //    the `debug_inspect` tool's `adapter:"node"` path against a REAL node. ──
 const hasNode = (): boolean => {
   try {
-    return Bun.spawnSync(["node", "--version"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
+    return (
+      Bun.spawnSync(["node", "--version"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
+    )
   } catch {
     return false
   }
@@ -401,12 +531,24 @@ DNODE("debug_inspect — REAL Node e2e via CDP (node --inspect-brk)", () => {
     const prog = join(dir, "x.mjs")
     writeFileSync(
       prog,
-      ["function compute(n) {", "  let total = 0", "  for (let i = 0; i < n; i++) total += i", "  const result = total", "  return result // line 5", "}", "globalThis.__r = compute(5)", ""].join("\n"),
+      [
+        "function compute(n) {",
+        "  let total = 0",
+        "  for (let i = 0; i < n; i++) total += i",
+        "  const result = total",
+        "  return result // line 5",
+        "}",
+        "globalThis.__r = compute(5)",
+        "",
+      ].join("\n"),
     )
     const tool = makeDebugInspectTool() // real ports (CDP carrier)
     const ctx = { cwd: dir, signal: new AbortController().signal } as ToolContext
     let r: ToolResult | undefined
-    for await (const ev of tool.execute({ program: prog, adapter: "node", breakpoints: [{ file: prog, line: 5 }] } as never, ctx) as AsyncIterable<ToolEvent>)
+    for await (const ev of tool.execute(
+      { program: prog, adapter: "node", breakpoints: [{ file: prog, line: 5 }] } as never,
+      ctx,
+    ) as AsyncIterable<ToolEvent>)
       if (ev.type === "result") r = ev.result
     expect(r?.ok).toBe(true)
     expect(r?.output).toContain("Stopped")
@@ -420,13 +562,31 @@ DNODE("debug_inspect — REAL Node break-on-throw via CDP (T-01)", () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "dap-node-exc-")))
     const prog = join(dir, "boom.mjs")
     // Uncaught TypeError thrown in user code — no line breakpoint needed.
-    writeFileSync(prog, ["function go() {", "  const obj = null", "  return obj.missing() // throws TypeError", "}", "go()", ""].join("\n"))
+    writeFileSync(
+      prog,
+      [
+        "function go() {",
+        "  const obj = null",
+        "  return obj.missing() // throws TypeError",
+        "}",
+        "go()",
+        "",
+      ].join("\n"),
+    )
     const tool = makeDebugInspectTool() // real CDP carrier
     const ctx = { cwd: dir, signal: new AbortController().signal } as ToolContext
     let r: ToolResult | undefined
     // Line bp on a NON-EXISTENT line (99) so it never binds/fires — the THROW is
     // the only stop, proving break-on-throw (not the line bp) caught it.
-    for await (const ev of tool.execute({ program: prog, adapter: "node", breakpoints: [{ file: prog, line: 99 }], exceptionBreakpoints: true } as never, ctx) as AsyncIterable<ToolEvent>)
+    for await (const ev of tool.execute(
+      {
+        program: prog,
+        adapter: "node",
+        breakpoints: [{ file: prog, line: 99 }],
+        exceptionBreakpoints: true,
+      } as never,
+      ctx,
+    ) as AsyncIterable<ToolEvent>)
       if (ev.type === "result") r = ev.result
     expect(r?.ok).toBe(true)
     expect(r?.output).toContain("Stopped (exception)")

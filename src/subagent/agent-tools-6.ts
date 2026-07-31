@@ -26,9 +26,9 @@
  * already owns.
  */
 
-import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { runtimeConfig } from "@/shared"
 import { withDelegationPolicy } from "@/shared/delegation-policy"
+import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { dispatchSubagent6, type Subagent6Deps } from "./dispatch-6"
 import { InputChannelRegistry, PtyTable } from "./handlers-6"
 import {

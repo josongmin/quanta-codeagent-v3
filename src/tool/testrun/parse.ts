@@ -378,7 +378,8 @@ export const parsePytest = (output: string): TestRunResult => {
   let curName: string | undefined
   let cur: { file: string; line: number } | undefined
   const flush = (): void => {
-    if (curName !== undefined && cur !== undefined && !blockLocByKey.has(curName)) blockLocByKey.set(curName, cur)
+    if (curName !== undefined && cur !== undefined && !blockLocByKey.has(curName))
+      blockLocByKey.set(curName, cur)
   }
   for (const raw of lines) {
     const t = raw.trim()

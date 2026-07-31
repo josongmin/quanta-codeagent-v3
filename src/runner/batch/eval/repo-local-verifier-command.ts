@@ -13,9 +13,7 @@ const normalizedTestCmdOf = (instance: Pick<Instance, "testCmd">): string | unde
   return NOOP_TEST_COMMANDS.has(cmd) ? undefined : cmd
 }
 
-const selectedFilesVerifierCommandOf = (
-  instance: Pick<Instance, "swebench">,
-): string | undefined =>
+const selectedFilesVerifierCommandOf = (instance: Pick<Instance, "swebench">): string | undefined =>
   selectedTestFilesVerifierCommand({
     repoLanguage: instance.swebench?.repoLanguage,
     selectedTestFilesToRun: instance.swebench?.selectedTestFilesToRun,

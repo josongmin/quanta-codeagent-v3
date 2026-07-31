@@ -3,11 +3,11 @@ import { runAgent } from "@/agent"
 import { renderAgentFleet } from "@/apps/cli/agents-fleet-panel"
 import { toAgentFleetRow } from "@/apps/cli/repl/slash-surface"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import type { SubagentObservation } from "@/protocol/subagent"
 import { decodeSubagentFrame, encodeSubagentFrame } from "@/protocol/subagent-frame"
 import { __resetRuntimeConfig } from "@/shared"
-import { defaultTools, ToolRegistry } from "@/tool"
-import type { SubagentObservation } from "@/protocol/subagent"
 import { TaskRegistry } from "@/subagent"
+import { defaultTools, ToolRegistry } from "@/tool"
 import { cfg, RecordingStream, text, withTimeout } from "./_harness"
 
 /**
@@ -32,7 +32,9 @@ const agentCall = (id: string, prompt: string): StreamEvent[] => [
 const conversationText = (input: StreamInput): string =>
   input.messages
     .flatMap((m) =>
-      m.content.map((b) => (b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "")),
+      m.content.map((b) =>
+        b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "",
+      ),
     )
     .join(" ")
 
@@ -73,7 +75,11 @@ describe("Sub-Agents panel — real loop + fake LLM end-to-end", () => {
   test("fake LLM spawns a real subagent ⇒ registry + events + CLI tree + web frame, secret scrubbed", async () => {
     const llm = new RoutingLLM([
       // Parent turn 1: spawn a subagent with a routable marker in the prompt.
-      { match: "PARENT-GO", events: agentCall("a1", "CHILD-TASK investigate the flake"), once: true },
+      {
+        match: "PARENT-GO",
+        events: agentCall("a1", "CHILD-TASK investigate the flake"),
+        once: true,
+      },
       // Child turn 1: return a final answer that (adversarially) leaks a secret.
       { match: "CHILD-TASK", events: text(`CHILD-ANSWER done, key was ${SECRET}`) },
       // Parent turn 2: after the child's tool_result comes back, finish.
@@ -115,9 +121,7 @@ describe("Sub-Agents panel — real loop + fake LLM end-to-end", () => {
 
     // 3. onSubagentEvent fired spawn + a completed status (web panel reads this).
     const spawns = events.filter((e) => e.type === "subagent_spawn")
-    const settles = events.filter(
-      (e) => e.type === "subagent_status" && e.status === "completed",
-    )
+    const settles = events.filter((e) => e.type === "subagent_status" && e.status === "completed")
     expect(spawns.length).toBeGreaterThanOrEqual(1)
     expect(settles.length).toBeGreaterThanOrEqual(1)
     expect(spawns[0]?.taskId).toBe(child?.id ?? "")

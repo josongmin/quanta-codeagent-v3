@@ -31,11 +31,9 @@ describe("createLLM — QUANTA_LLM_REPLAY deterministic replay (jun-11)", () => 
       { type: "message_stop", stop_reason: "end_turn" } as StreamEvent,
     ])
     // anthropic + NO api key would normally throw; the replay branch short-circuits.
-    const llm = createLLM(
-      "anthropic",
-      {},
-      { QUANTA_LLM_REPLAY: path } as unknown as Parameters<typeof createLLM>[2],
-    )
+    const llm = createLLM("anthropic", {}, { QUANTA_LLM_REPLAY: path } as unknown as Parameters<
+      typeof createLLM
+    >[2])
     const got: string[] = []
     for await (const ev of llm.stream({ messages: [], system: "", tools: [] } as StreamInput)) {
       got.push(ev.type)

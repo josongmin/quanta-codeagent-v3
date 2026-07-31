@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { lastTurnOutcomeFromAgentOutcome } from "../../../src/reactor/agent-outcome-adapter"
 import { approvalPlaceholderOutcome } from "../../../src/host/runtime/internal/context-binding/approval-support"
+import { lastTurnOutcomeFromAgentOutcome } from "../../../src/reactor/agent-outcome-adapter"
 
 /**
  * ALBB-18 (5) — a turn paused awaiting HITL approval must NOT report the

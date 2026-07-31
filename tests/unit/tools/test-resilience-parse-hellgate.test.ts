@@ -17,8 +17,8 @@ import { describe, expect, test } from "bun:test"
 import {
   isQuarantined,
   type ParsedFailure,
-  type QuarantineLedger,
   parseBunTestOutput,
+  type QuarantineLedger,
 } from "../../../tools/test-resilience/parse"
 
 describe("HELLGATE: bun-test output parser", () => {
@@ -53,9 +53,10 @@ describe("HELLGATE: bun-test output parser", () => {
   })
 
   test("strips ANSI color codes before matching", () => {
-    const out = ["\x1b[2mtests/unit/c.test.ts:\x1b[0m", "\x1b[31m(fail)\x1b[0m groupC > red [1ms]"].join(
-      "\n",
-    )
+    const out = [
+      "\x1b[2mtests/unit/c.test.ts:\x1b[0m",
+      "\x1b[31m(fail)\x1b[0m groupC > red [1ms]",
+    ].join("\n")
     const r = parseBunTestOutput(out)
     expect(r.failures).toHaveLength(1)
     expect(r.failures[0]?.file).toBe("tests/unit/c.test.ts")
@@ -70,7 +71,9 @@ describe("HELLGATE: bun-test output parser", () => {
   })
 
   test("a (fail) with no timing suffix still parses (name not truncated)", () => {
-    const r = parseBunTestOutput(["tests/unit/e.test.ts:", "(fail) plain name no timing"].join("\n"))
+    const r = parseBunTestOutput(
+      ["tests/unit/e.test.ts:", "(fail) plain name no timing"].join("\n"),
+    )
     expect(r.failures[0]?.name).toBe("plain name no timing")
   })
 

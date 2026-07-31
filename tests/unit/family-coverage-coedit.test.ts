@@ -6,12 +6,8 @@ describe("family coverage co-edit", () => {
   test("coedit gate is default-OFF and explicit opt-in only", () => {
     expect(familyCoverageCoeditEnabled({})).toBe(false)
     expect(familyCoverageCoeditEnabled({ QUANTA_BENCH_FAMILY_COVERAGE_COEDIT: "1" })).toBe(true)
-    expect(
-      familyCoverageCoeditEnabled({ QUANTA_BENCH_FAMILY_COVERAGE_COEDIT: "true" }),
-    ).toBe(true)
-    expect(
-      familyCoverageCoeditEnabled({ QUANTA_BENCH_FAMILY_COVERAGE_COEDIT: "off" }),
-    ).toBe(false)
+    expect(familyCoverageCoeditEnabled({ QUANTA_BENCH_FAMILY_COVERAGE_COEDIT: "true" })).toBe(true)
+    expect(familyCoverageCoeditEnabled({ QUANTA_BENCH_FAMILY_COVERAGE_COEDIT: "off" })).toBe(false)
   })
 
   test("replays bounded exact-block donor edits onto one sibling file", () => {

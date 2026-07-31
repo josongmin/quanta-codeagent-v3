@@ -12,8 +12,8 @@ import { mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { evidenceLspStatic } from "@/agent/lsp-bridge"
-import { buildEvidence } from "@/tool/evidence/builder"
 import { defaultRuntimePort } from "@/tool/evidence"
+import { buildEvidence } from "@/tool/evidence/builder"
 import type { Toolchain } from "@/tool/testrun"
 
 const has = (b: string, ...a: string[]): boolean => {
@@ -60,7 +60,12 @@ DRUN("defaultRuntimePort — REAL C++ runtime (clang++ -g → lldb-dap)", () => 
       detect: async () => tc,
       // Synthesize the failure (the runtime is keyed off file+line; the ctest
       // parser path is unit-tested separately).
-      runTests: async () => ({ runner: "ctest", passed: 0, failed: [{ name: "main", file: join(dir, "t.cpp"), line: 5, message: "assert" }], ok: false }),
+      runTests: async () => ({
+        runner: "ctest",
+        passed: 0,
+        failed: [{ name: "main", file: join(dir, "t.cpp"), line: 5, message: "assert" }],
+        ok: false,
+      }),
       runtime: defaultRuntimePort,
       changedFiles: async () => ["t.cpp"],
     })

@@ -9,10 +9,10 @@ export {
   sanitizeTitle,
 } from "./osc-adapter"
 export type { IdleInfo, NotificationPort, PushStats, TurnCompleteInfo } from "./port"
+export { computePresence, type PresenceSignals } from "./presence-decision"
 export {
   type PushDecision,
   type PushDecisionInput,
   type PushDisabledReason,
   shouldPush,
 } from "./push-decision"
-export { computePresence, type PresenceSignals } from "./presence-decision"

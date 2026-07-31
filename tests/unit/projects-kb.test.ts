@@ -158,10 +158,7 @@ describe("projects-kb — store (deterministic)", () => {
     const store = createProjectsKbStore({ idFactory: (s) => `pk-${s}` })
     // Two occurrences of the query bracket the sentinel — a match-centered
     // snippet between them would leak the entire secret span.
-    store.index(
-      "span.txt",
-      new TextEncoder().encode(`start NEEDLE ${SENTINEL} NEEDLE end`),
-    )
+    store.index("span.txt", new TextEncoder().encode(`start NEEDLE ${SENTINEL} NEEDLE end`))
     const hits = store.searchLexical("needle", 10)
     expect(hits.length).toBe(1)
     const hit = hits[0]

@@ -15,9 +15,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { attachToDaemon } from "@/apps/cli/attach"
 import { main as startDaemon } from "@/apps/web-daemon"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
-import { attachToDaemon } from "@/apps/cli/attach"
 import { createStubRuntimeFactory } from "../../web-daemon/fixture"
 
 const handles: WebDaemonHandle[] = []

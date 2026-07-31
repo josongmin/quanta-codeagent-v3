@@ -16,13 +16,13 @@
  * pipeline as today).
  */
 
+import { isTruthyToken, type PromptSurfaceProfileSnapshot } from "@/shared"
 import type { PersonaKind } from "../persona"
 import { buildSystemPrompt, type EnvironmentPosture } from "../prompt"
 import type { AgentMode as PromptPackMode } from "../prompt-rules"
 import type { VerifyStrategy } from "../prompt-rules/verify-strategy"
 import type { PromptStyle } from "../prompt-style"
 import type { AgentMode as RunMode } from "../run-mode/types"
-import { isTruthyToken, type PromptSurfaceProfileSnapshot } from "@/shared"
 import { DEFAULT_MODE_VARIANTS, UNKNOWN_MODE_VARIANT } from "./mode-variants"
 import {
   assertValidVariantLines,

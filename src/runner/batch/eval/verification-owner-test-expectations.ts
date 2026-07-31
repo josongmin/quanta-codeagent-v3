@@ -398,7 +398,11 @@ const appendFactsFromTestFile = async (args: {
     -1,
   )
   if (size < 0 || size > MAX_TEST_FILE_BYTES) return false
-  const text = await withFsTimeout(readFile(abs, "utf8").catch(() => null), args.timeoutMs, null)
+  const text = await withFsTimeout(
+    readFile(abs, "utf8").catch(() => null),
+    args.timeoutMs,
+    null,
+  )
   if (text === null) return false
   for (const fact of expectationsFromTestFile(args.relPath, text, args.perFileExpectationCap)) {
     if (args.out.includes(fact)) continue

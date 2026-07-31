@@ -58,7 +58,14 @@ export interface GitToolsOpts {
 }
 
 // ADR-0105/0107: budget interface + helpers (closed-port; tools opt in).
-export { applyBudget, crossedTarget, type GitBudget, resolveGitBudget, resolveMaxCommits, withBudget } from "./_budget"
+export {
+  applyBudget,
+  crossedTarget,
+  type GitBudget,
+  resolveGitBudget,
+  resolveMaxCommits,
+  withBudget,
+} from "./_budget"
 export { gitBlameTool } from "./blame"
 export { gitBlameHeatmapTool, rankBlame } from "./blame-heatmap"
 export { type GitBranchSwitchToolOpts, gitBranchSwitchTool } from "./branch-switch"
@@ -137,46 +144,50 @@ export const gitTools = (runner: GitRunner = defaultGitRunner, opts: GitToolsOpt
   // same runner reference (byte-identical: no extra allocation).
   const walkedRunner = withBudget(runner, opts.budget)
   return [
-  gitDiffTool(runner) as Tool,
-  // Diff→prose AUTHORING (Codex `yeet` / Cursor compose). Read-only, tier
-  // "none" — these author a commit message / PR body but never mutate. Default-
-  // OFF: registered ONLY when an author LLM is wired (`opts.authorLLM`). Absent
-  // ⇒ omitted entirely (byte-identical legacy registry).
-  ...(opts.authorLLM !== undefined
-    ? [
-        gitComposeCommitTool(runner, opts.authorLLM) as Tool,
-        gitComposePrTool(runner, opts.authorLLM) as Tool,
-      ]
-    : []),
-  gitStatusTool(runner) as Tool,
-  gitLogTool(walkedRunner) as Tool,
-  gitBlameTool(walkedRunner) as Tool,
-  // Stage-1 fault-localization signals (read-only, concurrency-safe).
-  gitChurnTool(walkedRunner) as Tool,
-  gitBlameHeatmapTool(walkedRunner) as Tool,
-  // Upstream-divergence check (read-only, v0 chat=branch absorption, #5).
-  gitUpstreamCheckTool(walkedRunner) as Tool,
-  // Isolated diff reviewer (read-only, Claude Desktop `reviewDiff` absorption,
-  // ADR-0111). Sub-agent runner is host-injected via ctx.reviewerAgent.
-  gitReviewDiffTool(runner) as Tool,
-  // Moved-code classifier (ADR-0109) + conflict inspector (ADR-0111). Both
-  // read-only + concurrency-safe; expose existing pure cores as first-class
-  // tools so `pr-review-canvas` and `fix-merge-conflicts` skills have a typed
-  // surface to call instead of shelling raw git in the prompt.
-  gitMovedCodeTool(runner) as Tool,
-  gitConflictInspectTool(runner) as Tool,
-  gitCommitTool(
-    runner,
-    opts.gitDirectiveEmitter !== undefined ? { gitDirectiveEmitter: opts.gitDirectiveEmitter } : {},
-  ) as Tool,
-  gitBranchSwitchTool(
-    runner,
-    opts.gitDirectiveEmitter !== undefined ? { gitDirectiveEmitter: opts.gitDirectiveEmitter } : {},
-  ) as Tool,
-  // §7.2 long-tail — co-change / related-files tool (read-only, concurrency-
-  // safe). Default-OFF: registered ONLY when `opts.coChange` is true
-  // (QUANTA_GIT_CO_CHANGE gate). Absent/false ⇒ omitted (byte-identical legacy
-  // 12-tool registry). Appended LAST so the legacy ordering is untouched.
-  ...(opts.coChange === true ? [gitCoChangeTool(walkedRunner) as Tool] : []),
+    gitDiffTool(runner) as Tool,
+    // Diff→prose AUTHORING (Codex `yeet` / Cursor compose). Read-only, tier
+    // "none" — these author a commit message / PR body but never mutate. Default-
+    // OFF: registered ONLY when an author LLM is wired (`opts.authorLLM`). Absent
+    // ⇒ omitted entirely (byte-identical legacy registry).
+    ...(opts.authorLLM !== undefined
+      ? [
+          gitComposeCommitTool(runner, opts.authorLLM) as Tool,
+          gitComposePrTool(runner, opts.authorLLM) as Tool,
+        ]
+      : []),
+    gitStatusTool(runner) as Tool,
+    gitLogTool(walkedRunner) as Tool,
+    gitBlameTool(walkedRunner) as Tool,
+    // Stage-1 fault-localization signals (read-only, concurrency-safe).
+    gitChurnTool(walkedRunner) as Tool,
+    gitBlameHeatmapTool(walkedRunner) as Tool,
+    // Upstream-divergence check (read-only, v0 chat=branch absorption, #5).
+    gitUpstreamCheckTool(walkedRunner) as Tool,
+    // Isolated diff reviewer (read-only, Claude Desktop `reviewDiff` absorption,
+    // ADR-0111). Sub-agent runner is host-injected via ctx.reviewerAgent.
+    gitReviewDiffTool(runner) as Tool,
+    // Moved-code classifier (ADR-0109) + conflict inspector (ADR-0111). Both
+    // read-only + concurrency-safe; expose existing pure cores as first-class
+    // tools so `pr-review-canvas` and `fix-merge-conflicts` skills have a typed
+    // surface to call instead of shelling raw git in the prompt.
+    gitMovedCodeTool(runner) as Tool,
+    gitConflictInspectTool(runner) as Tool,
+    gitCommitTool(
+      runner,
+      opts.gitDirectiveEmitter !== undefined
+        ? { gitDirectiveEmitter: opts.gitDirectiveEmitter }
+        : {},
+    ) as Tool,
+    gitBranchSwitchTool(
+      runner,
+      opts.gitDirectiveEmitter !== undefined
+        ? { gitDirectiveEmitter: opts.gitDirectiveEmitter }
+        : {},
+    ) as Tool,
+    // §7.2 long-tail — co-change / related-files tool (read-only, concurrency-
+    // safe). Default-OFF: registered ONLY when `opts.coChange` is true
+    // (QUANTA_GIT_CO_CHANGE gate). Absent/false ⇒ omitted (byte-identical legacy
+    // 12-tool registry). Appended LAST so the legacy ordering is untouched.
+    ...(opts.coChange === true ? [gitCoChangeTool(walkedRunner) as Tool] : []),
   ]
 }

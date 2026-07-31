@@ -33,18 +33,15 @@ import {
   type AdmissibilityWaveAOptions,
   runAdmissibilityGate,
 } from "@/agent/admissibility-gate"
-import type {
-  ApprovalRequest,
-  ApprovalStateMachinePort,
-} from "@/agent/approval-state-machine"
+import type { ApprovalRequest, ApprovalStateMachinePort } from "@/agent/approval-state-machine"
 import { dispatchTool } from "@/agent/dispatch"
 import { buildAdmissibility } from "@/apps/cli/repl/runtime-context-compose"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { ToolUseBlock } from "@/llm"
 import type {
-  ApprovalDecision as ReviewerApprovalDecision,
   PermissionContext,
   ReviewContext,
+  ApprovalDecision as ReviewerApprovalDecision,
   ReviewerPort,
   ToolActionKeyed,
 } from "@/permission"

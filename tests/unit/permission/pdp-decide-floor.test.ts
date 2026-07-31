@@ -17,7 +17,9 @@ describe("PDP decideFloor — the security floor split [P2-T3]", () => {
   })
 
   test("always-confirm with needs-sandbox DEFERS (bash without a profile is not gated)", () => {
-    expect(decideFloor({ tier: "always-confirm", capability: { confirm: "needs-sandbox" } })).toBe("defer")
+    expect(decideFloor({ tier: "always-confirm", capability: { confirm: "needs-sandbox" } })).toBe(
+      "defer",
+    )
   })
 
   test("always-confirm with NO capability DEFERS (the inferToolTier catch-all stays mode-policy)", () => {
@@ -45,7 +47,8 @@ describe("PDP decideFloor — the security floor split [P2-T3]", () => {
     for (const tier of ALL_TIERS) {
       for (const c of confirms) {
         const capability = c === "no-cap" ? undefined : ({ confirm: c } as ToolCapability)
-        const expected = tier === "always-confirm" && c === "sensitive" ? "universal-floor" : "defer"
+        const expected =
+          tier === "always-confirm" && c === "sensitive" ? "universal-floor" : "defer"
         expect(decideFloor({ tier, capability })).toBe(expected)
       }
     }
@@ -62,7 +65,9 @@ describe("inferToolTier — capability drives the tier (SSOT) [P2-T3]", () => {
   }) => ({
     isReadOnly: () => over.readOnly ?? false,
     ...(over.hitlTier !== undefined ? { hitlTier: () => over.hitlTier as HITLTier } : {}),
-    ...(over.capability !== undefined ? { capability: () => over.capability as ToolCapability } : {}),
+    ...(over.capability !== undefined
+      ? { capability: () => over.capability as ToolCapability }
+      : {}),
   })
 
   test("capability sensitive ⇒ always-confirm tier even when the tool is read-only", () => {
@@ -74,14 +79,17 @@ describe("inferToolTier — capability drives the tier (SSOT) [P2-T3]", () => {
   })
 
   test("capability needs-sandbox ⇒ always-confirm tier (asks when no profile / hitl on)", () => {
-    expect(inferToolTier(tool({ readOnly: false, capability: { confirm: "needs-sandbox" } }), {})).toBe(
-      "always-confirm",
-    )
+    expect(
+      inferToolTier(tool({ readOnly: false, capability: { confirm: "needs-sandbox" } }), {}),
+    ).toBe("always-confirm")
   })
 
   test("an explicit hand-off-required hitlTier is NEVER downgraded by a capability", () => {
     expect(
-      inferToolTier(tool({ hitlTier: "hand-off-required", capability: { confirm: "sensitive" } }), {}),
+      inferToolTier(
+        tool({ hitlTier: "hand-off-required", capability: { confirm: "sensitive" } }),
+        {},
+      ),
     ).toBe("hand-off-required")
   })
 

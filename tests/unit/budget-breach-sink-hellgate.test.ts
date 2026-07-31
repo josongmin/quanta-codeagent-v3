@@ -49,7 +49,9 @@ const stubConfig = (sink: AgentEvent[], ledger: BudgetLedger | undefined): Agent
   }) as unknown as AgentConfig
 
 const breachEvents = (sink: AgentEvent[]): Extract<AgentEvent, { type: "budget_breach" }>[] =>
-  sink.filter((e): e is Extract<AgentEvent, { type: "budget_breach" }> => e.type === "budget_breach")
+  sink.filter(
+    (e): e is Extract<AgentEvent, { type: "budget_breach" }> => e.type === "budget_breach",
+  )
 
 const usageEv = (
   over: Partial<Extract<AgentEvent, { type: "usage" }>> = {},

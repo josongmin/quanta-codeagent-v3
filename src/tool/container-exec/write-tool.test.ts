@@ -101,7 +101,12 @@ describe("container_write_file — exact-byte authoring over the exec port (B2)"
   })
 
   test("a timed-out transport result ⇒ typed timeout failure, file state flagged UNKNOWN", async () => {
-    const { port } = fakePort(async () => ({ stdout: null, stderr: null, code: 124, timedOut: true }))
+    const { port } = fakePort(async () => ({
+      stdout: null,
+      stderr: null,
+      code: 124,
+      timedOut: true,
+    }))
     const r = await run(containerWriteFileTool(port), { path: "/app/x", content: "y" })
     expect(r.ok).toBe(false)
     expect(r.failure?.mode).toBe("timeout")

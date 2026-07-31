@@ -32,14 +32,10 @@ const UNIFIED_TO_V4A_SRC = readFileSync(
 
 // ── imports for live tests ────────────────────────────────────────────────────
 
-import type { SignatureHelpPort } from "@/lsp"
-import type { FormatPort } from "@/lsp"
-import type { CodeActionPort, CodeActionKind } from "@/lsp"
-import { lspSignatureHelpTool } from "@/tool/lsp_nav"
-import { lspFormatTool } from "@/tool/lsp_nav"
-import { lspCodeActionTool } from "@/tool/lsp_nav"
-import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
+import type { CodeActionKind, CodeActionPort, FormatPort, SignatureHelpPort } from "@/lsp"
 import { isUnifiedDiff, parsePatch, unifiedDiffToV4A } from "@/patch"
+import { lspCodeActionTool, lspFormatTool, lspSignatureHelpTool } from "@/tool/lsp_nav"
+import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -82,9 +78,9 @@ describe("F-B4-crlf-stray-cr: ast-grep CRLF handling in match text", () => {
     // uses the CRLF-aware form, not the bare-LF form.
     // Strategy: find the line containing the ↵ marker replacement and confirm it
     // uses \r?\n instead of a bare \n.
-    const replaceLine = AST_GREP_SRC
-      .split("\n")
-      .find((l) => l.includes("↵") && l.includes("replace"))
+    const replaceLine = AST_GREP_SRC.split("\n").find(
+      (l) => l.includes("↵") && l.includes("replace"),
+    )
     expect(replaceLine).toBeDefined()
     // Must contain \r?\n (the CRLF-aware form)
     expect(replaceLine).toMatch(/\\r\?\\n/)
@@ -154,7 +150,11 @@ describe("C3-JAIL-PATH-MISMATCH: lsp_nav tools pass jailed abs path to port", ()
         return []
       },
     }
-    await collect(lspSignatureHelpTool(port), { path: "src/x.ts", line: 1, character: 1 }, ctx("/work/proj"))
+    await collect(
+      lspSignatureHelpTool(port),
+      { path: "src/x.ts", line: 1, character: 1 },
+      ctx("/work/proj"),
+    )
     // The port must receive the absolute path rooted at ctx.cwd
     expect(calls).toHaveLength(1)
     expect(calls[0]).toBe("/work/proj/src/x.ts")
@@ -172,7 +172,11 @@ describe("C3-JAIL-PATH-MISMATCH: lsp_nav tools pass jailed abs path to port", ()
         return []
       },
     }
-    await collect(lspSignatureHelpTool(port), { path: "src/y.ts", line: 2, character: 3 }, ctx("/other/root"))
+    await collect(
+      lspSignatureHelpTool(port),
+      { path: "src/y.ts", line: 2, character: 3 },
+      ctx("/other/root"),
+    )
     expect(calls[0]).toBe("/other/root/src/y.ts")
   })
 
@@ -189,7 +193,11 @@ describe("C3-JAIL-PATH-MISMATCH: lsp_nav tools pass jailed abs path to port", ()
       },
       applyEdit: async () => {},
     }
-    await collect(lspCodeActionTool(port), { path: "src/x.ts", line: 1, character: 1 }, ctx("/work/proj"))
+    await collect(
+      lspCodeActionTool(port),
+      { path: "src/x.ts", line: 1, character: 1 },
+      ctx("/work/proj"),
+    )
     expect(calls).toHaveLength(1)
     expect(calls[0]).toBe("/work/proj/src/x.ts")
     expect(calls[0]).not.toBe("src/x.ts")
@@ -223,10 +231,14 @@ describe("C3-JAIL-PATH-MISMATCH: lsp_nav tools pass jailed abs path to port", ()
         return []
       },
     }
-    await collect(lspFormatTool(port), {
-      path: "src/x.ts",
-      range: { startLine: 1, startCharacter: 1, endLine: 2, endCharacter: 1 },
-    }, ctx("/work/proj"))
+    await collect(
+      lspFormatTool(port),
+      {
+        path: "src/x.ts",
+        range: { startLine: 1, startCharacter: 1, endLine: 2, endCharacter: 1 },
+      },
+      ctx("/work/proj"),
+    )
     expect(calls).toHaveLength(1)
     expect(calls[0]).toBe("/work/proj/src/x.ts")
   })
@@ -313,7 +325,7 @@ describe("A5-SILENT-NOHEADER: missing +++ line produces zero-op (documented beha
     // Red-on-injection: an infinite loop or early return instead of i++ →
     // the converter hangs or discards subsequent valid entries.
     const input = [
-      "--- a/bad.py",  // missing +++ → silently skipped
+      "--- a/bad.py", // missing +++ → silently skipped
       "-dropped",
       "+dropped",
       "--- a/good.py",
@@ -333,13 +345,7 @@ describe("A5-SILENT-NOHEADER: missing +++ line produces zero-op (documented beha
   test("A5-3: paired control — well-formed diff with +++ produces expected op count", () => {
     // Red-on-injection: always return zero ops regardless of input →
     // legitimate patches silently become no-ops; data loss.
-    const input = [
-      "--- a/foo.py",
-      "+++ b/foo.py",
-      "@@ -1 +1 @@",
-      "-old",
-      "+new",
-    ].join("\n")
+    const input = ["--- a/foo.py", "+++ b/foo.py", "@@ -1 +1 @@", "-old", "+new"].join("\n")
     const v4a = unifiedDiffToV4A(input)
     const patch = parsePatch(v4a)
     expect(patch.ops).toHaveLength(1)

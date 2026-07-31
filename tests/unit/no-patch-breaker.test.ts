@@ -7,7 +7,9 @@ import { decideNoPatch } from "@/agent/no-patch-breaker"
 
 describe("decideNoPatch", () => {
   test("any mutating edit → continue (rail inert)", () => {
-    expect(decideNoPatch({ turnsUsed: 59, maxTurns: 60, hasMutatingEdit: true })).toEqual({ action: "continue" })
+    expect(decideNoPatch({ turnsUsed: 59, maxTurns: 60, hasMutatingEdit: true })).toEqual({
+      action: "continue",
+    })
   })
 
   test("no edit at budget end → exhausted (the #9296 verdict)", () => {
@@ -21,10 +23,19 @@ describe("decideNoPatch", () => {
   })
 
   test("early with no edit → continue (don't fire prematurely)", () => {
-    expect(decideNoPatch({ turnsUsed: 10, maxTurns: 60, hasMutatingEdit: false })).toEqual({ action: "continue" })
+    expect(decideNoPatch({ turnsUsed: 10, maxTurns: 60, hasMutatingEdit: false })).toEqual({
+      action: "continue",
+    })
   })
 
   test("custom fraction respected", () => {
-    expect(decideNoPatch({ turnsUsed: 5, maxTurns: 10, hasMutatingEdit: false, forceCommitAtFraction: 0.5 }).action).toBe("commit-now")
+    expect(
+      decideNoPatch({
+        turnsUsed: 5,
+        maxTurns: 10,
+        hasMutatingEdit: false,
+        forceCommitAtFraction: 0.5,
+      }).action,
+    ).toBe("commit-now")
   })
 })

@@ -26,8 +26,8 @@ import {
   type SecretEgressConfig,
   scanEgressText,
 } from "@/runtime/network-proxy"
-import { compositeSecretScanner } from "@/security/secret-detection"
 import type { SecretFinding, SecretScanner } from "@/security/secret-detection"
+import { compositeSecretScanner } from "@/security/secret-detection"
 
 const DECLARED = "s3cr3t-deploy-token-do-not-leak"
 const AWS_KEY = "AKIAIOSFODNN7EXAMPLE"
@@ -109,12 +109,20 @@ describe("secret-egress adversarial — split-across-scan-units (header vs body 
   })
 
   test("half in body + half in header is NOT reassembled (each blob scanned alone)", async () => {
-    const d = await decideEgressScan("s3cr3t-deploy-token", `x-note: -do-not-leak`, cfg({ scanner: nullScanner }))
+    const d = await decideEgressScan(
+      "s3cr3t-deploy-token",
+      `x-note: -do-not-leak`,
+      cfg({ scanner: nullScanner }),
+    )
     expect(d.kind).toBe("clean")
   })
 
   test("declared secret split within the SAME body across a raw \\r\\n chunk boundary is not caught", async () => {
-    const d = await decideEgressScan("s3cr3t-deploy-token\r\n-do-not-leak", "", cfg({ scanner: nullScanner }))
+    const d = await decideEgressScan(
+      "s3cr3t-deploy-token\r\n-do-not-leak",
+      "",
+      cfg({ scanner: nullScanner }),
+    )
     expect(d.kind).toBe("clean")
   })
 })
@@ -150,7 +158,11 @@ describe("secret-egress adversarial — MODE (deny vs redact) correctness at the
   })
 
   test("deny mode denies even a purely-declared (fully-redactable) hit", async () => {
-    const d = await decideEgressScan(`x ${DECLARED}`, "", cfg({ mode: "deny", scanner: nullScanner }))
+    const d = await decideEgressScan(
+      `x ${DECLARED}`,
+      "",
+      cfg({ mode: "deny", scanner: nullScanner }),
+    )
     expect(d.kind).toBe("deny")
   })
 })

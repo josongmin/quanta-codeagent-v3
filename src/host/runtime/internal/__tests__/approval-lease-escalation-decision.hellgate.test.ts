@@ -54,10 +54,7 @@ const plainAction = (tool: string): ToolAction => ({ tool, input: {}, isReadOnly
 
 /** Mint an approval for `action` and return its id (the controller throws a
  *  `RuntimeApprovalRequiredError` carrying the pending approval). */
-const mint = async (
-  ctrl: ReturnType<typeof makeCtrl>,
-  action: ToolAction,
-): Promise<string> => {
+const mint = async (ctrl: ReturnType<typeof makeCtrl>, action: ToolAction): Promise<string> => {
   let id: string | undefined
   await ctrl.runWithProtocol(async () => {
     try {

@@ -1,3 +1,4 @@
+import type { HITLTierReason, ToolCapability } from "@/shared"
 import type { CircumventionTracker, EffectSignature } from "./circumvention"
 import {
   type AutoModeClassifier,
@@ -26,7 +27,6 @@ import {
   type PermissionRiskLevel,
   type PermissionStackSource,
 } from "./recorder"
-import type { HITLTierReason, ToolCapability } from "@/shared"
 import type {
   HITLTier,
   PermissionContext,

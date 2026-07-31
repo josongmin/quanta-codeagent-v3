@@ -18,9 +18,12 @@ import { readMcpConfig, resolveMcpLaunchPolicy } from "../../src/apps/cli/intern
 
 const slogEvents: { event: string; data: Record<string, unknown> }[] = []
 const slog = {
-  info: (event: string, data?: Record<string, unknown>) => slogEvents.push({ event, data: data ?? {} }),
-  warn: (event: string, data?: Record<string, unknown>) => slogEvents.push({ event, data: data ?? {} }),
-  error: (event: string, data?: Record<string, unknown>) => slogEvents.push({ event, data: data ?? {} }),
+  info: (event: string, data?: Record<string, unknown>) =>
+    slogEvents.push({ event, data: data ?? {} }),
+  warn: (event: string, data?: Record<string, unknown>) =>
+    slogEvents.push({ event, data: data ?? {} }),
+  error: (event: string, data?: Record<string, unknown>) =>
+    slogEvents.push({ event, data: data ?? {} }),
 } as unknown as StructuredLogger
 
 let dir: string
@@ -64,7 +67,8 @@ const project = (opts: {
   mkdirSync(userDir, { recursive: true })
   writeFileSync(join(cwd, ".mcp.json"), MCP_JSON)
   process.env.QUANTA_MCP_CONFIG = join(cwd, ".mcp.json")
-  if (opts.userSettings) writeFileSync(join(userDir, "settings.json"), JSON.stringify(opts.userSettings))
+  if (opts.userSettings)
+    writeFileSync(join(userDir, "settings.json"), JSON.stringify(opts.userSettings))
   if (opts.projectSettings) {
     mkdirSync(join(cwd, ".quanta"), { recursive: true })
     writeFileSync(join(cwd, ".quanta", "settings.json"), JSON.stringify(opts.projectSettings))

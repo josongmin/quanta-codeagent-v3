@@ -35,9 +35,9 @@
  * by concatenation so no forbidden token appears literally in this source.
  */
 
+import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import path from "node:path"
-import { describe, expect, test } from "bun:test"
 import { SIGNAL_AUTHORITY } from "@/agent/verification-bundle"
 
 const repoRoot = path.resolve(import.meta.dir, "..", "..")
@@ -185,34 +185,33 @@ describe("SCAFF-08: static-witness scaffold sources carry no benchmark-shaped co
   // ── the ratchet body: every scaffold source is free of EVERY forbidden needle.
   // Unconditional assert first (aggregate), then narrow per-category so a checker
   // that silently returned [] would still face the category-level pins below. ──
-  test.each(SCAFFOLD_MODULES.map((m): [string] => [m]))(
-    "scaffold module %s contains no benchmark-shaped contamination",
-    (moduleName: string) => {
-      const entry = scanned.find((s) => s.name === moduleName)
-      if (entry === undefined) {
-        // Missing file is allowed (skipped) — but record a visible skip rather
-        // than a silent vacuous pass. The floor test guards the set as a whole.
-        expect(SCAFFOLD_MODULES as readonly string[]).toContain(moduleName)
-        return
-      }
-      const hits = contaminationHits(entry.source)
-      expect(hits).toEqual([])
+  test.each(
+    SCAFFOLD_MODULES.map((m): [string] => [m]),
+  )("scaffold module %s contains no benchmark-shaped contamination", (moduleName: string) => {
+    const entry = scanned.find((s) => s.name === moduleName)
+    if (entry === undefined) {
+      // Missing file is allowed (skipped) — but record a visible skip rather
+      // than a silent vacuous pass. The floor test guards the set as a whole.
+      expect(SCAFFOLD_MODULES as readonly string[]).toContain(moduleName)
+      return
+    }
+    const hits = contaminationHits(entry.source)
+    expect(hits).toEqual([])
 
-      // Per-category narrowing pins (independent of the aggregate matcher):
-      for (const prefix of INSTANCE_PREFIXES) {
-        expect(entry.source.includes(prefix)).toBe(false) // no SWE-bench instance id
-      }
-      for (const p of CONTAMINATED_PATHS) {
-        expect(entry.source.includes(p)).toBe(false) // no contaminated django RCA path
-      }
-      for (const g of GRADER_FIELDS) {
-        expect(entry.source.includes(g)).toBe(false) // no hidden-grader runtime dependency
-      }
-      for (const d of DOTTED_MODULE_NEEDLES) {
-        expect(entry.source.includes(d)).toBe(false) // no dotted-module regex authority
-      }
-    },
-  )
+    // Per-category narrowing pins (independent of the aggregate matcher):
+    for (const prefix of INSTANCE_PREFIXES) {
+      expect(entry.source.includes(prefix)).toBe(false) // no SWE-bench instance id
+    }
+    for (const p of CONTAMINATED_PATHS) {
+      expect(entry.source.includes(p)).toBe(false) // no contaminated django RCA path
+    }
+    for (const g of GRADER_FIELDS) {
+      expect(entry.source.includes(g)).toBe(false) // no hidden-grader runtime dependency
+    }
+    for (const d of DOTTED_MODULE_NEEDLES) {
+      expect(entry.source.includes(d)).toBe(false) // no dotted-module regex authority
+    }
+  })
 
   // ── light cross-check (NOT a duplicate of the preset allowlist ratchet): every
   // `researchOnly` signal in the authority SSOT stays CLASSIFIED, so a new
@@ -241,9 +240,7 @@ describe("SCAFF-08: static-witness scaffold sources carry no benchmark-shaped co
     // refactor that downgraded one of them into a hard authority class would let
     // it veto a clean candidate. (declaredExpectedMatch = answer-key matcher,
     // rubricScore = LLM rubric, smokeGreen = issue smoke.)
-    const researchOnly = entries
-      .filter(([, cls]) => cls === "researchOnly")
-      .map(([name]) => name)
+    const researchOnly = entries.filter(([, cls]) => cls === "researchOnly").map(([name]) => name)
     expect(researchOnly.length).toBeGreaterThanOrEqual(3)
     expect(researchOnly).toContain("declaredExpectedMatch")
     expect(researchOnly).toContain("rubricScore")

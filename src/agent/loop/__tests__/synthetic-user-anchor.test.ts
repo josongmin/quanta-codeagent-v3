@@ -30,8 +30,6 @@ describe("injectRedactionBanner — human prompt anchoring", () => {
     expect(first?.type === "text" ? first.text : "").toContain("Secret redaction DISABLED")
     expect(first?.type === "text" ? first.text : "").toContain("real human prompt")
     expect(second?.type === "text" ? second.text : "").toContain("@repo")
-    expect(second?.type === "text" ? second.text : "").not.toContain(
-      "Secret redaction DISABLED",
-    )
+    expect(second?.type === "text" ? second.text : "").not.toContain("Secret redaction DISABLED")
   })
 })

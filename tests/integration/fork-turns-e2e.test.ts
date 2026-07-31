@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test"
 import { runAgent } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { __resetRuntimeConfig } from "@/shared"
-import { defaultTools, ToolRegistry } from "@/tool"
 import { TaskRegistry } from "@/subagent"
+import { defaultTools, ToolRegistry } from "@/tool"
 import { cfg, RecordingStream, text, withTimeout } from "./_harness"
 
 /**
@@ -22,7 +22,11 @@ import { cfg, RecordingStream, text, withTimeout } from "./_harness"
 // must reach the CHILD's LLM input; with fork_turns:"none" it must NOT.
 const PARENT_MEMO = "PARENT-MEMO-FORKTOKEN-42"
 
-const forkAgentCall = (id: string, prompt: string, forkTurns: "none" | "all" | number): StreamEvent[] => [
+const forkAgentCall = (
+  id: string,
+  prompt: string,
+  forkTurns: "none" | "all" | number,
+): StreamEvent[] => [
   { type: "tool_use_start", id, name: "agent" },
   { type: "tool_use_end", id, input: { prompt, fork_turns: forkTurns } },
   { type: "message_stop", stop_reason: "tool_use" },
@@ -30,7 +34,11 @@ const forkAgentCall = (id: string, prompt: string, forkTurns: "none" | "all" | n
 
 const convo = (i: StreamInput): string =>
   i.messages
-    .flatMap((m) => m.content.map((b) => (b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "")))
+    .flatMap((m) =>
+      m.content.map((b) =>
+        b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "",
+      ),
+    )
     .join(" ")
 
 /** Routes by substring; records EVERY stream input so we can inspect what the
@@ -59,7 +67,11 @@ class CapturingRoutingLLM implements LLMPort {
 const run = async (forkTurns: "none" | "all" | number) => {
   __resetRuntimeConfig()
   const llm = new CapturingRoutingLLM([
-    { match: "PARENT-GO", events: forkAgentCall("a1", "CHILD-TASK do the subtask", forkTurns), once: true },
+    {
+      match: "PARENT-GO",
+      events: forkAgentCall("a1", "CHILD-TASK do the subtask", forkTurns),
+      once: true,
+    },
     { match: "CHILD-TASK", events: text("CHILD-ANSWER done") },
     { match: "CHILD-ANSWER", events: text("PARENT-DONE") },
   ])
@@ -73,7 +85,15 @@ const run = async (forkTurns: "none" | "all" | number) => {
         // must inherit into the child (config.messages is the forkPrompt source
         // when no live transcriptSource is wired).
         messages: [
-          { role: "user", content: [{ type: "text", text: `PARENT-GO. Please remember ${PARENT_MEMO}. Then spawn a child.` }] },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `PARENT-GO. Please remember ${PARENT_MEMO}. Then spawn a child.`,
+              },
+            ],
+          },
         ],
         subagent: { maxDepth: 3, taskRegistry: new TaskRegistry() },
         maxTurns: 8,

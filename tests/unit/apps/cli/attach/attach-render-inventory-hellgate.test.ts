@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { SESSION_EVENT_TYPES } from "@/protocol/session"
 import {
   ATTACH_IGNORED_SESSION_EVENT_TYPES,
   ATTACH_RENDERED_SESSION_EVENT_TYPES,
 } from "@/apps/cli/attach/render"
+import { SESSION_EVENT_TYPES } from "@/protocol/session"
 
 /**
  * Attach renderer inventory hellgate.

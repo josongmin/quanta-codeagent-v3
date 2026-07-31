@@ -66,11 +66,11 @@ describe("attach routing guard — only argv[2] === 'attach' reaches the attach 
 describe("attach routing guard — source form is the strict positional gate", () => {
   const source = readFileSync(INDEX_PATH, "utf8")
 
-  test("index.ts gates the attach route on exact `process.argv[2] === \"attach\"`", () => {
+  test('index.ts gates the attach route on exact `process.argv[2] === "attach"`', () => {
     expect(source).toContain('process.argv[2] === "attach"')
   })
 
-  test("the attach route is NOT gated on a loose `.includes(\"attach\")`", () => {
+  test('the attach route is NOT gated on a loose `.includes("attach")`', () => {
     // A `process.argv.includes("attach")` (or `.slice(2).includes`) would let a
     // later argv token trip the route — the strict equality above forbids it.
     expect(source).not.toMatch(/argv[^\n]*\.includes\(\s*["']attach["']\s*\)/)

@@ -22,8 +22,8 @@ import {
   entropyScanner,
   mask,
   patternScanner,
-  SecretScanReadError,
   type SecretScanner,
+  SecretScanReadError,
   secretlintScanner,
   shannonEntropyBits,
 } from "@/security/secret-detection"

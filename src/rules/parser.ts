@@ -137,14 +137,21 @@ const parseLine = (raw: string, sourceFile: string, lineNumber: number): ParsedL
  *  collide with a byte-prefix rule's key) — so an argv rule and a string rule
  *  with a coincidentally-equal joined prefix do NOT false-conflict, and two
  *  argv rules with identical tokens DO dedupe. */
-const dedupeKey = (parsed: { readonly prefix: string; readonly argv?: readonly string[] }): string =>
+const dedupeKey = (parsed: {
+  readonly prefix: string
+  readonly argv?: readonly string[]
+}): string =>
   parsed.argv !== undefined ? `argv\x00${parsed.argv.join("\x00")}` : `str\x00${parsed.prefix}`
 
 /** Append a parsed line into the accumulator. Handles same-action dedupe
  *  (silent) and different-action conflicts (throws). Mutates `rules` and
  *  `byKey`. */
 const appendRule = (
-  parsed: { readonly action: RuleAction; readonly prefix: string; readonly argv?: readonly string[] },
+  parsed: {
+    readonly action: RuleAction
+    readonly prefix: string
+    readonly argv?: readonly string[]
+  },
   layer: RuleLayer,
   sourceFile: string,
   lineNumber: number,

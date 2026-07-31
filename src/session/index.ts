@@ -13,6 +13,24 @@
  * `QUANTA_SESSIONS_DIR` (same convention as `QUANTA_MEMORY_PATH`).
  */
 
+// WS-1 (jul-11) — unified session-attach SSOT (CLI /fork switch + web open-thread
+// swap both compose it; one crown-ordered guard, surfaces inject effects).
+export type { AttachOutcome, AttachSessionDeps } from "./attach-session"
+export { attachSessionToLive } from "./attach-session"
+// §13.2 (jun-08): persisted interrupted-turn marker + crash resume (default-OFF
+// behind QUANTA_CRASH_RESUME; pure offer builders).
+export type { CrashResumeOffer, InterruptedSessionDetection } from "./crash-resume"
+export {
+  buildCrashResumeMessage,
+  buildCrashResumeOffer,
+  CRASH_RESUME_GATE,
+  CRASH_RESUME_PARTIAL_GATE,
+  clearSessionInterrupted,
+  crashResumeEnabled,
+  crashResumePartialEnabled,
+  detectInterruptedSessions,
+  markSessionInterrupted,
+} from "./crash-resume"
 // ADR-0034: JSONL envelope (additive rail, not used by the snapshot store).
 export type {
   DynamicToolRecord,
@@ -92,10 +110,6 @@ export {
 // ADR-0157: FS adapter (Bun.file/Bun.write).
 export { exportSessionToFile, importSessionFromFile } from "./import-export-fs"
 export { listSessions, removeFromIndex, upsertMeta } from "./index-store"
-// WS-1 (jul-11) — unified session-attach SSOT (CLI /fork switch + web open-thread
-// swap both compose it; one crown-ordered guard, surfaces inject effects).
-export type { AttachOutcome, AttachSessionDeps } from "./attach-session"
-export { attachSessionToLive } from "./attach-session"
 export {
   archivedFilePath,
   archivedFilePathAsync,
@@ -121,29 +135,6 @@ export type {
 export { forkSessionAtMessage, resolveMessageIdPrefix, rewindSession } from "./rewind"
 export type { SessionRootProvider } from "./root-port"
 export { defaultSessionRootProvider, staticSessionRootProvider } from "./root-port"
-// §13.2 (jun-08): persisted interrupted-turn marker + crash resume (default-OFF
-// behind QUANTA_CRASH_RESUME; pure offer builders).
-export type { CrashResumeOffer, InterruptedSessionDetection } from "./crash-resume"
-export {
-  buildCrashResumeMessage,
-  buildCrashResumeOffer,
-  clearSessionInterrupted,
-  CRASH_RESUME_GATE,
-  CRASH_RESUME_PARTIAL_GATE,
-  crashResumeEnabled,
-  crashResumePartialEnabled,
-  detectInterruptedSessions,
-  markSessionInterrupted,
-} from "./crash-resume"
-// §13.1 (jun-08): store-level aggregate corruption detection + operator
-// recovery guidance (diagnostic; never on the hot path).
-export type {
-  SessionFileHealth,
-  SessionFileStatus,
-  StoreHealthReport,
-  StoreHealthVerdict,
-} from "./store-health"
-export { buildRecoveryGuidance, checkSessionStoreHealth } from "./store-health"
 export {
   appendEnvelope,
   archiveSession,
@@ -158,6 +149,15 @@ export {
   sessionEnvelopePathAsync,
   unarchiveSession,
 } from "./store"
+// §13.1 (jun-08): store-level aggregate corruption detection + operator
+// recovery guidance (diagnostic; never on the hot path).
+export type {
+  SessionFileHealth,
+  SessionFileStatus,
+  StoreHealthReport,
+  StoreHealthVerdict,
+} from "./store-health"
+export { buildRecoveryGuidance, checkSessionStoreHealth } from "./store-health"
 export type {
   PersistedInterruptedTurn,
   SavedSession,

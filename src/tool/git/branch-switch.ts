@@ -44,7 +44,7 @@ const autoWipMessage = (): string => `wip: ${new Date().toISOString()}`
 const stashLabel = (): string => `branch-switch wip: ${new Date().toISOString()}`
 
 const DIRTY_REJECTION =
-  "working tree is dirty; pass dirtyAction:\"commit-wip\"|\"stash\"|\"discard\" (or autoWip:true) — or `git stash` first"
+  'working tree is dirty; pass dirtyAction:"commit-wip"|"stash"|"discard" (or autoWip:true) — or `git stash` first'
 
 /** True ⇒ `git status --porcelain` stdout contains any change line. The
  *  porcelain format emits one line per changed/untracked file; an empty

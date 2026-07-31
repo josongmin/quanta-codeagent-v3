@@ -72,7 +72,9 @@ describe("extractIssueDeclaredExpected — precision-first", () => {
     // For a bare common word that is a false-green spec rail, so it must NOT
     // surface as a stdout-kind extract (either undefined, or never stdout-kind).
     for (const word of ["none", "null", "pass", "true", "error", "false"]) {
-      const r = extractIssueDeclaredExpected(`The function should return \`${word}\` for this input.`)
+      const r = extractIssueDeclaredExpected(
+        `The function should return \`${word}\` for this input.`,
+      )
       // Either rejected outright, or — if some other rule admits it — it must NOT
       // be the broad stdout_contains substring path.
       if (r !== undefined) {

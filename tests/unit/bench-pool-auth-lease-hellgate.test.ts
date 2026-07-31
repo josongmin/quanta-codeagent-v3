@@ -12,11 +12,14 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { AuthLeaseManager } from "../../src/apps/bench/auth-pool"
 import type { AuthPoolEntry } from "../../src/apps/bench/auth-pool"
+import { AuthLeaseManager } from "../../src/apps/bench/auth-pool"
 import type { SpawnFn, SpawnResult } from "../../src/apps/bench/remote/backend"
 import { type PoolChunk, runPool } from "../../src/apps/bench/remote/pool"
-import { createLeasePoolAuthProvider, type PoolAuthProvider } from "../../src/apps/bench/remote/pool-auth"
+import {
+  createLeasePoolAuthProvider,
+  type PoolAuthProvider,
+} from "../../src/apps/bench/remote/pool-auth"
 
 const authJsonFor = (label: string): string =>
   JSON.stringify({
@@ -42,13 +45,15 @@ const mockSpawn = (opts: { rateLimited?: Set<string>; eventLog?: string[] } = {}
   const routeSsh = (args: string[]): SpawnResult => {
     const cmd = args[args.length - 1] ?? ""
     if (cmd.includes("READY")) return ok("READY")
-    if (cmd.includes("run.exit") || cmd.includes("XQ-RUN-EXIT-XQ")) return ok("0\n==XQ-RUN-EXIT-XQ==\n")
+    if (cmd.includes("run.exit") || cmd.includes("XQ-RUN-EXIT-XQ"))
+      return ok("0\n==XQ-RUN-EXIT-XQ==\n")
     if (cmd.includes("mkdir ~/.pool-grade.lock")) return ok("LOCKED")
     if (cmd.includes("rmdir ~/.pool-grade.lock")) return ok("")
     const r = cmd.match(/cat ~\/runs\/([^/]+)\/report\.json/)
     if (r) return ok(JSON.stringify({ resolved_ids: [`x__${r[1]}-1`] }))
     const t = cmd.match(/tail -\d+ ~\/runs\/([^/]+)\/run\.log/)
-    if (t && opts.rateLimited?.has(t[1] ?? "")) return ok("[FAIL][generation_error] z__z-1 (turns=2)")
+    if (t && opts.rateLimited?.has(t[1] ?? ""))
+      return ok("[FAIL][generation_error] z__z-1 (turns=2)")
     return ok("")
   }
   const fn: SpawnFn = async (cmd, args, o): Promise<SpawnResult> => {
@@ -118,9 +123,7 @@ describe("T-3 pool account-aware scheduler", () => {
     const events: string[] = []
     const { fn } = mockSpawn({ eventLog: events })
     const mgr = new AuthLeaseManager(TWO_ACCOUNTS, { now: () => 1_000_000 })
-    const base = createLeasePoolAuthProvider(mgr, (p) =>
-      authJsonFor(p === "/a.json" ? "a" : "b"),
-    )
+    const base = createLeasePoolAuthProvider(mgr, (p) => authJsonFor(p === "/a.json" ? "a" : "b"))
     const recording: PoolAuthProvider = {
       acquire: (req) => {
         events.push("acquire")
@@ -129,17 +132,21 @@ describe("T-3 pool account-aware scheduler", () => {
       canEventuallySchedule: () => base.canEventuallySchedule(),
       nextReadyAt: () => base.nextReadyAt(),
     }
-    return runPool([{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }], poolCfg(fn, recording)).then(() => {
-      expect(events[0]).toBe("acquire") // lease first…
-      expect(events).toContain("launch") // …then the box launched
-      expect(events.indexOf("acquire")).toBeLessThan(events.indexOf("launch"))
-    })
+    return runPool([{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }], poolCfg(fn, recording)).then(
+      () => {
+        expect(events[0]).toBe("acquire") // lease first…
+        expect(events).toContain("launch") // …then the box launched
+        expect(events.indexOf("acquire")).toBeLessThan(events.indexOf("launch"))
+      },
+    )
   })
 
   test("clean run leaks no slots (every lease released on success)", async () => {
     const { fn } = mockSpawn({})
     const mgr = new AuthLeaseManager(TWO_ACCOUNTS, { now: () => 1_000_000 })
-    const provider = createLeasePoolAuthProvider(mgr, (p) => authJsonFor(p === "/a.json" ? "a" : "b"))
+    const provider = createLeasePoolAuthProvider(mgr, (p) =>
+      authJsonFor(p === "/a.json" ? "a" : "b"),
+    )
     const chunks: PoolChunk[] = [
       { runId: "c1", datasetPath: "/tmp/c1.jsonl" },
       { runId: "c2", datasetPath: "/tmp/c2.jsonl" },
@@ -188,14 +195,20 @@ describe("T-3 pool account-aware scheduler", () => {
       }
       return ok("")
     }
-    const mgr = new AuthLeaseManager([{ label: "solo", authFile: "/s.json", maxParallel: 6, maxBoxes: 1 }], {
-      now: () => 1_000_000,
-    })
+    const mgr = new AuthLeaseManager(
+      [{ label: "solo", authFile: "/s.json", maxParallel: 6, maxBoxes: 1 }],
+      {
+        now: () => 1_000_000,
+      },
+    )
     const provider = createLeasePoolAuthProvider(mgr, () => authJsonFor("solo"))
-    const out = await runPool([{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }], poolCfg(fn, provider, {
-      maxChunkRetries: 2,
-      reuseWarm: false,
-    }))
+    const out = await runPool(
+      [{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }],
+      poolCfg(fn, provider, {
+        maxChunkRetries: 2,
+        reuseWarm: false,
+      }),
+    )
     expect(out[0]?.lost).toBe(false)
     expect(out[0]?.attempts).toBe(2)
     // CRITICAL: the failed-then-retried chunk must not have leaked the account's slot/box.
@@ -208,7 +221,9 @@ describe("T-3 pool account-aware scheduler", () => {
     // a cools, so c2 routes to acct-b. Teeth: a.cooldownUntil set, b's NOT.
     const { fn, calls } = mockSpawn({ rateLimited: new Set(["c1"]) })
     const mgr = new AuthLeaseManager(TWO_ACCOUNTS, { now: () => 1_000_000 })
-    const provider = createLeasePoolAuthProvider(mgr, (p) => authJsonFor(p === "/a.json" ? "a" : "b"))
+    const provider = createLeasePoolAuthProvider(mgr, (p) =>
+      authJsonFor(p === "/a.json" ? "a" : "b"),
+    )
     await runPool(
       [
         { runId: "c1", datasetPath: "/tmp/c1.jsonl" },
@@ -236,8 +251,13 @@ describe("T-3 pool account-aware scheduler", () => {
     // poolCfg.authJsonProvider throws if called; a clean run proves it isn't.
     const { fn } = mockSpawn({})
     const mgr = new AuthLeaseManager(TWO_ACCOUNTS, { now: () => 1_000_000 })
-    const provider = createLeasePoolAuthProvider(mgr, (p) => authJsonFor(p === "/a.json" ? "a" : "b"))
-    const out = await runPool([{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }], poolCfg(fn, provider))
+    const provider = createLeasePoolAuthProvider(mgr, (p) =>
+      authJsonFor(p === "/a.json" ? "a" : "b"),
+    )
+    const out = await runPool(
+      [{ runId: "c1", datasetPath: "/tmp/c1.jsonl" }],
+      poolCfg(fn, provider),
+    )
     expect(out[0]?.lost).toBe(false)
   })
 
@@ -255,9 +275,12 @@ describe("T-3 pool account-aware scheduler", () => {
 
   test("auth file read failure releases the acquired lease instead of leaking account capacity", async () => {
     const { fn } = mockSpawn({})
-    const mgr = new AuthLeaseManager([{ label: "solo", authFile: "/missing.json", maxParallel: 6, maxBoxes: 1 }], {
-      now: () => 1_000_000,
-    })
+    const mgr = new AuthLeaseManager(
+      [{ label: "solo", authFile: "/missing.json", maxParallel: 6, maxBoxes: 1 }],
+      {
+        now: () => 1_000_000,
+      },
+    )
     const provider = createLeasePoolAuthProvider(mgr, () => {
       throw new Error("ENOENT: missing auth file")
     })
@@ -312,9 +335,12 @@ describe("T-3 pool account-aware scheduler", () => {
       }
       return ok("")
     }
-    const mgr = new AuthLeaseManager([{ label: "solo", authFile: "/s.json", maxParallel: 6, maxBoxes: 1 }], {
-      now: () => 1_000_000,
-    })
+    const mgr = new AuthLeaseManager(
+      [{ label: "solo", authFile: "/s.json", maxParallel: 6, maxBoxes: 1 }],
+      {
+        now: () => 1_000_000,
+      },
+    )
     const provider = createLeasePoolAuthProvider(mgr, () => authJsonFor("solo"))
     const runPromise = runPool(
       [
@@ -335,7 +361,10 @@ describe("T-3 pool account-aware scheduler", () => {
     await Promise.race([
       terminateStarted,
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`timed out waiting for first terminate: ${events.join(" | ")}`)), 2_000),
+        setTimeout(
+          () => reject(new Error(`timed out waiting for first terminate: ${events.join(" | ")}`)),
+          2_000,
+        ),
       ),
     ])
     await Promise.resolve()
@@ -345,7 +374,10 @@ describe("T-3 pool account-aware scheduler", () => {
     const out = await Promise.race([
       runPromise,
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`timed out waiting for run completion: ${events.join(" | ")}`)), 2_000),
+        setTimeout(
+          () => reject(new Error(`timed out waiting for run completion: ${events.join(" | ")}`)),
+          2_000,
+        ),
       ),
     ])
     expect(out.every((r) => !r.lost)).toBe(true)
@@ -354,6 +386,7 @@ describe("T-3 pool account-aware scheduler", () => {
 
 // cleanup
 import { afterAll } from "bun:test"
+
 afterAll(() => {
   for (const d of BUDGET_DIRS) rmSync(d, { recursive: true, force: true })
 })

@@ -19,7 +19,8 @@ const fake = (
 ): { proto: ConvergeProtocol<FakeVerdict, string>; gens: string[] } => {
   const gens: string[] = []
   let idx = 0
-  const at = (i: number): FakeVerdict => verdicts[Math.min(i, verdicts.length - 1)] ?? { green: false, actionable: false }
+  const at = (i: number): FakeVerdict =>
+    verdicts[Math.min(i, verdicts.length - 1)] ?? { green: false, actionable: false }
   const proto: ConvergeProtocol<FakeVerdict, string> = {
     judge: () => at(idx),
     feedback: () => (opts.feedbackNull ? null : { feedback: "fix" }),
@@ -39,7 +40,11 @@ const INERT: FakeVerdict = { green: false, actionable: false }
 describe("runConvergeProtocol — surface-neutral bounded convergence", () => {
   test("converges: red → 1 gen → green ⇒ reason=green, converged, carry threaded", async () => {
     const { proto, gens } = fake([RED, GREEN])
-    const o = await runConvergeProtocol(proto, { maxRounds: 4, maxTurns: 100 }, { turnsConsumed: 5, carry: "init" })
+    const o = await runConvergeProtocol(
+      proto,
+      { maxRounds: 4, maxTurns: 100 },
+      { turnsConsumed: 5, carry: "init" },
+    )
     expect(o.converged).toBe(true)
     expect(o.reason).toBe("green")
     expect(o.rounds).toBe(1)
@@ -58,7 +63,11 @@ describe("runConvergeProtocol — surface-neutral bounded convergence", () => {
   // reason/converged MUST both derive from the ONE final judge.
   test("maxRounds=1: red → 1 gen → green ⇒ converged AND reason=green (no rounds-exhausted mask)", async () => {
     const { proto, gens } = fake([RED, GREEN])
-    const o = await runConvergeProtocol(proto, { maxRounds: 1, maxTurns: 100 }, { turnsConsumed: 0, carry: "init" })
+    const o = await runConvergeProtocol(
+      proto,
+      { maxRounds: 1, maxTurns: 100 },
+      { turnsConsumed: 0, carry: "init" },
+    )
     expect(o.converged).toBe(true)
     expect(o.reason).toBe("green")
     expect(o.rounds).toBe(1)
@@ -67,7 +76,11 @@ describe("runConvergeProtocol — surface-neutral bounded convergence", () => {
 
   test("non-actionable verdict ⇒ no-signal, 0 rounds, carry untouched", async () => {
     const { proto, gens } = fake([INERT])
-    const o = await runConvergeProtocol(proto, { maxRounds: 4, maxTurns: 100 }, { turnsConsumed: 3, carry: "init" })
+    const o = await runConvergeProtocol(
+      proto,
+      { maxRounds: 4, maxTurns: 100 },
+      { turnsConsumed: 3, carry: "init" },
+    )
     expect(o.reason).toBe("no-signal")
     expect(o.rounds).toBe(0)
     expect(o.carry).toBe("init")
@@ -76,14 +89,22 @@ describe("runConvergeProtocol — surface-neutral bounded convergence", () => {
 
   test("feedback null ⇒ no-signal (never loops blind)", async () => {
     const { proto, gens } = fake([RED, RED], { feedbackNull: true })
-    const o = await runConvergeProtocol(proto, { maxRounds: 4, maxTurns: 100 }, { turnsConsumed: 0, carry: "x" })
+    const o = await runConvergeProtocol(
+      proto,
+      { maxRounds: 4, maxTurns: 100 },
+      { turnsConsumed: 0, carry: "x" },
+    )
     expect(o.reason).toBe("no-signal")
     expect(gens).toHaveLength(0)
   })
 
   test("ROUND bound: stays red ⇒ exactly maxRounds gens, reason=rounds-exhausted", async () => {
     const { proto, gens } = fake([RED, RED, RED, RED, RED])
-    const o = await runConvergeProtocol(proto, { maxRounds: 3, maxTurns: 100 }, { turnsConsumed: 0, carry: "x" })
+    const o = await runConvergeProtocol(
+      proto,
+      { maxRounds: 3, maxTurns: 100 },
+      { turnsConsumed: 0, carry: "x" },
+    )
     expect(o.rounds).toBe(3)
     expect(o.reason).toBe("rounds-exhausted")
     expect(gens).toHaveLength(3)
@@ -92,7 +113,11 @@ describe("runConvergeProtocol — surface-neutral bounded convergence", () => {
 
   test("WATCHDOG bound: turn budget trips before maxRounds (independent bound)", async () => {
     const { proto, gens } = fake([RED, RED, RED, RED, RED], { turnsPerGen: 10 })
-    const o = await runConvergeProtocol(proto, { maxRounds: 10, maxTurns: 25 }, { turnsConsumed: 0, carry: "x" })
+    const o = await runConvergeProtocol(
+      proto,
+      { maxRounds: 10, maxTurns: 25 },
+      { turnsConsumed: 0, carry: "x" },
+    )
     expect(o.reason).toBe("watchdog")
     expect(gens).toHaveLength(3) // 0,10,20 fire; 30>=25 stops
     expect(o.rounds).toBe(3)
@@ -100,7 +125,11 @@ describe("runConvergeProtocol — surface-neutral bounded convergence", () => {
 
   test("maxRounds=0 ⇒ immediate rounds-exhausted, no gen, carry/turns untouched", async () => {
     const { proto, gens } = fake([RED])
-    const o = await runConvergeProtocol(proto, { maxRounds: 0, maxTurns: 100 }, { turnsConsumed: 7, carry: "init" })
+    const o = await runConvergeProtocol(
+      proto,
+      { maxRounds: 0, maxTurns: 100 },
+      { turnsConsumed: 7, carry: "init" },
+    )
     expect(o.rounds).toBe(0)
     expect(o.turnsConsumed).toBe(7)
     expect(o.carry).toBe("init")

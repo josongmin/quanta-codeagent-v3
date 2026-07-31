@@ -322,10 +322,7 @@ describe("notebook_edit — agent-loop dispatch e2e (real fs, real dispatchTool)
         return false // deny the mutating edit
       },
     })
-    const res = await dispatch(
-      { path: file, mode: "delete", cell: 0 },
-      config,
-    )
+    const res = await dispatch({ path: file, mode: "delete", cell: 0 }, config)
     expect(confirmCalls).toBe(1) // the ask branch consulted the human seam
     expect(res.ok).toBe(false)
     // RED-ON-INJECTION: a missing permission gate writes the file.
@@ -338,10 +335,7 @@ describe("notebook_edit — agent-loop dispatch e2e (real fs, real dispatchTool)
       permission: { mode: "default" } as PermissionContext,
       onConfirm: async (_a: ToolAction) => true,
     })
-    const res = await dispatch(
-      { path: file, mode: "delete", cell: 1 },
-      config,
-    )
+    const res = await dispatch({ path: file, mode: "delete", cell: 1 }, config)
     expect(res.ok).toBe(true)
     const parsed = JSON.parse(readFileUtf8(file)) as ParsedNb
     expect(parsed.cells).toHaveLength(1)
@@ -358,10 +352,7 @@ describe("notebook_edit — agent-loop dispatch e2e (real fs, real dispatchTool)
     const readFileState = new ReadFileState()
     readFileState.record(file, 1)
 
-    const res = await dispatch(
-      { path: file, mode: "delete", cell: 0 },
-      cfg({ readFileState }),
-    )
+    const res = await dispatch({ path: file, mode: "delete", cell: 0 }, cfg({ readFileState }))
     expect(res.ok).toBe(false)
     // The stale-write message tells the model the file changed since its read.
     expect(res.block.content.toLowerCase()).toContain("modified on disk")

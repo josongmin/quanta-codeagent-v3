@@ -21,10 +21,7 @@ import { join } from "node:path"
 import { buildInteractiveApprovalResolver } from "../interactive"
 
 const resolverWith = (answer: string) =>
-  buildInteractiveApprovalResolver(
-    { question: async () => answer },
-    new AbortController().signal,
-  )
+  buildInteractiveApprovalResolver({ question: async () => answer }, new AbortController().signal)
 
 const approval = { approvalId: "a1", reason: "shell wants git push" } as Parameters<
   ReturnType<typeof buildInteractiveApprovalResolver>

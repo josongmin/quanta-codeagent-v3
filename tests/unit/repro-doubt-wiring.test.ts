@@ -8,14 +8,14 @@
  * injected into the tool result on the stuck-trip — and NEVER when the knob is off.
  */
 import { describe, expect, test } from "bun:test"
+import { z } from "zod"
 import type { AgentConfig } from "@/agent"
 import { dispatchTool } from "@/agent/dispatch"
 import { createReproDoubtState, REPRO_DOUBT_STEER } from "@/agent/repro-doubt-guard"
+import type { ToolUseBlock } from "@/llm"
+import type { PermissionContext } from "@/permission"
 import type { Tool, ToolEvent } from "@/tool"
 import { ToolRegistry } from "@/tool"
-import type { PermissionContext } from "@/permission"
-import type { ToolUseBlock } from "@/llm"
-import { z } from "zod"
 
 const tool = (name: string, readOnly: boolean): Tool => ({
   name,
@@ -27,8 +27,7 @@ const tool = (name: string, readOnly: boolean): Tool => ({
   isConcurrencySafe: () => readOnly,
   // Expose the shell command so the jun-28 repro-doubt gate can see it's test-like
   // (mirrors the real bash tool's extractShellCommand surface).
-  extractShellCommand: (input: unknown) =>
-    (input as { command?: string } | null)?.command ?? null,
+  extractShellCommand: (input: unknown) => (input as { command?: string } | null)?.command ?? null,
   execute: async function* (): AsyncIterable<ToolEvent> {
     yield { type: "result", result: { ok: true, output: `${name} ran` } }
   },

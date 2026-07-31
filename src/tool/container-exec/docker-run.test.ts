@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { dockerContainerExec } from "./docker-backend"
 import {
-  defaultDockerSpawn,
   type DockerLifecycle,
+  defaultDockerSpawn,
   dockerRunViaCli,
   type SpawnPort,
   type SpawnResult,

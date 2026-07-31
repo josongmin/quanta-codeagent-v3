@@ -22,10 +22,7 @@
  */
 import { describe, expect, test } from "bun:test"
 import { decideOnAssembled, freshRecovery } from "@/agent/loop"
-import {
-  injectTurnBudgetReminder,
-  turnBudgetReminderText,
-} from "@/agent/loop/turn-iteration"
+import { injectTurnBudgetReminder, turnBudgetReminderText } from "@/agent/loop/turn-iteration"
 import {
   EMPTY_TURN_EXHAUSTED_REASON,
   MALFORMED_TOOL_USE_REASON,
@@ -224,8 +221,7 @@ describe("turnBudgetReminderText — FIX-1 makes the approaching limit visible",
 // ─── (d') FIX-1 WIRING — injectTurnBudgetReminder appends to working memory ─
 
 describe("injectTurnBudgetReminder — FIX-1 wiring proof", () => {
-  const cfgWith = (maxTurns: number): AgentConfig =>
-    ({ maxTurns }) as unknown as AgentConfig
+  const cfgWith = (maxTurns: number): AgentConfig => ({ maxTurns }) as unknown as AgentConfig
 
   test("a tail turn appends ONE out-of-band user reminder to working memory", () => {
     const wm = createWorkingMemory<Message>([])

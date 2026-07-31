@@ -48,7 +48,11 @@ describe("effortLadderLimits", () => {
 
   test("derives from a provided base (red-on-injection — tracks base changes)", () => {
     const base = { maxTotalSteps: 10, maxExpensive: 5, maxPerAction: 5 }
-    expect(effortLadderLimits(1, base)).toEqual({ maxTotalSteps: 12, maxExpensive: 6, maxPerAction: 6 })
+    expect(effortLadderLimits(1, base)).toEqual({
+      maxTotalSteps: 12,
+      maxExpensive: 6,
+      maxPerAction: 6,
+    })
   })
 })
 
@@ -63,7 +67,11 @@ describe("resolveEffortLadderLimits — env parse", () => {
   })
 
   test("positive integer ⇒ that tier's limits", () => {
-    expect(resolveEffortLadderLimits({ QUANTA_BENCH_EFFORT_LADDER: "1" })).toEqual(effortLadderLimits(1))
-    expect(resolveEffortLadderLimits({ QUANTA_BENCH_EFFORT_LADDER: " 2 " })).toEqual(effortLadderLimits(2))
+    expect(resolveEffortLadderLimits({ QUANTA_BENCH_EFFORT_LADDER: "1" })).toEqual(
+      effortLadderLimits(1),
+    )
+    expect(resolveEffortLadderLimits({ QUANTA_BENCH_EFFORT_LADDER: " 2 " })).toEqual(
+      effortLadderLimits(2),
+    )
   })
 })

@@ -20,8 +20,8 @@
  * the other always-on steps; terminal validation is never silently skipped.
  */
 
-import { foldState } from "../eval-step"
 import type { EvalCtx, EvalStep } from "../eval-step"
+import { foldState } from "../eval-step"
 
 export const terminalValidateStep: EvalStep = {
   id: "terminal-validate",

@@ -193,10 +193,7 @@ describe("spawnToolsAvailable — config.subagent.maxDepth TIGHTENS the policy (
   for (const [maxDepth, depth, expected] of capRaiseAttempts) {
     test(`policy 1 + subagent.maxDepth=${maxDepth} depth=${depth} ⇒ ${expected}`, () => {
       withCap(1) // operator policy 1 (root-only)
-      const config = { depth, subagent: { maxDepth } } as Pick<
-        AgentConfig,
-        "depth" | "subagent"
-      >
+      const config = { depth, subagent: { maxDepth } } as Pick<AgentConfig, "depth" | "subagent">
       expect(spawnToolsAvailable(config)).toBe(expected)
     })
   }

@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises"
-import { errMessage } from "@/shared"
 import {
   type FetchLike,
   refreshToken,
@@ -7,6 +6,7 @@ import {
   type TokenRecord,
   writeToken,
 } from "@/auth/chatgpt-oauth"
+import { errMessage } from "@/shared"
 
 export interface RefreshRemoteAuthJsonOptions {
   readonly env?: Record<string, string | undefined>
@@ -59,7 +59,11 @@ export const refreshRemoteAuthJson = async (
     return JSON.stringify(next)
   } catch (err) {
     const remaining = remainingMs(current, now)
-    if (typeof current.access_token === "string" && current.access_token !== "" && remaining >= FALLBACK_MIN_REMAINING_MS) {
+    if (
+      typeof current.access_token === "string" &&
+      current.access_token !== "" &&
+      remaining >= FALLBACK_MIN_REMAINING_MS
+    ) {
       const mins = Math.round(remaining / 60_000)
       process.stderr.write(
         `[full-remote] local token refresh failed (${errMessage(err)}); ` +

@@ -9,9 +9,9 @@
 
 import { byteCompare } from "@/shared"
 import {
+  CANDIDATE_KINDS,
   type Candidate,
   type CandidateInput,
-  CANDIDATE_KINDS,
   type Exclusion,
   type LocalizationPass,
   type PatchTarget,
@@ -42,7 +42,9 @@ export const createLocalizationTracker = (): LocalizationTracker => {
     if (!CANDIDATE_KINDS.has(input.kind))
       throw new Error(`localization: unknown candidate kind "${input.kind}"`)
     if (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1)
-      throw new Error(`localization: confidence must be a finite number in [0,1], got ${input.confidence}`)
+      throw new Error(
+        `localization: confidence must be a finite number in [0,1], got ${input.confidence}`,
+      )
     seq += 1
     const id = input.id ?? mintId(seq)
     if (candidateIds.has(id)) throw new Error(`localization: duplicate candidate id "${id}"`)
@@ -70,7 +72,11 @@ export const createLocalizationTracker = (): LocalizationTracker => {
       throw new Error(`localization: candidate "${candidateId}" already selected`)
   }
 
-  const exclude = (candidateId: string, reason: string, evidenceRefs: readonly string[] = []): void => {
+  const exclude = (
+    candidateId: string,
+    reason: string,
+    evidenceRefs: readonly string[] = [],
+  ): void => {
     requireExclusiveUnseen(candidateId, "exclude")
     excluded.push({ candidateId, reason, evidenceRefs })
     excludedIds.add(candidateId)

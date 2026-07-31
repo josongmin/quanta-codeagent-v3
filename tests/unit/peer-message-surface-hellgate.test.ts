@@ -32,11 +32,11 @@ import {
   surfaceNotifyMailbox,
   teamScopedMailbox,
 } from "@/agent/subagent-mailbox"
+import { type AssembleRequest, assembleAgentConfig } from "@/host/runtime/agent-config-assembler"
 import {
   createPeerMessageStreamSink,
   maybeWirePeerMessageSurface,
 } from "@/host/runtime/peer-message-sink-wire"
-import { type AssembleRequest, assembleAgentConfig } from "@/host/runtime/agent-config-assembler"
 import { __resetRuntimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 
@@ -220,7 +220,12 @@ describe("W2-1 — assembler composition", () => {
 
     const peer = events.filter((e) => e.type === "peer_message")
     expect(peer).toHaveLength(1)
-    expect(peer[0]).toMatchObject({ type: "peer_message", from: "root/1", to: ROOT, body: "surfaced!" })
+    expect(peer[0]).toMatchObject({
+      type: "peer_message",
+      from: "root/1",
+      to: ROOT,
+      body: "surfaced!",
+    })
   })
 
   test("knob OFF ⇒ NO peer_message events (byte-identical default)", () => {

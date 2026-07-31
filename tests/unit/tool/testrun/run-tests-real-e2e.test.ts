@@ -38,7 +38,12 @@ Dgo("run_tests — REAL go test -json", () => {
     writeFileSync(join(dir, "go.mod"), "module t\ngo 1.25\n")
     writeFileSync(
       join(dir, "m_test.go"),
-      ["package t", "import \"testing\"", "func TestPass(t *testing.T){ if 1+1!=2 {t.Fatal(\"no\")} }", "func TestFail(t *testing.T){ if 2+2!=5 {t.Fatalf(\"got %d want 5\", 2+2)} }"].join("\n"),
+      [
+        "package t",
+        'import "testing"',
+        'func TestPass(t *testing.T){ if 1+1!=2 {t.Fatal("no")} }',
+        'func TestFail(t *testing.T){ if 2+2!=5 {t.Fatalf("got %d want 5", 2+2)} }',
+      ].join("\n"),
     )
     const r = await run(dir)
     expect(r.ok).toBe(false) // a suite with failures is ok:false
@@ -53,10 +58,21 @@ Drs("run_tests — REAL cargo test", () => {
   test("detects rust, runs, reports the failing test + file:line", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "tr-rs-")))
     mkdirSync(join(dir, "src"), { recursive: true })
-    writeFileSync(join(dir, "Cargo.toml"), ['[package]', 'name = "t"', 'version = "0.1.0"', 'edition = "2021"'].join("\n"))
+    writeFileSync(
+      join(dir, "Cargo.toml"),
+      ["[package]", 'name = "t"', 'version = "0.1.0"', 'edition = "2021"'].join("\n"),
+    )
     writeFileSync(
       join(dir, "src", "lib.rs"),
-      ["pub fn add(a: i32, b: i32) -> i32 { a + b }", "#[cfg(test)]", "mod tests {", "    use super::*;", "    #[test] fn pass_test() { assert_eq!(add(2,2), 4); }", "    #[test] fn fail_test() { assert_eq!(add(2,2), 5); }", "}"].join("\n"),
+      [
+        "pub fn add(a: i32, b: i32) -> i32 { a + b }",
+        "#[cfg(test)]",
+        "mod tests {",
+        "    use super::*;",
+        "    #[test] fn pass_test() { assert_eq!(add(2,2), 4); }",
+        "    #[test] fn fail_test() { assert_eq!(add(2,2), 5); }",
+        "}",
+      ].join("\n"),
     )
     const r = await run(dir)
     expect(r.ok).toBe(false)
@@ -72,7 +88,12 @@ Dpy("run_tests — REAL python unittest", () => {
     writeFileSync(join(dir, "pyproject.toml"), '[project]\nname = "t"\nversion = "0.1.0"\n')
     writeFileSync(
       join(dir, "test_m.py"),
-      ["import unittest", "class T(unittest.TestCase):", "    def test_pass(self): self.assertEqual(1+1, 2)", "    def test_fail(self): self.assertEqual(2+2, 5)"].join("\n"),
+      [
+        "import unittest",
+        "class T(unittest.TestCase):",
+        "    def test_pass(self): self.assertEqual(1+1, 2)",
+        "    def test_fail(self): self.assertEqual(2+2, 5)",
+      ].join("\n"),
     )
     const r = await run(dir)
     expect(r.ok).toBe(false)

@@ -10,7 +10,9 @@ import { describe, expect, test } from "bun:test"
 import { reviewSubmission } from "../../src/runner/batch/eval/submission-review"
 
 const diff = (...files: string[]): string =>
-  files.map((f) => `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1 +1 @@\n-x\n+y`).join("\n")
+  files
+    .map((f) => `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -1 +1 @@\n-x\n+y`)
+    .join("\n")
 
 describe("reviewSubmission", () => {
   test("source-only ⇒ clean", () => {

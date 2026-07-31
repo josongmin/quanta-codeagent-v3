@@ -8,8 +8,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { decideScopeEscalation } from "@/agent/skill-scope-escalation"
 import type { ConfirmDecision } from "@/agent"
+import { decideScopeEscalation } from "@/agent/skill-scope-escalation"
 import type { ToolAction } from "@/permission"
 
 const base = {
@@ -162,7 +162,11 @@ describe("decideScopeEscalation", () => {
       onConfirm: async () => false,
     })
     expect(bypass).toEqual({ kind: "dispatch", widen: true })
-    const ac = await decideScopeEscalation({ ...base, tier: "always-confirm", onConfirm: async () => false })
+    const ac = await decideScopeEscalation({
+      ...base,
+      tier: "always-confirm",
+      onConfirm: async () => false,
+    })
     expect(ac).toEqual({ kind: "dispatch", widen: true })
   })
 })

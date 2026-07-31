@@ -54,12 +54,14 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
-import type { Subprocess } from "bun"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createServer, type Server } from "node:http"
 import type { AddressInfo } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { Subprocess } from "bun"
+import { loadMcpTools } from "@/../src/agent"
+import { type McpServerConfig, StdioMcpTransport } from "@/../src/mcp"
 import {
   type DialTarget,
   type NetworkProxyConfig,
@@ -68,8 +70,6 @@ import {
   type ResolvePeerHost,
   withEgressProxy,
 } from "@/../src/runtime/network-proxy"
-import { type McpServerConfig, StdioMcpTransport } from "@/../src/mcp"
-import { loadMcpTools } from "@/../src/agent"
 
 // ── Hermetic upstream origin (the "real internet" for this test) ────────────
 let origin: Server

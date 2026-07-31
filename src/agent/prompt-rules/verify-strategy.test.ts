@@ -141,7 +141,9 @@ describe("grader-only (P6 SWE hidden-grader) — exact + no-leak", () => {
     // baseline carries the conflicting body rules …
     expect(off).toContain("first reproduce the failure with the smallest")
     expect(off).toContain("Completion bar: finish only when")
-    expect(off).toContain("Verification report (use when you ran or considered running verification)")
+    expect(off).toContain(
+      "Verification report (use when you ran or considered running verification)",
+    )
     // … grader-only removes ALL conflicting body rules and adds the single coherent grader rule
     expect(on).not.toContain("first reproduce the failure with the smallest")
     expect(on).not.toContain("Completion bar: finish only when")
@@ -150,7 +152,9 @@ describe("grader-only (P6 SWE hidden-grader) — exact + no-leak", () => {
     // R4 self-audit: the structured Verification report block (rail: pytest / verdict / exit)
     // presupposes a local run grader-only forbids — it too must be suppressed. RED before the
     // fix (only completion-bar was dropped, the report block survived and re-injected the conflict).
-    expect(on).not.toContain("Verification report (use when you ran or considered running verification)")
+    expect(on).not.toContain(
+      "Verification report (use when you ran or considered running verification)",
+    )
     expect(on).not.toContain("rail:      <e.g. bun test, pytest, tsc --noEmit, manual repro>")
     expect(on).toContain("[R-GRADER-ONLY]")
     // but grader-only supplies its OWN honest final-verification format (not a silent drop)
@@ -220,9 +224,7 @@ describe("grader-only (P6 SWE hidden-grader) — exact + no-leak", () => {
           break
         }
     const inGrader = (i: number): boolean => gStart >= 0 && i >= gStart && i <= gEnd
-    return lines.filter(
-      (l, i) => !inGrader(i) && HARD_CONFLICT_DEMANDS.some((rx) => rx.test(l)),
-    )
+    return lines.filter((l, i) => !inGrader(i) && HARD_CONFLICT_DEMANDS.some((rx) => rx.test(l)))
   }
   test("scenario: grader-only prompt has ZERO local-verification DEMANDS outside the grader rule", () => {
     const on = buildSystemPrompt("/w", { promptPack: "batch", verifyStrategy: "grader-only" })

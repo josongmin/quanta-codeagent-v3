@@ -20,9 +20,9 @@
  * at the module that now owns the authority; the invariant is unchanged.
  */
 
+import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 
 const DRIVER = join(import.meta.dir, "../../src/runner/batch/eval/driver/config-build.ts")
 

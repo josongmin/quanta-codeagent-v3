@@ -9,16 +9,17 @@
  * key. NO policy lives here (DEFAULT-OFF / activation is `config.ts`); this is
  * pure composition so the producer + consumer agents share one wiring point.
  */
-import { s3ReplayStore } from "@/llm/replay"
+
 import type { MatchPolicy, ReplayStore } from "@/llm/replay"
+import { s3ReplayStore } from "@/llm/replay"
 import type { StreamInput } from "@/llm/types"
 import {
   type RemoteBackend,
-  readReceipt,
   type ResumeReceipt,
+  readReceipt,
   type S3BackendOptions,
-  s3Backend,
   type SegmentStore,
+  s3Backend,
   segmentStore,
   writeReceipt,
 } from "@/shared/remote-store"

@@ -206,7 +206,9 @@ describe("H1 dynamic-message-matcher — fixed-skeleton narrows the abstain regi
     // option, the legacy path would have regressed.
     const wrong = patchAdding('raise ValueError(f"completely unrelated boom: {x} happened")')
     expect(matchCandidateAgainstDeclaredExpected(wrong, publicExpected(V))).toBeNull()
-    expect(matchCandidateAgainstDeclaredExpected(wrong, publicExpected(V), { dynamicSkeleton: false })).toBeNull()
+    expect(
+      matchCandidateAgainstDeclaredExpected(wrong, publicExpected(V), { dynamicSkeleton: false }),
+    ).toBeNull()
   })
 
   test("ENGAGE: knob ON + WRONG f-string skeleton ⇒ false (veto) — the abstain region SHRANK", () => {

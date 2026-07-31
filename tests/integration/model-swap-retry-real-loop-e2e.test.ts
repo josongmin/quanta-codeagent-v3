@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { type AgentConfig, runAgent } from "@/agent"
-import { retryWithCmd, type RetryWithSessionState } from "@/apps/cli/retry-with"
+import { type RetryWithSessionState, retryWithCmd } from "@/apps/cli/retry-with"
 import type { SlashContext } from "@/apps/cli/slash-commands"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import { defaultTools, ToolRegistry } from "@/tool"
@@ -186,7 +186,11 @@ describe("model-swap-retry — real loop turn 1 → escalated re-run under the s
     const base = new CapturingCandidateLLM("base-model-v1", "answer")
     const mid = new CapturingCandidateLLM("mid-model", "unused mid")
     const target = new CapturingCandidateLLM("target-model", "targeted answer")
-    const out = await withTimeout(runAgent(swapConfig({ llm: base })), 15_000, "model-swap-explicit")
+    const out = await withTimeout(
+      runAgent(swapConfig({ llm: base })),
+      15_000,
+      "model-swap-explicit",
+    )
     const turnInput = base.seenInputs[0] as StreamInput
     const messages: Message[] = [...out.messages]
     const events: StreamEvent[] = []

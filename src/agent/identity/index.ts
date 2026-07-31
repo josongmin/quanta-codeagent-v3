@@ -5,7 +5,7 @@ export {
   assertValidIdentityLines,
   IDENTITY_MODES,
   IdentityLineError,
-  isIdentityMode,
   type IdentityMode,
   type IdentityProvider,
+  isIdentityMode,
 } from "./port"

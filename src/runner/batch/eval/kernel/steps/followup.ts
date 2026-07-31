@@ -24,9 +24,9 @@
  * into the baseline.
  */
 
-import { foldState } from "../eval-step"
 import type { BenchPosture } from "../../knobs-bench"
 import type { EvalCtx, EvalStep } from "../eval-step"
+import { foldState } from "../eval-step"
 
 /** The followup gate predicate, exported so the parity test asserts against the
  *  EXACT posture flag the driver uses (T-601 repair-escalation). */

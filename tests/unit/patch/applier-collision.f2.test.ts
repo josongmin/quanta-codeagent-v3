@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { applyPatch, PatchApplyError, type PatchFileSystemPort, parsePatch } from "../../../src/patch/index.js"
+import {
+  applyPatch,
+  PatchApplyError,
+  type PatchFileSystemPort,
+  parsePatch,
+} from "../../../src/patch/index.js"
 
 // In-memory PatchFileSystemPort.
 class MemFs implements PatchFileSystemPort {

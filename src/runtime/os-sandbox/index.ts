@@ -1,8 +1,8 @@
 export { compileBubblewrapArgs } from "./bubblewrap"
 export { type DefaultOsSandboxConfig, defaultOsSandbox } from "./default"
-export { resolveSandboxProfileFromEnv, SANDBOX_DEFAULT_FLIP_PROFILE } from "./env"
 // RFC jun-6 — sandbox-block discriminant classifier (pure, default-OFF).
 export { classifySandboxDenial } from "./denial-classify"
+export { resolveSandboxProfileFromEnv, SANDBOX_DEFAULT_FLIP_PROFILE } from "./env"
 export {
   isBubblewrapAvailable,
   isLandlockAvailable,

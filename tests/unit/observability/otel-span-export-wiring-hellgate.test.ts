@@ -20,8 +20,8 @@ import {
   __resetSpanSink,
   endSpan,
   getSpanSink,
-  setSpanSink,
   SPAN_NAMES,
+  setSpanSink,
   startSpan,
 } from "@/observability"
 import {
@@ -29,11 +29,11 @@ import {
   defaultMetricsRegistry,
   getDefaultMetricSink,
 } from "@/observability/metrics/in-memory-registry"
+import type { ExportSpan, OtelExporter } from "@/observability/otel-exporter"
 import {
   createExporterSpanSink,
   installOtelSpanExportFromEnv,
 } from "@/observability/otel-span-export"
-import type { ExportSpan, OtelExporter } from "@/observability/otel-exporter"
 
 const ENDPOINT = "http://localhost:4318"
 

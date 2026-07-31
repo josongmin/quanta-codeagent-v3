@@ -386,7 +386,9 @@ export const probeRepoMap3 = async (opts: ProbeRepoMap3Opts): Promise<string | u
     maxChars: opts.maxChars ?? REPO_MAP_DEFAULT_MAX_CHARS,
   }
   // Per-root scan is independently no-throw so one root cannot sink the others.
-  const scanOne = async (r: LabelledRoot): Promise<{ label: string; root: string; tree: string } | null> => {
+  const scanOne = async (
+    r: LabelledRoot,
+  ): Promise<{ label: string; root: string; tree: string } | null> => {
     try {
       const tree = await opts.scan({ cwd: r.root, ...caps })
       if (tree === undefined || tree.trim().length === 0) return null

@@ -28,8 +28,8 @@ import { describe, expect, test } from "bun:test"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import { createWorkingMemory } from "@/memory"
 import { CompactionBreaker } from "../../compaction-breaker"
-import { maybeCompact } from "../compaction-wire"
 import type { AgentConfig } from "../../types"
+import { maybeCompact } from "../compaction-wire"
 
 /** A summarizer that ALWAYS refuses — emits an empty text turn ⇒ `summarize(...)`
  *  trims to `""` ⇒ `compactIfNeeded` returns `{compacted:false, reason:"empty_summary"}`. */
@@ -102,7 +102,6 @@ describe("ALBB-08 Fix 1 — proactive empty_summary trips the futility breaker (
     // The (CAP+1)th call's opening `.check()` now trips the circuit breaker.
     const tripped = await call()
     expect(tripped.abort).toBe(true)
-    if (tripped.abort)
-      expect(tripped.reason).toContain("rapid_refill_breaker: proactive")
+    if (tripped.abort) expect(tripped.reason).toContain("rapid_refill_breaker: proactive")
   })
 })

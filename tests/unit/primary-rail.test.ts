@@ -27,15 +27,15 @@ describe("T-302 decideRepairAdmission — repair iterates ONLY on a red primary 
   })
 
   test("ADM-2: no primaryRail ⇒ deny (no blind repair without an admissible rail)", () => {
-    expect(decideRepairAdmission({ primaryRailPresent: false, primaryRailState: "unrun" }).admit).toBe(
-      false,
-    )
+    expect(
+      decideRepairAdmission({ primaryRailPresent: false, primaryRailState: "unrun" }).admit,
+    ).toBe(false)
   })
 
   test("ADM-3: primaryRail GREEN ⇒ deny (already proven; nothing to repair)", () => {
-    expect(decideRepairAdmission({ primaryRailPresent: true, primaryRailState: "green" }).admit).toBe(
-      false,
-    )
+    expect(
+      decideRepairAdmission({ primaryRailPresent: true, primaryRailState: "green" }).admit,
+    ).toBe(false)
   })
 
   test("ADM-4: primaryRail present but UNRUN ⇒ deny (not yet proven red)", () => {

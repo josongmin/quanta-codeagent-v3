@@ -21,8 +21,8 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import {
-  createDefaultSubagentMailbox,
   DEFAULT_SUBAGENT_MAILBOX_MAX_UNDELIVERED_PER_SENDER as CAP,
+  createDefaultSubagentMailbox,
   type MailboxPort,
 } from "@/agent/subagent-mailbox"
 import { assembleAgentConfig } from "@/host/runtime/agent-config-assembler"

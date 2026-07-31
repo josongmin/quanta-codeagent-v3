@@ -26,28 +26,21 @@
  */
 
 import { describe, expect, mock, test } from "bun:test"
-import type { Instance } from "@/runner/batch/types"
-import {
-  benchPostureFromState,
-  resolveBenchKnobs,
-  type BenchPosture,
-} from "@/runner/batch/eval/knobs-bench"
-import type {
-  EvalCtx,
-  EvalPhaseDeps,
-  FollowupOutcome,
-} from "@/runner/batch/eval/kernel/eval-step"
+import type { EnvPrepResult } from "@/runner/batch/eval/env-prep"
+import type { EvalCtx, EvalPhaseDeps, FollowupOutcome } from "@/runner/batch/eval/kernel/eval-step"
 import { runPipeline, type StepObserver } from "@/runner/batch/eval/kernel/pipeline"
 import { envPrepStep } from "@/runner/batch/eval/kernel/steps/env-prep"
+import { followupStep } from "@/runner/batch/eval/kernel/steps/followup"
 import { mainPhaseStep } from "@/runner/batch/eval/kernel/steps/main-phase"
 import { repairStep } from "@/runner/batch/eval/kernel/steps/repair"
-import { followupStep } from "@/runner/batch/eval/kernel/steps/followup"
 import { terminalValidateStep } from "@/runner/batch/eval/kernel/steps/terminal-validate"
-import type {
-  RunRepairRoundsArgs,
-  RunRepairRoundsResult,
-} from "@/runner/batch/eval/repair/types"
-import type { EnvPrepResult } from "@/runner/batch/eval/env-prep"
+import {
+  type BenchPosture,
+  benchPostureFromState,
+  resolveBenchKnobs,
+} from "@/runner/batch/eval/knobs-bench"
+import type { RunRepairRoundsArgs, RunRepairRoundsResult } from "@/runner/batch/eval/repair/types"
+import type { Instance } from "@/runner/batch/types"
 
 // The pipeline under test, in the SAME order as the driver's inline sequence:
 // env-prep BEFORE the agent, main agent run, then repair / owner-widening
@@ -319,14 +312,21 @@ describe("pipeline-parity-phases: kernel over [env-prep, main, repair, followup,
     await expect(runPipeline([followupStep], ctx, posture)).rejects.toThrow(/wiring error/)
     // And the SAME unbound followup, gated OFF, is a silent no-op (NOT a throw).
     const offCtx: EvalCtx = { ...ctx }
-    const out = await runPipeline([followupStep], offCtx, { ...basePosture(), repairEscalation: false })
+    const out = await runPipeline([followupStep], offCtx, {
+      ...basePosture(),
+      repairEscalation: false,
+    })
     expect(out).toBe(offCtx)
   })
 
   test("OBSERVABILITY: included set reflects exactly the gated-in phases for a mixed posture", async () => {
     const { ctx } = makeCtx()
     // repair OFF, followup ON.
-    const posture: BenchPosture = { ...basePosture(), repairRounds: undefined, repairEscalation: true }
+    const posture: BenchPosture = {
+      ...basePosture(),
+      repairRounds: undefined,
+      repairEscalation: true,
+    }
     const { observe, entries } = recordingObserver()
 
     await runPipeline(EVAL_STEPS, ctx, posture, observe)

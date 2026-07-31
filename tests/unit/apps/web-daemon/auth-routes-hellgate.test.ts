@@ -2,10 +2,7 @@
  * handler (OAuth/file side effects) is invoked. */
 import { describe, expect, test } from "bun:test"
 import type { Server } from "bun"
-import {
-  buildFetchHandler,
-  type FetchHandlerDeps,
-} from "@/apps/web-daemon/server/fetch-handler"
+import { buildFetchHandler, type FetchHandlerDeps } from "@/apps/web-daemon/server/fetch-handler"
 import type { WSData } from "@/apps/web-daemon/server/ws-data"
 
 const handlerWith = (calls: string[]) =>

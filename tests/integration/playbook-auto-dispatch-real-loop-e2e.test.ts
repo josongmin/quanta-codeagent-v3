@@ -78,10 +78,7 @@ const registration = (): PlaybookRegistration => ({
 /** Drain the production queue the way the REPL does: `promptSource.next()`
  *  resolves the pushed prompt (or `null` on abort). We bound the wait so a
  *  non-enqueue (control) times out fast instead of hanging the suite. */
-const drainNext = async (
-  queue: ExternalPromptQueue,
-  ms: number,
-): Promise<string | null> => {
+const drainNext = async (queue: ExternalPromptQueue, ms: number): Promise<string | null> => {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), ms)
   try {

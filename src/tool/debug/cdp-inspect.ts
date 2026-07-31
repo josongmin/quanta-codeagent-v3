@@ -13,8 +13,14 @@
  * can never hang the tool.
  */
 import { errMessage, logger } from "@/shared"
-import { CdpClient } from "./cdp-client"
-import type { DapVariable, FrameScopes, Inspection, ScopeVars, StackFrameInfo } from "./inspect-driver"
+import type { CdpClient } from "./cdp-client"
+import type {
+  DapVariable,
+  FrameScopes,
+  Inspection,
+  ScopeVars,
+  StackFrameInfo,
+} from "./inspect-driver"
 
 export interface CdpInspectSpec {
   /** file:// URL of the breakpoint source (the failing test file). */
@@ -42,7 +48,8 @@ const MAX_TOTAL_VARS = 200
  *  pause storm; the real flow needs at most one resume past the entry break). */
 const MAX_RESUMES = 8
 
-const asObj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {})
+const asObj = (v: unknown): Record<string, unknown> =>
+  typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {}
 const asArr = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
 const str = (v: unknown, fallback = ""): string => (typeof v === "string" ? v : fallback)
 const num = (v: unknown, fallback = 0): number => (typeof v === "number" ? v : fallback)
@@ -52,7 +59,13 @@ const withTimeout = <T>(p: Promise<T>, ms: number, onTimeout: T): Promise<T> => 
   const timeout = new Promise<T>((resolve) => {
     timer = setTimeout(() => resolve(onTimeout), ms)
   })
-  return Promise.race([p.then((v) => { if (timer) clearTimeout(timer); return v }), timeout])
+  return Promise.race([
+    p.then((v) => {
+      if (timer) clearTimeout(timer)
+      return v
+    }),
+    timeout,
+  ])
 }
 
 /** Render a CDP RemoteObject's value in a DAP-parity style (strings quoted,
@@ -65,7 +78,8 @@ const renderValue = (ro: Record<string, unknown>): string => {
   if (ro.value === null) return "null"
   return str(ro.description) || str(ro.className) || str(ro.subtype) || type
 }
-const typeOf = (ro: Record<string, unknown>): string => str(ro.className) || str(ro.subtype) || str(ro.type)
+const typeOf = (ro: Record<string, unknown>): string =>
+  str(ro.className) || str(ro.subtype) || str(ro.type)
 
 interface VarBudget {
   remaining: number
@@ -82,7 +96,14 @@ const expandObject = async (
   visited: Set<string>,
   signal?: AbortSignal,
 ): Promise<DapVariable[]> => {
-  if (signal?.aborted === true || objectId.length === 0 || depth > MAX_VAR_DEPTH || budget.remaining <= 0 || visited.has(objectId)) return []
+  if (
+    signal?.aborted === true ||
+    objectId.length === 0 ||
+    depth > MAX_VAR_DEPTH ||
+    budget.remaining <= 0 ||
+    visited.has(objectId)
+  )
+    return []
   visited.add(objectId)
   const props = await getProps(objectId)
   const out: DapVariable[] = []
@@ -97,9 +118,10 @@ const expandObject = async (
     const childId = str(ro.objectId)
     const type = typeOf(ro)
     // Expand nested objects (objectId present) one+ level deeper.
-    const children = childId.length > 0 && (str(ro.type) === "object" || str(ro.type) === "function")
-      ? await expandObject(getProps, childId, depth + 1, budget, visited, signal)
-      : []
+    const children =
+      childId.length > 0 && (str(ro.type) === "object" || str(ro.type) === "function")
+        ? await expandObject(getProps, childId, depth + 1, budget, visited, signal)
+        : []
     out.push({
       name: str(po.name, "?"),
       value: renderValue(ro),
@@ -110,7 +132,11 @@ const expandObject = async (
   return out
 }
 
-export const inspectViaCdp = async (client: CdpClient, spec: CdpInspectSpec, opts: CdpInspectOptions = {}): Promise<Inspection> => {
+export const inspectViaCdp = async (
+  client: CdpClient,
+  spec: CdpInspectSpec,
+  opts: CdpInspectOptions = {},
+): Promise<Inspection> => {
   const stopTimeoutMs = opts.stopTimeoutMs ?? DEFAULT_STOP_TIMEOUT_MS
   const aborted = (): boolean => opts.signal?.aborted === true
   // Abort sentinel raced into every wait so a cancelled turn unblocks at once
@@ -132,7 +158,11 @@ export const inspectViaCdp = async (client: CdpClient, spec: CdpInspectSpec, opt
     if (spec.pauseOnExceptions !== undefined && spec.pauseOnExceptions !== "none") {
       await client.request("Debugger.setPauseOnExceptions", { state: spec.pauseOnExceptions })
     }
-    const bp = await client.request("Debugger.setBreakpointByUrl", { lineNumber: Math.max(0, spec.line - 1), url: spec.url, columnNumber: 0 })
+    const bp = await client.request("Debugger.setBreakpointByUrl", {
+      lineNumber: Math.max(0, spec.line - 1),
+      url: spec.url,
+      columnNumber: 0,
+    })
     const bpId = str(asObj(bp.result).breakpointId)
     const bound = asArr(asObj(bp.result).locations).length > 0
 
@@ -162,7 +192,10 @@ export const inspectViaCdp = async (client: CdpClient, spec: CdpInspectSpec, opt
       }
       const body = asObj(ev)
       const hit = asArr(body.hitBreakpoints).map((h) => str(h))
-      const isExceptionStop = spec.pauseOnExceptions !== undefined && spec.pauseOnExceptions !== "none" && str(body.reason) === "exception"
+      const isExceptionStop =
+        spec.pauseOnExceptions !== undefined &&
+        spec.pauseOnExceptions !== "none" &&
+        str(body.reason) === "exception"
       if ((bpId.length > 0 && hit.includes(bpId)) || isExceptionStop) {
         pausedBody = body
         break
@@ -181,11 +214,19 @@ export const inspectViaCdp = async (client: CdpClient, spec: CdpInspectSpec, opt
       const fo = asObj(f)
       const loc = asObj(fo.location)
       const url = str(fo.url)
-      return { name: str(fo.functionName, "(anonymous)") || "(anonymous)", line: num(loc.lineNumber) + 1, ...(url.length > 0 ? { source: url } : {}) }
+      return {
+        name: str(fo.functionName, "(anonymous)") || "(anonymous)",
+        line: num(loc.lineNumber) + 1,
+        ...(url.length > 0 ? { source: url } : {}),
+      }
     })
 
     const getProps = async (objectId: string): Promise<unknown[]> => {
-      const r = await withTimeout(client.request("Runtime.getProperties", { objectId, ownProperties: true }), Math.min(stopTimeoutMs, 10_000), { result: { result: [] } })
+      const r = await withTimeout(
+        client.request("Runtime.getProperties", { objectId, ownProperties: true }),
+        Math.min(stopTimeoutMs, 10_000),
+        { result: { result: [] } },
+      )
       return asArr(asObj(r.result).result)
     }
 
@@ -207,13 +248,24 @@ export const inspectViaCdp = async (client: CdpClient, spec: CdpInspectSpec, opt
         const kind = str(so.type)
         const objectId = str(asObj(so.object).objectId)
         if (objectId.length === 0) continue
-        if (kind === "local" || kind === "block" || kind === "catch") localVars.push(...(await expandObject(getProps, objectId, 1, budget, visited, opts.signal)))
-        else if (kind === "closure") closureVars.push(...(await expandObject(getProps, objectId, 1, budget, visited, opts.signal)))
+        if (kind === "local" || kind === "block" || kind === "catch")
+          localVars.push(
+            ...(await expandObject(getProps, objectId, 1, budget, visited, opts.signal)),
+          )
+        else if (kind === "closure")
+          closureVars.push(
+            ...(await expandObject(getProps, objectId, 1, budget, visited, opts.signal)),
+          )
       }
       const scopes: ScopeVars[] = []
       if (localVars.length > 0) scopes.push({ scope: "Locals", vars: localVars })
       if (closureVars.length > 0) scopes.push({ scope: "Closure", vars: closureVars })
-      frames.push({ frame: str(fo.functionName, "(anonymous)") || "(anonymous)", line: num(loc.lineNumber) + 1, ...(url.length > 0 ? { source: url } : {}), scopes })
+      frames.push({
+        frame: str(fo.functionName, "(anonymous)") || "(anonymous)",
+        line: num(loc.lineNumber) + 1,
+        ...(url.length > 0 ? { source: url } : {}),
+        scopes,
+      })
     }
 
     // Best-effort: let the program finish, then tear down (dispose kills the WS,
@@ -237,7 +289,13 @@ export const inspectViaCdp = async (client: CdpClient, spec: CdpInspectSpec, opt
       const description = str(d.description).split("\n")[0] ?? ""
       exception = { id, description }
     }
-    return { outcome: "stopped", reason, stack, frames, ...(exception !== undefined ? { exception } : {}) }
+    return {
+      outcome: "stopped",
+      reason,
+      stack,
+      frames,
+      ...(exception !== undefined ? { exception } : {}),
+    }
   } catch (e) {
     client.dispose()
     return { outcome: "error", message: errMessage(e) }

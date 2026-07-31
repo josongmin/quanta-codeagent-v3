@@ -98,7 +98,11 @@ const crc32 = (b: Uint8Array): number => {
  * the REAL `xlsx_read`/`docx_read` tool is a faithful end-to-end test.
  */
 const buildDeflateBombZip = (
-  entries: ReadonlyArray<{ entry: ZipEntry; uncompSizeOverride?: number; compOverride?: Uint8Array }>,
+  entries: ReadonlyArray<{
+    entry: ZipEntry
+    uncompSizeOverride?: number
+    compOverride?: Uint8Array
+  }>,
 ): Uint8Array => {
   const u16 = (n: number): number[] => [n & 0xff, (n >>> 8) & 0xff]
   const u32 = (n: number): number[] => [
@@ -210,11 +214,13 @@ describe("H15 — DEFLATE entry LIES about uncompressed size → reader rejects 
     expect(r.failure?.mode).toBe("error")
     // The cell payload never surfaces (no rows rendered).
     expect(r.output).not.toContain("secret")
-    expect(r.output).not.toContain("Sheet \"Z\"")
+    expect(r.output).not.toContain('Sheet "Z"')
     // The failure is the declared-size cap rejection (not a parse of bomb data).
     expect(r.output).toContain("exceeds cap")
     // Surfaced as a malformed-doc error to the model (no raw stack / no rows).
-    expect(r.failure?.mode === "error" ? r.failure.modelVisibleError : undefined).toBe("xlsx_malformed")
+    expect(r.failure?.mode === "error" ? r.failure.modelVisibleError : undefined).toBe(
+      "xlsx_malformed",
+    )
   })
 
   test("docx_read: tampered document.xml declaring 4 GiB → typed error, no text, no OOM", async () => {
@@ -239,7 +245,9 @@ describe("H15 — DEFLATE entry LIES about uncompressed size → reader rejects 
     expect(r.ok).toBe(false)
     expect(r.failure?.mode).toBe("error")
     expect(r.output).not.toContain("CLASSIFIED")
-    expect(r.failure?.mode === "error" ? r.failure.modelVisibleError : undefined).toBe("docx_malformed")
+    expect(r.failure?.mode === "error" ? r.failure.modelVisibleError : undefined).toBe(
+      "docx_malformed",
+    )
   })
 })
 
@@ -277,15 +285,13 @@ describe("H15 — DEFLATE entry that GENUINELY inflates past the per-entry cap �
     expect(tampered.length).toBeLessThan(1024 * 1024)
     await writeFile(join(dir, "real-bomb.xlsx"), tampered)
 
-    const result = await run(
-      xlsxRead,
-      { path: "real-bomb.xlsx" },
-      ctx(dir),
-    )
+    const result = await run(xlsxRead, { path: "real-bomb.xlsx" }, ctx(dir))
 
     expect(result.ok).toBe(false)
     expect(result.failure?.mode).toBe("error")
-    expect(result.failure?.mode === "error" ? result.failure.modelVisibleError : undefined).toBe("xlsx_malformed")
+    expect(result.failure?.mode === "error" ? result.failure.modelVisibleError : undefined).toBe(
+      "xlsx_malformed",
+    )
   })
 })
 

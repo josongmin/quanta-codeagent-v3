@@ -130,7 +130,10 @@ describe("always-confirm — UNIVERSAL floor (secure-by-default) [P2-T1]", () =>
   test("no asker at all ⇒ always-confirm fail-closed DENIES under bypass (no HITL opt-in)", async () => {
     const counts = { n: 0 }
     const out = await runAgent(
-      cfg({ registry: new ToolRegistry([alwaysConfirmTool(counts)]), permission: { mode: "bypass" } }),
+      cfg({
+        registry: new ToolRegistry([alwaysConfirmTool(counts)]),
+        permission: { mode: "bypass" },
+      }),
     )
     expect(out.reason).toBe("completed")
     expect(counts.n).toBe(0) // fail-closed — never ran

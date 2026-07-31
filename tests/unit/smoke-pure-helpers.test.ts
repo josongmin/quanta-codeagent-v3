@@ -327,7 +327,13 @@ describe("TrajectoryReplayLLM", () => {
 describe("runAssertions — judge-not-sole-gate (FLAG 1)", () => {
   const blankCapture = (): CaptureStream => new CaptureStream()
   const run = (spec: ExpectSpec) =>
-    runAssertions({ spec, capture: blankCapture(), cwd: "/tmp/nonexistent", stopReason: "x", turns: 0 })
+    runAssertions({
+      spec,
+      capture: blankCapture(),
+      cwd: "/tmp/nonexistent",
+      stopReason: "x",
+      turns: 0,
+    })
 
   test("judge block with NO real assertion FAILS as a config error (teeth)", () => {
     // Pre-fix this spec passed purely on the cached literal score (1 >= 0.6),

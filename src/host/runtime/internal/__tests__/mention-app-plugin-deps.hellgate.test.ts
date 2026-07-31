@@ -34,7 +34,7 @@ describe("buildAppPluginMentionDeps — host gate", () => {
     // the plugin registry is a real (possibly empty) list, never a throw
     expect(Array.isArray(out.plugins?.list())).toBe(true)
     // the built-in app catalog is non-empty (real data, not a stub)
-    expect((out.apps?.list().length ?? 0)).toBeGreaterThan(0)
+    expect(out.apps?.list().length ?? 0).toBeGreaterThan(0)
   })
 
   test("ON with no .quanta/plugins dir ⇒ empty registry, never throws", () => {

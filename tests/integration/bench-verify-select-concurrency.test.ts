@@ -3,9 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import { scopedEnv } from "../_support/scoped-env"
 import { runInstance } from "../../src/apps/bench/eval"
 import type { Instance } from "../../src/apps/bench/types"
+import { scopedEnv } from "../_support/scoped-env"
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 

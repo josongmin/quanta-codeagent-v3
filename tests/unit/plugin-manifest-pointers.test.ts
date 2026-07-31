@@ -14,11 +14,8 @@
  *    `QUANTA_PLUGIN_POINTERS` (default-OFF ⇒ loader output byte-identical).
  */
 import { describe, expect, test } from "bun:test"
-import {
-  PluginManifestSchema,
-  PluginPointerHooksSchema,
-} from "../../src/skill/plugin-manifest"
 import { resolvePluginPointers } from "../../src/skill/plugin-loader"
+import { PluginManifestSchema, PluginPointerHooksSchema } from "../../src/skill/plugin-manifest"
 
 const VALID_INTERFACE = {
   displayName: "Quanta Demo",
@@ -72,7 +69,10 @@ describe("§2.4 plugin manifest schema — hooks/apps fields", () => {
   })
 
   test("accepts apps as an array of folder pointers", () => {
-    const r = PluginManifestSchema.safeParse({ ...VALID_MANIFEST, apps: ["./apps/foo", "./apps/bar"] })
+    const r = PluginManifestSchema.safeParse({
+      ...VALID_MANIFEST,
+      apps: ["./apps/foo", "./apps/bar"],
+    })
     expect(r.success).toBe(true)
   })
 

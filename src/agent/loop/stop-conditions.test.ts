@@ -105,7 +105,9 @@ describe("stop-conditions registry (H3)", () => {
         },
         decisionEmitter: undefined,
       },
-      wm: { snapshot: () => [{ role: "user", content: [{ type: "text", text: "x".repeat(200) }] }] },
+      wm: {
+        snapshot: () => [{ role: "user", content: [{ type: "text", text: "x".repeat(200) }] }],
+      },
       session: { skillGate: undefined },
     } as unknown as RunAgentContext
     const stop = await costPreflightCondition(preflightCtx, 4)

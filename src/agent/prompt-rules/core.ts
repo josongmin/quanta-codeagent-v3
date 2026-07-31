@@ -20,8 +20,8 @@
  * editing them means editing the atom graph + updating the snapshot tests.
  */
 
-import { POSTURE_ATOMS, selectAtoms } from "../prompt-graph"
 import type { InstructionAtom, PromptContext } from "../prompt-graph"
+import { POSTURE_ATOMS, selectAtoms } from "../prompt-graph"
 
 export interface PromptRule {
   /** Stable ID embedded inline (`[R-…]`) — anti-regression tests pin this. */

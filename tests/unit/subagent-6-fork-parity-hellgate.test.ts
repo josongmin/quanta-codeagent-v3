@@ -21,16 +21,16 @@ import { describe, expect, test } from "bun:test"
 import { buildForkTurnsPreamble, composeForkedPrompt } from "@/agent/fork-turns"
 import { redactTranscript } from "@/agent/tier1/advisor"
 import type { Message } from "@/llm"
-import { agentSchema } from "@/subagent/agent-tool"
 import {
   createAgentTool,
   handleSpawnAgent,
   SpawnAgentInputSchema,
-  TaskRegistry,
   type SubagentRequest,
   type SubagentResult,
   type SubagentRunner,
+  TaskRegistry,
 } from "@/subagent"
+import { agentSchema } from "@/subagent/agent-tool"
 
 const u = (t: string): Message => ({ role: "user", content: [{ type: "text", text: t }] })
 const a = (t: string): Message => ({ role: "assistant", content: [{ type: "text", text: t }] })
@@ -52,10 +52,7 @@ const trioChildPrompt = async (prompt: string, spec: "none" | "all" | number): P
   }
   const registry = new TaskRegistry()
   const tool = createAgentTool({ runner, registry, forkPrompt })
-  for await (const _ev of tool.execute(
-    { prompt, fork_turns: spec } as never,
-    ctx(),
-  )) void _ev
+  for await (const _ev of tool.execute({ prompt, fork_turns: spec } as never, ctx())) void _ev
   const last = seen.at(-1)
   if (last === undefined) throw new Error("trio runner never invoked")
   return last
@@ -122,7 +119,20 @@ describe("ALBB-16 / C5059-04 — fork_turns schema + default + boundary hardenin
     // are hand-copied unions that must stay in lockstep. NOTE: the schemas
     // intentionally DIFFER on the `prompt` field (below), so this parity is
     // deliberately fork_turns-only, not whole-schema.
-    const cases = ["none", "all", 0, 1, 2, 1_000_000_000, -1, 1.5, "2", true, Number.NaN, Number.POSITIVE_INFINITY]
+    const cases = [
+      "none",
+      "all",
+      0,
+      1,
+      2,
+      1_000_000_000,
+      -1,
+      1.5,
+      "2",
+      true,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+    ]
     for (const v of cases) {
       const six = SpawnAgentInputSchema.safeParse({ prompt: "x", fork_turns: v }).success
       const trio = agentSchema.safeParse({ prompt: "x", fork_turns: v }).success

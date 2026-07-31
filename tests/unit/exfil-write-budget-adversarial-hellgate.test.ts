@@ -19,7 +19,7 @@
  */
 
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, existsSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -27,8 +27,8 @@ import {
   createSessionWriteBudget,
   WRITE_BUDGET_REASON,
 } from "@/tool/_shared/write-budget"
-import type { ToolContext, ToolResult } from "@/tool/types"
 import { editTool } from "@/tool/edit"
+import type { ToolContext, ToolResult } from "@/tool/types"
 import { writeTool } from "@/tool/write"
 
 const dir = mkdtempSync(join(tmpdir(), "exfil-budget-adv-"))
@@ -48,8 +48,7 @@ const drain = async (
   if (!result) throw new Error("no result")
   return result
 }
-const runWrite = (input: unknown, c: ToolContext) =>
-  drain(writeTool.execute(input as never, c))
+const runWrite = (input: unknown, c: ToolContext) => drain(writeTool.execute(input as never, c))
 const runEdit = (input: unknown, c: ToolContext) => drain(editTool.execute(input as never, c))
 
 describe("write-budget adversarial — CROSS-TOOL shared counter (write + edit share one cap)", () => {
@@ -70,10 +69,7 @@ describe("write-budget adversarial — CROSS-TOOL shared counter (write + edit s
     const wrote1 = await runWrite({ path: target, content: "hello world" }, c) // op 1 (write)
     expect(wrote1.ok).toBe(true)
 
-    const edited = await runEdit(
-      { path: target, old_string: "hello", new_string: "HELLO" },
-      c,
-    ) // op 2 (edit)
+    const edited = await runEdit({ path: target, old_string: "hello", new_string: "HELLO" }, c) // op 2 (edit)
     expect(edited.ok).toBe(true)
 
     const wrote3 = await runWrite({ path: join(dir, "third.txt"), content: "x" }, c) // op 3 → over cap
@@ -205,7 +201,11 @@ describe("write-budget adversarial — untrusted-gating is the SOLE FP control",
     // one never denies; the untrusted one denies past the cap. This is the
     // paired-control that proves the gate — not some fixture — is load-bearing.
     const mk = (untrusted: boolean) =>
-      createSessionWriteBudget({ untrustedContext: untrusted, maxWritesPerTurn: 1, overVerdict: "deny" })
+      createSessionWriteBudget({
+        untrustedContext: untrusted,
+        maxWritesPerTurn: 1,
+        overVerdict: "deny",
+      })
     const trusted = mk(false)
     const untrusted = mk(true)
     expect(trusted.recordWrite(0)).toBe("ok")

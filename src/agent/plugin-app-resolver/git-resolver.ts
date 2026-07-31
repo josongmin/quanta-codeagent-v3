@@ -21,8 +21,8 @@
  * wrapper is the belt-and-suspenders second line.
  */
 
-import { errMessage, logger } from "@/shared"
 import type { MentionResolverPort } from "@/agent/mention-injection"
+import { errMessage, logger } from "@/shared"
 
 /** The closed git subcommand enum (mirrors the parser's `@git:(status|diff|log)`). */
 export type GitSubcommand = "status" | "diff" | "log"

@@ -1,9 +1,9 @@
-import { afterEach, describe, expect, test } from "bun:test"
 import { Database } from "bun:sqlite"
+import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { recallContext, type RecallDeps } from "@/agent/memory"
+import { type RecallDeps, recallContext } from "@/agent/memory"
 import type { MemoryEntry } from "@/memory"
 import { SqliteStore } from "@/memory"
 import { resolveMemoryConfigFromEnv } from "@/runner/assemble/memory-factory"
@@ -107,13 +107,9 @@ describe("§10.6 routing meta — SQLite persistence round-trip", () => {
         superseded_by TEXT, session_id TEXT
       )
     `)
-    legacy.query("INSERT INTO memories (id, kind, text, tags, created_at) VALUES (?,?,?,?,?)").run(
-      "old1",
-      "fact",
-      "legacy knowledge",
-      "[]",
-      NOW,
-    )
+    legacy
+      .query("INSERT INTO memories (id, kind, text, tags, created_at) VALUES (?,?,?,?,?)")
+      .run("old1", "fact", "legacy knowledge", "[]", NOW)
     legacy.close()
 
     // Open with the current store — migration must not throw.
@@ -248,9 +244,9 @@ describe("§10.6 env → factory projection (knob wire)", () => {
   test("loose truthy tokens (on/true/yes) also enable", () => {
     const store = freshStore()
     for (const v of ["on", "true", "yes", "ON"]) {
-      expect(
-        resolveMemoryConfigFromEnv({ QUANTA_MEMORY_ROUTING: v }, store)?.routingEnabled,
-      ).toBe(true)
+      expect(resolveMemoryConfigFromEnv({ QUANTA_MEMORY_ROUTING: v }, store)?.routingEnabled).toBe(
+        true,
+      )
     }
     store.close()
   })

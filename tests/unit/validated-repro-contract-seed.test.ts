@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  validatedReproContractSeed,
-  validatedReproRepairSeed,
-} from "@/runner/batch/eval/driver"
+import { validatedReproContractSeed, validatedReproRepairSeed } from "@/runner/batch/eval/driver"
 import { PacketBlindnessViolation } from "@/runner/batch/eval/llm-evidence-packet"
 
 describe("validatedReproContractSeed", () => {

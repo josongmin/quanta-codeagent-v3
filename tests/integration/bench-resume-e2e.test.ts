@@ -40,28 +40,23 @@
  * cross-box request determinism.
  */
 
+import { afterEach, describe, expect, it } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, describe, expect, it } from "bun:test"
+import { resumeKey } from "@/apps/bench/resume/identity"
+import { teeResumeReplayStore } from "@/apps/bench/resume/recorder"
+import { prepareResume } from "@/apps/bench/resume/resume-launch"
+import { type ResumeStore, resumeStore } from "@/apps/bench/resume/store"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import {
-  jsonlReplayStore,
-  recordingLlmPort,
-  replayLlmPort,
-  s3ReplayStore,
-} from "@/llm/replay"
+import { jsonlReplayStore, recordingLlmPort, replayLlmPort, s3ReplayStore } from "@/llm/replay"
 import {
   isResumeEligible,
-  readReceipt,
   type RemoteBackend,
+  readReceipt,
   segmentStore,
   writeReceipt,
 } from "@/shared/remote-store"
-import { type ResumeStore, resumeStore } from "@/apps/bench/resume/store"
-import { teeResumeReplayStore } from "@/apps/bench/resume/recorder"
-import { prepareResume } from "@/apps/bench/resume/resume-launch"
-import { resumeKey } from "@/apps/bench/resume/identity"
 
 // ── Fakes ────────────────────────────────────────────────────────────────────
 
@@ -131,7 +126,8 @@ const countingLlm = (): { port: LLMPort; calls: () => number } => {
         const firstUserText =
           input.messages.find((m) => m.role === "user")?.content.find((b) => b.type === "text") ??
           null
-        const tag = firstUserText !== null && firstUserText.type === "text" ? firstUserText.text : "?"
+        const tag =
+          firstUserText !== null && firstUserText.type === "text" ? firstUserText.text : "?"
         async function* run(): AsyncIterable<StreamEvent> {
           yield { type: "text_delta", delta: `LIVE-reply-to:${tag}` }
           yield { type: "message_stop", stop_reason: "end_turn" }
@@ -259,10 +255,7 @@ describe("bench spot-resume KEYSTONE e2e (record → durable → reclaim → res
     // inject a ResumeStore over the reclaimed durable backend so no real S3 is
     // hit; the workDir seam pins where the materialized cassette lands.
     const resumeWorkDir = mkTmp()
-    const makeStore = (
-      cfg: { bucket: string; region?: string },
-      key: string,
-    ): ResumeStore => {
+    const makeStore = (cfg: { bucket: string; region?: string }, key: string): ResumeStore => {
       // Compose the real resumeStore but with a runAws that is never reached —
       // we override the backend entirely by going through segmentStore directly.
       // Simpler + faithful: build a ResumeStore whose layers point at the
@@ -359,10 +352,7 @@ describe("bench spot-resume KEYSTONE e2e (record → durable → reclaim → res
     await writeReceipt(backend, KEY, { ...healthy!, degraded: true })
     expect(isResumeEligible(await readReceipt(backend, KEY))).toBe(false)
 
-    const makeStore = (
-      _cfg: { bucket: string; region?: string },
-      key: string,
-    ): ResumeStore => {
+    const makeStore = (_cfg: { bucket: string; region?: string }, key: string): ResumeStore => {
       const segs = segmentStore(backend, key)
       return {
         backend,

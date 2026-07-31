@@ -241,7 +241,12 @@ describe("edit-repair-loop — real runAgent loop drives the fast-model repair t
     const provider = new FileContentDiagnosticsProvider()
     const out = await withTimeout(
       runAgent(
-        editRepairConfig({ llm, cwd: dir, diagnosticsProvider: provider, editRepair: { maxIters: 3 } }),
+        editRepairConfig({
+          llm,
+          cwd: dir,
+          diagnosticsProvider: provider,
+          editRepair: { maxIters: 3 },
+        }),
       ),
       15_000,
       "edit-repair-loop-e2e-clean",
@@ -264,7 +269,12 @@ describe("edit-repair-loop — real runAgent loop drives the fast-model repair t
     const provider = new FileContentDiagnosticsProvider()
     const out = await withTimeout(
       runAgent(
-        editRepairConfig({ llm, cwd: dir, diagnosticsProvider: provider, editRepair: { maxIters: 3 } }),
+        editRepairConfig({
+          llm,
+          cwd: dir,
+          diagnosticsProvider: provider,
+          editRepair: { maxIters: 3 },
+        }),
       ),
       15_000,
       "edit-repair-loop-e2e-off",

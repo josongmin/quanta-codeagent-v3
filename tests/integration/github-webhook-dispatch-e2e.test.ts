@@ -32,10 +32,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
 import { createServer, request as httpRequest, type Server } from "node:http"
-import { type AddressInfo } from "node:net"
-
-import { loadPrContext } from "@/integrations/github/pr-context-loader"
-import { createPrOutputSink } from "@/integrations/github/pr-output-sink"
+import type { AddressInfo } from "node:net"
 import {
   asIdempotencyKey,
   computeIdempotencyKey,
@@ -46,8 +43,9 @@ import {
   type WebhookResponse,
   type WebhookTransportPort,
 } from "@/integrations/github"
-import type { GhCliPort, GhCliResult } from "@/reactor"
-import type { ClockPort } from "@/reactor"
+import { loadPrContext } from "@/integrations/github/pr-context-loader"
+import { createPrOutputSink } from "@/integrations/github/pr-output-sink"
+import type { ClockPort, GhCliPort, GhCliResult } from "@/reactor"
 
 // ── Constants ────────────────────────────────────────────────────────────
 const SECRET = "h9-webhook-shared-secret"
@@ -301,7 +299,9 @@ describe("H9 — github webhook → dispatch full pipe (real socket, hermetic gh
       if (joined.includes("--method POST")) {
         const bodyArg = args.find((a) => a.startsWith("body="))
         if (bodyArg !== undefined) postedBodies.push(bodyArg.slice("body=".length))
-        return ok(JSON.stringify({ html_url: "https://github.com/octo/widget/pull/42#issuecomment-9001" }))
+        return ok(
+          JSON.stringify({ html_url: "https://github.com/octo/widget/pull/42#issuecomment-9001" }),
+        )
       }
       return ok("[]") // listing → no existing comment
     })

@@ -17,11 +17,13 @@ const DEFAULT_MAX_CARDS = 12
  *  enclosing block (adversarial-audit R1 injection finding). Boundary-token defanging
  *  (`<system-reminder>`) remains the wiring's `embedUntrusted` job; this guarantees the
  *  digest's OWN line structure can't be hijacked regardless. */
-const oneLine = (s: string): string => s.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim()
+const oneLine = (s: string): string =>
+  s
+    .replace(/[\r\n]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
 
-const locSuffix = (
-  location: EvidenceLedgerSnapshot["cards"][number]["location"],
-): string => {
+const locSuffix = (location: EvidenceLedgerSnapshot["cards"][number]["location"]): string => {
   if (location?.file === undefined) return ""
   const line = location.lineStart !== undefined ? `:${location.lineStart}` : ""
   return ` [${oneLine(location.file)}${line}]`

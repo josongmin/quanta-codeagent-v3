@@ -16,7 +16,14 @@ const NB = JSON.stringify({
   nbformat_minor: 5,
   metadata: { kernelspec: { name: "python3" } },
   cells: [
-    { cell_type: "code", id: "a", source: ["x = 1\n", "print(x)\n"], metadata: {}, execution_count: null, outputs: [] },
+    {
+      cell_type: "code",
+      id: "a",
+      source: ["x = 1\n", "print(x)\n"],
+      metadata: {},
+      execution_count: null,
+      outputs: [],
+    },
     { cell_type: "markdown", id: "b", source: ["# notes\n"], metadata: {} },
   ],
 })
@@ -40,7 +47,15 @@ const makePort = (seed: Record<string, string>) => {
       files.set(k, content)
     },
     async statFile(path): Promise<FileInfo> {
-      return { path, size: 0, isDirectory: false, mtimeMs: 0, isFIFO: false, isCharacterDevice: false, isBlockDevice: false }
+      return {
+        path,
+        size: 0,
+        isDirectory: false,
+        mtimeMs: 0,
+        isFIFO: false,
+        isCharacterDevice: false,
+        isBlockDevice: false,
+      }
     },
     async fileExists(path, base) {
       return files.has(resolve(path, base))
@@ -49,8 +64,12 @@ const makePort = (seed: Record<string, string>) => {
   return { port, files, writes }
 }
 
-const ctx = (): ToolContext => ({ cwd: "/repo", signal: new AbortController().signal }) as ToolContext
-const run = async (tool: ReturnType<typeof makeNotebookEditTool>, input: object): Promise<ToolResult> => {
+const ctx = (): ToolContext =>
+  ({ cwd: "/repo", signal: new AbortController().signal }) as ToolContext
+const run = async (
+  tool: ReturnType<typeof makeNotebookEditTool>,
+  input: object,
+): Promise<ToolResult> => {
   let last: ToolResult | undefined
   for await (const ev of tool.execute(input as never, ctx()) as AsyncIterable<ToolEvent>)
     if (ev.type === "result") last = ev.result
@@ -84,7 +103,11 @@ describe("notebook_edit tool — FS-jail wrapper hellgate", () => {
 
   test("unreadable file ⇒ ok:false (no throw), NO write", async () => {
     const { port, writes } = makePort({})
-    const r = await run(makeNotebookEditTool(port), { path: "missing.ipynb", mode: "delete", cell: 0 })
+    const r = await run(makeNotebookEditTool(port), {
+      path: "missing.ipynb",
+      mode: "delete",
+      cell: 0,
+    })
     expect(r.ok).toBe(false)
     expect(writes).toHaveLength(0)
   })
@@ -117,7 +140,11 @@ describe("notebook_edit tool — FS-jail wrapper hellgate", () => {
 
   test("missing required field for mode ⇒ ok:false usage error, NO write", async () => {
     const { port, writes } = makePort({ "/repo/nb.ipynb": NB })
-    const r = await run(makeNotebookEditTool(port), { path: "nb.ipynb", mode: "str_replace", cell: 0 })
+    const r = await run(makeNotebookEditTool(port), {
+      path: "nb.ipynb",
+      mode: "str_replace",
+      cell: 0,
+    })
     expect(r.ok).toBe(false)
     expect(writes).toHaveLength(0)
   })
@@ -148,7 +175,9 @@ describe("notebook_edit tool — FS-jail wrapper hellgate", () => {
     const histCtx = {
       cwd: "/repo",
       signal: new AbortController().signal,
-      fileHistory: { record: (e: { path: string; cwd: string; content: string }) => recorded.push(e) },
+      fileHistory: {
+        record: (e: { path: string; cwd: string; content: string }) => recorded.push(e),
+      },
     } as unknown as ToolContext
     let last: ToolResult | undefined
     const tool = makeNotebookEditTool(port)

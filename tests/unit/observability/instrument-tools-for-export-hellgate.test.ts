@@ -13,12 +13,12 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test"
+import { instrumentToolsForExport } from "@/observability"
 import {
   __resetDefaultMetricSink,
   setDefaultMetricSink,
 } from "@/observability/metrics/in-memory-registry"
 import type { MetricSample } from "@/observability/metrics/port"
-import { instrumentToolsForExport } from "@/observability"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 
 const fakeTool = (name: string): Tool => ({

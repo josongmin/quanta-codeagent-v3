@@ -573,7 +573,7 @@ describe("chip — empty objective text suppresses the chip", () => {
     expect(line).not.toContain("🎯")
   })
 
-  test('PAIRED CONTROL: same flag/state but non-empty text ⇒ chip present', () => {
+  test("PAIRED CONTROL: same flag/state but non-empty text ⇒ chip present", () => {
     const line = stripAnsi(
       createStatusPills({
         enabled: true,

@@ -99,7 +99,9 @@ describe("[F4] FsJailFileSystemPort.writeFile is atomic (temp + rename)", () => 
     expect(rename.from.startsWith(`${finalPath}.`)).toBe(true)
 
     // (2) The bytes were written to that temp path, NOT to the final path.
-    const writes = fs.ops.filter((o): o is Extract<Op, { kind: "writeFile" }> => o.kind === "writeFile")
+    const writes = fs.ops.filter(
+      (o): o is Extract<Op, { kind: "writeFile" }> => o.kind === "writeFile",
+    )
     expect(writes.length).toBe(1)
     expect(writes[0]?.path).toBe(rename.from)
     expect(writes[0]?.content).toBe("final-bytes")

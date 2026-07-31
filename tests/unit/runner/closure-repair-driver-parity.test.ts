@@ -50,11 +50,15 @@ describe("runner closure-repair driver parity", () => {
     // (`extractIssueHint(...).symbols`), populated by the caller — the runner
     // submodule declares the field rather than inlining the `extractIssueHint`
     // call (that inline now lives only in the apps/bench monolithic driver).
-    expect(DRIVER_SRC).toContain('repairIssueSymbols: ReturnType<typeof extractIssueHint>["symbols"]')
+    expect(DRIVER_SRC).toContain(
+      'repairIssueSymbols: ReturnType<typeof extractIssueHint>["symbols"]',
+    )
     expect(DRIVER_SRC).toContain("args.repair.buildContext?.(repairArgs)")
     expect(DRIVER_SRC).toContain("buildRepairRoundSeedMessage(")
     // DRIFT: the evidence packet is recorded off the args bag now (`args.repairLlmEvidence`).
-    expect(DRIVER_SRC).toContain("recordLlmEvidencePacket(args.repairLlmEvidence, repairSeed.packet)")
+    expect(DRIVER_SRC).toContain(
+      "recordLlmEvidencePacket(args.repairLlmEvidence, repairSeed.packet)",
+    )
   })
 
   test("surfaces false-red and sibling-coverage telemetry", () => {
@@ -71,6 +75,8 @@ describe("runner closure-repair driver parity", () => {
     expect(DRIVER_SRC).toContain("primaryFalseRed: args.phase.primaryFalseRed")
     // Sibling-coverage telemetry (driver/localize-prep.ts): the resolved owner
     // files are projected into the phase's `siblingFiles` list.
-    expect(DRIVER_SRC).toContain("siblingFiles: args.prepared.ownerResolved?.map((o) => o.file) ?? []")
+    expect(DRIVER_SRC).toContain(
+      "siblingFiles: args.prepared.ownerResolved?.map((o) => o.file) ?? []",
+    )
   })
 })

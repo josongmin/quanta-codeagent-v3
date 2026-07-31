@@ -148,9 +148,9 @@ describe("rule-indicator · env gating", () => {
     expect(isRulePillEnabled(cleanEnv({ [RULE_PILL_ENV]: "1" }))).toBe(true)
     expect(isRulePillEnabled(cleanEnv({ [RULE_PILL_ENV]: "0" }))).toBe(false)
     // Indicator off ⇒ pill off even when the pill knob is explicitly on.
-    expect(
-      isRulePillEnabled(cleanEnv({ [RULE_INDICATOR_ENV]: "0", [RULE_PILL_ENV]: "1" })),
-    ).toBe(false)
+    expect(isRulePillEnabled(cleanEnv({ [RULE_INDICATOR_ENV]: "0", [RULE_PILL_ENV]: "1" }))).toBe(
+      false,
+    )
   })
 
   test("buildRuleInventory with indicator disabled returns the empty singleton", async () => {

@@ -679,7 +679,9 @@ describe("session stress — worktree (git required)", () => {
       // Surface the captured stderr on failure so a real regression is legible.
       for (let i = 0; i < exitCodes.length; i++) {
         if (exitCodes[i] !== 0) {
-          throw new Error(`fork #${i} failed (exit ${exitCodes[i]}); stderr: ${captured[i]?.err ?? ""}`)
+          throw new Error(
+            `fork #${i} failed (exit ${exitCodes[i]}); stderr: ${captured[i]?.err ?? ""}`,
+          )
         }
         expect(exitCodes[i]).toBe(0)
       }

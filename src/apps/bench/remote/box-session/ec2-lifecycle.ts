@@ -54,7 +54,10 @@ export const resolveSwebenchPipSpec = (
   override: string | undefined,
   family?: string,
 ): string =>
-  override ?? (isLiveRun(datasetName, family) ? "git+https://github.com/SWE-bench-Live/SWE-bench-Live" : "swebench")
+  override ??
+  (isLiveRun(datasetName, family)
+    ? "git+https://github.com/SWE-bench-Live/SWE-bench-Live"
+    : "swebench")
 
 /** RFC jun-29 — pick the Docker image NAMESPACE the harness pulls prebuilt images from.
  *  SWE-bench-Live publishes its prebuilt images under `starryzhang`, NOT the default
@@ -99,13 +102,17 @@ export const ensureBoxSwebenchShimCurrent = async (session: BoxSession): Promise
     buildSwebenchShim(want),
   )
   if (wrote.code !== 0) {
-    throw new Error(`[pool] rewriting stale swebench shim failed (code ${wrote.code}): ${wrote.stderr}`)
+    throw new Error(
+      `[pool] rewriting stale swebench shim failed (code ${wrote.code}): ${wrote.stderr}`,
+    )
   }
   const warm = await session.ssh(
     'set -o pipefail; ~/swebench-python -c "import swebench; print(swebench.__version__)" 2>&1 | tail -3',
   )
   if (warm.code !== 0) {
-    throw new Error(`[pool] re-warming swebench shim (from=${want}) failed (code ${warm.code}):\n${warm.stdout}`)
+    throw new Error(
+      `[pool] re-warming swebench shim (from=${want}) failed (code ${warm.code}):\n${warm.stdout}`,
+    )
   }
 }
 
@@ -484,17 +491,21 @@ const setupProHarnessIfNeeded = async (
     "test -d ~/swebench-pro/.git || git clone --depth 1 https://github.com/scaleapi/SWE-bench_Pro-os ~/swebench-pro 2>&1 | tail -3",
   )
   if (clone.code !== 0) {
-    throw new Error(`[full-remote] Pro harness clone failed (code ${clone.code}):\n${clone.stdout}${clone.stderr}`)
+    throw new Error(
+      `[full-remote] Pro harness clone failed (code ${clone.code}):\n${clone.stdout}${clone.stderr}`,
+    )
   }
   // Dedicated venv with the harness deps (requirements.txt: pandas/tqdm/datasets/modal/docker/
   // huggingface_hub). modal is imported even in --use_local_docker mode, so install it too.
   const venv = await ssh(
-    "set -o pipefail; export PATH=\"$HOME/.local/bin:$PATH\"; " +
+    'set -o pipefail; export PATH="$HOME/.local/bin:$PATH"; ' +
       "uv venv ~/swebench-pro-venv --python 3.11 2>&1 | tail -2 && " +
       "uv pip install --python ~/swebench-pro-venv/bin/python pandas tqdm datasets docker huggingface_hub modal 2>&1 | tail -4",
   )
   if (venv.code !== 0) {
-    throw new Error(`[full-remote] Pro grading venv setup failed (code ${venv.code}):\n${venv.stdout}${venv.stderr}`)
+    throw new Error(
+      `[full-remote] Pro grading venv setup failed (code ${venv.code}):\n${venv.stdout}${venv.stderr}`,
+    )
   }
   log("[full-remote] Pro harness ready (~/swebench-pro + ~/swebench-pro-venv)")
 }

@@ -37,10 +37,7 @@ import { cfg, RecordingStream, text, withTimeout } from "./_harness"
 
 const ENABLE = { maxDepth: 1, taskRegistry: new TaskRegistry(), enableBatchSpawn: true } as const
 
-const spawnBatchCall = (
-  id: string,
-  input: Record<string, unknown>,
-): StreamEvent[] => [
+const spawnBatchCall = (id: string, input: Record<string, unknown>): StreamEvent[] => [
   { type: "tool_use_start", id, name: "spawn_batch" },
   { type: "tool_use_end", id, input },
   { type: "message_stop", stop_reason: "tool_use" },

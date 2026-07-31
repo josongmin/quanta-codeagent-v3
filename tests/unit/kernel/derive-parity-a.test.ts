@@ -21,7 +21,6 @@ import { describe, expect, test } from "bun:test"
 import { BENCH } from "@/config/knob-inventory/bench"
 import type { KnobInventoryEntry } from "@/config/knob-inventory/types"
 import type { AnyKnobSchema } from "@/config/knob-schema/contracts"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 import { deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
 import {
   benchInLoopExecSchema,
@@ -37,12 +36,13 @@ import {
   subagentSchema,
   verificationPlanSchema,
 } from "@/config/knob-schema/schemas/bench-a"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 // Live registry knobs (their parse is the ground truth).
 import { benchInLoopExecKnob } from "@/runner/knobs/knobs/bench-in-loop-exec"
 import { branchSearchKnob } from "@/runner/knobs/knobs/branch-search"
 import { faultEvidenceKnob } from "@/runner/knobs/knobs/fault-evidence"
-import { issueHintExpectedActualKnob } from "@/runner/knobs/knobs/issue-hint-expected-actual"
 import { issueHintKnob } from "@/runner/knobs/knobs/issue-hint"
+import { issueHintExpectedActualKnob } from "@/runner/knobs/knobs/issue-hint-expected-actual"
 import { noPatchBreakerKnob } from "@/runner/knobs/knobs/no-patch-breaker"
 import { patchHygieneKnob } from "@/runner/knobs/knobs/patch-hygiene"
 import { primaryRailKnob } from "@/runner/knobs/knobs/primary-rail"
@@ -108,13 +108,25 @@ const PAIRS: readonly Pair[] = [
     schema: issueHintExpectedActualSchema,
     knob: asAnyKnob(issueHintExpectedActualKnob),
   },
-  { name: "bench-in-loop-exec", schema: benchInLoopExecSchema, knob: asAnyKnob(benchInLoopExecKnob) },
+  {
+    name: "bench-in-loop-exec",
+    schema: benchInLoopExecSchema,
+    knob: asAnyKnob(benchInLoopExecKnob),
+  },
   { name: "fault-evidence", schema: faultEvidenceSchema, knob: asAnyKnob(faultEvidenceKnob) },
-  { name: "verification-plan", schema: verificationPlanSchema, knob: asAnyKnob(verificationPlanKnob) },
+  {
+    name: "verification-plan",
+    schema: verificationPlanSchema,
+    knob: asAnyKnob(verificationPlanKnob),
+  },
   { name: "primary-rail", schema: primaryRailSchema, knob: asAnyKnob(primaryRailKnob) },
   { name: "patch-hygiene", schema: patchHygieneSchema, knob: asAnyKnob(patchHygieneKnob) },
   { name: "no-patch-breaker", schema: noPatchBreakerSchema, knob: asAnyKnob(noPatchBreakerKnob) },
-  { name: "repair-escalation", schema: repairEscalationSchema, knob: asAnyKnob(repairEscalationKnob) },
+  {
+    name: "repair-escalation",
+    schema: repairEscalationSchema,
+    knob: asAnyKnob(repairEscalationKnob),
+  },
   {
     name: "spec-fidelity-steer",
     schema: specFidelitySteerSchema,
@@ -235,7 +247,9 @@ describe("Pillar A derive parity (slice A) — RED on injection (the assert has 
     // issue-hint-expected-actual is kind="string" in bench.ts; force "bool".
     const corrupted: AnyKnobSchema = { ...issueHintExpectedActualSchema, kind: "bool" }
     const derived = deriveInventoryEntry(corrupted)
-    const current = inventoryByEnvKey.get(issueHintExpectedActualSchema.envKey) as KnobInventoryEntry
+    const current = inventoryByEnvKey.get(
+      issueHintExpectedActualSchema.envKey,
+    ) as KnobInventoryEntry
     expect(derived).not.toEqual(current)
   })
 

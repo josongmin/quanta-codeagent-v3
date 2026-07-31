@@ -42,7 +42,11 @@ type Script =
  *  (whitespace / digit / punctuation / symbol / emoji / untracked). */
 const scriptOf = (cp: number): Script | null => {
   // Hangul: syllables + Jamo + compatibility Jamo.
-  if ((cp >= 0xac00 && cp <= 0xd7a3) || (cp >= 0x1100 && cp <= 0x11ff) || (cp >= 0x3130 && cp <= 0x318f))
+  if (
+    (cp >= 0xac00 && cp <= 0xd7a3) ||
+    (cp >= 0x1100 && cp <= 0x11ff) ||
+    (cp >= 0x3130 && cp <= 0x318f)
+  )
     return "hangul"
   if (cp >= 0x3040 && cp <= 0x309f) return "hiragana"
   if (cp >= 0x30a0 && cp <= 0x30ff) return "katakana"
@@ -55,11 +59,7 @@ const scriptOf = (cp: number): Script | null => {
   if (cp >= 0x0900 && cp <= 0x097f) return "devanagari"
   if (cp >= 0x0370 && cp <= 0x03ff) return "greek"
   // Latin: ASCII letters + Latin-1 supplement / extended letters (accented).
-  if (
-    (cp >= 0x41 && cp <= 0x5a) ||
-    (cp >= 0x61 && cp <= 0x7a) ||
-    (cp >= 0x00c0 && cp <= 0x024f)
-  )
+  if ((cp >= 0x41 && cp <= 0x5a) || (cp >= 0x61 && cp <= 0x7a) || (cp >= 0x00c0 && cp <= 0x024f))
     return "latin"
   return null
 }

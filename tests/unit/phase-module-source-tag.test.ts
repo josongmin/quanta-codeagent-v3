@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
+import { resolveBenchKnobs } from "@/runner/batch/eval/knobs-bench"
 import { CLEAN_SELECTOR } from "@/runner/batch/eval/posture/capability-profiles"
 import { withKnobModules } from "@/runner/batch/eval/posture/knob-module"
-import { resolveBenchKnobs } from "@/runner/batch/eval/knobs-bench"
 
 // Wave-3 obligation 3: a controller-injected phase-module value is tagged
 // `phase-module` (not `preset`), so the report never misattributes it to a named

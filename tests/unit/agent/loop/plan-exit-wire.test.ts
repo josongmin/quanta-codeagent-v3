@@ -29,10 +29,7 @@ const makeStore = (): PlanStore => {
   return store
 }
 
-const makeCfg = (
-  planStore: PlanStore | undefined,
-  emitted: AgentEvent[],
-): PlanLifecycleConfig => ({
+const makeCfg = (planStore: PlanStore | undefined, emitted: AgentEvent[]): PlanLifecycleConfig => ({
   planMode: true,
   collaborationMode: "plan",
   stream: { emit: (e) => emitted.push(e) },

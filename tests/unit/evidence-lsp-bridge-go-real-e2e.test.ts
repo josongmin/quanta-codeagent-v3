@@ -27,14 +27,19 @@ const has = (b: string, ...a: string[]): boolean => {
 // gopls thunders under the parallel suite, so this runs only when
 // QUANTA_REAL_TOOLCHAIN_E2E is set (`bun run test:real-toolchain`, serial).
 const D =
-  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") && has("go", "version") && has("gopls", "version")
+  gateOn(process.env, "QUANTA_REAL_TOOLCHAIN_E2E") &&
+  has("go", "version") &&
+  has("gopls", "version")
     ? describe
     : describe.skip
 
 const project = (): string => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "evbridge-go-")))
   writeFileSync(join(dir, "go.mod"), ["module t", "", "go 1.21"].join("\n"))
-  writeFileSync(join(dir, "add.go"), ["package t", "", "func Add(a, b int) int {", "\treturn a + b", "}"].join("\n"))
+  writeFileSync(
+    join(dir, "add.go"),
+    ["package t", "", "func Add(a, b int) int {", "\treturn a + b", "}"].join("\n"),
+  )
   writeFileSync(
     join(dir, "add_test.go"),
     [

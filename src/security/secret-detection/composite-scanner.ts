@@ -16,9 +16,9 @@ import { patternScanner } from "./pattern-scanner"
 import {
   DEFAULT_MAX_FINDINGS,
   type SecretFinding,
-  SecretScanReadError,
   type SecretScanner,
   type SecretScannerOpts,
+  SecretScanReadError,
 } from "./port"
 
 /**

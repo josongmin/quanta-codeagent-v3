@@ -46,7 +46,12 @@ const TURN: readonly AgentEvent[] = [
   { type: "plan_created", plan: { id: "p1", name: "n", version: 1, todos: [] } } as AgentEvent,
   {
     type: "plan_updated",
-    delta: { kind: "todo_status_changed", todoId: "x", fromStatus: "pending", toStatus: "completed" },
+    delta: {
+      kind: "todo_status_changed",
+      todoId: "x",
+      fromStatus: "pending",
+      toStatus: "completed",
+    },
     version: 2,
   } as AgentEvent,
   { type: "assistant_text", delta: "here is the answer" },
@@ -126,9 +131,7 @@ describe("item-stream — NON-BEHAVIORAL base-stream byte-identity over a whole 
       (o) => o.type === "plan_created" || o.type === "plan_updated" || o.type === "plan_snapshot",
     )
     expect(planMirror).toHaveLength(0)
-    const planItems = captured.filter(
-      (o) => o.type === "item_stream" && o.item.itemType === "plan",
-    )
+    const planItems = captured.filter((o) => o.type === "item_stream" && o.item.itemType === "plan")
     expect(planItems.length).toBeGreaterThan(0)
   })
 

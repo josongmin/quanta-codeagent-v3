@@ -82,9 +82,8 @@ const postureCtx = (envPosture: PromptContext["envPosture"]): PromptContext => (
  *  list membership + `withoutBlocks`. `renderAtoms` selects the applicable posture
  *  atoms via `matches()` (matcher + supersede resolution + ordering) and flattens
  *  their lines. Byte-identical to the prior CORE/OWNED/DEFAULT projections. */
-export const renderPostureBase = (
-  posture: "frozen" | "owned" | "default",
-): readonly string[] => renderAtoms(POSTURE_ATOMS, postureCtx(posture))
+export const renderPostureBase = (posture: "frozen" | "owned" | "default"): readonly string[] =>
+  renderAtoms(POSTURE_ATOMS, postureCtx(posture))
 
 /** TASK-only rules (task axis) — env-independent mode narrowing. interactive/ide carry none;
  *  headless/daemon → R-SINGLE-COHERENT; batch → R-NO-EXPLORE-OVER-EDIT; ci-bot → PR rules. */

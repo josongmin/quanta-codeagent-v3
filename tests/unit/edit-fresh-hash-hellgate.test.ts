@@ -89,7 +89,12 @@ describe("jul-13 edit-fresh-hash", () => {
   test("1. OFF (flag absent) ⇒ success output byte-identical (no fresh-hash line)", async () => {
     const path = "/in-mem/off.txt"
     const { port } = makeFullPort({ [path]: "const a = 1" })
-    const r = await run(makeEditTool(port), { path, old_string: "1", new_string: "2" }, "/in-mem", false)
+    const r = await run(
+      makeEditTool(port),
+      { path, old_string: "1", new_string: "2" },
+      "/in-mem",
+      false,
+    )
     expect(r.ok).toBe(true)
     // Legacy line exactly — no appended hash. Removing the `ctx.editFreshHash` gate
     // (always append) turns this RED.
@@ -102,7 +107,12 @@ describe("jul-13 edit-fresh-hash", () => {
     const before = "const a = 1"
     const after = "const a = 2"
     const { port, files } = makeFullPort({ [path]: before })
-    const r = await run(makeEditTool(port), { path, old_string: "1", new_string: "2" }, "/in-mem", true)
+    const r = await run(
+      makeEditTool(port),
+      { path, old_string: "1", new_string: "2" },
+      "/in-mem",
+      true,
+    )
     expect(r.ok).toBe(true)
     const m = r.output?.match(FRESH_RE)
     expect(m).not.toBeNull()
@@ -209,7 +219,12 @@ describe("jul-13 edit-fresh-hash — REAL FS round-trip fidelity", () => {
     expect(r1.ok).toBe(true)
     const freshHash = r1.output?.match(FRESH_RE)?.[1]
     // Second edit, no re-read, precondition = advertised hash → MUST pass on disk.
-    const r2 = await runFs({ path, old_string: "b = 1", new_string: "b = 2", expected_hash: freshHash })
+    const r2 = await runFs({
+      path,
+      old_string: "b = 1",
+      new_string: "b = 2",
+      expected_hash: freshHash,
+    })
     expect(r2.ok).toBe(true)
     expect(r2.failure).toBeUndefined()
     // CRLF preserved end-to-end (edit strategy + write did not coerce terminators).

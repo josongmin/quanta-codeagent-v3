@@ -487,9 +487,7 @@ describe("recall-budget visibility (truncation disclosure)", () => {
     expect(out).not.toBeNull()
     const block = out as string
     // Disclosure present, exact K/N, and the memory_search nudge.
-    expect(block).toContain(
-      "(recalled 3 of 8 candidate memories — use memory_search for more)",
-    )
+    expect(block).toContain("(recalled 3 of 8 candidate memories — use memory_search for more)")
     // Exactly K rendered entry lines (the disclosure is not an entry line).
     const entryLines = block.split("\n").filter((l) => l.startsWith("- (fact)"))
     expect(entryLines).toHaveLength(3)

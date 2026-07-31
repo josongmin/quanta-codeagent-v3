@@ -134,9 +134,7 @@ export const runOneTurn = async <R>(
     onCancel: () => turnAbort.abort(),
     onAbort: () => outerAbort.abort(),
     // Only wire the Ctrl+B sink when the host opted in; absent ⇒ FSM byte-identical.
-    ...(deps.onMovedToBackground !== undefined
-      ? { onBackground: () => signalBackground?.() }
-      : {}),
+    ...(deps.onMovedToBackground !== undefined ? { onBackground: () => signalBackground?.() } : {}),
   })
   turnIndicator.start()
   const onAbortStopIndicator = (): void => turnIndicator.stop()

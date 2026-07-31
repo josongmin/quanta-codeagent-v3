@@ -12,9 +12,10 @@
  * explicit, reviewed reason. It is the recurrence guard for the audit's headline
  * (a new surface silently skipping the gate = default-OPEN).
  */
+
+import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 
 const SRC = join(import.meta.dir, "../../../src")
 
@@ -78,7 +79,9 @@ describe("single-PEP fence — tool.execute() only from allowlisted sites [P2-T3
   // fence above is meaningless.
   test("the detector matches a real bypass and ignores unrelated .execute(", () => {
     expect(TOOL_EXECUTE.test("for await (const ev of evilTool.execute(input, ctx)) {")).toBe(true)
-    expect(TOOL_EXECUTE.test("for await (const ev of reg.tools.get(n).execute(x, ctx)) {")).toBe(true)
+    expect(TOOL_EXECUTE.test("for await (const ev of reg.tools.get(n).execute(x, ctx)) {")).toBe(
+      true,
+    )
     expect(TOOL_EXECUTE.test("const r = await db.query.execute(sql)")).toBe(false)
     expect(TOOL_EXECUTE.test("async *execute(input: I, ctx: ToolContext) {")).toBe(false) // a DEFINITION, not a call
   })

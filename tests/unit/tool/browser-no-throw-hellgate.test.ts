@@ -5,7 +5,7 @@
  * browser tool inherit this no-hang requirement automatically.
  */
 import { describe, expect, test } from "bun:test"
-import { createHeadlessBrowser, type BrowserPort } from "@/browser"
+import { type BrowserPort, createHeadlessBrowser } from "@/browser"
 import type { Tool, ToolResult } from "@/tool"
 import { createBrowserToolset } from "@/tool/browser"
 

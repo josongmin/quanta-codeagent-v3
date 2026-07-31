@@ -29,8 +29,7 @@ export const maybePickSession = async (): Promise<void> => {
   if (sessions.length === 0) return
 
   const home = homedir()
-  const shorten = (p: string) =>
-    home && p.startsWith(home) ? `~${p.slice(home.length)}` : p
+  const shorten = (p: string) => (home && p.startsWith(home) ? `~${p.slice(home.length)}` : p)
   // Relative-time display thresholds (durations in ms, not timers) — named so
   // the no-magic-timeout scanner sees bound constants, not stray wall-clock.
   const MINUTE_MS = 60_000
@@ -57,9 +56,7 @@ export const maybePickSession = async (): Promise<void> => {
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
   const ans = (
-    await rl.question(
-      `\x1b[2mResume a session? [1-${sessions.length} or Enter for new]: \x1b[0m`,
-    )
+    await rl.question(`\x1b[2mResume a session? [1-${sessions.length} or Enter for new]: \x1b[0m`)
   ).trim()
   rl.close()
 

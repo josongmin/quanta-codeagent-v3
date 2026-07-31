@@ -29,7 +29,9 @@ describe("HELLGATE L4 — budget-ledger activation seam", () => {
     // interactive has NO preset maxCostUsd; the override pins one.
     expect(assembleWith({ QUANTA_MAX_COST_USD: "0.05" }).budgetMeter?.dials.maxCostUsd).toBe(0.05)
     // garbage ⇒ omitted (preset stands; interactive ⇒ undefined).
-    expect(assembleWith({ QUANTA_MAX_COST_USD: "abc" }).budgetMeter?.dials.maxCostUsd).toBeUndefined()
+    expect(
+      assembleWith({ QUANTA_MAX_COST_USD: "abc" }).budgetMeter?.dials.maxCostUsd,
+    ).toBeUndefined()
   })
 
   test("QUANTA_MAX_COST_PER_TURN_USD override pins a per-turn ceiling", () => {

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { buildSystemPrompt, type AgentConfig, runAgent } from "@/agent"
+import { type AgentConfig, buildSystemPrompt, runAgent } from "@/agent"
 import type { StreamEvent, StreamInput } from "@/llm"
 import { __resetRuntimeConfig } from "@/shared"
 import { defaultTools, ToolRegistry } from "@/tool"
@@ -60,7 +60,9 @@ const flattenSystem = (s: StreamInput["system"]): string => {
   if (typeof s === "string") return s
   if (Array.isArray(s)) {
     return s
-      .map((b) => (typeof b === "string" ? b : ((b as { text?: string }).text ?? JSON.stringify(b))))
+      .map((b) =>
+        typeof b === "string" ? b : ((b as { text?: string }).text ?? JSON.stringify(b)),
+      )
       .join("\n")
   }
   return JSON.stringify(s)

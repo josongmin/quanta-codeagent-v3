@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { runAgent, wireOptionalAgentPorts } from "@/agent"
+import { z } from "zod"
 import type { AgentConfig } from "@/agent"
+import { runAgent, wireOptionalAgentPorts } from "@/agent"
 import type { StreamEvent } from "@/llm"
 import { __resetRuntimeConfig } from "@/shared"
 import type { AgentEvent } from "@/stream"
 import type { Tool, ToolEvent } from "@/tool"
 import { defaultTools, ToolRegistry } from "@/tool"
-import { z } from "zod"
 import { cfg, RecordingStream, withTimeout } from "./_harness"
 
 /**
@@ -89,10 +89,7 @@ const TOOL_ID = "probe-1"
 /** The scripted conversation shared by the ON and OFF runs (identical input, so
  *  the ONLY difference between the two traces is the lifecycle decoration). */
 const scriptedLLM = (): ScriptLLM =>
-  new ScriptLLM([
-    textThenToolCall(TOOL_ID, "let me probe first", "hello"),
-    finalText("all done"),
-  ])
+  new ScriptLLM([textThenToolCall(TOOL_ID, "let me probe first", "hello"), finalText("all done")])
 
 const baseCfg = (llm: ScriptLLM, stream: RecordingStream): AgentConfig =>
   cfg({
@@ -189,12 +186,9 @@ describe("item-lifecycle stream — real loop + fake LLM end-to-end (GAP 10)", (
 
     // (4) The TEXT item opened on the first real assistant_text and closed at/
     //     before the tool item opened (the model moved on to a tool call).
-    const textStartedAt = evs.findIndex(
-      (e) => e.type === "item_started" && e.itemKind === "text",
-    )
+    const textStartedAt = evs.findIndex((e) => e.type === "item_started" && e.itemKind === "text")
     expect(textStartedAt).toBeGreaterThanOrEqual(0)
-    const textItemId =
-      evs[textStartedAt]?.type === "item_started" ? evs[textStartedAt].itemId : ""
+    const textItemId = evs[textStartedAt]?.type === "item_started" ? evs[textStartedAt].itemId : ""
     const textCompletedAt = evs.findIndex(
       (e) => e.type === "item_completed" && e.itemId === textItemId,
     )
@@ -257,5 +251,6 @@ describe("item-lifecycle stream — real loop + fake LLM end-to-end (GAP 10)", (
 // for the unrelated fast-apply-merge gate); reset so no ambient process.env knob
 // bleeds in. Registered at module scope via bun's global hooks equivalent.
 import { afterAll, beforeAll } from "bun:test"
+
 beforeAll(() => __resetRuntimeConfig())
 afterAll(() => __resetRuntimeConfig())

@@ -173,7 +173,9 @@ describe("Phase 0-c — revived req.depth > maxDepth reject via background path"
     expect(snap?.status).toBe("failed")
     // RFC jul-13 §6.5 B Phase 2 — reject message is now the Codex-style directive
     // with the cap interpolated (`max subagent depth (1) exceeded — …`).
-    expect(snap?.errorMessage ?? snap?.outputDetail ?? "").toContain("max subagent depth (1) exceeded")
+    expect(snap?.errorMessage ?? snap?.outputDetail ?? "").toContain(
+      "max subagent depth (1) exceeded",
+    )
     // …and the real agent loop was NEVER forked (recursion actually bounded).
     expect(spy.forked()).toBe(0)
   })

@@ -52,7 +52,6 @@ const slashRuntime = createSlashRuntime(BUILTINS, { virtualCommands: REPL_VIRTUA
 export const describeSlashCommand = slashRuntime.describe
 export const slashCompleter = slashRuntime.complete
 export const runSlashCommand = slashRuntime.run
-export { isSlashCommand }
 /** ADR-0231 — re-exported for the radar wire hellgate (direct cmd invocation
  *  against a synthetic `SlashContext`). */
-export { radarCmd }
+export { isSlashCommand, radarCmd }

@@ -14,9 +14,9 @@ import { DEFAULT_IDENTITIES, UNKNOWN_MODE_IDENTITY } from "./default-identities"
 import {
   assertValidIdentityLines,
   IDENTITY_MODES,
-  isIdentityMode,
   type IdentityMode,
   type IdentityProvider,
+  isIdentityMode,
 } from "./port"
 
 /** Build the default {@link IdentityProvider}. `overrides` is an optional
@@ -63,4 +63,5 @@ export const defaultIdentityProvider = (
 export const identityForToken = (
   token: string,
   provider: IdentityProvider = defaultIdentityProvider(),
-): readonly string[] => (isIdentityMode(token) ? provider.identityFor(token) : [...UNKNOWN_MODE_IDENTITY])
+): readonly string[] =>
+  isIdentityMode(token) ? provider.identityFor(token) : [...UNKNOWN_MODE_IDENTITY]

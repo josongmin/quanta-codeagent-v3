@@ -26,11 +26,9 @@ describe("buildAstStaticWitnesses", () => {
       problemStatement: "Something is broken in the widget pipeline somewhere.",
       ownerCandidates: ["pkg/solo.py"],
       readSource: sourceMap({
-        "pkg/solo.py": [
-          "class Solo:",
-          "    def helper(self, x):",
-          "        return x + 1",
-        ].join("\n"),
+        "pkg/solo.py": ["class Solo:", "    def helper(self, x):", "        return x + 1"].join(
+          "\n",
+        ),
       }),
     }
     expect(buildAstStaticWitnesses(input)).toEqual([])
@@ -70,11 +68,7 @@ describe("buildAstStaticWitnesses", () => {
       problemStatement: "Output formatting is wrong; nothing names the method.",
       ownerCandidates: ["pkg/base.py", "pkg/sub.py"],
       readSource: sourceMap({
-        "pkg/base.py": [
-          "class Base:",
-          `    def ${sym}(self):`,
-          "        return 'base'",
-        ].join("\n"),
+        "pkg/base.py": ["class Base:", `    def ${sym}(self):`, "        return 'base'"].join("\n"),
         "pkg/sub.py": [
           "from pkg.base import Base",
           "class Sub(Base):",
@@ -158,10 +152,7 @@ describe("buildAstStaticWitnesses", () => {
     expect(pc.length).toBe(1)
     expect(pc[0]?.authority).toBe("authoritative")
     expect(pc[0]?.fromFile).toBe("pkg/producer.py")
-    expect([...(pc[0]?.subjectFiles ?? [])].sort()).toEqual([
-      "pkg/consumer.py",
-      "pkg/producer.py",
-    ])
+    expect([...(pc[0]?.subjectFiles ?? [])].sort()).toEqual(["pkg/consumer.py", "pkg/producer.py"])
   })
 
   test("registration-callback: callback passed into register(...) with resolvable impl => authoritative", () => {
@@ -229,10 +220,7 @@ describe("buildAstStaticWitnesses", () => {
       readSource: sourceMap({
         "pkg/base.py": ["class B:", `    def ${sym}(self):`, "        return []"].join("\n"),
         "pkg/postgres.py": ["class P:", `    def ${sym}(self):`, "        return []"].join("\n"),
-        "pkg/consumer.py": [
-          "def lonely_loader(x):",
-          "    return build_widget(x)",
-        ].join("\n"),
+        "pkg/consumer.py": ["def lonely_loader(x):", "    return build_widget(x)"].join("\n"),
       }),
     }
     const a = buildAstStaticWitnesses(input)

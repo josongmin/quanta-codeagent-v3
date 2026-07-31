@@ -118,7 +118,10 @@ describe("createBm25SecondaryReranker", () => {
     const rLow = createBm25SecondaryReranker({ alpha: -5 })
     const lowOut = await rLow.rerank({
       query: "cat",
-      candidates: [c("doc-frequent", "the the the the", 0), c("doc-rare", "the cat sat on the mat", 0)],
+      candidates: [
+        c("doc-frequent", "the the the the", 0),
+        c("doc-rare", "the cat sat on the mat", 0),
+      ],
     })
     expect(lowOut[0]?.id).toBe("doc-rare")
 

@@ -4,9 +4,9 @@
  * enforced by tests/unit/slice-boundary-config-parity.test.ts).
  */
 
+import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { relative } from "node:path"
-import { describe, expect, test } from "bun:test"
 import { getSliceBoundaryConfig } from "./_arch/slice-boundary-configs"
 import {
   extractTypeOnlyModuleRefs,

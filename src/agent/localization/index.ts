@@ -3,6 +3,8 @@
  * typed state. Pure slice (no @/llm/@/tool); consumes P1 EvidenceCard ids via evidenceRefs.
  * DEFAULT-OFF / inert until wired (see docs/plans/jul-5-sota-runtime-kernel).
  */
+
+export { createLocalizationTracker, type LocalizationTracker } from "./pass"
 export type {
   Candidate,
   CandidateInput,
@@ -11,4 +13,3 @@ export type {
   LocalizationPass,
   PatchTarget,
 } from "./types"
-export { createLocalizationTracker, type LocalizationTracker } from "./pass"

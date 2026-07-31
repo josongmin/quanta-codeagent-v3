@@ -71,7 +71,9 @@ describe("buildCounterfactualSeed", () => {
       ownerFile: "pkg/axis.py",
     })
     expect(seed).toBeDefined()
-    expect(seed).toContain("runtime-expanding calls (compiler/IO/DB/subprocess) may not be necessary")
+    expect(seed).toContain(
+      "runtime-expanding calls (compiler/IO/DB/subprocess) may not be necessary",
+    )
     expect(seed).toContain("changing the existing control flow may not be necessary")
     expect(seed).toContain("- added 2 runtime-expanding calls")
     // No imperative command.
@@ -107,7 +109,9 @@ describe("buildCounterfactualSeed", () => {
       ownerFile: undefined,
     })
     expect(seed).toBeDefined()
-    expect(seed).toContain("if a smaller edit to fewer source files fully fixes the issue, prefer it")
+    expect(seed).toContain(
+      "if a smaller edit to fewer source files fully fixes the issue, prefer it",
+    )
     expect(seed).not.toContain("`")
   })
 

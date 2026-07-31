@@ -5,14 +5,18 @@
  * remediation: the exit-code safety net + go build-fail capture.
  */
 import { describe, expect, test } from "bun:test"
-import { makeRunTestsTool, type TestRunPort } from "@/tool/testrun/tool"
 import type { FileSystemPort } from "@/storage"
+import { makeRunTestsTool, type TestRunPort } from "@/tool/testrun/tool"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 
 const fsWith = (present: string[]): FileSystemPort =>
   ({ fileExists: async (name: string) => present.includes(name) }) as unknown as FileSystemPort
 
-const portReturning = (out: { stdout?: string; stderr?: string; exitCode: number }): TestRunPort => ({
+const portReturning = (out: {
+  stdout?: string
+  stderr?: string
+  exitCode: number
+}): TestRunPort => ({
   run: async () => ({ stdout: out.stdout ?? "", stderr: out.stderr ?? "", exitCode: out.exitCode }),
 })
 
@@ -33,7 +37,10 @@ describe("run_tests — false-green & fault hellgate", () => {
       '{"Action":"output","Package":"t","Output":"FAIL\\tt [build failed]\\n"}',
       '{"Action":"fail","Package":"t","Elapsed":0,"FailedBuild":"t [t.test]"}',
     ].join("\n")
-    const tool = makeRunTestsTool({ fs: fsWith(["go.mod"]), port: portReturning({ stdout: buildFail, exitCode: 1 }) })
+    const tool = makeRunTestsTool({
+      fs: fsWith(["go.mod"]),
+      port: portReturning({ stdout: buildFail, exitCode: 1 }),
+    })
     const r = await run(tool)
     expect(r.ok).toBe(false) // the keystone: a build failure is NOT a pass
     expect(r.output.toLowerCase()).toContain("fail")
@@ -42,14 +49,24 @@ describe("run_tests — false-green & fault hellgate", () => {
   test("non-zero exit with NO parsed failures ⇒ safety net forces ok:false", async () => {
     // A runner that fails for a reason the parser doesn't model (e.g. cargo
     // panics before any test) must not slip through as green.
-    const tool = makeRunTestsTool({ fs: fsWith(["Cargo.toml"]), port: portReturning({ stdout: "weird output", exitCode: 101 }) })
+    const tool = makeRunTestsTool({
+      fs: fsWith(["Cargo.toml"]),
+      port: portReturning({ stdout: "weird output", exitCode: 101 }),
+    })
     const r = await run(tool)
     expect(r.ok).toBe(false)
   })
 
   test("all-pass suite (exit 0) ⇒ ok:true", async () => {
-    const goPass = ['{"Action":"pass","Test":"TestA"}', '{"Action":"pass","Test":"TestB"}', '{"Action":"pass","Package":"t"}'].join("\n")
-    const tool = makeRunTestsTool({ fs: fsWith(["go.mod"]), port: portReturning({ stdout: goPass, exitCode: 0 }) })
+    const goPass = [
+      '{"Action":"pass","Test":"TestA"}',
+      '{"Action":"pass","Test":"TestB"}',
+      '{"Action":"pass","Package":"t"}',
+    ].join("\n")
+    const tool = makeRunTestsTool({
+      fs: fsWith(["go.mod"]),
+      port: portReturning({ stdout: goPass, exitCode: 0 }),
+    })
     const r = await run(tool)
     expect(r.ok).toBe(true)
     expect(r.output).toContain("2 passed")
@@ -57,7 +74,12 @@ describe("run_tests — false-green & fault hellgate", () => {
 
   test("no recognized toolchain ⇒ ok:false, NO spawn", async () => {
     let spawned = false
-    const port: TestRunPort = { run: async () => { spawned = true; return { stdout: "", stderr: "", exitCode: 0 } } }
+    const port: TestRunPort = {
+      run: async () => {
+        spawned = true
+        return { stdout: "", stderr: "", exitCode: 0 }
+      },
+    }
     const tool = makeRunTestsTool({ fs: fsWith([]), port })
     const r = await run(tool)
     expect(r.ok).toBe(false)

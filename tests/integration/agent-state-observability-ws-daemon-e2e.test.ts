@@ -51,7 +51,7 @@ import {
 } from "@/apps/web-daemon/server"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import { type AgentStateMessage, decodeAgentStateFrame } from "@/protocol/agent-state"
-import { type ObservabilityMessage, decodeObservabilityFrame } from "@/protocol/observability"
+import { decodeObservabilityFrame, type ObservabilityMessage } from "@/protocol/observability"
 import { supported } from "@/protocol/session"
 import { createStubRuntimeFactory } from "../unit/apps/web-daemon/fixture"
 
@@ -117,7 +117,9 @@ const captureTimer = (): {
 }
 
 /** Seed real closed ports so a snapshot/delta carries observable content. */
-const buildLivePorts = (timer: NonNullable<ObservabilityPorts["timer"]>): {
+const buildLivePorts = (
+  timer: NonNullable<ObservabilityPorts["timer"]>,
+): {
   ports: ObservabilityPorts
   ledger: ReturnType<typeof createRunLedger>
   approvals: ReturnType<typeof createApprovalStateMachine>
@@ -165,7 +167,11 @@ const connect = (
   sockets.push(ws)
   const observability: ObservabilityMessage[] = []
   const agentState: AgentStateMessage[] = []
-  type Waiter<T> = { pred: (m: T) => boolean; resolve: (m: T) => void; timer: ReturnType<typeof setTimeout> }
+  type Waiter<T> = {
+    pred: (m: T) => boolean
+    resolve: (m: T) => void
+    timer: ReturnType<typeof setTimeout>
+  }
   const obsWaiters = new Set<Waiter<ObservabilityMessage>>()
   const asWaiters = new Set<Waiter<AgentStateMessage>>()
 
@@ -242,9 +248,7 @@ const connect = (
   return { ws, observability, agentState, waitObservability, waitAgentState, open }
 }
 
-const boot = async (
-  extra: Partial<WebDaemonServerConfig>,
-): Promise<WebDaemonHandle> => {
+const boot = async (extra: Partial<WebDaemonServerConfig>): Promise<WebDaemonHandle> => {
   const { factory } = createStubRuntimeFactory()
   const handle = await startWebDaemon({
     port: 0,
@@ -255,7 +259,9 @@ const boot = async (
     supportedReadModels: {
       session: supported("session.v1"),
       agentState:
-        extra.agentStatePorts !== undefined ? supported("agent-state.v1") : { status: "unsupported" },
+        extra.agentStatePorts !== undefined
+          ? supported("agent-state.v1")
+          : { status: "unsupported" },
       canvas: { status: "unsupported" },
       observability:
         extra.observabilityPorts !== undefined
@@ -340,7 +346,10 @@ describe("W4 — observability + agent-state through the REAL daemon WS", () => 
 
     // Push three representative agent-state observations through the REAL source.
     // (Mirrors what `wireAgentStateTap` hands the sink when the loop emits.)
-    source.sink.capture({ type: "plan_created", plan: { id: "p", name: "P", version: 1, todos: [] } })
+    source.sink.capture({
+      type: "plan_created",
+      plan: { id: "p", name: "P", version: 1, todos: [] },
+    })
     source.sink.capture({
       type: "mode_changed",
       from: "default",

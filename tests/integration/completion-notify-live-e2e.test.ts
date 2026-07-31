@@ -111,7 +111,11 @@ describe("completion-notify — real loop (runAgent) + production notify seam en
 
   test("FAST real turn (< threshold) ⇒ onTurnComplete fires NOTHING (anti-spam gate)", async () => {
     const { out, write } = makeSink()
-    const notify = createOscNotificationPort({ write, channel: "bell", slowTurnThresholdMs: 10_000 })
+    const notify = createOscNotificationPort({
+      write,
+      channel: "bell",
+      slowTurnThresholdMs: 10_000,
+    })
 
     const info = await runTurnAndBuildNotifyInput({
       scripts: [text("quick")],

@@ -196,10 +196,12 @@ export const benchInLoopExecSchema: KnobSchema<BenchInLoopExecModeKnob | boolean
 }
 
 /* ── default-OFF bool knobs sharing the strict {1,on,true} trim/lowercase gate ─ */
-const makeEnablingParse = () => (raw: string | undefined): true | undefined => {
-  if (raw === undefined) return undefined
-  return ENABLING.has(raw.trim().toLowerCase()) ? true : undefined
-}
+const makeEnablingParse =
+  () =>
+  (raw: string | undefined): true | undefined => {
+    if (raw === undefined) return undefined
+    return ENABLING.has(raw.trim().toLowerCase()) ? true : undefined
+  }
 
 /* ── fault-evidence (QUANTA_BENCH_FAULT_EVIDENCE) ─────────────────────────── */
 export const faultEvidenceSchema: KnobSchema<boolean> = {

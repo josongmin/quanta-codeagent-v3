@@ -158,7 +158,11 @@ describe("selectByAcceptance — optional LLM soft-rerank (never-veto, fail-open
   })
 
   test("FAIL-OPEN: null choice ⇒ deterministic vote winner stands", async () => {
-    const r = await selectByAcceptance([cand("A"), cand("A"), cand("C")], noOracles, async () => null)
+    const r = await selectByAcceptance(
+      [cand("A"), cand("A"), cand("C")],
+      noOracles,
+      async () => null,
+    )
     expect(r.selected.patch).toBe("A")
     expect(r.llmChosenIndex).toBeUndefined()
   })

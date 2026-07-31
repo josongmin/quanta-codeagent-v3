@@ -491,9 +491,7 @@ describe("CHA multi-site — pure unit teeth (always run)", () => {
     expect(parseChaStdout('{"sites": [{"file":"a.py","line":"3","cls":"X"}]}')).toEqual([])
     // telemetry-only structuralSimilarity rides through as a NUMBER (never gates)
     expect(
-      parseChaStdout(
-        '{"sites": [{"file":"a.py","line":3,"cls":"X","structurallySimilar":0.12}]}',
-      ),
+      parseChaStdout('{"sites": [{"file":"a.py","line":3,"cls":"X","structurallySimilar":0.12}]}'),
     ).toEqual([{ file: "a.py", line: 3, cls: "X", structurallySimilar: 0.12 }])
     // a wrong-typed similarity is dropped but the site is KEPT (low score never rejects)
     expect(

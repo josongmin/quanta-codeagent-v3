@@ -36,16 +36,16 @@ import { afterEach, describe, expect, mock, spyOn, test } from "bun:test"
 import type { LLMPort, StreamEvent, StreamInput, SystemPromptInput } from "@/llm"
 import { createWorkingMemory } from "@/memory"
 import { AbortError } from "@/shared"
-import { applyAction } from "../recovery-executor"
-import { createToolChoiceTurnState } from "../../tool-choice"
 import type { RecoveryAction } from "../../recovery"
 import { freshRecovery } from "../../recovery"
 import { interruptedCategory } from "../../stop-category"
+import { createToolChoiceTurnState } from "../../tool-choice"
 import type { TurnSession, TurnState } from "../../turn-context"
 import type { AgentConfig } from "../../types"
-import { resolveTurnLoopOutcome } from "../turn-outcome"
+import { applyAction } from "../recovery-executor"
 import * as sameTurnEngine from "../same-turn-engine"
 import { executeTurnWithObservability } from "../turn-loop"
+import { resolveTurnLoopOutcome } from "../turn-outcome"
 import type { RunAgentContext } from "../types"
 
 /** A summarizer LLM whose stream aborts the shared signal mid-flight and throws.
@@ -193,9 +193,7 @@ describe("ALBB-20 #13 — abort during in-flight reactive summarizer settles abo
     // discriminating: it is the USER interrupt category (a cooperative Ctrl+C),
     // NOT a hard error stopCategory.
     expect(resolution.stopCategory?.kind).toBe("interrupted")
-    expect(resolution.stopCategory?.reasonCode).toBe(
-      interruptedCategory("user").reasonCode,
-    )
+    expect(resolution.stopCategory?.reasonCode).toBe(interruptedCategory("user").reasonCode)
     expect(controller.signal.aborted).toBe(true)
   })
 

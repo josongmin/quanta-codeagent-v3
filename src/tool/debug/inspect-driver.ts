@@ -113,7 +113,8 @@ const MAX_TOTAL_VARS = 200
 /** Cap on threads/goroutines surfaced in the concurrency dump. */
 const MAX_THREADS = 50
 
-const asObj = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {})
+const asObj = (v: unknown): Record<string, unknown> =>
+  typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {}
 const asArr = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
 const str = (v: unknown, fallback = ""): string => (typeof v === "string" ? v : fallback)
 const num = (v: unknown, fallback = 0): number => (typeof v === "number" ? v : fallback)
@@ -125,7 +126,13 @@ const withTimeout = <T>(p: Promise<T>, ms: number, onTimeout: T): Promise<T> => 
   const timeout = new Promise<T>((resolve) => {
     timer = setTimeout(() => resolve(onTimeout), ms)
   })
-  return Promise.race([p.then((v) => { if (timer) clearTimeout(timer); return v }), timeout])
+  return Promise.race([
+    p.then((v) => {
+      if (timer) clearTimeout(timer)
+      return v
+    }),
+    timeout,
+  ])
 }
 
 /** Mutable budget shared across an entire inspection's variable expansion. */
@@ -148,7 +155,14 @@ const expandVariables = async (
 ): Promise<DapVariable[]> => {
   // Honour the turn abort mid-expansion — a cancelled turn must not keep
   // round-tripping `variables` requests through a wedged adapter.
-  if (signal?.aborted === true || ref <= 0 || depth > MAX_VAR_DEPTH || budget.remaining <= 0 || visited.has(ref)) return []
+  if (
+    signal?.aborted === true ||
+    ref <= 0 ||
+    depth > MAX_VAR_DEPTH ||
+    budget.remaining <= 0 ||
+    visited.has(ref)
+  )
+    return []
   visited.add(ref)
   const vRes = await timed("variables", { variablesReference: ref })
   const out: DapVariable[] = []
@@ -164,7 +178,8 @@ const expandVariables = async (
     budget.remaining--
     const childRef = num(vo.variablesReference)
     const type = str(vo.type, "")
-    const children = childRef > 0 ? await expandVariables(timed, childRef, depth + 1, budget, visited, signal) : []
+    const children =
+      childRef > 0 ? await expandVariables(timed, childRef, depth + 1, budget, visited, signal) : []
     out.push({
       name: str(vo.name, "?"),
       value,
@@ -235,7 +250,10 @@ export const inspectViaDap = async (
     const byFile = new Map<string, { line: number; condition?: string }[]>()
     for (const bp of spec.breakpoints) {
       const arr = byFile.get(bp.file) ?? []
-      arr.push({ line: bp.line, ...(bp.condition !== undefined ? { condition: bp.condition } : {}) })
+      arr.push({
+        line: bp.line,
+        ...(bp.condition !== undefined ? { condition: bp.condition } : {}),
+      })
       byFile.set(bp.file, arr)
     }
     // Track whether ANY breakpoint actually bound — an adapter returns
@@ -261,7 +279,8 @@ export const inspectViaDap = async (
         allResponded = false
         continue
       }
-      if (asArr(asObj(bpRes.body).breakpoints).some((b) => asObj(b).verified === true)) anyVerified = true
+      if (asArr(asObj(bpRes.body).breakpoints).some((b) => asObj(b).verified === true))
+        anyVerified = true
     }
     // Break-on-throw: arm exception breakpoints (best-effort — an adapter that
     // doesn't support them just answers an error, which we ignore). MUST be in
@@ -330,7 +349,11 @@ export const inspectViaDap = async (
     const stack = rawFrames.map((f): StackFrameInfo => {
       const fo = asObj(f)
       const src = asObj(fo.source).path
-      return { name: str(fo.name, "?"), line: num(fo.line), ...(typeof src === "string" ? { source: src } : {}) }
+      return {
+        name: str(fo.name, "?"),
+        line: num(fo.line),
+        ...(typeof src === "string" ? { source: src } : {}),
+      }
     })
 
     // Capture scopes+locals for the TOP K frames (not just the stop frame) under
@@ -367,8 +390,13 @@ export const inspectViaDap = async (
 
     let evaluated: { expression: string; result: string } | undefined
     if (spec.evaluate !== undefined && spec.evaluate.length > 0) {
-      const evRes = await timed("evaluate", { expression: spec.evaluate, frameId: topFrameId, context: "repl" })
-      if (evRes.success) evaluated = { expression: spec.evaluate, result: str(asObj(evRes.body).result, "") }
+      const evRes = await timed("evaluate", {
+        expression: spec.evaluate,
+        frameId: topFrameId,
+        context: "repl",
+      })
+      if (evRes.success)
+        evaluated = { expression: spec.evaluate, result: str(asObj(evRes.body).result, "") }
     }
 
     // Concurrency dump: list the live threads (dlv maps goroutines onto DAP
@@ -385,7 +413,10 @@ export const inspectViaDap = async (
       const exRes = await timed("exceptionInfo", { threadId })
       if (exRes.success) {
         const eb = asObj(exRes.body)
-        exception = { id: str(eb.exceptionId, str(asObj(stopped.body).text, "exception")), description: str(eb.description) }
+        exception = {
+          id: str(eb.exceptionId, str(asObj(stopped.body).text, "exception")),
+          description: str(eb.description),
+        }
       } else {
         const text = str(asObj(stopped.body).text)
         if (text.length > 0) exception = { id: text, description: "" }
@@ -398,14 +429,23 @@ export const inspectViaDap = async (
     await withTimeout(
       client.request("terminate").then(
         () => {},
-        (e) => logger.debug(`debug-inspect: best-effort terminate request failed: ${errMessage(e)}`),
+        (e) =>
+          logger.debug(`debug-inspect: best-effort terminate request failed: ${errMessage(e)}`),
       ),
       2_000,
       undefined,
     )
     client.dispose()
 
-    return { outcome: "stopped", reason, stack, frames, ...(evaluated !== undefined ? { evaluated } : {}), ...(exception !== undefined ? { exception } : {}), ...(threads.length > 0 ? { threads } : {}) }
+    return {
+      outcome: "stopped",
+      reason,
+      stack,
+      frames,
+      ...(evaluated !== undefined ? { evaluated } : {}),
+      ...(exception !== undefined ? { exception } : {}),
+      ...(threads.length > 0 ? { threads } : {}),
+    }
   } catch (e) {
     client.dispose()
     return { outcome: "error", message: errMessage(e) }

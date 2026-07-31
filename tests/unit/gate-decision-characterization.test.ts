@@ -46,8 +46,7 @@ function* allSignals(): Generator<GateSignals> {
   }
 }
 
-const key = (s: GateSignals): string =>
-  JSON.stringify(s)
+const key = (s: GateSignals): string => JSON.stringify(s)
 
 const decisionStr = (s: GateSignals): string => {
   const d = decideGate(s)

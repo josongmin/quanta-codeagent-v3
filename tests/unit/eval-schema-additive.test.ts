@@ -14,10 +14,12 @@
  * on a test-local literal) means a regression in the store's envelope stamping,
  * line framing, or validation drop-rules is actually caught here.
  */
+
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { makeRunId, ResultStore } from "@/../src/apps/eval/storage/result-store"
 import type {
   Metric,
   PublicPayload,
@@ -25,7 +27,6 @@ import type {
   SyntheticPayload,
   TokenUsage,
 } from "@/../src/apps/eval/storage/schema"
-import { ResultStore, makeRunId } from "@/../src/apps/eval/storage/result-store"
 
 describe("ADR-0087 eval schema additive fields", () => {
   let dir: string
@@ -56,8 +57,16 @@ describe("ADR-0087 eval schema additive fields", () => {
       verdict: "fail",
       durationMs: 9000,
     }
-    const synRun = makeRunId("synthetic", () => 1_700_000_000_000, () => "aaaa0001")
-    const pubRun = makeRunId("public", () => 1_700_000_000_000, () => "bbbb0001")
+    const synRun = makeRunId(
+      "synthetic",
+      () => 1_700_000_000_000,
+      () => "aaaa0001",
+    )
+    const pubRun = makeRunId(
+      "public",
+      () => 1_700_000_000_000,
+      () => "bbbb0001",
+    )
     await store.append(synRun, { tier: "synthetic", usecase: "uc", payload: syn })
     await store.append(pubRun, { tier: "public", usecase: "uc", payload: pub })
 
@@ -97,8 +106,16 @@ describe("ADR-0087 eval schema additive fields", () => {
       tokens,
       costUsd: 0.5,
     }
-    const synRun = makeRunId("synthetic", () => 1_700_000_000_000, () => "aaaa0002")
-    const pubRun = makeRunId("public", () => 1_700_000_000_000, () => "bbbb0002")
+    const synRun = makeRunId(
+      "synthetic",
+      () => 1_700_000_000_000,
+      () => "aaaa0002",
+    )
+    const pubRun = makeRunId(
+      "public",
+      () => 1_700_000_000_000,
+      () => "bbbb0002",
+    )
     await store.append(synRun, { tier: "synthetic", usecase: "uc", payload: syn })
     await store.append(pubRun, { tier: "public", usecase: "uc", payload: pub })
 
@@ -112,7 +129,11 @@ describe("ADR-0087 eval schema additive fields", () => {
   })
 
   test("(b) RunSummaryRecord WITH status/params survives; WITHOUT stays valid", async () => {
-    const baseRun = makeRunId("synthetic", () => 1_700_000_000_000, () => "cccc0001")
+    const baseRun = makeRunId(
+      "synthetic",
+      () => 1_700_000_000_000,
+      () => "cccc0001",
+    )
     const base: Omit<RunSummaryRecord, "ts" | "schema"> = {
       runId: baseRun,
       tier: "synthetic",
@@ -126,7 +147,11 @@ describe("ADR-0087 eval schema additive fields", () => {
     expect(baseBack?.status).toBeUndefined()
     expect(baseBack?.params).toBeUndefined()
 
-    const enrichedRun = makeRunId("synthetic", () => 1_700_000_000_000, () => "cccc0002")
+    const enrichedRun = makeRunId(
+      "synthetic",
+      () => 1_700_000_000_000,
+      () => "cccc0002",
+    )
     const enriched: Omit<RunSummaryRecord, "ts" | "schema"> = {
       ...base,
       runId: enrichedRun,
@@ -143,7 +168,11 @@ describe("ADR-0087 eval schema additive fields", () => {
   test("(d) Metric.unit and Metric.step are optional through the on-disk round-trip", async () => {
     const minimal: Metric = { key: "k", value: 1 }
     const full: Metric = { key: "k", value: 1, unit: "ms", step: 7 }
-    const runId = makeRunId("synthetic", () => 1_700_000_000_000, () => "dddd0001")
+    const runId = makeRunId(
+      "synthetic",
+      () => 1_700_000_000_000,
+      () => "dddd0001",
+    )
     const payload: SyntheticPayload = {
       kind: "synthetic",
       scenarioId: "metric-optionality",

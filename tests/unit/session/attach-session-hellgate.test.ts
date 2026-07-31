@@ -18,8 +18,8 @@
  */
 import { describe, expect, test } from "bun:test"
 import type { Message } from "@/llm"
-import { attachSessionToLive } from "@/session"
 import type { SessionMeta } from "@/session"
+import { attachSessionToLive } from "@/session"
 
 const meta = (id: string): SessionMeta => ({
   id,

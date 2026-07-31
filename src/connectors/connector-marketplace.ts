@@ -107,7 +107,9 @@ export interface ConnectorMarketplace {
   install(app: DirectoryApp): Promise<LifecycleResult>
   enable(id: string): Promise<LifecycleResult>
   disable(id: string): Promise<LifecycleResult>
-  uninstall(id: string): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: "not-installed" }>
+  uninstall(
+    id: string,
+  ): Promise<{ readonly ok: true } | { readonly ok: false; readonly error: "not-installed" }>
   list(): Promise<readonly InstalledApp[]>
   get(id: string): Promise<InstalledApp | undefined>
 }

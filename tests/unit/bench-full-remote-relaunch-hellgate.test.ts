@@ -164,9 +164,7 @@ describe("runWithRelaunch — instance-aware, fresh box per loss", () => {
           calls += 1
           return {
             run: async () =>
-              calls === 1
-                ? { unresolved: ["a__1"] }
-                : { resolved: ["a__1", "b__2"] },
+              calls === 1 ? { unresolved: ["a__1"] } : { resolved: ["a__1", "b__2"] },
           }
         }
       })(),

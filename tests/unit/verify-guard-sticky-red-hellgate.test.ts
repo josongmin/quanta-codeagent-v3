@@ -165,9 +165,11 @@ describe("HELLGATE — stickyRed closes the narrow-green-washes-broad-red leak",
 // `env VAR= ... uv run ... python tests/runtests.py X`, sometimes `cd repo &&`.
 // ────────────────────────────────────────────────────────────────────────
 describe("HELLGATE — sticky key canonicalizes env/cd wrapper (no false-block on correct re-run)", () => {
-  const RED = "env PYTEST_ADDOPTS= PYTHONNOUSERSITE=1 uv run --python 3.9 python tests/runtests.py migrations.test_loader"
+  const RED =
+    "env PYTEST_ADDOPTS= PYTHONNOUSERSITE=1 uv run --python 3.9 python tests/runtests.py migrations.test_loader"
   // Same test target, different wrapper: extra env var + a `cd` prefix + spacing.
-  const GREEN_SAME = "cd /home/ubuntu/repo-AbC123 && env PYTHONNOUSERSITE=1 PYTEST_ADDOPTS=  uv run --python 3.9 python tests/runtests.py migrations.test_loader"
+  const GREEN_SAME =
+    "cd /home/ubuntu/repo-AbC123 && env PYTHONNOUSERSITE=1 PYTEST_ADDOPTS=  uv run --python 3.9 python tests/runtests.py migrations.test_loader"
 
   test("re-run of the SAME test (different env/cd wrapper) GREEN clears the red ⇒ NO block", () => {
     const v = decide(
@@ -181,7 +183,8 @@ describe("HELLGATE — sticky key canonicalizes env/cd wrapper (no false-block o
   })
 
   test("SOUNDNESS: a DIFFERENT test target green does NOT clear the red (body preserved)", () => {
-    const GREEN_OTHER = "env PYTHONNOUSERSITE=1 uv run --python 3.9 python tests/runtests.py migrations.test_state"
+    const GREEN_OTHER =
+      "env PYTHONNOUSERSITE=1 uv run --python 3.9 python tests/runtests.py migrations.test_state"
     const v = decide(
       { mustPass: true, maxTrips: 2, stickyRed: true },
       { name: "edit" },
@@ -227,7 +230,12 @@ describe("HELLGATE — test_runner keys on target, not just tool name", () => {
     const v = decide(
       { mustPass: true, maxTrips: 2, stickyRed: true },
       { name: "edit" },
-      { name: "test_runner", arg: "migrations.test_loader", ok: false, output: "FAILED (failures=1)" },
+      {
+        name: "test_runner",
+        arg: "migrations.test_loader",
+        ok: false,
+        output: "FAILED (failures=1)",
+      },
       { name: "test_runner", arg: "migrations.test_state", ok: true, output: "OK" },
     )
     expect(v.block).toBe(true)
@@ -237,7 +245,12 @@ describe("HELLGATE — test_runner keys on target, not just tool name", () => {
     const v = decide(
       { mustPass: true, maxTrips: 2, stickyRed: true },
       { name: "edit" },
-      { name: "test_runner", arg: "migrations.test_loader", ok: false, output: "FAILED (failures=1)" },
+      {
+        name: "test_runner",
+        arg: "migrations.test_loader",
+        ok: false,
+        output: "FAILED (failures=1)",
+      },
       { name: "test_runner", arg: "migrations.test_loader", ok: true, output: "OK" },
     )
     expect(v.block).toBe(false)
@@ -254,7 +267,12 @@ describe("HELLGATE — canonicalize peels nested/interleaved cd+env prefixes", (
     const v = decide(
       { mustPass: true, maxTrips: 2, stickyRed: true },
       { name: "edit" },
-      { name: "bash", arg: `cd /a && cd /b && env FOO=1 ${BODY}`, ok: false, output: DJANGO_FAIL_OUTPUT },
+      {
+        name: "bash",
+        arg: `cd /a && cd /b && env FOO=1 ${BODY}`,
+        ok: false,
+        output: DJANGO_FAIL_OUTPUT,
+      },
       { name: "edit" },
       { name: "bash", arg: BODY, ok: true, output: "OK" },
     )
@@ -268,7 +286,12 @@ describe("HELLGATE — canonicalize peels nested/interleaved cd+env prefixes", (
       { mustPass: true, maxTrips: 2, stickyRed: true },
       { name: "edit" },
       { name: "bash", arg: `cd=1 ${BODY}`, ok: false, output: DJANGO_FAIL_OUTPUT },
-      { name: "bash", arg: "cd=1 python tests/runtests.py migrations.test_state", ok: true, output: "OK" },
+      {
+        name: "bash",
+        arg: "cd=1 python tests/runtests.py migrations.test_state",
+        ok: true,
+        output: "OK",
+      },
     )
     expect(v.block).toBe(true) // different target ⇒ red stands
   })

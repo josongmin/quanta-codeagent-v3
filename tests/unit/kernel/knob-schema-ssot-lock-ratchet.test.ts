@@ -21,9 +21,9 @@
  * Grep/fs-based (no 65 per-file imports) so it stays cheap + has no load order.
  */
 
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
-import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { join } from "node:path"
 import { ALL_BENCH_SCHEMAS } from "@/config/knob-schema/schemas"
 
 const KNOBS_DIR = "src/runner/knobs/knobs"
@@ -97,9 +97,7 @@ describe("knob=schema SSOT lock (drift-back prevention)", () => {
 
   test("3. the allow-list has no stale entries (every listed id has a real file)", () => {
     // Keeps the allow-list honest: a deleted/renamed non-schema knob must be pruned.
-    const stale = [...NON_SCHEMA_ALLOWLIST].filter(
-      (id) => !existsSync(join(KNOBS_DIR, `${id}.ts`)),
-    )
+    const stale = [...NON_SCHEMA_ALLOWLIST].filter((id) => !existsSync(join(KNOBS_DIR, `${id}.ts`)))
     expect(stale, `stale NON_SCHEMA_ALLOWLIST entries (no file): ${stale.join(", ")}`).toEqual([])
   })
 

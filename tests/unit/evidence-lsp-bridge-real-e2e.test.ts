@@ -37,10 +37,21 @@ const D =
 const project = (): string => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "evbridge-")))
   mkdirSync(join(dir, "src"), { recursive: true })
-  writeFileSync(join(dir, "Cargo.toml"), ['[package]', 'name = "t"', 'version = "0.1.0"', 'edition = "2021"'].join("\n"))
+  writeFileSync(
+    join(dir, "Cargo.toml"),
+    ["[package]", 'name = "t"', 'version = "0.1.0"', 'edition = "2021"'].join("\n"),
+  )
   writeFileSync(
     join(dir, "src", "lib.rs"),
-    ["pub fn add(a: i32, b: i32) -> i32 { a + b }", "", "#[cfg(test)]", "mod tests {", "    use super::*;", "    #[test] fn fail_test() { assert_eq!(add(2, 2), 5); }", "}"].join("\n"),
+    [
+      "pub fn add(a: i32, b: i32) -> i32 { a + b }",
+      "",
+      "#[cfg(test)]",
+      "mod tests {",
+      "    use super::*;",
+      "    #[test] fn fail_test() { assert_eq!(add(2, 2), 5); }",
+      "}",
+    ].join("\n"),
   )
   return dir
 }

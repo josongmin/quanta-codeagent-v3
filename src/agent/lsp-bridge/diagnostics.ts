@@ -6,10 +6,7 @@ import {
   diagnosticsTool,
   type Tool,
 } from "@/tool"
-import {
-  attachLspDiagnosticsHook,
-  type LspDiagnosticsHookHandle,
-} from "../lsp-diagnostics-hook"
+import { attachLspDiagnosticsHook, type LspDiagnosticsHookHandle } from "../lsp-diagnostics-hook"
 import type { AgentConfig } from "../types"
 import { isAvailable } from "./availability"
 import { specFor } from "./servers"

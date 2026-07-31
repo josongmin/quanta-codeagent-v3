@@ -53,7 +53,11 @@ export const buildReproViabilityFromPort = async (args: {
   readonly capturedPatch: string
   readonly signal?: AbortSignal
 }): Promise<ReproViabilityReview> => {
-  const prompt = buildReproViabilityPrompt(args.problemStatement, args.reproSources, args.capturedPatch)
+  const prompt = buildReproViabilityPrompt(
+    args.problemStatement,
+    args.reproSources,
+    args.capturedPatch,
+  )
   const messages: Message[] = [{ role: "user", content: [{ type: "text", text: prompt }] }]
   try {
     const events: StreamEvent[] = []

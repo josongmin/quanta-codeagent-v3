@@ -34,7 +34,13 @@ import { join } from "node:path"
 import type { AgentConfig } from "@/agent"
 import { runAgent } from "@/agent"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
-import { __resetSpanSink, SPAN_NAMES, type SpanName, type SpanSink, setSpanSink } from "@/observability"
+import {
+  __resetSpanSink,
+  SPAN_NAMES,
+  type SpanName,
+  type SpanSink,
+  setSpanSink,
+} from "@/observability"
 import type { ExportSpan, OtelExporter } from "@/observability/otel-exporter"
 import { createExporterSpanSink } from "@/observability/otel-span-export"
 import { getActiveTraceRef, type TraceRef } from "@/observability/tracing"
@@ -89,9 +95,7 @@ interface OpenRow {
   /** The ref the EXPORT sink issued for THIS span (what it will POST). */
   issued: TraceRef | undefined
 }
-const unifiedSink = (
-  inner: SpanSink,
-): { sink: SpanSink; opens: OpenRow[] } => {
+const unifiedSink = (inner: SpanSink): { sink: SpanSink; opens: OpenRow[] } => {
   const opens: OpenRow[] = []
   const sink: SpanSink = {
     onStart: (name, a) => {
@@ -125,7 +129,12 @@ const cfgFor = (llm: LLMPort, sessionId: string, cwd: string): AgentConfig =>
     messages: [{ role: "user", content: [{ type: "text", text: "go" }] }] as Message[],
   })
 
-const toolTurnThenText = (model: string, provider: string, file: string, id: string): InterleavingLLM =>
+const toolTurnThenText = (
+  model: string,
+  provider: string,
+  file: string,
+  id: string,
+): InterleavingLLM =>
   new InterleavingLLM(
     [
       [
@@ -209,7 +218,9 @@ describe("OTLP ≡ active-context id unification (FINAL seam)", () => {
     const dir = mkdtempSync(join(tmpdir(), "otlp-unify-2-"))
     try {
       const [a, b] = await Promise.all([
-        runAgent(cfgFor(toolTurnThenText("claude-a", "anthropic", join(dir, "a.txt"), "a"), "sA", dir)),
+        runAgent(
+          cfgFor(toolTurnThenText("claude-a", "anthropic", join(dir, "a.txt"), "a"), "sA", dir),
+        ),
         runAgent(cfgFor(toolTurnThenText("gpt-b", "openai", join(dir, "b.txt"), "b"), "sB", dir)),
       ])
       expect(a.reason).toBe("completed")

@@ -67,7 +67,9 @@ describe("B5 computePresence — visibility gate (web-only signal)", () => {
     expect(computePresence(base({ tabVisible: true, now: 200_000, lastActivityAt: 1_000 }))).toBe(
       false,
     )
-    expect(computePresence(base({ tabVisible: true, now: 1_000, lastActivityAt: 1_000 }))).toBe(true)
+    expect(computePresence(base({ tabVisible: true, now: 1_000, lastActivityAt: 1_000 }))).toBe(
+      true,
+    )
   })
 
   test("PD-07: CLI parity — tabVisible:true makes it activity-only (byte-identical to !isIdle)", () => {
@@ -87,16 +89,20 @@ describe("B5 computePresence — degenerate thresholds (fail-safe, no false-pres
     // ALWAYS present. But an idle-disabled surface must NOT permanently suppress
     // pushes, so a non-positive threshold means "presence gate off" ⇒ never present.
     expect(computePresence(base({ thresholdMs: 0, now: 1_000, lastActivityAt: 1_000 }))).toBe(false)
-    expect(computePresence(base({ thresholdMs: -5, now: 1_000, lastActivityAt: 1_000 }))).toBe(false)
+    expect(computePresence(base({ thresholdMs: -5, now: 1_000, lastActivityAt: 1_000 }))).toBe(
+      false,
+    )
   })
 
   test("PD-09: non-finite threshold (Infinity) ⇒ never present (gate off)", () => {
     expect(
-      computePresence(base({ thresholdMs: Number.POSITIVE_INFINITY, now: 1_000, lastActivityAt: 1_000 })),
+      computePresence(
+        base({ thresholdMs: Number.POSITIVE_INFINITY, now: 1_000, lastActivityAt: 1_000 }),
+      ),
     ).toBe(false)
-    expect(computePresence(base({ thresholdMs: Number.NaN, now: 1_000, lastActivityAt: 1_000 }))).toBe(
-      false,
-    )
+    expect(
+      computePresence(base({ thresholdMs: Number.NaN, now: 1_000, lastActivityAt: 1_000 })),
+    ).toBe(false)
   })
 
   test("PD-10: future lastActivityAt (clock skew) ⇒ treated as just-active (present if visible)", () => {

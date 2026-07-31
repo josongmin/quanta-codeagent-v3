@@ -36,13 +36,13 @@ import type { KernelClock, KernelEventLogPort, SessionHost } from "@/kernel/sess
 import { createKernelSessionState } from "@/kernel/session"
 import type { SessionEvent } from "@/protocol/session"
 import { createRuntimeSession } from "@/sdk/runtime/session"
-import { capabilitiesFor } from "../../support/session-fixtures"
 import {
   attachSessionTransport as engineAttachSessionTransport,
   type SessionEngineDeps,
   type SessionRuntimeState,
 } from "@/sdk/runtime/session/engine"
 import { SessionSubscriptionHub } from "@/sdk/runtime/subscription"
+import { capabilitiesFor } from "../../support/session-fixtures"
 
 /* ------------------------------------------------------------------------- */
 /* Harness (mirrors the ticket's runtime-repro + the W1-B e2e transport pair) */

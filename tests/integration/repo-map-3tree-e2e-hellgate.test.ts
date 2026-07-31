@@ -17,10 +17,11 @@
  * roots in parallel each capped, and asserts all three labelled sections land
  * in the rendered env block.
  */
+
+import { describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 import { probeRepoMap3, renderEnvBlock } from "@/agent"
 import { makeRepoMapScan, type RepoMapShell } from "@/runner/assemble/repo-map-scan"
 
@@ -69,7 +70,10 @@ describe("§10.4 e2e — 3-tree probe over real rg + real dirs", () => {
 
   test("renders into the real ## Environment block via renderEnvBlock", async () => {
     const repoMap = await probeRepoMap3({ cwd, gitRoot, userHome, scan })
-    const block = renderEnvBlock({ platform: "test", ...(repoMap !== undefined ? { repoMap } : {}) })
+    const block = renderEnvBlock({
+      platform: "test",
+      ...(repoMap !== undefined ? { repoMap } : {}),
+    })
     expect(block).toContain("## Environment")
     expect(block).toContain("Repo map")
     expect(block).toContain("### cwd")

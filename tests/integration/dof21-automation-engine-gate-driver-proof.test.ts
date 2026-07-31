@@ -43,8 +43,7 @@ import {
 } from "@/scheduler/automation-engine"
 import { parseRRule } from "@/scheduler/rrule-parser"
 import { assembleAutomation, type EnvReader } from "@/scheduler/runtime-wire"
-import type { AgentLoopPort } from "@/scheduler/types"
-import type { RRule } from "@/scheduler/types"
+import type { AgentLoopPort, RRule } from "@/scheduler/types"
 
 // ─── fixtures ─────────────────────────────────────────────────────────────
 

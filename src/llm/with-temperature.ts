@@ -34,8 +34,7 @@ export const withTemperature = (inner: LLMPort, temperature: number): LLMPort =>
   stream(input: StreamInput): AsyncIterable<StreamEvent> {
     // Caller-set temperature wins (per-call override > per-port default);
     // otherwise inject the wrapped value. No other field is mutated.
-    const next: StreamInput =
-      input.temperature !== undefined ? input : { ...input, temperature }
+    const next: StreamInput = input.temperature !== undefined ? input : { ...input, temperature }
     return inner.stream(next)
   },
 })

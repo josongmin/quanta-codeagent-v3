@@ -7,8 +7,8 @@ import {
   type MissingEvidenceFact,
   type OwnerEvidenceFact,
   opaqueInstanceIdHash,
-  ownerTestResultReceipt,
   ownerSliceMissingEvidence,
+  ownerTestResultReceipt,
   type ProofReceiptFact,
   type ProofReceiptState,
   renderLlmEvidencePacket,
@@ -137,10 +137,12 @@ const proofReceiptsOf = (args: BuildRepairContextArgs): readonly ProofReceiptFac
     ...(args.validationCmd !== undefined && args.validationCmd !== ""
       ? { command: args.validationCmd }
       : {}),
-    ...(args.failureEvidence?.stdoutTail !== undefined && args.failureEvidence.stdoutTail.trim() !== ""
+    ...(args.failureEvidence?.stdoutTail !== undefined &&
+    args.failureEvidence.stdoutTail.trim() !== ""
       ? { stdoutTail: boundTailMarker(args.failureEvidence.stdoutTail, 600) }
       : {}),
-    ...(args.failureEvidence?.stderrTail !== undefined && args.failureEvidence.stderrTail.trim() !== ""
+    ...(args.failureEvidence?.stderrTail !== undefined &&
+    args.failureEvidence.stderrTail.trim() !== ""
       ? { stderrTail: boundTailMarker(args.failureEvidence.stderrTail, 600) }
       : {}),
   }

@@ -122,7 +122,13 @@ describe("§8.2 session_meta — 5 absorbed Codex fields", () => {
   test("byte-identity: a session_meta with none of the 5 fields encodes the legacy wire form", () => {
     const legacy = baseMeta() as SessionEnvelopeRecord
     const encoded = encodeSessionLine(legacy)
-    for (const f of ["agent_nickname", "dynamic_tools", "originator", "thread_source", "model_provider"]) {
+    for (const f of [
+      "agent_nickname",
+      "dynamic_tools",
+      "originator",
+      "thread_source",
+      "model_provider",
+    ]) {
       expect(encoded.includes(`"${f}"`)).toBe(false)
     }
     const dec = decodeSessionLine(encoded)

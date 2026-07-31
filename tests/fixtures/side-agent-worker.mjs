@@ -19,7 +19,11 @@ const send = (msg) => {
 
 process.on("message", (msg) => {
   if (msg && msg.kind === "charter") {
-    send({ kind: "finding", summary: `worked on: ${msg.task}`, detail: `turns=${msg.maxTurnsPerWake}` })
+    send({
+      kind: "finding",
+      summary: `worked on: ${msg.task}`,
+      detail: `turns=${msg.maxTurnsPerWake}`,
+    })
   }
   if (msg && msg.kind === "shutdown") {
     process.exit(0)

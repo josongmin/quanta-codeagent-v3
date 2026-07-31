@@ -50,7 +50,11 @@ export interface RuntimeFrame {
  *  the HEADLINE view — the stop frame's locals (== `frames[0].locals`); `frames`
  *  adds the top-K caller frames for deeper context. */
 export interface RuntimeEvidence {
-  readonly stack: readonly { readonly name: string; readonly file?: string; readonly line: number }[]
+  readonly stack: readonly {
+    readonly name: string
+    readonly file?: string
+    readonly line: number
+  }[]
   readonly locals: readonly RuntimeVar[]
   readonly frames?: readonly RuntimeFrame[]
   /** Set when the runtime stop was an EXCEPTION (break-on-throw) — the throw's

@@ -8,7 +8,9 @@ describe("discoverVerificationOwnerTests", () => {
   test("returns a typed owner-near test plan with base-green public regression tests", async () => {
     const plan = await discoverVerificationOwnerTestsPlan(
       {
-        instance: { swebench: { baseCommit: "base", instanceId: "owner-test", repo: "example/repo" } },
+        instance: {
+          swebench: { baseCommit: "base", instanceId: "owner-test", repo: "example/repo" },
+        },
         ownerCandidates: ["pkg/core.py"],
         sandbox: "/tmp/fake-repo",
         timeoutMs: 1_000,
@@ -16,7 +18,10 @@ describe("discoverVerificationOwnerTests", () => {
       {
         listPythonFiles: async () => ["pkg/core.py", "tests/test_core.py", "tests/test_other.py"],
         readTestFiles: async () => [
-          { path: "tests/test_core.py", text: "from pkg import core\n\ndef test_core():\n    assert True\n" },
+          {
+            path: "tests/test_core.py",
+            text: "from pkg import core\n\ndef test_core():\n    assert True\n",
+          },
           {
             path: "tests/test_other.py",
             text: "from pkg import other\n\ndef test_other():\n    assert True\n",
@@ -54,7 +59,10 @@ describe("discoverVerificationOwnerTests", () => {
       {
         listPythonFiles: async () => ["pkg/core.py", "tests/test_core.py", "tests/test_other.py"],
         readTestFiles: async () => [
-          { path: "tests/test_core.py", text: "from pkg import core\n\ndef test_core():\n    assert True\n" },
+          {
+            path: "tests/test_core.py",
+            text: "from pkg import core\n\ndef test_core():\n    assert True\n",
+          },
           {
             path: "tests/test_other.py",
             text: "from pkg import other\n\ndef test_other():\n    assert True\n",
@@ -63,9 +71,7 @@ describe("discoverVerificationOwnerTests", () => {
       },
     )
 
-    expect(cmds).toEqual([
-      "python -m pytest -p no:cacheprovider -q --no-header tests/test_core.py",
-    ])
+    expect(cmds).toEqual(["python -m pytest -p no:cacheprovider -q --no-header tests/test_core.py"])
   })
 
   test("ignores non-source owner candidates and dedupes repeated files", async () => {
@@ -79,13 +85,14 @@ describe("discoverVerificationOwnerTests", () => {
       {
         listPythonFiles: async () => ["pkg/core.py", "tests/test_core.py"],
         readTestFiles: async () => [
-          { path: "tests/test_core.py", text: "from pkg import core\n\ndef test_core():\n    assert True\n" },
+          {
+            path: "tests/test_core.py",
+            text: "from pkg import core\n\ndef test_core():\n    assert True\n",
+          },
         ],
       },
     )
 
-    expect(cmds).toEqual([
-      "python -m pytest -p no:cacheprovider -q --no-header tests/test_core.py",
-    ])
+    expect(cmds).toEqual(["python -m pytest -p no:cacheprovider -q --no-header tests/test_core.py"])
   })
 })

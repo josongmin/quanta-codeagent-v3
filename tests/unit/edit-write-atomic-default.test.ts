@@ -67,7 +67,9 @@ const makeRealFsSpyPort = (): {
 }
 
 const runTool = async (
-  tool: { execute: (i: never, c: ToolContext) => AsyncIterable<{ type: string; result?: ToolResult }> },
+  tool: {
+    execute: (i: never, c: ToolContext) => AsyncIterable<{ type: string; result?: ToolResult }>
+  },
   input: unknown,
   cwd: string,
 ): Promise<ToolResult> => {
@@ -176,7 +178,11 @@ describe("edit/write — in-memory fake WITHOUT writeFileAtomic falls back to wr
   test("edit on a legacy port commits via writeFile (byte-identical)", async () => {
     const path = "/in-mem/legacy-edit.txt"
     const { port, files, writes } = makeLegacyPort({ [path]: "const a = 1" })
-    const r = await runTool(makeEditTool(port), { path, old_string: "1", new_string: "2" }, "/in-mem")
+    const r = await runTool(
+      makeEditTool(port),
+      { path, old_string: "1", new_string: "2" },
+      "/in-mem",
+    )
     expect(r.ok).toBe(true)
     expect(files.get(path)).toBe("const a = 2")
     expect(writes).toEqual([{ method: "writeFile", path, content: "const a = 2" }])

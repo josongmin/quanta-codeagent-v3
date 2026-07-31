@@ -20,8 +20,8 @@ import type {
   InstanceResult,
   LlmEvidenceArtifacts,
   OwnerWideningTelemetry,
-  ReproOracleCalibration,
   RepairValidationDecision,
+  ReproOracleCalibration,
   SelectionTelemetry,
 } from "@/runner/batch/types"
 

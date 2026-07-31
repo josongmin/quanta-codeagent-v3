@@ -40,9 +40,11 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { buildSystemPrompt } from "@/agent"
 import type { AgentConfig } from "@/agent/types"
-import { buildInteractiveTurnAssembler } from "@/apps/web-daemon/runtime-factory"
-import type { ObservableRuntimeFacade } from "@/apps/web-daemon/runtime-factory"
 import { main } from "@/apps/web-daemon"
+import { createCanvasToolDiffSource } from "@/apps/web-daemon/canvas-tool-diff-source"
+import { createCanvasUsageSource } from "@/apps/web-daemon/canvas-usage-source"
+import type { ObservableRuntimeFacade } from "@/apps/web-daemon/runtime-factory"
+import { buildInteractiveTurnAssembler } from "@/apps/web-daemon/runtime-factory"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import { encodeSessionTransportMessage } from "@/ipc/session"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
@@ -51,8 +53,6 @@ import { type CanvasMessage, decodeCanvasFrame } from "@/protocol/canvas"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
 import { StdoutStream } from "@/stream"
 import { buildDefaultTools, ToolRegistry } from "@/tool"
-import { createCanvasToolDiffSource } from "@/apps/web-daemon/canvas-tool-diff-source"
-import { createCanvasUsageSource } from "@/apps/web-daemon/canvas-usage-source"
 
 /* ------------------------------------------------------------------ */
 /* RecordingLLM — scripts a write tool_use then a text completion.     */
@@ -182,7 +182,10 @@ const waitForOpen = (ws: WebSocket): Promise<void> =>
  *  decode each string with `decodeCanvasFrame` and ignore non-canvas frames. */
 const collectCanvas = (
   ws: WebSocket,
-): { frames: CanvasMessage[]; waitFor: (kind: CanvasMessage["kind"], timeoutMs?: number) => Promise<CanvasMessage> } => {
+): {
+  frames: CanvasMessage[]
+  waitFor: (kind: CanvasMessage["kind"], timeoutMs?: number) => Promise<CanvasMessage>
+} => {
   const frames: CanvasMessage[] = []
   ws.addEventListener("message", (event: MessageEvent) => {
     if (typeof event.data !== "string") return
@@ -203,7 +206,11 @@ const collectCanvas = (
       }, 10)
       const deadline = setTimeout(() => {
         clearInterval(timer)
-        reject(new Error(`waitForCanvas(${kind}): timed out (saw ${frames.map((f) => f.kind).join(",")})`))
+        reject(
+          new Error(
+            `waitForCanvas(${kind}): timed out (saw ${frames.map((f) => f.kind).join(",")})`,
+          ),
+        )
       }, timeoutMs)
     })
   return { frames, waitFor }
@@ -245,14 +252,22 @@ afterEach(async () => {
     if (d !== undefined) rmSync(d, { recursive: true, force: true })
   }
   // Restore the gate after every test (hermetic env).
-  if (savedCanvasGate === undefined) delete (process.env as Record<string, string | undefined>).QUANTA_WEB_CANVAS
+  if (savedCanvasGate === undefined)
+    delete (process.env as Record<string, string | undefined>).QUANTA_WEB_CANVAS
   else process.env.QUANTA_WEB_CANVAS = savedCanvasGate
 })
 
 const setup = (
   gateOn: boolean,
   factoryOpts: FactoryOpts = {},
-): { dir: string; file: string; before: string; after: string; bag: { sessionId?: string }; factory: () => Promise<ObservableRuntimeFacade> } => {
+): {
+  dir: string
+  file: string
+  before: string
+  after: string
+  bag: { sessionId?: string }
+  factory: () => Promise<ObservableRuntimeFacade>
+} => {
   savedCanvasGate = process.env.QUANTA_WEB_CANVAS
   if (gateOn) process.env.QUANTA_WEB_CANVAS = "1"
   else delete (process.env as Record<string, string | undefined>).QUANTA_WEB_CANVAS

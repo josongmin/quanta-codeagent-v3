@@ -189,8 +189,8 @@ describe("prepareResume — FAIL-CLOSED (broken cassette ⇒ fresh, never partia
 /* ── WIRING-PROOF: lost-instance requeue carries the replay env to the box ──── */
 
 import { buildForwardedBenchEnv } from "@/apps/bench/remote/box-session"
-import { resumeForwardEnvFor } from "@/apps/bench/remote/pool/worker"
 import type { PoolChunk } from "@/apps/bench/remote/pool/types"
+import { resumeForwardEnvFor } from "@/apps/bench/remote/pool/worker"
 import { resumeReplayBoxEnv } from "../resume-launch"
 
 const singleInstanceChunk: PoolChunk = {

@@ -136,7 +136,11 @@ describe("reviewAction (knob ON) — EVERY kind routed through the real dispatch
 
   test("only allow/allow_for_session yield an allowed outcome; all others deny — at the DISPATCH boundary", async () => {
     for (const kind of ALL_ASSESSMENT_KINDS) {
-      const dec = await reviewAction(action, ctx(), assessorPort(async () => sampleFor(kind)))
+      const dec = await reviewAction(
+        action,
+        ctx(),
+        assessorPort(async () => sampleFor(kind)),
+      )
       const shouldAllow = ALLOWING_KINDS.has(kind)
       expect(isAllowed(dec.outcome)).toBe(shouldAllow)
       // The tier is pinned to guardian so no foreign-reviewer matrix dodge.
@@ -177,7 +181,8 @@ describe("reviewAction (knob ON) — HOSTILE guardianAssess never yields an acci
       action,
       ctx(),
       assessorPort(
-        async () => ({ kind: "auto_grant_everything", rationale: "trust me" }) as unknown as ActionAssessment,
+        async () =>
+          ({ kind: "auto_grant_everything", rationale: "trust me" }) as unknown as ActionAssessment,
       ),
     )
     expect(dec.outcome).toBe("guardian_denied")
@@ -270,7 +275,10 @@ describe("collapseAssessment — direct fuzz over adversarial kinds (unit-level 
     for (const k of rogueKinds) {
       let leakedAllow = false
       try {
-        const d = collapseAssessment({ kind: k, rationale: "x" } as unknown as ActionAssessment, CLOCK)
+        const d = collapseAssessment(
+          { kind: k, rationale: "x" } as unknown as ActionAssessment,
+          CLOCK,
+        )
         leakedAllow = isAllowed(d.outcome)
       } catch {
         // throw = fail-closed
@@ -309,16 +317,19 @@ describe("reviewAction (knob ON) — CONCURRENCY: mixed hostile/benign never cro
     // resolved outcome must match its OWN assessment — a shared mutable seam
     // (e.g. a module-level "last decision") would let a benign allow bleed into
     // a hostile slot.
-    const specs: Array<{ tag: string; assess: () => Promise<ActionAssessment>; allow: boolean }> = []
+    const specs: Array<{ tag: string; assess: () => Promise<ActionAssessment>; allow: boolean }> =
+      []
     for (let i = 0; i < 40; i++) {
       const mod = i % 4
-      if (mod === 0) specs.push({ tag: `allow${i}`, assess: async () => sampleFor("allow"), allow: true })
+      if (mod === 0)
+        specs.push({ tag: `allow${i}`, assess: async () => sampleFor("allow"), allow: true })
       else if (mod === 1)
         specs.push({ tag: `deny${i}`, assess: async () => sampleFor("deny"), allow: false })
       else if (mod === 2)
         specs.push({
           tag: `garbage${i}`,
-          assess: async () => ({ kind: "grant_all", rationale: "x" }) as unknown as ActionAssessment,
+          assess: async () =>
+            ({ kind: "grant_all", rationale: "x" }) as unknown as ActionAssessment,
           allow: false,
         })
       else

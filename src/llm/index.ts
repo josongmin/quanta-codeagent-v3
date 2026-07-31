@@ -22,6 +22,13 @@ export {
   createCredentialSource,
   DEFAULT_HELPER_TTL_MS,
 } from "./credential-helper"
+export {
+  DEFAULT_EMPTY_STREAM_BREAKER_K,
+  EMPTY_STREAM_BREAKER_ERROR_MARKER,
+  type EmptyStreamBreakerOpts,
+  isStreamEventContentful,
+  withEmptyStreamCircuitBreaker,
+} from "./empty-stream-breaker"
 export type {
   CreateLLMOptions,
   CreateMulticloudOptions,
@@ -45,20 +52,7 @@ export {
   tryCreateLLM,
 } from "./factory"
 export type { FallbackLLMOptions, FallbackMetricSink } from "./fallback"
-export {
-  DEFAULT_EMPTY_STREAM_BREAKER_K,
-  EMPTY_STREAM_BREAKER_ERROR_MARKER,
-  type EmptyStreamBreakerOpts,
-  isStreamEventContentful,
-  withEmptyStreamCircuitBreaker,
-} from "./empty-stream-breaker"
 export { FALLBACK_METRIC_NAMES, FallbackLLM, isFallbackTrigger } from "./fallback"
-export {
-  DEFAULT_STREAM_TRACE_INTERVAL_MS,
-  type StreamProgressTraceOpts,
-  type TraceTimer,
-  withStreamProgressTrace,
-} from "./stream-progress-trace"
 export type { LiveUsageKnobs } from "./live-usage"
 export { estimateTokensFromChars, withLiveUsage } from "./live-usage"
 // §9.6 — Anthropic Message Batches API client core (default-OFF). Surfaced on
@@ -97,16 +91,6 @@ export {
   streamWithModel,
 } from "./model-swap"
 export type { LLMPort } from "./ports"
-// Repair-breadth fanout sampling — pure leaf (per-candidate temperature
-// schedule, Agentless `repair.py` parity) + SOLID decorator that injects a
-// per-port temperature into `StreamInput`. Inert until a seam wires them.
-export {
-  GREEDY,
-  sampleTemperatureForCandidate,
-  TEMPERATURE_SAMPLE,
-} from "./sample-temperature"
-export { laneLabeledPort } from "./with-recording-lane"
-export { withTemperature } from "./with-temperature"
 export {
   hasPrewarm,
   type LlmPrewarmPort,
@@ -137,6 +121,20 @@ export {
   isFallbackKind,
   retryDispositionForKind,
 } from "./retry"
+// Repair-breadth fanout sampling — pure leaf (per-candidate temperature
+// schedule, Agentless `repair.py` parity) + SOLID decorator that injects a
+// per-port temperature into `StreamInput`. Inert until a seam wires them.
+export {
+  GREEDY,
+  sampleTemperatureForCandidate,
+  TEMPERATURE_SAMPLE,
+} from "./sample-temperature"
+export {
+  DEFAULT_STREAM_TRACE_INTERVAL_MS,
+  type StreamProgressTraceOpts,
+  type TraceTimer,
+  withStreamProgressTrace,
+} from "./stream-progress-trace"
 export type { DecodedProviderEvent, ParsedSseFrame } from "./streaming-events"
 export {
   __resetUnknownEventRateLimitForTests,
@@ -193,3 +191,5 @@ export type {
   ToolSchema,
   ToolUseBlock,
 } from "./types"
+export { laneLabeledPort } from "./with-recording-lane"
+export { withTemperature } from "./with-temperature"

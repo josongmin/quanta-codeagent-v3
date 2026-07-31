@@ -1,6 +1,8 @@
 // ADR-0135 — Permission profile + file_system_sandbox_policy 2-layer.
 export type { AccessVerdict, CanAccessOpts } from "./access-check"
 export { canAccess, containsPath } from "./access-check"
+export type { ApprovalLadderName, NamedApprovalLadderRung } from "./approval-ladder"
+export { APPROVAL_LADDER, APPROVAL_LADDER_NAMES, parseApprovalLadderName } from "./approval-ladder"
 // jun-7-misc 03 (ADR-0497) — guardian per-action typed assessment collapse.
 export { collapseAssessment } from "./assessment-collapse"
 export type { ApprovalRecord, ApprovalReviewer, ApprovalReviewerOpts } from "./auto-approval-review"
@@ -8,6 +10,14 @@ export type { ApprovalRecord, ApprovalReviewer, ApprovalReviewerOpts } from "./a
 // the live auto-approval cadence is auto-approval-review-observer +
 // allowlistEscalated. Kept as Codex-parity substrate (unit-tested only).
 export { createApprovalReviewer } from "./auto-approval-review"
+export type {
+  AutoApprovalReviewEvent,
+  AutoApprovalReviewObserver,
+} from "./auto-approval-review-observer"
+export {
+  __resetAutoApprovalReviewObserver,
+  setAutoApprovalReviewObserver,
+} from "./auto-approval-review-observer"
 // ADR-0453 — Heartbeat autorun eligibility (pure verdict consumed by scheduler/reactor).
 export type {
   AutorunApprovalPolicy,
@@ -96,14 +106,6 @@ export {
   gitWriteProtectReason,
   isGitWriteProtected,
 } from "./git-write-guard"
-export {
-  isNamedProfileName,
-  NAMED_PROFILE_NAMES,
-  NAMED_PROFILES,
-  resolvePermissionProfileField,
-  resolveProfileByName,
-} from "./named-profiles"
-export type { NamedProfileName } from "./named-profiles"
 export type {
   AxisOutcome,
   AxisStep,
@@ -128,6 +130,14 @@ export type {
   ResolutionSource,
 } from "./inspector"
 export { getPermissionInspector } from "./inspector"
+export type { NamedProfileName } from "./named-profiles"
+export {
+  isNamedProfileName,
+  NAMED_PROFILE_NAMES,
+  NAMED_PROFILES,
+  resolvePermissionProfileField,
+  resolveProfileByName,
+} from "./named-profiles"
 export {
   ALL_OUTCOMES,
   ALL_REVIEWERS,
@@ -147,18 +157,6 @@ export {
   resolveHostId,
   setHostMode,
 } from "./per-host-mode"
-export type { ApprovalLadderName, NamedApprovalLadderRung } from "./approval-ladder"
-export { APPROVAL_LADDER, APPROVAL_LADDER_NAMES, parseApprovalLadderName } from "./approval-ladder"
-export type { ReviewerSandboxProfile } from "./reviewer-default-policy"
-export { selectDefaultReviewer } from "./reviewer-default-policy"
-export type {
-  AutoApprovalReviewEvent,
-  AutoApprovalReviewObserver,
-} from "./auto-approval-review-observer"
-export {
-  __resetAutoApprovalReviewObserver,
-  setAutoApprovalReviewObserver,
-} from "./auto-approval-review-observer"
 export type { ThreadPermission } from "./per-thread-store"
 export {
   clearThreadPermission,
@@ -332,6 +330,8 @@ export {
   ReviewerUnavailableError,
   reviewAction,
 } from "./reviewer"
+export type { ReviewerSandboxProfile } from "./reviewer-default-policy"
+export { selectDefaultReviewer } from "./reviewer-default-policy"
 // #20 — prefix-aware session grants (pure: derive/match the "always allow `git
 // …` this session" prefix key, with the single-simple-command safety guard).
 export {
@@ -377,8 +377,8 @@ export type {
   DenialMemory,
   HITLTier,
   PermissionContext,
-  PermissionDenyDecision,
   PermissionDecision,
+  PermissionDenyDecision,
   PermissionMode,
   PermissionSoftDenySource,
   ReviewContext,

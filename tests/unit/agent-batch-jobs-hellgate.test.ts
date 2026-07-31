@@ -352,9 +352,7 @@ describe("GAP7 audit R2: concurrency-safe item claim (no double-dispatch)", () =
       })
     const mk = () =>
       new BatchJobRunner({ store, dispatch: gatedDispatch, clock: makeClock(), newId: makeIdGen() })
-    const submitted = await mk().submit(
-      spec([{ a: "0" }, { a: "1" }, { a: "2" }], { poolSize: N }),
-    )
+    const submitted = await mk().submit(spec([{ a: "0" }, { a: "1" }, { a: "2" }], { poolSize: N }))
     if (!submitted.ok) throw new Error("unreachable")
 
     // Runner A claims + dispatches ALL rows, then parks on the gate (rows `running`).

@@ -33,7 +33,11 @@ beforeAll(async () => {
   dir = await mkdtemp(join(tmpdir(), "replay-limit-"))
   path = join(dir, "c.jsonl")
   // Three distinct interactions.
-  await writeFile(path, [rowN(1), rowN(2), rowN(3)].map((r) => JSON.stringify(r)).join("\n"), "utf8")
+  await writeFile(
+    path,
+    [rowN(1), rowN(2), rowN(3)].map((r) => JSON.stringify(r)).join("\n"),
+    "utf8",
+  )
 })
 afterAll(async () => {
   await rm(dir, { recursive: true, force: true })

@@ -19,9 +19,9 @@ import {
   mask,
   type SecretFinding,
   type SecretKind,
-  SecretScanReadError,
   type SecretScanner,
   type SecretScannerOpts,
+  SecretScanReadError,
 } from "./port"
 
 interface Pattern {

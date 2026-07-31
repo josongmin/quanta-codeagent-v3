@@ -73,12 +73,8 @@ describe("lsp_nav description calibration (empty != unused)", () => {
   test("NO lsp_nav description implies exhaustiveness over usage", () => {
     for (const t of tools) {
       const d = t.description.toLowerCase()
-      expect(d, `${t.name} must not claim "no false positives"`).not.toContain(
-        "no false positives",
-      )
-      expect(d, `${t.name} must not claim "returns every/all"`).not.toMatch(
-        /returns? (every|all) /,
-      )
+      expect(d, `${t.name} must not claim "no false positives"`).not.toContain("no false positives")
+      expect(d, `${t.name} must not claim "returns every/all"`).not.toMatch(/returns? (every|all) /)
     }
   })
 })

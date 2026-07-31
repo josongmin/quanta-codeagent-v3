@@ -20,18 +20,18 @@
  * other quanta slice — keeps the scanner portable to a Tauri sidecar / worker.
  */
 import { readFile } from "node:fs/promises"
-import { isRecord } from "@/shared"
 import { lintSource } from "@secretlint/core"
 import { creator as recommendedPreset } from "@secretlint/secretlint-rule-preset-recommend"
 import type { SecretLintCoreConfig, SecretLintCoreResultMessage } from "@secretlint/types"
+import { isRecord } from "@/shared"
 import {
   DEFAULT_MAX_FINDINGS,
   mask,
   type SecretFinding,
   type SecretKind,
-  SecretScanReadError,
   type SecretScanner,
   type SecretScannerOpts,
+  SecretScanReadError,
 } from "./port"
 
 /**

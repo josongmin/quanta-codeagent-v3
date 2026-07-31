@@ -19,8 +19,7 @@ export const renderClosurePrompt = (
     // single-owner admission (owner may be uncorroborated / null; the override
     // family is still real, and the repair-seed widen surfaces it unconditionally,
     // so the round-0 surface must match). Prepend the owner only when admitted.
-    const head =
-      owner.admit && owner.owner !== null ? [owner.owner, ...siblings] : siblings
+    const head = owner.admit && owner.owner !== null ? [owner.owner, ...siblings] : siblings
     return [
       "First edit candidates — these override the SAME method (co-change); a single-site edit is INCOMPLETE, fix ALL:",
       ...head.map((f) => `- ${f}`),

@@ -34,8 +34,7 @@
 import { describe, expect, test } from "bun:test"
 import { selectReproTest } from "../../src/agent/repro-test/select"
 import type { ReproTestSample } from "../../src/agent/repro-test/types"
-import { benchPostureFromState } from "../../src/runner/batch/eval/knobs-bench"
-import { resolveBenchKnobs } from "../../src/runner/batch/eval/knobs-bench"
+import { benchPostureFromState, resolveBenchKnobs } from "../../src/runner/batch/eval/knobs-bench"
 
 const mkSample = (
   source: string,

@@ -33,7 +33,8 @@ describe("workflowToActivity", () => {
     { type: "step_start", id: "v2", label: "verify:perf" },
     { type: "step_skipped", id: "v2" },
   ]
-  const snap = () => materialize(reduceAll([...workflowToActivity(events, { runId: "run", label: "review" })]))
+  const snap = () =>
+    materialize(reduceAll([...workflowToActivity(events, { runId: "run", label: "review" })]))
 
   test("A1 — run root + phases nested, steps under their phase", () => {
     const s = snap()
@@ -61,7 +62,10 @@ describe("workflowToActivity", () => {
   test("A4 — a step before any phase attaches to the run root", () => {
     const s = materialize(
       reduceAll([
-        ...workflowToActivity([{ type: "step_start", id: "s", label: "x" }], { runId: "r", label: "w" }),
+        ...workflowToActivity([{ type: "step_start", id: "s", label: "x" }], {
+          runId: "r",
+          label: "w",
+        }),
       ]),
     )
     expect(s.childIds.get("r")).toEqual(["r/step/s"])
@@ -70,7 +74,9 @@ describe("workflowToActivity", () => {
   test("A5 — workflowCloseActivity derives last phase from events; honest fail", () => {
     // No manual phase name — close reads the last phase_enter ("Verify") itself.
     const close = workflowCloseActivity(events, { runId: "run", label: "review" }, false, 999)
-    const s = materialize(reduceAll([...workflowToActivity(events, { runId: "run", label: "review" }), ...close]))
+    const s = materialize(
+      reduceAll([...workflowToActivity(events, { runId: "run", label: "review" }), ...close]),
+    )
     expect(s.byId.get("run")?.endedAt).toBe(999)
     // Verify is closed (done signal) but has a failed child ⇒ DERIVES failed.
     expect(s.byId.get("run/phase/Verify")?.status).toBe("failed")
@@ -80,7 +86,9 @@ describe("workflowToActivity", () => {
 
   test("A6 — a start-less step_skipped is still VISIBLE (not silently dropped)", () => {
     const s = materialize(
-      reduceAll([...workflowToActivity([{ type: "step_skipped", id: "s9" }], { runId: "r", label: "w" })]),
+      reduceAll([
+        ...workflowToActivity([{ type: "step_skipped", id: "s9" }], { runId: "r", label: "w" }),
+      ]),
     )
     expect(s.byId.get("r/step/s9")?.status).toBe("skipped") // opened then skipped
   })
@@ -89,7 +97,10 @@ describe("workflowToActivity", () => {
     const s = materialize(
       reduceAll([
         ...workflowToActivity(
-          [{ type: "phase_enter", name: "a/b" }, { type: "step_start", id: "s", label: "x" }],
+          [
+            { type: "phase_enter", name: "a/b" },
+            { type: "step_start", id: "s", label: "x" },
+          ],
           { runId: "run", label: "w" },
         ),
       ]),
@@ -122,7 +133,11 @@ describe("fleetRowToActivity", () => {
   })
 
   test("B2 — settled vocabulary maps: completed→done, failed→failed, stopped→stopped", () => {
-    for (const [src, dst] of [["completed", "done"], ["failed", "failed"], ["stopped", "stopped"]] as const) {
+    for (const [src, dst] of [
+      ["completed", "done"],
+      ["failed", "failed"],
+      ["stopped", "stopped"],
+    ] as const) {
       const s = materialize(reduceAll([...fleetRowToActivity(row({ status: src, endedAt: 200 }))]))
       expect(s.byId.get("t1")?.status).toBe(dst)
       expect(s.byId.get("t1")?.endedAt).toBe(200)
@@ -133,7 +148,11 @@ describe("fleetRowToActivity", () => {
     const s = materialize(
       reduceAll([
         ...fleetRowToActivity(
-          row({ status: "completed", agentType: "Explore", result: { ok: true, finalText: "x", turns: 4 } }),
+          row({
+            status: "completed",
+            agentType: "Explore",
+            result: { ok: true, finalText: "x", turns: 4 },
+          }),
         ),
       ]),
     )
@@ -166,10 +185,14 @@ describe("sideAgentToActivity", () => {
   })
 
   test("C2 — status map: idle-reaped→stopped, failed→failed", () => {
-    const reaped = materialize(reduceAll([...sideAgentToActivity(snap({ status: "idle-reaped", stoppedAt: 99 }))]))
+    const reaped = materialize(
+      reduceAll([...sideAgentToActivity(snap({ status: "idle-reaped", stoppedAt: 99 }))]),
+    )
     expect(reaped.byId.get("d1")?.status).toBe("stopped")
     expect(reaped.byId.get("d1")?.endedAt).toBe(99)
-    const failed = materialize(reduceAll([...sideAgentToActivity(snap({ status: "failed", stoppedAt: 50 }))]))
+    const failed = materialize(
+      reduceAll([...sideAgentToActivity(snap({ status: "failed", stoppedAt: 50 }))]),
+    )
     expect(failed.byId.get("d1")?.status).toBe("failed")
   })
 

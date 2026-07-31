@@ -10,16 +10,16 @@ import { createConversationActionSurface } from "@/apps/cli/repl/conversation-ac
 import type { Message } from "@/llm"
 import {
   buildCrashResumeOffer,
-  clearSessionInterrupted,
   CRASH_RESUME_GATE,
+  clearSessionInterrupted,
   detectInterruptedSessions,
   listSessions,
   loadSessionById,
   markSessionInterrupted,
   type PersistedInterruptedTurn,
+  type SessionMeta,
   saveSessionById,
   sessionFilePath,
-  type SessionMeta,
 } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
 
@@ -203,9 +203,7 @@ describe("§13.2 crash-resume hellgate — crash mid-turn → restart → resume
     const resumed = await pollConversationAction(restartCfg, undefined)
     expect(resumed.kind).toBe("injection")
     if (resumed.kind !== "injection") throw new Error("expected injection")
-    const injected = resumed.message.content
-      .map((b) => (b.type === "text" ? b.text : ""))
-      .join("")
+    const injected = resumed.message.content.map((b) => (b.type === "text" ? b.text : "")).join("")
     expect(injected).toContain("refactor the parser to support nested groups")
     expect(injected).toContain("I extracted the tokenizer")
     expect(injected.toLowerCase()).toContain("resume")
@@ -227,12 +225,16 @@ describe("§13.2 crash-resume hellgate — crash mid-turn → restart → resume
     await seedSession(SESSION_ID)
     const before = readFileSync(sessionFilePath(SESSION_ID), "utf8")
 
-    await markSessionInterrupted(SESSION_ID, {
-      userText: "task",
-      partialAssistantText: "partial",
-      reason: "crash",
-      interruptedAt: 5_000,
-    }, { env: process.env })
+    await markSessionInterrupted(
+      SESSION_ID,
+      {
+        userText: "task",
+        partialAssistantText: "partial",
+        reason: "crash",
+        interruptedAt: 5_000,
+      },
+      { env: process.env },
+    )
     // No write happened (byte-identical snapshot) ...
     expect(readFileSync(sessionFilePath(SESSION_ID), "utf8")).toBe(before)
     // ... and a restart detects nothing.
@@ -243,18 +245,26 @@ describe("§13.2 crash-resume hellgate — crash mid-turn → restart → resume
   test("multiple crashed sessions ⇒ restart offers the most-recent first", async () => {
     await seedSession("early")
     await seedSession("late")
-    await markSessionInterrupted("early", {
-      userText: "first task",
-      partialAssistantText: "",
-      reason: "crash",
-      interruptedAt: 1_000,
-    }, { env: process.env })
-    await markSessionInterrupted("late", {
-      userText: "second task",
-      partialAssistantText: "",
-      reason: "crash",
-      interruptedAt: 9_000,
-    }, { env: process.env })
+    await markSessionInterrupted(
+      "early",
+      {
+        userText: "first task",
+        partialAssistantText: "",
+        reason: "crash",
+        interruptedAt: 1_000,
+      },
+      { env: process.env },
+    )
+    await markSessionInterrupted(
+      "late",
+      {
+        userText: "second task",
+        partialAssistantText: "",
+        reason: "crash",
+        interruptedAt: 9_000,
+      },
+      { env: process.env },
+    )
     const list = await listSessions({ includeArchived: true })
     const detections = await detectInterruptedSessions(list, { env: process.env })
     expect(detections.map((d) => d.sessionId)).toEqual(["late", "early"])

@@ -149,9 +149,7 @@ describe("WEB @-mention injection — ADR-0422 hellgate", () => {
 
     // CLI path (the sibling installer the task names as the analogue). Imported
     // lazily so the parity assertion is against the CLI's ACTUAL resolver build.
-    const { installCliMentionInjector } = await import(
-      "@/host/runtime/internal/mention-wire"
-    )
+    const { installCliMentionInjector } = await import("@/host/runtime/internal/mention-wire")
     const cliCfg = installCliMentionInjector({ cwd: dir } as unknown as AgentConfig)
     const cliMsgs = await cliCfg.mentionInjector?.("open @./shared.txt")
 

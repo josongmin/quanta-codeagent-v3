@@ -18,10 +18,10 @@
  * fix to a bare `.catch(() => {})` and assertion (2) goes red (no log line).
  */
 import { afterEach, describe, expect, spyOn, test } from "bun:test"
+import { logger } from "@/shared"
 import { DapClient, type DapTransport } from "@/tool/debug/dap-client"
 import { DapFrameDecoder, encodeDapMessage } from "@/tool/debug/dap-codec"
 import { inspectViaDap } from "@/tool/debug/inspect-driver"
-import { logger } from "@/shared"
 
 /**
  * Faithful happy-path adapter (initialize → initialized → setBreakpoints →
@@ -39,8 +39,16 @@ const makeTerminateThrowingAdapter = () => {
 
   const handle = (req: { seq: number; command: string; arguments?: Record<string, unknown> }) => {
     const respondTo = (seq: number, command: string, body?: unknown, ok = true, message?: string) =>
-      send({ type: "response", request_seq: seq, success: ok, command, ...(body !== undefined ? { body } : {}), ...(message ? { message } : {}) })
-    const respond = (body?: unknown, ok = true, message?: string) => respondTo(req.seq, req.command, body, ok, message)
+      send({
+        type: "response",
+        request_seq: seq,
+        success: ok,
+        command,
+        ...(body !== undefined ? { body } : {}),
+        ...(message ? { message } : {}),
+      })
+    const respond = (body?: unknown, ok = true, message?: string) =>
+      respondTo(req.seq, req.command, body, ok, message)
     switch (req.command) {
       case "initialize":
         respond({ supportsConfigurationDoneRequest: true })
@@ -121,7 +129,9 @@ describe("inspectViaDap — best-effort terminate failure is attributed, not swa
       // (2) The swallow was ATTRIBUTED: a debug line with the stable label that
       //     carries the underlying transport error fired.
       const labelled = debugSpy.mock.calls.find(
-        (c) => typeof c[0] === "string" && (c[0] as string).includes("debug-inspect: best-effort terminate request failed"),
+        (c) =>
+          typeof c[0] === "string" &&
+          (c[0] as string).includes("debug-inspect: best-effort terminate request failed"),
       )
       expect(labelled).toBeDefined()
       // The cause is threaded through `errMessage`, not discarded.
@@ -145,7 +155,9 @@ describe("inspectViaDap — best-effort terminate failure is attributed, not swa
       })
       expect(r.outcome).toBe("stopped")
       const labelled = debugSpy.mock.calls.find(
-        (c) => typeof c[0] === "string" && (c[0] as string).includes("best-effort terminate request failed"),
+        (c) =>
+          typeof c[0] === "string" &&
+          (c[0] as string).includes("best-effort terminate request failed"),
       )
       expect(labelled).toBeUndefined()
     } finally {
@@ -164,8 +176,16 @@ const makeCleanAdapter = (): DapTransport => {
   const send = (msg: unknown) => toClient?.(encodeDapMessage(msg))
   const handle = (req: { seq: number; command: string; arguments?: Record<string, unknown> }) => {
     const respondTo = (seq: number, command: string, body?: unknown, ok = true, message?: string) =>
-      send({ type: "response", request_seq: seq, success: ok, command, ...(body !== undefined ? { body } : {}), ...(message ? { message } : {}) })
-    const respond = (body?: unknown, ok = true, message?: string) => respondTo(req.seq, req.command, body, ok, message)
+      send({
+        type: "response",
+        request_seq: seq,
+        success: ok,
+        command,
+        ...(body !== undefined ? { body } : {}),
+        ...(message ? { message } : {}),
+      })
+    const respond = (body?: unknown, ok = true, message?: string) =>
+      respondTo(req.seq, req.command, body, ok, message)
     switch (req.command) {
       case "initialize":
         respond({ supportsConfigurationDoneRequest: true })
@@ -208,7 +228,8 @@ const makeCleanAdapter = (): DapTransport => {
   }
   return {
     send: (data) => {
-      for (const m of decoder.push(data)) handle(m as { seq: number; command: string; arguments?: Record<string, unknown> })
+      for (const m of decoder.push(data))
+        handle(m as { seq: number; command: string; arguments?: Record<string, unknown> })
     },
     onData: (cb) => {
       toClient = cb

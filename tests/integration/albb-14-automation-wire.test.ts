@@ -176,9 +176,9 @@ describe("ALBB-14 §Automation — composition-root stub is fail-loud (posture b
   test("A3: invoking the composition-root stub handler increments the drop counter", async () => {
     process.env.QUANTA_AUTOMATION = "on"
     process.env.QUANTA_AUTOMATION_INTERVAL_MS = "1000"
-    const slot = __resolveAutomationForTest(process.env) as
-      | NonNullable<AgentConfig["automationEngine"]>
-      | null
+    const slot = __resolveAutomationForTest(process.env) as NonNullable<
+      AgentConfig["automationEngine"]
+    > | null
     expect(slot).not.toBeNull()
     const counterName = AUTOMATION_FIRES_DROPPED_COUNTER
     const before = metrics.snapshot().counters[counterName] ?? 0

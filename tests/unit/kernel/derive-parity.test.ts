@@ -18,9 +18,8 @@
 import { describe, expect, test } from "bun:test"
 import { BENCH } from "@/config/knob-inventory/bench"
 import type { KnobInventoryEntry } from "@/config/knob-inventory/types"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
-import { deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
 import type { AnyKnobSchema } from "@/config/knob-schema/contracts"
+import { deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
 import {
   localizePhaseSchema,
   repoMapSchema,
@@ -33,6 +32,7 @@ import {
   reproTestSchema,
   reproVoteSchema,
 } from "@/config/knob-schema/schemas/bench-repro"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 // Live registry knobs (their parse is the ground truth).
 import { localizePhaseKnob } from "@/runner/knobs/knobs/localize-phase"
 import { repoMapKnob } from "@/runner/knobs/knobs/repo-map"
@@ -97,7 +97,11 @@ const PAIRS: readonly Pair[] = [
   { name: "repro-test", schema: reproTestSchema, knob: asAnyKnob(reproTestKnob) },
   { name: "repro-vote", schema: reproVoteSchema, knob: asAnyKnob(reproVoteKnob) },
   { name: "repro-doubt", schema: reproDoubtSchema, knob: asAnyKnob(reproDoubtKnob) },
-  { name: "repro-exec-timeout", schema: reproExecTimeoutSchema, knob: asAnyKnob(reproExecTimeoutKnob) },
+  {
+    name: "repro-exec-timeout",
+    schema: reproExecTimeoutSchema,
+    knob: asAnyKnob(reproExecTimeoutKnob),
+  },
   { name: "localize-phase", schema: localizePhaseSchema, knob: asAnyKnob(localizePhaseKnob) },
   { name: "retry-transient", schema: retryTransientSchema, knob: asAnyKnob(retryTransientKnob) },
   { name: "selector-mode", schema: selectorModeSchema, knob: asAnyKnob(selectorModeKnob) },
@@ -107,8 +111,15 @@ const PAIRS: readonly Pair[] = [
 describe("derive parity (base) — FULL-Knob data parity (BURN-DOWN gate)", () => {
   const FULL_KNOB_DIVERGENT_CEILING = 0
   const project = (k: AnyKnob): Record<string, unknown> => ({
-    id: k.id, envKey: k.envKey, category: k.category, surfaces: [...k.surfaces],
-    describe: k.describe, default: k.default, costMultiplier: k.costMultiplier, unit: k.unit, source: k.source,
+    id: k.id,
+    envKey: k.envKey,
+    category: k.category,
+    surfaces: [...k.surfaces],
+    describe: k.describe,
+    default: k.default,
+    costMultiplier: k.costMultiplier,
+    unit: k.unit,
+    source: k.source,
   })
   const mismatches: string[] = []
   for (const { name, schema, knob } of PAIRS) {
@@ -147,9 +158,7 @@ describe("Pillar A derive parity — knob parse semantics", () => {
       const derived = deriveKnob(schema)
       const cfg = { sentinel: name } as unknown as Parameters<typeof derived.apply>[0]
       // NOOP apply returns the exact same config reference, untouched.
-      expect(
-        derived.apply(cfg, derived.parse("1") as never, { surface: "bench" }),
-      ).toBe(cfg)
+      expect(derived.apply(cfg, derived.parse("1") as never, { surface: "bench" })).toBe(cfg)
       expect(derived.surfaces).toContain("bench")
       expect(derived.id).toBe(knob.id)
       expect(derived.envKey).toBe(knob.envKey)

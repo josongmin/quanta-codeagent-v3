@@ -15,14 +15,11 @@ describe("test_runner localEnv wiring", () => {
   test("explicit command inherits ctx.localEnv PATH prepend through runShell", async () => {
     const prefix = "/tmp/quanta-test-runner-local-env"
     const command = 'printf "%s" "$PATH"'
-    const events = await collect(
-      { command },
-      {
-        cwd: "/tmp",
-        signal: new AbortController().signal,
-        localEnv: { vars: {}, pathPrepend: [prefix] },
-      } as ToolContext,
-    )
+    const events = await collect({ command }, {
+      cwd: "/tmp",
+      signal: new AbortController().signal,
+      localEnv: { vars: {}, pathPrepend: [prefix] },
+    } as ToolContext)
     const result = events.at(-1)
     expect(result?.type).toBe("result")
     if (result?.type !== "result") throw new Error("expected result event")

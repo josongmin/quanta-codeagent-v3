@@ -28,22 +28,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import {
-  lstat,
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  stat,
-  symlink,
-  writeFile,
-} from "node:fs/promises"
+import { lstat, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import {
-  importExternalConfig,
-  persistConvertedItems,
-} from "@/migration/external-config"
+import { importExternalConfig, persistConvertedItems } from "@/migration/external-config"
 
 const IS_WIN = process.platform === "win32"
 
@@ -104,122 +92,125 @@ afterEach(async () => {
 // whose destination is a pre-planted symlink.
 // ───────────────────────────────────────────────────────────────────────────
 
-describe.skipIf(IS_WIN)("config-migration WRITE-jail — symlinked destination is not followed", () => {
-  test("settings.json → symlink to outside evil-target: persist must NOT clobber the target", async () => {
-    // Plant a sensitive outside file + a symlink at the persist destination.
-    // The decoy is VALID JSON on purpose: a non-JSON decoy would trip the
-    // (incidental) corrupt-target refusal and mask the real symlink-follow
-    // clobber. A valid-JSON target is read-merged-rewritten through the link
-    // unless the WRITE path is O_NOFOLLOW-jailed.
-    const target = join(evil, "authorized_keys.json")
-    const ORIGINAL = JSON.stringify({ owner: "sensitive-config", keep: true }, null, 2)
-    await writeFile(target, ORIGINAL, "utf8")
-    await symlink(target, join(project, "settings.json"))
+describe.skipIf(IS_WIN)(
+  "config-migration WRITE-jail — symlinked destination is not followed",
+  () => {
+    test("settings.json → symlink to outside evil-target: persist must NOT clobber the target", async () => {
+      // Plant a sensitive outside file + a symlink at the persist destination.
+      // The decoy is VALID JSON on purpose: a non-JSON decoy would trip the
+      // (incidental) corrupt-target refusal and mask the real symlink-follow
+      // clobber. A valid-JSON target is read-merged-rewritten through the link
+      // unless the WRITE path is O_NOFOLLOW-jailed.
+      const target = join(evil, "authorized_keys.json")
+      const ORIGINAL = JSON.stringify({ owner: "sensitive-config", keep: true }, null, 2)
+      await writeFile(target, ORIGINAL, "utf8")
+      await symlink(target, join(project, "settings.json"))
 
-    const r = await persistConvertedItems({
-      enabled: true,
-      homeDir: home,
-      projectDir: project,
-      sourceKey: "project:symlink-settings",
-      converted: [
-        {
-          type: "settings",
-          ok: true,
-          value: { allow: ["Read", "Edit"], deny: ["Bash(rm -rf:*)"], ask: [] },
-        },
-      ],
+      const r = await persistConvertedItems({
+        enabled: true,
+        homeDir: home,
+        projectDir: project,
+        sourceKey: "project:symlink-settings",
+        converted: [
+          {
+            type: "settings",
+            ok: true,
+            value: { allow: ["Read", "Edit"], deny: ["Bash(rm -rf:*)"], ask: [] },
+          },
+        ],
+      })
+
+      // The outside target MUST be byte-for-byte intact — the whole point.
+      expect(await readFile(target, "utf8")).toBe(ORIGINAL)
+      // The destination is STILL a symlink (we didn't replace it with a real
+      // file either — a symlink-following write would have left it a symlink
+      // pointing at a now-clobbered target; a no-follow refusal leaves it as-is).
+      expect(await isSymlink(join(project, "settings.json"))).toBe(true)
+      // Nothing was written for this item ⇒ a typed warning, no persist.
+      expect(r.writtenTypes).not.toContain("settings")
+      expect(r.warnings.length).toBeGreaterThanOrEqual(1)
+      expect(r.warnings.some((w) => w.path.endsWith("settings.json"))).toBe(true)
     })
 
-    // The outside target MUST be byte-for-byte intact — the whole point.
-    expect(await readFile(target, "utf8")).toBe(ORIGINAL)
-    // The destination is STILL a symlink (we didn't replace it with a real
-    // file either — a symlink-following write would have left it a symlink
-    // pointing at a now-clobbered target; a no-follow refusal leaves it as-is).
-    expect(await isSymlink(join(project, "settings.json"))).toBe(true)
-    // Nothing was written for this item ⇒ a typed warning, no persist.
-    expect(r.writtenTypes).not.toContain("settings")
-    expect(r.warnings.length).toBeGreaterThanOrEqual(1)
-    expect(r.warnings.some((w) => w.path.endsWith("settings.json"))).toBe(true)
-  })
+    test(".mcp.json → symlink to outside evil-target: executable config target NOT clobbered", async () => {
+      // Valid JSON decoy (see settings test) so the clobber is not masked by the
+      // corrupt-target refusal — this is the worst target: an executable config.
+      const target = join(evil, "id_rsa.json")
+      const ORIGINAL = JSON.stringify({ owner: "private-config", keep: true }, null, 2)
+      await writeFile(target, ORIGINAL, "utf8")
+      await symlink(target, join(project, ".mcp.json"))
 
-  test(".mcp.json → symlink to outside evil-target: executable config target NOT clobbered", async () => {
-    // Valid JSON decoy (see settings test) so the clobber is not masked by the
-    // corrupt-target refusal — this is the worst target: an executable config.
-    const target = join(evil, "id_rsa.json")
-    const ORIGINAL = JSON.stringify({ owner: "private-config", keep: true }, null, 2)
-    await writeFile(target, ORIGINAL, "utf8")
-    await symlink(target, join(project, ".mcp.json"))
+      const r = await persistConvertedItems({
+        enabled: true,
+        homeDir: home,
+        projectDir: project,
+        sourceKey: "project:symlink-mcp",
+        converted: [
+          {
+            type: "mcp",
+            ok: true,
+            value: [{ name: "fs", transport: "stdio", command: "mcp-fs", args: ["--root", "."] }],
+          },
+        ],
+      })
 
-    const r = await persistConvertedItems({
-      enabled: true,
-      homeDir: home,
-      projectDir: project,
-      sourceKey: "project:symlink-mcp",
-      converted: [
-        {
-          type: "mcp",
-          ok: true,
-          value: [{ name: "fs", transport: "stdio", command: "mcp-fs", args: ["--root", "."] }],
-        },
-      ],
+      expect(await readFile(target, "utf8")).toBe(ORIGINAL)
+      expect(await isSymlink(join(project, ".mcp.json"))).toBe(true)
+      expect(r.writtenTypes).not.toContain("mcp")
+      expect(r.warnings.some((w) => w.path.endsWith(".mcp.json"))).toBe(true)
     })
 
-    expect(await readFile(target, "utf8")).toBe(ORIGINAL)
-    expect(await isSymlink(join(project, ".mcp.json"))).toBe(true)
-    expect(r.writtenTypes).not.toContain("mcp")
-    expect(r.warnings.some((w) => w.path.endsWith(".mcp.json"))).toBe(true)
-  })
+    test("hooks (writes to settings.json) → symlinked settings target NOT clobbered", async () => {
+      // Valid JSON decoy (hooks write to settings.json — same merge-rewrite path).
+      const target = join(evil, "shell-rc.json")
+      const ORIGINAL = JSON.stringify({ owner: "shell-config", keep: true }, null, 2)
+      await writeFile(target, ORIGINAL, "utf8")
+      await symlink(target, join(project, "settings.json"))
 
-  test("hooks (writes to settings.json) → symlinked settings target NOT clobbered", async () => {
-    // Valid JSON decoy (hooks write to settings.json — same merge-rewrite path).
-    const target = join(evil, "shell-rc.json")
-    const ORIGINAL = JSON.stringify({ owner: "shell-config", keep: true }, null, 2)
-    await writeFile(target, ORIGINAL, "utf8")
-    await symlink(target, join(project, "settings.json"))
+      const r = await persistConvertedItems({
+        enabled: true,
+        homeDir: home,
+        projectDir: project,
+        sourceKey: "project:symlink-hooks",
+        converted: [
+          {
+            type: "hooks",
+            ok: true,
+            value: [{ event: "PreToolUse", matcher: "Bash", commands: ["guard.sh"] }],
+          },
+        ],
+      })
 
-    const r = await persistConvertedItems({
-      enabled: true,
-      homeDir: home,
-      projectDir: project,
-      sourceKey: "project:symlink-hooks",
-      converted: [
-        {
-          type: "hooks",
-          ok: true,
-          value: [{ event: "PreToolUse", matcher: "Bash", commands: ["guard.sh"] }],
-        },
-      ],
+      expect(await readFile(target, "utf8")).toBe(ORIGINAL)
+      expect(await isSymlink(join(project, "settings.json"))).toBe(true)
+      expect(r.warnings.some((w) => w.path.endsWith("settings.json"))).toBe(true)
     })
 
-    expect(await readFile(target, "utf8")).toBe(ORIGINAL)
-    expect(await isSymlink(join(project, "settings.json"))).toBe(true)
-    expect(r.warnings.some((w) => w.path.endsWith("settings.json"))).toBe(true)
-  })
+    // End-to-end through the public importExternalConfig: a competitor tree whose
+    // settings.json is a hostile symlink. The full detect→convert→persist flow
+    // must leave the outside target intact.
+    test("importExternalConfig end-to-end: hostile symlinked settings.json never clobbers outside file", async () => {
+      // Valid JSON decoy so the corrupt-target refusal cannot mask a real follow.
+      const target = join(evil, "secret.json")
+      const ORIGINAL = JSON.stringify({ OWNER_API_KEY: "sk-do-not-overwrite" }, null, 2)
+      await writeFile(target, ORIGINAL, "utf8")
+      // Plant a real settings file under .claude so detect picks up a 'settings'
+      // source, then point the DESTINATION (<project>/settings.json) at the decoy.
+      await writeFile(
+        join(project, ".claude", "settings.json"),
+        JSON.stringify({ permissions: { allow: ["Read"], deny: [] } }),
+        "utf8",
+      )
+      await symlink(target, join(project, "settings.json"))
 
-  // End-to-end through the public importExternalConfig: a competitor tree whose
-  // settings.json is a hostile symlink. The full detect→convert→persist flow
-  // must leave the outside target intact.
-  test("importExternalConfig end-to-end: hostile symlinked settings.json never clobbers outside file", async () => {
-    // Valid JSON decoy so the corrupt-target refusal cannot mask a real follow.
-    const target = join(evil, "secret.json")
-    const ORIGINAL = JSON.stringify({ OWNER_API_KEY: "sk-do-not-overwrite" }, null, 2)
-    await writeFile(target, ORIGINAL, "utf8")
-    // Plant a real settings file under .claude so detect picks up a 'settings'
-    // source, then point the DESTINATION (<project>/settings.json) at the decoy.
-    await writeFile(
-      join(project, ".claude", "settings.json"),
-      JSON.stringify({ permissions: { allow: ["Read"], deny: [] } }),
-      "utf8",
-    )
-    await symlink(target, join(project, "settings.json"))
-
-    const r = await importExternalConfig({ enabled: true, homeDir: home, projectDir: project })
-    expect(r.ran).toBe(true)
-    // The decoy outside the project tree is untouched.
-    expect(await readFile(target, "utf8")).toBe(ORIGINAL)
-    expect(await isSymlink(join(project, "settings.json"))).toBe(true)
-  })
-})
+      const r = await importExternalConfig({ enabled: true, homeDir: home, projectDir: project })
+      expect(r.ran).toBe(true)
+      // The decoy outside the project tree is untouched.
+      expect(await readFile(target, "utf8")).toBe(ORIGINAL)
+      expect(await isSymlink(join(project, "settings.json"))).toBe(true)
+    })
+  },
+)
 
 // ───────────────────────────────────────────────────────────────────────────
 // READ-jail (re-pin): a symlinked SOURCE that points at a sensitive file via

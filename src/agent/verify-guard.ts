@@ -30,8 +30,8 @@ export {
   OUTCOME_FAILURE_MATCHERS,
   type OutcomeFailureMatcher,
   TEST_LIKE_RE,
-  verifyOutputFailureMarkerId,
   type VerifyMatcher,
+  verifyOutputFailureMarkerId,
 } from "./verify-signal"
 
 /** Per-session forcing budget. One instance per agent run. */
@@ -107,9 +107,7 @@ export const stickyRedForceMessage = (command?: string, marker?: string): string
       ? `the command \`${command}\``
       : "an earlier verification command"
   const evidence =
-    marker !== undefined
-      ? ` Its output matched a known failure pattern (\`${marker}\`).`
-      : ""
+    marker !== undefined ? ` Its output matched a known failure pattern (\`${marker}\`).` : ""
   return (
     `The LATEST run of ${which} after your last edit FAILED and has not been re-run green.${evidence} ` +
     `A DIFFERENT check passing (e.g. a narrow reproduction script) does NOT clear this — it is a separate test. ` +

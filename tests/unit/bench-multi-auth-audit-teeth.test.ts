@@ -199,7 +199,9 @@ describe("audit: worker threads boxAccountLabel as next-chunk affinity (pool.ts 
   test("chunk N+1's acquire is PREFERRED toward chunk N's leased account", async () => {
     const { fn } = mockSpawn()
     const mgr = new AuthLeaseManager(TWO, { now: () => FIXED_NOW })
-    const base = createLeasePoolAuthProvider(mgr, () => JSON.stringify({ access_token: "x", expires_at: "2099-01-01T00:00:00.000Z" }))
+    const base = createLeasePoolAuthProvider(mgr, () =>
+      JSON.stringify({ access_token: "x", expires_at: "2099-01-01T00:00:00.000Z" }),
+    )
     const preferredSeen: Array<string | undefined> = []
     const recording: PoolAuthProvider = {
       acquire: (req) => {
@@ -209,10 +211,7 @@ describe("audit: worker threads boxAccountLabel as next-chunk affinity (pool.ts 
       canEventuallySchedule: () => base.canEventuallySchedule(),
       nextReadyAt: () => base.nextReadyAt(),
     }
-    const chunks: PoolChunk[] = [
-      chunk("c1"),
-      chunk("c2"),
-    ]
+    const chunks: PoolChunk[] = [chunk("c1"), chunk("c2")]
     await runPool(chunks, cfg(fn, recording))
     // first chunk has no affinity; second is PREFERRED toward the first's account.
     // Deleting `state.boxAccountLabel = leasedAccountLabel` makes [1] undefined ⇒ red.
@@ -237,7 +236,9 @@ describe("audit: budget-timeout abort still returns the account slot (no auth-le
     try {
       const { fn } = mockSpawn()
       const mgr = new AuthLeaseManager(TWO, { now: () => FIXED_NOW })
-      const provider = createLeasePoolAuthProvider(mgr, () => JSON.stringify({ access_token: "x", expires_at: "2099-01-01T00:00:00.000Z" }))
+      const provider = createLeasePoolAuthProvider(mgr, () =>
+        JSON.stringify({ access_token: "x", expires_at: "2099-01-01T00:00:00.000Z" }),
+      )
       await expect(
         runPool(
           [chunk("c1")],
@@ -265,13 +266,12 @@ describe("audit: multi-auth has NO global worker-level backoff lane (pool.ts ski
   test("a 429 on acct-a cools that account but never triggers a worker-level sleep", async () => {
     const { fn } = mockSpawn({ rateLimited: new Set(["c1"]) })
     const mgr = new AuthLeaseManager(TWO, { now: () => FIXED_NOW })
-    const provider = createLeasePoolAuthProvider(mgr, () => JSON.stringify({ access_token: "x", expires_at: "2099-01-01T00:00:00.000Z" }))
+    const provider = createLeasePoolAuthProvider(mgr, () =>
+      JSON.stringify({ access_token: "x", expires_at: "2099-01-01T00:00:00.000Z" }),
+    )
     const slept: number[] = []
     await runPool(
-      [
-        chunk("c1"),
-        chunk("c2"),
-      ],
+      [chunk("c1"), chunk("c2")],
       // backoffBaseMs is large: if a global lane re-appeared, the rate-limited c1
       // would force a sleep(90s). multi-auth must instead cool acct-a and route c2
       // to acct-b with ZERO worker-level sleep.
@@ -300,13 +300,12 @@ describe("audit: multi-auth has NO global worker-level backoff lane (pool.ts ski
         now: () => clock,
       },
     )
-    const provider = createLeasePoolAuthProvider(mgr, () => JSON.stringify({ access_token: "x", expires_at: "2099-01-01T00:00:00.000Z" }))
+    const provider = createLeasePoolAuthProvider(mgr, () =>
+      JSON.stringify({ access_token: "x", expires_at: "2099-01-01T00:00:00.000Z" }),
+    )
     const { fn } = mockSpawn({ rateLimited: new Set(["c1"]) })
     const out = await runPool(
-      [
-        chunk("c1"),
-        chunk("c2"),
-      ],
+      [chunk("c1"), chunk("c2")],
       cfg(fn, provider, {
         now: () => clock,
         sleep: async (ms: number) => {

@@ -74,14 +74,10 @@ const enq = (s: PlanQueueStore, threadId: string, text: string): string =>
  */
 const makeReplSink = (): {
   sink: SendNowSink
-  install: (
-    fn: (inj: SendNowInjection) => { ok: true } | { ok: false; reason: string },
-  ) => void
+  install: (fn: (inj: SendNowInjection) => { ok: true } | { ok: false; reason: string }) => void
   installedCalls: SendNowInjection[]
 } => {
-  let target:
-    | ((inj: SendNowInjection) => { ok: true } | { ok: false; reason: string })
-    | undefined
+  let target: ((inj: SendNowInjection) => { ok: true } | { ok: false; reason: string }) | undefined
   const installedCalls: SendNowInjection[] = []
   return {
     installedCalls,
@@ -111,8 +107,7 @@ const countingSink = (
       n += 1
       if (reply === "throw") throw new Error("sink boom")
       if (reply === "reject-terminal") return { ok: false, reason: "downstream-full" }
-      if (reply === "reject-transient")
-        return { ok: false, reason: "not ready", retryable: true }
+      if (reply === "reject-transient") return { ok: false, reason: "not ready", retryable: true }
       return { ok: true }
     },
   }
@@ -308,10 +303,7 @@ describe("sendNow · coexists with retry/edit/delete round-trip", () => {
 describe("sendNow · OFF byte-identity (mutators never called)", () => {
   const snapshotStore = (s: PlanQueueStore): string =>
     JSON.stringify(
-      [...s.inspect().entries()].map(([tid, entries]) => [
-        tid,
-        entries.map((e) => ({ ...e })),
-      ]),
+      [...s.inspect().entries()].map(([tid, entries]) => [tid, entries.map((e) => ({ ...e }))]),
     )
 
   test("FC-12: a store whose sendNow is NEVER called is byte-identical to one that only enqueued", () => {

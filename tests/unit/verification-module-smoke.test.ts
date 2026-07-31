@@ -129,7 +129,7 @@ describe("verification module-smoke", () => {
   })
 
   test("current-tree probe uses the same local testCmd pass/fail semantics as verify()", async () => {
-    const sandbox = await Bun.file("/tmp").exists() ? "/tmp" : process.cwd()
+    const sandbox = (await Bun.file("/tmp").exists()) ? "/tmp" : process.cwd()
     const verdict = await probeModuleSmokeOnCurrentTree({
       instance: {
         testCmd: `printf '1 passed in 0.01s\n' >&2; exit 143`,

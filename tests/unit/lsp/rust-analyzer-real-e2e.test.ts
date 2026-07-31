@@ -8,11 +8,11 @@
  * stays green). Verified 2026-06-10 with rust-analyzer 1.95.0.
  */
 import { describe, expect, test } from "bun:test"
-import { gateOn } from "@/shared"
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { RustAnalyzerAdapter } from "@/lsp"
+import { gateOn } from "@/shared"
 
 const has = (bin: string, arg = "--version"): boolean => {
   try {
@@ -40,7 +40,17 @@ const MAIN_RS = [
   "",
 ].join("\n")
 
-const CARGO_TOML = ['[package]', 'name = "t"', 'version = "0.1.0"', 'edition = "2021"', "", "[[bin]]", 'name = "t"', 'path = "src/main.rs"', ""].join("\n")
+const CARGO_TOML = [
+  "[package]",
+  'name = "t"',
+  'version = "0.1.0"',
+  'edition = "2021"',
+  "",
+  "[[bin]]",
+  'name = "t"',
+  'path = "src/main.rs"',
+  "",
+].join("\n")
 
 /** rust-analyzer indexes the project asynchronously after start; on a COLD
  *  cache it can briefly return a partial/self result before cargo metadata is

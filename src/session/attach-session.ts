@@ -47,7 +47,10 @@ export interface AttachSessionDeps {
   readonly replaceTranscript: (msgs: readonly Message[]) => Promise<readonly Message[]>
   /** Surface-state commit — runs after the swap resolved, BEFORE persist
    *  repoint. Optional: the web daemon has no per-connection surface state. */
-  readonly onReplaced?: (ctx: { readonly sessionId: string; readonly history: readonly Message[] }) => void
+  readonly onReplaced?: (ctx: {
+    readonly sessionId: string
+    readonly history: readonly Message[]
+  }) => void
   /** Repoint future persistence at the attached session (in-place; surface owns
    *  the mechanism — CLI mirrors `meta`, web takes only `id`). */
   readonly setPersistTarget: (target: { readonly id: string; readonly meta: SessionMeta }) => void

@@ -1,6 +1,6 @@
+import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 import { buildInteractiveTurnAssembler } from "@/apps/web-daemon/runtime-factory"
 import type { StreamEvent, StreamInput } from "@/llm"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
@@ -77,12 +77,18 @@ describe("web-daemon runtime factory", () => {
   // the permission e2e suites mirror this flag, so if it were removed they would
   // pass falsely while the real daemon blanket-allowed every tool under bypass.
   test("the production runtime base ENABLES the HITL gate (bypass cannot blanket-allow)", () => {
-    const src = readFileSync(join(import.meta.dir, "../../../../src/apps/web-daemon/runtime-factory.ts"), "utf8")
+    const src = readFileSync(
+      join(import.meta.dir, "../../../../src/apps/web-daemon/runtime-factory.ts"),
+      "utf8",
+    )
     expect(src).toMatch(/hitl:\s*\{\s*enabled:\s*true\s*\}/)
   })
 
   test("the production runtime base publishes the interactive prompt surface profile", () => {
-    const src = readFileSync(join(import.meta.dir, "../../../../src/apps/web-daemon/runtime-factory.ts"), "utf8")
+    const src = readFileSync(
+      join(import.meta.dir, "../../../../src/apps/web-daemon/runtime-factory.ts"),
+      "utf8",
+    )
     // `("interactive"` may be followed by `)` OR `, {envPosture…}` (the env-posture
     // arg added later) — accept either so the pin tracks the call, not its arity.
     expect(src).toMatch(/promptSurfaceProfile:\s*promptSurfaceProfileForRunMode\("interactive"[,)]/)

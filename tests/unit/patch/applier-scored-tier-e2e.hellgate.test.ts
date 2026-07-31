@@ -109,8 +109,7 @@ describe("[hellgate] apply_patch scored-tier decisive-best — end-to-end", () =
   test("EXACT-tier path is unaffected — a unique exact match still lands without the scored tier", async () => {
     const dir = mkdtempSync(join(root, "exact-"))
     // One verbatim-exact window + an indented decoy. The exact tier wins outright.
-    const original =
-      ["foo", "bar", "baz", "MID", "  foo", "  bar", "  baz"].join("\n") + "\n"
+    const original = ["foo", "bar", "baz", "MID", "  foo", "  bar", "  baz"].join("\n") + "\n"
     const file = join(dir, "code.txt")
     writeFileSync(file, original)
 

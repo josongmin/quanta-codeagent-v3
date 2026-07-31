@@ -26,13 +26,13 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test"
+import type { PermissionProfile } from "@/permission/permission-profile"
 import {
   inferApprovalPolicy,
   inferControlPolicy,
   inferNetworkPolicy,
   inferSandboxPolicy,
 } from "@/permission/policy"
-import type { PermissionProfile } from "@/permission/permission-profile"
 
 const POISON_KEYS = ["approval", "network", "sandbox", "control"] as const
 

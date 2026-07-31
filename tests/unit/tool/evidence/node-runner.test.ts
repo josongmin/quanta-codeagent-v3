@@ -11,7 +11,9 @@ describe("detectJsRunner", () => {
     expect(detectJsRunner(JSON.stringify({ devDependencies: { jest: "^29" } }))).toBe("jest")
     expect(detectJsRunner(JSON.stringify({ devDependencies: { mocha: "^10" } }))).toBe("mocha")
     expect(detectJsRunner(JSON.stringify({ dependencies: { vitest: "^2" } }))).toBe("vitest")
-    expect(detectJsRunner(JSON.stringify({ devDependencies: { vitest: "^2", jest: "^29" } }))).toBe("vitest")
+    expect(detectJsRunner(JSON.stringify({ devDependencies: { vitest: "^2", jest: "^29" } }))).toBe(
+      "vitest",
+    )
     expect(detectJsRunner(JSON.stringify({ devDependencies: { typescript: "^5" } }))).toBe("node") // none ⇒ node
   })
 
@@ -28,7 +30,12 @@ describe("nodeInspectArgv — single-process inspect command per runner", () => 
     expect(nodeInspectArgv("node", "node", F, 9229)).toEqual(["node", "--inspect-brk=9229", F])
   })
   test("mocha runs in-process via its bin (source as-is ⇒ bp binds)", () => {
-    expect(nodeInspectArgv("mocha", "node", F, 9229)).toEqual(["node", "--inspect-brk=9229", "node_modules/.bin/mocha", F])
+    expect(nodeInspectArgv("mocha", "node", F, 9229)).toEqual([
+      "node",
+      "--inspect-brk=9229",
+      "node_modules/.bin/mocha",
+      F,
+    ])
   })
   test("jest ⇒ null (single-process but TRANSFORMS source ⇒ file:line bp won't bind)", () => {
     expect(nodeInspectArgv("jest", "node", F, 9229)).toBeNull()

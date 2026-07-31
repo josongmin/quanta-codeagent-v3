@@ -1,16 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { runAgent } from "@/agent"
 import type { CloseoutCritic, CloseoutCriticVerdict } from "@/agent"
+import { runAgent } from "@/agent"
 import type { StreamEvent } from "@/llm"
-import {
-  cfg,
-  eventsOf,
-  FakeLLM,
-  RecordingStream,
-  text,
-  toolUse,
-  withTimeout,
-} from "./_harness"
+import { cfg, eventsOf, FakeLLM, RecordingStream, text, toolUse, withTimeout } from "./_harness"
 
 /**
  * TRUE end-to-end for the `closeout-critic-gate` feature, driven by a FAKE LLM

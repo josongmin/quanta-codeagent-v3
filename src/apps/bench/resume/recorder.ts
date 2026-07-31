@@ -24,10 +24,10 @@ import { join } from "node:path"
 import type { LLMPort } from "@/llm"
 import {
   jsonlReplayStore,
-  recordingLlmPort,
   type RecordedInteraction,
   type ReplayMatchOpts,
   type ReplayStore,
+  recordingLlmPort,
 } from "@/llm/replay"
 import type { StreamInput } from "@/llm/types"
 import { benchHome, benchRunId } from "@/runner/batch/corpus/paths"

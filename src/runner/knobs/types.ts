@@ -73,14 +73,7 @@ export interface Knob<T = unknown> {
  *  capability module (not a resolution layer; not a named preset). */
 export interface KnobValue<T> {
   readonly value: T
-  readonly source:
-    | "cli"
-    | "session"
-    | "env"
-    | "config-file"
-    | "preset"
-    | "phase-module"
-    | "default"
+  readonly source: "cli" | "session" | "env" | "config-file" | "preset" | "phase-module" | "default"
 }
 
 /**

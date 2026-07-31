@@ -55,14 +55,33 @@ const REAL_PAUSE = {
 const PROPS: Record<string, unknown[]> = {
   "local-0": [
     { name: "result", value: { type: "number", value: 10 } },
-    { name: "acc", value: { type: "object", subtype: "array", className: "Array", description: "Array(2)", objectId: "arr-0" } },
+    {
+      name: "acc",
+      value: {
+        type: "object",
+        subtype: "array",
+        className: "Array",
+        description: "Array(2)",
+        objectId: "arr-0",
+      },
+    },
   ],
   "arr-0": [
     { name: "0", value: { type: "number", value: 1 } },
     { name: "1", value: { type: "number", value: 2 } },
     { name: "length", value: { type: "number", value: 2 } },
   ],
-  "clo-0": [{ name: "helper", value: { type: "function", className: "Function", description: "function helper()", objectId: "fn-0" } }],
+  "clo-0": [
+    {
+      name: "helper",
+      value: {
+        type: "function",
+        className: "Function",
+        description: "function helper()",
+        objectId: "fn-0",
+      },
+    },
+  ],
   "glob-0": [{ name: "process", value: { type: "object", className: "process", objectId: "p-0" } }],
   "local-1": [{ name: "x", value: { type: "number", value: 7 } }],
 }
@@ -79,12 +98,19 @@ const makeFakeInspector = (opts: FakeOpts = {}): CdpTransport => {
         reply({})
         break
       case "Debugger.setBreakpointByUrl":
-        reply({ breakpointId: "bp1", locations: opts.unbound ? [] : [{ scriptId: "7", lineNumber: 6, columnNumber: 0 }] })
+        reply({
+          breakpointId: "bp1",
+          locations: opts.unbound ? [] : [{ scriptId: "7", lineNumber: 6, columnNumber: 0 }],
+        })
         break
       case "Runtime.runIfWaitingForDebugger":
         reply({})
         // The --inspect-brk ENTRY pause (not our bp) — driver must resume past it.
-        if (opts.stopsAtBp !== false) send({ method: "Debugger.paused", params: { reason: "Break on start", hitBreakpoints: [], callFrames: [] } })
+        if (opts.stopsAtBp !== false)
+          send({
+            method: "Debugger.paused",
+            params: { reason: "Break on start", hitBreakpoints: [], callFrames: [] },
+          })
         break
       case "Debugger.resume":
         // The 2nd resume is the best-effort TEARDOWN resume. Throwing here makes
@@ -96,7 +122,8 @@ const makeFakeInspector = (opts: FakeOpts = {}): CdpTransport => {
         reply({})
         resumesSeen++
         // First resume (past the entry pause) ⇒ emit the REAL bp pause.
-        if (resumesSeen === 1 && opts.stopsAtBp !== false) send({ method: "Debugger.paused", params: REAL_PAUSE })
+        if (resumesSeen === 1 && opts.stopsAtBp !== false)
+          send({ method: "Debugger.paused", params: REAL_PAUSE })
         break
       case "Runtime.getProperties":
         reply({ result: PROPS[String(req.params?.objectId)] ?? [] })
@@ -116,7 +143,10 @@ const makeFakeInspector = (opts: FakeOpts = {}): CdpTransport => {
 
 describe("inspectViaCdp — full CDP launch+inspect handshake (node)", () => {
   test("skips the entry pause, stops at the bp, assembles multi-frame locals + types", async () => {
-    const r = await inspectViaCdp(new CdpClient(makeFakeInspector()), { url: "file:///t/m.test.mjs", line: 7 })
+    const r = await inspectViaCdp(new CdpClient(makeFakeInspector()), {
+      url: "file:///t/m.test.mjs",
+      line: 7,
+    })
     expect(r.outcome).toBe("stopped")
     if (r.outcome !== "stopped") return
     // Stack: CDP 0-based lines ⇒ 1-based; anonymous frame named.
@@ -138,9 +168,13 @@ describe("inspectViaCdp — full CDP launch+inspect handshake (node)", () => {
       { name: "length", value: "2" },
     ])
     // closure scope captured separately.
-    expect(r.frames[0]?.scopes.find((s) => s.scope === "Closure")?.vars.map((v) => v.name)).toEqual(["helper"])
+    expect(r.frames[0]?.scopes.find((s) => s.scope === "Closure")?.vars.map((v) => v.name)).toEqual(
+      ["helper"],
+    )
     // frame 1 (caller) locals.
-    expect(r.frames[1]?.scopes.find((s) => s.scope === "Locals")?.vars).toEqual([{ name: "x", value: "7", type: "number" }])
+    expect(r.frames[1]?.scopes.find((s) => s.scope === "Locals")?.vars).toEqual([
+      { name: "x", value: "7", type: "number" },
+    ])
   })
 
   test("rejecting teardown resume ⇒ inspection still completes AND a labelled debug line fires (not swallowed)", async () => {
@@ -151,10 +185,13 @@ describe("inspectViaCdp — full CDP launch+inspect handshake (node)", () => {
     // outcome assertion stays green.
     const debugSpy = spyOn(logger, "debug").mockImplementation(() => {})
     try {
-      const r = await inspectViaCdp(new CdpClient(makeFakeInspector({ throwOnTeardownResume: true })), {
-        url: "file:///t/m.test.mjs",
-        line: 7,
-      })
+      const r = await inspectViaCdp(
+        new CdpClient(makeFakeInspector({ throwOnTeardownResume: true })),
+        {
+          url: "file:///t/m.test.mjs",
+          line: 7,
+        },
+      )
       // Cleanup completed despite the rejecting resume — the result still lands.
       expect(r.outcome).toBe("stopped")
       // The swallow is now VISIBLE: a stable-labelled debug line fired.
@@ -168,19 +205,31 @@ describe("inspectViaCdp — full CDP launch+inspect handshake (node)", () => {
   })
 
   test("breakpoint never hit (program completes) ⇒ exited, not a hang", async () => {
-    const r = await inspectViaCdp(new CdpClient(makeFakeInspector({ stopsAtBp: false })), { url: "file:///t/m.test.mjs", line: 7 }, { stopTimeoutMs: 300 })
+    const r = await inspectViaCdp(
+      new CdpClient(makeFakeInspector({ stopsAtBp: false })),
+      { url: "file:///t/m.test.mjs", line: 7 },
+      { stopTimeoutMs: 300 },
+    )
     expect(r.outcome).toBe("exited")
   })
 
   test("unbound breakpoint + completes ⇒ exited with breakpointsBound:false", async () => {
-    const r = await inspectViaCdp(new CdpClient(makeFakeInspector({ stopsAtBp: false, unbound: true })), { url: "file:///t/m.test.mjs", line: 7 }, { stopTimeoutMs: 300 })
+    const r = await inspectViaCdp(
+      new CdpClient(makeFakeInspector({ stopsAtBp: false, unbound: true })),
+      { url: "file:///t/m.test.mjs", line: 7 },
+      { stopTimeoutMs: 300 },
+    )
     expect(r.outcome).toBe("exited")
     if (r.outcome === "exited") expect(r.breakpointsBound).toBe(false)
   })
 
   test("ABORT mid-inspect ⇒ error outcome promptly", async () => {
     const ac = new AbortController()
-    const p = inspectViaCdp(new CdpClient(makeFakeInspector({ stopsAtBp: false })), { url: "file:///t/m.test.mjs", line: 7 }, { stopTimeoutMs: 60_000, signal: ac.signal })
+    const p = inspectViaCdp(
+      new CdpClient(makeFakeInspector({ stopsAtBp: false })),
+      { url: "file:///t/m.test.mjs", line: 7 },
+      { stopTimeoutMs: 60_000, signal: ac.signal },
+    )
     ac.abort()
     const r = await p
     expect(r.outcome).toBe("error")
@@ -201,22 +250,69 @@ const makeExceptionInspector = (): CdpTransport & { state: () => unknown } => {
   const send = (m: unknown) => toClient?.(JSON.stringify(m))
   const t: CdpTransport = {
     send: (data) => {
-      const req = JSON.parse(data) as { id: number; method: string; params?: Record<string, unknown> }
+      const req = JSON.parse(data) as {
+        id: number
+        method: string
+        params?: Record<string, unknown>
+      }
       const reply = (result: unknown) => send({ id: req.id, result })
       switch (req.method) {
-        case "Debugger.setPauseOnExceptions": pauseState = req.params?.state; reply({}); break
-        case "Debugger.setBreakpointByUrl": reply({ breakpointId: "bp1", locations: [{ scriptId: "1", lineNumber: 4 }] }); break
-        case "Runtime.runIfWaitingForDebugger": reply({}); send({ method: "Debugger.paused", params: { reason: "Break on start", hitBreakpoints: [], callFrames: [] } }); break
-        case "Debugger.resume":
-          reply({}); resumes++
-          if (resumes === 1)
-            send({ method: "Debugger.paused", params: { reason: "exception", hitBreakpoints: [], data: { type: "object", subtype: "error", className: "TypeError", description: "TypeError: x is not a function\n    at boom (file:///t/m.mjs:5:3)" }, callFrames: [{ callFrameId: "0", functionName: "boom", url: "file:///t/m.mjs", location: { lineNumber: 4 }, scopeChain: [{ type: "local", object: { objectId: "L0" } }] }] } })
+        case "Debugger.setPauseOnExceptions":
+          pauseState = req.params?.state
+          reply({})
           break
-        case "Runtime.getProperties": reply({ result: String(req.params?.objectId) === "L0" ? [{ name: "x", value: { type: "undefined" } }] : [] }); break
-        default: reply({})
+        case "Debugger.setBreakpointByUrl":
+          reply({ breakpointId: "bp1", locations: [{ scriptId: "1", lineNumber: 4 }] })
+          break
+        case "Runtime.runIfWaitingForDebugger":
+          reply({})
+          send({
+            method: "Debugger.paused",
+            params: { reason: "Break on start", hitBreakpoints: [], callFrames: [] },
+          })
+          break
+        case "Debugger.resume":
+          reply({})
+          resumes++
+          if (resumes === 1)
+            send({
+              method: "Debugger.paused",
+              params: {
+                reason: "exception",
+                hitBreakpoints: [],
+                data: {
+                  type: "object",
+                  subtype: "error",
+                  className: "TypeError",
+                  description: "TypeError: x is not a function\n    at boom (file:///t/m.mjs:5:3)",
+                },
+                callFrames: [
+                  {
+                    callFrameId: "0",
+                    functionName: "boom",
+                    url: "file:///t/m.mjs",
+                    location: { lineNumber: 4 },
+                    scopeChain: [{ type: "local", object: { objectId: "L0" } }],
+                  },
+                ],
+              },
+            })
+          break
+        case "Runtime.getProperties":
+          reply({
+            result:
+              String(req.params?.objectId) === "L0"
+                ? [{ name: "x", value: { type: "undefined" } }]
+                : [],
+          })
+          break
+        default:
+          reply({})
       }
     },
-    onData: (cb) => { toClient = cb },
+    onData: (cb) => {
+      toClient = cb
+    },
     close: () => {},
   }
   return Object.assign(t, { state: () => pauseState })
@@ -225,7 +321,11 @@ const makeExceptionInspector = (): CdpTransport & { state: () => unknown } => {
 describe("inspectViaCdp — exception-aware capture (T-01)", () => {
   test("sets pauseOnExceptions, stops on the THROW (no bp hit), captures type+message", async () => {
     const adapter = makeExceptionInspector()
-    const r = await inspectViaCdp(new CdpClient(adapter), { url: "file:///t/m.mjs", line: 99, pauseOnExceptions: "uncaught" })
+    const r = await inspectViaCdp(new CdpClient(adapter), {
+      url: "file:///t/m.mjs",
+      line: 99,
+      pauseOnExceptions: "uncaught",
+    })
     expect(adapter.state()).toBe("uncaught") // driver armed exception pausing
     expect(r.outcome).toBe("stopped")
     if (r.outcome !== "stopped") return

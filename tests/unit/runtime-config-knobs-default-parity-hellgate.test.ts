@@ -41,9 +41,9 @@
 // envKey (and an unmutated clone passes).
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { RUNTIME_CONFIG_KNOBS } from "@/shared/runtime-config-knobs"
-import type { RcKind, RuntimeConfigKnob } from "@/shared/runtime-config-knobs"
 import { __resetRuntimeConfig, runtimeConfig } from "@/shared/runtime-config"
+import type { RcKind, RuntimeConfigKnob } from "@/shared/runtime-config-knobs"
+import { RUNTIME_CONFIG_KNOBS } from "@/shared/runtime-config-knobs"
 import { getTerminalIo, setTerminalIo } from "@/shared/terminal-io"
 
 // ---------------------------------------------------------------------------
@@ -154,7 +154,9 @@ const FIELD_OVERRIDES: Readonly<Record<string, FieldOverride>> = {
  *  `enum` are indistinguishable at runtime (both strings) → we return the token
  *  `"string|enum"` and accept it against either declared kind. `undefined`
  *  actuals carry no runtime type → `undefined` (kind unverifiable, skipped). */
-const runtimeKindOf = (v: unknown): "bool" | "int" | "float" | "string|enum" | "list" | undefined => {
+const runtimeKindOf = (
+  v: unknown,
+): "bool" | "int" | "float" | "string|enum" | "list" | undefined => {
   if (typeof v === "boolean") return "bool"
   if (typeof v === "number") return Number.isInteger(v) ? "int" : "float"
   if (typeof v === "string") return "string|enum"
@@ -270,7 +272,12 @@ const parityFor = (entry: RuntimeConfigKnob, baseline: Record<string, unknown>):
     if (override.mode === "off-gate") {
       return classifyOffGate(entry, override.coGatedField, override.coGatedField in baseline)
     }
-    return classifyParity(entry, override.field, override.field in baseline, baseline[override.field])
+    return classifyParity(
+      entry,
+      override.field,
+      override.field in baseline,
+      baseline[override.field],
+    )
   }
   const { field, defaultValue } = reflectKnob(entry.envKey, baseline)
   return classifyParity(entry, field, field !== undefined && field in baseline, defaultValue)
@@ -299,7 +306,9 @@ describe("runtime-config knob CATALOG ↔ GATE default/kind parity (ratchet)", (
       setTerminalIo(savedIo)
     }
 
-    const violations = verdicts.filter((v) => v.kind === "violation").map((v) => (v as { message: string }).message)
+    const violations = verdicts
+      .filter((v) => v.kind === "violation")
+      .map((v) => (v as { message: string }).message)
     const checkedValue = verdicts.filter((v) => v.kind === "checked-value").length
     const checkedExists = verdicts.filter((v) => v.kind === "checked-exists").length
     const checkedOffgate = verdicts.filter((v) => v.kind === "checked-offgate").length
@@ -323,7 +332,12 @@ describe("runtime-config knob CATALOG ↔ GATE default/kind parity (ratchet)", (
     try {
       for (const entry of RUNTIME_CONFIG_KNOBS) {
         const v = parityFor(entry, baseline)
-        if (v.kind === "checked-value" || v.kind === "checked-exists" || v.kind === "checked-offgate") checked++
+        if (
+          v.kind === "checked-value" ||
+          v.kind === "checked-exists" ||
+          v.kind === "checked-offgate"
+        )
+          checked++
       }
     } finally {
       setTerminalIo(savedIo)
@@ -386,12 +400,14 @@ describe("runtime-config knob CATALOG parity — red-on-injection", () => {
     const target = RUNTIME_CONFIG_KNOBS.find((k) => k.kind === "bool" && k.default === false)
     expect(target).toBeDefined()
     const targetKey = (target as RuntimeConfigKnob).envKey
-    const clone = RUNTIME_CONFIG_KNOBS.map((k) => (k.envKey === targetKey ? { ...k, default: true } : { ...k }))
+    const clone = RUNTIME_CONFIG_KNOBS.map((k) =>
+      k.envKey === targetKey ? { ...k, default: true } : { ...k },
+    )
     const flagged = flaggedKeys(clone)
     expect(flagged).toEqual([targetKey]) // exactly that one, nothing else
   })
 
-  test("mutating a list knob's default [] → \"\" (kind/default drift) is FLAGGED", () => {
+  test('mutating a list knob\'s default [] → "" (kind/default drift) is FLAGGED', () => {
     const target = RUNTIME_CONFIG_KNOBS.find((k) => k.kind === "list")
     expect(target).toBeDefined()
     const targetKey = (target as RuntimeConfigKnob).envKey
@@ -404,7 +420,9 @@ describe("runtime-config knob CATALOG parity — red-on-injection", () => {
   })
 
   test("mutating an enum knob's default to a wrong token is FLAGGED", () => {
-    const target = RUNTIME_CONFIG_KNOBS.find((k) => k.kind === "enum" && typeof k.default === "string")
+    const target = RUNTIME_CONFIG_KNOBS.find(
+      (k) => k.kind === "enum" && typeof k.default === "string",
+    )
     expect(target).toBeDefined()
     const targetKey = (target as RuntimeConfigKnob).envKey
     const clone = RUNTIME_CONFIG_KNOBS.map((k) =>

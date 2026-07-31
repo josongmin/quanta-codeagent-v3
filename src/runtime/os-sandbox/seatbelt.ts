@@ -63,9 +63,7 @@ export const compileSeatbeltProfile = (
   )
 
   // Resolve extra read paths (same resolution rule as write paths).
-  const extraReads = unique(
-    (policy.extraReadPaths ?? []).map((p) => resolvePath(p, workspace)),
-  )
+  const extraReads = unique((policy.extraReadPaths ?? []).map((p) => resolvePath(p, workspace)))
 
   const lines: string[] = [
     "(version 1)",

@@ -1,7 +1,7 @@
+import { describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 import { defsInSource, resolveOwnerSiblings } from "@/agent/closure"
 
 // django-14315 shape: base + postgresql (+ other backends) define the SAME
@@ -26,7 +26,8 @@ const stubDefiners =
 
 describe("defsInSource", () => {
   test("extracts def / async def / class names; excludes dunder", () => {
-    const src = "class Foo:\n    def bar(self):\n        pass\n    def __init__(self):\n        pass\nasync def baz():\n    pass"
+    const src =
+      "class Foo:\n    def bar(self):\n        pass\n    def __init__(self):\n        pass\nasync def baz():\n    pass"
     expect(defsInSource(src).sort()).toEqual(["Foo", "bar", "baz"])
   })
 
@@ -143,8 +144,14 @@ describe("resolveOwnerSiblings (WS2 grep + issueText anchor)", () => {
   test("ripgrep default finds the sibling on a real tree (integration)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "ws2-rg-"))
     try {
-      writeFileSync(join(dir, "a.py"), "class A:\n    def settings_to_cmd_args_env(self):\n        pass\n")
-      writeFileSync(join(dir, "b.py"), "class B:\n    def settings_to_cmd_args_env(self):\n        pass\n")
+      writeFileSync(
+        join(dir, "a.py"),
+        "class A:\n    def settings_to_cmd_args_env(self):\n        pass\n",
+      )
+      writeFileSync(
+        join(dir, "b.py"),
+        "class B:\n    def settings_to_cmd_args_env(self):\n        pass\n",
+      )
       const out = await resolveOwnerSiblings()({
         stage1Files: [{ file: "a.py", score: 5 }],
         issueText: "the settings_to_cmd_args_env method returns the wrong value",
@@ -224,7 +231,8 @@ describe("resolveOwnerSiblings (WS2 grep + issueText anchor)", () => {
       ],
       issueText: "runshell is broken",
       cwd: "/repo",
-      readSource: (f) => (f === "owner.py" ? "class C:\n    def runshell(self):\n        pass" : null),
+      readSource: (f) =>
+        f === "owner.py" ? "class C:\n    def runshell(self):\n        pass" : null,
       listDefiners: stubDefiners({ runshell: ["owner.py", "low.py", "sibling.py"] }),
       maxFiles: 3,
     })

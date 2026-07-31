@@ -140,7 +140,9 @@ const table = (rows: readonly LeaderRow[]): string => {
   const header = "| instance | repo | preset | model |\n| --- | --- | --- | --- |"
   const body = [...rows]
     .sort((a, b) => byteCompare(a.instanceId, b.instanceId))
-    .map((r) => `| ${cell(r.instanceId)} | ${cell(r.repo)} | ${cell(r.preset)} | ${cell(r.model)} |`)
+    .map(
+      (r) => `| ${cell(r.instanceId)} | ${cell(r.repo)} | ${cell(r.preset)} | ${cell(r.model)} |`,
+    )
     .join("\n")
   return `${header}\n${body}`
 }

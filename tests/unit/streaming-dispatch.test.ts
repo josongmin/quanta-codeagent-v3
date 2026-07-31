@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test"
+import { z } from "zod"
 import {
   type DispatchOutcome,
   type StreamingCall,
@@ -9,7 +10,6 @@ import { buildToolInputSeam } from "@/agent/tool-input-streaming"
 import { assembleFromEvents, type StreamEvent } from "@/llm"
 import { logger } from "@/shared"
 import { defineTool, ToolRegistry } from "@/tool"
-import { z } from "zod"
 
 /** Async generator over a fixed event list. `onEmit` fires AFTER each event is
  *  yielded so a test can record interleaving (e.g. assert a dispatch started
@@ -304,9 +304,7 @@ describe("streamingTurn #8 tool-input callback observability", () => {
     // Stream processing survived (assembled, not crashed).
     expect(res.kind).toBe("assembled")
     // Observable exactly once, at the outer seam.
-    const startWarns = warn.mock.calls.filter((c) =>
-      String(c[0]).includes("fireToolInput(start)"),
-    )
+    const startWarns = warn.mock.calls.filter((c) => String(c[0]).includes("fireToolInput(start)"))
     expect(startWarns.length).toBe(1)
     expect(String(startWarns[0]?.[0])).toContain("faulty callback boom")
     warn.mockRestore()

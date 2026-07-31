@@ -1,9 +1,9 @@
 /** System-prompt mode-variant slice barrel (ADR-0211). */
 export {
-  type BuildSystemPromptForRunModeOpts,
   type BuildSystemPromptForModeOpts,
-  buildSystemPromptForRunMode,
+  type BuildSystemPromptForRunModeOpts,
   buildSystemPromptForMode,
+  buildSystemPromptForRunMode,
   defaultModeVariantRegistry,
   promptSurfaceProfileForRunMode,
   resolveCliDefaultEnvPosture,

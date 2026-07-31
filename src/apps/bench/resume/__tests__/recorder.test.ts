@@ -16,8 +16,8 @@
 import { describe, expect, test } from "bun:test"
 import {
   maybeTeeResumeRecording,
-  teeResumeReplayStore,
   teeReplayStore,
+  teeResumeReplayStore,
 } from "@/apps/bench/resume/recorder"
 import type { LLMPort } from "@/llm"
 import type { RecordedInteraction, ReplayStore } from "@/llm/replay"

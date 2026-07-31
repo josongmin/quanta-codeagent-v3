@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import type { Message } from "@/llm"
 import type { TurnContextInput } from "@/agent/prompt"
 import { buildTurnContext } from "@/agent/prompt"
 import { todayDateLine } from "@/agent/prompt-reminders"
+import type { Message } from "@/llm"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELLGATE — `today-date-line-clock-port` (L4)

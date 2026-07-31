@@ -120,9 +120,7 @@ describe("enter_plan_mode — consumer contract (scripted tool_use → real loop
     expect(outcome.reason).toBe("completed")
     // No entry ⇒ no flip ⇒ write runs normally.
     expect(executions.count).toBe(1)
-    expect(
-      stream.events.filter((e) => e.type === "mode_changed"),
-    ).toHaveLength(0)
+    expect(stream.events.filter((e) => e.type === "mode_changed")).toHaveLength(0)
     const writeResult = stream.events.find((e) => e.type === "tool_result" && e.name === "write")
     expect(writeResult && writeResult.type === "tool_result" && writeResult.ok).toBe(true)
   }, 15_000)

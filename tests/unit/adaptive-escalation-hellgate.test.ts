@@ -22,8 +22,8 @@ import {
   admitNextStep,
   classifyAction,
   DEFAULT_ADAPTIVE_LIMITS,
-  type EvidenceFacts,
   EVIDENCE_GAPS,
+  type EvidenceFacts,
   fullyEvidencedFacts,
   isExpensiveAction,
   isRerouteAction,
@@ -233,9 +233,7 @@ describe("adaptive-escalation router contract", () => {
 
     test("LEGAL-3: ordering vetoes are gone (run_public_repro after base repro proceeds)", () => {
       const facts: EvidenceFacts = { ...fullyEvidencedFacts(IDS), baseReproEstablished: true }
-      expect(
-        validateAdaptiveDecisionForEvidence(facts, dec("run_public_repro")),
-      ).toBeUndefined()
+      expect(validateAdaptiveDecisionForEvidence(facts, dec("run_public_repro"))).toBeUndefined()
       // and positive-proof ordering veto is gone too
       expect(validateAdaptiveDecisionForEvidence(facts, dec("run_proof_clean"))).toBeUndefined()
     })

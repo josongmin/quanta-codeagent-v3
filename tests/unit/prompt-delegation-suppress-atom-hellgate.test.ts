@@ -125,14 +125,25 @@ describe("C5059-05 — tool-routing variant structural invariants", () => {
     // directly so it doesn't rely on A_TOOL_ROUTING being the only false-gated atom.
     const base = reachableBodyContexts()[0]
     if (base === undefined) throw new Error("no ctx")
-    expect(matches({ hasDelegationSuppress: false }, { ...base, hasDelegationSuppress: false })).toBe(true)
-    expect(matches({ hasDelegationSuppress: false }, { ...base, hasDelegationSuppress: true })).toBe(false)
-    expect(matches({ hasDelegationSuppress: true }, { ...base, hasDelegationSuppress: false })).toBe(false)
-    expect(matches({ hasDelegationSuppress: true }, { ...base, hasDelegationSuppress: true })).toBe(true)
+    expect(
+      matches({ hasDelegationSuppress: false }, { ...base, hasDelegationSuppress: false }),
+    ).toBe(true)
+    expect(
+      matches({ hasDelegationSuppress: false }, { ...base, hasDelegationSuppress: true }),
+    ).toBe(false)
+    expect(
+      matches({ hasDelegationSuppress: true }, { ...base, hasDelegationSuppress: false }),
+    ).toBe(false)
+    expect(matches({ hasDelegationSuppress: true }, { ...base, hasDelegationSuppress: true })).toBe(
+      true,
+    )
   })
 
   test("OFF render EXACTLY equals the frozen base tool-routing (byte-identical pin)", () => {
-    const offLines = selectAtoms(BODY_AFTER_PERSONA_ATOMS, { ...ctx0, hasDelegationSuppress: false })
+    const offLines = selectAtoms(BODY_AFTER_PERSONA_ATOMS, {
+      ...ctx0,
+      hasDelegationSuppress: false,
+    })
       .filter((a) => a.atomId === "BODY-TOOL-ROUTING")
       .flatMap((a) => a.lines)
     expect(offLines).toEqual([...BODY_AFTER_PERSONA_TOOL_ROUTING])

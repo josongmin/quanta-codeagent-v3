@@ -1,20 +1,21 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { afterAll, describe, expect, it } from "bun:test"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, describe, expect, it } from "bun:test"
 import type { ToolContext, ToolEvent } from "../types"
-import {
-  buildFindRefsArgv,
-  findReferencesTool,
-  formatFindRefs,
-  isDefinitionLine,
-} from "./index"
+import { buildFindRefsArgv, findReferencesTool, formatFindRefs, isDefinitionLine } from "./index"
 
 const ctx = (cwd: string): ToolContext => ({ cwd, signal: new AbortController().signal })
 
-const run = async (input: Record<string, unknown>, cwd: string): Promise<{ ok: boolean; output: string }> => {
+const run = async (
+  input: Record<string, unknown>,
+  cwd: string,
+): Promise<{ ok: boolean; output: string }> => {
   let out = { ok: false, output: "(no result)" }
-  for await (const ev of findReferencesTool.execute(input as never, ctx(cwd)) as AsyncIterable<ToolEvent>) {
+  for await (const ev of findReferencesTool.execute(
+    input as never,
+    ctx(cwd),
+  ) as AsyncIterable<ToolEvent>) {
     if (ev.type === "result") out = ev.result as { ok: boolean; output: string }
   }
   return out

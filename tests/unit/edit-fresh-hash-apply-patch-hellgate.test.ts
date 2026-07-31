@@ -187,7 +187,10 @@ describe("jul-13 apply_patch × edit-fresh-hash baseline refresh — PRODUCTION 
     expect(rA.ok).toBe(true)
     expect(rA.failure).toBeUndefined()
 
-    const rB = await runEdit({ path: fileB, old_string: "brand new B", new_string: "edited B" }, ctx)
+    const rB = await runEdit(
+      { path: fileB, old_string: "brand new B", new_string: "edited B" },
+      ctx,
+    )
     expect(rB.ok).toBe(true)
     expect(rB.failure).toBeUndefined()
     expect(readFileSync(fileB, "utf8")).toBe("edited B")
@@ -236,7 +239,10 @@ describe("jul-13 apply_patch × edit-fresh-hash baseline refresh — PRODUCTION 
     expect(rMove.ok).toBe(true)
     expect(rMove.failure).toBeUndefined()
 
-    const rAdd = await runEdit({ path: added, old_string: "fresh add", new_string: "edited add" }, ctx)
+    const rAdd = await runEdit(
+      { path: added, old_string: "fresh add", new_string: "edited add" },
+      ctx,
+    )
     expect(rAdd.ok).toBe(true)
     expect(rAdd.failure).toBeUndefined()
   })

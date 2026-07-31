@@ -9,6 +9,7 @@
 
 import { lstat, readdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { REPRO_CANONICAL_BASENAME } from "@/agent/repro-test/scaffold-patterns"
 import { isTestFilePath, type SandboxData } from "@/shared"
 import { getCachePathspecs } from "../corpus/cache-pathspecs"
 import {
@@ -17,7 +18,6 @@ import {
   revertProjectEnvSandbox,
 } from "../corpus/project-env"
 import { type ExecResult, exec, execArgv, trimOut } from "./exec"
-import { REPRO_CANONICAL_BASENAME } from "@/agent/repro-test/scaffold-patterns"
 import { isBenchReproArtifactPath } from "./repro-artifacts"
 import { stripEnvManifestPins } from "./strip-env-manifest-pins"
 

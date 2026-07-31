@@ -157,7 +157,9 @@ describe("resumed frame codec (additive 7th kind)", () => {
     expect(() =>
       decodeSessionTransportMessage(JSON.stringify({ ...base, servedThroughSeq: undefined })),
     ).toThrow()
-    expect(() => decodeSessionTransportMessage(JSON.stringify({ ...base, sessionId: "" }))).toThrow()
+    expect(() =>
+      decodeSessionTransportMessage(JSON.stringify({ ...base, sessionId: "" })),
+    ).toThrow()
   })
 
   test("the control-frame version gate applies (a foreign-version resumed frame is dropped by tryDecode, not delivered)", () => {

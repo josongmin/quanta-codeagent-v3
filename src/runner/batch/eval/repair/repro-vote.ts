@@ -410,8 +410,7 @@ export const makeReproVoteValidate = (deps: ReproVoteValidateDeps) => {
     }
     const vote = voteResolved(samples)
     const detail = detailOf(vote)
-    if (vote.verdict === "resolved")
-      return voteResolvedResult(deps, round, record, detail, samples)
+    if (vote.verdict === "resolved") return voteResolvedResult(deps, round, record, detail, samples)
     if (vote.verdict === "reproduced")
       return voteUnresolvedResult(deps, round, record, detail, samples, args)
     // Inconclusive (tie / all-noisy): don't guess and don't use a legacy fallback.

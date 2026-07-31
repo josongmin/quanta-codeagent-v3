@@ -224,9 +224,7 @@ describe("detectCommand — probe order (bun → npm → pytest)", () => {
   test("malformed package.json (parse fails) + no other marker ⇒ undefined (not npm)", async () => {
     // readPackageJson swallows the parse error and returns null ⇒ pkg!==null is
     // false ⇒ npm arm skipped; no python marker ⇒ undefined.
-    await withProject({ "package.json": "{ not json" }, undefined, (r) =>
-      expect(r).toBeUndefined(),
-    )
+    await withProject({ "package.json": "{ not json" }, undefined, (r) => expect(r).toBeUndefined())
   })
 })
 
@@ -238,8 +236,10 @@ describe("detectCommand — path forwarding (npm uses `--`, others append raw)",
   })
 
   test("npm + path ⇒ 'npm test -- <path>' (path forwarded after separator)", async () => {
-    await withProject({ "package.json": JSON.stringify({ scripts: {} }) }, "spec/foo.test.ts", (r) =>
-      expect(r).toBe("npm test -- spec/foo.test.ts"),
+    await withProject(
+      { "package.json": JSON.stringify({ scripts: {} }) },
+      "spec/foo.test.ts",
+      (r) => expect(r).toBe("npm test -- spec/foo.test.ts"),
     )
   })
 

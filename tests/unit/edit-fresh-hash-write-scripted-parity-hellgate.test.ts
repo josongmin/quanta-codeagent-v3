@@ -27,7 +27,9 @@ import { makeWriteTool } from "@/tool/write"
 const FRESH_RE = /fresh sha256: ([0-9a-f]{64})/
 
 const drive = async (
-  tool: { execute: (i: never, c: ToolContext) => AsyncIterable<{ type: string; result?: ToolResult }> },
+  tool: {
+    execute: (i: never, c: ToolContext) => AsyncIterable<{ type: string; result?: ToolResult }>
+  },
   input: unknown,
   ctx: ToolContext,
 ): Promise<ToolResult> => {

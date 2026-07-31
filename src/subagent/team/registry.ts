@@ -100,7 +100,12 @@ export const createTeamRegistry = (): TeamRegistryPort => {
           // caller-auth: may seed only ITSELF or an UNTEAMED agent — never re-home a
           // member already in ANOTHER team (that is the re-home hijack that bypasses the
           // teamScopedMailbox cross-team deny). Host path (no caller) re-homes freely.
-          if (caller !== undefined && m !== caller && teamByAgent.has(m) && teamByAgent.get(m) !== teamId) {
+          if (
+            caller !== undefined &&
+            m !== caller &&
+            teamByAgent.has(m) &&
+            teamByAgent.get(m) !== teamId
+          ) {
             continue
           }
           join(teamId, m)

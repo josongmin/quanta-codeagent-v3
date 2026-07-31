@@ -153,7 +153,7 @@ export const filesFromUnifiedDiff = (patch: string): string[] => {
     if (line.startsWith(DIFF_GIT_PREFIX)) {
       flush()
       const parsed = parseDiffGitPaths(line)
-      fallbackPath = (parsed?.b ?? parsed?.a) ?? undefined
+      fallbackPath = parsed?.b ?? parsed?.a ?? undefined
       continue
     }
     const pre = parseImageHeaderPath(line, "--- ", "a")

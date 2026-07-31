@@ -46,9 +46,7 @@ const cleanAdmit = (input: Parameters<typeof buildFaultEvidencePacket>[0]) =>
 
 describe("SCAFF-03 — witnessStructuralOwnerCandidates extractor (typed-relation only)", () => {
   it("a unique-symbol-definer yields its single owner file", () => {
-    expect(witnessStructuralOwnerCandidates([uniqueDefiner])).toEqual([
-      { file: A, forSymbol: SYM },
-    ])
+    expect(witnessStructuralOwnerCandidates([uniqueDefiner])).toEqual([{ file: A, forSymbol: SYM }])
   })
 
   it("a COMPLETE override-family yields EVERY family file (not an arbitrary one)", () => {

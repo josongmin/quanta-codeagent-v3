@@ -22,10 +22,7 @@ import { describe, expect, test } from "bun:test"
 import { decideLocalizePhase } from "../../src/agent/localize-phase-guard"
 import { buildLocalizePhase } from "../../src/agent/session-resources"
 import { repairLocalizePhaseSuppressed } from "../../src/runner/batch/eval/driver"
-import {
-  benchPostureFromState,
-  resolveBenchKnobs,
-} from "../../src/runner/batch/eval/knobs-bench"
+import { benchPostureFromState, resolveBenchKnobs } from "../../src/runner/batch/eval/knobs-bench"
 
 /** A bench posture with localize-phase ACTIVE (and LSP nav on so the advisory
  *  grounding steer rides on the same `localizePhase` object). Built through the

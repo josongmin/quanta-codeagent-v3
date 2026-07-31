@@ -77,17 +77,27 @@ const withAppendedUserText = (input: TurnContextInput, text: string): TurnContex
 
 export const FORK_EXPERIMENTS: Record<string, ForkExperimentSpec> = {
   baseline: {
-    description: "A/B CONTROL arm — identity (never touches the input). Run this alongside another arm as the comparison branch; it is byte-identical to wiring no mutator.",
+    description:
+      "A/B CONTROL arm — identity (never touches the input). Run this alongside another arm as the comparison branch; it is byte-identical to wiring no mutator.",
     params: [],
     // The control: identity. Same reference back, so it is provably a no-op.
     build: () => (_turn, input) => input,
   },
 
   inject: {
-    description: "Append arbitrary text as a user message at ONE chosen turn (turn-scoped). The general-purpose 'give the LLM this hint at step N' lever. Other turns pass through unchanged.",
+    description:
+      "Append arbitrary text as a user message at ONE chosen turn (turn-scoped). The general-purpose 'give the LLM this hint at step N' lever. Other turns pass through unchanged.",
     params: [
-      { env: "QUANTA_FORK_INJECT_TURN", required: true, desc: "1-based turn index to inject at (e.g. 5)" },
-      { env: "QUANTA_FORK_INJECT_TEXT", required: true, desc: "the text to add as a trailing user message that turn" },
+      {
+        env: "QUANTA_FORK_INJECT_TURN",
+        required: true,
+        desc: "1-based turn index to inject at (e.g. 5)",
+      },
+      {
+        env: "QUANTA_FORK_INJECT_TEXT",
+        required: true,
+        desc: "the text to add as a trailing user message that turn",
+      },
     ],
     build: (env) => {
       const injectText = env.QUANTA_FORK_INJECT_TEXT ?? ""
@@ -109,7 +119,8 @@ export const FORK_EXPERIMENTS: Record<string, ForkExperimentSpec> = {
             `(turn 1 is the first turn). Got ${JSON.stringify(env.QUANTA_FORK_INJECT_TURN)}.`,
         )
       }
-      return (turn, input) => (turn === injectTurn ? withAppendedUserText(input, injectText) : input)
+      return (turn, input) =>
+        turn === injectTurn ? withAppendedUserText(input, injectText) : input
     },
   },
 }
@@ -134,10 +145,7 @@ export const describeForkExperiments = (): string => {
         spec.params.length === 0
           ? "    (no params)"
           : spec.params
-              .map(
-                (p) =>
-                  `    ${p.env}${p.required ? " (required)" : " (optional)"} — ${p.desc}`,
-              )
+              .map((p) => `    ${p.env}${p.required ? " (required)" : " (optional)"} — ${p.desc}`)
               .join("\n")
       return `  ${name} — ${spec.description}\n${params}`
     })

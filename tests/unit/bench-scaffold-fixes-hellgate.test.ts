@@ -1,9 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { applyBenchEnvDefaults } from "@/apps/bench/index"
-import {
-  CURRENT_BENCH_BASE_PRESET,
-  resolveBenchExecutionPreset,
-} from "@/apps/bench/preset"
+import { CURRENT_BENCH_BASE_PRESET, resolveBenchExecutionPreset } from "@/apps/bench/preset"
 
 /**
  * Structural fixes for two bench-scaffold defects that crippled gpt-5.4 on

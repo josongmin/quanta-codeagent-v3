@@ -61,10 +61,7 @@ class InboxReadingLLM implements LLMPort {
   }
 }
 
-const inboxConfig = (
-  llm: LLMPort,
-  mailbox: MailboxPort | undefined,
-): AgentConfig =>
+const inboxConfig = (llm: LLMPort, mailbox: MailboxPort | undefined): AgentConfig =>
   cfg({
     llm,
     registry: new ToolRegistry([...defaultTools]),

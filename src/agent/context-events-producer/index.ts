@@ -17,10 +17,10 @@
  *     {@link TypedEventDebugEnricher}
  */
 
-export { createContextEventsProducer } from "./factory"
 export {
   makeTypedEventDebugEnricher,
   TYPED_EVENTS_DEBUG_KEY,
   type TypedEventDebugEnricher,
 } from "./debug-enricher"
+export { createContextEventsProducer } from "./factory"
 export type { ContextEventsProducerConfig, ContextSnapshotInput } from "./types"

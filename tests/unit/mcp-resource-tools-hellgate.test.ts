@@ -15,6 +15,7 @@ import { describe, expect, test } from "bun:test"
 import { wrapToolResult } from "@/agent/untrusted-envelope"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { buildDefaultTools, deriveProvenance } from "@/tool"
+import type { ImageWritePort } from "@/tool/image-gen/store"
 import {
   filterDirectChildren,
   type HandleResult,
@@ -29,7 +30,6 @@ import {
   type ResourcesHandle,
   type ResourceTemplateEntry,
 } from "@/tool/mcp_resources"
-import type { ImageWritePort } from "@/tool/image-gen/store"
 
 /** In-memory write double so the blob-to-disk read tool doesn't hit the real FS
  *  (the test cwd `/repo` is not writable). Records bytes for readback. */
@@ -138,7 +138,9 @@ describe("N3 — happy path list/read/get", () => {
       tools({
         templates: {
           ok: true,
-          value: [{ uriTemplate: "file:///logs/{name}.log", name: "by-name", description: "a log" }],
+          value: [
+            { uriTemplate: "file:///logs/{name}.log", name: "by-name", description: "a log" },
+          ],
         },
       }),
       "mcp_list_resource_templates",

@@ -125,7 +125,11 @@ const bloatedHistoryWithFreshResult = (args: {
     out.push({
       role: "user",
       content: [
-        { type: "tool_result", tool_use_id: `u${i}`, content: `staledump${i}:${"x".repeat(60_000)}` },
+        {
+          type: "tool_result",
+          tool_use_id: `u${i}`,
+          content: `staledump${i}:${"x".repeat(60_000)}`,
+        },
       ],
     })
   }
@@ -439,9 +443,7 @@ describe("H7 hellgate: plan-queue drain × microcompaction cross interaction", (
     expect(clearedCountOfTurn(llm.seenMessages, 1)).toBe(0)
     expect(turn2Text).toContain(FRESH_SENTINEL)
     // No microcompact recovery event.
-    expect(
-      stream.events.some((e) => e.type === "recovery" && e.reason === "compact"),
-    ).toBe(false)
+    expect(stream.events.some((e) => e.type === "recovery" && e.reason === "compact")).toBe(false)
     expect(queue.sizeFor(tid)).toBe(0)
   })
 })

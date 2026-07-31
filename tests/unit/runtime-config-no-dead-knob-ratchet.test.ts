@@ -184,9 +184,7 @@ describe("runtime-config no-dead-knob ratchet", () => {
     expect(consumerFiles(SYNTHETIC).length).toBe(0) // the checker DOES flag it dead
     // and a name that unambiguously IS consumed (a real distinctive live field)
     // must NOT be flagged — control against a vacuous "everything is dead" checker.
-    const liveControl = DISTINCTIVE.find(
-      (f) => consumerFiles(f).length > 0,
-    )
+    const liveControl = DISTINCTIVE.find((f) => consumerFiles(f).length > 0)
     expect(liveControl).toBeDefined()
     expect(consumerFiles(liveControl as string).length).toBeGreaterThan(0)
   })
@@ -210,9 +208,10 @@ describe("runtime-config no-dead-knob ratchet", () => {
   test("known homonyms read RuntimeConfig at their owning seams", () => {
     for (const [field, owner] of Object.entries(HOMONYM_OWNER_READS)) {
       expect(HOMONYMS, `${field} must remain a genuine homonym`).toContain(field)
-      expect(readFileSync(owner.path, "utf8"), `${field} must read its RuntimeConfig field`).toMatch(
-        owner.pattern,
-      )
+      expect(
+        readFileSync(owner.path, "utf8"),
+        `${field} must read its RuntimeConfig field`,
+      ).toMatch(owner.pattern)
     }
   })
 })

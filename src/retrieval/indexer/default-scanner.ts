@@ -25,10 +25,10 @@ import { type Dirent, promises as fsp } from "node:fs"
 import { join, relative } from "node:path"
 import type { CodeParserPort } from "@/retrieval/code-parser"
 import { err, ok, type Result, runtimeConfig } from "@/shared"
+import { globToRegex, type IgnoreMatcher, loadIgnore, toPosix } from "@/shared/ignore-matcher"
 import { chunkFile } from "./chunker"
 import { chunkFileSyntactic } from "./chunker-syntactic"
 import { DeltaTracker, type FileStamp } from "./delta-tracker"
-import { globToRegex, type IgnoreMatcher, loadIgnore, toPosix } from "@/shared/ignore-matcher"
 import type { CodebaseIndexer, ScanOptions } from "./port"
 import type {
   ChunkerOptions,

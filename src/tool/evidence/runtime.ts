@@ -21,7 +21,13 @@ import { pathToFileURL } from "node:url"
 import { CdpClient } from "../debug/cdp-client"
 import { inspectViaCdp } from "../debug/cdp-inspect"
 import { DapClient, type DapTransport } from "../debug/dap-client"
-import { type DapVariable, type FrameScopes, type Inspection, inspectViaDap, type InspectSpec } from "../debug/inspect-driver"
+import {
+  type DapVariable,
+  type FrameScopes,
+  type Inspection,
+  type InspectSpec,
+  inspectViaDap,
+} from "../debug/inspect-driver"
 import { defaultDebugAdapterPort, spawnNodeCdpInspector, spawnTcpDebugAdapter } from "../debug/port"
 import type { Toolchain } from "../testrun"
 import { detectJsRunner, nodeInspectArgv } from "./node-runner"
@@ -75,14 +81,22 @@ const toRuntime = (r: Inspection): RuntimeEvidence | null => {
     locals: frameLocals(f),
   }))
   return {
-    stack: r.stack.slice(0, MAX_STACK_FRAMES).map((f) => ({ name: f.name, ...(f.source !== undefined ? { file: f.source } : {}), line: f.line })),
+    stack: r.stack.slice(0, MAX_STACK_FRAMES).map((f) => ({
+      name: f.name,
+      ...(f.source !== undefined ? { file: f.source } : {}),
+      line: f.line,
+    })),
     locals: frames[0]?.locals ?? [],
     ...(frames.length > 0 ? { frames } : {}),
     // Break-on-throw: carry the exception type+message when the stop was a throw.
-    ...(r.exception !== undefined ? { exception: { type: r.exception.id, message: r.exception.description } } : {}),
+    ...(r.exception !== undefined
+      ? { exception: { type: r.exception.id, message: r.exception.description } }
+      : {}),
     // Concurrency dump: surface goroutines/threads only when there's more than
     // the single main thread (so simple single-threaded failures stay quiet).
-    ...(r.threads !== undefined && r.threads.length > 1 ? { threads: r.threads.map((t) => ({ id: t.id, name: t.name })) } : {}),
+    ...(r.threads !== undefined && r.threads.length > 1
+      ? { threads: r.threads.map((t) => ({ id: t.id, name: t.name })) }
+      : {}),
   }
 }
 
@@ -95,7 +109,10 @@ const runInspect = async (
   let client: DapClient | undefined
   try {
     client = new DapClient(await openTransport())
-    const r = await inspectViaDap(client, spec, { stopTimeoutMs: 20_000, ...(signal !== undefined ? { signal } : {}) })
+    const r = await inspectViaDap(client, spec, {
+      stopTimeoutMs: 20_000,
+      ...(signal !== undefined ? { signal } : {}),
+    })
     return toRuntime(r)
   } catch {
     return null
@@ -112,10 +129,23 @@ const hasDebugpy = (): boolean => ok("python3", "-c", "import debugpy")
 const debugpyLaunch = (command: readonly string[], cwd: string): Record<string, unknown> | null => {
   const mIdx = command.indexOf("-m")
   if (mIdx === -1 || command[mIdx + 1] === undefined) return null
-  return { request: "launch", type: "python", module: command[mIdx + 1], args: command.slice(mIdx + 2), cwd, console: "internalConsole", python: ["python3"] }
+  return {
+    request: "launch",
+    type: "python",
+    module: command[mIdx + 1],
+    args: command.slice(mIdx + 2),
+    cwd,
+    console: "internalConsole",
+    python: ["python3"],
+  }
 }
 
-const pythonRuntime = (f: FailureEvidence, tc: Toolchain, cwd: string, signal?: AbortSignal): Promise<RuntimeEvidence | null> => {
+const pythonRuntime = (
+  f: FailureEvidence,
+  tc: Toolchain,
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<RuntimeEvidence | null> => {
   if (!hasDebugpy()) return Promise.resolve(null)
   const launch = debugpyLaunch(tc.command, cwd)
   if (launch === null) return Promise.resolve(null)
@@ -141,7 +171,12 @@ const resolveLldbDap = (): readonly string[] | null => {
 
 const cargoTestBinary = async (cwd: string, signal?: AbortSignal): Promise<string | null> => {
   try {
-    const proc = Bun.spawn(["cargo", "test", "--no-run", "--message-format=json"], { cwd, stdout: "pipe", stderr: "ignore", ...(signal !== undefined ? { signal } : {}) })
+    const proc = Bun.spawn(["cargo", "test", "--no-run", "--message-format=json"], {
+      cwd,
+      stdout: "pipe",
+      stderr: "ignore",
+      ...(signal !== undefined ? { signal } : {}),
+    })
     const out = await new Response(proc.stdout).text()
     await proc.exited
     let exe: string | null = null
@@ -149,8 +184,17 @@ const cargoTestBinary = async (cwd: string, signal?: AbortSignal): Promise<strin
       const t = line.trim()
       if (t.length === 0) continue
       try {
-        const o = JSON.parse(t) as { reason?: string; profile?: { test?: boolean }; executable?: string | null }
-        if (o.reason === "compiler-artifact" && o.profile?.test === true && typeof o.executable === "string") exe = o.executable
+        const o = JSON.parse(t) as {
+          reason?: string
+          profile?: { test?: boolean }
+          executable?: string | null
+        }
+        if (
+          o.reason === "compiler-artifact" &&
+          o.profile?.test === true &&
+          typeof o.executable === "string"
+        )
+          exe = o.executable
       } catch {
         /* non-JSON noise */
       }
@@ -179,7 +223,11 @@ const rustLldbInitCommands = (): readonly string[] => {
   }
 }
 
-const rustRuntime = async (f: FailureEvidence, cwd: string, signal?: AbortSignal): Promise<RuntimeEvidence | null> => {
+const rustRuntime = async (
+  f: FailureEvidence,
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<RuntimeEvidence | null> => {
   const lldb = resolveLldbDap()
   if (lldb === null) return null
   const exe = await cargoTestBinary(cwd, signal)
@@ -188,13 +236,18 @@ const rustRuntime = async (f: FailureEvidence, cwd: string, signal?: AbortSignal
   const initCommands = rustLldbInitCommands()
   return runInspect(
     () => defaultDebugAdapterPort.spawn({ command: [...lldb], cwd }),
-    { adapterID: "lldb", launch: { program: exe, ...(initCommands.length > 0 ? { initCommands } : {}) }, breakpoints: [{ file: realFile, line: f.line! }] },
+    {
+      adapterID: "lldb",
+      launch: { program: exe, ...(initCommands.length > 0 ? { initCommands } : {}) },
+      breakpoints: [{ file: realFile, line: f.line! }],
+    },
     signal,
   )
 }
 
 // ── C++ (clang++ -g → lldb-dap, same adapter as Rust) ────────────────────────
-const resolveClangxx = (): string | null => (ok("clang++", "--version") ? "clang++" : ok("g++", "--version") ? "g++" : null)
+const resolveClangxx = (): string | null =>
+  ok("clang++", "--version") ? "clang++" : ok("g++", "--version") ? "g++" : null
 
 /** Compile the failing C++ source standalone with debug info, returning the
  *  binary path (in the OS tmp dir). Single-file only — a CMake/multi-TU build is
@@ -202,14 +255,21 @@ const resolveClangxx = (): string | null => (ok("clang++", "--version") ? "clang
 const compileCppDebug = (cxx: string, realFile: string): string | null => {
   try {
     const out = join(tmpdir(), `qcpp-${realpathSync(realFile).replace(/[^\w]/g, "_")}`)
-    const r = Bun.spawnSync([cxx, "-g", "-O0", "-std=c++17", realFile, "-o", out], { stdout: "ignore", stderr: "ignore" })
+    const r = Bun.spawnSync([cxx, "-g", "-O0", "-std=c++17", realFile, "-o", out], {
+      stdout: "ignore",
+      stderr: "ignore",
+    })
     return r.exitCode === 0 ? out : null
   } catch {
     return null
   }
 }
 
-const cppRuntime = (f: FailureEvidence, cwd: string, signal?: AbortSignal): Promise<RuntimeEvidence | null> => {
+const cppRuntime = (
+  f: FailureEvidence,
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<RuntimeEvidence | null> => {
   const lldb = resolveLldbDap()
   const cxx = resolveClangxx()
   if (lldb === null || cxx === null) return Promise.resolve(null)
@@ -218,7 +278,11 @@ const cppRuntime = (f: FailureEvidence, cwd: string, signal?: AbortSignal): Prom
   if (exe === null) return Promise.resolve(null)
   return runInspect(
     () => defaultDebugAdapterPort.spawn({ command: [...lldb], cwd }),
-    { adapterID: "lldb", launch: { program: exe }, breakpoints: [{ file: realFile, line: f.line! }] },
+    {
+      adapterID: "lldb",
+      launch: { program: exe },
+      breakpoints: [{ file: realFile, line: f.line! }],
+    },
     signal,
   )
 }
@@ -233,7 +297,11 @@ const resolveDlv = (): string | null => {
   return null
 }
 
-const goRuntime = (f: FailureEvidence, cwd: string, signal?: AbortSignal): Promise<RuntimeEvidence | null> => {
+const goRuntime = (
+  f: FailureEvidence,
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<RuntimeEvidence | null> => {
   const dlv = resolveDlv()
   if (dlv === null) return Promise.resolve(null)
   return runInspect(
@@ -245,7 +313,11 @@ const goRuntime = (f: FailureEvidence, cwd: string, signal?: AbortSignal): Promi
       }),
     // dlv `mode:"test"` runs `go test` in `program` (the package dir); the
     // breakpoint at the failure line stops inside the failing test.
-    { adapterID: "go", launch: { request: "launch", mode: "test", program: cwd }, breakpoints: [{ file: realpathOr(absOf(f.file!, cwd)), line: f.line! }] },
+    {
+      adapterID: "go",
+      launch: { request: "launch", mode: "test", program: cwd },
+      breakpoints: [{ file: realpathOr(absOf(f.file!, cwd)), line: f.line! }],
+    },
     signal,
   )
 }
@@ -261,7 +333,11 @@ const readPkgJson = (cwd: string): string | null => {
   }
 }
 
-const nodeRuntime = async (f: FailureEvidence, cwd: string, signal?: AbortSignal): Promise<RuntimeEvidence | null> => {
+const nodeRuntime = async (
+  f: FailureEvidence,
+  cwd: string,
+  signal?: AbortSignal,
+): Promise<RuntimeEvidence | null> => {
   const node = resolveNode()
   if (node === null) return null
   // Route by the project's JS runner: node:test/plain files run directly (self-
@@ -280,7 +356,11 @@ const nodeRuntime = async (f: FailureEvidence, cwd: string, signal?: AbortSignal
       connectTimeoutMs: 8_000,
     })
     client = new CdpClient(transport)
-    const r = await inspectViaCdp(client, { url: pathToFileURL(realFile).href, line: f.line! }, { stopTimeoutMs: 20_000, ...(signal !== undefined ? { signal } : {}) })
+    const r = await inspectViaCdp(
+      client,
+      { url: pathToFileURL(realFile).href, line: f.line! },
+      { stopTimeoutMs: 20_000, ...(signal !== undefined ? { signal } : {}) },
+    )
     return toRuntime(r)
   } catch {
     return null
@@ -295,7 +375,15 @@ const nodeRuntime = async (f: FailureEvidence, cwd: string, signal?: AbortSignal
  *  silently lose a language's runtime (the gap the coverage-matrix ratchet
  *  couldn't catch behaviourally, since a missing arm and an absent toolchain
  *  both degrade to null). */
-const RUNTIME_HANDLERS: Record<Toolchain["kind"], (f: FailureEvidence, tc: Toolchain, cwd: string, signal?: AbortSignal) => Promise<RuntimeEvidence | null>> = {
+const RUNTIME_HANDLERS: Record<
+  Toolchain["kind"],
+  (
+    f: FailureEvidence,
+    tc: Toolchain,
+    cwd: string,
+    signal?: AbortSignal,
+  ) => Promise<RuntimeEvidence | null>
+> = {
   python: (f, tc, cwd, signal) => pythonRuntime(f, tc, cwd, signal),
   rust: (f, _tc, cwd, signal) => rustRuntime(f, cwd, signal),
   go: (f, _tc, cwd, signal) => goRuntime(f, cwd, signal),

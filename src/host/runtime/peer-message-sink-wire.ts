@@ -73,10 +73,7 @@ export const createPeerMessageStreamSink = (stream: StreamPort): PeerMessageSink
  *  readable while every line is individually neutralized. The result is safe for
  *  the stdout render, the item-stream text, AND the trajectory recorder. */
 const peerBodyRedactor = (body: string): string =>
-  redactSecrets(body, { origin: "tool_result" })
-    .text.split("\n")
-    .map(sanitizeLogText)
-    .join("\n")
+  redactSecrets(body, { origin: "tool_result" }).text.split("\n").map(sanitizeLogText).join("\n")
 
 /**
  * Wire the surface-notify decorator onto `cfg.subagentMailbox` when

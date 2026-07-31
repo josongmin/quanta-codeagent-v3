@@ -8,8 +8,16 @@
 import { describe, expect, test } from "bun:test"
 import { createStatusPills, stripAnsi } from "@/apps/cli/status-pills"
 
-const pills = (initial: NonNullable<Parameters<typeof createStatusPills>[0]>["initial"], env: NodeJS.ProcessEnv = {}) =>
-  createStatusPills({ enabled: true, isTTY: true, env, ...(initial !== undefined ? { initial } : {}) })
+const pills = (
+  initial: NonNullable<Parameters<typeof createStatusPills>[0]>["initial"],
+  env: NodeJS.ProcessEnv = {},
+) =>
+  createStatusPills({
+    enabled: true,
+    isTTY: true,
+    env,
+    ...(initial !== undefined ? { initial } : {}),
+  })
 
 describe("/goal status-pill chip", () => {
   test("renders 🎯 + objective + elapsed while a goal is active", () => {

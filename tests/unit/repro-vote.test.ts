@@ -14,9 +14,9 @@ describe("voteResolved — validation-time majority over the reproducing set", (
   })
 
   it("an incomplete patch is rejected (1 resolved < 3 reproduced)", () => {
-    expect(voteResolved([s("resolved"), s("reproduced"), s("reproduced"), s("reproduced")]).verdict).toBe(
-      "reproduced",
-    )
+    expect(
+      voteResolved([s("resolved"), s("reproduced"), s("reproduced"), s("reproduced")]).verdict,
+    ).toBe("reproduced")
   })
 
   it("RED-ON-INJECTION: flipping ONE resolved→reproduced turns a 3-1 win into a 2-2 tie (inconclusive)", () => {

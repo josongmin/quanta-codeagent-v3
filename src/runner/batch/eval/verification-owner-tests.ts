@@ -14,13 +14,13 @@ import {
   isPythonTestFile,
   normalizeRepoPath,
 } from "./impacted-test-discovery"
+import { buildProjectPytestArgv, buildPytestArgv } from "./regression-oracle-adapter"
 import {
   collectBaseGreenRepoTests,
   listTrackedPythonFiles,
   probeRepoTestOnCurrentTree,
   readRepoTestFiles,
 } from "./repo-regression-discovery-adapter"
-import { buildProjectPytestArgv, buildPytestArgv } from "./regression-oracle-adapter"
 
 export const DEFAULT_VERIFICATION_OWNER_TESTS = 3
 
@@ -111,14 +111,12 @@ export const discoverVerificationOwnerTestsPlan = async (
     args.instance.swebench?.baseCommit === undefined
       ? []
       : [
-          ...(
-            await (deps.collectBaseGreenTests ?? collectBaseGreenRepoTests)({
-              instance: args.instance,
-              sandbox: args.sandbox,
-              timeoutMs: args.timeoutMs,
-              tests: testPaths,
-            })
-          ),
+          ...(await (deps.collectBaseGreenTests ?? collectBaseGreenRepoTests)({
+            instance: args.instance,
+            sandbox: args.sandbox,
+            timeoutMs: args.timeoutMs,
+            tests: testPaths,
+          })),
         ]
   const primaryBaseVerdict =
     testPaths[0] === undefined

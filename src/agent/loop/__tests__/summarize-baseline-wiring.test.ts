@@ -13,7 +13,7 @@
 import { describe, expect, test } from "bun:test"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import { createWorkingMemory } from "@/memory"
-import { type TokenBaselineBoxState } from "../../compaction"
+import type { TokenBaselineBoxState } from "../../compaction"
 import type { AgentConfig } from "../../types"
 import { syncQueuedTurnInputs } from "../turn-iteration"
 

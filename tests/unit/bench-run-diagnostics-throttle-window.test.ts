@@ -1,8 +1,5 @@
 import { describe, expect, it } from "bun:test"
-import {
-  classifyReportText,
-  collectRunDiagnostics,
-} from "@/apps/bench/remote/box-session"
+import { classifyReportText, collectRunDiagnostics } from "@/apps/bench/remote/box-session"
 
 type SpawnResult = { code: number; stdout: string; stderr: string }
 const ok = (stdout = ""): SpawnResult => ({ code: 0, stdout, stderr: "" })
@@ -31,7 +28,8 @@ describe("collectRunDiagnostics full-log throttle scan (#8)", () => {
     // tail -60 returns clean grading output (the 429 happened earlier and
     // scrolled away); the full-log grep surfaces the buried throttle line.
     const ssh = async (cmd: string): Promise<SpawnResult> => {
-      if (cmd.startsWith("tail -60")) return ok("instance 12/16 graded OK\ninstance 13/16 graded OK")
+      if (cmd.startsWith("tail -60"))
+        return ok("instance 12/16 graded OK\ninstance 13/16 graded OK")
       if (cmd.includes("grep -aiE")) return ok(`${THROTTLE_LINE}\n`)
       return ok()
     }

@@ -97,9 +97,7 @@ const setEq = (a: readonly string[], b: readonly string[]): boolean => {
 
 const renderSummary = (e: Omit<FailureExplanation, "summary">): string => {
   const f2p =
-    e.failToPass.length === 0
-      ? "  (none recorded)"
-      : e.failToPass.map((t) => `  - ${t}`).join("\n")
+    e.failToPass.length === 0 ? "  (none recorded)" : e.failToPass.map((t) => `  - ${t}`).join("\n")
   const goldF =
     e.goldFiles.length === 0 ? "  (none)" : e.goldFiles.map((f) => `  - ${f}`).join("\n")
   const agentF =

@@ -17,8 +17,8 @@ import type { ExperimentMeta } from "@/config/knob-schema/contracts"
 import {
   EXPERIMENTS,
   type ExperimentEntry,
-  expiredActiveExperiments,
   experimentByKnob,
+  expiredActiveExperiments,
   retiredKnobIds,
 } from "@/runner/batch/eval/kernel/experiments"
 

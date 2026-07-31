@@ -146,7 +146,10 @@ describe("acceptance-adapter — redaction is forced at the minting boundary", (
         lastVerifyCmd: "pytest x",
         failTail: leakyTail,
       }),
-      outcome("diff --git a/f1.py b/f1.py\n+b", { lastVerifyCmd: "pytest y", failTail: "plain red" }),
+      outcome("diff --git a/f1.py b/f1.py\n+b", {
+        lastVerifyCmd: "pytest y",
+        failTail: "plain red",
+      }),
     ])
     // evidence reached the prompt (verify cmd + safe prose)...
     expect(capturedPrompt).toContain("verify_command: pytest x")

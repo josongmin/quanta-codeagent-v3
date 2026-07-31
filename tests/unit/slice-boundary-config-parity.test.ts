@@ -11,10 +11,10 @@
  * fails "no inert/dead config" rather than sneaking past a filename-only check.
  */
 
-import { readdirSync, readFileSync } from "node:fs"
-import { fileURLToPath } from "node:url"
-import { dirname, join } from "node:path"
 import { describe, expect, test } from "bun:test"
+import { readdirSync, readFileSync } from "node:fs"
+import { dirname, join } from "node:path"
+import { fileURLToPath } from "node:url"
 import ts from "typescript"
 import { SLICE_BOUNDARY_CONFIGS } from "./_arch/slice-boundary-configs"
 

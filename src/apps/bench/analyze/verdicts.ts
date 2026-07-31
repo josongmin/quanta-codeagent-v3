@@ -154,9 +154,7 @@ const rowScoreLabel = (
   row: Record<string, unknown>,
 ): "official_harness" | "local_structural" | "research_contaminated" | undefined => {
   const raw = row.scoreLabel
-  return raw === "official_harness" ||
-    raw === "local_structural" ||
-    raw === "research_contaminated"
+  return raw === "official_harness" || raw === "local_structural" || raw === "research_contaminated"
     ? raw
     : undefined
 }
@@ -184,8 +182,7 @@ const countDistinctIds = (
   return ids.size
 }
 
-const hasOwn = (row: Record<string, unknown>, key: string): boolean =>
-  Object.prototype.hasOwnProperty.call(row, key)
+const hasOwn = (row: Record<string, unknown>, key: string): boolean => Object.hasOwn(row, key)
 
 const hasPerInstanceProofTelemetry = (perInstance: readonly unknown[]): boolean =>
   perInstance.some(
@@ -220,7 +217,10 @@ interface CanonicalPerInstanceRow {
 const canonicalPerInstanceRows = (
   perInstance: readonly unknown[],
 ): readonly CanonicalPerInstanceRow[] => {
-  const canonical = new Map<string, { row: Record<string, unknown>; verdict: VerdictStatus; order: number }>()
+  const canonical = new Map<
+    string,
+    { row: Record<string, unknown>; verdict: VerdictStatus; order: number }
+  >()
   for (const [order, raw] of perInstance.entries()) {
     if (!isRecord(raw)) continue
     const id = raw.id
@@ -252,7 +252,9 @@ const reportTotalsFromOurReport = (args: {
   contractOnlySubmittedCount: number
 }): RunReportTotals => {
   const proofTotals = isRecord(args.report.proofTotals) ? args.report.proofTotals : undefined
-  const llmEvidenceTotals = isRecord(args.report.llmEvidenceTotals) ? args.report.llmEvidenceTotals : undefined
+  const llmEvidenceTotals = isRecord(args.report.llmEvidenceTotals)
+    ? args.report.llmEvidenceTotals
+    : undefined
   const perInstanceProofTelemetry = hasPerInstanceProofTelemetry(args.telemetryPresenceRows)
   return {
     submittedWithProof:
@@ -272,16 +274,17 @@ const reportTotalsFromOurReport = (args: {
     contractOnlySubmitted:
       asCount(proofTotals?.contractOnlySubmitted) ??
       (perInstanceProofTelemetry ? args.contractOnlySubmittedCount : null),
-    packetizedGenerationCount:
-      asCount(llmEvidenceTotals?.packetizedGenerationCount) ?? null,
-    packetizedRepairCount:
-      asCount(llmEvidenceTotals?.packetizedRepairCount) ?? null,
+    packetizedGenerationCount: asCount(llmEvidenceTotals?.packetizedGenerationCount) ?? null,
+    packetizedRepairCount: asCount(llmEvidenceTotals?.packetizedRepairCount) ?? null,
     packetizedSelectionExplanationCount:
       asCount(llmEvidenceTotals?.packetizedSelectionExplanationCount) ?? null,
   }
 }
 
-const fromOurReport = (report: Record<string, unknown>, perInstance: readonly unknown[]): RunVerdicts => {
+const fromOurReport = (
+  report: Record<string, unknown>,
+  perInstance: readonly unknown[],
+): RunVerdicts => {
   const canonicalRows = canonicalPerInstanceRows(perInstance)
   const canonicalTelemetryRows = canonicalRows.map(({ row }) => row)
   const proofMissing = new Set<string>()

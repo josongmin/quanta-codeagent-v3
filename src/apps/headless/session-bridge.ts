@@ -60,9 +60,7 @@ const buildHeadlessRuntimeArgs = (
     ...(approval.approvalProtocol !== undefined
       ? { approvalProtocol: approval.approvalProtocol }
       : {}),
-    ...(input.sessionTransport !== undefined
-      ? { sessionTransport: input.sessionTransport }
-      : {}),
+    ...(input.sessionTransport !== undefined ? { sessionTransport: input.sessionTransport } : {}),
   }
   return {
     boot,

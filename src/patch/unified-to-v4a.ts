@@ -131,7 +131,10 @@ export const unifiedDiffToV4A = (text: string): string => {
       const fromRaw = (line.slice(4).split("\t")[0] ?? "").trimEnd()
       const fromPath = stripGitPrefix(fromRaw)
       const toLine = lines[i + 1] ?? ""
-      if (!toLine.startsWith("+++ ") && !toLine.startsWith("+++\t")) { i++; continue }
+      if (!toLine.startsWith("+++ ") && !toLine.startsWith("+++\t")) {
+        i++
+        continue
+      }
       const toRaw = (toLine.slice(4).split("\t")[0] ?? "").trimEnd()
       const toPath = stripGitPrefix(toRaw)
       i += 2

@@ -181,7 +181,10 @@ export const ptyTools = (port: PtySessionPort): Tool[] => {
       if (!g.ok) return one(g.result)
       return fromPort(async () => {
         const r = await port.attach(g.data.handle)
-        return okOrFail(r, (v) => ({ ok: true, output: `attached ${v.handle} (cursor=${v.cursor})` }))
+        return okOrFail(r, (v) => ({
+          ok: true,
+          output: `attached ${v.handle} (cursor=${v.cursor})`,
+        }))
       })
     },
   }

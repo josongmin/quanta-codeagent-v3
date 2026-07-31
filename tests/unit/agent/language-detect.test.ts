@@ -11,7 +11,10 @@ import { buildLanguageHint, detectLanguage } from "@/agent/language-detect"
 
 describe("detectLanguage — Unicode-script classifier", () => {
   test("Hangul-dominant ⇒ ko / high", () => {
-    expect(detectLanguage("안녕하세요 오늘 날씨 어때요")).toEqual({ lang: "ko", confidence: "high" })
+    expect(detectLanguage("안녕하세요 오늘 날씨 어때요")).toEqual({
+      lang: "ko",
+      confidence: "high",
+    })
   })
 
   test("Japanese (kana present) ⇒ ja / high — even with Han", () => {

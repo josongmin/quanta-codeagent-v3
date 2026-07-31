@@ -14,8 +14,8 @@ import {
 import {
   type ContractCandidate,
   filterAuthorityContractBundle,
-  type SelectionContract,
   renderContractAuthorityLabel,
+  type SelectionContract,
 } from "@/runner/batch/eval/public-contract-types"
 
 /** A candidate that touches the given files/symbols (generic, no oracle label). */

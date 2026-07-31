@@ -20,16 +20,12 @@ import type { StreamInput, ThinkingConfig } from "@/llm"
 import { buildAnthropicMessagesRequest } from "@/llm/anthropic-messages-codec"
 
 const reqOf = (temperature?: number, thinking?: ThinkingConfig) =>
-  buildAnthropicMessagesRequest(
-    "claude-opus-4-8",
-    1024,
-    {
-      messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
-      tools: [],
-      ...(temperature !== undefined ? { temperature } : {}),
-      ...(thinking !== undefined ? { thinking } : {}),
-    } as unknown as StreamInput,
-  ) as unknown as Record<string, unknown>
+  buildAnthropicMessagesRequest("claude-opus-4-8", 1024, {
+    messages: [{ role: "user", content: [{ type: "text", text: "hi" }] }],
+    tools: [],
+    ...(temperature !== undefined ? { temperature } : {}),
+    ...(thinking !== undefined ? { thinking } : {}),
+  } as unknown as StreamInput) as unknown as Record<string, unknown>
 
 describe("anthropic temperature × thinking — active thinking suppresses temperature", () => {
   test("temperature 0.8 + thinking enabled ⇒ temperature OMITTED (would 400)", () => {

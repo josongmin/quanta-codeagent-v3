@@ -26,11 +26,6 @@ export type {
   SessionTransportBridgeErrorArgs,
 } from "./bridge"
 export { createSessionTransportBridge, planSessionReplay } from "./bridge"
-export {
-  HEARTBEAT_INTERVAL_MS,
-  replyToHeartbeat,
-  replyToHeartbeatOnTransport,
-} from "./heartbeat"
 export type {
   CreateSessionTransportClientOpts,
   SessionTransportClient,
@@ -67,6 +62,11 @@ export {
   SessionHandleClosedError,
   SessionTurnCorrelationLostError,
 } from "./handle"
+export {
+  HEARTBEAT_INTERVAL_MS,
+  replyToHeartbeat,
+  replyToHeartbeatOnTransport,
+} from "./heartbeat"
 export type { BindSessionTransportServerOpts, SessionTransportServer } from "./server"
 export { bindSessionTransportServer } from "./server"
 export { type CreateSessionStdioClientOpts, createSessionStdioClient } from "./stdio-client"

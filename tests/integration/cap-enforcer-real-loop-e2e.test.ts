@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
+import { z } from "zod"
 import { runAgent } from "@/agent"
 import { CapEnforcer } from "@/agent/cap-enforcer"
 import type { Message, StreamEvent, StreamInput } from "@/llm"
 import type { NextAction, Tool, ToolContext, ToolEvent } from "@/tool"
 import { defaultTools, ToolRegistry } from "@/tool"
-import { z } from "zod"
 import { cfg, eventsOf, RecordingStream, text, withTimeout } from "./_harness"
 
 /**
@@ -61,8 +61,7 @@ const cappedProbeTool = (): Tool => ({
   },
 })
 
-const registryWithProbe = (): ToolRegistry =>
-  new ToolRegistry([...defaultTools, cappedProbeTool()])
+const registryWithProbe = (): ToolRegistry => new ToolRegistry([...defaultTools, cappedProbeTool()])
 
 const capCall = (id: string, path: string, maxDepth: number): StreamEvent[] => [
   { type: "tool_use_start", id, name: CAP_TOOL },

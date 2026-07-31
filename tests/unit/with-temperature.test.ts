@@ -90,7 +90,9 @@ describe("withTemperature", () => {
   test("forwards other StreamInput fields alongside the injected temperature", async () => {
     const inner = new ScriptedLLM("m")
     const wrapped = withTemperature(inner, 0.8)
-    await collect(wrapped.stream({ ...baseInput, promptCacheKey: "k1", toolChoice: { kind: "any" } }))
+    await collect(
+      wrapped.stream({ ...baseInput, promptCacheKey: "k1", toolChoice: { kind: "any" } }),
+    )
     expect(inner.lastInput?.promptCacheKey).toBe("k1")
     expect(inner.lastInput?.toolChoice).toEqual({ kind: "any" })
     expect(inner.lastInput?.temperature).toBe(0.8)

@@ -259,9 +259,7 @@ describe("DOF-10 authenticated operator flow — ONE revision, real daemon + DOF
     expect(canvasDecoded?.kind).toBe("context.usage")
     if (canvasDecoded?.kind === "context.usage") {
       expect(canvasDecoded.total).toBe(42)
-      expect(canvasDecoded.segments).toEqual([
-        { id: "System", tokens: 42 },
-      ])
+      expect(canvasDecoded.segments).toEqual([{ id: "System", tokens: 42 }])
     }
 
     // ---- OBSERVABILITY: fire the captured tick ⇒ a real observability.snapshot ----

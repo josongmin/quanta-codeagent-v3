@@ -22,7 +22,8 @@ const ASSERTION = [
   "migrations/test_loader.py:512: AssertionError",
 ].join("\n")
 const TRAILING_NOISE = `${"\n".padEnd(1, "\n")}${Array.from({ length: 200 }, (_, i) => `  warnings summary ${i}: DeprecationWarning blah blah blah blah blah`).join("\n")}`
-const SUMMARY = "FAILED migrations/test_loader.py::test_migration_state - AssertionError: assert {'a': 1} == {'a': 1, 'b': 2}"
+const SUMMARY =
+  "FAILED migrations/test_loader.py::test_migration_state - AssertionError: assert {'a': 1} == {'a': 1, 'b': 2}"
 const PYTEST_OUTPUT = `${ASSERTION}\n=========================== short test summary info ============================\n${SUMMARY}${TRAILING_NOISE}`
 
 describe("pinPytestAssertion", () => {
@@ -34,7 +35,9 @@ describe("pinPytestAssertion", () => {
 
     // Pinned: the assertion detail is present at the front.
     const pinned = pinPytestAssertion(PYTEST_OUTPUT, cap)
-    expect(pinned.includes("E       AssertionError: assert {'a': 1} == {'a': 1, 'b': 2}")).toBe(true)
+    expect(pinned.includes("E       AssertionError: assert {'a': 1} == {'a': 1, 'b': 2}")).toBe(
+      true,
+    )
     expect(pinned.includes("Right contains 1 more item")).toBe(true)
     expect(pinned.length).toBeLessThanOrEqual(cap)
   })

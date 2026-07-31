@@ -62,7 +62,9 @@ const agentCall = (id: string, agentType: string, prompt: string): StreamEvent[]
 const conversationText = (input: StreamInput): string =>
   input.messages
     .flatMap((m) =>
-      m.content.map((b) => (b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "")),
+      m.content.map((b) =>
+        b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "",
+      ),
     )
     .join(" ")
 
@@ -124,7 +126,11 @@ const childSystem = (llm: RoutingLLM, childMarker: string): string | undefined =
 describe("subagent-role-identity — REAL forked child loop receives the role system prompt", () => {
   test("gate ON (resolver wired, matching agent_type): child loop's input.system IS the role identity", async () => {
     const llm = new RoutingLLM([
-      { match: "PARENT-GO", events: agentCall("a1", "reviewer", "CHILD-TASK review the diff"), once: true },
+      {
+        match: "PARENT-GO",
+        events: agentCall("a1", "reviewer", "CHILD-TASK review the diff"),
+        once: true,
+      },
       { match: "Subagent completed", events: text("parent done") },
       { match: "CHILD-TASK", events: text("CHILD-ANSWER reviewed as security reviewer") },
     ])
@@ -168,7 +174,11 @@ describe("subagent-role-identity — REAL forked child loop receives the role sy
 
   test("PAIRED CONTROL (resolver OMITTED): SAME spawn ⇒ child inherits the PARENT system (no role identity)", async () => {
     const llm = new RoutingLLM([
-      { match: "PARENT-GO", events: agentCall("a1", "reviewer", "CHILD-TASK review the diff"), once: true },
+      {
+        match: "PARENT-GO",
+        events: agentCall("a1", "reviewer", "CHILD-TASK review the diff"),
+        once: true,
+      },
       { match: "Subagent completed", events: text("parent done") },
       { match: "CHILD-TASK", events: text("CHILD-ANSWER but no role identity") },
     ])
@@ -206,7 +216,11 @@ describe("subagent-role-identity — REAL forked child loop receives the role sy
     // agent_type has no definition ⇒ applyNamedAgent returns the request
     // unchanged ⇒ child inherits the parent system.
     const llm = new RoutingLLM([
-      { match: "PARENT-GO", events: agentCall("a1", "nonexistent-role", "CHILD-TASK do work"), once: true },
+      {
+        match: "PARENT-GO",
+        events: agentCall("a1", "nonexistent-role", "CHILD-TASK do work"),
+        once: true,
+      },
       { match: "Subagent completed", events: text("parent done") },
       { match: "CHILD-TASK", events: text("CHILD-ANSWER generic") },
     ])

@@ -63,12 +63,12 @@
  */
 
 import { errMessage } from "@/shared"
-import { reproScriptBasename } from "./scaffold-patterns"
 import {
   classifyPytestReportText,
   parsePytestExecutionReport,
   pytestReportPathFor,
 } from "./pytest-report"
+import { reproScriptBasename } from "./scaffold-patterns"
 import type {
   ReproControlOutcome,
   ReproExecFailureKind,

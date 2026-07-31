@@ -5,11 +5,11 @@
  * cargo + rust-analyzer are absent. Verified 2026-06-10.
  */
 import { describe, expect, test } from "bun:test"
-import { gateOn } from "@/shared"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { evidenceLspStatic } from "@/agent/lsp-bridge"
+import { gateOn } from "@/shared"
 import { buildEvidence, type EvidenceSources } from "@/tool/evidence/builder"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
 
@@ -34,7 +34,10 @@ D("buildEvidence — REAL keystone fusion (cargo failure + rust-analyzer static)
   test("one call returns a packet fusing the real failure + real LSP static", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "kst-")))
     mkdirSync(join(dir, "src"), { recursive: true })
-    writeFileSync(join(dir, "Cargo.toml"), ['[package]', 'name = "t"', 'version = "0.1.0"', 'edition = "2021"'].join("\n"))
+    writeFileSync(
+      join(dir, "Cargo.toml"),
+      ["[package]", 'name = "t"', 'version = "0.1.0"', 'edition = "2021"'].join("\n"),
+    )
     writeFileSync(
       join(dir, "src", "lib.rs"),
       [

@@ -32,9 +32,9 @@ import {
   DEFAULT_MIN_SECRET_LENGTH,
   mask,
   type SecretFinding,
-  SecretScanReadError,
   type SecretScanner,
   type SecretScannerOpts,
+  SecretScanReadError,
 } from "./port"
 
 /**

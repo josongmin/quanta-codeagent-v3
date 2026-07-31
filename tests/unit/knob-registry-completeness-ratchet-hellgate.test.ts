@@ -130,47 +130,140 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
   ["QUANTA_LANCE_API_KEY", "secret: Lance vector-DB credential (search-index-backend)"],
   ["QUANTA_QDRANT_API_KEY", "secret: Qdrant vector-DB credential (search-index-backend)"],
   ["QUANTA_CHATGPT_AUTH_SOURCE", "secret: ChatGPT token-store preference (@/auth/chatgpt-oauth)"],
-  ["QUANTA_SIDE_AGENT_LLM_REPLAY", "test-only: side-agent hermetic forked-child LLM replay seam (worker-charter-runner), not a user knob"],
+  [
+    "QUANTA_SIDE_AGENT_LLM_REPLAY",
+    "test-only: side-agent hermetic forked-child LLM replay seam (worker-charter-runner), not a user knob",
+  ],
   // DEV / BENCH-INTERNAL toggles — read at their own call site, intentionally NOT
   // surfaced in /config (an internal bench/experiment seam, not a user setting).
-  ["QUANTA_FORK_EXPERIMENT", "dev-experiment: counterfactual trajectory-fork troubleshooting seam (jun-23 fork-experiments), not a user knob"],
-  ["QUANTA_FORK_INJECT_TEXT", "dev-experiment: trajectory-fork text injection (fork-experiments), not a user knob"],
-  ["QUANTA_FORK_INJECT_TURN", "dev-experiment: trajectory-fork turn injection (fork-experiments), not a user knob"],
-  ["QUANTA_BENCH_REPLAY_LIMIT", "dev/bench-only: trajectory replay cap (apps/bench/trajectory), not a shipped user knob"],
-  ["QUANTA_CAPTURE_DEBUG", "dev/bench-only: jun-24 lost-edits RCA diagnostic (apps/bench/eval/driver — per-call git-status exec, default-OFF), not a shipped user knob"],
-  ["QUANTA_BENCH_HEALTH_ABORT", "bench-only: run-health systemic-failure abort control (runner/batch/eval/run-health — read at call site), not a shipped user /config knob"],
-  ["QUANTA_LSP_MEM_BUDGET_MB", "infra: LSP server RSS cap (lsp/server-mem-budget — operator memory-budget tuning read at call site), not a user /config knob"],
-  ["QUANTA_BENCH_NO_PROGRESS_ABORT_S", "bench-only: full-remote no-progress (wedged-box) idle-abort budget (resolveNoProgressBudgetMs, read at the full.ts composition root), same class as QUANTA_BENCH_HEALTH_ABORT — not a shipped /config knob"],
-  ["QUANTA_OTEL_ENDPOINT", "infra: operator OTEL collector URL (apps/bench OTLP export + reverse tunnel, read at the bench composition root), not a user /config knob"],
-  ["QUANTA_OTEL_RUN_ID", "infra: OTEL trace-viewer deep-link run id (apps/bench/otel + default-trace-sink, operator tracing), not a user /config knob"],
-  ["QUANTA_OTEL_SINK", "infra: OTEL durable span-sink target file/s3 (apps/bench/span-sink resolveSpanSink, operator tracing), not a user /config knob"],
-  ["QUANTA_OTEL_S3_REGION", "infra: OTEL durable s3 span-sink region (apps/bench/span-sink, operator tracing), not a user /config knob"],
-  ["QUANTA_LSP_RSS_BUDGET_MB", "infra: LSP server RSS watchdog budget (lsp/server-rss-watchdog resolveLspRssBudgetMb — operator memory-budget tuning read at call site), sibling of QUANTA_LSP_MEM_BUDGET_MB, not a user /config knob"],
+  [
+    "QUANTA_FORK_EXPERIMENT",
+    "dev-experiment: counterfactual trajectory-fork troubleshooting seam (jun-23 fork-experiments), not a user knob",
+  ],
+  [
+    "QUANTA_FORK_INJECT_TEXT",
+    "dev-experiment: trajectory-fork text injection (fork-experiments), not a user knob",
+  ],
+  [
+    "QUANTA_FORK_INJECT_TURN",
+    "dev-experiment: trajectory-fork turn injection (fork-experiments), not a user knob",
+  ],
+  [
+    "QUANTA_BENCH_REPLAY_LIMIT",
+    "dev/bench-only: trajectory replay cap (apps/bench/trajectory), not a shipped user knob",
+  ],
+  [
+    "QUANTA_CAPTURE_DEBUG",
+    "dev/bench-only: jun-24 lost-edits RCA diagnostic (apps/bench/eval/driver — per-call git-status exec, default-OFF), not a shipped user knob",
+  ],
+  [
+    "QUANTA_BENCH_HEALTH_ABORT",
+    "bench-only: run-health systemic-failure abort control (runner/batch/eval/run-health — read at call site), not a shipped user /config knob",
+  ],
+  [
+    "QUANTA_LSP_MEM_BUDGET_MB",
+    "infra: LSP server RSS cap (lsp/server-mem-budget — operator memory-budget tuning read at call site), not a user /config knob",
+  ],
+  [
+    "QUANTA_BENCH_NO_PROGRESS_ABORT_S",
+    "bench-only: full-remote no-progress (wedged-box) idle-abort budget (resolveNoProgressBudgetMs, read at the full.ts composition root), same class as QUANTA_BENCH_HEALTH_ABORT — not a shipped /config knob",
+  ],
+  [
+    "QUANTA_OTEL_ENDPOINT",
+    "infra: operator OTEL collector URL (apps/bench OTLP export + reverse tunnel, read at the bench composition root), not a user /config knob",
+  ],
+  [
+    "QUANTA_OTEL_RUN_ID",
+    "infra: OTEL trace-viewer deep-link run id (apps/bench/otel + default-trace-sink, operator tracing), not a user /config knob",
+  ],
+  [
+    "QUANTA_OTEL_SINK",
+    "infra: OTEL durable span-sink target file/s3 (apps/bench/span-sink resolveSpanSink, operator tracing), not a user /config knob",
+  ],
+  [
+    "QUANTA_OTEL_S3_REGION",
+    "infra: OTEL durable s3 span-sink region (apps/bench/span-sink, operator tracing), not a user /config knob",
+  ],
+  [
+    "QUANTA_LSP_RSS_BUDGET_MB",
+    "infra: LSP server RSS watchdog budget (lsp/server-rss-watchdog resolveLspRssBudgetMb — operator memory-budget tuning read at call site), sibling of QUANTA_LSP_MEM_BUDGET_MB, not a user /config knob",
+  ],
   // BENCH-INTERNAL harness env (read at the bench/eval composition root to
   // configure benchmark + SWE-bench-Pro grading runs — a test-harness concern,
   // never a user-facing /config live-toggle). Same class as QUANTA_BENCH_HEALTH_ABORT.
-  ["QUANTA_BENCH_HOST_MONITOR", "bench-only: host-resource sampler kill-switch (apps/bench/run-main, jun-28 fork-storm OOM diagnostic), read at the bench composition root, not a shipped /config knob"],
-  ["QUANTA_BENCH_MAX_COST_USD", "bench-only: per-run cost cap for the eval driver (runner/batch/eval/driver/config-build), read at the bench composition root, not a shipped /config knob"],
-  ["QUANTA_BENCH_MAX_COST_PER_TURN_USD", "bench-only: per-turn cost cap for the eval driver (runner/batch/eval/driver/config-build), read at the bench composition root, not a shipped /config knob"],
+  [
+    "QUANTA_BENCH_HOST_MONITOR",
+    "bench-only: host-resource sampler kill-switch (apps/bench/run-main, jun-28 fork-storm OOM diagnostic), read at the bench composition root, not a shipped /config knob",
+  ],
+  [
+    "QUANTA_BENCH_MAX_COST_USD",
+    "bench-only: per-run cost cap for the eval driver (runner/batch/eval/driver/config-build), read at the bench composition root, not a shipped /config knob",
+  ],
+  [
+    "QUANTA_BENCH_MAX_COST_PER_TURN_USD",
+    "bench-only: per-turn cost cap for the eval driver (runner/batch/eval/driver/config-build), read at the bench composition root, not a shipped /config knob",
+  ],
   // VERIFY-AXIS strategy toggles (jul-4 3-axis prompt refactor + jul-5 P6): the SWE
   // verifyStrategy is picked in config-build.sweVerify via gateOn at the eval-driver
   // composition root (raw env, NOT the typed runtime-config registry that their sibling
   // QUANTA_BENCH_IN_LOOP_EXEC uses). Default-OFF, measure-first A/B levers — not shipped
   // user /config knobs. Same class as the cost/health/host-monitor bench toggles above.
-  ["QUANTA_BENCH_REPRODUCE_FIRST", "bench-only: verify-axis reproduce-first strategy toggle (config-build.sweVerify), read via gateOn at the eval-driver composition root, default-OFF measure-first A/B — not a shipped /config knob"],
-  ["QUANTA_SWE_HIDDEN_GRADER", "bench-only: verify-axis grader-only strategy toggle + user-directive NOEXEC coherence (config-build.sweVerify + buildPromptText, P6 SWE hidden-grader pack), read via gateOn at the eval-driver composition root, default-OFF measure-first A/B — not a shipped /config knob"],
-  ["QUANTA_BENCH_PROMPT_SECTIONED", "bench-only: render STYLE axis toggle (flat|sectioned `##` headers, jul-6 4th prompt slot), read via gateOn at config-build (eval-driver composition root), default-OFF measure-first A/B on SWE f2p — same class as the verify-axis toggles above, not a shipped /config knob"],
-  ["QUANTA_OBS_RENDER", "bench-only: observation-kernel render toggle (jul-6 S3, `<quanta_observations>` vs legacy `## Issue Hints`), resolved DEFAULT-ON in benchPostureFromState (BenchPosture.renderObservations) — env disables (0/off/false) ⇒ byte-identical legacy render; not a shipped /config knob"],
-  ["QUANTA_BENCH_LANE_PROGRESS", "bench-only: live CLI view of parallel candidate lanes (apps/bench/lane-progress-renderer startLaneProgressRenderer, read at the bench composition root) — DEFAULT-ON terminal progress display, falsy disables; a bench-run display toggle, not a shipped /config knob"],
-  ["QUANTA_OBS_LSP_PREFETCH", "bench-only: LSP-enrich provider toggle (jul-6 S3, documentSymbol/hover over candidate files → symbol owners + contracts), resolved DEFAULT-ON in benchPostureFromState (BenchPosture.lspPrefetch) — env disables; graceful no-op without a language server; not a shipped /config knob"],
-  ["QUANTA_OBS_OWNER_CRITIC", "bench-only: observe-only OwnerCritic toggle (jul-6 S1, LSP callgraph refutes wrong-owner edits post-repair), resolved DEFAULT-OFF in benchPostureFromState (BenchPosture.ownerCritic) — repair-time LSP latency measure-first lever, fail-open telemetry, never diverts control flow; not a shipped /config knob"],
-  ["QUANTA_SWEBENCH_DATASET_FAMILY", "bench-only: SWE-bench dataset family selector verified|pro|live (apps/bench/dataset-family), read at the bench composition root, not a shipped /config knob"],
-  ["QUANTA_SWEBENCH_PIP_SPEC", "bench-only: SWE-bench remote box pip spec override (apps/bench/remote/box-session/ec2-lifecycle), read at the bench composition root, not a shipped /config knob"],
-  ["QUANTA_SWEBENCH_PRO_HARNESS_DIR", "bench-only: SWE-bench-Pro ScaleAI grading harness dir (apps/bench/run-main buildProGradeVerifier), read at the bench composition root, not a shipped /config knob"],
-  ["QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH", "bench-only: SWE-bench-Pro raw sample path (apps/bench/run-main buildProGradeVerifier), read at the bench composition root, not a shipped /config knob"],
-  ["QUANTA_SWEBENCH_PRO_PYTHON_BIN", "bench-only: SWE-bench-Pro grading python bin (apps/bench/run-main), read at the bench composition root, not a shipped /config knob"],
-  ["QUANTA_SWEBENCH_PRO_MODEL_NAME", "bench-only: SWE-bench-Pro report model-name label (apps/bench/run-main), read at the bench composition root, not a shipped /config knob"],
-  ["QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME", "bench-only: SWE-bench-Pro DockerHub namespace for prebuilt images (apps/bench/run-main), read at the bench composition root, not a shipped /config knob"],
+  [
+    "QUANTA_BENCH_REPRODUCE_FIRST",
+    "bench-only: verify-axis reproduce-first strategy toggle (config-build.sweVerify), read via gateOn at the eval-driver composition root, default-OFF measure-first A/B — not a shipped /config knob",
+  ],
+  [
+    "QUANTA_SWE_HIDDEN_GRADER",
+    "bench-only: verify-axis grader-only strategy toggle + user-directive NOEXEC coherence (config-build.sweVerify + buildPromptText, P6 SWE hidden-grader pack), read via gateOn at the eval-driver composition root, default-OFF measure-first A/B — not a shipped /config knob",
+  ],
+  [
+    "QUANTA_BENCH_PROMPT_SECTIONED",
+    "bench-only: render STYLE axis toggle (flat|sectioned `##` headers, jul-6 4th prompt slot), read via gateOn at config-build (eval-driver composition root), default-OFF measure-first A/B on SWE f2p — same class as the verify-axis toggles above, not a shipped /config knob",
+  ],
+  [
+    "QUANTA_OBS_RENDER",
+    "bench-only: observation-kernel render toggle (jul-6 S3, `<quanta_observations>` vs legacy `## Issue Hints`), resolved DEFAULT-ON in benchPostureFromState (BenchPosture.renderObservations) — env disables (0/off/false) ⇒ byte-identical legacy render; not a shipped /config knob",
+  ],
+  [
+    "QUANTA_BENCH_LANE_PROGRESS",
+    "bench-only: live CLI view of parallel candidate lanes (apps/bench/lane-progress-renderer startLaneProgressRenderer, read at the bench composition root) — DEFAULT-ON terminal progress display, falsy disables; a bench-run display toggle, not a shipped /config knob",
+  ],
+  [
+    "QUANTA_OBS_LSP_PREFETCH",
+    "bench-only: LSP-enrich provider toggle (jul-6 S3, documentSymbol/hover over candidate files → symbol owners + contracts), resolved DEFAULT-ON in benchPostureFromState (BenchPosture.lspPrefetch) — env disables; graceful no-op without a language server; not a shipped /config knob",
+  ],
+  [
+    "QUANTA_OBS_OWNER_CRITIC",
+    "bench-only: observe-only OwnerCritic toggle (jul-6 S1, LSP callgraph refutes wrong-owner edits post-repair), resolved DEFAULT-OFF in benchPostureFromState (BenchPosture.ownerCritic) — repair-time LSP latency measure-first lever, fail-open telemetry, never diverts control flow; not a shipped /config knob",
+  ],
+  [
+    "QUANTA_SWEBENCH_DATASET_FAMILY",
+    "bench-only: SWE-bench dataset family selector verified|pro|live (apps/bench/dataset-family), read at the bench composition root, not a shipped /config knob",
+  ],
+  [
+    "QUANTA_SWEBENCH_PIP_SPEC",
+    "bench-only: SWE-bench remote box pip spec override (apps/bench/remote/box-session/ec2-lifecycle), read at the bench composition root, not a shipped /config knob",
+  ],
+  [
+    "QUANTA_SWEBENCH_PRO_HARNESS_DIR",
+    "bench-only: SWE-bench-Pro ScaleAI grading harness dir (apps/bench/run-main buildProGradeVerifier), read at the bench composition root, not a shipped /config knob",
+  ],
+  [
+    "QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH",
+    "bench-only: SWE-bench-Pro raw sample path (apps/bench/run-main buildProGradeVerifier), read at the bench composition root, not a shipped /config knob",
+  ],
+  [
+    "QUANTA_SWEBENCH_PRO_PYTHON_BIN",
+    "bench-only: SWE-bench-Pro grading python bin (apps/bench/run-main), read at the bench composition root, not a shipped /config knob",
+  ],
+  [
+    "QUANTA_SWEBENCH_PRO_MODEL_NAME",
+    "bench-only: SWE-bench-Pro report model-name label (apps/bench/run-main), read at the bench composition root, not a shipped /config knob",
+  ],
+  [
+    "QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME",
+    "bench-only: SWE-bench-Pro DockerHub namespace for prebuilt images (apps/bench/run-main), read at the bench composition root, not a shipped /config knob",
+  ],
 ])
 
 const scan = (): { declared: Set<string>; orphans: Map<string, string> } => {
@@ -230,29 +323,25 @@ const scan = (): { declared: Set<string>; orphans: Map<string, string> } => {
 const ORPHAN_CEILING = 0
 
 describe("knob-registry completeness ratchet (ADR-0503 P0)", () => {
-  test(
-    `orphan QUANTA_* reads (declared nowhere) stay <= ${ORPHAN_CEILING}`,
-    () => {
-      const { declared, orphans } = scan()
-      // biome-ignore lint/suspicious/noConsole: ratchet visibility for reviewers
-      console.log(
-        `[knob-completeness] declared=${declared.size} orphans=${orphans.size}/${ORPHAN_CEILING}`,
+  test(`orphan QUANTA_* reads (declared nowhere) stay <= ${ORPHAN_CEILING}`, () => {
+    const { declared, orphans } = scan()
+    // biome-ignore lint/suspicious/noConsole: ratchet visibility for reviewers
+    console.log(
+      `[knob-completeness] declared=${declared.size} orphans=${orphans.size}/${ORPHAN_CEILING}`,
+    )
+    if (orphans.size > ORPHAN_CEILING) {
+      const list = [...orphans.entries()]
+        .sort()
+        .map(([t, loc]) => `  ${t}  (${loc})`)
+        .join("\n")
+      throw new Error(
+        `${orphans.size} orphan QUANTA_* reads (ceiling ${ORPHAN_CEILING}) — each is read in src ` +
+          `but declared in NO registry (runtime-config / @/runner/knobs / apps/cli-local). ` +
+          `Declare it, or add to EXCEPTIONS with a reason:\n${list}`,
       )
-      if (orphans.size > ORPHAN_CEILING) {
-        const list = [...orphans.entries()]
-          .sort()
-          .map(([t, loc]) => `  ${t}  (${loc})`)
-          .join("\n")
-        throw new Error(
-          `${orphans.size} orphan QUANTA_* reads (ceiling ${ORPHAN_CEILING}) — each is read in src ` +
-            `but declared in NO registry (runtime-config / @/runner/knobs / apps/cli-local). ` +
-            `Declare it, or add to EXCEPTIONS with a reason:\n${list}`,
-        )
-      }
-      expect(orphans.size).toBeLessThanOrEqual(ORPHAN_CEILING)
-    },
-    15_000,
-  )
+    }
+    expect(orphans.size).toBeLessThanOrEqual(ORPHAN_CEILING)
+  }, 15_000)
 
   // RED-ON-INJECTION: prove the scanner actually CATCHES an orphan read and does
   // NOT false-positive on a declared one — else the ceiling is a vacuous 0.

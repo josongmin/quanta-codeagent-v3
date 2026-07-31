@@ -108,12 +108,7 @@ describe("bench-leaderboard-analyze pipeline", () => {
 
     // CONTROL: K genuine empty-patches DO count as misses (rate drops).
     const withEmpty = loadVerdicts({
-      perInstance: [
-        resolvedRow("a__1"),
-        resolvedRow("a__2"),
-        emptyRow("a__3"),
-        emptyRow("a__4"),
-      ],
+      perInstance: [resolvedRow("a__1"), resolvedRow("a__2"), emptyRow("a__3"), emptyRow("a__4")],
     })
     const mdEmpty = renderLeaderboardMarkdown(rowsFromRun(withEmpty, META))
     expect(mdEmpty).toContain("Official harness resolved: 2 / 4")

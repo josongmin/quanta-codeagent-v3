@@ -22,8 +22,8 @@
  */
 import { describe, expect, test } from "bun:test"
 import { askUserPortFromPrompter } from "@/apps/cli/ask-user-wire"
-import { type CliPrompterIO, cliPrompter } from "@/mcp"
 import type { ElicitationPrompter, ElicitationResult, EnumOption } from "@/mcp"
+import { type CliPrompterIO, cliPrompter } from "@/mcp"
 import { askUserTool } from "@/tool/ask-user"
 import type { ToolContext, ToolEvent } from "@/tool/types"
 

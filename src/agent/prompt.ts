@@ -1,6 +1,5 @@
 import { basename } from "node:path"
 import type { Message, SystemBlock } from "@/llm"
-import { runtimeConfig } from "@/shared"
 import type {
   AgentPromptMode,
   PromptActiveLeversSnapshot,
@@ -9,6 +8,7 @@ import type {
   PromptSummaryPrefix,
   PromptSurfaceProfileSnapshot,
 } from "@/shared"
+import { runtimeConfig } from "@/shared"
 import type { TaskBudget } from "./budget/task-budget"
 import { buildPersistentInjectionMessages } from "./context-change"
 import type { TurnEnvContext } from "./env-context"

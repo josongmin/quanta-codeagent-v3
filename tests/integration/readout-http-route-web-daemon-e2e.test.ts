@@ -41,9 +41,9 @@ import { startWebDaemon } from "@/apps/web-daemon/server"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import type { ConnectedSessionTransport, SessionTransport } from "@/ipc/session"
 import type { SessionEvent, SessionSnapshotLite } from "@/protocol/session"
-import { capabilitiesFor, makeSnapshotLite } from "../support/session-fixtures"
 import { supported } from "@/protocol/session"
 import type { RuntimeFacade, RuntimeSession, SessionDispatchResult } from "@/sdk/runtime"
+import { capabilitiesFor, makeSnapshotLite } from "../support/session-fixtures"
 
 const handles: WebDaemonHandle[] = []
 

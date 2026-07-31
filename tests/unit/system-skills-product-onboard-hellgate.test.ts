@@ -60,10 +60,7 @@ describe("B1 — product-onboard system skill (hellgate)", () => {
     const raw = readRaw()
     const parsed = parseSkillMarkdown(raw)
     // Loud-failure strict schema MUST accept the SKILL.md verbatim.
-    expect(
-      parsed.ok,
-      parsed.ok ? "" : `strict parse failed: ${parsed.error.message}`,
-    ).toBe(true)
+    expect(parsed.ok, parsed.ok ? "" : `strict parse failed: ${parsed.error.message}`).toBe(true)
     if (!parsed.ok) return
     const fm = parsed.value.frontmatter
 
@@ -95,7 +92,10 @@ describe("B1 — product-onboard system skill (hellgate)", () => {
 
     // The distinct repo-recon `onboard` skill still exists SEPARATELY (no
     // shadowing / rename collision).
-    expect(all.some((s) => s.name === "onboard"), "repo-recon onboard must remain").toBe(true)
+    expect(
+      all.some((s) => s.name === "onboard"),
+      "repo-recon onboard must remain",
+    ).toBe(true)
   })
 
   test("HELL-PO-3: body is the 5-step update_plan contract; triggers do NOT overlap the repo-recon onboard skill", () => {
@@ -127,7 +127,12 @@ describe("B1 — product-onboard system skill (hellgate)", () => {
     for (const productTrigger of ["get started", "first task", "new user"]) {
       expect(surface.includes(productTrigger), `must own trigger "${productTrigger}"`).toBe(true)
     }
-    for (const repoReconTrigger of ["낯선 레포", "repo 파악", "explain this codebase", "구조 파악"]) {
+    for (const repoReconTrigger of [
+      "낯선 레포",
+      "repo 파악",
+      "explain this codebase",
+      "구조 파악",
+    ]) {
       expect(
         surface.includes(repoReconTrigger.toLowerCase()),
         `must NOT steal repo-recon trigger "${repoReconTrigger}"`,

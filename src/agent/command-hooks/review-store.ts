@@ -30,8 +30,8 @@
 import { createHash } from "node:crypto"
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
-import type { CommandHookBinding } from "./types"
 import { mapClaudeEvent } from "./gate"
+import type { CommandHookBinding } from "./types"
 
 /** The default on-disk location of the approval ledger, under the user config
  *  dir (the central-config `QUANTA_CONFIG_DIR` or `~/.quanta`). User-scoped so
@@ -68,7 +68,9 @@ interface ApprovalsFile {
 
 /** Coerce an unknown into a non-null plain object, else undefined. */
 const asObject = (v: unknown): Record<string, unknown> | undefined =>
-  typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined
+  typeof v === "object" && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : undefined
 
 /** Parse one persisted record defensively (drops anything malformed). */
 const parseRecord = (key: string, raw: unknown): HookApprovalRecord | undefined => {

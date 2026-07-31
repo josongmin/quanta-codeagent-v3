@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { reproRunArgv } from "../corpus/dataset"
 import type { Instance } from "../types"
-import { reproValidationCmd } from "./repro-command"
 import {
   dockerRunReproArgv,
   preferredReproExecRuntime,
@@ -9,23 +8,33 @@ import {
   pythonReproAdapter,
   resolveReproAdapter,
 } from "./repro-adapter"
+import { reproValidationCmd } from "./repro-command"
 
 const inst = (repoLanguage?: string): Pick<Instance, "swebench"> => ({
-  swebench: { instanceId: "x", repo: "r", baseCommit: "c", ...(repoLanguage ? { repoLanguage } : {}) },
+  swebench: {
+    instanceId: "x",
+    repo: "r",
+    baseCommit: "c",
+    ...(repoLanguage ? { repoLanguage } : {}),
+  },
 })
 
 describe("pythonReproAdapter — byte-identical to the existing pytest SSOT (RFC Phase 1)", () => {
   test("buildExecArgv == reproRunArgv for a swebench instance", () => {
     const ctx = { repo: "django/django", version: "5.0", scriptPath: "/w/__repro_0_a.py" }
-    expect(pythonReproAdapter.buildExecArgv(ctx)).toEqual([...reproRunArgv(ctx.repo, ctx.version, ctx.scriptPath)])
+    expect(pythonReproAdapter.buildExecArgv(ctx)).toEqual([
+      ...reproRunArgv(ctx.repo, ctx.version, ctx.scriptPath),
+    ])
   })
 
   test("buildExecArgv for repo=undefined ⇒ bare python3 (matches reproValidationCmd)", () => {
-    expect(pythonReproAdapter.buildExecArgv({ repo: undefined, version: undefined, scriptPath: "/w/r.py" })).toEqual([
-      "python3",
-      "-s",
-      "/w/r.py",
-    ])
+    expect(
+      pythonReproAdapter.buildExecArgv({
+        repo: undefined,
+        version: undefined,
+        scriptPath: "/w/r.py",
+      }),
+    ).toEqual(["python3", "-s", "/w/r.py"])
   })
 
   test("buildValidationCmd == reproValidationCmd", () => {
@@ -39,8 +48,12 @@ describe("pythonReproAdapter — byte-identical to the existing pytest SSOT (RFC
     expect(name).toBe("__repro_0_abc-123-def.py")
     // the scaffold name + its pytest sidecar are recognized by the adapter's own patterns
     expect(pythonReproAdapter.artifactPatterns.some((re) => re.test(name))).toBe(true)
-    expect(pythonReproAdapter.artifactPatterns.some((re) => re.test(`${name}.pytest-report.json`))).toBe(true)
-    expect(pythonReproAdapter.artifactPatterns.some((re) => re.test("reproduce_issue.py"))).toBe(true)
+    expect(
+      pythonReproAdapter.artifactPatterns.some((re) => re.test(`${name}.pytest-report.json`)),
+    ).toBe(true)
+    expect(pythonReproAdapter.artifactPatterns.some((re) => re.test("reproduce_issue.py"))).toBe(
+      true,
+    )
     // a normal source file is NOT a repro artifact
     expect(pythonReproAdapter.artifactPatterns.some((re) => re.test("src/foo.py"))).toBe(false)
   })
@@ -118,7 +131,9 @@ describe("image exec backend (RFC Phase 2a — pure composition)", () => {
   test("execBackend=image but ref/dir MISSING ⇒ falls back to host (byte-identical)", () => {
     const host = pythonReproAdapter.buildExecArgv(ctx({}))
     expect(pythonReproAdapter.buildExecArgv(ctx({ execBackend: "image" }))).toEqual(host)
-    expect(pythonReproAdapter.buildExecArgv(ctx({ execBackend: "image", imageRef: "x" }))).toEqual(host)
+    expect(pythonReproAdapter.buildExecArgv(ctx({ execBackend: "image", imageRef: "x" }))).toEqual(
+      host,
+    )
   })
 
   test("execBackend defaulting (omitted/host) ⇒ host argv unchanged", () => {
@@ -144,10 +159,14 @@ describe("image exec backend (RFC Phase 2a — pure composition)", () => {
   })
 
   test("proReproImageRef: dockerhubTag ⇒ jefzda/sweap-images:<tag>; absent ⇒ null", () => {
-    expect(proReproImageRef({ swebench: { instanceId: "i", repo: "r", baseCommit: "c", dockerhubTag: "nodebb.x" } })).toBe(
-      "jefzda/sweap-images:nodebb.x",
-    )
-    expect(proReproImageRef({ swebench: { instanceId: "i", repo: "r", baseCommit: "c" } })).toBeNull()
+    expect(
+      proReproImageRef({
+        swebench: { instanceId: "i", repo: "r", baseCommit: "c", dockerhubTag: "nodebb.x" },
+      }),
+    ).toBe("jefzda/sweap-images:nodebb.x")
+    expect(
+      proReproImageRef({ swebench: { instanceId: "i", repo: "r", baseCommit: "c" } }),
+    ).toBeNull()
   })
 })
 
@@ -173,11 +192,15 @@ describe("preferredReproExecRuntime — Phase 2b image backend is DEFAULT-OFF (g
     // box. Selecting the image backend by default would silently flip every Pro
     // repro run onto an unproven `docker run` path (import may resolve to the
     // image's UNPATCHED copy ⇒ correct patches read base-red ⇒ real solves lost).
-    expect(withGate(undefined, () => preferredReproExecRuntime(withImageTag, "/w/__repro_0_a.py"))).toEqual({})
+    expect(
+      withGate(undefined, () => preferredReproExecRuntime(withImageTag, "/w/__repro_0_a.py")),
+    ).toEqual({})
   })
 
   test("gate ON + dockerhubTag ⇒ image backend selected (opt-in arm)", () => {
-    expect(withGate("1", () => preferredReproExecRuntime(withImageTag, "/w/__repro_0_a.py"))).toEqual({
+    expect(
+      withGate("1", () => preferredReproExecRuntime(withImageTag, "/w/__repro_0_a.py")),
+    ).toEqual({
       execBackend: "image",
       imageRef: "jefzda/sweap-images:nodebb.x",
       sandboxDir: "/w",
@@ -185,7 +208,9 @@ describe("preferredReproExecRuntime — Phase 2b image backend is DEFAULT-OFF (g
   })
 
   test("gate ON but NO dockerhubTag (Verified/Live) ⇒ {} (host, fail-closed)", () => {
-    const noTag: Pick<Instance, "swebench"> = { swebench: { instanceId: "i", repo: "r", baseCommit: "c" } }
+    const noTag: Pick<Instance, "swebench"> = {
+      swebench: { instanceId: "i", repo: "r", baseCommit: "c" },
+    }
     expect(withGate("1", () => preferredReproExecRuntime(noTag, "/w/r.py"))).toEqual({})
   })
 })

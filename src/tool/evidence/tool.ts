@@ -17,7 +17,14 @@
  */
 import { z } from "zod"
 import { defaultFileSystemPort, type FileSystemPort } from "@/storage"
-import { commandRunsOk, detectToolchain, defaultTestRunPort, runToolchain, type TestRunPort, type Toolchain } from "../testrun"
+import {
+  commandRunsOk,
+  defaultTestRunPort,
+  detectToolchain,
+  runToolchain,
+  type TestRunPort,
+  type Toolchain,
+} from "../testrun"
 import type { Tool, ToolContext, ToolEvent } from "../types"
 import { buildEvidence, type EvidenceSources } from "./builder"
 import { defaultRuntimePort } from "./runtime"
@@ -25,13 +32,29 @@ import type { EvidencePacket, FailureEvidence, RuntimeEvidence, StaticEvidence }
 
 const schema = z.object({
   cwd: z.string().optional().describe("Project root (defaults to session cwd)."),
-  publicApiChangeAllowed: z.boolean().optional().describe("Patch constraint: may the fix change a public API? Default false."),
-  style: z.string().optional().describe("Patch constraint: style guidance (e.g. 'match surrounding')."),
+  publicApiChangeAllowed: z
+    .boolean()
+    .optional()
+    .describe("Patch constraint: may the fix change a public API? Default false."),
+  style: z
+    .string()
+    .optional()
+    .describe("Patch constraint: style guidance (e.g. 'match surrounding')."),
   // Per-section toggles — each defaults ON. `runtime` is the expensive one (it
   // re-runs the suite under a debugger), so turn it OFF for a fast failure+static
   // packet; turn `static` off to skip the LSP query.
-  includeRuntime: z.boolean().optional().describe("Capture runtime stack+locals by re-running the failing test under a debugger (DAP). Default true; set false to skip the extra debugger run."),
-  includeStatic: z.boolean().optional().describe("Capture static context (LSP definitions/refs/types) at the failure site. Default true."),
+  includeRuntime: z
+    .boolean()
+    .optional()
+    .describe(
+      "Capture runtime stack+locals by re-running the failing test under a debugger (DAP). Default true; set false to skip the extra debugger run.",
+    ),
+  includeStatic: z
+    .boolean()
+    .optional()
+    .describe(
+      "Capture static context (LSP definitions/refs/types) at the failure site. Default true.",
+    ),
 })
 type Input = z.infer<typeof schema>
 
@@ -42,10 +65,20 @@ export interface EvidenceToolDeps {
   /** LSP static at a failure site (host-injected, e.g. via lsp-bridge).
    *  Receives the turn signal so an aborted turn bails out of the LSP
    *  indexing-retry budget promptly. */
-  readonly lspStatic?: (file: string, line: number, cwd: string, signal?: AbortSignal) => Promise<StaticEvidence | null>
+  readonly lspStatic?: (
+    file: string,
+    line: number,
+    cwd: string,
+    signal?: AbortSignal,
+  ) => Promise<StaticEvidence | null>
   /** DAP runtime for the failing test. Default: `defaultRuntimePort` (python/
    *  debugpy, in-slice). Host may override. */
-  readonly runtime?: (failure: FailureEvidence, tc: Toolchain, cwd: string, signal?: AbortSignal) => Promise<RuntimeEvidence | null>
+  readonly runtime?: (
+    failure: FailureEvidence,
+    tc: Toolchain,
+    cwd: string,
+    signal?: AbortSignal,
+  ) => Promise<RuntimeEvidence | null>
   /** Changed-files probe (default: `git diff --name-only HEAD`). */
   readonly changedFiles?: (cwd: string) => Promise<readonly string[]>
 }
@@ -71,7 +104,10 @@ export const parseGitPorcelain = (text: string): readonly string[] => {
 /** Default git changed-files: working-tree + index status, plus untracked. */
 const gitChangedFiles = async (cwd: string): Promise<readonly string[]> => {
   try {
-    const proc = Bun.spawn(["git", "-C", cwd, "status", "--porcelain"], { stdout: "pipe", stderr: "ignore" })
+    const proc = Bun.spawn(["git", "-C", cwd, "status", "--porcelain"], {
+      stdout: "pipe",
+      stderr: "ignore",
+    })
     const out = await new Response(proc.stdout).text()
     await proc.exited
     return parseGitPorcelain(out)
@@ -132,7 +168,9 @@ export const makeCollectEvidenceTool = (deps: EvidenceToolDeps = {}): Tool<Input
         },
         changedFiles: deps.changedFiles ?? gitChangedFiles,
         // static (LSP): wired unless the caller opted out. Host-injected port.
-        ...(input.includeStatic !== false && deps.lspStatic !== undefined ? { lspStatic: deps.lspStatic } : {}),
+        ...(input.includeStatic !== false && deps.lspStatic !== undefined
+          ? { lspStatic: deps.lspStatic }
+          : {}),
         // runtime (DAP): default ON (python/debugpy + rust/lldb, in-slice),
         // degrades to null when the toolchain/adapter is absent. Opt OUT with
         // includeRuntime:false to skip the expensive extra debugger run.

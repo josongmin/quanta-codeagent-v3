@@ -68,12 +68,14 @@ describe("withGitSnapshot — P0 build-env materialization wiring [gated on git]
           30_000,
           base,
           async () => {
-            observedPyprojectDuringBody = readFileSync(join(dir, "pyproject.toml"), "utf8").includes(
-              PROJECT_ENV_SANDBOX_BEGIN,
-            )
-            observedSourceShimDuringBody = readFileSync(join(dir, "setup_package.py"), "utf8").includes(
-              PROJECT_ENV_SOURCE_SHIM_BEGIN,
-            )
+            observedPyprojectDuringBody = readFileSync(
+              join(dir, "pyproject.toml"),
+              "utf8",
+            ).includes(PROJECT_ENV_SANDBOX_BEGIN)
+            observedSourceShimDuringBody = readFileSync(
+              join(dir, "setup_package.py"),
+              "utf8",
+            ).includes(PROJECT_ENV_SOURCE_SHIM_BEGIN)
             // A genuine agent edit to a source file (must survive in the captured diff).
             writeFileSync(join(dir, "mod.py"), "x = 2  # AGENT-FIX\n")
           },

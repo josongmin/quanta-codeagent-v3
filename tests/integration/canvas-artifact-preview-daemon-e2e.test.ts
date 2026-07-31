@@ -31,14 +31,14 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { buildSystemPrompt } from "@/agent"
 import type { AgentConfig } from "@/agent/types"
-import { type ArtifactRegistry, createArtifactRegistry, monotonicIdFactory } from "@/artifact"
 import { main } from "@/apps/web-daemon"
 import { createCanvasArtifactSource } from "@/apps/web-daemon/canvas-artifact-source"
 import {
-  type ObservableRuntimeFacade,
   buildInteractiveTurnAssembler,
+  type ObservableRuntimeFacade,
 } from "@/apps/web-daemon/runtime-factory"
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
+import { type ArtifactRegistry, createArtifactRegistry, monotonicIdFactory } from "@/artifact"
 import { createArtifactPreviewResolver } from "@/host/runtime"
 import { encodeSessionTransportMessage } from "@/ipc/session"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
@@ -148,7 +148,9 @@ const buildFactory = (
     }
     const canvasArtifact = createCanvasArtifactSource()
     const resolver =
-      registry !== undefined ? createArtifactPreviewResolver({ registry, jailRoot: cwd }) : undefined
+      registry !== undefined
+        ? createArtifactPreviewResolver({ registry, jailRoot: cwd })
+        : undefined
 
     const base: RuntimeAgentConfigBase = {
       llm: new RecordingLLM(scripts),
@@ -242,7 +244,9 @@ const collectCanvas = (
       }, 10)
       const deadline = setTimeout(() => {
         clearInterval(timer)
-        reject(new Error(`waitForCanvas(${kind}): timeout (saw ${frames.map((f) => f.kind).join(",")})`))
+        reject(
+          new Error(`waitForCanvas(${kind}): timeout (saw ${frames.map((f) => f.kind).join(",")})`),
+        )
       }, timeoutMs)
     })
   return { frames, waitFor }

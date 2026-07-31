@@ -11,6 +11,7 @@
 import type { ServerWebSocket } from "bun"
 import type { createFollowerApprovalCoordinator } from "@/agent/thread-follower"
 import {
+  replyToHeartbeat,
   type SessionTransport,
   tryDecodeSessionTransportMessage,
   wrapWebSocketLikeAsSessionTransport,
@@ -28,7 +29,6 @@ import {
   type BunWebSocketAdapter,
   createBunWebSocketAdapter,
 } from "../ws-adapter"
-import { replyToHeartbeat } from "@/ipc/session"
 import { attachAgentStateSink, attachCanvasSink, attachObservabilitySink } from "./sinks"
 import type { WSData } from "./ws-data"
 

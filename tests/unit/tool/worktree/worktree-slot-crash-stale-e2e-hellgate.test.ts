@@ -75,11 +75,7 @@ const perm: PermissionContext = { mode: "acceptEdits" }
  *  the real composition root). */
 const cfg = (repo: string, slot?: WorktreeSlotHandle): AgentConfig =>
   ({
-    registry: new ToolRegistry([
-      bashTool,
-      editTool,
-      ...(slot !== undefined ? worktreeTools : []),
-    ]),
+    registry: new ToolRegistry([bashTool, editTool, ...(slot !== undefined ? worktreeTools : [])]),
     cwd: repo,
     signal: new AbortController().signal,
     permission: perm,

@@ -39,8 +39,8 @@
  *      silently here.
  */
 
-import { codexSpecRoute } from "./codex-spec-router"
 import type { LLMErrorKind } from "@/shared"
+import { codexSpecRoute } from "./codex-spec-router"
 
 /** Three-way retry disposition for a KIND, at the same-provider `RetryingLLM`
  *  layer. `"consult_markers"` means "the table has no decisive same-provider

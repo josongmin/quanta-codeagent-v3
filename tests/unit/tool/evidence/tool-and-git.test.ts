@@ -4,12 +4,11 @@
  * slice(3) parse, ok:true-always, and relative-path handoff all turn these red.
  */
 import { describe, expect, test } from "bun:test"
-import { parseGitPorcelain } from "@/tool/evidence/tool"
-import { makeCollectEvidenceTool } from "@/tool/evidence/tool"
-import { buildEvidence, type EvidenceSources } from "@/tool/evidence/builder"
-import { defaultRuntimePort } from "@/tool/evidence"
-import type { TestRunResult, Toolchain } from "@/tool/testrun"
 import type { FileSystemPort } from "@/storage"
+import { defaultRuntimePort } from "@/tool/evidence"
+import { buildEvidence, type EvidenceSources } from "@/tool/evidence/builder"
+import { makeCollectEvidenceTool, parseGitPorcelain } from "@/tool/evidence/tool"
+import type { TestRunResult, Toolchain } from "@/tool/testrun"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 
 describe("parseGitPorcelain", () => {
@@ -30,7 +29,12 @@ describe("parseGitPorcelain", () => {
 })
 
 const RUST: Toolchain = { kind: "rust", command: ["cargo", "test"], parser: "cargo" }
-const failing: TestRunResult = { runner: "cargo", passed: 1, ok: false, failed: [{ name: "t", file: "src/lib.rs", line: 6 }] }
+const failing: TestRunResult = {
+  runner: "cargo",
+  passed: 1,
+  ok: false,
+  failed: [{ name: "t", file: "src/lib.rs", line: 6 }],
+}
 const green: TestRunResult = { runner: "cargo", passed: 2, ok: true, failed: [] }
 
 describe("buildEvidence — absolute-path handoff to enrichment ports", () => {
@@ -75,7 +79,10 @@ describe("buildEvidence — absolute-path handoff to enrichment ports", () => {
 
 const fsWith = (present: string[]): FileSystemPort =>
   ({ fileExists: async (n: string) => present.includes(n) }) as unknown as FileSystemPort
-const runTool = async (tool: ReturnType<typeof makeCollectEvidenceTool>, input: object = {}): Promise<ToolResult> => {
+const runTool = async (
+  tool: ReturnType<typeof makeCollectEvidenceTool>,
+  input: object = {},
+): Promise<ToolResult> => {
   const ctx = { cwd: "/p", signal: new AbortController().signal } as ToolContext
   let r: ToolResult | undefined
   for await (const ev of tool.execute(input as never, ctx) as AsyncIterable<ToolEvent>)
@@ -98,7 +105,9 @@ describe("collect_evidence tool — ok semantics (consistent with run_tests)", (
   test("a green suite ⇒ ok:true", async () => {
     const tool = makeCollectEvidenceTool({
       fs: fsWith(["go.mod"]),
-      testPort: { run: async () => ({ stdout: '{"Action":"pass","Test":"A"}', stderr: "", exitCode: 0 }) },
+      testPort: {
+        run: async () => ({ stdout: '{"Action":"pass","Test":"A"}', stderr: "", exitCode: 0 }),
+      },
       changedFiles: async () => [],
     })
     const r = await runTool(tool)
@@ -161,7 +170,9 @@ describe("collect_evidence tool — nothing-actually-ran must NEVER be ok:true (
   test("paired control — supported repo, green suite ⇒ ok:true (unchanged)", async () => {
     const tool = makeCollectEvidenceTool({
       fs: fsWith(["go.mod"]),
-      testPort: { run: async () => ({ stdout: '{"Action":"pass","Test":"A"}', stderr: "", exitCode: 0 }) },
+      testPort: {
+        run: async () => ({ stdout: '{"Action":"pass","Test":"A"}', stderr: "", exitCode: 0 }),
+      },
       changedFiles: async () => [],
     })
     const r = await runTool(tool)
@@ -174,7 +185,18 @@ describe("collect_evidence tool — per-section toggles", () => {
   // location, so parseCargo extracts file+line (needed for the static query).
   const failingCargo = {
     run: async () => ({
-      stdout: ["test x ... FAILED", "", "failures:", "", "---- x stdout ----", "", "thread 'x' panicked at src/lib.rs:6:9:", "boom", "", "test result: FAILED. 0 passed; 1 failed;"].join("\n"),
+      stdout: [
+        "test x ... FAILED",
+        "",
+        "failures:",
+        "",
+        "---- x stdout ----",
+        "",
+        "thread 'x' panicked at src/lib.rs:6:9:",
+        "boom",
+        "",
+        "test result: FAILED. 0 passed; 1 failed;",
+      ].join("\n"),
       stderr: "",
       exitCode: 101,
     }),

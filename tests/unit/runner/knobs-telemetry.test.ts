@@ -116,7 +116,12 @@ describe("JsonlRecorder writes a knobs_applied line", () => {
       surface: "bench",
       knobs: {
         lsp: { value: true, unit: undefined, display: "on", source: "env" },
-        "branch-search": { value: { defaultN: 3 }, unit: "candidates", display: "3 candidates", source: "env" },
+        "branch-search": {
+          value: { defaultN: 3 },
+          unit: "candidates",
+          display: "3 candidates",
+          source: "env",
+        },
       },
       preset: "agentless-full",
       costMultiplier: 9,
@@ -137,7 +142,12 @@ describe("JsonlRecorder writes a knobs_applied line", () => {
     expect(knobsLine.data.costMultiplier).toBe(9)
     expect(knobsLine.data.knobs).toEqual({
       lsp: { value: true, unit: undefined, display: "on", source: "env" },
-      "branch-search": { value: { defaultN: 3 }, unit: "candidates", display: "3 candidates", source: "env" },
+      "branch-search": {
+        value: { defaultN: 3 },
+        unit: "candidates",
+        display: "3 candidates",
+        source: "env",
+      },
     })
   })
 

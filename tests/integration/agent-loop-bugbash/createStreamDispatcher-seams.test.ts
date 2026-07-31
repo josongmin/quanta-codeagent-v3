@@ -30,11 +30,11 @@
  */
 
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
-import { createStreamDispatcher } from "@/agent/stream-callbacks"
 import type { DispatchPort } from "@/agent/dispatch"
+import type { ToolHistoryEntry } from "@/agent/session-resources"
+import { createStreamDispatcher } from "@/agent/stream-callbacks"
 import type { StreamingCall } from "@/agent/streaming-dispatch"
 import type { SkillGate, TurnSession, TurnState } from "@/agent/turn-context"
-import type { ToolHistoryEntry } from "@/agent/session-resources"
 import type { AgentConfig } from "@/agent/types"
 import type { TurnTimingCapture } from "@/observability"
 import { __resetRuntimeConfig } from "@/shared"

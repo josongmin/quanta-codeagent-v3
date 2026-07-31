@@ -16,8 +16,8 @@ import { describe, expect, it } from "bun:test"
 import {
   isCleanHardVeto,
   isKnownSignal,
-  type SignalAuthority,
   SIGNAL_AUTHORITY,
+  type SignalAuthority,
 } from "@/agent/verification-bundle"
 
 const KNOWN_CLASSES: ReadonlySet<SignalAuthority> = new Set<SignalAuthority>([
@@ -76,8 +76,7 @@ describe("T-MEASURE-08 — promotion policy (research authority can never veto c
     // The promotion endpoint: a signal may only gain clean veto power by being
     // executable/structural. Any other class (incl. researchOnly) returns false.
     for (const [signal, authority] of Object.entries(SIGNAL_AUTHORITY)) {
-      const expectedCleanVeto =
-        authority === "hardExecutable" || authority === "hardStructural"
+      const expectedCleanVeto = authority === "hardExecutable" || authority === "hardStructural"
       expect(isCleanHardVeto(signal, "clean")).toBe(expectedCleanVeto)
     }
   })

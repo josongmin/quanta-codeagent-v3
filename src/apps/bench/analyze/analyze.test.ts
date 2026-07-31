@@ -320,18 +320,15 @@ describe("loadVerdicts — both report shapes", () => {
   })
 
   test("wave2 provenance guard rejects old or underspecified reports", () => {
-    expect(
-      () =>
-        assertWave2BenchReportProvenance(
-          {
-            ...ourReport,
-            knobs: { resolved: {}, inactive: [], preset: "agentless-v3-thin-strict" },
-          },
-          "old-report",
-        ),
-    ).toThrow(
-      /predates answer-key-clean-after/,
-    )
+    expect(() =>
+      assertWave2BenchReportProvenance(
+        {
+          ...ourReport,
+          knobs: { resolved: {}, inactive: [], preset: "agentless-v3-thin-strict" },
+        },
+        "old-report",
+      ),
+    ).toThrow(/predates answer-key-clean-after/)
     expect(() =>
       assertWave2BenchReportProvenance(
         {
@@ -782,8 +779,7 @@ describe("explainFailure", () => {
         JSON.stringify({
           instance_id: "pylint-dev__pylint-8898",
           model_name_or_path: "gpt-5.4",
-          modelPatch:
-            "diff --git a/pylint/checkers/format.py b/pylint/checkers/format.py\n+x\n",
+          modelPatch: "diff --git a/pylint/checkers/format.py b/pylint/checkers/format.py\n+x\n",
         }),
       ].join("\n"),
     )

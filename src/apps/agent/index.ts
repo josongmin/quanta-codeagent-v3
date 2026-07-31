@@ -65,8 +65,8 @@ import {
   formatHelp,
   parseAgentArgs,
 } from "@/host/runtime/agent-args"
-import { errMessage, gateOn, logger, quantaHomeDir, runtimeConfig, setTerminalIo } from "@/shared"
 import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
+import { errMessage, gateOn, logger, quantaHomeDir, runtimeConfig, setTerminalIo } from "@/shared"
 import type { AssembleRequest } from "./assemble"
 
 export { buildSearchPipelineFromEnv, clearSearchPipelineWireForTests }

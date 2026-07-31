@@ -38,8 +38,8 @@ import {
   type CommandHookReviewPort,
   defaultHookApprovalsPath,
   HookBus,
-  hookBindingKey,
   HookReviewStore,
+  hookBindingKey,
   installCommandHooks,
   mapClaudeEvent,
   normalizeCommandHookGate,
@@ -369,7 +369,12 @@ describe("T04 — source provenance derivation", () => {
       },
     })
     const [b] = parseCommandHookBindings(text)
-    expect(b).toEqual({ event: "PreToolUse", command: "ext.sh", source: "imported", needsReview: true })
+    expect(b).toEqual({
+      event: "PreToolUse",
+      command: "ext.sh",
+      source: "imported",
+      needsReview: true,
+    })
   })
 
   test("LEGACY parse — NO marker ⇒ byte-identical un-provenanced binding", () => {
@@ -431,4 +436,3 @@ describe("T04 — source provenance derivation", () => {
     expect(b?.needsReview).toBe(false)
   })
 })
-

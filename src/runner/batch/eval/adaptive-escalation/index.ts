@@ -14,6 +14,7 @@ export {
   type AdaptiveRunResult,
   runAdaptiveEscalation,
 } from "./controller"
+export { validateAdaptiveDecisionForEvidence } from "./decision-legality"
 export {
   ADAPTIVE_ACTIONS,
   ADAPTIVE_DECISION_JSON_SCHEMA,
@@ -25,6 +26,11 @@ export {
   parseAdaptiveDecision,
 } from "./decision-schema"
 export {
+  effortLadderLimits,
+  MAX_EFFORT_TIER,
+  resolveEffortLadderLimits,
+} from "./effort-ladder"
+export {
   deriveEvidenceGaps,
   type EvidenceFacts,
   evidenceIdsOf,
@@ -33,12 +39,6 @@ export {
   renderAdvisoryRouterFacts,
   renderEvidenceFacts,
 } from "./evidence-facts"
-export { validateAdaptiveDecisionForEvidence } from "./decision-legality"
-export {
-  effortLadderLimits,
-  MAX_EFFORT_TIER,
-  resolveEffortLadderLimits,
-} from "./effort-ladder"
 export {
   deriveEvidenceFactsFromPacket,
   projectRouterEvidence,

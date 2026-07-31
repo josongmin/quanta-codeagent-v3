@@ -12,9 +12,9 @@
 
 import { describe, expect, test } from "bun:test"
 import {
+  buildLocationSeeder,
   buildRepairFanoutFiles,
   buildRepairFanoutSymbols,
-  buildLocationSeeder,
   type LocationSet,
   partitionLocationSets,
   partitionSymbolSets,

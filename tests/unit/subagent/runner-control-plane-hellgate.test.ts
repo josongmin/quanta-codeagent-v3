@@ -25,9 +25,7 @@ const parentConfig = (over: Partial<AgentConfig> = {}): AgentConfig =>
 const outcome = (): AgentOutcome => ({
   reason: "completed",
   turns: 1,
-  messages: [
-    { role: "assistant", content: [{ type: "text", text: "ok" }] },
-  ] satisfies Message[],
+  messages: [{ role: "assistant", content: [{ type: "text", text: "ok" }] }] satisfies Message[],
 })
 
 const req = (over: Partial<SubagentRequest> = {}): SubagentRequest => ({

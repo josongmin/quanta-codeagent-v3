@@ -21,8 +21,8 @@
  * allocation, no clock read — the turn is byte-for-byte unchanged.
  */
 
-import { errMessage, logger } from "@/shared"
 import { type ProposeOpts, proposeOnIdleForLongTask, type RadarStore } from "@/radar"
+import { errMessage, logger } from "@/shared"
 
 /**
  * Session-end radar producer block (mirrors the `memoryConsolidator?`

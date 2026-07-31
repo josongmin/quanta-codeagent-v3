@@ -29,13 +29,20 @@ const makeValidate = (passing: ReadonlySet<string>) => {
   const validate = async (args: ValidateArgs): Promise<ValidatorResult> => {
     seen.push(args.cmd)
     seenPredicates.push(args.successPredicate)
-    return args.cmd !== undefined && passing.has(args.cmd) ? { ok: true } : { ok: false, failTail: "x" }
+    return args.cmd !== undefined && passing.has(args.cmd)
+      ? { ok: true }
+      : { ok: false, failTail: "x" }
   }
   return { validate, seen, seenPredicates }
 }
 
 const railStep = (cmd: string) =>
-  ({ kind: "owner-test", cmd, authority: "execution", successPredicate: { type: "test_exit_zero" } }) as const
+  ({
+    kind: "owner-test",
+    cmd,
+    authority: "execution",
+    successPredicate: { type: "test_exit_zero" },
+  }) as const
 
 const base = {
   config: { maxRounds: 1 },

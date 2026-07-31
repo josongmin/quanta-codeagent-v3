@@ -31,7 +31,15 @@
  *  This file does NOT touch any existing test file. */
 
 import { afterAll, describe, expect, test } from "bun:test"
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { defaultFileSystemPort, sha256Hex } from "@/storage"
@@ -85,7 +93,10 @@ describe("jul-13 edit-fresh-hash × DEFAULT-ON mtime guard — PRODUCTION TRUTH 
     const state = new ReadFileState()
     const readTimeMtime = recordReadTimeMtime(state, path)
 
-    const r1 = await runEdit({ path, old_string: "x = 1", new_string: "x = 2" }, prodCtx(dir, state, true))
+    const r1 = await runEdit(
+      { path, old_string: "x = 1", new_string: "x = 2" },
+      prodCtx(dir, state, true),
+    )
     expect(r1.ok).toBe(true)
 
     const onDiskAfter = statSync(path).mtimeMs
@@ -131,7 +142,10 @@ describe("jul-13 edit-fresh-hash × DEFAULT-ON mtime guard — PRODUCTION TRUTH 
     const state = new ReadFileState()
     const readTimeMtime = recordReadTimeMtime(state, path)
 
-    const r1 = await runEdit({ path, old_string: "x = 1", new_string: "x = 2" }, prodCtx(dir, state, false))
+    const r1 = await runEdit(
+      { path, old_string: "x = 1", new_string: "x = 2" },
+      prodCtx(dir, state, false),
+    )
     expect(r1.ok).toBe(true)
     // OFF ⇒ baseline untouched by the edit.
     expect(state.recordedMtime(path)).toBe(readTimeMtime)
@@ -257,7 +271,10 @@ describe("jul-13 edit-fresh-hash × mtime guard — fast-apply-merge success pat
     }
 
     // old_string absent verbatim → exact+fuzzy miss → merge rung → verified merge.
-    const r1 = await runEdit({ path, old_string: "beta_MISSING_ANCHOR", new_string: "BETA_MERGED" }, ctx)
+    const r1 = await runEdit(
+      { path, old_string: "beta_MISSING_ANCHOR", new_string: "BETA_MERGED" },
+      ctx,
+    )
     expect(r1.ok).toBe(true)
     expect(r1.output).toContain("fast-apply merge")
     const advertised = r1.output?.match(FRESH_RE)?.[1]

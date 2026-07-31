@@ -187,7 +187,9 @@ export const computeClosureDiagnostics = (
 
   // Owner recall over patch-bearing instances that have an oracle.
   const owned = facts.filter((f) => f.patchFiles.length > 0 && oracleMap.has(f.instanceId))
-  const multiFileOwned = owned.filter((f) => (oracleMap.get(f.instanceId)?.goldFiles.length ?? 0) > 1)
+  const multiFileOwned = owned.filter(
+    (f) => (oracleMap.get(f.instanceId)?.goldFiles.length ?? 0) > 1,
+  )
   const recallAt = (k: number): ClosureMetric =>
     metricOf(
       owned.map((f) => {
@@ -215,7 +217,9 @@ export const computeClosureDiagnostics = (
       }),
     ),
     exact_file_set_match_rate: metricOf(
-      owned.map((f) => sameFileSet(f.patchFiles, (oracleMap.get(f.instanceId) as ClosureOracle).goldFiles)),
+      owned.map((f) =>
+        sameFileSet(f.patchFiles, (oracleMap.get(f.instanceId) as ClosureOracle).goldFiles),
+      ),
     ),
     multi_file_full_coverage_rate: metricOf(
       multiFileOwned.map((f) => {
@@ -270,7 +274,9 @@ export const computeClosureDiagnostics = (
         (tier) =>
           [
             `acceptance_tier_${tier}_rate`,
-            metricOf(facts.map((f) => (f.acceptanceTier == null ? null : f.acceptanceTier === tier))),
+            metricOf(
+              facts.map((f) => (f.acceptanceTier == null ? null : f.acceptanceTier === tier)),
+            ),
           ] as const,
       ),
     ),

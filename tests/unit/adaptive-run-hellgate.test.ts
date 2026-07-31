@@ -199,10 +199,7 @@ describe("assembled adaptive runner (Wave-3 keystone)", () => {
 
   test("RUN-7: run_public_repro when base repro already established PROCEEDS (ordering veto demoted)", async () => {
     const phase = recordingRunPhase()
-    const { modelCall } = scriptedModelCall([
-      decision("run_public_repro"),
-      decision("accept_thin"),
-    ])
+    const { modelCall } = scriptedModelCall([decision("run_public_repro"), decision("accept_thin")])
     const result = await runAdaptiveBenchAttempt({
       intakePacket: intake(),
       base: BASE,
@@ -297,10 +294,7 @@ describe("assembled adaptive runner (Wave-3 keystone)", () => {
       // proxy infra signal only (no execution_failed/env_prep_failed receipt).
       missingEvidence: [{ kind: "public_proof", reason: "public_proof_infra_blocked" }],
     })
-    const { modelCall } = scriptedModelCall([
-      decision("run_proof_clean"),
-      decision("accept_thin"),
-    ])
+    const { modelCall } = scriptedModelCall([decision("run_proof_clean"), decision("accept_thin")])
     const result = await runAdaptiveBenchAttempt({
       intakePacket: proxyOnlyPacket(),
       base: BASE,

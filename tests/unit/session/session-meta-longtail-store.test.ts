@@ -2,12 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import {
-  loadSessionById,
-  saveSessionById,
-  sessionFilePath,
-  type SessionMeta,
-} from "@/session"
+import { loadSessionById, type SessionMeta, saveSessionById, sessionFilePath } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
 
 /**

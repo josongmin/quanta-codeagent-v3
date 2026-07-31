@@ -22,11 +22,17 @@
  *    still returns (an observability path must never fail the bootstrap).
  */
 import { describe, expect, test } from "bun:test"
-import { errMessage } from "../../src/shared"
 import { parseResourceSpans } from "../../src/apps/bench/otel-trace-sink"
 import type { BootstrapTracer } from "../../src/apps/bench/remote/bootstrap-tracer"
 import { createBootstrapTracer } from "../../src/apps/bench/remote/bootstrap-tracer"
-import { createSpawnRecorder, ok, whenArgsInclude, whenCmd, whenSshRemoteIncludes } from "./bench-spawn-testkit"
+import { errMessage } from "../../src/shared"
+import {
+  createSpawnRecorder,
+  ok,
+  whenArgsInclude,
+  whenCmd,
+  whenSshRemoteIncludes,
+} from "./bench-spawn-testkit"
 
 /** A fake fetch that records every OTLP POST (url + parsed body) and 200s. */
 const recordingFetch = () => {
@@ -78,9 +84,15 @@ describe("bootstrap tracer — per-phase OTEL spans", () => {
     // All bootstrap phases share ONE trace so the UI groups them into one waterfall.
     const traceIds = new Set(
       posts.flatMap((p) =>
-        ((p.body as { resourceSpans?: Array<{ scopeSpans?: Array<{ spans?: Array<{ traceId?: string }> }> }> })
-          .resourceSpans ?? []
-        ).flatMap((rs) => (rs.scopeSpans ?? []).flatMap((ss) => (ss.spans ?? []).map((s) => s.traceId))),
+        (
+          (
+            p.body as {
+              resourceSpans?: Array<{ scopeSpans?: Array<{ spans?: Array<{ traceId?: string }> }> }>
+            }
+          ).resourceSpans ?? []
+        ).flatMap((rs) =>
+          (rs.scopeSpans ?? []).flatMap((ss) => (ss.spans ?? []).map((s) => s.traceId)),
+        ),
       ),
     )
     expect(traceIds.size).toBe(1)

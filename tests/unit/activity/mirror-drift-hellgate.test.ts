@@ -13,8 +13,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import type { AgentFleetRow } from "@/apps/cli/agents-fleet-panel"
 import type { FleetRowLike, SideAgentStatusLike, WorkflowEventLike } from "@/activity"
+import type { AgentFleetRow } from "@/apps/cli/agents-fleet-panel"
 import type { SideAgentStatus } from "@/side-agent"
 import type { WorkflowEvent } from "@/workflow"
 

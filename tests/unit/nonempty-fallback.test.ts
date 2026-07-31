@@ -1,14 +1,11 @@
 import { describe, expect, it } from "bun:test"
 import type { CandidateVerdict, HardGateSignals } from "@/agent/verification-bundle"
 import {
-  bestEffortEligible,
-  nonEmptyFallbackEligible,
-} from "@/runner/batch/eval/selection-gates"
-import {
   type Candidate,
   runSelection,
   type SelectionPorts,
 } from "@/runner/batch/eval/selection-executor"
+import { bestEffortEligible, nonEmptyFallbackEligible } from "@/runner/batch/eval/selection-gates"
 
 // -- Pure predicate teeth -----------------------------------------------------
 
@@ -117,8 +114,7 @@ const cand = (over: Partial<Candidate> & { id: string }): Candidate => ({
  *  EMPTY patch — so the clean-mode selector-repair append degrades to a no-op
  *  (`empty_patch` stop) and `scored` holds exactly the listed candidates. */
 const genThenEmpty = (list: readonly Candidate[]): SelectionPorts["generate"] => {
-  return async (i) =>
-    (list[i] ?? cand({ id: `repair-${i}`, patch: "", files: [] })) as Candidate
+  return async (i) => (list[i] ?? cand({ id: `repair-${i}`, patch: "", files: [] })) as Candidate
 }
 
 describe("runSelection non-empty fallback (default-OFF A/B arm)", () => {

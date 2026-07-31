@@ -59,8 +59,7 @@ const STORE_SRC = join(REPO_ROOT, "src", "permission", "trust-scope-store.ts")
 const SHARED_INDEX = join(REPO_ROOT, "src", "shared", "index.ts")
 const SHARED_DIR = join(REPO_ROOT, "src", "shared")
 
-const mkTmp = async (): Promise<string> =>
-  mkdtemp(join(tmpdir(), "quanta-trust-scope-concurrent-"))
+const mkTmp = async (): Promise<string> => mkdtemp(join(tmpdir(), "quanta-trust-scope-concurrent-"))
 
 /** A local tsconfig next to the child so Bun resolves the store's `@/shared`
  *  import (the store → json-state-file → `@/shared`). Bun auto-picks the
@@ -119,14 +118,7 @@ const spawnChild = (
   opts: SpawnOpts,
 ): { proc: ReturnType<typeof Bun.spawn>; outcome: Promise<{ durable: boolean }> } => {
   const proc = Bun.spawn(
-    [
-      BUN,
-      opts.scriptPath,
-      JSON.stringify(opts.keys),
-      opts.file,
-      opts.ready,
-      opts.go,
-    ],
+    [BUN, opts.scriptPath, JSON.stringify(opts.keys), opts.file, opts.ready, opts.go],
     { stdout: "pipe", stderr: "pipe", cwd: dirname(opts.scriptPath) },
   )
   const outcome = (async () => {
@@ -197,8 +189,12 @@ describe("trust-scope concurrent grant — 2-process TOCTOU HELL", () => {
       const { aOut, bOut } = await runOneRace({
         dir,
         file,
-        a: [{ projectKey: "p1", grant: { tool: "bash", scope: "project", actionKey: "bash|cmd-A" } }],
-        b: [{ projectKey: "p1", grant: { tool: "bash", scope: "project", actionKey: "bash|cmd-B" } }],
+        a: [
+          { projectKey: "p1", grant: { tool: "bash", scope: "project", actionKey: "bash|cmd-A" } },
+        ],
+        b: [
+          { projectKey: "p1", grant: { tool: "bash", scope: "project", actionKey: "bash|cmd-B" } },
+        ],
         tag: "hc1",
       })
       // Both children believed their grant was durable.
@@ -255,9 +251,7 @@ describe("trust-scope concurrent grant — 2-process TOCTOU HELL", () => {
         dir,
         file,
         // Process A: a positive project-scoped grant for a benign command.
-        a: [
-          { projectKey: "p1", grant: { tool: "bash", scope: "project", actionKey: "bash|ls" } },
-        ],
+        a: [{ projectKey: "p1", grant: { tool: "bash", scope: "project", actionKey: "bash|ls" } }],
         // Process B: an explicit DENY for a dangerous command (must NOT be lost).
         b: [
           { projectKey: "p1", grant: { tool: "bash", scope: "deny", actionKey: "bash|rm -rf /" } },
@@ -304,8 +298,12 @@ describe("trust-scope concurrent grant — 2-process TOCTOU HELL", () => {
         // We cannot express revoke through grant(), so model A as a no-op writer
         // and perform the revoke in the parent AFTER hydrate below; the race we
         // assert is "peer grant + concurrent disk state" not re-adopting.
-        a: [{ projectKey: "p1", grant: { tool: "bash", scope: "project", actionKey: "bash|a-new" } }],
-        b: [{ projectKey: "p1", grant: { tool: "bash", scope: "project", actionKey: "bash|b-new" } }],
+        a: [
+          { projectKey: "p1", grant: { tool: "bash", scope: "project", actionKey: "bash|a-new" } },
+        ],
+        b: [
+          { projectKey: "p1", grant: { tool: "bash", scope: "project", actionKey: "bash|b-new" } },
+        ],
         tag: "hc4",
       })
       expect(aOut.durable).toBe(true)

@@ -47,7 +47,9 @@ const ARBITRATE_MARKER = "You consolidate a new candidate memory"
 const convo = (i: StreamInput): string =>
   i.messages
     .flatMap((m) =>
-      m.content.map((b) => (b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "")),
+      m.content.map((b) =>
+        b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "",
+      ),
     )
     .join(" ")
 
@@ -59,7 +61,8 @@ const EXISTING_ID = "mem:seed:release-guard-DEDUP-77"
 // A distinct-enough paraphrase: shares the load-bearing tokens with EXISTING_TEXT
 // so it clears the 0.6 lexical Jaccard, but is not byte-identical (so the
 // arbitration path — not the exact-match `skip` short-circuit — is taken).
-const NEAR_DUP_TEXT = "the release build runs bun test then bun run typecheck and lint before shipping"
+const NEAR_DUP_TEXT =
+  "the release build runs bun test then bun run typecheck and lint before shipping"
 
 // A clearly-distinct fact (no meaningful token overlap with EXISTING_TEXT) for
 // the control — findNearDuplicates returns [], so it inserts as a new row.

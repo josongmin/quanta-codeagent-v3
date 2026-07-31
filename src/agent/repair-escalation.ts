@@ -44,7 +44,11 @@ export const decideEscalation = (input: EscalationInput): EscalationDecision => 
   const strong = input.candidates.filter((c) => isStrong(c, minScore))
 
   if (!input.primaryRailRedAfterRepair) {
-    return { escalate: false, owners: [], reason: "primary rail not red after repair — no widening" }
+    return {
+      escalate: false,
+      owners: [],
+      reason: "primary rail not red after repair — no widening",
+    }
   }
   // WS2 sibling-coverage gate (the #14315 multi-site lever). Keys off the FEEDER's
   // unsliced `siblingFiles` (the SAME list the repair-seed widen injects) — so the

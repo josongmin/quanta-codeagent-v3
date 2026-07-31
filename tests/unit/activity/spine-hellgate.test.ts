@@ -38,12 +38,21 @@ describe("reduceActivity — node_open", () => {
   })
 
   test("A2 — explicit status on open is honoured", () => {
-    const s = snap([{ type: "node_open", node: { id: "a", parentId: null, kind: "agent", label: "x", status: "pending" } }])
+    const s = snap([
+      {
+        type: "node_open",
+        node: { id: "a", parentId: null, kind: "agent", label: "x", status: "pending" },
+      },
+    ])
     expect(s.byId.get("a")?.status).toBe("pending")
   })
 
   test("A3 — roots in FIRST-SEEN order; children nested under parent", () => {
-    const s = snap([open("r2", null, "workflow"), open("r1", null, "workflow"), open("c", "r2", "agent")])
+    const s = snap([
+      open("r2", null, "workflow"),
+      open("r1", null, "workflow"),
+      open("c", "r2", "agent"),
+    ])
     expect(s.roots).toEqual(["r2", "r1"]) // insertion order, NOT sorted
     expect(s.childIds.get("r2")).toEqual(["c"])
     expect(s.childIds.get("r1")).toBeUndefined()
@@ -54,7 +63,10 @@ describe("reduceActivity — node_open", () => {
       open("a", null, "agent", "old"),
       { type: "node_metric", id: "a", tokensDelta: 100 },
       { type: "node_status", id: "a", status: "stuck", stuck: { reason: "rate_limited" } },
-      { type: "node_open", node: { id: "a", parentId: null, kind: "agent", label: "new", meta: { m: "1" } } },
+      {
+        type: "node_open",
+        node: { id: "a", parentId: null, kind: "agent", label: "new", meta: { m: "1" } },
+      },
     ])
     const n = s.byId.get("a")
     expect(n?.label).toBe("new") // refreshed
@@ -64,7 +76,11 @@ describe("reduceActivity — node_open", () => {
   })
 
   test("A5 — re-open does NOT duplicate the child link", () => {
-    const s = snap([open("p", null, "workflow"), open("c", "p", "agent"), open("c", "p", "agent", "again")])
+    const s = snap([
+      open("p", null, "workflow"),
+      open("c", "p", "agent"),
+      open("c", "p", "agent", "again"),
+    ])
     expect(s.childIds.get("p")).toEqual(["c"]) // exactly once
   })
 })
@@ -78,16 +94,37 @@ describe("reduceActivity — node_status", () => {
   })
 
   test("B2 — terminal status stamps endedAt; running does not", () => {
-    const done = snap([open("a", null, "agent"), { type: "node_status", id: "a", status: "done", at: 50 }])
+    const done = snap([
+      open("a", null, "agent"),
+      { type: "node_status", id: "a", status: "done", at: 50 },
+    ])
     expect(done.byId.get("a")?.endedAt).toBe(50)
-    const run = snap([open("b", null, "agent"), { type: "node_status", id: "b", status: "running", at: 50 }])
+    const run = snap([
+      open("b", null, "agent"),
+      { type: "node_status", id: "b", status: "running", at: 50 },
+    ])
     expect(run.byId.get("b")?.endedAt).toBeUndefined()
   })
 
   test("B3 — stuck carries the reason; a later transition CLEARS it", () => {
-    const stuckSnap = snap([open("a", null, "agent"), { type: "node_status", id: "a", status: "stuck", stuck: { reason: "waiting_approval", detail: "Write x" } }])
-    expect(stuckSnap.byId.get("a")?.stuck).toEqual({ reason: "waiting_approval", detail: "Write x" })
-    const clearedSnap = snap([open("a", null, "agent"), { type: "node_status", id: "a", status: "stuck", stuck: { reason: "waiting_approval" } }, { type: "node_status", id: "a", status: "running" }])
+    const stuckSnap = snap([
+      open("a", null, "agent"),
+      {
+        type: "node_status",
+        id: "a",
+        status: "stuck",
+        stuck: { reason: "waiting_approval", detail: "Write x" },
+      },
+    ])
+    expect(stuckSnap.byId.get("a")?.stuck).toEqual({
+      reason: "waiting_approval",
+      detail: "Write x",
+    })
+    const clearedSnap = snap([
+      open("a", null, "agent"),
+      { type: "node_status", id: "a", status: "stuck", stuck: { reason: "waiting_approval" } },
+      { type: "node_status", id: "a", status: "running" },
+    ])
     expect(clearedSnap.byId.get("a")?.stuck).toBeUndefined()
   })
 
@@ -98,12 +135,17 @@ describe("reduceActivity — node_status", () => {
 
   test("B5 — status for an UNKNOWN id is dropped (NO-THROW, no ghost node)", () => {
     const st = emptyActivityState()
-    expect(() => reduceActivity(st, { type: "node_status", id: "ghost", status: "done" })).not.toThrow()
+    expect(() =>
+      reduceActivity(st, { type: "node_status", id: "ghost", status: "done" }),
+    ).not.toThrow()
     expect(materialize(st).byId.has("ghost")).toBe(false)
   })
 
   test("B6 — startedAt stamped on first running transition if open had none", () => {
-    const s = snap([open("a", null, "agent"), { type: "node_status", id: "a", status: "running", at: 9 }])
+    const s = snap([
+      open("a", null, "agent"),
+      { type: "node_status", id: "a", status: "running", at: 9 },
+    ])
     expect(s.byId.get("a")?.startedAt).toBe(9)
   })
 })
@@ -112,19 +154,30 @@ describe("reduceActivity — node_status", () => {
 
 describe("reduceActivity — node_metric", () => {
   test("C1 — deltas accumulate", () => {
-    const s = snap([open("a", null, "agent"), { type: "node_metric", id: "a", tokensDelta: 10, toolCallsDelta: 1 }, { type: "node_metric", id: "a", tokensDelta: 5 }])
+    const s = snap([
+      open("a", null, "agent"),
+      { type: "node_metric", id: "a", tokensDelta: 10, toolCallsDelta: 1 },
+      { type: "node_metric", id: "a", tokensDelta: 5 },
+    ])
     expect(s.byId.get("a")?.tokens).toBe(15)
     expect(s.byId.get("a")?.toolCalls).toBe(1)
   })
 
   test("C2 — metric for unknown id dropped (NO-THROW)", () => {
     const st = emptyActivityState()
-    expect(() => reduceActivity(st, { type: "node_metric", id: "ghost", tokensDelta: 5 })).not.toThrow()
+    expect(() =>
+      reduceActivity(st, { type: "node_metric", id: "ghost", tokensDelta: 5 }),
+    ).not.toThrow()
     expect(materialize(st).byId.has("ghost")).toBe(false)
   })
 
   test("C3 — non-finite delta ignored (no NaN poisoning the counter)", () => {
-    const s = snap([open("a", null, "agent"), { type: "node_metric", id: "a", tokensDelta: Number.NaN }, { type: "node_metric", id: "a", tokensDelta: Number.POSITIVE_INFINITY }, { type: "node_metric", id: "a", tokensDelta: 7 }])
+    const s = snap([
+      open("a", null, "agent"),
+      { type: "node_metric", id: "a", tokensDelta: Number.NaN },
+      { type: "node_metric", id: "a", tokensDelta: Number.POSITIVE_INFINITY },
+      { type: "node_metric", id: "a", tokensDelta: 7 },
+    ])
     expect(s.byId.get("a")?.tokens).toBe(7)
   })
 
@@ -249,7 +302,10 @@ describe("spine hardening", () => {
   })
 
   test("E6 — terminal-only transition does NOT back-stamp startedAt", () => {
-    const s = snap([open("a", null, "agent"), { type: "node_status", id: "a", status: "done", at: 9 }])
+    const s = snap([
+      open("a", null, "agent"),
+      { type: "node_status", id: "a", status: "done", at: 9 },
+    ])
     expect(s.byId.get("a")?.startedAt).toBeUndefined() // never started ⇒ no start time
     expect(s.byId.get("a")?.endedAt).toBe(9)
   })

@@ -13,7 +13,12 @@ const confirmingIo = () => ({ write: () => {}, read: async () => "y" })
 
 describe("cliPrompter.promptUrl — non-http rejected past the schema", () => {
   it("a schema-bypassing non-http(s) url is NEVER opened (even on user confirm)", async () => {
-    for (const url of ["file:///etc/passwd", "javascript:alert(1)", "data:text/html,x", "ftp://x"]) {
+    for (const url of [
+      "file:///etc/passwd",
+      "javascript:alert(1)",
+      "data:text/html,x",
+      "ftp://x",
+    ]) {
       const opened: string[] = []
       const prompter = cliPrompter(confirmingIo(), (u) => opened.push(u))
       const r = await prompter.promptUrl({ prompt: "open?", url } as UrlRequest)

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import type { InstanceResult } from "../types"
 import { resolvedTotals } from "../observe"
+import type { InstanceResult } from "../types"
 import { isSwebenchInfraGradeFailure, swebenchGraderInvalidVerdict } from "./driver"
 
 // RFC jun-29 #2: a swebench main-grade INFRA failure (verify set `error` on a non-pass =
@@ -11,8 +11,15 @@ const swebench = { swebench: { instanceId: "x", repo: "r", baseCommit: "c" } }
 
 describe("isSwebenchInfraGradeFailure (#2 measurement-hole fence)", () => {
   test("swebench + !passed + error ⇒ true (infra hole → will be excluded)", () => {
-    expect(isSwebenchInfraGradeFailure(swebench, { passed: false, error: "Pro harness not wired" })).toBe(true)
-    expect(isSwebenchInfraGradeFailure(swebench, { passed: false, error: "pro harness invocation failed" })).toBe(true)
+    expect(
+      isSwebenchInfraGradeFailure(swebench, { passed: false, error: "Pro harness not wired" }),
+    ).toBe(true)
+    expect(
+      isSwebenchInfraGradeFailure(swebench, {
+        passed: false,
+        error: "pro harness invocation failed",
+      }),
+    ).toBe(true)
   })
 
   // PAIRED CONTROL — the genuine miss: same !passed, but NO error ⇒ a real model miss
@@ -36,9 +43,12 @@ describe("isSwebenchInfraGradeFailure (#2 measurement-hole fence)", () => {
 // both remaining links via the extracted decision fn + the resolvedTotals consumer.
 describe("swebenchGraderInvalidVerdict (predicate → verdict wiring)", () => {
   test("infra failure ⇒ 'grader_invalid'", () => {
-    expect(swebenchGraderInvalidVerdict(false, swebench, { passed: false, error: "Pro harness not wired" })).toBe(
-      "grader_invalid",
-    )
+    expect(
+      swebenchGraderInvalidVerdict(false, swebench, {
+        passed: false,
+        error: "Pro harness not wired",
+      }),
+    ).toBe("grader_invalid")
   })
   test("gold-sanity graderInvalid ⇒ 'grader_invalid' (covers its own case)", () => {
     expect(swebenchGraderInvalidVerdict(true, swebench, { passed: true })).toBe("grader_invalid")

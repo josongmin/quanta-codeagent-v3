@@ -7,10 +7,11 @@
  *   C. composite dispatch — folder/git attach only when dep supplied            (4)
  *   D. byte-identity — omitting folders/git ⇒ no port keys (legacy shape)       (2)
  */
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs"
+
+import { afterAll, describe, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { afterAll, describe, expect, test } from "bun:test"
 import { buildInjectionFragments, type ParsedMention } from "@/agent/mention-injection"
 import {
   createCompositeMentionResolver,

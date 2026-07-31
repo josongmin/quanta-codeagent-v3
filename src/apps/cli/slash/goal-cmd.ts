@@ -22,7 +22,8 @@ const MAX_GOAL_CHARS = 4000
 
 export const goalCmd: SlashCommand = {
   name: "/goal",
-  describe: "Set or show the active pursuing objective (define measurable outcomes for best results)",
+  describe:
+    "Set or show the active pursuing objective (define measurable outcomes for best results)",
   category: "session",
 
   async run(args, ctx): Promise<number> {
@@ -55,7 +56,9 @@ export const goalCmd: SlashCommand = {
     if (raw === "") {
       const o = port.get(threadId)
       if (o === null) {
-        ctx.out("No goal set. Usage: /goal <objective>  (define measurable outcomes for best results)\n")
+        ctx.out(
+          "No goal set. Usage: /goal <objective>  (define measurable outcomes for best results)\n",
+        )
         return 0
       }
       const b = o.budget

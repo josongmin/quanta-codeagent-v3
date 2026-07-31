@@ -11,8 +11,9 @@
  * since a broken synthesis silently re-leaks the grace timer / signals a reaped
  * (recycled) pid.
  */
-import { EventEmitter } from "node:events"
+
 import { describe, expect, test } from "bun:test"
+import { EventEmitter } from "node:events"
 import { wrapChild } from "@/host/runtime/side-agent-fork-port"
 import type { ProcessTreeKiller } from "@/runtime"
 
@@ -36,7 +37,10 @@ const makeFakeCp = (pid: number | undefined) => {
   return ee
 }
 
-const spyKiller = (): { killer: ProcessTreeKiller; calls: Array<{ pid: number; signal: string }> } => {
+const spyKiller = (): {
+  killer: ProcessTreeKiller
+  calls: Array<{ pid: number; signal: string }>
+} => {
   const calls: Array<{ pid: number; signal: string }> = []
   return {
     killer: { signalTree: (pid, signal) => void calls.push({ pid, signal: String(signal) }) },

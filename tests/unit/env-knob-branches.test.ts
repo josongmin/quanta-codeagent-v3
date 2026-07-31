@@ -340,11 +340,15 @@ describe("buildSubagentConfig — QUANTA_SUBAGENT + max-depth", () => {
   })
 
   test("max-depth integer → block includes maxDepth", () => {
-    expect(buildSubagentConfig(undefined, { QUANTA_SUBAGENT: "1", QUANTA_SUBAGENT_MAX_DEPTH: "3" })).toEqual({ maxDepth: 3, ...ON })
+    expect(
+      buildSubagentConfig(undefined, { QUANTA_SUBAGENT: "1", QUANTA_SUBAGENT_MAX_DEPTH: "3" }),
+    ).toEqual({ maxDepth: 3, ...ON })
   })
 
   test("max-depth non-integer → ignored, falls back to default-ON block", () => {
-    expect(buildSubagentConfig(undefined, { QUANTA_SUBAGENT: "1", QUANTA_SUBAGENT_MAX_DEPTH: "many" })).toEqual(ON)
+    expect(
+      buildSubagentConfig(undefined, { QUANTA_SUBAGENT: "1", QUANTA_SUBAGENT_MAX_DEPTH: "many" }),
+    ).toEqual(ON)
   })
 })
 

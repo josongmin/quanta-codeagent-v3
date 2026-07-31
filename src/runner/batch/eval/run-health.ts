@@ -203,9 +203,7 @@ export interface RunHealthVerdict {
   categories: InstanceHealth[]
 }
 
-const deriveVerdict = (
-  categories: readonly InstanceHealth[],
-): RunHealthVerdict["verdict"] => {
+const deriveVerdict = (categories: readonly InstanceHealth[]): RunHealthVerdict["verdict"] => {
   if (categories.some(isHealthySignal)) return "healthy"
   if (categories.some((c) => c === "systemic_auth")) return "systemic_auth"
   if (categories.some((c) => c === "systemic_infra")) return "systemic_infra"

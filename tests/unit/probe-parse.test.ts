@@ -99,7 +99,9 @@ describe("loadRun", () => {
           unlabeledPassed: 0,
           officialResolvedPct: 50,
         },
-        instances: [{ id: "i1", passed: true, verdict: "ok", turns: 1, scoreLabel: "official_harness" }],
+        instances: [
+          { id: "i1", passed: true, verdict: "ok", turns: 1, scoreLabel: "official_harness" },
+        ],
       }),
     )
     writeFileSync(

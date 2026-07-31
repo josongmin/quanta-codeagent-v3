@@ -4,6 +4,7 @@
  * the oracle never being consulted as anything but post-hoc gold.
  */
 import { describe, expect, test } from "bun:test"
+import type { ClosureDiagnostics } from "@/runner/batch/eval/closure-diagnostics"
 import {
   buildFacts,
   diagnoseRun,
@@ -11,7 +12,6 @@ import {
   strayFilesOf,
   summarizeClosureDiagnostics,
 } from "@/runner/batch/eval/closure-diagnostics-io"
-import type { ClosureDiagnostics } from "@/runner/batch/eval/closure-diagnostics"
 import type { InstanceResult } from "@/runner/batch/types"
 
 const DIFF = `diff --git a/pkg/a.py b/pkg/a.py

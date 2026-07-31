@@ -57,10 +57,7 @@ export interface PrepareResumeOpts {
   /** Diagnostic sink (default console.error) — explains WHY a resume was skipped. */
   readonly log?: (msg: string) => void
   /** Test seam: override the durable store factory (default = real S3 store). */
-  readonly makeStore?: (
-    cfg: { bucket: string; region?: string },
-    key: string,
-  ) => ResumeStore
+  readonly makeStore?: (cfg: { bucket: string; region?: string }, key: string) => ResumeStore
   /** Test seam: directory the materialized cassette is written under. */
   readonly workDir?: string
 }
@@ -117,10 +114,7 @@ export const prepareResume = async (
   }
 }
 
-const defaultMakeStore = (
-  cfg: { bucket: string; region?: string },
-  key: string,
-): ResumeStore =>
+const defaultMakeStore = (cfg: { bucket: string; region?: string }, key: string): ResumeStore =>
   resumeStore(
     { bucket: cfg.bucket, ...(cfg.region !== undefined ? { region: cfg.region } : {}) },
     key,
@@ -139,9 +133,7 @@ const sanitizeFile = (key: string): string => key.replace(/[^A-Za-z0-9._-]+/g, "
  * `undefined` (no resume) ⇒ `{}` so the fresh requeue path is byte-identical.
  */
 export const resumeReplayBoxEnv = (
-  resume:
-    | { campaignId: string; instanceId: string; bucket: string; region?: string }
-    | undefined,
+  resume: { campaignId: string; instanceId: string; bucket: string; region?: string } | undefined,
 ): Record<string, string> => {
   if (resume === undefined) return {}
   return {

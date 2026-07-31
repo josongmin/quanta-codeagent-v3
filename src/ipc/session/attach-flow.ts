@@ -493,9 +493,7 @@ const runSessionHandshakeCore = (args: {
   readonly resumeFromSeq?: number
 }) => {
   const resumeFromSeq = args.resumeFromSeq
-  const handshake = createAttachHandshake(
-    resumeFromSeq !== undefined ? { resumeFromSeq } : {},
-  )
+  const handshake = createAttachHandshake(resumeFromSeq !== undefined ? { resumeFromSeq } : {})
   let lastSeq = resumeFromSeq ?? 0
   let snapshot: SessionSnapshotLite | undefined
   let settled = false

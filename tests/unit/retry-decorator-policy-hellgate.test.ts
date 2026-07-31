@@ -153,7 +153,7 @@ class OkLLM implements LLMPort {
 describe("DOF-30 ON-proof — RetryingLLM retry decision flows from codexSpecRoute", () => {
   // A kind the table routes to a same-provider-retryable action RETRIES; a kind
   // it routes fatal/hitl does NOT. Observable via inner.calls.
-  test('retryable table kind (rate_limit → retry_after_backoff) ⇒ RetryingLLM retries then succeeds', async () => {
+  test("retryable table kind (rate_limit → retry_after_backoff) ⇒ RetryingLLM retries then succeeds", async () => {
     // ORACLE precondition — the derived wire says "retry".
     expect(retryDispositionForKind("rate_limit")).toBe("retry")
 
@@ -171,7 +171,7 @@ describe("DOF-30 ON-proof — RetryingLLM retry decision flows from codexSpecRou
     expect(call).toBe(2) // retried exactly once
   })
 
-  test('non-retryable table kind (auth → hitl_handoff) ⇒ RetryingLLM does NOT retry', async () => {
+  test("non-retryable table kind (auth → hitl_handoff) ⇒ RetryingLLM does NOT retry", async () => {
     // ORACLE precondition — the derived wire says "no_retry".
     expect(retryDispositionForKind("auth")).toBe("no_retry")
     const inner = new ThrowingLLM(new LLMError("401 unauthorized", { kind: "auth" }))
@@ -180,7 +180,7 @@ describe("DOF-30 ON-proof — RetryingLLM retry decision flows from codexSpecRou
     expect(inner.calls).toBe(1) // no retry
   })
 
-  test('not_implemented (fallback_provider action) is NON-retryable at RetryingLLM (carve-out) but IS a fallback trigger', () => {
+  test("not_implemented (fallback_provider action) is NON-retryable at RetryingLLM (carve-out) but IS a fallback trigger", () => {
     // The one place the retry axis and the table action diverge: table routes
     // it to fallback_provider, but same-provider retry is waste (stub throws
     // identically). Derivation encodes both: no same-provider retry, YES swap.
@@ -192,7 +192,7 @@ describe("DOF-30 ON-proof — RetryingLLM retry decision flows from codexSpecRou
 })
 
 describe("DOF-30 ON-proof — FallbackLLM swap decision flows from codexSpecRoute", () => {
-  test('fallback_provider table kind (server_error) ⇒ FallbackLLM advances to the next provider', async () => {
+  test("fallback_provider table kind (server_error) ⇒ FallbackLLM advances to the next provider", async () => {
     // ORACLE precondition — the derived wire says this kind is a fallback trigger.
     expect(isFallbackKind("server_error")).toBe(true)
     const primary = new ThrowingLLM(new LLMError("500", { kind: "server_error" }))
@@ -204,7 +204,7 @@ describe("DOF-30 ON-proof — FallbackLLM swap decision flows from codexSpecRout
     expect(secondary.calls).toBe(1) // swap happened
   })
 
-  test('non-fallback table kind (auth → hitl_handoff) ⇒ FallbackLLM does NOT swap, rethrows immediately', async () => {
+  test("non-fallback table kind (auth → hitl_handoff) ⇒ FallbackLLM does NOT swap, rethrows immediately", async () => {
     expect(isFallbackKind("auth")).toBe(false)
     const primary = new ThrowingLLM(new LLMError("401", { kind: "auth" }))
     const secondary = new OkLLM()

@@ -62,7 +62,10 @@ describe("DOF-40 approval attribution gap — fail-closed surfacing", () => {
 
   it("ON: unknown-id settle WITH observer surfaces the gap (id + op + decision)", () => {
     const sink = gapSink()
-    const asm = createApprovalStateMachine({ now: stepClock(), onUnattributed: sink.onUnattributed })
+    const asm = createApprovalStateMachine({
+      now: stepClock(),
+      onUnattributed: sink.onUnattributed,
+    })
     const out = asm.settle("kernel-id-never-requested", "approve")
     // Contract unchanged: still null (no phantom record minted).
     expect(out).toBeNull()
@@ -78,7 +81,10 @@ describe("DOF-40 approval attribution gap — fail-closed surfacing", () => {
 
   it("ON: unknown-id settle(deny) reports decision='deny'; unknown decision coerces to deny", () => {
     const sink = gapSink()
-    const asm = createApprovalStateMachine({ now: stepClock(), onUnattributed: sink.onUnattributed })
+    const asm = createApprovalStateMachine({
+      now: stepClock(),
+      onUnattributed: sink.onUnattributed,
+    })
     asm.settle("id-1", "deny")
     // Unknown decision → SM coerces to deny; the gap mirrors the coerced value.
     asm.settle("id-2", "garbage" as never)
@@ -90,7 +96,10 @@ describe("DOF-40 approval attribution gap — fail-closed surfacing", () => {
 
   it("ON: unknown-id expire + cancel each surface a gap with the matching op (no decision)", () => {
     const sink = gapSink()
-    const asm = createApprovalStateMachine({ now: stepClock(), onUnattributed: sink.onUnattributed })
+    const asm = createApprovalStateMachine({
+      now: stepClock(),
+      onUnattributed: sink.onUnattributed,
+    })
     asm.expire("gone-1")
     asm.cancel("gone-2")
     expect(sink.gaps).toEqual([
@@ -119,7 +128,10 @@ describe("DOF-40 approval attribution gap — fail-closed surfacing", () => {
 
   it("no false gap: a KNOWN pending id settles normally and fires NO gap", () => {
     const sink = gapSink()
-    const asm = createApprovalStateMachine({ now: stepClock(), onUnattributed: sink.onUnattributed })
+    const asm = createApprovalStateMachine({
+      now: stepClock(),
+      onUnattributed: sink.onUnattributed,
+    })
     const r = asm.request({
       id: "known-1",
       threadId: "t",
@@ -137,7 +149,10 @@ describe("DOF-40 approval attribution gap — fail-closed surfacing", () => {
 
   it("no false gap on idempotent re-settle: already-settled id is not a gap", () => {
     const sink = gapSink()
-    const asm = createApprovalStateMachine({ now: stepClock(), onUnattributed: sink.onUnattributed })
+    const asm = createApprovalStateMachine({
+      now: stepClock(),
+      onUnattributed: sink.onUnattributed,
+    })
     asm.request({
       id: "known-2",
       threadId: "t",
@@ -213,7 +228,11 @@ describe("DOF-40 approval attribution gap — fail-closed surfacing", () => {
     // silent-drop the fix targets) DOES surface a gap.
     asm.settle("orphan-kernel-id", "approve")
     expect(sink.gaps).toEqual([
-      expect.objectContaining({ approvalId: "orphan-kernel-id", op: "settle", decision: "approve" }),
+      expect.objectContaining({
+        approvalId: "orphan-kernel-id",
+        op: "settle",
+        decision: "approve",
+      }),
     ])
   })
 })

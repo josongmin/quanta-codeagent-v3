@@ -199,7 +199,13 @@ export const checkSessionStoreHealth = async (): Promise<StoreHealthReport> => {
     try {
       path = buildPath(id)
     } catch (e) {
-      return { id, path: id, archived, status: "corrupt", detail: `invalid session id: ${errMessage(e)}` }
+      return {
+        id,
+        path: id,
+        archived,
+        status: "corrupt",
+        detail: `invalid session id: ${errMessage(e)}`,
+      }
     }
     return classifyOne(id, path, archived)
   }
@@ -228,7 +234,14 @@ export const checkSessionStoreHealth = async (): Promise<StoreHealthReport> => {
     verdict === "corrupt" || verdict === "degraded" ? buildRecoveryGuidance(base) : undefined
 
   if (guidance !== undefined) {
-    logger.warn("session store health: non-healthy", { root, verdict, total, ok, corrupt, unreadable })
+    logger.warn("session store health: non-healthy", {
+      root,
+      verdict,
+      total,
+      ok,
+      corrupt,
+      unreadable,
+    })
   }
 
   return { ...base, files, ...(guidance !== undefined ? { guidance } : {}) }

@@ -4,10 +4,10 @@ import {
   linuxOsSandbox,
   nativeLandlockOsSandbox,
   SANDBOX_UNAVAILABLE_EXIT_CODE,
-  sandboxUnavailableRefusal,
   type SandboxedSpawnResult,
   type SandboxPolicy,
   type Spawner,
+  sandboxUnavailableRefusal,
 } from "@/runtime/os-sandbox"
 
 /**
@@ -153,7 +153,10 @@ describe("C. paired control: backend present ⇒ spawner IS called (not a blanke
   test("REFUSE-C1: linux + bwrap present ⇒ command spawned under bwrap, sandboxApplied=true", async () => {
     const { spawner, calls } = makeSentinelSpawner()
     const sb = linuxOsSandbox({ spawner, which: whichBwrapOnly })
-    const r = await sb.spawn({ command: ["echo", "hi"], cwd: "/ws" }, { profile: "workspace-write" })
+    const r = await sb.spawn(
+      { command: ["echo", "hi"], cwd: "/ws" },
+      { profile: "workspace-write" },
+    )
     // The spawner WAS called — the refusal is specific to the unavailable case.
     expect(calls.length).toBe(1)
     expect((calls[0] as SpawnCall).argv[0]).toBe("bwrap")

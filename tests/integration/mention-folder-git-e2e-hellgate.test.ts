@@ -10,10 +10,11 @@
  * call, with real fs (folder) + an injected git provider, and asserts the
  * model-visible envelope carries the folder listing + git body.
  */
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs"
+
+import { describe, expect, test } from "bun:test"
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 import {
   buildInjectionFragments,
   buildMentionInjectionMessages,

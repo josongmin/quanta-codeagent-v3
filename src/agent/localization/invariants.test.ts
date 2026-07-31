@@ -16,7 +16,9 @@ const cand = (over: Partial<CandidateInput> = {}): CandidateInput => ({
 describe("addCandidate — domain", () => {
   test("unknown kind throws", () => {
     const t = createLocalizationTracker()
-    expect(() => t.addCandidate(cand({ kind: "module" as never }))).toThrow(/unknown candidate kind/)
+    expect(() => t.addCandidate(cand({ kind: "module" as never }))).toThrow(
+      /unknown candidate kind/,
+    )
   })
   test("confidence outside [0,1] or non-finite throws", () => {
     const t = createLocalizationTracker()

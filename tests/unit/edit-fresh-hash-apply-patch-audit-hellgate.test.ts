@@ -228,7 +228,11 @@ describe("jul-13 apply_patch × edit-fresh-hash AUDIT — untested success sites
     writeFileSync(path, ORIGINAL, "utf8")
     const state = new ReadFileState()
     const readTimeMtime = recordReadTimeMtime(state, path)
-    const fb = makeFallback(() => ({ ok: true, newPatch: fixedPatch(rel), rationale: "re-emitted" }))
+    const fb = makeFallback(() => ({
+      ok: true,
+      newPatch: fixedPatch(rel),
+      rationale: "re-emitted",
+    }))
     // ONLY difference vs test A: editFreshHash OFF. The guard + fallback are
     // wired identically, isolating the site-3 refresh as the sole variable.
     const ctx = prodCtx({ cwd: dir, state, freshHash: false, fallback: fb })
@@ -353,9 +357,9 @@ describe("jul-13 apply_patch × edit-fresh-hash AUDIT — untested success sites
       expect((outcome.error as Error).name).not.toBe("StaleReadError")
     } else {
       // If it surfaced a result, it must NOT be a stale_read rejection.
-      expect(
-        (outcome.result.failure as { reason?: string } | undefined)?.reason,
-      ).not.toBe("stale_read")
+      expect((outcome.result.failure as { reason?: string } | undefined)?.reason).not.toBe(
+        "stale_read",
+      )
     }
   })
 

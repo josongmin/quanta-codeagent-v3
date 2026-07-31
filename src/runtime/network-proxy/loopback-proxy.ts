@@ -321,7 +321,8 @@ export class LoopbackEgressProxy implements NetworkProxyPort {
       // rejection + a hung client socket. Fail closed to 502, mirroring the
       // `upstream.on("error")` idiom below.
       void this.scanAndPipeHttp(req, res, target, this.config.secretEgress).catch(() => {
-        if (!res.headersSent) res.writeHead(502, { "content-type": "text/plain" }).end("egress-scan error")
+        if (!res.headersSent)
+          res.writeHead(502, { "content-type": "text/plain" }).end("egress-scan error")
         else res.end()
       })
       return

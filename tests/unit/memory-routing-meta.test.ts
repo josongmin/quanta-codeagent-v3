@@ -10,12 +10,7 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStore } from "@/memory/adapters/in-memory"
 import { rankEntries, scoreEntry } from "@/memory/ranking"
-import {
-  EMBED_DIM,
-  type MemoryEntry,
-  type MemoryQuery,
-  normalizeEntry,
-} from "@/memory/types"
+import { EMBED_DIM, type MemoryEntry, type MemoryQuery, normalizeEntry } from "@/memory/types"
 
 const NOW = 1_000_000_000_000
 
@@ -192,9 +187,7 @@ describe("§10.6 recall weighting — boosts on match (opt-in)", () => {
 describe("§10.6 InMemoryStore — meta round-trips + clone isolates appliesTo", () => {
   test("save→get preserves routing meta", async () => {
     const store = new InMemoryStore()
-    await store.save(
-      entry({ id: "m", taskGroup: "g", appliesTo: { cwd: "/x" }, reuseRule: "rr" }),
-    )
+    await store.save(entry({ id: "m", taskGroup: "g", appliesTo: { cwd: "/x" }, reuseRule: "rr" }))
     const got = await store.get("m")
     expect(got?.taskGroup).toBe("g")
     expect(got?.appliesTo).toEqual({ cwd: "/x" })

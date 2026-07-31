@@ -66,9 +66,7 @@ export const createWebAskUserPort = (
       return { ok: false, reason: "empty-options" }
     }
     const labels =
-      req.kind === "select" || req.kind === "multiselect"
-        ? req.options.map(optionLabel)
-        : undefined
+      req.kind === "select" || req.kind === "multiselect" ? req.options.map(optionLabel) : undefined
     // UUX-2-17 — the rich structure rides ALONGSIDE the label-only `choices`
     // (which stays the pickable-value contract for label-only clients).
     const details =

@@ -8,12 +8,12 @@
  * AUTO-SKIPS without cargo + lldb-dap. Verified 2026-06-10.
  */
 import { describe, expect, test } from "bun:test"
-import { gateOn } from "@/shared"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { buildEvidence } from "@/tool/evidence/builder"
+import { gateOn } from "@/shared"
 import { defaultRuntimePort } from "@/tool/evidence"
+import { buildEvidence } from "@/tool/evidence/builder"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
 
 const has = (b: string, ...a: string[]): boolean => {
@@ -57,7 +57,10 @@ D("defaultRuntimePort — REAL Rust runtime via lldb-dap (second runtime languag
   test("buildEvidence captures the rust test's locals (the value behind the failure)", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "rtrs-")))
     mkdirSync(join(dir, "src"), { recursive: true })
-    writeFileSync(join(dir, "Cargo.toml"), ['[package]', 'name = "t"', 'version = "0.1.0"', 'edition = "2021"'].join("\n"))
+    writeFileSync(
+      join(dir, "Cargo.toml"),
+      ["[package]", 'name = "t"', 'version = "0.1.0"', 'edition = "2021"'].join("\n"),
+    )
     writeFileSync(join(dir, "src", "lib.rs"), LIB_RS)
 
     const pkt = await buildEvidence(dir, {
@@ -77,7 +80,7 @@ D("defaultRuntimePort — REAL Rust runtime via lldb-dap (second runtime languag
     expect((result?.type ?? "").length).toBeGreaterThan(0)
     // SOTA++: per-frame locals are captured — the headline `locals` is the stop
     // frame's, exposed again under `frames[0]` for caller-context drill-down.
-    expect((pkt.runtime?.frames?.length ?? 0)).toBeGreaterThan(0)
+    expect(pkt.runtime?.frames?.length ?? 0).toBeGreaterThan(0)
     expect(pkt.runtime?.frames?.[0]?.locals.some((v) => v.name === "result")).toBe(true)
     // T-03 follow-up — Rust PRETTY-PRINTER: with Rust's lldb formatters sourced
     // (initCommands), a `Vec<i32>` surfaces its ELEMENTS as children ([0]=10, …)

@@ -1,6 +1,6 @@
+import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 import ts from "typescript"
 import {
   SESSION_COMMAND_TYPES,
@@ -63,24 +63,12 @@ const FRONTEND_PROTOCOL_PATH = join(REPO_ROOT, GENERATED_OUTPUT_PATH)
  *  barrel-targeting checks. */
 const FRONTEND_BARREL_PATH = join(REPO_ROOT, "apps/web-frontend/src/types/protocol.ts")
 
-const FRONTEND_ENVELOPE_PATH = join(
-  REPO_ROOT,
-  "apps/web-frontend/src/ws/envelope.ts",
-)
-const FRONTEND_SLASH_KNOBS_PATH = join(
-  REPO_ROOT,
-  "apps/web-frontend/src/components/slash-knobs.ts",
-)
+const FRONTEND_ENVELOPE_PATH = join(REPO_ROOT, "apps/web-frontend/src/ws/envelope.ts")
+const FRONTEND_SLASH_KNOBS_PATH = join(REPO_ROOT, "apps/web-frontend/src/components/slash-knobs.ts")
 const DAEMON_CONFIG_HTTP_PATH = join(REPO_ROOT, "src/apps/web-daemon/server/http.ts")
 
-const ESCALATION_CARD_PATH = join(
-  REPO_ROOT,
-  "apps/web-frontend/src/components/EscalationCard.tsx",
-)
-const ESCALATION_OPTIONS_PATH = join(
-  REPO_ROOT,
-  "src/agent/skill-scope-escalation.ts",
-)
+const ESCALATION_CARD_PATH = join(REPO_ROOT, "apps/web-frontend/src/components/EscalationCard.tsx")
+const ESCALATION_OPTIONS_PATH = join(REPO_ROOT, "src/agent/skill-scope-escalation.ts")
 
 const readText = (path: string): string => readFileSync(path, "utf8")
 
@@ -114,9 +102,7 @@ const extractUnionTypeLiterals = (
   //    `extends <envelopeName><"literal">` declaration.
   const literals = new Set<string>()
   for (const name of memberNames) {
-    const ifaceRe = new RegExp(
-      `interface ${name}\\b[\\s\\S]*?extends ${envelopeName}<"([^"]+)">`,
-    )
+    const ifaceRe = new RegExp(`interface ${name}\\b[\\s\\S]*?extends ${envelopeName}<"([^"]+)">`)
     const ifaceMatch = ifaceRe.exec(source)
     if (ifaceMatch?.[1] !== undefined) literals.add(ifaceMatch[1])
   }
@@ -128,9 +114,7 @@ const extractUnionTypeLiterals = (
  * Used for the config-key allowlist mirrors on both the daemon and frontend.
  */
 const extractSetLiterals = (source: string, constName: string): Set<string> => {
-  const re = new RegExp(
-    `${constName}[^=]*=\\s*new Set\\(\\[([\\s\\S]*?)\\]\\)`,
-  )
+  const re = new RegExp(`${constName}[^=]*=\\s*new Set\\(\\[([\\s\\S]*?)\\]\\)`)
   const match = re.exec(source)
   if (match === null) {
     throw new Error(`could not locate \`${constName} = new Set([…])\``)
@@ -176,7 +160,9 @@ const extractOrderedArrayLiterals = (source: string, constName: string): string[
   if (match === null) {
     throw new Error(`could not locate \`${constName} = [ … ]\` array literal`)
   }
-  return [...(match[1] ?? "").matchAll(/"([^"]+)"/g)].flatMap((m) => (m[1] !== undefined ? [m[1]] : []))
+  return [...(match[1] ?? "").matchAll(/"([^"]+)"/g)].flatMap((m) =>
+    m[1] !== undefined ? [m[1]] : [],
+  )
 }
 
 /**
@@ -236,11 +222,10 @@ describe("wire-protocol GENERATED bundle is in sync with canonical (ticket 03-B 
     // hook forces a `bun run build:protocol` to resolve.
     const committed = readText(FRONTEND_PROTOCOL_PATH)
     // A stand-in "regeneration" that grew a member the committed file lacks.
-    const regeneratedWithNewEvent =
-      committed.replace(
-        "export interface SessionClosedEvent",
-        "export interface WidgetPokedEvent extends SessionEventEnvelope<\"widget.poked\"> {\n  readonly widgetId: string\n}\n\nexport interface SessionClosedEvent",
-      )
+    const regeneratedWithNewEvent = committed.replace(
+      "export interface SessionClosedEvent",
+      'export interface WidgetPokedEvent extends SessionEventEnvelope<"widget.poked"> {\n  readonly widgetId: string\n}\n\nexport interface SessionClosedEvent',
+    )
     // Sanity: the injection actually changed the text (guards a no-op replace).
     expect(regeneratedWithNewEvent).not.toBe(committed)
     // The guard's assertion (`regenerated === committed`) would fail on this pair.
@@ -287,10 +272,7 @@ describe("wire-protocol drift contract: frontend copy === canonical daemon SSOT"
     // the frame (losing its seq, breaking resume). A past drift kept the union
     // in sync but let this array fall behind — so the daemon's `turn.llm.request`
     // / `turn.llm.continuation` events were silently dropped. Pin both directions.
-    const gateTypes = extractArrayLiterals(
-      readText(FRONTEND_ENVELOPE_PATH),
-      "EVENT_TYPES",
-    )
+    const gateTypes = extractArrayLiterals(readText(FRONTEND_ENVELOPE_PATH), "EVENT_TYPES")
     const canonical = new Set<string>(SESSION_EVENT_TYPES)
 
     expect([...gateTypes].sort()).toEqual([...canonical].sort())
@@ -376,9 +358,7 @@ describe("wire-protocol drift contract: frontend copy === canonical daemon SSOT"
     for (const t of canonical) {
       expect(t.startsWith("permission_escalation")).toBe(false)
     }
-    const canonicalSnapshot = readText(
-      join(REPO_ROOT, "src/protocol/session/snapshot.ts"),
-    )
+    const canonicalSnapshot = readText(join(REPO_ROOT, "src/protocol/session/snapshot.ts"))
     const frontendProtocol = readText(FRONTEND_PROTOCOL_PATH)
     for (const source of [canonicalSnapshot, frontendProtocol]) {
       expect(source).toContain("scopeContext")
@@ -416,10 +396,7 @@ describe("wire-protocol drift contract: frontend copy === canonical daemon SSOT"
       readText(FRONTEND_SLASH_KNOBS_PATH),
       "CONFIG_WRITABLE_KEYS",
     )
-    const daemonKeys = extractSetLiterals(
-      readText(DAEMON_CONFIG_HTTP_PATH),
-      "CONFIG_ALLOWED_KEYS",
-    )
+    const daemonKeys = extractSetLiterals(readText(DAEMON_CONFIG_HTTP_PATH), "CONFIG_ALLOWED_KEYS")
 
     expect([...frontendKeys].sort()).toEqual([...daemonKeys].sort())
 

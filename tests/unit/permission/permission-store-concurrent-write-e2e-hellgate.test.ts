@@ -273,7 +273,15 @@ describe("permission-store concurrent write — 2-process TOCTOU HELL", () => {
         // Process A: a positive per-thread grant for the shared thread.
         a: [{ kind: "grant", threadId: "shared", sig: "" }],
         // Process B: an explicit DENY on the SAME thread (must NOT be lost).
-        b: [{ kind: "deny", threadId: "shared", sig: "rm-rf-slash", deniedAt: 99, reason: "rm -rf /" }],
+        b: [
+          {
+            kind: "deny",
+            threadId: "shared",
+            sig: "rm-rf-slash",
+            deniedAt: 99,
+            reason: "rm -rf /",
+          },
+        ],
         tag: "hp3",
       })
       expect(aRes).toBe("ok")

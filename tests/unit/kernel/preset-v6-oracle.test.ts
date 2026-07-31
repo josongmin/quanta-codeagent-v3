@@ -79,7 +79,9 @@ describe("agentless-v6-oracle — the synthesis-convergence lever preset", () =>
     // every oracle param preserved
     for (const [k, v] of Object.entries(oracle)) expect(hard[k]).toBe(v)
     // exactly the two PUBLIC-only hardening knobs added
-    const added = Object.keys(hard).filter((k) => !(k in oracle)).sort()
+    const added = Object.keys(hard)
+      .filter((k) => !(k in oracle))
+      .sort()
     expect(added).toEqual(["repair-strong-oracle", "repro-vote"])
     // frozen literal matches
     expect(KNOB_PRESETS[HARD]?.["repro-vote"]).toBe("1")
@@ -93,7 +95,9 @@ describe("agentless-v6-oracle — the synthesis-convergence lever preset", () =>
     const hard = PRESET_SPECS[HARD]?.params ?? {}
     const v7 = PRESET_SPECS[V7]?.params ?? {}
     for (const [k, v] of Object.entries(hard)) expect(v7[k]).toBe(v)
-    const added = Object.keys(v7).filter((k) => !(k in hard)).sort()
+    const added = Object.keys(v7)
+      .filter((k) => !(k in hard))
+      .sort()
     expect(added).toEqual([
       "acceptance",
       "adversarial-repro",

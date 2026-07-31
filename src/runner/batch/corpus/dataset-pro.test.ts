@@ -88,7 +88,10 @@ describe("Pro ingest — normalize + parse + carry (RFC jun-29)", () => {
   // python — NOT fenced to the "true" no-op (that would mute a gradeable Python repo).
   test("python spellings (python3/py/cpython/Python) ⇒ real testCmd, not fenced", () => {
     for (const repo_language of ["python3", "py", "cpython", "Python", "python 3.11"]) {
-      const tasks = parseSwebenchJsonl(JSON.stringify({ ...proRow, repo_language }), normalizeProRow)
+      const tasks = parseSwebenchJsonl(
+        JSON.stringify({ ...proRow, repo_language }),
+        normalizeProRow,
+      )
       const inst = toInstance(tasks[0]!, "/tmp/repo")
       expect(inst.testCmd).not.toBe("true")
       expect(inst.testCmd).toContain("test_y")

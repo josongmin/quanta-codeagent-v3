@@ -2,9 +2,9 @@ import { describe, expect, it } from "bun:test"
 import type { RemoteBackend } from "../backend"
 import {
   isResumeEligible,
-  readReceipt,
   type ResumeReceipt,
   type RunAwsResult,
+  readReceipt,
   s3Backend,
   segmentStore,
   writeReceipt,
@@ -109,7 +109,11 @@ describe("segment-store", () => {
     const holed: RemoteBackend = {
       ...be,
       async list() {
-        return ["camp/inst/events/000001.json", "camp/inst/events/000002.json", "camp/inst/events/000003.json"]
+        return [
+          "camp/inst/events/000001.json",
+          "camp/inst/events/000002.json",
+          "camp/inst/events/000003.json",
+        ]
       },
       async get(path) {
         if (path === "camp/inst/events/000002.json") return undefined
@@ -236,7 +240,7 @@ describe("resume-receipt", () => {
     expect(isResumeEligible(degradedAbsent)).toBe(false)
   })
 
-  it("FIX1: degraded as the STRING \"false\" is ineligible (not coerced truthy/falsy)", () => {
+  it('FIX1: degraded as the STRING "false" is ineligible (not coerced truthy/falsy)', () => {
     const stringFalse = { ...sample, degraded: "false" } as unknown as ResumeReceipt
     expect(isResumeEligible(stringFalse)).toBe(false)
   })
@@ -265,7 +269,7 @@ describe("resume-receipt", () => {
     expect(isResumeEligible(sample)).toBe(true)
   })
 
-  it("FIX1: readReceipt of a {\"degraded\":\"false\"} blob (mistyped) ⇒ undefined", async () => {
+  it('FIX1: readReceipt of a {"degraded":"false"} blob (mistyped) ⇒ undefined', async () => {
     const be = fakeBackend()
     const blob: RemoteBackend = {
       ...be,
@@ -382,9 +386,7 @@ describe("s3-backend", () => {
       { stdout: "", exitCode: 1, stderr: "AccessDenied: not authorized to PutObject" },
     ])
     const be = s3Backend({ bucket: "bkt", runAws })
-    await expect(be.put("camp/inst/events/000001.json", "body")).rejects.toThrow(
-      /AccessDenied/,
-    )
+    await expect(be.put("camp/inst/events/000001.json", "body")).rejects.toThrow(/AccessDenied/)
   })
 
   it("list parses FULL keys from realistic `aws s3 ls --recursive` output", async () => {
@@ -411,10 +413,7 @@ describe("s3-backend", () => {
   })
 
   it("FIX5: list parses a key CONTAINING A SPACE (slices past first 3 cols, keeps remainder)", async () => {
-    const lsOut = [
-      "2026-06-27 08:10:01         12 camp/inst/has space/file.json",
-      "",
-    ].join("\n")
+    const lsOut = ["2026-06-27 08:10:01         12 camp/inst/has space/file.json", ""].join("\n")
     const { runAws } = recordingRunAws([{ stdout: lsOut, exitCode: 0 }])
     const be = s3Backend({ bucket: "bkt", runAws })
     const keys = await be.list("camp/inst/")

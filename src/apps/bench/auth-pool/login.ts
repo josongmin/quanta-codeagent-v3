@@ -34,8 +34,10 @@ const sanitizeLabel = (label: string): string => label.replace(/[^A-Za-z0-9_-]+/
 
 /** Per-label credential path: `<quantaHome>/auth/chatgpt-<label>.json`. Distinct
  *  from the single-account default so accounts never clobber each other. */
-export const benchAccountAuthFile = (env: Record<string, string | undefined>, label: string): string =>
-  join(resolveQuantaHome(env), "auth", `chatgpt-${sanitizeLabel(label)}.json`)
+export const benchAccountAuthFile = (
+  env: Record<string, string | undefined>,
+  label: string,
+): string => join(resolveQuantaHome(env), "auth", `chatgpt-${sanitizeLabel(label)}.json`)
 
 /** Default manifest the fleet auto-builds when no `--auth-pool` is given. */
 export const defaultBenchManifestPath = (env: Record<string, string | undefined>): string =>
@@ -173,11 +175,7 @@ export const runBenchLogin = async (
   const writeTokenImpl = deps.writeTokenImpl ?? writeToken
   await writeTokenImpl(authFile, record)
 
-  const reg = registerAccount(
-    manifestPath,
-    { label, authFile, maxParallel },
-    deps,
-  )
+  const reg = registerAccount(manifestPath, { label, authFile, maxParallel }, deps)
 
   return {
     label,

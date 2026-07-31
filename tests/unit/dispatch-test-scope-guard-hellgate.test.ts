@@ -14,9 +14,9 @@ import { describe, expect, test } from "bun:test"
 import { z } from "zod"
 import type { AgentConfig } from "@/agent"
 import { dispatchTool } from "@/agent/dispatch"
+import type { ToolUseBlock } from "@/llm/types"
 import type { PermissionContext } from "@/permission"
 import { type Tool, type ToolEvent, ToolRegistry } from "@/tool"
-import type { ToolUseBlock } from "@/llm/types"
 
 const makeMutating = (name: string, schema: z.ZodTypeAny): Tool => ({
   name,
@@ -42,7 +42,12 @@ const config = (over: Partial<AgentConfig> = {}): AgentConfig =>
     ...over,
   }) as AgentConfig
 
-const call = (name: string, input: unknown): ToolUseBlock => ({ type: "tool_use", id: "c1", name, input })
+const call = (name: string, input: unknown): ToolUseBlock => ({
+  type: "tool_use",
+  id: "c1",
+  name,
+  input,
+})
 const perm: PermissionContext = { mode: "acceptEdits" }
 
 describe("dispatch test-scope guard", () => {
@@ -85,7 +90,11 @@ describe("dispatch test-scope guard", () => {
       "+new",
       "*** End Patch",
     ].join("\n")
-    const res = await dispatchTool(call("apply_patch", { patch }), config({ protectTestPaths: true }), perm)
+    const res = await dispatchTool(
+      call("apply_patch", { patch }),
+      config({ protectTestPaths: true }),
+      perm,
+    )
     expect(res.preview).toBe("test-scope-blocked")
   })
 
@@ -98,7 +107,11 @@ describe("dispatch test-scope guard", () => {
       "+new",
       "*** End Patch",
     ].join("\n")
-    const res = await dispatchTool(call("apply_patch", { patch }), config({ protectTestPaths: true }), perm)
+    const res = await dispatchTool(
+      call("apply_patch", { patch }),
+      config({ protectTestPaths: true }),
+      perm,
+    )
     expect(res.preview).not.toBe("test-scope-blocked")
   })
 

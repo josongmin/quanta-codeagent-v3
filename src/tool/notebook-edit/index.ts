@@ -13,8 +13,19 @@
 import { errMessage } from "@/shared"
 
 export type NotebookEditOp =
-  | { readonly kind: "str_replace"; readonly cell: number; readonly oldStr: string; readonly newStr: string; readonly replaceAll?: boolean }
-  | { readonly kind: "insert"; readonly index: number; readonly cellType: "code" | "markdown"; readonly source: string }
+  | {
+      readonly kind: "str_replace"
+      readonly cell: number
+      readonly oldStr: string
+      readonly newStr: string
+      readonly replaceAll?: boolean
+    }
+  | {
+      readonly kind: "insert"
+      readonly index: number
+      readonly cellType: "code" | "markdown"
+      readonly source: string
+    }
   | { readonly kind: "delete"; readonly cell: number }
 
 export type NotebookEditResult =
@@ -50,7 +61,11 @@ export const editNotebook = (rawJson: string, op: NotebookEditOp): NotebookEditR
   let nb: Notebook
   try {
     const parsed = JSON.parse(rawJson) as unknown
-    if (parsed === null || typeof parsed !== "object" || !Array.isArray((parsed as Notebook).cells)) {
+    if (
+      parsed === null ||
+      typeof parsed !== "object" ||
+      !Array.isArray((parsed as Notebook).cells)
+    ) {
       return fail("not a notebook: no `cells` array (nbformat expected)")
     }
     // Work on a shallow clone of the cells array so the input is never mutated.
@@ -70,9 +85,13 @@ export const editNotebook = (rawJson: string, op: NotebookEditOp): NotebookEditR
         const occ = body.split(op.oldStr).length - 1
         if (occ === 0) return fail(`str_replace: oldStr not found in cell ${op.cell}`)
         if (occ > 1 && op.replaceAll !== true)
-          return fail(`str_replace: oldStr matches ${occ}× in cell ${op.cell} — pass replaceAll or disambiguate`)
+          return fail(
+            `str_replace: oldStr matches ${occ}× in cell ${op.cell} — pass replaceAll or disambiguate`,
+          )
         const next =
-          op.replaceAll === true ? body.split(op.oldStr).join(op.newStr) : body.replace(op.oldStr, op.newStr)
+          op.replaceAll === true
+            ? body.split(op.oldStr).join(op.newStr)
+            : body.replace(op.oldStr, op.newStr)
         nb.cells[op.cell] = { ...cell, source: splitLines(next) }
         return ok(nb, `str_replace in cell ${op.cell} (${occ}×)`)
       }
@@ -83,7 +102,13 @@ export const editNotebook = (rawJson: string, op: NotebookEditOp): NotebookEditR
         // missing id on load) rather than mint a non-deterministic one.
         const cell: NbCell =
           op.cellType === "code"
-            ? { cell_type: "code", source: splitLines(op.source), metadata: {}, execution_count: null, outputs: [] }
+            ? {
+                cell_type: "code",
+                source: splitLines(op.source),
+                metadata: {},
+                execution_count: null,
+                outputs: [],
+              }
             : { cell_type: "markdown", source: splitLines(op.source), metadata: {} }
         nb.cells.splice(op.index, 0, cell)
         return ok(nb, `inserted ${op.cellType} cell at index ${op.index}`)

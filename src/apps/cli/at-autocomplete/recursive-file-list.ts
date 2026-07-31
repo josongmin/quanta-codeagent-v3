@@ -44,10 +44,7 @@ import type { AtCandidate } from "./port"
 /** Enumerate workspace files relative to `root`. Returns forward-slash
  *  paths, or `null` to signal "source unavailable — use the fallback".
  *  Injected so tests can drive both the rg path and the walk path. */
-export type FileSource = (
-  root: string,
-  signal?: AbortSignal,
-) => Promise<readonly string[] | null>
+export type FileSource = (root: string, signal?: AbortSignal) => Promise<readonly string[] | null>
 
 /** Options for {@link createRecursiveFileLister}. */
 export interface RecursiveFileListerOptions {
@@ -273,7 +270,12 @@ export const createRecursiveFileLister = (
     const entries =
       fromSource !== null
         ? deriveEntries(fromSource, maxFiles)
-        : await buildIndexViaWalk(root as string, await loadIgnore(absRoot, honor), maxFiles, undefined)
+        : await buildIndexViaWalk(
+            root as string,
+            await loadIgnore(absRoot, honor),
+            maxFiles,
+            undefined,
+          )
     return {
       entries,
       rels: entries.map((e) => e.rel),

@@ -26,7 +26,14 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { defaultTools, type Tool, ToolRegistry, type ToolContext, type ToolEvent, type ToolResult } from "@/tool"
+import {
+  defaultTools,
+  type Tool,
+  type ToolContext,
+  type ToolEvent,
+  ToolRegistry,
+  type ToolResult,
+} from "@/tool"
 import { createCommunicateUpdateTool } from "@/tool/communicate-update"
 import { coverageCheckTool } from "@/tool/coverage_check"
 import { docxWriteTool, pptxWriteTool, xlsxWriteTool } from "@/tool/document/authoring"
@@ -100,7 +107,10 @@ describe("default tool auto-discovery conformance", () => {
     for (const tool of discovered) {
       const spec = advertised.get(tool.name)
       expect(spec, `${tool.name} must be advertised by the live registry`).toBeDefined()
-      expect(tool.description.trim().length, `${tool.name} needs a model-facing description`).toBeGreaterThan(0)
+      expect(
+        tool.description.trim().length,
+        `${tool.name} needs a model-facing description`,
+      ).toBeGreaterThan(0)
       expect(spec?.input_schema, `${tool.name} needs an input schema`).toBeDefined()
       expect(typeof tool.isReadOnly()).toBe("boolean")
       expect(typeof tool.isConcurrencySafe({} as never)).toBe("boolean")

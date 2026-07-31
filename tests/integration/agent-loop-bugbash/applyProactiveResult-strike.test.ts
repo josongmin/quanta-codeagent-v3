@@ -33,10 +33,10 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { CompactionBreaker } from "@/agent/compaction-breaker"
 import { UNPRODUCTIVE_PROACTIVE_REASONS } from "@/agent/compaction"
-import { maybeCompact } from "@/agent/loop/compaction-wire"
+import { CompactionBreaker } from "@/agent/compaction-breaker"
 import type { ConversationSummaryArchive } from "@/agent/conversation-summary-archive"
+import { maybeCompact } from "@/agent/loop/compaction-wire"
 import type { AgentConfig } from "@/agent/types"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import { createWorkingMemory } from "@/memory"

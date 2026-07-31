@@ -12,11 +12,12 @@
  *
  * Plus a DEFAULT-OFF assertion: the stock jsonl path keeps `defaultHashRequest`.
  */
+
+import { describe, expect, it } from "bun:test"
 import { existsSync, readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { describe, expect, it } from "bun:test"
-import { defaultHashRequest } from "@/llm/replay"
 import type { MatchPolicy } from "@/llm/replay"
+import { defaultHashRequest } from "@/llm/replay"
 import type { StreamInput } from "@/llm/types"
 import { canonicalizeForHash, canonicalizeRequest, resumeHashRequest } from "../canonicalize"
 
@@ -63,51 +64,34 @@ describe("canonicalize — MASKING (volatile-only diffs collapse)", () => {
   })
 
   it("ISO timestamp (date+time, frac, offset) → EQUAL hash", () => {
-    expect(
-      hashEq(req("at 2017-07-06 20:50:00"), req("at 2024-01-02 03:04:05")),
-    ).toBe(true)
-    expect(
-      hashEq(
-        req("at 2024-01-02T03:04:05.678Z"),
-        req("at 2099-12-31T23:59:59.000Z"),
-      ),
-    ).toBe(true)
-  })
-
-  it("random workdir suffix repo-AAAAAA vs repo-BBBBBB → EQUAL hash", () => {
-    expect(hashEq(req("cd /work/repo-AAAAAA/src"), req("cd /work/repo-ZZ9Q1k/src"))).toBe(
+    expect(hashEq(req("at 2017-07-06 20:50:00"), req("at 2024-01-02 03:04:05"))).toBe(true)
+    expect(hashEq(req("at 2024-01-02T03:04:05.678Z"), req("at 2099-12-31T23:59:59.000Z"))).toBe(
       true,
     )
   })
 
+  it("random workdir suffix repo-AAAAAA vs repo-BBBBBB → EQUAL hash", () => {
+    expect(hashEq(req("cd /work/repo-AAAAAA/src"), req("cd /work/repo-ZZ9Q1k/src"))).toBe(true)
+  })
+
   it("bench-/swebench- workdir suffixes collapse", () => {
+    expect(hashEq(req("box bench-astropy.5.0-a1b2c3"), req("box bench-astropy.5.0-z9y8x7"))).toBe(
+      true,
+    )
     expect(
-      hashEq(req("box bench-astropy.5.0-a1b2c3"), req("box bench-astropy.5.0-z9y8x7")),
-    ).toBe(true)
-    expect(
-      hashEq(
-        req("dir swebench-django.4.2-AbC123"),
-        req("dir swebench-django.4.2-XyZ987"),
-      ),
+      hashEq(req("dir swebench-django.4.2-AbC123"), req("dir swebench-django.4.2-XyZ987")),
     ).toBe(true)
   })
 
   it("hex address 0x... → EQUAL hash", () => {
-    expect(
-      hashEq(req("<object at 0x7f3a9c10>"), req("<object at 0x1122aabb>")),
-    ).toBe(true)
+    expect(hashEq(req("<object at 0x7f3a9c10>"), req("<object at 0x1122aabb>"))).toBe(true)
   })
 
   it("/tmp and /var/folders temp paths → EQUAL hash", () => {
-    expect(hashEq(req("wrote /tmp/abc123/out.txt"), req("wrote /tmp/xyz999/out.txt"))).toBe(
+    expect(hashEq(req("wrote /tmp/abc123/out.txt"), req("wrote /tmp/xyz999/out.txt"))).toBe(true)
+    expect(hashEq(req("cache /var/folders/aa/bb/T/x"), req("cache /var/folders/cc/dd/T/y"))).toBe(
       true,
     )
-    expect(
-      hashEq(
-        req("cache /var/folders/aa/bb/T/x"),
-        req("cache /var/folders/cc/dd/T/y"),
-      ),
-    ).toBe(true)
   })
 
   it("volatile tokens inside a tool_result collapse (pytest-output home)", () => {
@@ -127,9 +111,7 @@ describe("canonicalize — FALSE-COLLAPSE GUARD (semantic diffs stay distinct)",
   })
 
   it("different FILE NAME → DIFFERENT hash", () => {
-    expect(hashEq(req("editing core/timeseries.py"), req("editing core/sampled.py"))).toBe(
-      false,
-    )
+    expect(hashEq(req("editing core/timeseries.py"), req("editing core/sampled.py"))).toBe(false)
   })
 
   it("different ASSERTION MESSAGE → DIFFERENT hash", () => {
@@ -270,51 +252,61 @@ describe("canonicalize — RE-VALIDATION on the REAL cassette (residual ≈ 0)",
       /\brepo-[A-Za-z0-9]{6,}\b|\bswebench-[\w.]+-[A-Za-z0-9]{6,}\b|\bbench-[\w.]+-[a-z0-9]{6,}\b/,
   }
 
-  it.skipIf(!hasWitness)("after canonicalization the volatile patterns are GONE (residual = 0)", () => {
-    const lines = readFileSync(cassettePath, "utf-8").split("\n").filter((l) => l.length > 0)
-    expect(lines.length).toBeGreaterThan(0)
+  it.skipIf(!hasWitness)(
+    "after canonicalization the volatile patterns are GONE (residual = 0)",
+    () => {
+      const lines = readFileSync(cassettePath, "utf-8")
+        .split("\n")
+        .filter((l) => l.length > 0)
+      expect(lines.length).toBeGreaterThan(0)
 
-    const before = { iso: 0, clock: 0, dur: 0, workdir: 0 }
-    const after = { iso: 0, clock: 0, dur: 0, workdir: 0 }
-    // Sample the cassette — parsing+regexing all 331 × ~65KB rows blew the default
-    // test timeout; 150 rows is representative (the full-cassette residual=0 is
-    // separately witnessed by tools/resume-hammer + the perturbation check).
-    for (const line of lines.slice(0, 150)) {
-      const request = (JSON.parse(line) as { request: StreamInput }).request
-      const raw = textOf(request)
-      const masked = canonicalizeForHash(raw)
-      for (const k of Object.keys(VOLATILE) as (keyof typeof VOLATILE)[]) {
-        if (VOLATILE[k].test(raw)) before[k]++
-        if (VOLATILE[k].test(masked)) after[k]++
-      }
-    }
-    // Residual must be ZERO for every category the canonicalizer targets.
-    expect(after).toEqual({ iso: 0, clock: 0, dur: 0, workdir: 0 })
-    // And at least one category had a non-trivial BEFORE count, else the test
-    // would pass vacuously on a cassette with no volatile tokens at all.
-    expect(before.iso + before.clock + before.dur + before.workdir).toBeGreaterThan(0)
-  })
-
-  it.skipIf(!hasWitness)("semantically-distinct real requests stay pairwise-distinct after canonicalization", () => {
-    const lines = readFileSync(cassettePath, "utf-8").split("\n").filter((l) => l.length > 0)
-    const sample = lines.slice(0, 40)
-    const requests = sample.map((l) => (JSON.parse(l) as { request: StreamInput }).request)
-    // PRECOMPUTE both hashes once per request (O(n)) — computing them inside the
-    // O(n²) pair loop re-hashed 65KB requests ~3000× (SHA-256 over the whole
-    // prompt), which blew the default test timeout. Comparisons below are cheap.
-    const baseHash = requests.map((r) => defaultHashRequest(r, POLICY))
-    const canonHash = requests.map((r) => resumeHashRequest(r, POLICY))
-    // Pair up requests whose ORIGINAL hashes differ; after canonicalization they
-    // must STILL differ (no false-collapse of genuinely-different turns).
-    let checked = 0
-    for (let i = 0; i < requests.length; i++) {
-      for (let j = i + 1; j < requests.length; j++) {
-        if (baseHash[i] !== baseHash[j]) {
-          expect(canonHash[i]).not.toBe(canonHash[j])
-          checked++
+      const before = { iso: 0, clock: 0, dur: 0, workdir: 0 }
+      const after = { iso: 0, clock: 0, dur: 0, workdir: 0 }
+      // Sample the cassette — parsing+regexing all 331 × ~65KB rows blew the default
+      // test timeout; 150 rows is representative (the full-cassette residual=0 is
+      // separately witnessed by tools/resume-hammer + the perturbation check).
+      for (const line of lines.slice(0, 150)) {
+        const request = (JSON.parse(line) as { request: StreamInput }).request
+        const raw = textOf(request)
+        const masked = canonicalizeForHash(raw)
+        for (const k of Object.keys(VOLATILE) as (keyof typeof VOLATILE)[]) {
+          if (VOLATILE[k].test(raw)) before[k]++
+          if (VOLATILE[k].test(masked)) after[k]++
         }
       }
-    }
-    expect(checked).toBeGreaterThan(0)
-  })
+      // Residual must be ZERO for every category the canonicalizer targets.
+      expect(after).toEqual({ iso: 0, clock: 0, dur: 0, workdir: 0 })
+      // And at least one category had a non-trivial BEFORE count, else the test
+      // would pass vacuously on a cassette with no volatile tokens at all.
+      expect(before.iso + before.clock + before.dur + before.workdir).toBeGreaterThan(0)
+    },
+  )
+
+  it.skipIf(!hasWitness)(
+    "semantically-distinct real requests stay pairwise-distinct after canonicalization",
+    () => {
+      const lines = readFileSync(cassettePath, "utf-8")
+        .split("\n")
+        .filter((l) => l.length > 0)
+      const sample = lines.slice(0, 40)
+      const requests = sample.map((l) => (JSON.parse(l) as { request: StreamInput }).request)
+      // PRECOMPUTE both hashes once per request (O(n)) — computing them inside the
+      // O(n²) pair loop re-hashed 65KB requests ~3000× (SHA-256 over the whole
+      // prompt), which blew the default test timeout. Comparisons below are cheap.
+      const baseHash = requests.map((r) => defaultHashRequest(r, POLICY))
+      const canonHash = requests.map((r) => resumeHashRequest(r, POLICY))
+      // Pair up requests whose ORIGINAL hashes differ; after canonicalization they
+      // must STILL differ (no false-collapse of genuinely-different turns).
+      let checked = 0
+      for (let i = 0; i < requests.length; i++) {
+        for (let j = i + 1; j < requests.length; j++) {
+          if (baseHash[i] !== baseHash[j]) {
+            expect(canonHash[i]).not.toBe(canonHash[j])
+            checked++
+          }
+        }
+      }
+      expect(checked).toBeGreaterThan(0)
+    },
+  )
 })

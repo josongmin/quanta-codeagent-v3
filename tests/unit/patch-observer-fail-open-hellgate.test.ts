@@ -41,19 +41,18 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { __resetSpanSink, setSpanSink } from "@/observability"
 import {
   applyPatch,
-  parsePatch,
   type PatchObservation,
   type PatchObserver,
   type PatchTracePort,
+  parsePatch,
 } from "@/patch"
-import { __resetSpanSink, setSpanSink } from "@/observability"
 import { applyPatchTool, FsJailFileSystemPort } from "@/tool/apply-patch"
 import type { ToolContext } from "@/tool/types"
 
-const makeJailRoot = (): string =>
-  mkdtempSync(join(tmpdir(), "patch-fail-open-hellgate-"))
+const makeJailRoot = (): string => mkdtempSync(join(tmpdir(), "patch-fail-open-hellgate-"))
 
 /** An `update` patch that turns `alpha\nbeta\ngamma\n` into `alpha\nBETA\ngamma\n`.
  *  Update ops emit per-hunk tier events AND an op event, so both sink branches
@@ -154,7 +153,12 @@ describe("patch-observer-fail-open — throwing telemetry sinks never abort appl
           traceSeen.push(e)
         },
       }
-      await applyPatch(parsePatch(UPDATE_PATCH), new FsJailFileSystemPort({ jailRoot: jailA }), throwingObserver, recordingTrace)
+      await applyPatch(
+        parsePatch(UPDATE_PATCH),
+        new FsJailFileSystemPort({ jailRoot: jailA }),
+        throwingObserver,
+        recordingTrace,
+      )
       expect(readFileSync(join(jailA, "edit.dat"), "utf8")).toBe(EXPECTED)
       // The trace saw its events even though the observer (called FIRST) threw.
       expect(traceSeen.some((e) => e.op === "update")).toBe(true)
@@ -165,7 +169,12 @@ describe("patch-observer-fail-open — throwing telemetry sinks never abort appl
       const recordingObserver: PatchObserver = (e) => {
         obsSeen.push(e)
       }
-      await applyPatch(parsePatch(UPDATE_PATCH), new FsJailFileSystemPort({ jailRoot: jailB }), recordingObserver, throwingTrace)
+      await applyPatch(
+        parsePatch(UPDATE_PATCH),
+        new FsJailFileSystemPort({ jailRoot: jailB }),
+        recordingObserver,
+        throwingTrace,
+      )
       expect(readFileSync(join(jailB, "edit.dat"), "utf8")).toBe(EXPECTED)
       expect(obsSeen.some((e) => e.op === "update")).toBe(true)
     } finally {

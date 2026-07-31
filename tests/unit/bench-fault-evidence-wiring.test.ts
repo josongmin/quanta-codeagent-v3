@@ -6,10 +6,7 @@
  * splats source content or renders an empty packet goes RED.
  */
 import { describe, expect, test } from "bun:test"
-import {
-  assembleFaultEvidence,
-  renderFaultEvidenceHint,
-} from "@/runner/batch/eval/fault-evidence"
+import { assembleFaultEvidence, renderFaultEvidenceHint } from "@/runner/batch/eval/fault-evidence"
 
 describe("fault-evidence adapter", () => {
   const packet = assembleFaultEvidence({

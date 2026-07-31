@@ -14,8 +14,8 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { isAlwaysInScope } from "@/agent/loop/skill-gate"
 import { EXPLORATION_LADDER, READ_ONLY_EXPLORATION } from "@/agent/exploration-ladder"
+import { isAlwaysInScope } from "@/agent/loop/skill-gate"
 import { BODY_AFTER_PERSONA } from "@/agent/prompt-body"
 
 const promptBody = BODY_AFTER_PERSONA.join("\n")
@@ -29,7 +29,10 @@ const PROMPT_LADDER_LITERAL = "file_tree_summary → glob → ls → read"
  *  between "ladder: " and the sentence-ending ".". */
 const promptLadderTools = (() => {
   const m = promptBody.match(/ladder:\s*([^.]+)\./)
-  return (m?.[1] ?? "").split("→").map((s) => s.trim()).filter(Boolean)
+  return (m?.[1] ?? "")
+    .split("→")
+    .map((s) => s.trim())
+    .filter(Boolean)
 })()
 
 describe("exploration-ladder ↔ prompt drift ratchet", () => {

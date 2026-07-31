@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test"
-import { detectEol as editDetectEol } from "../../../src/tool/edit/eol.js"
-import { detectEol as sharedDetectEol } from "../../../src/shared/eol.js"
 import {
   applyPatch,
   type PatchFileSystemPort,
   type PatchObservation,
   parsePatch,
 } from "../../../src/patch/index.js"
+import { detectEol as sharedDetectEol } from "../../../src/shared/eol.js"
+import { detectEol as editDetectEol } from "../../../src/tool/edit/eol.js"
 
 // ---------------------------------------------------------------------------
 // In-memory PatchFileSystemPort (same shape as applier.test.ts).

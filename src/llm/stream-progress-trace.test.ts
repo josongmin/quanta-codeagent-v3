@@ -101,7 +101,8 @@ const makeLogSink = () => {
 
 const heartbeats = (lines: string[]): string[] =>
   lines.filter((l) => l.startsWith("[stream-trace] route="))
-const summaries = (lines: string[]): string[] => lines.filter((l) => l.startsWith("[stream-trace] done"))
+const summaries = (lines: string[]): string[] =>
+  lines.filter((l) => l.startsWith("[stream-trace] done"))
 
 describe("withStreamProgressTrace — stall visibility (THE KEY TEST)", () => {
   test("STALL: telemetry then awaits forever → heartbeats keep firing, idle climbs, content=0", async () => {
@@ -180,10 +181,7 @@ describe("withStreamProgressTrace — stall visibility (THE KEY TEST)", () => {
 
 describe("withStreamProgressTrace — red-on-injection (the trace is what surfaces it)", () => {
   test("intervalMs=0 (disabled) → ZERO heartbeats even for a multi-event stream", async () => {
-    const inner = new ScriptedPort([
-      TELEMETRY_CONTINUATION,
-      { type: "text_delta", delta: "x" },
-    ])
+    const inner = new ScriptedPort([TELEMETRY_CONTINUATION, { type: "text_delta", delta: "x" }])
     const timer = new ManualTimer()
     const sink = makeLogSink()
     const guarded = withStreamProgressTrace(inner, {

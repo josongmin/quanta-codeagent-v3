@@ -22,6 +22,7 @@
  * `stopReason !== "refusal"` gate) re-reds E1/E2 respectively.
  */
 import { describe, expect, test } from "bun:test"
+import { z } from "zod"
 import type { AgentConfig } from "@/agent"
 import { runAgent } from "@/agent"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
@@ -29,7 +30,6 @@ import type { PermissionContext } from "@/permission"
 import { LLMError } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { defaultTools, type Tool, type ToolEvent, ToolRegistry } from "@/tool"
-import { z } from "zod"
 
 class ScriptedLLM implements LLMPort {
   readonly inputs: StreamInput[] = []

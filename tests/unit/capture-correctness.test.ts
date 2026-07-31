@@ -16,8 +16,7 @@ const classOf = (args: {
   sourcePatch: string
   rawDirty: boolean
   editCount: number
-}): DoneTimeCaptureClass =>
-  classifyDoneTimeCapture({ ...args, touchedFiles: [] }).captureClass
+}): DoneTimeCaptureClass => classifyDoneTimeCapture({ ...args, touchedFiles: [] }).captureClass
 
 describe("classifyDoneTimeCapture — structural facts, no thresholds", () => {
   it("non-empty source diff ⇒ source-captured (normal submit)", () => {

@@ -22,7 +22,12 @@
 // patch performs, and `end()` runs in `finally` (even when the apply throws).
 
 import { describe, expect, test } from "bun:test"
-import { type CriticalSectionSeam, makeInterruptRouter, type ToolContext, type ToolResult } from "@/tool"
+import {
+  type CriticalSectionSeam,
+  makeInterruptRouter,
+  type ToolContext,
+  type ToolResult,
+} from "@/tool"
 import { applyPatchTool } from "@/tool/apply-patch"
 
 const wrapPatch = (...body: string[]): string =>
@@ -118,13 +123,7 @@ describe("[F6] apply_patch interrupt guard + critical-section parity", () => {
     // A patch whose target anchor cannot be found ⇒ applyPatch throws inside the
     // critical section. The section MUST still be ended (finally), and the error
     // must propagate (no silent swallow).
-    const patch = wrapPatch(
-      "*** Update File: missing.txt",
-      "@@",
-      " anchor-not-present",
-      "-x",
-      "+y",
-    )
+    const patch = wrapPatch("*** Update File: missing.txt", "@@", " anchor-not-present", "-x", "+y")
     let threw = false
     try {
       await run({ patch }, c)
@@ -171,7 +170,11 @@ describe("[F6] apply_patch interrupt guard + critical-section parity", () => {
       now: () => 0,
       maxMs: 1_000_000, // watchdog far away ⇒ end() is the deliverer, never the cap
       scheduler: { schedule: () => () => {} }, // inert timer — cb never fires
-      observer: { onHonored: (r) => { honored = r } },
+      observer: {
+        onHonored: (r) => {
+          honored = r
+        },
+      },
     })
     // Fire the upstream abort INSIDE the open window by wrapping the real seam:
     // begin() opens the withhold window (openDepth→1), then source aborts.

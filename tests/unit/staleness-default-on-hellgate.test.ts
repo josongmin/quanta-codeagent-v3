@@ -20,14 +20,7 @@
  * B (default mint) RED.
  */
 import { afterAll, describe, expect, test } from "bun:test"
-import {
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  utimesSync,
-  writeFileSync,
-} from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { AgentConfig } from "@/agent/types"

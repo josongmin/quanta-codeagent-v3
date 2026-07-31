@@ -58,9 +58,7 @@ describe("[GAP A] applyPatch — scored-candidate decisive-best tie-break", () =
     // Neither matches at the EXACT tier (line 0 is indented in both / lines
     // differ), so the locator falls to the TRIMMED tier → 2 hits → today THROWS.
     // After the fix the scored tie-break applies at the strict-best window @0.
-    const original = ["  foo", "bar", "baz", "MID-1", "MID-2", "  foo", "  bar", "  baz"].join(
-      "\n",
-    )
+    const original = ["  foo", "bar", "baz", "MID-1", "MID-2", "  foo", "  bar", "  baz"].join("\n")
     const fs = new MemFs({ "a.txt": `${original}\n` })
     const text = [
       "*** Begin Patch",

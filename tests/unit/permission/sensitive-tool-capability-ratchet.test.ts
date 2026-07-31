@@ -12,9 +12,9 @@
 import { describe, expect, test } from "bun:test"
 import { decideFloor, inferToolTier } from "@/permission"
 import type { HITLTier, ToolCapability } from "@/shared"
+import type { Tool } from "@/tool"
 import { ghPrAutoMergeTool, ghPrCommentTool, ghPrCreateTool, ghPrOpenTool } from "@/tool/gh"
 import { gitPushTool } from "@/tool/git"
-import type { Tool } from "@/tool"
 
 /** Resolve floor membership exactly as the gate does (declaration → OUTCOME). */
 const landsOnUniversalFloor = (tool: Tool): boolean => {
@@ -28,7 +28,10 @@ const landsOnUniversalFloor = (tool: Tool): boolean => {
   const cap = tool.capability
   if (typeof cap === "function") duck.capability = (i) => cap.call(tool, i as never)
   const tier = inferToolTier(duck, {})
-  return tier === "hand-off-required" || decideFloor({ tier, capability: duck.capability?.({}) }) === "universal-floor"
+  return (
+    tier === "hand-off-required" ||
+    decideFloor({ tier, capability: duck.capability?.({}) }) === "universal-floor"
+  )
 }
 
 // Stubs are never invoked — `capability()` is a pure declaration.

@@ -1,5 +1,5 @@
-import { errMessage, logger as defaultLogger } from "@/shared"
 import type { Logger } from "@/shared"
+import { logger as defaultLogger, errMessage } from "@/shared"
 
 /** Minimal surface of the process-level rejection listener target we need. Kept
  *  narrow so the CRITICAL contract (register EXACTLY once, never exit) can be

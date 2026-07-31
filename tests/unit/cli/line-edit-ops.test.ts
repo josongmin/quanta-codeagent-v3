@@ -22,13 +22,19 @@ import {
 
 describe("deleteWordBefore (ctrl+w)", () => {
   test("deletes the word immediately before the cursor", () => {
-    expect(deleteWordBefore({ buf: "foo bar baz", cursor: 11 })).toEqual({ buf: "foo bar ", cursor: 8 })
+    expect(deleteWordBefore({ buf: "foo bar baz", cursor: 11 })).toEqual({
+      buf: "foo bar ",
+      cursor: 8,
+    })
   })
   test("skips trailing whitespace then deletes the word", () => {
     expect(deleteWordBefore({ buf: "foo bar   ", cursor: 10 })).toEqual({ buf: "foo ", cursor: 4 })
   })
   test("deletes only up to the cursor, preserving the suffix", () => {
-    expect(deleteWordBefore({ buf: "foo bar baz", cursor: 7 })).toEqual({ buf: "foo  baz", cursor: 4 })
+    expect(deleteWordBefore({ buf: "foo bar baz", cursor: 7 })).toEqual({
+      buf: "foo  baz",
+      cursor: 4,
+    })
   })
   test("at column 0 is a no-op (returns the same state)", () => {
     const s = { buf: "abc", cursor: 0 }

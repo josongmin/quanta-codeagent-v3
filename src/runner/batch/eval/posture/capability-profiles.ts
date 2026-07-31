@@ -367,10 +367,7 @@ export const MODEL_LANE_DIVERSITY: KnobModule = {
  *  arm that isolates whether decorrelating the candidate pool across models
  *  lifts edit-correctness once localization is already closed. Control =
  *  `agentless-v5-absorb` (single-lane). Fire with QUANTA_BENCH_MODEL_LANES set. */
-export const ABSORB_XLANE_MODULES: readonly KnobModule[] = [
-  ...ABSORB_MODULES,
-  MODEL_LANE_DIVERSITY,
-]
+export const ABSORB_XLANE_MODULES: readonly KnobModule[] = [...ABSORB_MODULES, MODEL_LANE_DIVERSITY]
 
 /** `agentless-v5-absorb-execfull` — v5-absorb with FULL in-loop repo-test
  *  execution (overrides REPRO_EXEC's `repro-only`, which FORBIDS the repo test
@@ -382,10 +379,7 @@ export const ABSORB_XLANE_MODULES: readonly KnobModule[] = [
  *  lets the agent run the REPO's existing test suite (the TRAE verified method:
  *  existing tests → runtime coordination error → fix the missed site). Control =
  *  `agentless-v5-absorb` (repro-only). */
-export const ABSORB_EXECFULL_MODULES: readonly KnobModule[] = [
-  ...ABSORB_MODULES,
-  FULL_EXEC,
-]
+export const ABSORB_EXECFULL_MODULES: readonly KnobModule[] = [...ABSORB_MODULES, FULL_EXEC]
 
 // ── v5 AdaptiveAction → phase modules (the controller's action map) ──────────
 // Mirrors the closed `AdaptiveAction` enum in the v5 readme. `accept_thin` and

@@ -2,9 +2,9 @@ import { describe, expect, test } from "bun:test"
 import { runAgent } from "@/agent"
 import {
   buildPursuitContinuationPrompt,
+  type ContinuationDeps,
   ContinuationSemaphore,
   createObjectiveStore,
-  type ContinuationDeps,
   type ObjectivePort,
   runIdleContinuation,
 } from "@/agent/objective"
@@ -81,7 +81,7 @@ class PursuitLLM implements LLMPort {
       .flatMap((m) => m.content.map((b) => (b.type === "text" ? b.text : "")))
       .join(" ")
     const rule = this.rules.find((r) => txt.includes(r.match))
-    for (const e of (rule?.events ?? this.fallback)) yield e
+    for (const e of rule?.events ?? this.fallback) yield e
   }
 }
 
@@ -154,7 +154,10 @@ describe("objective-goal-continuation-live — runIdleContinuation decision logi
     // NOT mark the criterion (a plausible-but-unverified finish — exactly what
     // the pursuit discipline guards against). Once we (below) flip it to the
     // "verify" script, it marks the criterion met via the REAL objective tool.
-    const finishWithoutMeetingGoal = new PursuitLLM([], text("made some progress, stopping for now"))
+    const finishWithoutMeetingGoal = new PursuitLLM(
+      [],
+      text("made some progress, stopping for now"),
+    )
     const markGoalMet = new PursuitLLM(
       [
         {

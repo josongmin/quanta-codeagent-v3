@@ -1,9 +1,9 @@
 import { z } from "zod"
-import {
-  type ActionAssessment,
-  type ApprovalDecision,
-  type ReviewerPort,
-  type ToolActionKeyed,
+import type {
+  ActionAssessment,
+  ApprovalDecision,
+  ReviewerPort,
+  ToolActionKeyed,
 } from "@/permission"
 import type { StreamPort } from "@/stream"
 import type { ReviewerRunner } from "@/tool/types"

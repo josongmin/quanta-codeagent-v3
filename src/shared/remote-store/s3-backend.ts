@@ -89,8 +89,7 @@ const NOT_FOUND_RE = /NoSuchKey|Not Found|does not exist|404/i
 
 export const s3Backend = (opts: S3BackendOptions): RemoteBackend => {
   const runAws = opts.runAws ?? makeDefaultRunAws(opts.timeoutMs ?? DEFAULT_AWS_TIMEOUT_MS)
-  const regionArgs: readonly string[] =
-    opts.region !== undefined ? ["--region", opts.region] : []
+  const regionArgs: readonly string[] = opts.region !== undefined ? ["--region", opts.region] : []
   const uri = (path: string): string => `s3://${opts.bucket}/${path}`
 
   return {
@@ -113,9 +112,7 @@ export const s3Backend = (opts: S3BackendOptions): RemoteBackend => {
       // failure and MUST throw — never masquerade as "not found".
       const stderr = res.stderr ?? ""
       if (NOT_FOUND_RE.test(stderr)) return undefined
-      throw new Error(
-        `[s3-backend] get ${path} failed (exit ${res.exitCode}): ${stderr}`,
-      )
+      throw new Error(`[s3-backend] get ${path} failed (exit ${res.exitCode}): ${stderr}`)
     },
     async list(prefix) {
       const res = await runAws([...regionArgs, "s3", "ls", uri(prefix), "--recursive"])

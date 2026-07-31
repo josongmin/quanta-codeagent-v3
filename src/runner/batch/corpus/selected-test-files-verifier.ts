@@ -17,7 +17,9 @@ const parseStringList = (value: unknown): readonly string[] | undefined => {
     parsed = value
   }
   if (!Array.isArray(parsed)) return undefined
-  const items = parsed.filter((entry): entry is string => typeof entry === "string" && entry.trim() !== "")
+  const items = parsed.filter(
+    (entry): entry is string => typeof entry === "string" && entry.trim() !== "",
+  )
   return items.length > 0 ? items : undefined
 }
 
@@ -26,8 +28,7 @@ const parseStringList = (value: unknown): readonly string[] | undefined => {
  *  (`TestX/subcase, punctuation#1`, `FuzzY/seed#0`). Accept those PUBLIC selector
  *  names verbatim, but stay fail-closed on other families (`Benchmark*`, random
  *  paths, malformed control chars). */
-const isGoRunnableSelector = (entry: string): boolean =>
-  /^(?:Test|Fuzz)[^\r\n\0]*$/.test(entry)
+const isGoRunnableSelector = (entry: string): boolean => /^(?:Test|Fuzz)[^\r\n\0]*$/.test(entry)
 
 const isNodeTestPath = (entry: string): boolean =>
   /(^|\/)[^/\s]+\.(?:[cm]?[jt]sx?)$/i.test(entry) || entry.includes("/")

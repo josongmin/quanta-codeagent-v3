@@ -1,14 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { runAgent } from "@/agent"
 import {
   createActivityStore,
   fleetToActivity,
   renderActivity,
   seedStoreFromSnapshot,
 } from "@/activity"
+import { runAgent } from "@/agent"
 import { toAgentFleetRow } from "@/apps/cli/repl/slash-surface"
-import type { SlashContext } from "@/apps/cli/slash-contract"
 import { SURFACE_SLASH_COMMANDS } from "@/apps/cli/slash/registry-surface"
+import type { SlashContext } from "@/apps/cli/slash-contract"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { SubagentObservation } from "@/protocol/subagent"
 import { __resetRuntimeConfig } from "@/shared"
@@ -49,7 +49,9 @@ const agentCall = (id: string, prompt: string): StreamEvent[] => [
 const conversationText = (input: StreamInput): string =>
   input.messages
     .flatMap((m) =>
-      m.content.map((b) => (b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "")),
+      m.content.map((b) =>
+        b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "",
+      ),
     )
     .join(" ")
 
@@ -166,9 +168,7 @@ describe("Activity Spine — REAL loop-emitted subagent lifecycle folds into the
     expect(tasks.length).toBe(1)
     expect(tasks[0]?.status).toBe("completed") // the loop SETTLED the lineage record
     expect(events.some((e) => e.type === "subagent_spawn")).toBe(true)
-    expect(
-      events.some((e) => e.type === "subagent_status" && e.status === "completed"),
-    ).toBe(true)
+    expect(events.some((e) => e.type === "subagent_status" && e.status === "completed")).toBe(true)
 
     // FOLD: drive the SAME chain `/activity` uses — registry → toAgentFleetRow →
     // fleetToActivity → spine — off the REAL registry.

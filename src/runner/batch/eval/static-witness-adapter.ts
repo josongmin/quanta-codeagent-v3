@@ -407,9 +407,7 @@ const legacySiblingWitnesses = (input: StaticWitnessProviderInput): StaticWitnes
     bySymbol.set(sym, files)
   }
   const out: StaticWitness[] = []
-  for (const [symbol, fileSet] of [...bySymbol.entries()].sort((a, b) =>
-    byteCompare(a[0], b[0]),
-  )) {
+  for (const [symbol, fileSet] of [...bySymbol.entries()].sort((a, b) => byteCompare(a[0], b[0]))) {
     const files = [...fileSet].sort()
     if (files.length < 2) continue
     out.push(

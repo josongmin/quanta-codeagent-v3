@@ -78,7 +78,13 @@ export const buildCodeCellDispatchPort = (input: CodeCellWireInput): CodeCellDis
     try {
       // H1 (DIP): the SAME injectable dispatch seam the loop uses (resolveDispatchPort ⇒ the wired
       // port or the default dispatchTool) — code-mode cells route through the identical chokepoint.
-      const result = await resolveDispatchPort(config)(call, config, permission, undefined, autoClassifier)
+      const result = await resolveDispatchPort(config)(
+        call,
+        config,
+        permission,
+        undefined,
+        autoClassifier,
+      )
       return { ok: result.ok, content: contentOf(result) }
     } catch (e) {
       return { ok: false, content: `code_cell dispatch failed for ${name}: ${errMessage(e)}` }

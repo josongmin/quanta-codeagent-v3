@@ -29,10 +29,12 @@
 
 /** Lines that, on their own, advertise an answer key. Conservative + anchored so
  *  an ordinary failure line that merely contains the word "expected" survives. */
-const ANSWER_KEY_LINE = /^\s*(FAIL_TO_PASS|PASS_TO_PASS|test_patch|gold[_ ]?patch|golden[_ ]?patch)\b/i
+const ANSWER_KEY_LINE =
+  /^\s*(FAIL_TO_PASS|PASS_TO_PASS|test_patch|gold[_ ]?patch|golden[_ ]?patch)\b/i
 
 /** Start of a unified-diff block. */
-const DIFF_START = /^(diff --git |index [0-9a-f]+\.\.|--- (a\/|\/dev\/null)|\+\+\+ (b\/|\/dev\/null))/
+const DIFF_START =
+  /^(diff --git |index [0-9a-f]+\.\.|--- (a\/|\/dev\/null)|\+\+\+ (b\/|\/dev\/null))/
 
 /** A hunk header. */
 const HUNK_HEADER = /^@@ .* @@/

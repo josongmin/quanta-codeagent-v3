@@ -42,7 +42,11 @@ describe("DapFrameDecoder", () => {
     const a = { seq: 1, command: "initialize" }
     const b = { seq: 2, command: "launch" }
     const c = { seq: 3, event: "stopped" }
-    expect(decodeAll([encodeDapMessage(a) + encodeDapMessage(b) + encodeDapMessage(c)])).toEqual([a, b, c])
+    expect(decodeAll([encodeDapMessage(a) + encodeDapMessage(b) + encodeDapMessage(c)])).toEqual([
+      a,
+      b,
+      c,
+    ])
   })
 
   test("a frame SPLIT across chunks (header break + body break) decodes once whole", () => {

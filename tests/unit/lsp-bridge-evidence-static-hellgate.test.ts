@@ -73,13 +73,10 @@ const contentModified = (): LspRequestError =>
 describe("evidenceLspStatic — typed ContentModified retry (#23)", () => {
   test("typed -32801 with rust-analyzer's REAL message is RETRIED and evidence lands", async () => {
     const stats: FakeStats = { hoverCalls: 0, stopped: false }
-    const provider = fakeProvider(
-      async (call) => {
-        if (call === 1) throw contentModified()
-        return HOVER
-      },
-      stats,
-    )
+    const provider = fakeProvider(async (call) => {
+      if (call === 1) throw contentModified()
+      return HOVER
+    }, stats)
     const port = evidenceLspStatic(5_000, provider)
     const ev = await port("/p/src/lib.rs", 6, "/p")
     expect(ev).not.toBeNull()
@@ -90,17 +87,14 @@ describe("evidenceLspStatic — typed ContentModified retry (#23)", () => {
 
   test("typed -32802 (ServerCancelled) is retried too", async () => {
     const stats: FakeStats = { hoverCalls: 0, stopped: false }
-    const provider = fakeProvider(
-      async (call) => {
-        if (call === 1)
-          throw new LspRequestError("textDocument/hover", {
-            code: -32802,
-            message: "server cancelled the request",
-          })
-        return HOVER
-      },
-      stats,
-    )
+    const provider = fakeProvider(async (call) => {
+      if (call === 1)
+        throw new LspRequestError("textDocument/hover", {
+          code: -32802,
+          message: "server cancelled the request",
+        })
+      return HOVER
+    }, stats)
     const ev = await evidenceLspStatic(5_000, provider)("/p/src/lib.rs", 6, "/p")
     expect(ev?.type_info).toBe(HOVER.contents)
     expect(stats.hoverCalls).toBeGreaterThanOrEqual(2)

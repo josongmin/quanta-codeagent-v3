@@ -220,13 +220,7 @@ describe("HELL-6: round-trip update hunk", () => {
 // HELL-7: add file from /dev/null
 // ---------------------------------------------------------------------------
 it("HELL-7: /dev/null source => add op with correct path", () => {
-  const input = [
-    "--- /dev/null",
-    "+++ b/new.py",
-    "@@ -0,0 +1,2 @@",
-    "+line1",
-    "+line2",
-  ].join("\n")
+  const input = ["--- /dev/null", "+++ b/new.py", "@@ -0,0 +1,2 @@", "+line1", "+line2"].join("\n")
   const v4a = unifiedDiffToV4A(input)
   const patch = parsePatch(v4a)
   expect(patch.ops[0]?.kind).toBe("add")
@@ -237,13 +231,7 @@ it("HELL-7: /dev/null source => add op with correct path", () => {
 // HELL-8: delete file to /dev/null
 // ---------------------------------------------------------------------------
 it("HELL-8: /dev/null target => delete op with correct path", () => {
-  const input = [
-    "--- a/old.py",
-    "+++ /dev/null",
-    "@@ -1,2 +0,0 @@",
-    "-line1",
-    "-line2",
-  ].join("\n")
+  const input = ["--- a/old.py", "+++ /dev/null", "@@ -1,2 +0,0 @@", "-line1", "-line2"].join("\n")
   const v4a = unifiedDiffToV4A(input)
   const patch = parsePatch(v4a)
   expect(patch.ops[0]?.kind).toBe("delete")
@@ -313,13 +301,7 @@ it("HELL-11: isUnifiedDiff returns false for a V4A patch with Begin Patch", () =
 // HELL-12: path without a/ or b/ prefix is left intact
 // ---------------------------------------------------------------------------
 it("HELL-12: path without git prefix is not stripped", () => {
-  const input = [
-    "--- foo.py",
-    "+++ foo.py",
-    "@@ -1 +1 @@",
-    "-x",
-    "+y",
-  ].join("\n")
+  const input = ["--- foo.py", "+++ foo.py", "@@ -1 +1 @@", "-x", "+y"].join("\n")
   const v4a = unifiedDiffToV4A(input)
   const patch = parsePatch(v4a)
   expect(patch.ops[0]?.path).toBe("foo.py")

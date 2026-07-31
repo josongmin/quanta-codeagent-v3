@@ -21,8 +21,8 @@
  * never silently skipped.
  */
 
-import { foldState } from "../eval-step"
 import type { EvalCtx, EvalStep } from "../eval-step"
+import { foldState } from "../eval-step"
 
 export const mainPhaseStep: EvalStep = {
   id: "main",
@@ -32,7 +32,9 @@ export const mainPhaseStep: EvalStep = {
   run: async (ctx: EvalCtx): Promise<EvalCtx> => {
     const delegate = ctx.deps.mainPhase
     if (delegate === undefined) {
-      throw new Error("mainPhaseStep: gated in but no `deps.mainPhase` delegate bound (wiring error)")
+      throw new Error(
+        "mainPhaseStep: gated in but no `deps.mainPhase` delegate bound (wiring error)",
+      )
     }
     const phase = await delegate()
     return foldState(ctx, { mainPhase: phase })

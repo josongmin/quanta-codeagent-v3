@@ -15,8 +15,8 @@
  * run_module) so there is ZERO mirror/drift — we run the shipped logic verbatim.
  */
 
-import { spawnSync } from "node:child_process"
 import { describe, expect, test } from "bun:test"
+import { spawnSync } from "node:child_process"
 import { SPHINX_RA_SHIM } from "@/apps/bench/python-swebench"
 
 const SAMPLES: Record<string, Record<string, { test_cmd: string }>> = {
@@ -30,7 +30,10 @@ const SAMPLES: Record<string, Record<string, { test_cmd: string }>> = {
 
 // EXACT mutation lines from the shipped shim — drop imports + run_module only.
 const predicate = SPHINX_RA_SHIM.split("\n")
-  .filter((l) => !l.startsWith("import runpy") && !l.startsWith("import swebench") && !l.startsWith("runpy."))
+  .filter(
+    (l) =>
+      !l.startsWith("import runpy") && !l.startsWith("import swebench") && !l.startsWith("runpy."),
+  )
   .join("\n")
 
 const script = [

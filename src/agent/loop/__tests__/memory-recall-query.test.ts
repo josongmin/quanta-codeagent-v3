@@ -23,7 +23,11 @@ const syntheticUser = (text: string): Message =>
 
 describe("deriveRecallQuery — skip carrier turns", () => {
   test("after a tools turn, query is the real prompt (NOT the empty tool_result carrier)", () => {
-    const wm = createWorkingMemory([u("Fix the auth bug"), a("running tests"), toolResultUser("c1")])
+    const wm = createWorkingMemory([
+      u("Fix the auth bug"),
+      a("running tests"),
+      toolResultUser("c1"),
+    ])
     expect(deriveRecallQuery(wm)).toBe("Fix the auth bug")
   })
 

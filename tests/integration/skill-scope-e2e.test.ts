@@ -30,9 +30,9 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
 import { type AgentConfig, runAgent } from "@/agent"
-import { __resetRuntimeConfig, runtimeConfig } from "@/shared"
 import type { LLMPort, Message, StreamEvent } from "@/llm"
 import type { PermissionContext } from "@/permission"
+import { __resetRuntimeConfig, runtimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 import { type Tool, type ToolEvent, ToolRegistry } from "@/tool"
 
@@ -437,8 +437,10 @@ describe("skill tool-scoping v2 escalation (e2e)", () => {
     await sealedSkill(dir)
     const counts: Record<string, number> = {}
     const registry = new ToolRegistry([countingToolRO("peek", counts)])
-    const asks: { tool: string; scopeContext: { activeSkill: string; reason: string } | undefined }[] =
-      []
+    const asks: {
+      tool: string
+      scopeContext: { activeSkill: string; reason: string } | undefined
+    }[] = []
 
     const llm = new FakeLLM([
       toolUseScript("s1", "Skill", { name: "sealed" }),
@@ -486,7 +488,9 @@ describe("skill tool-scoping v2 escalation (e2e)", () => {
     // SAME ask (consistency: pair = interactive seam, summary = timeline label).
     const summaries = stream.events.filter((e) => e.type === "skill_scope_decision")
     expect(summaries).toHaveLength(1) // 1st call only; 2nd was widened into scope
-    expect(summaries[0]?.type === "skill_scope_decision" ? summaries[0].decision : "").toBe("allowed")
+    expect(summaries[0]?.type === "skill_scope_decision" ? summaries[0].decision : "").toBe(
+      "allowed",
+    )
   })
 
   test("hand-off-required tool is BLOCKED without asking; not dispatched; decision=blocked", async () => {
@@ -520,7 +524,9 @@ describe("skill tool-scoping v2 escalation (e2e)", () => {
     // hard-lock timeline item — this MUST still fire even though no card does).
     const summaries = stream.events.filter((e) => e.type === "skill_scope_decision")
     expect(summaries).toHaveLength(1)
-    expect(summaries[0]?.type === "skill_scope_decision" ? summaries[0].decision : "").toBe("blocked")
+    expect(summaries[0]?.type === "skill_scope_decision" ? summaries[0].decision : "").toBe(
+      "blocked",
+    )
     // ADR-0512 P3 security invariant (RED-on-injection): a hand-off-required tool
     // is NON-escalatable — it NEVER emits an interactive escalation request /
     // resolution. The card seam must not be reachable for a security boundary.
@@ -574,7 +580,10 @@ describe("skill tool-scoping v2 escalation (e2e)", () => {
   test("L1 availability filter — the LLM tool list is NARROWED to in-scope once a skill is armed", async () => {
     await sealedSkill(dir)
     const counts: Record<string, number> = {}
-    const registry = new ToolRegistry([countingTool("danger", counts), countingToolRO("grep", counts)])
+    const registry = new ToolRegistry([
+      countingTool("danger", counts),
+      countingToolRO("grep", counts),
+    ])
     // Capture the tool names sent to the model on EACH turn.
     const toolsPerTurn: string[][] = []
     const llm = new FakeLLM([
@@ -621,7 +630,9 @@ describe("skill tool-scoping v2 escalation (e2e)", () => {
     // The tool_result is labeled "declined", and the model is told to use a permitted tool.
     const tr = stream.events.find((e) => e.type === "tool_result" && e.id === "p1")
     expect(tr?.type === "tool_result" ? tr.preview : "").toBe("skill-scoped: declined")
-    const msg = allToolResults(outcome).find((b) => b.type === "tool_result" && b.tool_use_id === "p1")
+    const msg = allToolResults(outcome).find(
+      (b) => b.type === "tool_result" && b.tool_use_id === "p1",
+    )
     expect(msg?.type === "tool_result" ? msg.content : "").toContain("Declined")
   })
 
@@ -646,7 +657,9 @@ describe("skill tool-scoping v2 escalation (e2e)", () => {
     expect(res[0]?.type === "permission_escalation_resolved" ? res[0].decision : "").toBe(
       "deny_and_steer",
     )
-    const msg = allToolResults(outcome).find((b) => b.type === "tool_result" && b.tool_use_id === "p1")
+    const msg = allToolResults(outcome).find(
+      (b) => b.type === "tool_result" && b.tool_use_id === "p1",
+    )
     expect(msg?.type === "tool_result" ? msg.content : "").toContain("use grep instead")
   })
 

@@ -227,10 +227,10 @@ describe("edit-fresh-hash — adversarial BYTE SHAPES (real round-trip fidelity)
     // Lines 1 & 3 are CRLF-terminated; line 2 is LF-terminated. The edit touches
     // line 2 only. A whole-file EOL normalizer would rewrite lines 1/3 and make the
     // advertised (in-memory) hash disagree with the (normalized) disk bytes.
-    const post = await assertFreshHashMatchesDisk(
-      "first = 1\r\nsecond = 2\nthird = 3\r\n",
-      { old_string: "second = 2", new_string: "second = 20" },
-    )
+    const post = await assertFreshHashMatchesDisk("first = 1\r\nsecond = 2\nthird = 3\r\n", {
+      old_string: "second = 2",
+      new_string: "second = 20",
+    })
     // Untouched CRLF lines kept their exact terminators; the edited LF line too.
     expect(post).toBe("first = 1\r\nsecond = 20\nthird = 3\r\n")
     // Sanity: mixed terminators genuinely coexist on disk.
@@ -242,10 +242,10 @@ describe("edit-fresh-hash — adversarial BYTE SHAPES (real round-trip fidelity)
     // A bare CR is NOT a line terminator to the \r?\n splitter — it lives inside the
     // line content. An over-eager normalizer that turns CR into CRLF/LF would drift
     // the disk bytes away from the advertised hash.
-    const post = await assertFreshHashMatchesDisk(
-      "keep\rthis line\nedit = 1\n",
-      { old_string: "edit = 1", new_string: "edit = 2" },
-    )
+    const post = await assertFreshHashMatchesDisk("keep\rthis line\nedit = 1\n", {
+      old_string: "edit = 1",
+      new_string: "edit = 2",
+    })
     expect(post).toBe("keep\rthis line\nedit = 2\n")
     expect(post).toContain("\r")
     expect(post).not.toContain("\r\n")
@@ -316,10 +316,10 @@ describe("edit-fresh-hash — adversarial BYTE SHAPES (real round-trip fidelity)
     // Insert a UNIQUE marker deep in the file so the edit target is unambiguous.
     const marker = "line 3777 = 3777"
     const big = `${lines.join("\n")}\n`
-    const post = await assertFreshHashMatchesDisk(
-      big,
-      { old_string: marker, new_string: "line 3777 = CHANGED" },
-    )
+    const post = await assertFreshHashMatchesDisk(big, {
+      old_string: marker,
+      new_string: "line 3777 = CHANGED",
+    })
     // The whole large file round-tripped: first and last lines intact, marker edited.
     expect(post.startsWith("line 0 = 0\n")).toBe(true)
     expect(post.endsWith(`line ${N - 1} = ${N - 1}\n`)).toBe(true)

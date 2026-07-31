@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs"
-import { isRecord } from "@/shared"
-import { byteCompare } from "@/shared/byte-compare"
 import { filesFromPatch } from "@/runner/batch/eval/selection-paths"
 import type { BenchReport, PerInstanceReport } from "@/runner/batch/report"
+import { isRecord } from "@/shared"
+import { byteCompare } from "@/shared/byte-compare"
 import {
   assertWave2BenchReportProvenance,
   loadWave2PredictionsFromFile,
@@ -133,7 +133,8 @@ const overlapOf = (a: readonly string[], b: readonly string[]): string[] => {
 const officialResolved = (row: PerInstanceReport): boolean =>
   row.scoreLabel === "official_harness" || row.gradeBreakdown?.resolved === true
 
-const regression = (row: PerInstanceReport): boolean => (row.gradeBreakdown?.passToPassFailed ?? 0) > 0
+const regression = (row: PerInstanceReport): boolean =>
+  (row.gradeBreakdown?.passToPassFailed ?? 0) > 0
 
 const emptyPatch = (row: PerInstanceReport): boolean =>
   row.patchBytes === 0 || row.failure?.signals.includes("empty_patch") === true
@@ -154,7 +155,10 @@ const touchedFilesOf = (
 ): readonly string[] => {
   const reportTouched = cleanList(row.touchedFiles ?? [])
   if (prediction !== undefined) {
-    if (row.modelPatchDigest !== undefined && row.modelPatchDigest !== prediction.modelPatchDigest) {
+    if (
+      row.modelPatchDigest !== undefined &&
+      row.modelPatchDigest !== prediction.modelPatchDigest
+    ) {
       throw new Error(
         `${sourceLabel}: report/predictions patch digest mismatch for instance "${row.id}"`,
       )
@@ -325,9 +329,8 @@ export const buildWave2CoverageCensus = (args: {
     sameFilesWrongFix: entries.filter((entry) => entry.coverageClass === "same-files wrong-fix")
       .length,
     partialOverlap: entries.filter((entry) => entry.coverageClass === "partial overlap").length,
-    disjointLocalization: entries.filter(
-      (entry) => entry.coverageClass === "disjoint localization",
-    ).length,
+    disjointLocalization: entries.filter((entry) => entry.coverageClass === "disjoint localization")
+      .length,
     entries,
   }
 }
@@ -407,12 +410,12 @@ export const renderWave2BacklogMarkdown = (artifact: Wave2BacklogArtifact): stri
     entries.length === 0
       ? "(none)"
       : "| instance | gold files | our files | overlap | class |\n| --- | ---: | ---: | --- | --- |\n" +
-          entries
-            .map(
-              (entry) =>
-                `| ${entry.instanceId} | ${entry.goldFiles.length} | ${entry.touchedFiles.length} | ${entry.overlapFiles.join(", ") || "-"} | ${entry.coverageClass} |`,
-            )
-            .join("\n"),
+        entries
+          .map(
+            (entry) =>
+              `| ${entry.instanceId} | ${entry.goldFiles.length} | ${entry.touchedFiles.length} | ${entry.overlapFiles.join(", ") || "-"} | ${entry.coverageClass} |`,
+          )
+          .join("\n"),
   ]
   const renderOracleSection = (
     entries: readonly { readonly instanceId: string; readonly reason: string }[],
@@ -421,7 +424,7 @@ export const renderWave2BacklogMarkdown = (artifact: Wave2BacklogArtifact): stri
     entries.length === 0
       ? "(none)"
       : "| instance | reason |\n| --- | --- |\n" +
-          entries.map((entry) => `| ${entry.instanceId} | ${entry.reason} |`).join("\n"),
+        entries.map((entry) => `| ${entry.instanceId} | ${entry.reason} |`).join("\n"),
   ]
   return [
     "## Wave2 Follow-on Backlog",

@@ -18,8 +18,8 @@
  * @see @/config/knob-inventory/types — the inventory entry shape we reproduce.
  */
 
-import type { AnyKnobSchema } from "./contracts"
 import type { KnobInventoryEntry } from "@/config/knob-inventory/types"
+import type { AnyKnobSchema } from "./contracts"
 
 /**
  * `true` iff the knob is OFF by default — derived from `schema.default` being

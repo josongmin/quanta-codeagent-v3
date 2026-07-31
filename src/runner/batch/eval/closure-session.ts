@@ -93,7 +93,8 @@ const closureBundleInputOf = (args: {
       ...(args.session.ownerNearPrimaryBaseValidatedRed === true
         ? { ownerNearPrimaryBaseValidatedRed: true }
         : {}),
-      ...(args.session.touchedModuleSmoke !== undefined && args.session.touchedModuleSmoke.length > 0
+      ...(args.session.touchedModuleSmoke !== undefined &&
+      args.session.touchedModuleSmoke.length > 0
         ? { touchedModuleSmoke: args.session.touchedModuleSmoke }
         : {}),
       ...(args.session.moduleSmokePrimaryBaseValidatedRed === true

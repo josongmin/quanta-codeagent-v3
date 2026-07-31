@@ -11,14 +11,14 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { z } from "zod"
+import type { AgentConfig } from "@/agent"
+import { HookBus } from "@/agent"
+import { type AdmissibilityAction, runAdmissibilityGate } from "@/agent/admissibility-gate"
 import {
   policyDenyStructured,
   resolvedHardDenyProse,
   withResolvedShellCommand,
 } from "@/agent/admissibility-gate/shared"
-import type { AgentConfig } from "@/agent"
-import { HookBus } from "@/agent"
-import { type AdmissibilityAction, runAdmissibilityGate } from "@/agent/admissibility-gate"
 import { dispatchTool } from "@/agent/dispatch"
 import type { ToolUseBlock } from "@/llm"
 import {

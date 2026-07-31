@@ -14,7 +14,7 @@ import {
 import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import type { SessionTransportMessage } from "@/ipc/session"
 import { encodeSessionTransportMessage, tryDecodeSessionTransportMessage } from "@/ipc/session"
-import { decodeAgentStateFrame, type AgentStateObservation } from "@/protocol/agent-state"
+import { type AgentStateObservation, decodeAgentStateFrame } from "@/protocol/agent-state"
 import { supported } from "@/protocol/session"
 import { createStubRuntimeFactory } from "./fixture"
 
@@ -770,7 +770,12 @@ describe("peekPlanInputAnswer (QUANTA_WEB_AGENT_STATE inbound frame decode)", ()
   test("decodes a well-formed answer frame (kind+promptId+text)", () => {
     expect(
       peekPlanInputAnswer(
-        JSON.stringify({ kind: "planInputAnswer", promptId: "p1", decision: "answer", text: "dev" }),
+        JSON.stringify({
+          kind: "planInputAnswer",
+          promptId: "p1",
+          decision: "answer",
+          text: "dev",
+        }),
       ),
     ).toEqual({ promptId: "p1", decision: "answer", text: "dev" })
   })
@@ -816,14 +821,20 @@ describe("peekPlanInputAnswer (QUANTA_WEB_AGENT_STATE inbound frame decode)", ()
   })
 
   test("returns null when promptId is missing or non-string", () => {
-    expect(peekPlanInputAnswer(JSON.stringify({ kind: "planInputAnswer", decision: "answer" }))).toBeNull()
     expect(
-      peekPlanInputAnswer(JSON.stringify({ kind: "planInputAnswer", promptId: 7, decision: "answer" })),
+      peekPlanInputAnswer(JSON.stringify({ kind: "planInputAnswer", decision: "answer" })),
+    ).toBeNull()
+    expect(
+      peekPlanInputAnswer(
+        JSON.stringify({ kind: "planInputAnswer", promptId: 7, decision: "answer" }),
+      ),
     ).toBeNull()
   })
 
   test("returns null for a JSON array or null payload (not an object frame)", () => {
-    expect(peekPlanInputAnswer(JSON.stringify([{ kind: "planInputAnswer", promptId: "p" }]))).toBeNull()
+    expect(
+      peekPlanInputAnswer(JSON.stringify([{ kind: "planInputAnswer", promptId: "p" }])),
+    ).toBeNull()
     expect(peekPlanInputAnswer("null")).toBeNull()
   })
 })

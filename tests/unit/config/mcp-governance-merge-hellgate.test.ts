@@ -11,10 +11,14 @@
  * Default-OFF byte-identical: neither field/flag set ⇒ resolved is unchanged.
  */
 import { describe, expect, test } from "bun:test"
-import { mergeSettings } from "@/config"
 import type { SettingsLayer } from "@/config"
+import { mergeSettings } from "@/config"
 
-const mcp = (over: { enabled?: string[]; denied?: string[]; managedOnly?: boolean }): SettingsLayer => ({
+const mcp = (over: {
+  enabled?: string[]
+  denied?: string[]
+  managedOnly?: boolean
+}): SettingsLayer => ({
   security: {
     mcp: {
       ...(over.enabled !== undefined ? { enabledServers: over.enabled } : {}),
@@ -26,7 +30,10 @@ const mcp = (over: { enabled?: string[]; denied?: string[]; managedOnly?: boolea
 
 describe("MCP governance — denylist (tightening) + managed-only", () => {
   test("byte-identical: only enabledServers ⇒ union (unchanged behavior)", () => {
-    const r = mergeSettings({ user: mcp({ enabled: ["fs", "git"] }), project: mcp({ enabled: ["web"] }) }, true)
+    const r = mergeSettings(
+      { user: mcp({ enabled: ["fs", "git"] }), project: mcp({ enabled: ["web"] }) },
+      true,
+    )
     expect([...r.mcpEnabledServers].sort()).toEqual(["fs", "git", "web"])
   })
 
@@ -43,7 +50,10 @@ describe("MCP governance — denylist (tightening) + managed-only", () => {
     // Untrusted ⇒ the repo's enabledServers (loosening) are dropped, but its
     // deniedServers (tightening) still removes from the machine-owned set.
     const r = mergeSettings(
-      { user: mcp({ enabled: ["fs", "git"] }), project: mcp({ enabled: ["evil"], denied: ["git"] }) },
+      {
+        user: mcp({ enabled: ["fs", "git"] }),
+        project: mcp({ enabled: ["evil"], denied: ["git"] }),
+      },
       false,
     )
     expect(r.mcpEnabledServers).not.toContain("git") // repo deny survived
@@ -54,7 +64,9 @@ describe("MCP governance — denylist (tightening) + managed-only", () => {
   test("allowManagedMcpServersOnly: managed sets it ⇒ ONLY managed enabledServers apply", () => {
     const r = mergeSettings(
       {
-        managed: { security: { mcp: { enabledServers: ["corp-mcp"], allowManagedMcpServersOnly: true } } },
+        managed: {
+          security: { mcp: { enabledServers: ["corp-mcp"], allowManagedMcpServersOnly: true } },
+        },
         user: mcp({ enabled: ["fs"] }),
         project: mcp({ enabled: ["web"] }),
       },

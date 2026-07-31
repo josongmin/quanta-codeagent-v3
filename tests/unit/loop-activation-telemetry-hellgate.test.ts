@@ -24,16 +24,16 @@
  */
 
 import { describe, expect, spyOn, test } from "bun:test"
+import {
+  type ActivationHookConfigLike,
+  resolvePluginActivationForTurn,
+} from "@/agent/loop-activation-hook"
 // Namespace import of the SAME barrel the hook dynamic-imports (`await
 // import("@/agent/mention-injection")` resolves to this exact module record), so
 // a `spyOn(namespace, "parseMentions")` is visible to the hook AND is
 // `mockRestore()`-able — unlike `mock.module`, which is process-global and NOT
 // undone by restore (would leak the throwing stub into later cases / files).
 import * as mentionInjection from "@/agent/mention-injection"
-import {
-  type ActivationHookConfigLike,
-  resolvePluginActivationForTurn,
-} from "@/agent/loop-activation-hook"
 import type { AggregatedActivation } from "@/agent/plugin-activation-handler"
 import type { MetricEmitterPort } from "@/observability/codex-r2-metrics"
 

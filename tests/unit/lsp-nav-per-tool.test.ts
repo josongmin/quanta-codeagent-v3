@@ -51,7 +51,10 @@ describe("lsp_definition", () => {
     expect(trace.pos).toEqual({ line: 4, character: 6 })
     // RFC jun-17: a pre-open "initializing language server" progress event now
     // precedes "analyzing …" so a cold-workspace open is never a silent block.
-    expect(progress).toEqual(["lsp_definition: initializing language server…", "analyzing src/a.ts"])
+    expect(progress).toEqual([
+      "lsp_definition: initializing language server…",
+      "analyzing src/a.ts",
+    ])
     expect(result.ok).toBe(true)
     expect(result.output).toContain("definition: 1 result(s)")
     expect(result.output).toContain("/abs/x.ts:10:5")

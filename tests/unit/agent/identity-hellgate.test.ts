@@ -20,10 +20,10 @@ import {
   defaultIdentityProvider,
   IDENTITY_MODES,
   IdentityLineError,
-  identityForToken,
-  isIdentityMode,
   type IdentityMode,
   type IdentityProvider,
+  identityForToken,
+  isIdentityMode,
 } from "@/agent/identity"
 import { buildSystemPrompt } from "@/agent/prompt"
 

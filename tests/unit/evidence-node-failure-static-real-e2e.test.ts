@@ -22,16 +22,32 @@ const has = (b: string, ...a: string[]): boolean => {
     return false
   }
 }
-const D = has("bun", "--version") && has("typescript-language-server", "--version") ? describe : describe.skip
+const D =
+  has("bun", "--version") && has("typescript-language-server", "--version")
+    ? describe
+    : describe.skip
 
 const project = (): string => {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), "evnode-")))
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "t", version: "0.0.0" }))
-  writeFileSync(join(dir, "tsconfig.json"), JSON.stringify({ compilerOptions: { strict: true, types: [] } }))
-  writeFileSync(join(dir, "math.ts"), "export const add = (a: number, b: number): number => a + b\n")
+  writeFileSync(
+    join(dir, "tsconfig.json"),
+    JSON.stringify({ compilerOptions: { strict: true, types: [] } }),
+  )
+  writeFileSync(
+    join(dir, "math.ts"),
+    "export const add = (a: number, b: number): number => a + b\n",
+  )
   writeFileSync(
     join(dir, "math.test.ts"),
-    ['import { test, expect } from "bun:test"', 'import { add } from "./math"', "test(\"adds\", () => {", "  expect(add(2, 2)).toBe(5) // line 4 — fails (4 !== 5)", "})", ""].join("\n"),
+    [
+      'import { test, expect } from "bun:test"',
+      'import { add } from "./math"',
+      'test("adds", () => {',
+      "  expect(add(2, 2)).toBe(5) // line 4 — fails (4 !== 5)",
+      "})",
+      "",
+    ].join("\n"),
   )
   return dir
 }

@@ -23,9 +23,8 @@
 import { describe, expect, test } from "bun:test"
 import { BENCH } from "@/config/knob-inventory/bench"
 import type { KnobInventoryEntry } from "@/config/knob-inventory/types"
-import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
-import { deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
 import type { AnyKnobSchema } from "@/config/knob-schema/contracts"
+import { deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
 import {
   benchClosureDiagSchema,
   benchConcurrencySchema,
@@ -41,6 +40,7 @@ import {
   benchSotaSchema,
   noPatchForceFractionSchema,
 } from "@/config/knob-schema/schemas/bench-gap-3"
+import { deriveKnob } from "@/runner/batch/eval/kernel/derive"
 // The ONE live registry knob among GAP-3 (its parse is the ground truth).
 import { noPatchForceFractionKnob } from "@/runner/knobs/knobs/no-patch-force-fraction"
 import { type AnyKnob, asAnyKnob } from "@/runner/knobs/types"
@@ -119,8 +119,15 @@ const LIVE_PAIRS: readonly LivePair[] = [
 describe("derive parity (gap-3) — FULL-Knob data parity (BURN-DOWN gate)", () => {
   const FULL_KNOB_DIVERGENT_CEILING = 0
   const project = (k: AnyKnob): Record<string, unknown> => ({
-    id: k.id, envKey: k.envKey, category: k.category, surfaces: [...k.surfaces],
-    describe: k.describe, default: k.default, costMultiplier: k.costMultiplier, unit: k.unit, source: k.source,
+    id: k.id,
+    envKey: k.envKey,
+    category: k.category,
+    surfaces: [...k.surfaces],
+    describe: k.describe,
+    default: k.default,
+    costMultiplier: k.costMultiplier,
+    unit: k.unit,
+    source: k.source,
   })
   const mismatches: string[] = []
   for (const { name, schema, knob } of LIVE_PAIRS) {

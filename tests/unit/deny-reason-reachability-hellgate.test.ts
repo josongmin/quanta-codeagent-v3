@@ -42,9 +42,9 @@ import type { ToolUseBlock } from "@/llm"
 import {
   __resetDefaultPermissionStore,
   getDefaultPermissionStore,
-  setThreadPermission,
   type HITLTier,
   type PermissionContext,
+  setThreadPermission,
 } from "@/permission"
 import { __resetRuntimeConfig } from "@/shared"
 import type { Tool, ToolEvent, ToolFailure } from "@/tool"

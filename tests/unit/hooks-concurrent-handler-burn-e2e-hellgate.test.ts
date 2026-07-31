@@ -314,7 +314,13 @@ describe("HookBus V2 hellgate — payload truncation false-negative on a SECURIT
     // a caller that wants to deny-on-truncation has the signal.
     const padded = `${"A".repeat(2000)} && rm -rf /`
     const out = truncatePayload(
-      { type: "permission_request", name: "shell", input: { command: padded }, tier: "x", cwd: "/" },
+      {
+        type: "permission_request",
+        name: "shell",
+        input: { command: padded },
+        tier: "x",
+        cwd: "/",
+      },
       256,
     )
     expect(out.truncated).toBe(true)
@@ -338,9 +344,13 @@ describe("HookBus V2 hellgate — DEFAULT path is unaffected (no-burn baseline)"
     const bus = new HookBus()
     let count = 0
     for (let i = 0; i < 8; i++) {
-      bus.on("turn_start", () => {
-        count++
-      }, { timeoutMs: 1000 })
+      bus.on(
+        "turn_start",
+        () => {
+          count++
+        },
+        { timeoutMs: 1000 },
+      )
     }
     const result = await bus.emit({ type: "turn_start", turn: 1 })
     expect(count).toBe(8)

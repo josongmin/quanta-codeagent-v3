@@ -14,7 +14,13 @@
  */
 
 /** The canonical execution-mode surfaces. Adding one here propagates to every aliasing slice. */
-export const EXECUTION_SURFACES = ["bench", "cli", "agent-batch", "agent-interactive", "ide"] as const
+export const EXECUTION_SURFACES = [
+  "bench",
+  "cli",
+  "agent-batch",
+  "agent-interactive",
+  "ide",
+] as const
 
 /** The execution-mode surface union — derived from {@link EXECUTION_SURFACES} (never re-declared). */
 export type ExecutionSurface = (typeof EXECUTION_SURFACES)[number]

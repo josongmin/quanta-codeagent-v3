@@ -27,7 +27,11 @@ export type ActivationPolicy = "passive" | "ensure-turn"
 
 /** All delivery modes enumerated — tests assert exhaustive coverage without
  *  `as const` gymnastics; the drift guard below pins union⇔array both ways. */
-export const ALL_DELIVERY_MODES = ["queue", "steer", "interrupt"] as const satisfies readonly DeliveryMode[]
+export const ALL_DELIVERY_MODES = [
+  "queue",
+  "steer",
+  "interrupt",
+] as const satisfies readonly DeliveryMode[]
 
 /** All activation policies enumerated (drift-guarded below). */
 export const ALL_ACTIVATION_POLICIES = [

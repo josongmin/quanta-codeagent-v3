@@ -64,7 +64,8 @@ describe("detached poll — no-progress (wedged-but-alive) watchdog wiring", () 
         ssh: async (remote) => {
           if (isLaunch(remote)) return ok("LAUNCHED\n")
           polls += 1
-          if (polls > 200) throw new Error(`SAFETY: watchdog never tripped after ${polls} frozen polls`)
+          if (polls > 200)
+            throw new Error(`SAFETY: watchdog never tripped after ${polls} frozen polls`)
           return FROZEN
         },
       }),

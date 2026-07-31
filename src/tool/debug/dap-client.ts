@@ -46,7 +46,8 @@ export class DapClient {
 
   /** Send a DAP request; resolves with the response (success true OR false). */
   request(command: string, args?: unknown): Promise<DapResponse> {
-    if (this.disposed) return Promise.reject(new Error(`dap: transport disposed (command=${command})`))
+    if (this.disposed)
+      return Promise.reject(new Error(`dap: transport disposed (command=${command})`))
     const seq = this.seq++
     const msg = {
       seq,

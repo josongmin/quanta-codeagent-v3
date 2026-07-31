@@ -51,7 +51,9 @@ const syncNodeFs: FilesystemPort = {
 export const buildAppPluginMentionDeps = (
   cwd: string,
   env: Record<string, string | undefined>,
-): { plugins: ReturnType<typeof createInMemoryPluginRegistry>; apps: typeof defaultAppCatalog } | Record<never, never> => {
+):
+  | { plugins: ReturnType<typeof createInMemoryPluginRegistry>; apps: typeof defaultAppCatalog }
+  | Record<never, never> => {
   if (!gateOn(env, "QUANTA_MENTION_APP_PLUGIN")) return {}
   let manifests: readonly PluginManifest[] = []
   try {

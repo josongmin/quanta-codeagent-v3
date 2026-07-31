@@ -226,179 +226,182 @@ const spawnAndKillMidTxn = async (args: readonly string[]): Promise<void> => {
   }
 }
 
-describe.skipIf(IS_WIN)("H10 — SqliteStore crash mid-distill (all-or-none + BLOB integrity)", () => {
-  test("(1) uncommitted distill batch SIGKILLed mid-txn ⇒ ZERO uncommitted rows survive; committed prefix intact", async () => {
-    freshTmp()
-    try {
-      const COMMITTED = 5
-      const UNCOMMITTED = 8
-      // Child commits 5 embedding rows, opens a txn with 8 more, hangs.
-      await spawnAndKillMidTxn([
-        dbPath,
-        "d1",
-        String(COMMITTED),
-        String(UNCOMMITTED),
-        String(EMBED_DIM),
-      ])
-
-      // Parent reopens through the REAL store — WAL recovery runs on open.
-      const store = new SqliteStore(dbPath)
+describe.skipIf(IS_WIN)(
+  "H10 — SqliteStore crash mid-distill (all-or-none + BLOB integrity)",
+  () => {
+    test("(1) uncommitted distill batch SIGKILLed mid-txn ⇒ ZERO uncommitted rows survive; committed prefix intact", async () => {
+      freshTmp()
       try {
-        const all = await store.all()
-        const ids = all.map((e) => e.id).sort()
+        const COMMITTED = 5
+        const UNCOMMITTED = 8
+        // Child commits 5 embedding rows, opens a txn with 8 more, hangs.
+        await spawnAndKillMidTxn([
+          dbPath,
+          "d1",
+          String(COMMITTED),
+          String(UNCOMMITTED),
+          String(EMBED_DIM),
+        ])
 
-        // ALL-OR-NONE: every uncommitted row rolled back.
-        const uncommitted = ids.filter((id) => id.includes("-uncommitted-"))
-        expect(uncommitted).toEqual([])
+        // Parent reopens through the REAL store — WAL recovery runs on open.
+        const store = new SqliteStore(dbPath)
+        try {
+          const all = await store.all()
+          const ids = all.map((e) => e.id).sort()
 
-        // The earlier COMMITted batch is fully durable.
-        const committed = ids.filter((id) => id.includes("-committed-"))
-        expect(committed.length).toBe(COMMITTED)
-        for (let i = 0; i < COMMITTED; i++) {
-          expect(committed).toContain(`d1-committed-${i}`)
-        }
+          // ALL-OR-NONE: every uncommitted row rolled back.
+          const uncommitted = ids.filter((id) => id.includes("-uncommitted-"))
+          expect(uncommitted).toEqual([])
 
-        // BLOB INTEGRITY: each surviving embedding decodes to a clean
-        // EMBED_DIM vector — no torn / truncated float buffer crept through.
-        for (const id of committed) {
-          const e = await store.get(id)
-          expect(e).toBeDefined()
-          expect(e?.embedding).toBeDefined()
-          expect(e?.embedding?.length).toBe(EMBED_DIM)
-          // every component finite (no NaN from a half-written float)
-          for (const x of e?.embedding ?? []) expect(Number.isFinite(x)).toBe(true)
-        }
-
-        // Schema intact post-recovery — a follow-up write succeeds.
-        await store.save({
-          id: "post-crash",
-          kind: "observation",
-          text: "ok",
-          tags: [],
-          createdAt: Date.now(),
-        })
-        expect((await store.get("post-crash"))?.id).toBe("post-crash")
-      } finally {
-        store.close()
-      }
-    } finally {
-      cleanupTmp()
-    }
-  }, 30_000)
-
-  test("(2) torn / wrong-dimension embedding BLOB ⇒ row loads with NO embedding (graceful degrade, no throw, no OOM)", async () => {
-    freshTmp()
-    try {
-      // Commit rows whose embedding BLOB has a DELIBERATELY torn dimension:
-      // EMBED_DIM-1 floats. The byte length is still a multiple of 4 (so it
-      // is NOT rejected by the odd-length guard) but the vector is the wrong
-      // length — a survivor of a torn distill that wrote a short buffer.
-      // `normalizeEntry` only persists EMBED_DIM vectors on the WRITE side,
-      // so this corruption is ONLY reachable through a raw/torn write — the
-      // exact post-crash state we are pinning.
-      const TORN_DIM = EMBED_DIM - 1
-      await spawnAndKillMidTxn([dbPath, "d2", "3", "4", String(TORN_DIM)])
-
-      const store = new SqliteStore(dbPath)
-      try {
-        // The read path MUST NOT throw on a wrong-dim BLOB.
-        const all = await store.all()
-        const committed = all.filter((e) => e.id.includes("-committed-"))
-        expect(committed.length).toBe(3)
-
-        for (const e of committed) {
-          // Graceful degrade: a wrong-dimension vector is NOT surfaced as a
-          // real EMBED_DIM embedding. It either decodes to its (wrong) raw
-          // length or is dropped — but the row still loads and ranks fine.
-          // The invariant the harness pins: it is NEVER a clean EMBED_DIM
-          // vector (that would be silent data corruption masquerading as a
-          // valid embedding).
-          if (e.embedding !== undefined) {
-            expect(e.embedding.length).not.toBe(EMBED_DIM)
+          // The earlier COMMITted batch is fully durable.
+          const committed = ids.filter((id) => id.includes("-committed-"))
+          expect(committed.length).toBe(COMMITTED)
+          for (let i = 0; i < COMMITTED; i++) {
+            expect(committed).toContain(`d1-committed-${i}`)
           }
+
+          // BLOB INTEGRITY: each surviving embedding decodes to a clean
+          // EMBED_DIM vector — no torn / truncated float buffer crept through.
+          for (const id of committed) {
+            const e = await store.get(id)
+            expect(e).toBeDefined()
+            expect(e?.embedding).toBeDefined()
+            expect(e?.embedding?.length).toBe(EMBED_DIM)
+            // every component finite (no NaN from a half-written float)
+            for (const x of e?.embedding ?? []) expect(Number.isFinite(x)).toBe(true)
+          }
+
+          // Schema intact post-recovery — a follow-up write succeeds.
+          await store.save({
+            id: "post-crash",
+            kind: "observation",
+            text: "ok",
+            tags: [],
+            createdAt: Date.now(),
+          })
+          expect((await store.get("post-crash"))?.id).toBe("post-crash")
+        } finally {
+          store.close()
         }
-
-        // recall() over the torn rows must not crash (ranking tolerates the
-        // wrong-dim vector via length-mismatch → similarity 0).
-        const recalled = await store.recall({ limit: 10 })
-        expect(Array.isArray(recalled)).toBe(true)
-        expect(recalled.length).toBe(3)
       } finally {
-        store.close()
+        cleanupTmp()
       }
-    } finally {
-      cleanupTmp()
-    }
-  }, 30_000)
+    }, 30_000)
 
-  test("(3) corrupt-embedding degradation on a crash survivor is OBSERVABLE (typed event, fail-open read)", async () => {
-    freshTmp()
-    try {
-      // Odd byte-length BLOB is impossible via serializeVec (always ×4), so
-      // we reproduce a true torn-WAL survivor: commit a row, then truncate
-      // its BLOB to an odd length via raw SQL (the only producer of this
-      // state is partial-write corruption). The store must surface it via
-      // the onCorruptEmbedding observer instead of silently dropping it.
-      await spawnAndKillMidTxn([dbPath, "d3", "2", "3", String(EMBED_DIM)])
-
-      const seen: Array<{ id: string; byteLength: number }> = []
-      const store = new SqliteStore(dbPath, {
-        onCorruptEmbedding: (ev) => seen.push({ id: ev.id, byteLength: ev.byteLength }),
-      })
+    test("(2) torn / wrong-dimension embedding BLOB ⇒ row loads with NO embedding (graceful degrade, no throw, no OOM)", async () => {
+      freshTmp()
       try {
-        // Simulate a torn (odd-length) embedding survivor on a committed row.
-        store
-          .rawDbForTest()
-          .exec("UPDATE memories SET embedding = X'00' WHERE id = 'd3-committed-0'")
+        // Commit rows whose embedding BLOB has a DELIBERATELY torn dimension:
+        // EMBED_DIM-1 floats. The byte length is still a multiple of 4 (so it
+        // is NOT rejected by the odd-length guard) but the vector is the wrong
+        // length — a survivor of a torn distill that wrote a short buffer.
+        // `normalizeEntry` only persists EMBED_DIM vectors on the WRITE side,
+        // so this corruption is ONLY reachable through a raw/torn write — the
+        // exact post-crash state we are pinning.
+        const TORN_DIM = EMBED_DIM - 1
+        await spawnAndKillMidTxn([dbPath, "d2", "3", "4", String(TORN_DIM)])
 
-        const got = await store.get("d3-committed-0")
-        // Fail-open: row still loads, embedding dropped.
-        expect(got).toBeDefined()
-        expect(got?.embedding).toBeUndefined()
-        // …and the corruption is OBSERVABLE, not silent.
-        expect(seen.map((s) => s.id)).toContain("d3-committed-0")
-        expect(seen.find((s) => s.id === "d3-committed-0")?.byteLength).toBe(1)
+        const store = new SqliteStore(dbPath)
+        try {
+          // The read path MUST NOT throw on a wrong-dim BLOB.
+          const all = await store.all()
+          const committed = all.filter((e) => e.id.includes("-committed-"))
+          expect(committed.length).toBe(3)
+
+          for (const e of committed) {
+            // Graceful degrade: a wrong-dimension vector is NOT surfaced as a
+            // real EMBED_DIM embedding. It either decodes to its (wrong) raw
+            // length or is dropped — but the row still loads and ranks fine.
+            // The invariant the harness pins: it is NEVER a clean EMBED_DIM
+            // vector (that would be silent data corruption masquerading as a
+            // valid embedding).
+            if (e.embedding !== undefined) {
+              expect(e.embedding.length).not.toBe(EMBED_DIM)
+            }
+          }
+
+          // recall() over the torn rows must not crash (ranking tolerates the
+          // wrong-dim vector via length-mismatch → similarity 0).
+          const recalled = await store.recall({ limit: 10 })
+          expect(Array.isArray(recalled)).toBe(true)
+          expect(recalled.length).toBe(3)
+        } finally {
+          store.close()
+        }
       } finally {
-        store.close()
+        cleanupTmp()
       }
-    } finally {
-      cleanupTmp()
-    }
-  }, 30_000)
+    }, 30_000)
 
-  test("(4) WAL sibling materializes + a second crash leaves the FIRST committed batch intact (idempotent recovery)", async () => {
-    freshTmp()
-    try {
-      // First crash: commit 4, abort 6.
-      await spawnAndKillMidTxn([dbPath, "round1", "4", "6", String(EMBED_DIM)])
-      // WAL sibling MUST exist under WAL journal mode.
-      const store1 = new SqliteStore(dbPath)
-      let firstCount: number
+    test("(3) corrupt-embedding degradation on a crash survivor is OBSERVABLE (typed event, fail-open read)", async () => {
+      freshTmp()
       try {
-        firstCount = (await store1.all()).filter((e) => e.id.includes("round1-committed-")).length
-        expect(firstCount).toBe(4)
-      } finally {
-        store1.close()
-      }
-      expect(existsSync(`${dbPath}-wal`) || existsSync(dbPath)).toBe(true)
+        // Odd byte-length BLOB is impossible via serializeVec (always ×4), so
+        // we reproduce a true torn-WAL survivor: commit a row, then truncate
+        // its BLOB to an odd length via raw SQL (the only producer of this
+        // state is partial-write corruption). The store must surface it via
+        // the onCorruptEmbedding observer instead of silently dropping it.
+        await spawnAndKillMidTxn([dbPath, "d3", "2", "3", String(EMBED_DIM)])
 
-      // Second crash on the SAME db: commit 3 more, abort 5. Recovery must
-      // be idempotent — round1's committed prefix survives a second torn run.
-      await spawnAndKillMidTxn([dbPath, "round2", "3", "5", String(EMBED_DIM)])
-      const store2 = new SqliteStore(dbPath)
-      try {
-        const all = await store2.all()
-        const r1 = all.filter((e) => e.id.includes("round1-committed-"))
-        const r2 = all.filter((e) => e.id.includes("round2-committed-"))
-        const aborted = all.filter((e) => e.id.includes("-uncommitted-"))
-        expect(r1.length).toBe(4) // first batch still intact
-        expect(r2.length).toBe(3) // second committed batch landed
-        expect(aborted).toEqual([]) // both aborted batches gone
+        const seen: Array<{ id: string; byteLength: number }> = []
+        const store = new SqliteStore(dbPath, {
+          onCorruptEmbedding: (ev) => seen.push({ id: ev.id, byteLength: ev.byteLength }),
+        })
+        try {
+          // Simulate a torn (odd-length) embedding survivor on a committed row.
+          store
+            .rawDbForTest()
+            .exec("UPDATE memories SET embedding = X'00' WHERE id = 'd3-committed-0'")
+
+          const got = await store.get("d3-committed-0")
+          // Fail-open: row still loads, embedding dropped.
+          expect(got).toBeDefined()
+          expect(got?.embedding).toBeUndefined()
+          // …and the corruption is OBSERVABLE, not silent.
+          expect(seen.map((s) => s.id)).toContain("d3-committed-0")
+          expect(seen.find((s) => s.id === "d3-committed-0")?.byteLength).toBe(1)
+        } finally {
+          store.close()
+        }
       } finally {
-        store2.close()
+        cleanupTmp()
       }
-    } finally {
-      cleanupTmp()
-    }
-  }, 30_000)
-})
+    }, 30_000)
+
+    test("(4) WAL sibling materializes + a second crash leaves the FIRST committed batch intact (idempotent recovery)", async () => {
+      freshTmp()
+      try {
+        // First crash: commit 4, abort 6.
+        await spawnAndKillMidTxn([dbPath, "round1", "4", "6", String(EMBED_DIM)])
+        // WAL sibling MUST exist under WAL journal mode.
+        const store1 = new SqliteStore(dbPath)
+        let firstCount: number
+        try {
+          firstCount = (await store1.all()).filter((e) => e.id.includes("round1-committed-")).length
+          expect(firstCount).toBe(4)
+        } finally {
+          store1.close()
+        }
+        expect(existsSync(`${dbPath}-wal`) || existsSync(dbPath)).toBe(true)
+
+        // Second crash on the SAME db: commit 3 more, abort 5. Recovery must
+        // be idempotent — round1's committed prefix survives a second torn run.
+        await spawnAndKillMidTxn([dbPath, "round2", "3", "5", String(EMBED_DIM)])
+        const store2 = new SqliteStore(dbPath)
+        try {
+          const all = await store2.all()
+          const r1 = all.filter((e) => e.id.includes("round1-committed-"))
+          const r2 = all.filter((e) => e.id.includes("round2-committed-"))
+          const aborted = all.filter((e) => e.id.includes("-uncommitted-"))
+          expect(r1.length).toBe(4) // first batch still intact
+          expect(r2.length).toBe(3) // second committed batch landed
+          expect(aborted).toEqual([]) // both aborted batches gone
+        } finally {
+          store2.close()
+        }
+      } finally {
+        cleanupTmp()
+      }
+    }, 30_000)
+  },
+)

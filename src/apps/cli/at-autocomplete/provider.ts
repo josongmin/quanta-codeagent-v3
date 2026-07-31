@@ -24,10 +24,7 @@
 
 import { rankByTier } from "./fuzzy"
 import type { AtCandidate, AtCandidateProvider } from "./port"
-import {
-  createRecursiveFileLister,
-  type RecursiveFileListerOptions,
-} from "./recursive-file-list"
+import { createRecursiveFileLister, type RecursiveFileListerOptions } from "./recursive-file-list"
 import { createSymbolLister, type SymbolListerOptions } from "./symbol-list"
 
 /** A name + description registry entry the kebab listers consume. */

@@ -29,8 +29,8 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test"
-import { runAgent } from "@/agent"
 import type { AgentConfig } from "@/agent"
+import { runAgent } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import {

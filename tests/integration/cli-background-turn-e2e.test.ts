@@ -40,15 +40,15 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { runAgent } from "@/agent"
 import type { AgentConfig, AgentOutcome } from "@/agent"
-import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import { __resetRuntimeConfig } from "@/shared"
+import { runAgent } from "@/agent"
+import { createBackgroundTurnPortal } from "@/apps/cli/repl/background-turn-portal"
+import { runOneTurn } from "@/apps/cli/repl/turn-runner"
 import type { StatusBar } from "@/apps/cli/status-bar"
 import type { TurnIndicator } from "@/apps/cli/turn-indicator"
 import type { TurnSummaryCollector } from "@/apps/cli/turn-summary"
-import { createBackgroundTurnPortal } from "@/apps/cli/repl/background-turn-portal"
-import { runOneTurn } from "@/apps/cli/repl/turn-runner"
+import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
+import { __resetRuntimeConfig } from "@/shared"
 import { cfg, RecordingStream, withTimeout } from "./_harness"
 
 // ── fake-stdin plumbing (mirrors background-ctrlb-turn-runner.hellgate) ──────

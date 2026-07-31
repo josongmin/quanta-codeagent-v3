@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { evaluateSuccessPredicate } from "@/agent/closure"
 import type { ExecObservation, SuccessPredicate } from "@/agent/closure"
+import { evaluateSuccessPredicate } from "@/agent/closure"
 
 /**
  * T-1 — SuccessPredicate evaluator (core, pure).
@@ -31,9 +31,7 @@ describe("evaluateSuccessPredicate — execution-grounded", () => {
     expect(r.matched).toBe(false)
   })
   test("selected_test_passes: exit 0 ⇒ matched", () => {
-    expect(
-      evaluateSuccessPredicate(obs(0), { type: "selected_test_passes" }).matched,
-    ).toBe(true)
+    expect(evaluateSuccessPredicate(obs(0), { type: "selected_test_passes" }).matched).toBe(true)
   })
   test("🔴 EXECUTION-ORACLE CONTROL: test_exit_zero still HARD-gates after the stdout demotion", () => {
     // The genuine execution oracle is the ONLY hard signal on the rail. This control
@@ -103,13 +101,15 @@ describe("evaluateSuccessPredicate — FAIL-OPEN (advisory in v1)", () => {
     ).toBe(false)
   })
   test("ast_or_dom_shape / stderr_absent ⇒ evaluable:false", () => {
-    expect(evaluateSuccessPredicate(obs(0), { type: "ast_or_dom_shape", shape: "x" }).evaluable).toBe(
-      false,
-    )
+    expect(
+      evaluateSuccessPredicate(obs(0), { type: "ast_or_dom_shape", shape: "x" }).evaluable,
+    ).toBe(false)
     expect(evaluateSuccessPredicate(obs(0), { type: "stderr_absent" }).evaluable).toBe(false)
   })
   test("unknown discriminant ⇒ evaluable:false, no throw", () => {
-    const r = evaluateSuccessPredicate(obs(0), { type: "totally_bogus" } as unknown as SuccessPredicate)
+    const r = evaluateSuccessPredicate(obs(0), {
+      type: "totally_bogus",
+    } as unknown as SuccessPredicate)
     expect(r.evaluable).toBe(false)
   })
 
@@ -117,18 +117,21 @@ describe("evaluateSuccessPredicate — FAIL-OPEN (advisory in v1)", () => {
     // stdout_contains is advisory in v1 regardless of substring, so a malformed
     // one (missing substring) is also advisory — and must never throw.
     expect(() =>
-      evaluateSuccessPredicate(obs(0, "x"), { type: "stdout_contains" } as unknown as SuccessPredicate),
+      evaluateSuccessPredicate(obs(0, "x"), {
+        type: "stdout_contains",
+      } as unknown as SuccessPredicate),
     ).not.toThrow()
     expect(
-      evaluateSuccessPredicate(obs(0, "x"), { type: "stdout_contains" } as unknown as SuccessPredicate)
-        .evaluable,
+      evaluateSuccessPredicate(obs(0, "x"), {
+        type: "stdout_contains",
+      } as unknown as SuccessPredicate).evaluable,
     ).toBe(false)
     // null / non-object predicate ⇒ advisory, not throw.
     expect(() =>
       evaluateSuccessPredicate(obs(0), null as unknown as SuccessPredicate),
     ).not.toThrow()
-    expect(evaluateSuccessPredicate(obs(0), undefined as unknown as SuccessPredicate).evaluable).toBe(
-      false,
-    )
+    expect(
+      evaluateSuccessPredicate(obs(0), undefined as unknown as SuccessPredicate).evaluable,
+    ).toBe(false)
   })
 })

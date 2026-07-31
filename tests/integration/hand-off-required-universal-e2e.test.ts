@@ -48,7 +48,11 @@ const endText: StreamEvent[] = [
   { type: "text_delta", delta: "ok" },
   { type: "message_stop", stop_reason: "end_turn" },
 ]
-const tieredTool = (name: string, counts: { n: number }, tier: "hand-off-required" | "always-confirm"): Tool => ({
+const tieredTool = (
+  name: string,
+  counts: { n: number },
+  tier: "hand-off-required" | "always-confirm",
+): Tool => ({
   name,
   description: name,
   inputSchema: z.object({}).passthrough(),
@@ -60,7 +64,8 @@ const tieredTool = (name: string, counts: { n: number }, tier: "hand-off-require
     yield { type: "result", result: { ok: true, output: "ran" } }
   },
 })
-const handoffTool = (counts: { n: number }): Tool => tieredTool("destroyer", counts, "hand-off-required")
+const handoffTool = (counts: { n: number }): Tool =>
+  tieredTool("destroyer", counts, "hand-off-required")
 const cfg = (
   llm: LLMPort,
   registry: ToolRegistry,

@@ -274,13 +274,16 @@ describe("A4 — early-dispatch rejection while the stream is still flowing", ()
     // predicate (object with approval.{approvalId,reason,requestedAt}) — the
     // exact shape the runtime approval protocol's onConfirm throws when the
     // permission gate asks during an early-started `agent` dispatch.
-    const approvalError = Object.assign(new Error("runtime approval required: edit.needs_approval"), {
-      approval: {
-        approvalId: "ap-1",
-        reason: "edit.needs_approval",
-        requestedAt: "2026-06-10T00:00:00.000Z",
+    const approvalError = Object.assign(
+      new Error("runtime approval required: edit.needs_approval"),
+      {
+        approval: {
+          approvalId: "ap-1",
+          reason: "edit.needs_approval",
+          requestedAt: "2026-06-10T00:00:00.000Z",
+        },
       },
-    })
+    )
 
     const isConcurrencySafe = (): boolean => true
     const dispatch = async (call: StreamingCall): Promise<DispatchOutcome> => {

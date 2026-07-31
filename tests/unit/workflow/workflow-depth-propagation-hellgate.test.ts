@@ -17,8 +17,8 @@
  * `config.depth`, so this goes RED the moment the defect is reintroduced.
  */
 import { afterAll, afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
-import * as adapter from "@/agent/workflow-agent-adapter"
 import type { AgentConfig } from "@/agent/types"
+import * as adapter from "@/agent/workflow-agent-adapter"
 import type { AgentRunPort } from "@/workflow"
 
 // Capture the `options.depth` the tier-1 call site stamps on the workflow

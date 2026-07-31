@@ -77,8 +77,7 @@ describe("provider-plane divergence (model absent, provider present)", () => {
       .flatMap((m) => m.resourceMetrics)
       .flatMap((rm) => rm.scopeMetrics)
       .flatMap((sm) => sm.metrics)
-      .find((m) => m.name === "gen_ai.client.operation.duration")
-      ?.histogram?.dataPoints[0]
+      .find((m) => m.name === "gen_ai.client.operation.duration")?.histogram?.dataPoints[0]
     const metricProvider = attrString(dp?.attributes ?? [], GEN_AI_ATTRS.provider.name)
 
     // The two planes MUST agree — either both carry the normalized provider or

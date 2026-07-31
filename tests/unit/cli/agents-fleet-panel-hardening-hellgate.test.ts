@@ -11,10 +11,7 @@
  *   - `opts.now` injected (renderer is clock-free / deterministic)
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import {
-  type AgentFleetRow,
-  renderAgentFleet,
-} from "../../../src/apps/cli/agents-fleet-panel"
+import { type AgentFleetRow, renderAgentFleet } from "../../../src/apps/cli/agents-fleet-panel"
 import { setColorPolicy, stripAnsi } from "../../../src/ui/ui-helpers"
 
 beforeEach(() => setColorPolicy("off"))
@@ -146,12 +143,7 @@ describe("long-id truncation", () => {
   // MUTATION-KILL: emitting the full id (no slice) → the 40-z run appears → RED.
   test("task_zzz...(40 z): 12-char head shown, full 40-z string absent", () => {
     const longId = `task_${"z".repeat(40)}`
-    const out = stripAnsi(
-      renderAgentFleet(
-        [row({ id: longId, status: "running" })],
-        tableOpts,
-      ),
-    )
+    const out = stripAnsi(renderAgentFleet([row({ id: longId, status: "running" })], tableOpts))
     // task_ stripped, then 12 chars → "zzzzzzzzzzzz" (12 z's).
     expect(out).toContain("z".repeat(12))
     // The full 40-z run must never appear (would mean no truncation).
@@ -234,17 +226,14 @@ describe("surrogate-safe unicode truncation", () => {
 
   test("emoji agentType does not throw", () => {
     expect(() =>
-      renderAgentFleet(
-        [row({ id: "e", agentType: "🚀explorer", status: "running" })],
-        tableOpts,
-      ),
+      renderAgentFleet([row({ id: "e", agentType: "🚀explorer", status: "running" })], tableOpts),
     ).not.toThrow()
     // tree path groups by agentType — also must not throw on astral type names.
     expect(() =>
-      renderAgentFleet(
-        [row({ id: "e", agentType: "🚀explorer", status: "running" })],
-        { format: "tree", now: NOW },
-      ),
+      renderAgentFleet([row({ id: "e", agentType: "🚀explorer", status: "running" })], {
+        format: "tree",
+        now: NOW,
+      }),
     ).not.toThrow()
   })
 })

@@ -330,8 +330,7 @@ export const otelTracer = (opts?: OtelTracerOpts): Tracer => {
       // `withSpan`). This is what makes a nested span link to its structural
       // parent without the caller threading the Span by hand.
       const parent = opts2?.parent ?? getActiveTraceRef()
-      const collapseOpts =
-        parent === undefined ? opts2 : ({ ...opts2, parent } as typeof opts2)
+      const collapseOpts = parent === undefined ? opts2 : ({ ...opts2, parent } as typeof opts2)
       if (api === undefined) return noopTracer.startSpan(name, collapseOpts)
       const spanOpts = buildSpanOpts(opts2)
       try {

@@ -66,7 +66,8 @@ describe("buildSrcRsyncArgs", () => {
       itemize: true,
       del: true,
     })
-    const stripFlags = (a: string[]) => a.filter((x) => !x.startsWith("--checksum") && !x.startsWith("--itemize") && x !== "--delete")
+    const stripFlags = (a: string[]) =>
+      a.filter((x) => !x.startsWith("--checksum") && !x.startsWith("--itemize") && x !== "--delete")
     expect(stripFlags(heal)).toEqual(seed)
   })
 })

@@ -20,13 +20,13 @@
  *      ALL N instances — proving the gate is what stops it.
  */
 import { describe, expect, test } from "bun:test"
-import { buildReport } from "../../src/runner/batch/report"
 import {
   classifyInstanceHealth,
   type InstanceHealth,
   runBatchWithHealth,
   shouldAbortRun,
 } from "../../src/runner/batch/eval/run-health"
+import { buildReport } from "../../src/runner/batch/report"
 import type { Instance, InstanceResult } from "../../src/runner/batch/types"
 
 // Minimal valid InstanceResult; override per-case.
@@ -92,7 +92,12 @@ describe("classifyInstanceHealth", () => {
           turns: 8,
           patch: "diff --git a b\n+x",
           passed: false,
-          gradeBreakdown: { resolved: false, failToPassFailed: 1, passToPassFailed: 0, passToPassTotal: 3 },
+          gradeBreakdown: {
+            resolved: false,
+            failToPassFailed: 1,
+            passToPassFailed: 0,
+            passToPassTotal: 3,
+          },
         }),
       ),
     ).toBe("graded_fail")
@@ -250,7 +255,12 @@ describe("runBatchWithHealth — loop integration", () => {
           turns: 7,
           patch: "diff --git a b\n+x",
           passed: false,
-          gradeBreakdown: { resolved: false, failToPassFailed: 1, passToPassFailed: 0, passToPassTotal: 3 },
+          gradeBreakdown: {
+            resolved: false,
+            failToPassFailed: 1,
+            passToPassFailed: 0,
+            passToPassTotal: 3,
+          },
         })
       },
     })
@@ -289,7 +299,10 @@ describe("buildReport — runHealth field is byte-identical-for-healthy", () => 
 
   test("healthy verdict supplied ⇒ field OMITTED (normal run unchanged)", () => {
     const report = buildReport(
-      { ...meta, runHealth: { aborted: false, verdict: "healthy", reason: "", attempted: 1, total: 1 } },
+      {
+        ...meta,
+        runHealth: { aborted: false, verdict: "healthy", reason: "", attempted: 1, total: 1 },
+      },
       [okResult],
     )
     expect("runHealth" in report).toBe(false)
@@ -353,7 +366,9 @@ describe("transient_throttle classification + non-abort", () => {
 
   test("auth-first preserved: the breaker's ambiguous 'throttle/auth' ⇒ systemic_auth", () => {
     expect(
-      classifyInstanceHealth(res({ turns: 0, error: "circuit open: throttle/auth (K empty streams)" })),
+      classifyInstanceHealth(
+        res({ turns: 0, error: "circuit open: throttle/auth (K empty streams)" }),
+      ),
     ).toBe("systemic_auth")
   })
 
@@ -361,7 +376,9 @@ describe("transient_throttle classification + non-abort", () => {
   // throttle word must NOT be masked as transient_throttle (it would defeat abort).
   test("3a: re-auth death carrying a 429 ⇒ systemic_auth (not throttle)", () => {
     expect(
-      classifyInstanceHealth(res({ turns: 0, error: "re-authentication required: 429 rate limit" })),
+      classifyInstanceHealth(
+        res({ turns: 0, error: "re-authentication required: 429 rate limit" }),
+      ),
     ).toBe("systemic_auth")
   })
 

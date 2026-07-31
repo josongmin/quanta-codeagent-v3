@@ -340,11 +340,7 @@ export const resolvePluginPointers = (
   }
 
   const appsRaw =
-    typeof fields.apps === "string"
-      ? [fields.apps]
-      : Array.isArray(fields.apps)
-        ? fields.apps
-        : []
+    typeof fields.apps === "string" ? [fields.apps] : Array.isArray(fields.apps) ? fields.apps : []
   const appPaths = appsRaw
     .map((a) => resolveUnder(pluginDir, a))
     .filter((p): p is string => p !== undefined)

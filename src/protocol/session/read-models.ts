@@ -3,20 +3,11 @@ import { CANVAS_PROTOCOL_VERSION } from "@/protocol/canvas"
 import { OBSERVABILITY_PROTOCOL_VERSION } from "@/protocol/observability"
 import { SESSION_PROTOCOL_VERSION, type SessionProtocolVersion } from "./version"
 
-export const SURFACE_READ_MODEL_IDS = [
-  "session",
-  "agentState",
-  "canvas",
-  "observability",
-] as const
+export const SURFACE_READ_MODEL_IDS = ["session", "agentState", "canvas", "observability"] as const
 
 export type SurfaceReadModelId = (typeof SURFACE_READ_MODEL_IDS)[number]
 
-export const SURFACE_READ_MODEL_STATUSES = [
-  "subscribed",
-  "supported",
-  "unsupported",
-] as const
+export const SURFACE_READ_MODEL_STATUSES = ["subscribed", "supported", "unsupported"] as const
 
 export type SurfaceReadModelStatus = (typeof SURFACE_READ_MODEL_STATUSES)[number]
 
@@ -94,8 +85,7 @@ export const LEGACY_DEFAULT_SURFACE_SUBSCRIPTION: SurfaceSubscription = {
 }
 
 export const isSurfaceReadModelStatus = (value: unknown): value is SurfaceReadModelStatus =>
-  typeof value === "string" &&
-  (SURFACE_READ_MODEL_STATUSES as readonly string[]).includes(value)
+  typeof value === "string" && (SURFACE_READ_MODEL_STATUSES as readonly string[]).includes(value)
 
 export const isSurfaceReadModelId = (value: unknown): value is SurfaceReadModelId =>
   typeof value === "string" && (SURFACE_READ_MODEL_IDS as readonly string[]).includes(value)
@@ -103,10 +93,7 @@ export const isSurfaceReadModelId = (value: unknown): value is SurfaceReadModelI
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value)
 
-const matchesProtocol = (
-  id: SurfaceReadModelId,
-  protocol: unknown,
-): boolean =>
+const matchesProtocol = (id: SurfaceReadModelId, protocol: unknown): boolean =>
   (id === "session" && protocol === SESSION_PROTOCOL_VERSION) ||
   (id === "agentState" && protocol === AGENT_STATE_PROTOCOL_VERSION) ||
   (id === "canvas" && protocol === CANVAS_PROTOCOL_VERSION) ||
@@ -176,8 +163,7 @@ export const resolveReadModels = (
           ? supported(AGENT_STATE_PROTOCOL_VERSION)
           : unsupported(),
     canvas:
-      supportedReadModels.canvas.status === "supported" &&
-      normalized.canvas.status === "subscribed"
+      supportedReadModels.canvas.status === "supported" && normalized.canvas.status === "subscribed"
         ? subscribed(CANVAS_PROTOCOL_VERSION)
         : supportedReadModels.canvas.status === "supported"
           ? supported(CANVAS_PROTOCOL_VERSION)

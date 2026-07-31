@@ -19,10 +19,10 @@
  * forwarded nothing. Symmetric to the localize/repro steps.
  */
 
-import { runRepairRounds } from "../../repair/index"
-import { foldState } from "../eval-step"
 import type { BenchPosture } from "../../knobs-bench"
+import { runRepairRounds } from "../../repair/index"
 import type { EvalCtx, EvalStep } from "../eval-step"
+import { foldState } from "../eval-step"
 
 /** The repair gate predicate, exported for the parity test to assert the EXACT
  *  driver predicate (presence of a repair-round budget). */

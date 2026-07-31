@@ -53,9 +53,7 @@ const SRC_DIR = join(REPO_ROOT, "src")
  * this round (R2 audit-H). The user owns these on a parallel branch and
  * will migrate them when their slice lands. New files MUST NOT be added.
  */
-const ALLOWED_UNSAFE_CAST_SITES = new Set<string>([
-  "runner/assemble/search-index-backend.ts",
-])
+const ALLOWED_UNSAFE_CAST_SITES = new Set<string>(["runner/assemble/search-index-backend.ts"])
 
 /** No shadow `errMessage` definitions are permitted anywhere under src/. */
 const ALLOWED_SHADOW_DEFINITION_SITES = new Set<string>()

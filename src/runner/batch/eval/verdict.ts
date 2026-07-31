@@ -72,7 +72,9 @@ const hasExplicitFailureSummary = (output: string): boolean =>
 /** Shared local-`testCmd` verdict classifier. The official grader path and the
  *  public module-smoke base probe must agree on what counts as green vs red on
  *  the repo-local verifier command. */
-export const localTestCmdPassed = (result: Pick<VerifyOutcome, "exitCode" | "logTail">): boolean => {
+export const localTestCmdPassed = (
+  result: Pick<VerifyOutcome, "exitCode" | "logTail">,
+): boolean => {
   const explicitFailure = hasExplicitFailureSummary(result.logTail)
   const summaryPass = hasExplicitPassingSummary(result.logTail) && !explicitFailure
   return !explicitFailure && (result.exitCode === 0 || summaryPass)

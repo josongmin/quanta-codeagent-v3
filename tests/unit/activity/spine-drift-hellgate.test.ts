@@ -74,10 +74,10 @@ describe("spine drift ratchet — single source of truth", () => {
   })
 
   test("3 — heterogeneous sources coexist as distinct roots, no cross-bleed", () => {
-    const wf = workflowToActivity(
-      [{ type: "step_start", id: "s1", label: "a" }],
-      { runId: "wf", label: "review" },
-    )
+    const wf = workflowToActivity([{ type: "step_start", id: "s1", label: "a" }], {
+      runId: "wf",
+      label: "review",
+    })
     const subs = fleetToActivity([{ id: "sub", description: "x", status: "running", startedAt: 1 }])
     const daemons = sideAgentsToActivity([
       { id: "dae", label: "indexer", status: "running", wakesDone: 2, startedAt: 1 },

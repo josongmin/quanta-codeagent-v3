@@ -108,7 +108,12 @@ describe("recovery-router WIRE — paired-control: previously-hardcoded kinds re
   // legacy path: a { do: "backoff", attempt: 0 } that consumes one retry slot.
   // This is the no-regression guarantee — the win is a single policy table, not
   // a behaviour change for the already-handled kinds.
-  const RETRY_KINDS: readonly LLMErrorKind[] = ["overloaded", "rate_limit", "server_error", "network"]
+  const RETRY_KINDS: readonly LLMErrorKind[] = [
+    "overloaded",
+    "rate_limit",
+    "server_error",
+    "network",
+  ]
 
   for (const kind of RETRY_KINDS) {
     test(`${kind} → still { do: "backoff", attempt: 0 } and consumes a retry slot (parity)`, () => {
@@ -117,7 +122,11 @@ describe("recovery-router WIRE — paired-control: previously-hardcoded kinds re
       expect(action === "retry_after_backoff" || action === "fallback_provider").toBe(true)
 
       const rec = freshRecovery()
-      const decision = decideOnStreamError(new LLMError(`provider says ${kind}`, { kind }), "msg", rec)
+      const decision = decideOnStreamError(
+        new LLMError(`provider says ${kind}`, { kind }),
+        "msg",
+        rec,
+      )
 
       const expected: RecoveryAction = { do: "backoff", attempt: 0 }
       expect(decision).toEqual(expected)
@@ -147,14 +156,18 @@ describe("recovery-router WIRE — CHARACTERIZATION of kinds whose behaviour the
   // must adjudicate `not_implemented` (a real behaviour change — measure-first
   // flip candidate, not a free dedup) before treating the wire as pure parity.
 
-  test('REGRESSION-RISK: not_implemented now RETRIES (was terminal in legacy FATAL_KINDS)', () => {
+  test("REGRESSION-RISK: not_implemented now RETRIES (was terminal in legacy FATAL_KINDS)", () => {
     const kind: LLMErrorKind = "not_implemented"
     // Codex table routes it to `fallback_provider`; at the OUTER owner (past any
     // FallbackLLM chain) that collapses to a same-turn backoff RETRY.
     expect(codexSpecRoute(kind)).toBe("fallback_provider")
 
     const rec = freshRecovery()
-    const decision = decideOnStreamError(new LLMError("stub adapter", { kind }), "stub adapter", rec)
+    const decision = decideOnStreamError(
+      new LLMError("stub adapter", { kind }),
+      "stub adapter",
+      rec,
+    )
 
     // WIRED behaviour: retries. LEGACY behaviour was { do: "error" } (FATAL_KINDS
     // in src/agent/retry.ts lists `not_implemented`: a stub adapter throws
@@ -165,7 +178,7 @@ describe("recovery-router WIRE — CHARACTERIZATION of kinds whose behaviour the
     expect(rec.streamRetries).toBe(1)
   })
 
-  test('CHANGED (intended): thread_rollback_failed now COMPACTS (was fatal in legacy)', () => {
+  test("CHANGED (intended): thread_rollback_failed now COMPACTS (was fatal in legacy)", () => {
     const kind: LLMErrorKind = "thread_rollback_failed"
     // Codex routes it to reactive_compaction (rebuild a shorter prefix). Legacy
     // had no structured handling ⇒ classifyLLMError=fatal. The compact route is
@@ -173,7 +186,11 @@ describe("recovery-router WIRE — CHARACTERIZATION of kinds whose behaviour the
     expect(codexSpecRoute(kind)).toBe("reactive_compaction")
 
     const rec = freshRecovery()
-    const decision = decideOnStreamError(new LLMError("rollback failed", { kind }), "rollback failed", rec)
+    const decision = decideOnStreamError(
+      new LLMError("rollback failed", { kind }),
+      "rollback failed",
+      rec,
+    )
 
     expect(decision.do).toBe("compact")
   })

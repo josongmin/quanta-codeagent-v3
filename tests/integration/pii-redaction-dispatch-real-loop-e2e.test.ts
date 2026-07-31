@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { z } from "zod"
 import { runAgent } from "@/agent"
 import { type AssemblerEnv, assembleAgentConfig } from "@/host/runtime/agent-config-assembler"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
@@ -6,7 +7,6 @@ import type { PermissionContext } from "@/permission"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import { __resetRuntimeConfig } from "@/shared"
 import { defaultTools, type Tool, type ToolEvent, ToolRegistry } from "@/tool"
-import { z } from "zod"
 import { RecordingStream, withTimeout } from "./_harness"
 
 /**
@@ -80,8 +80,7 @@ const piiEmitTool = (): Tool => ({
   },
 })
 
-const registryWithPiiTool = (): ToolRegistry =>
-  new ToolRegistry([...defaultTools, piiEmitTool()])
+const registryWithPiiTool = (): ToolRegistry => new ToolRegistry([...defaultTools, piiEmitTool()])
 
 /** The tool_result content the LLM saw on each stream() call, in order — the
  *  authoritative view of what the NEXT turn's model actually received. */

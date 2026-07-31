@@ -22,8 +22,8 @@
  * `ctx.deps.localize`, which the driver binds over its private LLM port + sandbox.
  */
 
-import { foldState } from "../eval-step"
 import type { EvalCtx, EvalStep } from "../eval-step"
+import { foldState } from "../eval-step"
 
 export const localizeStep: EvalStep = {
   id: "localize",

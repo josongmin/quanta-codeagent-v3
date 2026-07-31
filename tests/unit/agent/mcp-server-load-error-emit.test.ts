@@ -20,11 +20,11 @@
  */
 
 import { describe, expect, it } from "bun:test"
-import { loadMcpTools } from "@/agent"
-import type { LoadMcpToolsOpts } from "@/agent"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import type { LoadMcpToolsOpts } from "@/agent"
+import { loadMcpTools } from "@/agent"
 
 /** Minimal healthy stdio MCP server (initialize + tools/list). */
 const MOCK_SERVER = `

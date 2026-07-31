@@ -136,10 +136,7 @@ export const buildChooserPrompt = (
  * Only an explicit, valid `BEST: <id>` now selects; everything else returns null
  * so the caller keeps the deterministic winner (never-veto / fail-open invariant).
  */
-export const parseChooserIndex = (
-  text: string,
-  validIds: ReadonlySet<number>,
-): number | null => {
+export const parseChooserIndex = (text: string, validIds: ReadonlySet<number>): number | null => {
   const m = text.match(/BEST:\s*(\d+)/i)
   if (m !== null) {
     const id = Number.parseInt(m[1] as string, 10)

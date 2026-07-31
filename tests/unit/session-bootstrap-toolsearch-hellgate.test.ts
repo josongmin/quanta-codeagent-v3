@@ -63,10 +63,10 @@ describe("createRunAgentContext", () => {
     expect(ts).toBeDefined()
 
     let output = ""
-    for await (const ev of ts.execute(
-      { query: "select:Skill,ToolSearch" },
-      { cwd: "/repo", signal: new AbortController().signal } as never,
-    )) {
+    for await (const ev of ts.execute({ query: "select:Skill,ToolSearch" }, {
+      cwd: "/repo",
+      signal: new AbortController().signal,
+    } as never)) {
       if (ev.type === "result") output = ev.result.output
     }
 

@@ -51,7 +51,10 @@ describe("detectToolchain", () => {
   test("conftest.py ALONE is NOT a marker (pytest-only ⇒ unittest fallback would false-green a 0-tests run)", async () => {
     // Deliberate: a pytest-only marker without an unittest-capable marker is not
     // detected, so we never fall back to unittest and falsely pass a pytest repo.
-    const t = await detectToolchain("/p", { fileExists: async (n) => n === "conftest.py", canRun: async () => true })
+    const t = await detectToolchain("/p", {
+      fileExists: async (n) => n === "conftest.py",
+      canRun: async () => true,
+    })
     expect(t).toBeNull()
   })
 

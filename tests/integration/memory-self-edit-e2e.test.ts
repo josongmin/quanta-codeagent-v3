@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { NullEmbedder, runAgent } from "@/agent"
-import { memoryTools } from "@/agent"
+import { memoryTools, NullEmbedder, runAgent } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { InMemoryStore } from "@/memory"
 import { __resetRuntimeConfig } from "@/shared"
@@ -52,7 +51,9 @@ const searchCall = (id: string, query: string): StreamEvent[] => [
 const convo = (i: StreamInput): string =>
   i.messages
     .flatMap((m) =>
-      m.content.map((b) => (b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "")),
+      m.content.map((b) =>
+        b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "",
+      ),
     )
     .join(" ")
 
@@ -101,11 +102,13 @@ describe("self-edit memory tools — real loop dispatch through runAgent", () =>
           // The REAL registry the loop dispatches over carries the self-edit
           // tools bound to THIS store (+ offline embedder). This is exactly
           // what `buildToolingCore` wires in production.
-          registry: new ToolRegistry([
-            ...defaultTools,
-            ...memoryTools({ store, embedder }),
-          ]),
-          messages: [{ role: "user", content: [{ type: "text", text: "record the runbook location, then look it up" }] }],
+          registry: new ToolRegistry([...defaultTools, ...memoryTools({ store, embedder })]),
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "text", text: "record the runbook location, then look it up" }],
+            },
+          ],
           maxTurns: 8,
         }),
       ),
@@ -161,7 +164,12 @@ describe("self-edit memory tools — real loop dispatch through runAgent", () =>
           llm,
           stream: new RecordingStream(),
           registry: new ToolRegistry([...defaultTools]),
-          messages: [{ role: "user", content: [{ type: "text", text: "record the runbook location, then look it up" }] }],
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "text", text: "record the runbook location, then look it up" }],
+            },
+          ],
           maxTurns: 8,
         }),
       ),

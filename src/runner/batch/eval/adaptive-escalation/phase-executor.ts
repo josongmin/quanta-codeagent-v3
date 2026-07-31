@@ -39,11 +39,11 @@
  * fidelity obligation lives at that wiring, not here).
  */
 
-import { type AdaptiveExecutorInput } from "./controller"
-import { projectRouterEvidence, type RouterEvidence } from "./router-evidence"
-import type { LlmEvidencePacket } from "../llm-evidence-packet"
 import type { BenchKnobState, BenchPosture } from "../knobs-bench"
+import type { LlmEvidencePacket } from "../llm-evidence-packet"
 import { type AdaptiveAction, derivePhasePosture, withKnobModules } from "../posture"
+import type { AdaptiveExecutorInput } from "./controller"
+import { projectRouterEvidence, type RouterEvidence } from "./router-evidence"
 
 /** The INJECTED phase runner: run one phase under `state` + `posture`, return
  *  its packet. The real implementation is wired to the driver at Wave-3

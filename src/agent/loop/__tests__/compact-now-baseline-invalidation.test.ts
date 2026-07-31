@@ -20,12 +20,9 @@
 import { describe, expect, test } from "bun:test"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import { createWorkingMemory } from "@/memory"
-import {
-  type TokenBaselineBoxState,
-  triggerTokenCount,
-} from "../../compaction"
-import { compactNowOnDemand } from "../compaction-wire"
+import { type TokenBaselineBoxState, triggerTokenCount } from "../../compaction"
 import type { AgentConfig } from "../../types"
+import { compactNowOnDemand } from "../compaction-wire"
 
 /** A summarizer LLM whose single text_delta becomes the summary — enough for
  *  `compactIfNeeded(force:true)` to fold the prefix and SHRINK the transcript. */
@@ -134,9 +131,7 @@ describe("compactNowOnDemand — effort-classifier reset (ALBB-08 Fix 2)", () =>
   const makeClassifier = (): AgentConfig["effortClassifier"] =>
     ({ reset() {}, onUserPrompt() {}, currentRecommendation: () => undefined }) as never
 
-  const makeConfigWithClassifier = (
-    classifier: AgentConfig["effortClassifier"],
-  ): AgentConfig =>
+  const makeConfigWithClassifier = (classifier: AgentConfig["effortClassifier"]): AgentConfig =>
     ({
       system: "sys",
       llm: summarizerLlm,

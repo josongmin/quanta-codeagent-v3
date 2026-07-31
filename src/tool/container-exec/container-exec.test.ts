@@ -45,7 +45,9 @@ describe("container_exec tool — exit-code completion + head/tail cap (RFC §13
   // if this seam breaks, OC1's crash detection silently rubber-stamps every crash as clean.
   // RED-on-injection: delete the `evidence:{…}` block in tool.ts ⇒ this assertion fails.
   test("carries exit code + executedCommand on the typed evidence seam (OC1 crash wire)", async () => {
-    const tool = containerExecTool(fakePort(async () => ({ stdout: "Traceback", stderr: "", code: 2 })))
+    const tool = containerExecTool(
+      fakePort(async () => ({ stdout: "Traceback", stderr: "", code: 2 })),
+    )
     const r = await run(tool, { command: "python /app/convert.py" })
     expect(r.ok).toBe(true)
     expect(r.evidence?.exitCode).toBe(2)

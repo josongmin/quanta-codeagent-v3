@@ -5,9 +5,7 @@ import { defineTool } from "../factory"
 import type { ToolContext, ToolEvent } from "../types"
 
 const schema = z.object({
-  pattern: z
-    .string()
-    .describe("ast-grep pattern. Use $VAR for metavariables matching any code."),
+  pattern: z.string().describe("ast-grep pattern. Use $VAR for metavariables matching any code."),
   path: z
     .string()
     .optional()
@@ -45,7 +43,7 @@ const SEARCH_TIMEOUT_MS = 30_000
 // during the same session allows the tool to work without a process restart.
 // Concurrent-probe race: a `Promise<string | undefined>` deduplicates parallel
 // first-call probes (both await the same Promise instead of spawning two).
-let probePromise: Promise<string | undefined> | undefined = undefined
+let probePromise: Promise<string | undefined> | undefined
 let probeSucceeded = false
 
 const sq = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
@@ -61,21 +59,18 @@ async function probeAstGrep(cwd: string): Promise<string | undefined> {
   // In-flight deduplication: if a probe is already running, await it.
   if (probePromise !== undefined) return probePromise
 
-  probePromise = runShell("ast-grep --version", { cwd, timeoutMs: PROBE_TIMEOUT_MS }).then(
-    (r) => {
-      if (r.exitCode === 0) {
-        probeSucceeded = true
-        // Keep probePromise set (resolved) so concurrent callers get the success.
-        return undefined
-      }
-      const msg =
-        "ast-grep not installed; run: brew install ast-grep  (or: cargo install ast-grep)"
-      // B2 fix: do NOT permanently cache the failure. Clear the in-flight
-      // promise so the next call re-probes. probeSucceeded stays false.
-      probePromise = undefined
-      return msg
-    },
-  )
+  probePromise = runShell("ast-grep --version", { cwd, timeoutMs: PROBE_TIMEOUT_MS }).then((r) => {
+    if (r.exitCode === 0) {
+      probeSucceeded = true
+      // Keep probePromise set (resolved) so concurrent callers get the success.
+      return undefined
+    }
+    const msg = "ast-grep not installed; run: brew install ast-grep  (or: cargo install ast-grep)"
+    // B2 fix: do NOT permanently cache the failure. Clear the in-flight
+    // promise so the next call re-probes. probeSucceeded stays false.
+    probePromise = undefined
+    return msg
+  })
 
   return probePromise
 }
@@ -160,9 +155,7 @@ export const astGrepTool = defineTool<Input>({
     // ast-grep). Truncated JSON will fail to parse; the catch block below
     // reports ok:false with a clear error rather than crashing the process.
     const truncated = r.stdout.length > MAX_STDOUT_BYTES
-    const rawStdout = truncated
-      ? r.stdout.slice(0, MAX_STDOUT_BYTES)
-      : r.stdout
+    const rawStdout = truncated ? r.stdout.slice(0, MAX_STDOUT_BYTES) : r.stdout
     const stdout = rawStdout.trim()
 
     if (!stdout || stdout === "[]") {
@@ -201,9 +194,7 @@ export const astGrepTool = defineTool<Input>({
     })
 
     const more =
-      matches.length > MAX_MATCHES
-        ? `\n... ${matches.length - MAX_MATCHES} more matches`
-        : ""
+      matches.length > MAX_MATCHES ? `\n... ${matches.length - MAX_MATCHES} more matches` : ""
 
     let output = lines.join("\n") + more
     if (truncated) {

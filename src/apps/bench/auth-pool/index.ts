@@ -2,7 +2,7 @@
  * Multi-Auth Fleet (jun-20) — public surface for the bench auth-pool module.
  * Entrypoints import from here, not from individual files.
  */
-export type { AuthPoolEntry, AuthSource } from "./types"
+
 export {
   type AccountStatus,
   type AcquireRequest,
@@ -18,8 +18,8 @@ export {
   describeAuthSource,
   loadAuthPoolFile,
   parseAuthPoolManifest,
-  resolveAuthLaunchFile,
   type ResolveAuthOpts,
+  resolveAuthLaunchFile,
   resolveAuthSource,
   selectAuthSourceLabel,
 } from "./load"
@@ -32,3 +32,4 @@ export {
   defaultBenchManifestPath,
   runBenchLogin,
 } from "./login"
+export type { AuthPoolEntry, AuthSource } from "./types"

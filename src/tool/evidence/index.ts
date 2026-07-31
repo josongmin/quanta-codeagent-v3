@@ -1,7 +1,7 @@
 /** Keystone — Evidence Packet Builder. Default-OFF (QUANTA_EVIDENCE); fuses
  *  run_tests (failure) + LSP (static) + DAP (runtime) + git (repo) into ONE
  *  unified packet for the LLM. */
-export { buildEvidence, type BuildEvidenceOptions, type EvidenceSources } from "./builder"
+export { type BuildEvidenceOptions, buildEvidence, type EvidenceSources } from "./builder"
 export { defaultRuntimePort } from "./runtime"
 export { collectEvidenceTool, type EvidenceToolDeps, makeCollectEvidenceTool } from "./tool"
 export type {

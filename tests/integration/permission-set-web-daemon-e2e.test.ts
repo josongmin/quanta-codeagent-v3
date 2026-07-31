@@ -11,13 +11,13 @@
  * stays gated — so this test fails RED on any non-honored wiring.
  */
 import { afterEach, describe, expect, test } from "bun:test"
+import { z } from "zod"
 import { buildInteractiveTurnAssembler } from "@/apps/web-daemon/runtime-factory"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { createRuntimeFromAgentConfigBase } from "@/sdk/runtime"
 import { StdoutStream } from "@/stream"
 import { type Tool, type ToolEvent, ToolRegistry } from "@/tool"
-import { z } from "zod"
 
 /** A scripted LLM: turn 1 calls the mutating tool; turn 2 calls it again; then
  *  ends. (Each `stream()` call serves the next script.) */

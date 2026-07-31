@@ -16,9 +16,9 @@
  *  the bridge would feed) and showing one tool is gone with zero disclosure. */
 
 import { describe, expect, test } from "bun:test"
+import { z } from "zod"
 import { disambiguateMcpToolNames, mcpToolName } from "@/agent"
 import { type Tool, type ToolEvent, ToolRegistry } from "@/tool"
-import { z } from "zod"
 
 /** A minimal `Tool` whose `execute` yields a result tagging WHICH source tool
  *  ran — so we can prove BOTH colliding tools remain independently callable
@@ -48,10 +48,7 @@ describe("F1 — disambiguateMcpToolNames keeps both colliding tools callable", 
     const a = mcpToolName("my-srv", "x") // mcp__my_srv__x
     const b = mcpToolName("my_srv", "x") // identical
     expect(a).toBe(b)
-    const { tools, collisions } = disambiguateMcpToolNames([
-      fakeTool(a, "A"),
-      fakeTool(b, "B"),
-    ])
+    const { tools, collisions } = disambiguateMcpToolNames([fakeTool(a, "A"), fakeTool(b, "B")])
     expect(tools[0]?.name).toBe(a) // first claimant unchanged
     expect(tools[1]?.name).toBe(`${a}_2`) // later one disambiguated
     expect(tools[0]?.name).not.toBe(tools[1]?.name) // both callable identities
@@ -81,10 +78,7 @@ describe("F1 — disambiguateMcpToolNames keeps both colliding tools callable", 
   })
 
   test("no collision ⇒ byte-identical (every name unchanged, no record)", () => {
-    const tools = [
-      fakeTool(mcpToolName("a", "x"), "AX"),
-      fakeTool(mcpToolName("b", "y"), "BY"),
-    ]
+    const tools = [fakeTool(mcpToolName("a", "x"), "AX"), fakeTool(mcpToolName("b", "y"), "BY")]
     const { tools: out, collisions } = disambiguateMcpToolNames(tools)
     expect(out.map((t) => t.name)).toEqual(tools.map((t) => t.name))
     expect(collisions).toEqual([])

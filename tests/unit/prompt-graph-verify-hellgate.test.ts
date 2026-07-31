@@ -235,7 +235,10 @@ describe("prompt-graph Phase 2 — BODY + NOTICE slice is sound", () => {
       expect(ALL_ATOMS.filter((a) => a.atomId === atomId).length, atomId).toBeGreaterThan(1)
       for (const ctx of allCtx) {
         const n = selectAtoms(ALL_ATOMS, ctx).filter((a) => a.atomId === atomId).length
-        expect(n, `${atomId} @ ${JSON.stringify({ posture: ctx.envPosture, mode: ctx.mode })}`).toBe(1)
+        expect(
+          n,
+          `${atomId} @ ${JSON.stringify({ posture: ctx.envPosture, mode: ctx.mode })}`,
+        ).toBe(1)
       }
     }
   })
@@ -245,7 +248,9 @@ describe("prompt-graph Phase 2 — BODY + NOTICE slice is sound", () => {
     // (or a partition became additive), this flags the reclassification.
     const allCtx = reachableAllContexts()
     const renderCounts = (atomId: string) =>
-      new Set(allCtx.map((ctx) => selectAtoms(ALL_ATOMS, ctx).filter((a) => a.atomId === atomId).length))
+      new Set(
+        allCtx.map((ctx) => selectAtoms(ALL_ATOMS, ctx).filter((a) => a.atomId === atomId).length),
+      )
     // additive: at least one ctx renders ≥2 variants together
     expect([...renderCounts("BODY-OPERATING-PRINCIPLES")].some((n) => n >= 2)).toBe(true)
   })
@@ -509,7 +514,10 @@ describe("prompt-graph — no-hidden-assumption lint fires on a real shipped pre
 
   test("stripping R-ENV#frozen's envPosture scope ⇒ a hidden-assumption violation", () => {
     const rEnv = ALL_ATOMS.find((a) => a.variantId === R_ENV_FROZEN_ID)
-    expect(rEnv, `${R_ENV_FROZEN_ID} must exist (the shipped install-prohibition premise)`).toBeDefined()
+    expect(
+      rEnv,
+      `${R_ENV_FROZEN_ID} must exist (the shipped install-prohibition premise)`,
+    ).toBeDefined()
     // Drop `when` ⇒ the install-prohibition premise now renders unconditioned.
     const { when: _dropped, ...unconditioned } = rEnv as InstructionAtom
     const others = ALL_ATOMS.filter((a) => a.variantId !== R_ENV_FROZEN_ID)

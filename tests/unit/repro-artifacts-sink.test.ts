@@ -14,9 +14,9 @@ import {
   candidateIdOf,
   makeReproArtifactSink,
   REPRO_ARTIFACT_TAIL_BOUND,
+  type ReproArtifactWritePort,
   reproArtifactInstanceDir,
   reproArtifactVoteRoundDir,
-  type ReproArtifactWritePort,
   safeReproArtifactSegment,
   sourceHashOf,
 } from "../../src/runner/batch/eval/repro-artifacts-sink"

@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
+import { z } from "zod"
 import { runAgent } from "@/agent"
 import { DedupGate } from "@/agent/dispatch-dedup"
 import type { Message, StreamEvent, StreamInput } from "@/llm"
 import type { Tool, ToolEvent } from "@/tool"
 import { defaultTools, ToolRegistry } from "@/tool"
-import { z } from "zod"
 import { cfg, RecordingStream, text, withTimeout } from "./_harness"
 
 /**

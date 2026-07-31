@@ -49,7 +49,12 @@ describe("repair-loop diagnostics — forwarded + derived oracle-gap", () => {
       {
         ...base("django__django-11265", false),
         repairValidationDecision: CANON_RESOLVED,
-        gradeBreakdown: { resolved: false, failToPassFailed: 1, passToPassFailed: 0, passToPassTotal: 30 },
+        gradeBreakdown: {
+          resolved: false,
+          failToPassFailed: 1,
+          passToPassFailed: 0,
+          passToPassTotal: 30,
+        },
       },
     ])
     expect(r.perInstance[0]?.oracleGapFalseGreen).toBe(true)
@@ -60,7 +65,12 @@ describe("repair-loop diagnostics — forwarded + derived oracle-gap", () => {
       {
         ...base("a", true),
         repairValidationDecision: CANON_RESOLVED,
-        gradeBreakdown: { resolved: true, failToPassFailed: 0, passToPassFailed: 0, passToPassTotal: 5 },
+        gradeBreakdown: {
+          resolved: true,
+          failToPassFailed: 0,
+          passToPassFailed: 0,
+          passToPassTotal: 5,
+        },
       },
     ]).perInstance[0]
     expect(p && "oracleGapFalseGreen" in p).toBe(false)
@@ -71,7 +81,12 @@ describe("repair-loop diagnostics — forwarded + derived oracle-gap", () => {
       {
         ...base("a", false),
         repairValidationDecision: { ...CANON_RESOLVED, authority: "agent-verify-cmd" },
-        gradeBreakdown: { resolved: false, failToPassFailed: 1, passToPassFailed: 0, passToPassTotal: 5 },
+        gradeBreakdown: {
+          resolved: false,
+          failToPassFailed: 1,
+          passToPassFailed: 0,
+          passToPassTotal: 5,
+        },
       },
     ]).perInstance[0]
     expect(p && "oracleGapFalseGreen" in p).toBe(false)

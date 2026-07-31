@@ -26,18 +26,18 @@
  *       - NO per-task model ⇒ NO override (byte-identical to the pre-B2 path).
  */
 
+import { Database } from "bun:sqlite"
+import { afterEach, describe, expect, test } from "bun:test"
 import { existsSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { Database } from "bun:sqlite"
-import { afterEach, describe, expect, test } from "bun:test"
 import {
   type AutomationEnginePort,
   type AutomationHandler,
   ensureAutomationEngineSchema,
   sqliteAutomationEngine,
-  tickScheduler,
   type TickOutcome,
+  tickScheduler,
 } from "@/scheduler/automation-engine"
 import { computeNextFire } from "@/scheduler/next-fire"
 import { parseRRule } from "@/scheduler/rrule-parser"

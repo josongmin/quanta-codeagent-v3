@@ -40,7 +40,13 @@ describe("DapClient", () => {
     expect(fake.sent).toHaveLength(1)
     const seq = fake.sent[0]!.seq as number
     expect(fake.sent[0]!.command).toBe("initialize")
-    fake.emit({ type: "response", request_seq: seq, success: true, command: "initialize", body: { supportsStepBack: false } })
+    fake.emit({
+      type: "response",
+      request_seq: seq,
+      success: true,
+      command: "initialize",
+      body: { supportsStepBack: false },
+    })
     const res = await p
     expect(res.success).toBe(true)
     expect(res.body).toEqual({ supportsStepBack: false })
@@ -54,8 +60,20 @@ describe("DapClient", () => {
     const seq1 = fake.sent[0]!.seq as number
     const seq2 = fake.sent[1]!.seq as number
     // Reply to the SECOND request first.
-    fake.emit({ type: "response", request_seq: seq2, success: true, command: "stackTrace", body: { n: 2 } })
-    fake.emit({ type: "response", request_seq: seq1, success: true, command: "threads", body: { n: 1 } })
+    fake.emit({
+      type: "response",
+      request_seq: seq2,
+      success: true,
+      command: "stackTrace",
+      body: { n: 2 },
+    })
+    fake.emit({
+      type: "response",
+      request_seq: seq1,
+      success: true,
+      command: "threads",
+      body: { n: 1 },
+    })
     expect((await p1).body).toEqual({ n: 1 })
     expect((await p2).body).toEqual({ n: 2 })
   })
@@ -65,7 +83,13 @@ describe("DapClient", () => {
     const client = new DapClient(fake.transport)
     const p = client.request("evaluate", { expression: "bogus" })
     const seq = fake.sent[0]!.seq as number
-    fake.emit({ type: "response", request_seq: seq, success: false, command: "evaluate", message: "not available" })
+    fake.emit({
+      type: "response",
+      request_seq: seq,
+      success: false,
+      command: "evaluate",
+      message: "not available",
+    })
     const res = await p
     expect(res.success).toBe(false)
     expect(res.message).toBe("not available")

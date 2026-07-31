@@ -12,8 +12,8 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { buildEvidence } from "@/tool/evidence/builder"
 import { defaultRuntimePort } from "@/tool/evidence"
+import { buildEvidence } from "@/tool/evidence/builder"
 import { runToolchain, type Toolchain } from "@/tool/testrun"
 
 const has = (b: string, ...a: string[]): boolean => {
@@ -48,7 +48,11 @@ const installMochaProject = (): string | null => {
       "",
     ].join("\n"),
   )
-  const r = Bun.spawnSync(["npm", "i", "--silent", "--no-audit", "--no-fund", "mocha"], { cwd: dir, stdout: "ignore", stderr: "ignore" })
+  const r = Bun.spawnSync(["npm", "i", "--silent", "--no-audit", "--no-fund", "mocha"], {
+    cwd: dir,
+    stdout: "ignore",
+    stderr: "ignore",
+  })
   return r.exitCode === 0 ? dir : null
 }
 
@@ -58,7 +62,11 @@ const D = dir !== null ? describe : describe.skip
 D("defaultRuntimePort — REAL mocha runner routing (T-02)", () => {
   test("detects mocha + captures the failing test's local over CDP", async () => {
     const root = dir as string
-    const tc: Toolchain = { kind: "node", command: ["node_modules/.bin/mocha", "sum.test.js"], parser: "node" }
+    const tc: Toolchain = {
+      kind: "node",
+      command: ["node_modules/.bin/mocha", "sum.test.js"],
+      parser: "node",
+    }
     const pkt = await buildEvidence(root, {
       detect: async () => tc,
       runTests: (t, c) => runToolchain(t, c),

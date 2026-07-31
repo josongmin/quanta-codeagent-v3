@@ -68,11 +68,15 @@ const findLayerImports = (
 }
 
 /** Back-compat alias — the original `@/runner`-only detector. */
-const findRunnerImports = (files: ReadonlyArray<{ path: string; source: string }>): Array<{ path: string; line: string }> =>
-  findLayerImports(files, "@/runner")
+const findRunnerImports = (
+  files: ReadonlyArray<{ path: string; source: string }>,
+): Array<{ path: string; line: string }> => findLayerImports(files, "@/runner")
 
 describe("config/knob-inventory stays a leaf (no @/runner back-edge)", () => {
-  const files = collectTsFiles(INVENTORY_DIR).map((path) => ({ path, source: readFileSync(path, "utf8") }))
+  const files = collectTsFiles(INVENTORY_DIR).map((path) => ({
+    path,
+    source: readFileSync(path, "utf8"),
+  }))
 
   test("scans a non-trivial set of inventory files", () => {
     // Guards against the detector silently scanning zero files (a moved/renamed dir).
@@ -121,7 +125,10 @@ describe("config/knob-schema stays a TRUE leaf (no @/runner, no @/agent back-edg
   // back-edge. For that to hold, the knob-schema dir must itself be a leaf: it
   // may import @/config (forward/sibling) but NOT @/runner or @/agent (the
   // assemble/runtime layers that derive FROM it). This guards the relocation.
-  const files = collectTsFiles(KNOB_SCHEMA_DIR).map((path) => ({ path, source: readFileSync(path, "utf8") }))
+  const files = collectTsFiles(KNOB_SCHEMA_DIR).map((path) => ({
+    path,
+    source: readFileSync(path, "utf8"),
+  }))
 
   test("scans a non-trivial set of knob-schema files", () => {
     // Guards against the detector silently scanning zero files (a moved/renamed dir).

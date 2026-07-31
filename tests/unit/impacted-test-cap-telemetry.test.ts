@@ -39,7 +39,11 @@ describe("impacted-test cap telemetry (#6)", () => {
 
   it("exactly-at-cap does not fire onCap (no witnesses dropped)", () => {
     const caps: unknown[] = []
-    discoverImpactedTestCandidates({ ...TWO_WITNESSES, maxTests: 2, onCap: (info) => caps.push(info) })
+    discoverImpactedTestCandidates({
+      ...TWO_WITNESSES,
+      maxTests: 2,
+      onCap: (info) => caps.push(info),
+    })
     expect(caps).toEqual([])
   })
 })

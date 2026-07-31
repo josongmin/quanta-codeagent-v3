@@ -26,11 +26,11 @@ import { quantaHomeDir } from "@/shared/quanta-home"
 import { runtimeConfig } from "@/shared/runtime-config"
 import type { Instance } from "../types"
 import { buildProjectEnvUvRunArgv } from "./project-env"
+import { specResolvedRunner, specRunnerKind } from "./repo-version-specs"
 import {
   parseSelectedTestFilesToRun,
   selectedTestFilesVerifierCommand,
 } from "./selected-test-files-verifier"
-import { specResolvedRunner, specRunnerKind } from "./repo-version-specs"
 
 /** A single official SWE-bench task (subset of the upstream row we use). */
 export interface SwebenchTask {
@@ -386,7 +386,12 @@ export const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
     typeof raw.repo_language === "string" ? raw.repo_language.trim().toLowerCase() : undefined
   // Treat every python spelling as python (audit EDGE-2): `python3`, `py`, `cpython`,
   // `python 3.11` must NOT be fenced as non-python (that would no-op a gradeable repo).
-  const isPython = lang === undefined || lang === "" || lang.startsWith("python") || lang === "py" || lang === "cpython"
+  const isPython =
+    lang === undefined ||
+    lang === "" ||
+    lang.startsWith("python") ||
+    lang === "py" ||
+    lang === "cpython"
   if (!isPython) {
     return (
       selectedTestFilesVerifierCommand({

@@ -70,7 +70,11 @@ const mutatingTool = (name: string, counts: Record<string, number>): Tool => ({
  *  reader observes the latest value. */
 const liveProxyPermission = (
   initial: PermissionMode,
-): { permission: PermissionContext; set: (m: PermissionMode) => void; get: () => PermissionMode } => {
+): {
+  permission: PermissionContext
+  set: (m: PermissionMode) => void
+  get: () => PermissionMode
+} => {
   let mode: PermissionMode = initial
   return {
     permission: {

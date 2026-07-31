@@ -18,7 +18,15 @@ import { inspectViaDap } from "@/tool/debug/inspect-driver"
  * `configurationDone` it emits a `stopped` event (breakpoint hit) UNLESS
  * `neverStops` is set (then it `terminated` — program ran to completion).
  */
-const makeFakeAdapter = (opts: { neverStops?: boolean; failEvaluate?: boolean; stallStopped?: boolean; unverifiedBp?: boolean; failSetBreakpoints?: boolean } = {}) => {
+const makeFakeAdapter = (
+  opts: {
+    neverStops?: boolean
+    failEvaluate?: boolean
+    stallStopped?: boolean
+    unverifiedBp?: boolean
+    failSetBreakpoints?: boolean
+  } = {},
+) => {
   let toClient: ((chunk: string | Buffer) => void) | undefined
   let initialized = false
   let bpSet = false
@@ -29,8 +37,16 @@ const makeFakeAdapter = (opts: { neverStops?: boolean; failEvaluate?: boolean; s
 
   const handle = (req: { seq: number; command: string; arguments?: Record<string, unknown> }) => {
     const respondTo = (seq: number, command: string, body?: unknown, ok = true, message?: string) =>
-      send({ type: "response", request_seq: seq, success: ok, command, ...(body !== undefined ? { body } : {}), ...(message ? { message } : {}) })
-    const respond = (body?: unknown, ok = true, message?: string) => respondTo(req.seq, req.command, body, ok, message)
+      send({
+        type: "response",
+        request_seq: seq,
+        success: ok,
+        command,
+        ...(body !== undefined ? { body } : {}),
+        ...(message ? { message } : {}),
+      })
+    const respond = (body?: unknown, ok = true, message?: string) =>
+      respondTo(req.seq, req.command, body, ok, message)
     switch (req.command) {
       case "initialize":
         // Faithful to real debugpy: NO `initialized` event until launch arrives,
@@ -63,7 +79,12 @@ const makeFakeAdapter = (opts: { neverStops?: boolean; failEvaluate?: boolean; s
         break
       case "threads":
         // Two threads model a concurrency dump (dlv reports goroutines here).
-        respond({ threads: [{ id: 1, name: "MainThread" }, { id: 2, name: "goroutine 2" }] })
+        respond({
+          threads: [
+            { id: 1, name: "MainThread" },
+            { id: 2, name: "goroutine 2" },
+          ],
+        })
         break
       case "stackTrace":
         // FOUR frames — real adapters give each frame DISTINCT scope/var refs.
@@ -81,7 +102,10 @@ const makeFakeAdapter = (opts: { neverStops?: boolean; failEvaluate?: boolean; s
       case "scopes": {
         // Per-frame distinct refs (faithful to real adapters).
         const byFrame: Record<number, unknown[]> = {
-          100: [{ name: "Locals", variablesReference: 1000 }, { name: "Globals", variablesReference: 9000 }],
+          100: [
+            { name: "Locals", variablesReference: 1000 },
+            { name: "Globals", variablesReference: 9000 },
+          ],
           101: [{ name: "Locals", variablesReference: 2000 }],
           102: [{ name: "Locals", variablesReference: 3000 }],
           103: [{ name: "Locals", variablesReference: 4000 }], // never captured (frame cap)
@@ -97,7 +121,10 @@ const makeFakeAdapter = (opts: { neverStops?: boolean; failEvaluate?: boolean; s
             { name: "n", value: "42", type: "int" },
             { name: "acc", value: "[1, 2]", type: "list", variablesReference: 1002 },
           ],
-          1002: [{ name: "0", value: "1", type: "int" }, { name: "1", value: "2", type: "int" }],
+          1002: [
+            { name: "0", value: "1", type: "int" },
+            { name: "1", value: "2", type: "int" },
+          ],
           9000: [{ name: "__name__", value: "'__main__'" }],
           2000: [{ name: "x", value: "7", type: "int" }],
           3000: [{ name: "y", value: "3", type: "int" }],
@@ -159,7 +186,10 @@ describe("inspectViaDap — full DAP launch+inspect handshake", () => {
       { name: "acc", value: "[1, 2]", type: "list" },
     ])
     // T-03: the thread/goroutine dump is captured (dlv reports goroutines here).
-    expect(r.threads).toEqual([{ id: 1, name: "MainThread" }, { id: 2, name: "goroutine 2" }])
+    expect(r.threads).toEqual([
+      { id: 1, name: "MainThread" },
+      { id: 2, name: "goroutine 2" },
+    ])
   })
 
   test("MULTI-FRAME: captures locals for the top K frames, caps deeper ones", async () => {
@@ -174,10 +204,16 @@ describe("inspectViaDap — full DAP launch+inspect handshake", () => {
     // The stack has 4 frames but only the top 3 (MAX_FRAMES_WITH_LOCALS) are
     // captured with scopes — the 4th (<module>) is NOT.
     expect(r.frames.map((f) => f.frame)).toEqual(["compute", "helper", "caller"])
-    expect(r.frames[1]?.scopes.find((s) => s.scope === "Locals")?.vars.map((v) => v.name)).toEqual(["x"])
-    expect(r.frames[2]?.scopes.find((s) => s.scope === "Locals")?.vars.map((v) => v.name)).toEqual(["y"])
+    expect(r.frames[1]?.scopes.find((s) => s.scope === "Locals")?.vars.map((v) => v.name)).toEqual([
+      "x",
+    ])
+    expect(r.frames[2]?.scopes.find((s) => s.scope === "Locals")?.vars.map((v) => v.name)).toEqual([
+      "y",
+    ])
     // red-on-injection: the 4th frame's variables (ref 4000) must NEVER be queried.
-    expect((adapter as unknown as { capturedVarRefs: number[] }).capturedVarRefs).not.toContain(4000)
+    expect((adapter as unknown as { capturedVarRefs: number[] }).capturedVarRefs).not.toContain(
+      4000,
+    )
   })
 
   test("NESTED: an aggregate local expands its children one+ level deep", async () => {
@@ -188,14 +224,18 @@ describe("inspectViaDap — full DAP launch+inspect handshake", () => {
       breakpoints: [{ file: "/p/app.py", line: 10 }],
     })
     if (r.outcome !== "stopped") throw new Error(`expected stopped, got ${r.outcome}`)
-    const acc = r.frames[0]?.scopes.find((s) => s.scope === "Locals")?.vars.find((v) => v.name === "acc")
+    const acc = r.frames[0]?.scopes
+      .find((s) => s.scope === "Locals")
+      ?.vars.find((v) => v.name === "acc")
     expect(acc?.type).toBe("list")
     expect(acc?.children?.map((c) => ({ name: c.name, value: c.value }))).toEqual([
       { name: "0", value: "1" },
       { name: "1", value: "2" },
     ])
     // a scalar local has no children.
-    const n = r.frames[0]?.scopes.find((s) => s.scope === "Locals")?.vars.find((v) => v.name === "n")
+    const n = r.frames[0]?.scopes
+      .find((s) => s.scope === "Locals")
+      ?.vars.find((v) => v.name === "n")
     expect(n?.children).toBeUndefined()
   })
 
@@ -241,7 +281,16 @@ describe("inspectViaDap — full DAP launch+inspect handshake", () => {
         const dec = new DapFrameDecoder()
         for (const m of dec.push(data)) {
           const req = m as { seq: number; command: string }
-          if (req.command === "initialize") cb?.(encodeDapMessage({ type: "response", request_seq: req.seq, success: false, command: "initialize", message: "adapter boot failed" }))
+          if (req.command === "initialize")
+            cb?.(
+              encodeDapMessage({
+                type: "response",
+                request_seq: req.seq,
+                success: false,
+                command: "initialize",
+                message: "adapter boot failed",
+              }),
+            )
         }
       },
       onData: (c) => {
@@ -262,7 +311,11 @@ describe("inspectViaDap — full DAP launch+inspect handshake", () => {
     const ac = new AbortController()
     const p = inspectViaDap(
       client,
-      { adapterID: "python", launch: { program: "/p/app.py" }, breakpoints: [{ file: "/p/app.py", line: 10 }] },
+      {
+        adapterID: "python",
+        launch: { program: "/p/app.py" },
+        breakpoints: [{ file: "/p/app.py", line: 10 }],
+      },
       { stopTimeoutMs: 60_000, signal: ac.signal },
     )
     ac.abort()
@@ -300,8 +353,16 @@ const makeWideDeepAdapter = () => {
   const send = (msg: unknown) => toClient?.(encodeDapMessage(msg))
   const handle = (req: { seq: number; command: string; arguments?: Record<string, unknown> }) => {
     const respondTo = (seq: number, command: string, body?: unknown, ok = true, message?: string) =>
-      send({ type: "response", request_seq: seq, success: ok, command, ...(body !== undefined ? { body } : {}), ...(message ? { message } : {}) })
-    const respond = (body?: unknown, ok = true, message?: string) => respondTo(req.seq, req.command, body, ok, message)
+      send({
+        type: "response",
+        request_seq: seq,
+        success: ok,
+        command,
+        ...(body !== undefined ? { body } : {}),
+        ...(message ? { message } : {}),
+      })
+    const respond = (body?: unknown, ok = true, message?: string) =>
+      respondTo(req.seq, req.command, body, ok, message)
     switch (req.command) {
       case "initialize":
         respond({ supportsConfigurationDoneRequest: true })
@@ -337,10 +398,14 @@ const makeWideDeepAdapter = () => {
         // breadth cap of 16). 600→601→602 is the depth chain.
         if (ref === 500) {
           const wide = Array.from({ length: 20 }, (_, i) => ({ name: `v${i}`, value: String(i) }))
-          return respond({ variables: [{ name: "deep", value: "<obj>", variablesReference: 600 }, ...wide] })
+          return respond({
+            variables: [{ name: "deep", value: "<obj>", variablesReference: 600 }, ...wide],
+          })
         }
-        if (ref === 600) return respond({ variables: [{ name: "a", value: "A", variablesReference: 601 }] })
-        if (ref === 601) return respond({ variables: [{ name: "b", value: "B", variablesReference: 602 }] })
+        if (ref === 600)
+          return respond({ variables: [{ name: "a", value: "A", variablesReference: 601 }] })
+        if (ref === 601)
+          return respond({ variables: [{ name: "b", value: "B", variablesReference: 602 }] })
         if (ref === 602) return respond({ variables: [{ name: "c", value: "C" }] })
         return respond({ variables: [] })
       }
@@ -355,7 +420,8 @@ const makeWideDeepAdapter = () => {
   }
   const transport: DapTransport = {
     send: (data) => {
-      for (const m of decoder.push(data)) handle(m as { seq: number; command: string; arguments?: Record<string, unknown> })
+      for (const m of decoder.push(data))
+        handle(m as { seq: number; command: string; arguments?: Record<string, unknown> })
     },
     onData: (cb) => {
       toClient = cb
@@ -368,7 +434,11 @@ const makeWideDeepAdapter = () => {
 describe("inspectViaDap — bounded variable-tree expansion", () => {
   test("BREADTH cap: a node with 21 children surfaces at most MAX_CHILDREN_PER_VAR (16)", async () => {
     const client = new DapClient(makeWideDeepAdapter())
-    const r = await inspectViaDap(client, { adapterID: "python", launch: { program: "/p/x.py" }, breakpoints: [{ file: "/p/x.py", line: 1 }] })
+    const r = await inspectViaDap(client, {
+      adapterID: "python",
+      launch: { program: "/p/x.py" },
+      breakpoints: [{ file: "/p/x.py", line: 1 }],
+    })
     if (r.outcome !== "stopped") throw new Error(`expected stopped, got ${r.outcome}`)
     const vars = r.frames[0]?.scopes.find((s) => s.scope === "Locals")?.vars ?? []
     expect(vars.length).toBe(16)
@@ -379,9 +449,15 @@ describe("inspectViaDap — bounded variable-tree expansion", () => {
 
   test("DEPTH cap: nesting expands to MAX_VAR_DEPTH (2) levels, then stops", async () => {
     const client = new DapClient(makeWideDeepAdapter())
-    const r = await inspectViaDap(client, { adapterID: "python", launch: { program: "/p/x.py" }, breakpoints: [{ file: "/p/x.py", line: 1 }] })
+    const r = await inspectViaDap(client, {
+      adapterID: "python",
+      launch: { program: "/p/x.py" },
+      breakpoints: [{ file: "/p/x.py", line: 1 }],
+    })
     if (r.outcome !== "stopped") throw new Error(`expected stopped, got ${r.outcome}`)
-    const deep = r.frames[0]?.scopes.find((s) => s.scope === "Locals")?.vars.find((v) => v.name === "deep")
+    const deep = r.frames[0]?.scopes
+      .find((s) => s.scope === "Locals")
+      ?.vars.find((v) => v.name === "deep")
     // Level 1: deep → [a]. Level 2 would be a → [b], but the depth cap stops it:
     // `a` is materialized as a leaf (no further children), and `c` never appears.
     const a = deep?.children?.find((c) => c.name === "a")
@@ -405,30 +481,80 @@ const makeExceptionAdapter = () => {
   const dec = new DapFrameDecoder()
   const send = (m: unknown) => toClient?.(encodeDapMessage(m))
   const handle = (req: { seq: number; command: string; arguments?: Record<string, unknown> }) => {
-    const respondTo = (seq: number, command: string, body?: unknown, ok = true) => send({ type: "response", request_seq: seq, success: ok, command, ...(body !== undefined ? { body } : {}) })
+    const respondTo = (seq: number, command: string, body?: unknown, ok = true) =>
+      send({
+        type: "response",
+        request_seq: seq,
+        success: ok,
+        command,
+        ...(body !== undefined ? { body } : {}),
+      })
     const respond = (body?: unknown) => respondTo(req.seq, req.command, body)
     switch (req.command) {
-      case "initialize": respond({ supportsConfigurationDoneRequest: true, supportsExceptionInfoRequest: true }); break
-      case "launch": deferredLaunchSeq = req.seq; initialized = true; send({ type: "event", event: "initialized" }); break
-      case "setExceptionBreakpoints": excFilters = req.arguments?.filters; respond({}); break
-      case "setBreakpoints": initialized ? respond({ breakpoints: [{ verified: true, line: 10 }] }) : respondTo(req.seq, req.command, undefined, false); break
+      case "initialize":
+        respond({ supportsConfigurationDoneRequest: true, supportsExceptionInfoRequest: true })
+        break
+      case "launch":
+        deferredLaunchSeq = req.seq
+        initialized = true
+        send({ type: "event", event: "initialized" })
+        break
+      case "setExceptionBreakpoints":
+        excFilters = req.arguments?.filters
+        respond({})
+        break
+      case "setBreakpoints":
+        initialized
+          ? respond({ breakpoints: [{ verified: true, line: 10 }] })
+          : respondTo(req.seq, req.command, undefined, false)
+        break
       case "configurationDone":
         respond()
         if (deferredLaunchSeq !== undefined) respondTo(deferredLaunchSeq, "launch")
-        send({ type: "event", event: "stopped", body: { reason: "exception", threadId: 1, text: "RuntimeError" } })
+        send({
+          type: "event",
+          event: "stopped",
+          body: { reason: "exception", threadId: 1, text: "RuntimeError" },
+        })
         break
-      case "threads": respond({ threads: [{ id: 1, name: "MainThread" }] }); break
-      case "stackTrace": respond({ stackFrames: [{ id: 100, name: "boom", line: 12, source: { path: "/p/app.py" } }] }); break
-      case "scopes": respond({ scopes: [{ name: "Locals", variablesReference: 1000 }] }); break
-      case "variables": respond({ variables: [{ name: "n", value: "0", type: "int" }] }); break
-      case "exceptionInfo": respond({ exceptionId: "RuntimeError", description: "boom: division by zero", breakMode: "unhandled" }); break
-      case "terminate": case "disconnect": respond(); send({ type: "event", event: "terminated", body: {} }); break
-      default: respondTo(req.seq, req.command, undefined, false)
+      case "threads":
+        respond({ threads: [{ id: 1, name: "MainThread" }] })
+        break
+      case "stackTrace":
+        respond({
+          stackFrames: [{ id: 100, name: "boom", line: 12, source: { path: "/p/app.py" } }],
+        })
+        break
+      case "scopes":
+        respond({ scopes: [{ name: "Locals", variablesReference: 1000 }] })
+        break
+      case "variables":
+        respond({ variables: [{ name: "n", value: "0", type: "int" }] })
+        break
+      case "exceptionInfo":
+        respond({
+          exceptionId: "RuntimeError",
+          description: "boom: division by zero",
+          breakMode: "unhandled",
+        })
+        break
+      case "terminate":
+      case "disconnect":
+        respond()
+        send({ type: "event", event: "terminated", body: {} })
+        break
+      default:
+        respondTo(req.seq, req.command, undefined, false)
     }
   }
   const transport: DapTransport = {
-    send: (data) => { for (const m of dec.push(data)) handle(m as { seq: number; command: string; arguments?: Record<string, unknown> }) },
-    onData: (cb) => { toClient = cb },
+    send: (data) => {
+      for (const m of dec.push(data))
+        handle(m as { seq: number; command: string; arguments?: Record<string, unknown> })
+    },
+    onData: (cb) => {
+      toClient = cb
+    },
     close: () => {},
   }
   return Object.assign(transport, { getFilters: () => excFilters })
@@ -444,7 +570,10 @@ describe("inspectViaDap — exception-aware capture (T-01)", () => {
       exceptionFilters: ["uncaught", "userUnhandled"],
     })
     // The driver MUST have set the exception filters in the config phase.
-    expect((adapter as unknown as { getFilters(): unknown }).getFilters()).toEqual(["uncaught", "userUnhandled"])
+    expect((adapter as unknown as { getFilters(): unknown }).getFilters()).toEqual([
+      "uncaught",
+      "userUnhandled",
+    ])
     expect(r.outcome).toBe("stopped")
     if (r.outcome !== "stopped") return
     expect(r.reason).toBe("exception")

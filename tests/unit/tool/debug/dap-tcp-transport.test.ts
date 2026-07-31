@@ -26,10 +26,26 @@ const startFakeDapServer = async (): Promise<number> => {
       for (const raw of dec.push(chunk)) {
         const req = raw as { seq: number; command: string }
         if (req.command === "initialize") {
-          socket.write(encodeDapMessage({ type: "response", request_seq: req.seq, success: true, command: "initialize", body: { supportsConfigurationDoneRequest: true } }))
+          socket.write(
+            encodeDapMessage({
+              type: "response",
+              request_seq: req.seq,
+              success: true,
+              command: "initialize",
+              body: { supportsConfigurationDoneRequest: true },
+            }),
+          )
           socket.write(encodeDapMessage({ type: "event", event: "initialized" }))
         } else if (req.command === "threads") {
-          socket.write(encodeDapMessage({ type: "response", request_seq: req.seq, success: true, command: "threads", body: { threads: [{ id: 1, name: "main" }] } }))
+          socket.write(
+            encodeDapMessage({
+              type: "response",
+              request_seq: req.seq,
+              success: true,
+              command: "threads",
+              body: { threads: [{ id: 1, name: "main" }] },
+            }),
+          )
         }
       }
     })
@@ -63,12 +79,19 @@ describe("DAP TCP transport", () => {
     const client = new DapClient(transport)
     const got = client.waitForEvent("initialized")
     await client.request("initialize", {})
-    expect(await Promise.race([got.then(() => "init"), new Promise((r) => setTimeout(() => r("timeout"), 2000))])).toBe("init")
+    expect(
+      await Promise.race([
+        got.then(() => "init"),
+        new Promise((r) => setTimeout(() => r("timeout"), 2000)),
+      ]),
+    ).toBe("init")
     client.dispose()
   })
 
   test("connect to a dead port rejects within the timeout (no hang)", async () => {
     const dead = await getFreePort() // free, nothing listening
-    await expect(connectTcpTransport({ host: "127.0.0.1", port: dead, connectTimeoutMs: 1500 })).rejects.toThrow()
+    await expect(
+      connectTcpTransport({ host: "127.0.0.1", port: dead, connectTimeoutMs: 1500 }),
+    ).rejects.toThrow()
   })
 })

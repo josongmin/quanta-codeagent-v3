@@ -21,13 +21,13 @@
 import { describe, expect, test } from "bun:test"
 import { makeAdaptiveExecutor } from "@/runner/batch/eval/adaptive-escalation/phase-executor"
 import { projectRouterEvidence } from "@/runner/batch/eval/adaptive-escalation/router-evidence"
-import type { LlmEvidencePacket } from "@/runner/batch/eval/llm-evidence-packet"
 import {
-  type BenchPosture,
   type BenchKnobState,
+  type BenchPosture,
   benchPostureFromState,
   resolveBenchKnobs,
 } from "@/runner/batch/eval/knobs-bench"
+import type { LlmEvidencePacket } from "@/runner/batch/eval/llm-evidence-packet"
 import {
   type AdaptiveAction,
   derivePhasePosture,
@@ -99,7 +99,11 @@ describe("adaptive phase executor factory (P6)", () => {
     const { runPhase, seen } = recordingRunPhase(goodPacket())
     const executor = makeAdaptiveExecutor({ base: baseState(), env: ENV, runPhase })
 
-    await executor({ action, modules: PHASE_MODULES[action], packet: projectRouterEvidence(goodPacket()) })
+    await executor({
+      action,
+      modules: PHASE_MODULES[action],
+      packet: projectRouterEvidence(goodPacket()),
+    })
 
     const expected = derivePhasePosture(baseState(), PHASE_MODULES[action], ENV)
     const expectedState = withKnobModules(baseState(), PHASE_MODULES[action])
@@ -116,7 +120,11 @@ describe("adaptive phase executor factory (P6)", () => {
     const { runPhase, seen } = recordingRunPhase(goodPacket())
     const executor = makeAdaptiveExecutor({ base: baseState(), env: ENV, runPhase })
 
-    await executor({ action, modules: PHASE_MODULES[action], packet: projectRouterEvidence(goodPacket()) })
+    await executor({
+      action,
+      modules: PHASE_MODULES[action],
+      packet: projectRouterEvidence(goodPacket()),
+    })
 
     const basePosture = benchPostureFromState(baseState(), ENV)
     // The fold actually changed the posture (else the POSTURE test would be vacuous).
@@ -163,7 +171,11 @@ describe("adaptive phase executor factory (P6)", () => {
     for (const action of ["accept_thin", "stop_infra_or_budget"] as const) {
       const { runPhase, seen } = recordingRunPhase(goodPacket())
       const executor = makeAdaptiveExecutor({ base: baseState(), env: ENV, runPhase })
-      await executor({ action, modules: PHASE_MODULES[action], packet: projectRouterEvidence(goodPacket()) })
+      await executor({
+        action,
+        modules: PHASE_MODULES[action],
+        packet: projectRouterEvidence(goodPacket()),
+      })
       expect(PHASE_MODULES[action]).toEqual([])
       expect(seen.state).toEqual(baseState())
       expect(seen.posture).toEqual(basePosture)

@@ -70,11 +70,7 @@ import { beforeEach, describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { __resetCloseoutCriticWarning, wireOptionalAgentPorts } from "@/agent/optional-ports"
 import type { LLMPort, StreamEvent, StreamInput, SystemPromptInput } from "@/llm"
-import {
-  runPairedAB,
-  type Scenario,
-  type ScenarioFactory,
-} from "./_ab-default-harness"
+import { runPairedAB, type Scenario, type ScenarioFactory } from "./_ab-default-harness"
 import { cfg, FakeLLM, RecordingStream } from "./_harness"
 
 // ── scripted-LLM building blocks (same idiom as the harness self-test) ───────
@@ -324,12 +320,8 @@ describe("DOF-22 rail-1 sweep — UNREACHABLE gates (vacuity PROOF, not a verdic
       // runtimeConfig/an assembler env, not here).
       const onSlots = on as unknown as Record<string, unknown>
       const offSlots = off as unknown as Record<string, unknown>
-      expect(onSlots.capEnforce).toBe(
-        offSlots.capEnforce,
-      )
-      expect(onSlots.capEnforcer).toBe(
-        offSlots.capEnforcer,
-      )
+      expect(onSlots.capEnforce).toBe(offSlots.capEnforce)
+      expect(onSlots.capEnforcer).toBe(offSlots.capEnforcer)
     }
     // POSITIVE CONTROL — the SAME seam DOES mutate a slot for a REACHABLE key, so
     // the byte-identical result above is a property of the unreachable keys, not a
@@ -351,7 +343,10 @@ describe("DOF-22 rail-1 sweep — UNREACHABLE gates (vacuity PROOF, not a verdic
     // nonexistent one, i.e. it cannot see it.
     for (const key of UNREACHABLE_ENV_KEYS) {
       const real = await runPairedAB(key, scenarioOf([successScript("neutral")]))
-      const fake = await runPairedAB("QUANTA_TOTALLY_NONEXISTENT_KEY", scenarioOf([successScript("neutral")]))
+      const fake = await runPairedAB(
+        "QUANTA_TOTALLY_NONEXISTENT_KEY",
+        scenarioOf([successScript("neutral")]),
+      )
       expect(real.verdict).toBe("NO-REGRESSION")
       // Same verdict + same diff shape as a nonexistent key ⇒ the harness is
       // BLIND to this gate through the wire-env seam (structural vacuity).

@@ -285,10 +285,9 @@ describe("T02 — a 2nd client's followerVerb frame injects through the REAL dae
 
     // Generous window — none of these should ever reach a dispatcher sink.
     expect(
-      await until(
-        () => injects.length + interrupts.length + queueModes.length > 0,
-        { timeoutMs: 400 },
-      ),
+      await until(() => injects.length + interrupts.length + queueModes.length > 0, {
+        timeoutMs: 400,
+      }),
     ).toBe(false)
     expect(injects).toHaveLength(0)
     expect(interrupts).toHaveLength(0)

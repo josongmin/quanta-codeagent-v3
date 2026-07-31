@@ -42,7 +42,8 @@ export class CdpClient {
 
   /** Send a CDP command; resolves with the reply (result OR error). */
   request(method: string, params?: Record<string, unknown>): Promise<CdpResponse> {
-    if (this.disposed) return Promise.reject(new Error(`cdp: transport disposed (method=${method})`))
+    if (this.disposed)
+      return Promise.reject(new Error(`cdp: transport disposed (method=${method})`))
     const id = ++this.seq
     return new Promise<CdpResponse>((resolve) => {
       this.pending.set(id, resolve)
@@ -72,7 +73,8 @@ export class CdpClient {
   dispose(): void {
     if (this.disposed) return
     this.disposed = true
-    for (const resolve of this.pending.values()) resolve({ error: { message: "cdp: client disposed" } })
+    for (const resolve of this.pending.values())
+      resolve({ error: { message: "cdp: client disposed" } })
     this.pending.clear()
     try {
       this.transport.close()
@@ -82,7 +84,13 @@ export class CdpClient {
   }
 
   private ingest(raw: string): void {
-    let msg: { id?: unknown; method?: unknown; params?: unknown; result?: unknown; error?: { message?: unknown } }
+    let msg: {
+      id?: unknown
+      method?: unknown
+      params?: unknown
+      result?: unknown
+      error?: { message?: unknown }
+    }
     try {
       msg = JSON.parse(raw)
     } catch {
@@ -94,7 +102,13 @@ export class CdpClient {
         this.pending.delete(msg.id)
         resolve({
           ...(msg.result !== undefined ? { result: msg.result } : {}),
-          ...(msg.error !== undefined ? { error: { message: typeof msg.error.message === "string" ? msg.error.message : "cdp error" } } : {}),
+          ...(msg.error !== undefined
+            ? {
+                error: {
+                  message: typeof msg.error.message === "string" ? msg.error.message : "cdp error",
+                },
+              }
+            : {}),
         })
       }
       return

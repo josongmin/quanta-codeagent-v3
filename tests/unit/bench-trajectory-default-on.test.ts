@@ -16,8 +16,9 @@
  * trajectory behavior is byte-identical (proven indirectly: only bench imports
  * this module's record path).
  */
-import { join } from "node:path"
+
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { join } from "node:path"
 import {
   type BenchTrajectoryMode,
   resolveBenchTrajectoryDefault,

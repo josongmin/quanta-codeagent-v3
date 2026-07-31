@@ -76,11 +76,17 @@ const okSummarizer =
  *  with a (deferred) result the test controls. */
 const deferredSummarizer = () => {
   let resolveFn: (
-    r: Result<{ summary: Summary; resultingTokens: number; summarizedPrefixLen: number }, SummarizeError>,
+    r: Result<
+      { summary: Summary; resultingTokens: number; summarizedPrefixLen: number },
+      SummarizeError
+    >,
   ) => void = () => {}
   let sawAbort = false
   const promise = new Promise<
-    Result<{ summary: Summary; resultingTokens: number; summarizedPrefixLen: number }, SummarizeError>
+    Result<
+      { summary: Summary; resultingTokens: number; summarizedPrefixLen: number },
+      SummarizeError
+    >
   >((res) => {
     resolveFn = res
   })
@@ -94,8 +100,12 @@ const deferredSummarizer = () => {
     fn,
     resolve: resolveFn,
     sawAbort: () => sawAbort,
-    settle: (r: Result<{ summary: Summary; resultingTokens: number; summarizedPrefixLen: number }, SummarizeError>) =>
-      resolveFn(r),
+    settle: (
+      r: Result<
+        { summary: Summary; resultingTokens: number; summarizedPrefixLen: number },
+        SummarizeError
+      >,
+    ) => resolveFn(r),
   }
 }
 

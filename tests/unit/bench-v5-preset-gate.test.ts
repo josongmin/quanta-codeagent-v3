@@ -21,13 +21,20 @@ describe("agentless-v5-thin-and-expanded preset + gate", () => {
 
   test("v5AdaptiveEnabled is STRICT opt-in (default-OFF)", () => {
     // ON only with the exact preset AND the exact gate.
-    expect(v5AdaptiveEnabled({ preset: V5_ADAPTIVE_PRESET, envVars: { QUANTA_BENCH_V5_ADAPTIVE: "1" } })).toBe(true)
+    expect(
+      v5AdaptiveEnabled({ preset: V5_ADAPTIVE_PRESET, envVars: { QUANTA_BENCH_V5_ADAPTIVE: "1" } }),
+    ).toBe(true)
     // OFF: gate unset / falsy
     expect(v5AdaptiveEnabled({ preset: V5_ADAPTIVE_PRESET, envVars: {} })).toBe(false)
-    expect(v5AdaptiveEnabled({ preset: V5_ADAPTIVE_PRESET, envVars: { QUANTA_BENCH_V5_ADAPTIVE: "0" } })).toBe(false)
+    expect(
+      v5AdaptiveEnabled({ preset: V5_ADAPTIVE_PRESET, envVars: { QUANTA_BENCH_V5_ADAPTIVE: "0" } }),
+    ).toBe(false)
     // OFF: gate on but a DIFFERENT preset (paired control — the gate alone can't enable it)
-    expect(v5AdaptiveEnabled({ preset: "agentless-v3-thin-strict", envVars: { QUANTA_BENCH_V5_ADAPTIVE: "1" } })).toBe(
-      false,
-    )
+    expect(
+      v5AdaptiveEnabled({
+        preset: "agentless-v3-thin-strict",
+        envVars: { QUANTA_BENCH_V5_ADAPTIVE: "1" },
+      }),
+    ).toBe(false)
   })
 })

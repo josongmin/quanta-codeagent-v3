@@ -24,8 +24,8 @@ import {
 } from "@/agent/subagent-background"
 import {
   defaultJsonlSchedulerStore,
-  persistentBackgroundSubagentScheduler,
   type PersistedHandle,
+  persistentBackgroundSubagentScheduler,
 } from "@/agent/subagent-persistence-store"
 import {
   askUserResumePolicy,
@@ -184,7 +184,9 @@ describe("hydrating-scheduler cache eviction after resume sweep", () => {
 
       // Calling evictInterrupted on an unknown id must not throw, and must not
       // corrupt the scheduler — no phantom entries appear in list().
-      persistent.evictInterrupted("bg-never-existed" as Parameters<typeof persistent.evictInterrupted>[0])
+      persistent.evictInterrupted(
+        "bg-never-existed" as Parameters<typeof persistent.evictInterrupted>[0],
+      )
       expect(persistent.list()).toEqual([])
     } finally {
       await rm(baseDir, { recursive: true, force: true })

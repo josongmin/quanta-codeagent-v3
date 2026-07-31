@@ -34,8 +34,8 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { mkdirSync, writeFileSync } from "node:fs"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { homedir, tmpdir } from "node:os"
 import { join } from "node:path"
 import { loadRepoRules, MAX_BYTES, REPO_RULE_CANDIDATES } from "@/agent/repo-rules"
@@ -104,7 +104,9 @@ describe("§A MAX_DEPTH=16 is a hard walk-up boundary (no runaway, bounded reach
     // loud rather than hanging the suite.
     const out = await Promise.race([
       loadRepoRules(cwd),
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error("walk did not terminate")), 5000)),
+      new Promise<never>((_, rej) =>
+        setTimeout(() => rej(new Error("walk did not terminate")), 5000),
+      ),
     ])
 
     expect(out).toBeDefined()

@@ -18,16 +18,16 @@ import type { AgentConfig } from "@/agent"
 import { wireOptionalAgentPorts } from "@/agent"
 import {
   buildRefusalFallbackInput,
+  freshRecovery,
   neutralizedRefusalTurn,
   REFUSAL_NEUTRALIZED_MARKER,
   resolveTurnAction,
 } from "@/agent/loop"
-import { DEFAULT_REFUSAL_FALLBACK_PROMPT } from "@/agent/refusal-fallback"
-import { freshRecovery } from "@/agent/loop"
-import { isRefusalStopReason } from "@/llm"
-import type { LLMPort, Message, StreamEvent } from "@/llm"
 import type { StreamSuccess } from "@/agent/loop/types"
+import { DEFAULT_REFUSAL_FALLBACK_PROMPT } from "@/agent/refusal-fallback"
 import type { TurnState } from "@/agent/turn-context"
+import type { LLMPort, Message, StreamEvent } from "@/llm"
+import { isRefusalStopReason } from "@/llm"
 
 // ─── isRefusalStopReason — the provider-agnostic seam ────────────────────────
 
@@ -102,7 +102,10 @@ describe("buildRefusalFallbackInput", () => {
     expect(input?.prompt).toBe("RECONSIDER PLEASE")
   })
   test("budgetOk: no taskBudget ⇒ true", () => {
-    const input = buildRefusalFallbackInput(cfgWith({ refusalFallback: { enabled: true } }), stateWith())
+    const input = buildRefusalFallbackInput(
+      cfgWith({ refusalFallback: { enabled: true } }),
+      stateWith(),
+    )
     expect(input?.budgetOk()).toBe(true)
   })
   test("budgetOk: spend over budget ⇒ false; under ⇒ true", () => {
@@ -170,14 +173,24 @@ describe("resolveTurnAction — T08 refusal-fallback", () => {
 
   test("ON content_filtered text-only ⇒ refusal_fallback (provider-agnostic)", () => {
     const rec = freshRecovery()
-    const a = resolveTurnAction(undefined, refusalResult("content_filtered", txt("x")), rec, okInput())
+    const a = resolveTurnAction(
+      undefined,
+      refusalResult("content_filtered", txt("x")),
+      rec,
+      okInput(),
+    )
     expect(a.do).toBe("refusal_fallback")
   })
 
   test("ON but one-shot already spent ⇒ terminal refusal (rationale preserved)", () => {
     const rec = freshRecovery()
     rec.refusalFallbacks = 1
-    const a = resolveTurnAction(undefined, refusalResult("refusal", txt("still no")), rec, okInput())
+    const a = resolveTurnAction(
+      undefined,
+      refusalResult("refusal", txt("still no")),
+      rec,
+      okInput(),
+    )
     expect(a.do).toBe("refusal")
     if (a.do === "refusal") expect(a.rationale).toBe("still no")
   })

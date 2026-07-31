@@ -32,16 +32,15 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { openThreadStore } from "@/apps/web-daemon/persistence-sqlite"
+import type { WebDaemonServerConfig } from "@/apps/web-daemon/server"
+import { startWebDaemon } from "@/apps/web-daemon/server"
+import type { WebDaemonHandle } from "@/apps/web-daemon/types"
 import type { ConnectedSessionTransport, SessionTransport } from "@/ipc/session"
 import type { SessionEvent, SessionSnapshotLite } from "@/protocol/session"
-import { capabilitiesFor, makeSnapshotLite } from "../support/session-fixtures"
-import type { SessionDispatchResult } from "@/sdk/runtime"
 import { supported } from "@/protocol/session"
-import { startWebDaemon } from "@/apps/web-daemon/server"
-import type { WebDaemonServerConfig } from "@/apps/web-daemon/server"
-import type { RuntimeFacade, RuntimeSession } from "@/sdk/runtime"
-import type { WebDaemonHandle } from "@/apps/web-daemon/types"
-import { openThreadStore } from "@/apps/web-daemon/persistence-sqlite"
+import type { RuntimeFacade, RuntimeSession, SessionDispatchResult } from "@/sdk/runtime"
+import { capabilitiesFor, makeSnapshotLite } from "../support/session-fixtures"
 
 const handles: WebDaemonHandle[] = []
 
@@ -209,17 +208,15 @@ describe("GET /threads/:id/events — B2 thread RESUME route (web daemon)", () =
 
     expect((await fetch(base)).status).toBe(401)
     expect((await fetch(base, { headers: { authorization: "Bearer nope" } })).status).toBe(401)
-    expect(
-      (await fetch(base, { headers: { authorization: "Bearer s3cr3t-token" } })).status,
-    ).toBe(200)
+    expect((await fetch(base, { headers: { authorization: "Bearer s3cr3t-token" } })).status).toBe(
+      200,
+    )
     expect((await fetch(`${base}?token=s3cr3t-token`)).status).toBe(200)
   })
 
   test("TR-02: a DIFFERENT (foreign) thread id resumes THAT thread's persisted events, read-only", async () => {
     const handle = await boot({ authToken: undefined })
-    const res = await fetch(
-      `http://127.0.0.1:${handle.port}/threads/${FOREIGN_THREAD_ID}/events`,
-    )
+    const res = await fetch(`http://127.0.0.1:${handle.port}/threads/${FOREIGN_THREAD_ID}/events`)
     expect(res.status).toBe(200)
     const body = (await res.json()) as EventsBody
     expect(body.threadId).toBe(FOREIGN_THREAD_ID)
@@ -232,9 +229,7 @@ describe("GET /threads/:id/events — B2 thread RESUME route (web daemon)", () =
 
   test("TR-03: the LIVE session id reports boundary:'live-attach'", async () => {
     const handle = await boot({ authToken: undefined })
-    const res = await fetch(
-      `http://127.0.0.1:${handle.port}/threads/${LIVE_SESSION_ID}/events`,
-    )
+    const res = await fetch(`http://127.0.0.1:${handle.port}/threads/${LIVE_SESSION_ID}/events`)
     expect(res.status).toBe(200)
     const body = (await res.json()) as EventsBody
     expect(body.threadId).toBe(LIVE_SESSION_ID)
@@ -275,9 +270,7 @@ describe("GET /threads/:id/events — persistence OFF honest boundary", () => {
     process.env.QUANTA_WEB_DB = "off"
     try {
       const handle = await boot({ authToken: undefined })
-      const res = await fetch(
-        `http://127.0.0.1:${handle.port}/threads/${FOREIGN_THREAD_ID}/events`,
-      )
+      const res = await fetch(`http://127.0.0.1:${handle.port}/threads/${FOREIGN_THREAD_ID}/events`)
       expect(res.status).toBe(404)
       const body = (await res.json()) as { error?: string }
       expect(body.error).toBe("persistence_disabled")

@@ -155,9 +155,7 @@ export interface SendNowSink {
    *  `retryable:true` on a rejection signals the TRANSIENT timing window
    *  (target not installed yet) — the store maps it to `send-not-ready`
    *  and PRESERVES the entry. Omitted / false ⇒ TERMINAL rejection. */
-  inject(
-    input: SendNowInjection,
-  ): { ok: true } | { ok: false; reason: string; retryable?: boolean }
+  inject(input: SendNowInjection): { ok: true } | { ok: false; reason: string; retryable?: boolean }
 }
 
 /** Payload handed to {@link SendNowSink.inject}. Carries enough envelope

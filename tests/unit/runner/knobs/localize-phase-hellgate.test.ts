@@ -24,21 +24,9 @@
  *   key in beforeEach/afterEach.
  */
 
-import {
-  afterAll,
-  afterEach,
-  beforeAll,
-  beforeEach,
-  describe,
-  expect,
-  test,
-} from "bun:test"
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
-import { ToolRegistry } from "@/tool"
-import {
-  applyBenchKnobs,
-  resolveBenchKnobs,
-} from "@/runner/batch/eval/knobs-bench"
+import { applyBenchKnobs, resolveBenchKnobs } from "@/runner/batch/eval/knobs-bench"
 import {
   __resetRegistry,
   __restoreRegistry,
@@ -48,6 +36,7 @@ import {
 } from "@/runner/knobs"
 // Import the real knob so the registry is populated.
 import { localizePhaseKnob } from "@/runner/knobs/knobs/localize-phase"
+import { ToolRegistry } from "@/tool"
 // Side-effect barrel so all production knobs are registered (the snapshot below
 // captures the full production registry, not just localize-phase).
 import "@/runner/knobs/knobs"

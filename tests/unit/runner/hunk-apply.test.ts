@@ -25,9 +25,7 @@ describe("applyHunkSelection — partial apply to disk", () => {
     expect(res.status).toBe("applied")
     // FRESH-READBACK from disk — not the return value.
     const onDisk = readFileSync(path, "utf8")
-    expect(onDisk).toBe(
-      ["line1", "L2X", "line3", "line4", "line5", "line6", "line7"].join("\n"),
-    )
+    expect(onDisk).toBe(["line1", "L2X", "line3", "line4", "line5", "line6", "line7"].join("\n"))
   })
 
   it("UC1 control: selecting ALL hunks reproduces `after` on disk", async () => {
@@ -52,9 +50,7 @@ describe("applyHunkSelection — partial apply to disk", () => {
     await applyHunkSelection({ path, before: B, after: A, selectedHunkIds: ["h1", "h3"] })
     const onDisk = readFileSync(path, "utf8")
     expect(onDisk).toContain("line4")
-    expect(onDisk).toBe(
-      ["line1", "L2X", "line3", "line4", "line5", "L6X", "line7"].join("\n"),
-    )
+    expect(onDisk).toBe(["line1", "L2X", "line3", "line4", "line5", "L6X", "line7"].join("\n"))
   })
 
   it("UC4: aborts (no write) when disk drifted from `before` since preview", async () => {

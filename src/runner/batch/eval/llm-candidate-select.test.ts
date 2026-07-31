@@ -101,19 +101,13 @@ describe("renderCandidate evidence — conditional, byte-identical when absent",
     expect(p).not.toContain("failure_output")
   })
   test("failureOutput present ⇒ failure section appears verbatim", () => {
-    const p = buildReviewerPrompt(
-      cand(0, { failureOutput: "E   assert 3 == 4\n1 failed" }),
-      "bug",
-    )
+    const p = buildReviewerPrompt(cand(0, { failureOutput: "E   assert 3 == 4\n1 failed" }), "bug")
     expect(p).toContain("failure_output (redacted, tail):")
     expect(p).toContain("E   assert 3 == 4")
     expect(p).toContain("1 failed")
   })
   test("both present ⇒ both sections; empty/whitespace evidence is omitted", () => {
-    const p = buildReviewerPrompt(
-      cand(0, { verifyCmd: "tox -e py39", failureOutput: "  " }),
-      "bug",
-    )
+    const p = buildReviewerPrompt(cand(0, { verifyCmd: "tox -e py39", failureOutput: "  " }), "bug")
     expect(p).toContain("verify_command: tox -e py39")
     expect(p).not.toContain("failure_output") // whitespace-only ⇒ omitted
   })

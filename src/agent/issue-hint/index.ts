@@ -19,6 +19,8 @@
  *   - all extractors deterministic on their input
  *   - default-OFF at the bench seam (byte-identical measurement when unset)
  */
+
+import { normalizePublicIssueText } from "@/shared"
 import { extractCodeFences, extractTracebackPaths } from "./extract-code"
 import { extractErrors } from "./extract-errors"
 import { extractExpectedActual } from "./extract-expected-actual"
@@ -27,7 +29,6 @@ import { extractRefs } from "./extract-refs"
 import { extractSymbols } from "./extract-symbols"
 import { extractTracebacks } from "./extract-tracebacks"
 import type { IssueHint } from "./types"
-import { normalizePublicIssueText } from "@/shared"
 
 export type {
   AgentlessLocalizeDeps,

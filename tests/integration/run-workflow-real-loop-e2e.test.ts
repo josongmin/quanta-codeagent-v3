@@ -65,7 +65,10 @@ const runWorkflowCall = (id: string): StreamEvent[] => [
     input: {
       phases: [
         { name: "PhaseA", steps: [{ id: "step-one", prompt: "STEP1-MARKER analyze the input" }] },
-        { name: "PhaseB", steps: [{ id: "step-two", prompt: "STEP2-MARKER synthesize the result" }] },
+        {
+          name: "PhaseB",
+          steps: [{ id: "step-two", prompt: "STEP2-MARKER synthesize the result" }],
+        },
       ],
     },
   },
@@ -77,7 +80,9 @@ const runWorkflowCall = (id: string): StreamEvent[] => [
 const conversationText = (input: StreamInput): string =>
   input.messages
     .flatMap((m) =>
-      m.content.map((b) => (b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "")),
+      m.content.map((b) =>
+        b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "",
+      ),
     )
     .join(" ")
 
@@ -106,7 +111,9 @@ class RoutingLLM implements LLMPort {
 
 const toolResults = (out: Awaited<ReturnType<typeof runAgent>>) =>
   out.messages.flatMap((m) =>
-    m.content.filter((b): b is Extract<typeof b, { type: "tool_result" }> => b.type === "tool_result"),
+    m.content.filter(
+      (b): b is Extract<typeof b, { type: "tool_result" }> => b.type === "tool_result",
+    ),
   )
 
 describe("run-workflow — REAL runAgent loop dispatches run_workflow; steps fork real subagents", () => {

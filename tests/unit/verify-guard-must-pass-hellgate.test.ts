@@ -441,9 +441,9 @@ describe("FIX C — explicit-undefined OWN field ≡ absent (proto-injected does
     // A failing verify ran AFTER the edit ⇒ presence is satisfied. Without the
     // must-pass gate, neither config blocks; the explicit-undefined must match.
     const absent = decide(editThenFailingVerify, {})
-    const explicitUndef = decide(editThenFailingVerify, { mustPass: undefined } as unknown as Parameters<
-      typeof decide
-    >[1])
+    const explicitUndef = decide(editThenFailingVerify, {
+      mustPass: undefined,
+    } as unknown as Parameters<typeof decide>[1])
     expect(absent.v.block).toBe(false)
     expect(explicitUndef).toEqual(absent)
     // paired control: an EXPLICIT true DOES change behavior (proves the read is live).
@@ -455,9 +455,9 @@ describe("FIX C — explicit-undefined OWN field ≡ absent (proto-injected does
     // A bash command that the default registry recognizes as a real test run.
     const editThenPytest = h({ name: "edit" }, { name: "bash", arg: "pytest tests/test_x.py" })
     const absent = decide(editThenPytest, {})
-    const explicitUndef = decide(editThenPytest, { exactCommands: undefined } as unknown as Parameters<
-      typeof decide
-    >[1])
+    const explicitUndef = decide(editThenPytest, {
+      exactCommands: undefined,
+    } as unknown as Parameters<typeof decide>[1])
     // pytest satisfies presence under the default registry ⇒ no block, identical.
     expect(absent.v.block).toBe(false)
     expect(explicitUndef).toEqual(absent)

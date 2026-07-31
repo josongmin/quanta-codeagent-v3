@@ -219,9 +219,7 @@ describe("background-compaction e2e — real loop", () => {
 
     // A compaction recovery event fired (the bg install runs through the SAME
     // proactive commit path ⇒ recovery:compact).
-    expect(
-      stream.events.some((e) => e.type === "recovery" && e.reason === "compact"),
-    ).toBe(true)
+    expect(stream.events.some((e) => e.type === "recovery" && e.reason === "compact")).toBe(true)
 
     // The FINAL transcript is compacted: a synthetic continuation-summary head
     // replaced the big old prefix.
@@ -275,9 +273,7 @@ describe("background-compaction e2e — real loop", () => {
     expect(finalText).not.toContain(SUMMARY_HEAD)
     expect(finalText).toContain(OLD_MARKER)
     // NO compaction recovery fired (bg discarded; sync path was under_threshold).
-    expect(
-      stream.events.some((e) => e.type === "recovery" && e.reason === "compact"),
-    ).toBe(false)
+    expect(stream.events.some((e) => e.type === "recovery" && e.reason === "compact")).toBe(false)
     // The turn-1 read result is still present and the transcript was NOT shrunk.
     expect(out.messages.length).toBeGreaterThanOrEqual(bloatedHistory().length)
   })
@@ -307,9 +303,7 @@ describe("background-compaction e2e — real loop", () => {
     const finalText = flatText([...out.messages])
     expect(finalText).not.toContain(SUMMARY_HEAD)
     expect(finalText).toContain(OLD_MARKER)
-    expect(
-      stream.events.some((e) => e.type === "recovery" && e.reason === "compact"),
-    ).toBe(false)
+    expect(stream.events.some((e) => e.type === "recovery" && e.reason === "compact")).toBe(false)
   })
 })
 
@@ -413,22 +407,38 @@ const highThresholdConfig = (): AgentConfig =>
  * installed + final length.
  */
 const driveInstallWire = async (
-  makeController: (getPrefix: () => readonly Message[]) => BackgroundSummarizationController<BgSummaryPayload>,
+  makeController: (
+    getPrefix: () => readonly Message[],
+  ) => BackgroundSummarizationController<BgSummaryPayload>,
 ): Promise<{ hasSummary: boolean; length: number; text: string }> => {
   const wm = createWorkingMemory<Message>(bgSeed())
   const controller = makeController(() => wm.snapshot())
   const config = highThresholdConfig()
   // Turn N: arm a speculative pass (maybeStart runs at the tail of maybeCompact).
   await maybeCompact({
-    config, system: "sys", wm, breaker: undefined, archive: undefined,
-    turn: 0, bgController: controller, resetClassifier: noopReset, tokenBaselineBox: undefined,
+    config,
+    system: "sys",
+    wm,
+    breaker: undefined,
+    archive: undefined,
+    turn: 0,
+    bgController: controller,
+    resetClassifier: noopReset,
+    tokenBaselineBox: undefined,
   })
   // Turn N+1: post-snapshot append + let the summarize settle, then reconcile.
   wm.append(userText("APPENDED next turn"))
   for (let i = 0; i < 20; i++) await Promise.resolve()
   await maybeCompact({
-    config, system: "sys", wm, breaker: undefined, archive: undefined,
-    turn: 1, bgController: controller, resetClassifier: noopReset, tokenBaselineBox: undefined,
+    config,
+    system: "sys",
+    wm,
+    breaker: undefined,
+    archive: undefined,
+    turn: 1,
+    bgController: controller,
+    resetClassifier: noopReset,
+    tokenBaselineBox: undefined,
   })
   const snap = wm.snapshot()
   const head = snap[0]?.content[0]
@@ -443,7 +453,9 @@ describe("background-compaction e2e — §D non-vacuity (reconcile→install is 
   /** The ONE valid prod adapter both arms share — built by the real factory over
    *  the drive's own wm so the produced summary is a genuine `[synthetic,
    *  ...liveSuffix]` that WOULD install. */
-  const realController = (getPrefix: () => readonly Message[]): BackgroundSummarizationController<BgSummaryPayload> => {
+  const realController = (
+    getPrefix: () => readonly Message[],
+  ): BackgroundSummarizationController<BgSummaryPayload> => {
     const c = makeBgCompactionController(
       { QUANTA_BG_COMPACTION: "1" },
       instantSummarizer,
@@ -466,7 +478,9 @@ describe("background-compaction e2e — §D non-vacuity (reconcile→install is 
     // an installable summary — but reconcile is severed to always DISCARD. The
     // ONLY difference vs. the baseline is the reconcile decision, so any surviving
     // §A signal here would be incidental. There is none.
-    const neuter = await driveInstallWire((getPrefix) => new NeuteredController(realController(getPrefix)))
+    const neuter = await driveInstallWire(
+      (getPrefix) => new NeuteredController(realController(getPrefix)),
+    )
 
     // RED-ON-INJECTION: severing reconcile→install makes the §A signals VANISH —
     // no synthetic head, transcript NOT compacted (it only GREW by the append), and

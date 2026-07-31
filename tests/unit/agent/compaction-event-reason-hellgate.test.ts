@@ -48,7 +48,9 @@ const bloatedHistory = (): Message[] => {
     })
     out.push({
       role: "user",
-      content: [{ type: "tool_result", tool_use_id: `u${i}`, content: `dump:${"x".repeat(60_000)}` }],
+      content: [
+        { type: "tool_result", tool_use_id: `u${i}`, content: `dump:${"x".repeat(60_000)}` },
+      ],
     })
   }
   out.push(u("now answer"))

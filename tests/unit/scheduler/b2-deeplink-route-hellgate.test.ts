@@ -21,8 +21,8 @@ import { describe, expect, test } from "bun:test"
 import { buildThreadDeeplink } from "@/scheduler/deeplink"
 import {
   resolveThreadRoute,
-  type ThreadRouteIntent,
   THREAD_WEB_PARAM,
+  type ThreadRouteIntent,
 } from "@/scheduler/deeplink-route"
 
 describe("B2 resolveThreadRoute — native quanta:// scheme", () => {

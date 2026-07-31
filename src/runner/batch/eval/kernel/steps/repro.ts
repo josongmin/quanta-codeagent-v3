@@ -19,9 +19,9 @@
  * calls `ctx.deps.repro`, which the driver binds over `prepareReproTest`.
  */
 
-import { foldState } from "../eval-step"
 import type { BenchPosture } from "../../knobs-bench"
 import type { EvalCtx, EvalStep } from "../eval-step"
+import { foldState } from "../eval-step"
 
 /** The repro gate predicate, exported so the parity test asserts against the
  *  EXACT same predicate the driver uses (not a re-spelled copy). */

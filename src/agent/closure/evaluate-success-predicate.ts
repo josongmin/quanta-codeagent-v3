@@ -25,7 +25,11 @@ import type { ExecObservation, PredicateResult, SuccessPredicate } from "./types
 const matched = (m: boolean, reason?: string): PredicateResult =>
   m
     ? { evaluable: true, matched: true }
-    : { evaluable: true, matched: false, ...(reason !== undefined ? { mismatchReason: reason } : {}) }
+    : {
+        evaluable: true,
+        matched: false,
+        ...(reason !== undefined ? { mismatchReason: reason } : {}),
+      }
 
 /** Advisory (cannot confidently evaluate from the observation) ⇒ fail-open. */
 const advisory = (why: string): PredicateResult => ({
@@ -71,9 +75,13 @@ export const evaluateSuccessPredicate = (
     // lost — we only strip the regex's authority to hard-fail. The rail falls
     // back to the genuine execution oracle (`test_exit_zero`) as the hard signal.
     case "stdout_contains":
-      return advisory("stdout_contains is advisory in v1 (issue-prose-derived; no reliable observed match)")
+      return advisory(
+        "stdout_contains is advisory in v1 (issue-prose-derived; no reliable observed match)",
+      )
     case "stdout_exact_empty":
-      return advisory("stdout_exact_empty is advisory in v1 (issue-prose-derived; no reliable observed match)")
+      return advisory(
+        "stdout_exact_empty is advisory in v1 (issue-prose-derived; no reliable observed match)",
+      )
     case "latex_or_string_exact":
       return advisory("latex_or_string_exact is advisory in v1 (no reliable observed repr)")
     case "symbolic_repr_equals":

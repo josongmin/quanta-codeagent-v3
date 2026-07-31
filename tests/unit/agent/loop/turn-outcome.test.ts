@@ -7,8 +7,8 @@
 import { describe, expect, test } from "bun:test"
 import { BudgetMeter } from "@/agent/budget"
 import { resolveTurnLoopOutcome, shouldParkOnGate } from "@/agent/loop/turn-outcome"
-import { createInMemoryPlanStore } from "@/agent/plan/state"
 import type { RunAgentContext, TurnResult } from "@/agent/loop/types"
+import { createInMemoryPlanStore } from "@/agent/plan/state"
 import type { AgentConfig } from "@/agent/types"
 import type { Message } from "@/llm"
 import { createWorkingMemory } from "@/memory"
@@ -220,7 +220,9 @@ describe("resolveTurnLoopOutcome", () => {
     args.pendingPlanExitRef.current = [
       { plan: "1. ship it", outcome: { decision: "approved" } },
     ] as typeof args.pendingPlanExitRef.current
-    args.pendingPlanEntryRef.current = [{ reason: "go back to planning" }] as typeof args.pendingPlanEntryRef.current
+    args.pendingPlanEntryRef.current = [
+      { reason: "go back to planning" },
+    ] as typeof args.pendingPlanEntryRef.current
 
     const resolution = await resolveTurnLoopOutcome(args)
 
@@ -290,7 +292,9 @@ describe("resolveTurnLoopOutcome", () => {
     args.pendingPlanExitRef.current = [
       { plan: "1. stale exit", outcome: { decision: "approved" } },
     ] as typeof args.pendingPlanExitRef.current
-    args.pendingPlanEntryRef.current = [{ reason: "stale entry" }] as typeof args.pendingPlanEntryRef.current
+    args.pendingPlanEntryRef.current = [
+      { reason: "stale entry" },
+    ] as typeof args.pendingPlanEntryRef.current
 
     const resolution = await resolveTurnLoopOutcome(args)
 
@@ -308,7 +312,9 @@ describe("resolveTurnLoopOutcome", () => {
     args.pendingPlanExitRef.current = [
       { plan: "1. stale exit", outcome: { decision: "approved" } },
     ] as typeof args.pendingPlanExitRef.current
-    args.pendingPlanEntryRef.current = [{ reason: "stale entry" }] as typeof args.pendingPlanEntryRef.current
+    args.pendingPlanEntryRef.current = [
+      { reason: "stale entry" },
+    ] as typeof args.pendingPlanEntryRef.current
 
     const resolution = await resolveTurnLoopOutcome(args)
 

@@ -15,16 +15,16 @@
  * repros into their prebuilt instance image when the image ref is derivable.
  */
 import { dirname } from "node:path"
-import { reproRunArgv } from "../corpus/dataset"
-import { normalizeRepoLanguageWithPythonDefault } from "../repo-language"
-import type { Instance } from "../types"
 import { classifyPytest, classifyPytestReportText } from "@/agent/repro-test/execute"
-import { gateOn } from "@/shared"
 import {
   REPRO_SCAFFOLD_ARTIFACT_PATTERNS,
   reproScriptBasename,
 } from "@/agent/repro-test/scaffold-patterns"
 import type { ReproTestOutcome } from "@/agent/repro-test/types"
+import { gateOn } from "@/shared"
+import { reproRunArgv } from "../corpus/dataset"
+import { normalizeRepoLanguageWithPythonDefault } from "../repo-language"
+import type { Instance } from "../types"
 import { reproValidationCmd, shellJoin, shellWord } from "./repro-command"
 
 export type ReproLanguage = "python" | "go" | "js" | "ts"
@@ -57,7 +57,17 @@ export const dockerRunReproArgv = (
   imageRef: string,
   sandboxDir: string,
   inner: readonly string[],
-): readonly string[] => ["docker", "run", "--rm", "-v", `${sandboxDir}:${sandboxDir}`, "-w", sandboxDir, imageRef, ...inner]
+): readonly string[] => [
+  "docker",
+  "run",
+  "--rm",
+  "-v",
+  `${sandboxDir}:${sandboxDir}`,
+  "-w",
+  sandboxDir,
+  imageRef,
+  ...inner,
+]
 
 const dockerValidationCmd = (imageRef: string, sandboxDir: string, scriptPath: string): string =>
   sandboxDir.startsWith("/")
@@ -103,7 +113,9 @@ export const pythonReproAdapter: ReproAdapter = {
     }
     // HOST backend (default): `repo === undefined` (non-SWE-bench fixture) ⇒ bare python3
     // (matches reproValidationCmd); else the uv project-env SSOT. BYTE-IDENTICAL to pre-Phase-2.
-    return repo === undefined ? ["python3", "-s", scriptPath] : [...reproRunArgv(repo, version, scriptPath)]
+    return repo === undefined
+      ? ["python3", "-s", scriptPath]
+      : [...reproRunArgv(repo, version, scriptPath)]
   },
   buildValidationCmd: ({ repo, version, scriptPath, execBackend, imageRef, sandboxDir }) =>
     execBackend === "image" && imageRef !== undefined && sandboxDir !== undefined
@@ -112,7 +124,9 @@ export const pythonReproAdapter: ReproAdapter = {
   // pytest sidecar is authoritative when present (matches execute.ts precedence); else the
   // stdout-based classifier. Byte-identical to the current verdict path.
   parseEvidence: ({ stdout, stderr, code, sidecarText }) =>
-    sidecarText !== undefined ? classifyPytestReportText(sidecarText) : classifyPytest(stdout, stderr, code),
+    sidecarText !== undefined
+      ? classifyPytestReportText(sidecarText)
+      : classifyPytest(stdout, stderr, code),
 }
 
 /**

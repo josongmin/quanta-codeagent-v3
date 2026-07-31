@@ -32,10 +32,7 @@
  * (`./counterfactual-contract`) for semantic steering.
  */
 
-import type {
-  CandidateFamily,
-  SemanticCounterfactualDerivation,
-} from "./counterfactual-contract"
+import type { CandidateFamily, SemanticCounterfactualDerivation } from "./counterfactual-contract"
 import type { CandidateRiskFacts } from "./counterfactual-risk"
 
 const pluralFiles = (n: number): string => `${n} source file${n === 1 ? "" : "s"}`
@@ -98,7 +95,8 @@ export const buildCounterfactualSeed = (args: {
     args.semantic !== undefined ? buildSemanticCounterfactualSeed(args.semantic) : undefined
 
   // Self-guard: nothing structurally wrong AND no semantic target ⇒ nothing to produce.
-  const fired = facts.crossFile || multiFile || hasNewDefs || hasNewFiles || hasRuntimeCalls || isEmpty
+  const fired =
+    facts.crossFile || multiFile || hasNewDefs || hasNewFiles || hasRuntimeCalls || isEmpty
   if (!fired) return semanticSeed
 
   const reasonBullets: string[] = []

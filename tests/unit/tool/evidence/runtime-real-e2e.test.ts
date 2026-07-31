@@ -11,8 +11,8 @@ import { describe, expect, test } from "bun:test"
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { buildEvidence } from "@/tool/evidence/builder"
 import { defaultRuntimePort } from "@/tool/evidence"
+import { buildEvidence } from "@/tool/evidence/builder"
 import { detectToolchain, runToolchain } from "@/tool/testrun"
 
 const has = (bin: string, ...a: string[]): boolean => {
@@ -26,14 +26,18 @@ const hasDebugpy = (): boolean => has("python3", "-c", "import debugpy")
 const lldbDap = (): boolean => {
   if (has("lldb-dap", "--help")) return true
   try {
-    return Bun.spawnSync(["xcrun", "-f", "lldb-dap"], { stdout: "ignore", stderr: "ignore" }).exitCode === 0
+    return (
+      Bun.spawnSync(["xcrun", "-f", "lldb-dap"], { stdout: "ignore", stderr: "ignore" })
+        .exitCode === 0
+    )
   } catch {
     return false
   }
 }
 const D = hasDebugpy() ? describe : describe.skip
 const buildSources = (dir: string) => ({
-  detect: (c: string) => detectToolchain(c, { fileExists: async (n: string) => existsSync(join(c, n)) }),
+  detect: (c: string) =>
+    detectToolchain(c, { fileExists: async (n: string) => existsSync(join(c, n)) }),
   runTests: (tc: never, c: string) => runToolchain(tc, c),
   runtime: defaultRuntimePort,
   changedFiles: async () => [] as string[],
@@ -81,7 +85,10 @@ DR("defaultRuntimePort — REAL Rust runtime capture (cargo + lldb-dap)", () => 
   test("buildEvidence captures the failing Rust test's locals (result=10)", async () => {
     const dir = realpathSync(mkdtempSync(join(tmpdir(), "rt-rs-")))
     mkdirSync(join(dir, "src"), { recursive: true })
-    writeFileSync(join(dir, "Cargo.toml"), ['[package]', 'name = "t"', 'version = "0.1.0"', 'edition = "2021"'].join("\n"))
+    writeFileSync(
+      join(dir, "Cargo.toml"),
+      ["[package]", 'name = "t"', 'version = "0.1.0"', 'edition = "2021"'].join("\n"),
+    )
     writeFileSync(
       join(dir, "src", "lib.rs"),
       [
@@ -111,7 +118,8 @@ DR("defaultRuntimePort — REAL Rust runtime capture (cargo + lldb-dap)", () => 
 })
 
 // ── GO runtime via dlv dap (over the TCP transport — its first real consumer) ──
-const dlvOk = (): boolean => has("dlv", "version") || has(`${process.env.HOME}/go/bin/dlv`, "version")
+const dlvOk = (): boolean =>
+  has("dlv", "version") || has(`${process.env.HOME}/go/bin/dlv`, "version")
 const DG = has("go", "version") && dlvOk() ? describe : describe.skip
 DG("defaultRuntimePort — REAL Go runtime capture (dlv dap over TCP)", () => {
   test("buildEvidence captures the failing Go test's locals via the TCP DAP transport", async () => {
@@ -139,6 +147,6 @@ DG("defaultRuntimePort — REAL Go runtime capture (dlv dap over TCP)", () => {
     expect(pkt.runtime?.stack.some((f) => f.name.includes("TestFail"))).toBe(true)
     // T-03 goroutine dump: the Go runtime always has >1 goroutine (scheduler/GC
     // alongside the test), so dlv reports them as DAP threads → captured.
-    expect((pkt.runtime?.threads?.length ?? 0)).toBeGreaterThan(1)
+    expect(pkt.runtime?.threads?.length ?? 0).toBeGreaterThan(1)
   }, 120_000)
 })

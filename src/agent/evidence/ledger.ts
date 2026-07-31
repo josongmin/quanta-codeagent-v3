@@ -10,9 +10,9 @@
 
 import {
   EVIDENCE_CONFIDENCES,
+  EVIDENCE_SOURCES,
   type EvidenceCard,
   type EvidenceCardInput,
-  EVIDENCE_SOURCES,
   type EvidenceLedger,
   type EvidenceLedgerSnapshot,
   type EvidenceSource,

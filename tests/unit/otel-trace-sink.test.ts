@@ -224,7 +224,12 @@ describe("otel-trace-sink parses the exporter's exact OTLP/JSON shape", () => {
     // an OK span carries no status message (only meaningful for errors)
     const { calls: okCalls } = (() => {
       const f = makeFakeFetch()
-      const ex = otelHttpExporter({ endpoint: ENDPOINT, fetch: f.fetch, flushIntervalMs: 0, ...noTimer })
+      const ex = otelHttpExporter({
+        endpoint: ENDPOINT,
+        fetch: f.fetch,
+        flushIntervalMs: 0,
+        ...noTimer,
+      })
       const t = buildExportingTracer(ex, { now: () => 1_000 })
       const sp = t.startSpan("ok_span")
       sp.setStatus("ok")
@@ -232,7 +237,9 @@ describe("otel-trace-sink parses the exporter's exact OTLP/JSON shape", () => {
       void ex.flush()
       return f
     })()
-    const okFull = parseResourceSpansFull((okCalls.find((c) => c.path === "/v1/traces")?.body ?? {}) as never)
+    const okFull = parseResourceSpansFull(
+      (okCalls.find((c) => c.path === "/v1/traces")?.body ?? {}) as never,
+    )
     expect(okFull[0]?.statusMessage).toBeUndefined()
   })
 })

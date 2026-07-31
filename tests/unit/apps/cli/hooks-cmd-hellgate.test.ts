@@ -12,7 +12,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { defaultHookApprovalsPath, hookBindingKey, HookReviewStore } from "@/agent"
+import { defaultHookApprovalsPath, HookReviewStore, hookBindingKey } from "@/agent"
 import { hooksCmd } from "@/apps/cli/hooks-cmd"
 import type { SlashContext } from "@/apps/cli/slash-contract"
 

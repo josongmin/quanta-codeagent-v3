@@ -137,10 +137,7 @@ describe("B3/B4-MANIFEST — gh tools manifest entry documents QUANTA_CI_BOT_GH_
   it("ARCH-04: gated-tools.ts manifest 'gh' entry note or origin must name QUANTA_CI_BOT_GH_WRITE (drift guard)", () => {
     const { readFileSync } = require("node:fs")
     const { join } = require("node:path")
-    const src = readFileSync(
-      join(import.meta.dir, "../../src/tool/surface/gated-tools.ts"),
-      "utf8",
-    )
+    const src = readFileSync(join(import.meta.dir, "../../src/tool/surface/gated-tools.ts"), "utf8")
     // The manifest type only supports one `gate` entry (QUANTA_GIT_TOOLS).
     // The secondary ci-bot gate MUST be documented in `note` or `origin` so
     // a reader inspecting the manifest learns about both activation paths.

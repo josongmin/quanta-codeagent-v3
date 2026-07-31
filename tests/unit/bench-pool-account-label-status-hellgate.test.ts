@@ -95,7 +95,9 @@ describe("T-6 account label in box status snapshot", () => {
     const mgr = new AuthLeaseManager([{ label: "acct-a", authFile: "/a.json", maxParallel: 6 }], {
       now: () => 1_000_000,
     })
-    const provider = createLeasePoolAuthProvider(mgr, () => JSON.stringify({ access_token: "ACCESS-a", expires_at: "2099-01-01T00:00:00.000Z" }))
+    const provider = createLeasePoolAuthProvider(mgr, () =>
+      JSON.stringify({ access_token: "ACCESS-a", expires_at: "2099-01-01T00:00:00.000Z" }),
+    )
     await runPool(CHUNK, baseCfg(fn, { authProvider: provider, authJsonProvider: () => "{}" }))
     const writes = statusWrites(calls)
     expect(writes.length).toBeGreaterThan(0)
@@ -111,7 +113,13 @@ describe("T-6 account label in box status snapshot", () => {
 
   test("single-auth mode writes NO accountLabel (byte-clean legacy snapshot)", async () => {
     const { fn, calls } = mockSpawn()
-    await runPool(CHUNK, baseCfg(fn, { authJsonProvider: () => JSON.stringify({ access_token: "x", expires_at: "2099-01-01T00:00:00.000Z" }) }))
+    await runPool(
+      CHUNK,
+      baseCfg(fn, {
+        authJsonProvider: () =>
+          JSON.stringify({ access_token: "x", expires_at: "2099-01-01T00:00:00.000Z" }),
+      }),
+    )
     const writes = statusWrites(calls)
     expect(writes.length).toBeGreaterThan(0)
     for (const s of writes) expect(s).not.toContain("accountLabel")

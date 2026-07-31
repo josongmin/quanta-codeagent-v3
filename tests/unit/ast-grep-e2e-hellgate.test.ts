@@ -24,10 +24,10 @@ import { execSync } from "node:child_process"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { astGrepTool } from "@/tool/ast-grep"
-import { applyPatchTool } from "@/tool/apply-patch"
 import { PatchParseError } from "@/patch"
 import type { ToolContext, ToolEvent } from "@/tool"
+import { applyPatchTool } from "@/tool/apply-patch"
+import { astGrepTool } from "@/tool/ast-grep"
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -86,15 +86,13 @@ describe("E2E-1: probe failure → ok:false with install hint", () => {
     if (astGrepAvailable) {
       // If ast-grep IS available on the host we cannot exercise the no-binary
       // path without monkey-patching the module cache.  Mark as a known skip.
-      console.log("[E2E-1] ast-grep is available on this host — probe-failure path not exercisable; skip")
+      console.log(
+        "[E2E-1] ast-grep is available on this host — probe-failure path not exercisable; skip",
+      )
       return
     }
 
-    const result = await run(
-      astGrepTool,
-      { pattern: "console.log($A)" },
-      tmpDir,
-    )
+    const result = await run(astGrepTool, { pattern: "console.log($A)" }, tmpDir)
 
     // Red-on-injection: remove the probeAstGrep guard in index.ts → the tool
     // would attempt to run ast-grep and crash or return a different error.
@@ -119,11 +117,7 @@ describe("E2E-2: real pattern search finds matches (skipIf !astGrepAvailable)", 
     const file = join(tmpDir, "e2e2-sample.js")
     writeFileSync(file, "console.log('hello');\nfoo.bar();\nconsole.log('world');\n")
 
-    const result = await run(
-      astGrepTool,
-      { pattern: "console.log($A)", path: file },
-      tmpDir,
-    )
+    const result = await run(astGrepTool, { pattern: "console.log($A)", path: file }, tmpDir)
 
     // Red-on-injection: remove the match-formatting lines in execute() →
     // output is empty string, both assertions below fail.
@@ -154,11 +148,7 @@ describe("E2E-3: 50-match cap fires when file has 60 matches (skipIf !astGrepAva
     const file = join(tmpDir, "e2e3-many-matches.js")
     writeFileSync(file, lines.join("\n") + "\n")
 
-    const result = await run(
-      astGrepTool,
-      { pattern: "console.log($A)", path: file },
-      tmpDir,
-    )
+    const result = await run(astGrepTool, { pattern: "console.log($A)", path: file }, tmpDir)
 
     expect(result.ok).toBe(true)
 
@@ -226,7 +216,10 @@ describe("E2E-5: language override flag does not crash (skipIf !astGrepAvailable
 // ════════════════════════════════════════════════════════════════════════════
 
 // Helper: apply a patch via applyPatchTool.execute using tmpDir as jail root.
-async function applyPatch(patchText: string, cwd: string): Promise<{ ok: boolean; output: string }> {
+async function applyPatch(
+  patchText: string,
+  cwd: string,
+): Promise<{ ok: boolean; output: string }> {
   return run(applyPatchTool, { patch: patchText }, cwd)
 }
 

@@ -104,4 +104,3 @@ describe("parseApprovalLadderName — fail closed", () => {
     expect(parseApprovalLadderName("guardian")).toBeUndefined()
   })
 })
-

@@ -114,7 +114,7 @@ describe("edit-fresh-hash · GATE STRICTNESS (runtimeConfig mutation table)", ()
     __resetRuntimeConfig()
   })
 
-  test("exactly \"off\" ⇒ FALSE (the sole disabling literal)", () => {
+  test('exactly "off" ⇒ FALSE (the sole disabling literal)', () => {
     expect(gateFor("off")).toBe(false)
   })
 
@@ -130,8 +130,8 @@ describe("edit-fresh-hash · GATE STRICTNESS (runtimeConfig mutation table)", ()
     ["true", "true"],
     ["yes", "yes"],
     ["OFF (case-sensitive, not disabling)", "OFF"],
-    ["leading-space \" off\"", " off"],
-    ["trailing-space \"off \"", "off "],
+    ['leading-space " off"', " off"],
+    ['trailing-space "off "', "off "],
     ["two", "2"],
   ]
 
@@ -153,7 +153,7 @@ describe("edit-fresh-hash · KNOB CATALOG PARITY", () => {
     expect(entry).toBeDefined()
   })
 
-  test("catalog row has kind:\"bool\" and default:true (default-ON opt-out)", () => {
+  test('catalog row has kind:"bool" and default:true (default-ON opt-out)', () => {
     const entry = RUNTIME_CONFIG_KNOBS.find((k) => k.envKey === KNOB)
     expect(entry?.kind).toBe("bool")
     expect(entry?.default).toBe(true)
@@ -169,11 +169,16 @@ describe("edit-fresh-hash · KNOB CATALOG PARITY", () => {
 // 3. OUTPUT CONTRACT EXACTNESS — full-string equality of the ON success output.
 // ─────────────────────────────────────────────────────────────────────────────
 describe("edit-fresh-hash · OUTPUT CONTRACT EXACTNESS (ON success)", () => {
-  test("ON success output is EXACTLY legacy-line + \"\\nfresh sha256: <hex> (pass …)\"", async () => {
+  test('ON success output is EXACTLY legacy-line + "\\nfresh sha256: <hex> (pass …)"', async () => {
     const path = "/in-mem/exact.txt"
     const after = "const a = 2"
     const { port } = makeFullPort({ [path]: "const a = 1" })
-    const r = await run(makeEditTool(port), { path, old_string: "1", new_string: "2" }, "/in-mem", true)
+    const r = await run(
+      makeEditTool(port),
+      { path, old_string: "1", new_string: "2" },
+      "/in-mem",
+      true,
+    )
     expect(r.ok).toBe(true)
 
     // The digest is over the POST-edit bytes (`planned.next`). Pin the WHOLE
@@ -189,7 +194,12 @@ describe("edit-fresh-hash · OUTPUT CONTRACT EXACTNESS (ON success)", () => {
   test("the advertised hex is a 64-char lowercase sha256 digest", async () => {
     const path = "/in-mem/hex.txt"
     const { port } = makeFullPort({ [path]: "x = 1" })
-    const r = await run(makeEditTool(port), { path, old_string: "1", new_string: "9" }, "/in-mem", true)
+    const r = await run(
+      makeEditTool(port),
+      { path, old_string: "1", new_string: "9" },
+      "/in-mem",
+      true,
+    )
     expect(r.ok).toBe(true)
     const m = r.output?.match(/fresh sha256: ([0-9a-f]{64}) \(/)
     expect(m).not.toBeNull()
@@ -204,7 +214,12 @@ describe("edit-fresh-hash · OFF BYTE-IDENTITY & failure-path invariance", () =>
   test("OFF success output is EXACTLY the legacy line (no trailing newline, no hash)", async () => {
     const path = "/in-mem/off-success.txt"
     const { port } = makeFullPort({ [path]: "const a = 1" })
-    const r = await run(makeEditTool(port), { path, old_string: "1", new_string: "2" }, "/in-mem", false)
+    const r = await run(
+      makeEditTool(port),
+      { path, old_string: "1", new_string: "2" },
+      "/in-mem",
+      false,
+    )
     expect(r.ok).toBe(true)
     // Removing the `ctx.editFreshHash` gate (always-append) flips this RED.
     expect(r.output).toBe(`${path}: Replaced 1 occurrence(s)`)
@@ -247,18 +262,28 @@ describe("edit-fresh-hash · OFF BYTE-IDENTITY & failure-path invariance", () =>
 // 5. NO "sha256" LEAK WHEN OFF — success AND failure paths.
 // ─────────────────────────────────────────────────────────────────────────────
 describe("edit-fresh-hash · NO sha256 leak when OFF", () => {
-  test("OFF success output contains zero \"sha256\" substring", async () => {
+  test('OFF success output contains zero "sha256" substring', async () => {
     const path = "/in-mem/off-nolek.txt"
     const { port } = makeFullPort({ [path]: "let v = 1" })
-    const r = await run(makeEditTool(port), { path, old_string: "1", new_string: "2" }, "/in-mem", false)
+    const r = await run(
+      makeEditTool(port),
+      { path, old_string: "1", new_string: "2" },
+      "/in-mem",
+      false,
+    )
     expect(r.ok).toBe(true)
     expect(r.output).not.toContain("sha256")
   })
 
-  test("OFF not_found output contains zero \"sha256\" substring", async () => {
+  test('OFF not_found output contains zero "sha256" substring', async () => {
     const path = "/in-mem/off-nf-nolek.txt"
     const { port } = makeFullPort({ [path]: "let v = 1" })
-    const r = await run(makeEditTool(port), { path, old_string: "NOPE", new_string: "2" }, "/in-mem", false)
+    const r = await run(
+      makeEditTool(port),
+      { path, old_string: "NOPE", new_string: "2" },
+      "/in-mem",
+      false,
+    )
     expect(r.ok).toBe(false)
     expect(r.output).not.toContain("sha256")
   })

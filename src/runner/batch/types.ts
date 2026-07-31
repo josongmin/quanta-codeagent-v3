@@ -9,9 +9,9 @@
 import type { StopReason } from "@/agent"
 import type { LocalEnvSelection } from "@/runtime"
 import type { LspGroundingStatus } from "@/shared"
+import type { ReproViabilityReview } from "./eval/repro-viability"
 import type { ReceiptEvidence, ScoreLabel } from "./eval/score-label"
 import type { SubmissionReview } from "./eval/submission-review"
-import type { ReproViabilityReview } from "./eval/repro-viability"
 
 /** Official SWE-bench instance metadata, present only for instances loaded
  *  from the real `swebench.verified` corpus. Consumed by the optional Python

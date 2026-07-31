@@ -13,11 +13,7 @@
  * byte-identical no-op), fires the steer at most once, and resets on every edit.
  */
 import { describe, expect, test } from "bun:test"
-import {
-  createReproDoubtState,
-  reproDoubtStep,
-  REPRO_DOUBT_STEER,
-} from "@/agent/repro-doubt-guard"
+import { createReproDoubtState, REPRO_DOUBT_STEER, reproDoubtStep } from "@/agent/repro-doubt-guard"
 
 const cfg = { stuckRuns: 5 }
 
@@ -49,7 +45,7 @@ describe("repro-doubt-guard", () => {
 
   test("no-op when stuckRuns is invalid (0 / non-integer)", () => {
     for (const bad of [{ stuckRuns: 0 }, { stuckRuns: -1 }, { stuckRuns: 2.5 }, {}]) {
-      let s = createReproDoubtState()
+      const s = createReproDoubtState()
       const r1 = reproDoubtStep(s, "edit", bad as any)
       const r2 = reproDoubtStep(r1.state, "bash", bad as any)
       expect(r1.steer).toBeUndefined()
@@ -98,7 +94,14 @@ describe("repro-doubt-guard", () => {
     let s = createReproDoubtState()
     s = reproDoubtStep(s, "edit", cfg).state
     const steers: (string | undefined)[] = []
-    for (const cmd of ["ls -la", "cat reproduce.py", "grep -r foo .", "ls", "find . -name x", "cat out"]) {
+    for (const cmd of [
+      "ls -la",
+      "cat reproduce.py",
+      "grep -r foo .",
+      "ls",
+      "find . -name x",
+      "cat out",
+    ]) {
       const r = reproDoubtStep(s, "bash", cfg, cmd)
       s = r.state
       steers.push(r.steer)
@@ -120,7 +123,14 @@ describe("repro-doubt-guard", () => {
 
   test("test_runner tool also counts as a test run", () => {
     // [edit, tr×5] → 5th test run (array index 5) trips the guard
-    const steers = drive(["edit", "test_runner", "test_runner", "test_runner", "test_runner", "test_runner"])
+    const steers = drive([
+      "edit",
+      "test_runner",
+      "test_runner",
+      "test_runner",
+      "test_runner",
+      "test_runner",
+    ])
     expect(steers.slice(0, 5).every((x) => x === undefined)).toBe(true)
     expect(steers[5]).toBe(REPRO_DOUBT_STEER)
   })

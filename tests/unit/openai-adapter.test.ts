@@ -289,7 +289,9 @@ describe("OpenAIAdapter.stream — throttle-swallow guard (empty-200 defense-in-
       {
         choices: [
           {
-            delta: { tool_calls: [{ index: 0, id: "c1", function: { name: "read", arguments: "{}" } }] },
+            delta: {
+              tool_calls: [{ index: 0, id: "c1", function: { name: "read", arguments: "{}" } }],
+            },
             finish_reason: null,
           },
         ],

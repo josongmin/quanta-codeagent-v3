@@ -262,7 +262,10 @@ describe("repair-breadth fan-out — #7 location-set perCandidateSeed seam", () 
   test("perCandidateSeed (when set) gives each candidate a DISTINCT seed; absent ⇒ shared base", async () => {
     const rec = freshRecorder()
     const deps: RepairBreadthDeps = {
-      ...makeDeps(rec, { patches: ["P0", "P1", "P2"], verdicts: [{ ok: false }, { ok: false }, { ok: false }] }),
+      ...makeDeps(rec, {
+        patches: ["P0", "P1", "P2"],
+        verdicts: [{ ok: false }, { ok: false }, { ok: false }],
+      }),
       // Inject a seeder mirroring buildLocationSeeder's shape (index-distinct).
       perCandidateSeed: (index, base) => `${base ?? ""}::lead-${index}`,
     }
@@ -409,7 +412,10 @@ describe("repair-breadth fan-out — structural family coverage widening", () =>
   test("derived family metadata is surfaced even when no co-edit port is wired", async () => {
     const rec = freshRecorder()
     const deps: RepairBreadthDeps = {
-      ...makeDeps(rec, { patches: [BASE_PATCH], verdicts: [{ ok: false, reproOutcome: "reproduced" }] }),
+      ...makeDeps(rec, {
+        patches: [BASE_PATCH],
+        verdicts: [{ ok: false, reproOutcome: "reproduced" }],
+      }),
       deriveCandidateStructuralRepair: async () => ({
         family: {
           familyId: "producer-consumer",

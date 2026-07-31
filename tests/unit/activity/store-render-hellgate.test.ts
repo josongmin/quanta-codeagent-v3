@@ -160,7 +160,9 @@ describe("renderActivity", () => {
       { type: "node_open", node: { id: "c", parentId: "r", kind: "agent", label: "leaf" } },
       { type: "node_status", id: "c", status: "stuck", stuck: { reason: "rate_limited" } },
     ])
-    const rootLine = renderActivity(s, { now: 0 }).find((l) => l.includes("run") && !l.includes("ACTIVITY"))
+    const rootLine = renderActivity(s, { now: 0 }).find(
+      (l) => l.includes("run") && !l.includes("ACTIVITY"),
+    )
     expect(rootLine).toContain("🛑") // derived stuck glyph
     expect(rootLine).not.toContain("STUCK:") // but no own reason annotation
     const leafLine = renderActivity(s, { now: 0 }).find((l) => l.includes("leaf"))
@@ -184,7 +186,9 @@ describe("renderActivity", () => {
     ])
     expect(renderActivity(s, { now: 0 })[0]).toContain("340 tool calls")
     // a run with no tool calls does NOT clutter the header
-    const none = build([{ type: "node_open", node: { id: "b", parentId: null, kind: "agent", label: "y" } }])
+    const none = build([
+      { type: "node_open", node: { id: "b", parentId: null, kind: "agent", label: "y" } },
+    ])
     expect(renderActivity(none, { now: 0 })[0]).not.toContain("tool call")
   })
 
@@ -201,11 +205,22 @@ describe("renderActivity", () => {
 
 describe("seedStoreFromSnapshot", () => {
   const fixture: AgentActivityEvent[] = [
-    { type: "node_open", node: { id: "run", parentId: null, kind: "workflow", label: "review", at: 5 } },
+    {
+      type: "node_open",
+      node: { id: "run", parentId: null, kind: "workflow", label: "review", at: 5 },
+    },
     { type: "node_open", node: { id: "p1", parentId: "run", kind: "phase", label: "Find" } },
-    { type: "node_open", node: { id: "a1", parentId: "p1", kind: "agent", label: "find", meta: { m: "1" } } },
+    {
+      type: "node_open",
+      node: { id: "a1", parentId: "p1", kind: "agent", label: "find", meta: { m: "1" } },
+    },
     { type: "node_metric", id: "a1", tokensDelta: 120, toolCallsDelta: 3 },
-    { type: "node_status", id: "a1", status: "stuck", stuck: { reason: "waiting_approval", detail: "x" } },
+    {
+      type: "node_status",
+      id: "a1",
+      status: "stuck",
+      stuck: { reason: "waiting_approval", detail: "x" },
+    },
     { type: "node_open", node: { id: "a2", parentId: "p1", kind: "agent", label: "verify" } },
     { type: "node_status", id: "a2", status: "done", at: 99 },
   ]
@@ -232,7 +247,10 @@ describe("seedStoreFromSnapshot", () => {
     source.emitAll(fixture)
     const before = source.snapshot()
     const view = seedStoreFromSnapshot(source.snapshot())
-    view.emit({ type: "node_open", node: { id: "extra", parentId: null, kind: "subagent", label: "live" } })
+    view.emit({
+      type: "node_open",
+      node: { id: "extra", parentId: null, kind: "subagent", label: "live" },
+    })
     // the source is untouched (no "extra" leaked back) — the /activity non-pollution invariant
     expect(source.snapshot().byId.has("extra")).toBe(false)
     expect([...source.snapshot().byId.keys()]).toEqual([...before.byId.keys()])

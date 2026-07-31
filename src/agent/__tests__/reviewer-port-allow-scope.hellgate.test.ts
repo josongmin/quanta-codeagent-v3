@@ -13,8 +13,8 @@
  * configured default); no scope ⇒ the configured `approveOutcome` default.
  */
 import { describe, expect, test } from "bun:test"
-import { createOnConfirmReviewerPort } from "../reviewer-port"
 import type { ReviewContext, ToolActionKeyed } from "@/permission"
+import { createOnConfirmReviewerPort } from "../reviewer-port"
 
 const action: ToolActionKeyed = {
   tool: "shell",

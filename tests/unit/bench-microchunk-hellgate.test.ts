@@ -125,9 +125,9 @@ describe("T-4 writeMicrochunks (filesystem) ↔ pool", () => {
     // The pool's pre-grade `mkdir -p ~/runs/<runId>/...` sink runs BEFORE
     // gradeChunkOnBox's own guard, so the charset must be enforced here. Revert
     // the assertSafeArtifactSuffix call in the loop and these stop throwing.
-    expect(() =>
-      assertUniqueChunkRunIds([{ runId: "..", datasetPath: "/tmp/a.jsonl" }]),
-    ).toThrow(/unsafe artifact suffix/)
+    expect(() => assertUniqueChunkRunIds([{ runId: "..", datasetPath: "/tmp/a.jsonl" }])).toThrow(
+      /unsafe artifact suffix/,
+    )
     expect(() =>
       assertUniqueChunkRunIds([{ runId: "run$(reboot)", datasetPath: "/tmp/a.jsonl" }]),
     ).toThrow(/unsafe artifact suffix/)

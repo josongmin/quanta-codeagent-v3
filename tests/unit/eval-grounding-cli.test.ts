@@ -77,29 +77,39 @@ const payload = (over: Partial<GroundingPayload> = {}): GroundingPayload => {
 const readJson = (path: string): unknown => JSON.parse(readFileSync(path, "utf8"))
 
 describe("eval grounding CLI", () => {
-  test("--help includes the grounding subcommands", () => {
-    const out = runEval("--help")
-    expect(out.status).toBe(0)
-    expect(out.stdout).toContain("grounding run [--mode raw|engine|assisted]")
-    expect(out.stdout).toContain("grounding preflight")
-    expect(out.stdout).toContain("grounding report --run-id ID")
-    expect(out.stdout).toContain("grounding baseline --candidate ID")
-    expect(out.stdout).toContain("grounding gate --route-matrix primary-openai")
-    expect(out.stdout).toContain("grounding compare --baseline ID --candidate ID")
-    expect(out.stdout).toContain("grounding regress --baseline ID --candidate ID --profile strict")
-    expect(out.stdout).toContain("grounding scaffold-replay --source JSONL --out PATH")
-    expect(out.stdout).toContain(
-      "grounding promote-replay --draft PATH --gold-json PATH --corpus replay_critical|replay_nightly --out PATH",
-    )
-  }, EVAL_CLI_CHILD_TIMEOUT_MS)
+  test(
+    "--help includes the grounding subcommands",
+    () => {
+      const out = runEval("--help")
+      expect(out.status).toBe(0)
+      expect(out.stdout).toContain("grounding run [--mode raw|engine|assisted]")
+      expect(out.stdout).toContain("grounding preflight")
+      expect(out.stdout).toContain("grounding report --run-id ID")
+      expect(out.stdout).toContain("grounding baseline --candidate ID")
+      expect(out.stdout).toContain("grounding gate --route-matrix primary-openai")
+      expect(out.stdout).toContain("grounding compare --baseline ID --candidate ID")
+      expect(out.stdout).toContain(
+        "grounding regress --baseline ID --candidate ID --profile strict",
+      )
+      expect(out.stdout).toContain("grounding scaffold-replay --source JSONL --out PATH")
+      expect(out.stdout).toContain(
+        "grounding promote-replay --draft PATH --gold-json PATH --corpus replay_critical|replay_nightly --out PATH",
+      )
+    },
+    EVAL_CLI_CHILD_TIMEOUT_MS,
+  )
 
-  test("grounding requires a valid subcommand", () => {
-    const out = runEval("grounding")
-    expect(out.status).toBe(1)
-    expect(out.stderr).toContain(
-      "eval grounding: subcommand must be one of: run, preflight, report, baseline, gate, compare, regress, scaffold-replay, promote-replay",
-    )
-  }, EVAL_CLI_CHILD_TIMEOUT_MS)
+  test(
+    "grounding requires a valid subcommand",
+    () => {
+      const out = runEval("grounding")
+      expect(out.status).toBe(1)
+      expect(out.stderr).toContain(
+        "eval grounding: subcommand must be one of: run, preflight, report, baseline, gate, compare, regress, scaffold-replay, promote-replay",
+      )
+    },
+    EVAL_CLI_CHILD_TIMEOUT_MS,
+  )
 
   test("grounding run rejects invalid suites and report/gate validate required args", () => {
     const badSuite = runEval("grounding", "run", "--suite", "bogus")
@@ -189,11 +199,15 @@ describe("eval grounding CLI", () => {
     // own 30s kill cap; retain all validation cases with a total-test budget.
   }, 180_000)
 
-  test("grounding run rejects invalid concurrency", () => {
-    const out = runEval("grounding", "run", "--suite", "canary", "--concurrency", "0")
-    expect(out.status).toBe(1)
-    expect(out.stderr).toContain("invalid --concurrency 0")
-  }, EVAL_CLI_CHILD_TIMEOUT_MS)
+  test(
+    "grounding run rejects invalid concurrency",
+    () => {
+      const out = runEval("grounding", "run", "--suite", "canary", "--concurrency", "0")
+      expect(out.status).toBe(1)
+      expect(out.stderr).toContain("invalid --concurrency 0")
+    },
+    EVAL_CLI_CHILD_TIMEOUT_MS,
+  )
 
   test("grounding CLI honors --store-dir and writes structured artifacts", async () => {
     const root = mkdtempSync(join(tmpdir(), "grounding-cli-store-"))

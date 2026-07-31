@@ -38,7 +38,14 @@ describe("terminal verify-gate barrel re-exports the @/agent/converge core (live
   test("a real verdict flows through the barrel (not a stub) — exercise recognized end to end", () => {
     const events: AgentEvent[] = [
       { type: "tool_call", id: "1", name: "container_exec", input: { command: "./solver in.txt" } },
-      { type: "tool_result", id: "1", name: "container_exec", ok: true, preview: "42", exitCode: 0 },
+      {
+        type: "tool_result",
+        id: "1",
+        name: "container_exec",
+        ok: true,
+        preview: "42",
+        exitCode: 0,
+      },
     ] as unknown as AgentEvent[]
     expect(inspectExerciseEvidence(events).exercised).toBe(true)
     // taint SSOT is live through the barrel too (laundering refused)

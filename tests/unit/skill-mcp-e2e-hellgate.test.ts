@@ -346,9 +346,7 @@ describe("D. malformed / hostile inputs degrade gracefully (never throw, never b
     // The hook wraps the coordinator — the throwing reconcile IS reached (proving
     // we exercised the swallow path, not an early return) yet the call resolves
     // instead of rejecting the turn.
-    await expect(
-      reconcileSkillMcpDepsForTurn(config, skillWithBothDeps),
-    ).resolves.toBeUndefined()
+    await expect(reconcileSkillMcpDepsForTurn(config, skillWithBothDeps)).resolves.toBeUndefined()
     expect(reconcileCalled).toBe(true)
   })
 

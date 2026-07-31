@@ -26,7 +26,17 @@ describe("test:ci admission gate", () => {
   })
 
   test("serializes every shared-process test entrypoint", () => {
-    const serialScripts = ["test", "test:unit", "test:fast", "test:integration", "test:shard", "test:contract", "test:ci", "test:cov", "test:watch"]
+    const serialScripts = [
+      "test",
+      "test:unit",
+      "test:fast",
+      "test:integration",
+      "test:shard",
+      "test:contract",
+      "test:ci",
+      "test:cov",
+      "test:watch",
+    ]
     for (const name of serialScripts) {
       expect(packageJson.scripts?.[name], name).toContain("--parallel=1")
     }

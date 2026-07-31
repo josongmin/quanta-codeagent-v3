@@ -83,7 +83,8 @@ const cannedFetch = (): {
 } => {
   const bodies: Array<Record<string, unknown>> = []
   const fetcher = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
-    if (typeof init?.body === "string") bodies.push(JSON.parse(init.body) as Record<string, unknown>)
+    if (typeof init?.body === "string")
+      bodies.push(JSON.parse(init.body) as Record<string, unknown>)
     return new Response(JSON.stringify({ data: [{ b64_json: PNG_B64 }] }), {
       status: 200,
       headers: { "content-type": "application/json" },
@@ -137,10 +138,14 @@ describe("§5.2 — OpenAI adapter resolves aspectRatio→size (real port, canne
 
   test("aspectRatio 9:16 ⇒ 1024x1536; 1:1 ⇒ 1024x1024", async () => {
     const a = cannedFetch()
-    await runTool(openAiImagePort({ apiKey: "sk-test", fetcher: a.fetcher }), { aspectRatio: "9:16" })
+    await runTool(openAiImagePort({ apiKey: "sk-test", fetcher: a.fetcher }), {
+      aspectRatio: "9:16",
+    })
     expect(a.bodies[0]?.size).toBe("1024x1536")
     const b = cannedFetch()
-    await runTool(openAiImagePort({ apiKey: "sk-test", fetcher: b.fetcher }), { aspectRatio: "1:1" })
+    await runTool(openAiImagePort({ apiKey: "sk-test", fetcher: b.fetcher }), {
+      aspectRatio: "1:1",
+    })
     expect(b.bodies[0]?.size).toBe("1024x1024")
   })
 

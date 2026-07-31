@@ -577,11 +577,17 @@ describe("G7 property — spawn happens IFF the gate is genuinely armed", () => 
           const cfg: CommandHookConfig = {
             ...(enabled !== undefined ? { enabled } : {}),
             ...(ack !== undefined ? { acknowledgedRisk: ack } : {}),
-            bindings: bindings.map((b) => ({ ...b, command: b.command === "" ? "" : uniqueCommand("g7") })),
+            bindings: bindings.map((b) => ({
+              ...b,
+              command: b.command === "" ? "" : uniqueCommand("g7"),
+            })),
           }
           const validBindings = cfg.bindings!.filter((b) => b.command.trim().length > 0).length
           const shouldArm =
-            enabled === true && typeof ack === "string" && ack.trim().length > 0 && validBindings > 0
+            enabled === true &&
+            typeof ack === "string" &&
+            ack.trim().length > 0 &&
+            validBindings > 0
 
           let gate: ReturnType<typeof normalizeCommandHookGate> | undefined
           let threw = false
@@ -591,7 +597,10 @@ describe("G7 property — spawn happens IFF the gate is genuinely armed", () => 
             threw = true
           }
 
-          if (enabled === true && (ack === undefined || (typeof ack === "string" && ack.trim().length === 0))) {
+          if (
+            enabled === true &&
+            (ack === undefined || (typeof ack === "string" && ack.trim().length === 0))
+          ) {
             // enabled with a blank/missing ack ALWAYS throws before it can arm.
             expect(threw).toBe(true)
             continue

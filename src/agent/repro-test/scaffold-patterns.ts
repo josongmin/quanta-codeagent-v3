@@ -22,7 +22,8 @@ export const REPRO_CANONICAL_BASENAME = "reproduce_issue.py"
 
 /** Build the per-sample Python repro scaffold basename. The matching pattern is
  *  {@link REPRO_PY_SCRIPT_BASENAME_RE}. */
-export const reproScriptBasename = (seq: number, uuid: string): string => `__repro_${seq}_${uuid}.py`
+export const reproScriptBasename = (seq: number, uuid: string): string =>
+  `__repro_${seq}_${uuid}.py`
 
 /** Python repro SCRIPT basenames: per-sample `__repro_N_<uuid>.py` + the canonical name. */
 export const REPRO_PY_SCRIPT_BASENAME_RE = /^(__repro_\d+_[0-9a-fA-F-]+\.py|reproduce_issue\.py)$/

@@ -10,9 +10,10 @@
  * Also pins: the core is PURE (no `process.*` / no top-level IO) and carries NO stale compiled `.js`
  * sibling (a `.js` next to a `.ts` shadows the source — the jul bug class).
  */
+
+import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 
 const CORE_DIR = join(import.meta.dir)
 

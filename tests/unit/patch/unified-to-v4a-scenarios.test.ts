@@ -147,13 +147,7 @@ describe("GROUP 3: Hunk header conversion", () => {
   // S-HUNK-2
   // Red-on-injection: require trailing context => bare "@@ -1,4 +1,4 @@" not converted
   it("S-HUNK-2: @@ without trailing context -> V4A contains standalone '@@'", () => {
-    const input = [
-      "--- a/foo.py",
-      "+++ b/foo.py",
-      "@@ -1,4 +1,4 @@",
-      "-old",
-      "+new",
-    ].join("\n")
+    const input = ["--- a/foo.py", "+++ b/foo.py", "@@ -1,4 +1,4 @@", "-old", "+new"].join("\n")
     const v4a = unifiedDiffToV4A(input)
     // Should have bare @@ (possibly at start of line or after newline)
     const lines = v4a.split("\n")
@@ -163,13 +157,7 @@ describe("GROUP 3: Hunk header conversion", () => {
   // S-HUNK-3
   // Red-on-injection: not trimming trailing space => "@@ " emitted instead of "@@"
   it("S-HUNK-3: @@ with trailing space only -> V4A emits bare '@@'", () => {
-    const input = [
-      "--- a/foo.py",
-      "+++ b/foo.py",
-      "@@ -1,4 +1,4 @@ ",
-      "-old",
-      "+new",
-    ].join("\n")
+    const input = ["--- a/foo.py", "+++ b/foo.py", "@@ -1,4 +1,4 @@ ", "-old", "+new"].join("\n")
     const v4a = unifiedDiffToV4A(input)
     const lines = v4a.split("\n")
     // After trim of empty string, should emit bare @@
@@ -227,13 +215,7 @@ describe("GROUP 4: File operation types", () => {
   // S-OP-1
   // Red-on-injection: emit "*** Add File:" instead of "*** Update File:" => op.kind === "add"
   it("S-OP-1: normal update produces kind === 'update'", () => {
-    const input = [
-      "--- a/foo.py",
-      "+++ b/foo.py",
-      "@@ -1 +1 @@",
-      "-old",
-      "+new",
-    ].join("\n")
+    const input = ["--- a/foo.py", "+++ b/foo.py", "@@ -1 +1 @@", "-old", "+new"].join("\n")
     const patch = parsePatch(unifiedDiffToV4A(input))
     expect(patch.ops[0]?.kind).toBe("update")
   })
@@ -255,13 +237,9 @@ describe("GROUP 4: File operation types", () => {
   // S-OP-3
   // Red-on-injection: not detecting /dev/null to => kind === "update" instead of "delete"
   it("S-OP-3: delete to /dev/null produces kind === 'delete'", () => {
-    const input = [
-      "--- a/gone.py",
-      "+++ /dev/null",
-      "@@ -1,2 +0,0 @@",
-      "-line1",
-      "-line2",
-    ].join("\n")
+    const input = ["--- a/gone.py", "+++ /dev/null", "@@ -1,2 +0,0 @@", "-line1", "-line2"].join(
+      "\n",
+    )
     const patch = parsePatch(unifiedDiffToV4A(input))
     expect(patch.ops[0]?.kind).toBe("delete")
   })
@@ -389,12 +367,7 @@ describe("GROUP 6: Content line edge cases", () => {
   // S-LINE-1
   // Red-on-injection: strip tabs from content lines => "\tindented" becomes "indented"
   it("S-LINE-1: tab at start of content line passes through", () => {
-    const input = [
-      "--- a/foo.py",
-      "+++ b/foo.py",
-      "@@ -1 +1 @@",
-      "\tindented_context",
-    ].join("\n")
+    const input = ["--- a/foo.py", "+++ b/foo.py", "@@ -1 +1 @@", "\tindented_context"].join("\n")
     const v4a = unifiedDiffToV4A(input)
     // Tab-prefixed line treated as context line (starts with " " or as-is)
     // Actually a tab isn't +/-/space so the converter skips it per the filter
@@ -435,14 +408,9 @@ describe("GROUP 6: Content line edge cases", () => {
   // S-LINE-3
   // Red-on-injection: drop empty context lines => " " (single space) not emitted
   it("S-LINE-3: empty context line (single space) is preserved", () => {
-    const input = [
-      "--- a/foo.py",
-      "+++ b/foo.py",
-      "@@ -1,3 +1,3 @@",
-      " above",
-      " ",
-      " below",
-    ].join("\n")
+    const input = ["--- a/foo.py", "+++ b/foo.py", "@@ -1,3 +1,3 @@", " above", " ", " below"].join(
+      "\n",
+    )
     const v4a = unifiedDiffToV4A(input)
     // The single-space context line must appear in V4A
     const lines = v4a.split("\n")
@@ -526,13 +494,9 @@ describe("GROUP 7: Round-trip integration", () => {
   // S-RT-3
   // Red-on-injection: emit hunk content for delete => parsePatch sees invalid body
   it("S-RT-3: delete file to /dev/null round-trips cleanly", () => {
-    const input = [
-      "--- a/removed.py",
-      "+++ /dev/null",
-      "@@ -1,2 +0,0 @@",
-      "-line1",
-      "-line2",
-    ].join("\n")
+    const input = ["--- a/removed.py", "+++ /dev/null", "@@ -1,2 +0,0 @@", "-line1", "-line2"].join(
+      "\n",
+    )
     const v4a = unifiedDiffToV4A(input)
     expect(() => parsePatch(v4a)).not.toThrow()
     const patch = parsePatch(v4a)

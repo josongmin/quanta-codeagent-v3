@@ -3,7 +3,7 @@
  * wave2-{ab,coverage,backlog} / presets. Extracted from cli.ts (ADR-0536 P0).
  * Thin glue over the analyze/ layer (separately tested). Moved verbatim.
  */
-import { readFileSync, readdirSync } from "node:fs"
+import { readdirSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { writePredictions } from "@/runner/batch/corpus/dataset"
@@ -11,9 +11,9 @@ import { gateOn, logger } from "@/shared"
 import {
   type CandidatePoolFs,
   type Prediction,
-  type SlotKey,
   renderBestKPassK,
   runBestKPassKGrade,
+  type SlotKey,
 } from "../analyze/bestk-passk-grade"
 import { costSummaryFromReport, renderCost } from "../analyze/cost"
 import { diffRuns, renderDiff } from "../analyze/diff"
@@ -240,7 +240,10 @@ export const cmdBestkPassk = async (): Promise<void> => {
     {
       fs,
       writePredictions: async (rows: readonly Prediction[], slot: SlotKey) => {
-        const file = join(tmpdir(), `quanta-bestk-preds-r${slot.round}i${slot.index}-${Date.now()}.jsonl`)
+        const file = join(
+          tmpdir(),
+          `quanta-bestk-preds-r${slot.round}i${slot.index}-${Date.now()}.jsonl`,
+        )
         await writePredictions(file, [...rows])
         return file
       },

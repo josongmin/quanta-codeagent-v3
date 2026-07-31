@@ -19,8 +19,8 @@
 
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
-import { buildIdentityReminderText, shouldSpliceIdentityReminder } from "@/agent/loop-helpers"
 import { prepareTurnIteration } from "@/agent/loop/turn-iteration"
+import { buildIdentityReminderText, shouldSpliceIdentityReminder } from "@/agent/loop-helpers"
 import type { AgentMode } from "@/agent/prompt"
 import { defaultModeVariantRegistry, type SystemPromptVariantRegistry } from "@/agent/system-prompt"
 import { createWorkingMemory } from "@/memory"
@@ -238,9 +238,10 @@ const runTurn = async (cfg: AgentConfig, wm: ReturnType<typeof createWorkingMemo
   })
 
 const reminderPresent = (wm: ReturnType<typeof createWorkingMemory>): boolean =>
-  (wm.snapshot() as ReadonlyArray<{ content: ReadonlyArray<{ type: string; text?: string }> }>).some(
-    (m) =>
-      m.content.some((b) => b.type === "text" && (b.text ?? "").includes("<system-reminder>")),
+  (
+    wm.snapshot() as ReadonlyArray<{ content: ReadonlyArray<{ type: string; text?: string }> }>
+  ).some((m) =>
+    m.content.some((b) => b.type === "text" && (b.text ?? "").includes("<system-reminder>")),
   )
 
 describe("ALBB-14 §D — identity reminder is spliced into assembled working memory", () => {

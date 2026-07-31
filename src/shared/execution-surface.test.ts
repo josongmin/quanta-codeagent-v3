@@ -43,7 +43,13 @@ describe("execution-mode surface SSOT (H4-F1)", () => {
     // Widen to `string[]` so `.sort()` + `toEqual` type cleanly under `typecheck:all` (no TS2769):
     // this arm pins the CANONICAL list; the compile-time functions above pin the three aliases to it.
     const canonical: readonly string[] = EXECUTION_SURFACES
-    expect([...canonical].sort()).toEqual(["agent-batch", "agent-interactive", "bench", "cli", "ide"])
+    expect([...canonical].sort()).toEqual([
+      "agent-batch",
+      "agent-interactive",
+      "bench",
+      "cli",
+      "ide",
+    ])
   })
 
   test("the bidirectional compile-time drift guards are wired (both directions present)", () => {

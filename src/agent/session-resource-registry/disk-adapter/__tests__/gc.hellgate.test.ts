@@ -363,10 +363,19 @@ describe("gc-truncate hellgate §M2 — PERSISTENT unreadable tail ⇒ BOUNDED e
     // ~7KB events file ≫ the escape hard cap (budget 250 × 4 = 1000B).
     const rows = Array.from({ length: 100 }, (_, i) => fixedRow(i))
     const body = `${rows.join("\n")}\n`
-    const dir = await writeSession(root, "tail-persistent-fail", { lastTouched: now, eventsBody: body })
+    const dir = await writeSession(root, "tail-persistent-fail", {
+      lastTouched: now,
+      eventsBody: body,
+    })
     const eventsPath = join(dir, "events.jsonl")
     const before = Buffer.byteLength(await readFile(eventsPath, "utf8"), "utf8")
-    const injected = JSON.stringify({ kind: "context_update", field: "cwd", prev: "x", next: "y", at: 777_777 })
+    const injected = JSON.stringify({
+      kind: "context_update",
+      field: "cwd",
+      prev: "x",
+      next: "y",
+      at: 777_777,
+    })
     let tailFailed = 0
     const res = await sweepDiskRegistry(
       { storageDir: root, ttlMs: DEFAULT_TTL_MS, maxSessionBytes: 500, now: () => now },

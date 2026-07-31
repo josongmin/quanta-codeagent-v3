@@ -11,9 +11,9 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { runTurn } from "@/agent/loop/same-turn-engine"
-import { type BgSummaryPayload } from "@/agent/compaction"
+import type { BgSummaryPayload } from "@/agent/compaction"
 import { BackgroundSummarizationController } from "@/agent/compaction/background"
+import { runTurn } from "@/agent/loop/same-turn-engine"
 import { freshRecovery } from "@/agent/recovery"
 import type { TurnSession, TurnState } from "@/agent/turn-context"
 import type { AgentConfig } from "@/agent/types"
@@ -56,9 +56,7 @@ describe("same-turn-engine #14 post-prep abort recheck", () => {
       guards: [],
     }
     const state: TurnState = {
-      wm: createWorkingMemory<Message>([
-        { role: "user", content: [{ type: "text", text: "hi" }] },
-      ]),
+      wm: createWorkingMemory<Message>([{ role: "user", content: [{ type: "text", text: "hi" }] }]),
       rec: freshRecovery(),
       breaker: undefined,
       toolHistory: undefined,
@@ -130,9 +128,7 @@ describe("same-turn-engine #14 post-prep abort recheck", () => {
       bgCompaction,
     }
     const state: TurnState = {
-      wm: createWorkingMemory<Message>([
-        { role: "user", content: [{ type: "text", text: "hi" }] },
-      ]),
+      wm: createWorkingMemory<Message>([{ role: "user", content: [{ type: "text", text: "hi" }] }]),
       rec: freshRecovery(),
       breaker: undefined,
       toolHistory: undefined,

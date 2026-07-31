@@ -78,7 +78,11 @@ describe("T-7 runBenchLogin", () => {
     const src = parseAuthPoolManifest(manifestText ?? "")
     expect(src.kind).toBe("pool")
     if (src.kind !== "pool") throw new Error("expected pool")
-    expect(src.accounts[0]).toMatchObject({ label: "acct-a", authFile: expectedPath, maxParallel: 6 })
+    expect(src.accounts[0]).toMatchObject({
+      label: "acct-a",
+      authFile: expectedPath,
+      maxParallel: 6,
+    })
   })
 
   test("a second login APPENDS — the first account is never clobbered", async () => {

@@ -134,8 +134,7 @@ export const createFanoutBackend = (cfg: FanoutConfig): GradeBackend => {
     const reportPath = join(dir, `${opts.runId}-merged.json`)
     await writeFile(reportPath, mergedReportJson(r, u, e, p))
     const mergedLogDirs = [...new Set(errorLogDirs)]
-    const errorLogDir =
-      mergedLogDirs.length === 0 ? undefined : mergedLogDirs.join(", ")
+    const errorLogDir = mergedLogDirs.length === 0 ? undefined : mergedLogDirs.join(", ")
     return {
       reportPath,
       resolved: r,

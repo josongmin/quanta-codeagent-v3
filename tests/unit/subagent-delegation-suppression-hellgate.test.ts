@@ -17,14 +17,14 @@
  * assembly) — each is caught here.
  */
 import { afterEach, describe, expect, test } from "bun:test"
-import { __resetRuntimeConfig, runtimeConfig } from "@/shared/runtime-config"
 import {
   DELEGATION_SUPPRESSION_POLICY,
   delegationSuppressEnabled,
   withDelegationPolicy,
 } from "@/shared/delegation-policy"
+import { __resetRuntimeConfig, runtimeConfig } from "@/shared/runtime-config"
+import { createAgentTool, type SubagentRunner, TaskRegistry } from "@/subagent"
 import { agentToolDescription } from "@/subagent/agent-tool"
-import { createAgentTool, TaskRegistry, type SubagentRunner } from "@/subagent"
 
 const KNOB = "QUANTA_SUBAGENT_DELEGATE_SUPPRESS"
 

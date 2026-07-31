@@ -31,7 +31,9 @@ const lastChars = (s: string, max: number): string => (s.length <= max ? s : s.s
  *  Lets the caller keep its legacy byte-tail trim for non-pytest validators ⇒ the
  *  pin is byte-identical everywhere it would be a no-op. */
 export const hasPytestFailureMarkers = (text: string): boolean =>
-  text.split("\n").some((l) => isFailuresBanner(l) || isFailedSummaryLine(l) || isAssertionDetailLine(l))
+  text
+    .split("\n")
+    .some((l) => isFailuresBanner(l) || isFailedSummaryLine(l) || isAssertionDetailLine(l))
 
 /**
  * Return a failure tail that LEADS with the pytest assertion region (when present)
@@ -58,8 +60,11 @@ export const pinPytestAssertion = (combined: string, maxChars: number): string =
   //    pytest still printed `E   …` lines — e.g. `-q` output).
   const looseAssertions = failuresStart >= 0 ? [] : lines.filter(isAssertionDetailLine)
 
-  const pinnedParts = [failuresBlock.join("\n"), looseAssertions.join("\n"), failedSummary.join("\n")]
-    .filter((p) => p.trim() !== "")
+  const pinnedParts = [
+    failuresBlock.join("\n"),
+    looseAssertions.join("\n"),
+    failedSummary.join("\n"),
+  ].filter((p) => p.trim() !== "")
   if (pinnedParts.length === 0) return lastChars(combined, maxChars) // not pytest ⇒ no-op
 
   const pinned = lastChars(pinnedParts.join("\n"), maxChars) // assertion region wins the budget

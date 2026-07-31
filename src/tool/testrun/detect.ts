@@ -40,7 +40,11 @@ const NODE: Toolchain = { kind: "node", command: ["npm", "test", "--silent"], pa
 // (conftest.py / pytest.ini) are deliberately NOT here: detecting them when
 // pytest is absent would fall back to unittest and falsely "pass" a 0-tests run.
 const PYTHON_MARKERS = ["pyproject.toml", "setup.py", "setup.cfg"] as const
-const UNITTEST: Toolchain = { kind: "python", command: ["python3", "-m", "unittest", "discover", "-v"], parser: "python-unittest" }
+const UNITTEST: Toolchain = {
+  kind: "python",
+  command: ["python3", "-m", "unittest", "discover", "-v"],
+  parser: "python-unittest",
+}
 const PYTEST: Toolchain = { kind: "python", command: ["python3", "-m", "pytest"], parser: "pytest" }
 
 // Compiled-language markers outrank python/node (a Rust/Go repo often carries a
@@ -48,7 +52,11 @@ const PYTEST: Toolchain = { kind: "python", command: ["python3", "-m", "pytest"]
 // C++ (CMake): ctest runs the test executables; `--output-on-failure` surfaces
 // the framework's failure (gtest `file:line: Failure`, or libc assert) which
 // parseCtest localizes. Ranked above python/node like the other compiled langs.
-const CPP: Toolchain = { kind: "cpp", command: ["ctest", "--output-on-failure", "--test-dir", "build"], parser: "ctest" }
+const CPP: Toolchain = {
+  kind: "cpp",
+  command: ["ctest", "--output-on-failure", "--test-dir", "build"],
+  parser: "ctest",
+}
 
 const MARKERS: readonly Marker[] = [
   { file: "Cargo.toml", toolchain: RUST },
@@ -66,7 +74,9 @@ export const detectToolchain = async (_cwd: string, fs: ExistsPort): Promise<Too
   // Python: any marker ⇒ python, command chosen by the pytest probe.
   for (const f of PYTHON_MARKERS) {
     if (await fs.fileExists(f)) {
-      const hasPytest = fs.canRun ? await fs.canRun(["python3", "-m", "pytest", "--version"]).catch(() => false) : false
+      const hasPytest = fs.canRun
+        ? await fs.canRun(["python3", "-m", "pytest", "--version"]).catch(() => false)
+        : false
       return hasPytest ? PYTEST : UNITTEST
     }
   }

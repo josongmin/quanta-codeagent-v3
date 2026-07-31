@@ -178,8 +178,9 @@ describe("createRecursiveFileLister — recursive walk + cap + jail (§7-13)", (
     const dirs = await list("apps")
     expect(dirs.find((c) => c.label === "src/apps/" && c.detail === "dir")).toBeDefined()
     const file = await list("driver")
-    expect(file.find((c) => c.label === "src/apps/bench/driver.ts" && c.detail === "file"))
-      .toBeDefined()
+    expect(
+      file.find((c) => c.label === "src/apps/bench/driver.ts" && c.detail === "file"),
+    ).toBeDefined()
   })
 
   test("B8 — rg source that yields nothing ⇒ empty, not a crash", async () => {
@@ -376,7 +377,8 @@ describe("createCompositeAtProvider — kind inference + lists (§7-15)", () => 
     // the very front.
     const p = createCompositeAtProvider({
       fileRoot: root, // has alpha.ts
-      listSkills: () => Array.from({ length: 10 }, (_, i) => ({ name: `alp-${i}`, description: "x" })),
+      listSkills: () =>
+        Array.from({ length: 10 }, (_, i) => ({ name: `alp-${i}`, description: "x" })),
     })
     const out = await p.list("alp")
     expect(out[0]?.kind).toBe("file")

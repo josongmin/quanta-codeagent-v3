@@ -12,19 +12,15 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { discoverSkills } from "../../src/skill/discover"
 import { implicitlyInvocableSkills } from "../../src/skill/activation"
+import { discoverSkills } from "../../src/skill/discover"
 
 const FENCE = (name: string): string =>
   ["---", `name: ${name}`, `description: ${name} desc`, "---", "Body."].join("\n")
 
 const tmp = (): Promise<string> => mkdtemp(join(tmpdir(), "qcav3-skill-implicit-e2e-"))
 
-const writeSkill = async (
-  root: string,
-  name: string,
-  policyYaml?: string,
-): Promise<void> => {
+const writeSkill = async (root: string, name: string, policyYaml?: string): Promise<void> => {
   const dir = join(root, name)
   await mkdir(dir, { recursive: true })
   await writeFile(join(dir, "SKILL.md"), FENCE(name), "utf8")
@@ -47,7 +43,7 @@ describe("§2.3 skill implicit-invocation policy — e2e discover + gate", () =>
   test("discovery lifts policy.allow_implicit_invocation:false onto the Skill", async () => {
     const root = await tmp()
     created.push(root)
-    await writeSkill(root, "private-skill", 'policy:\n  allow_implicit_invocation: false\n')
+    await writeSkill(root, "private-skill", "policy:\n  allow_implicit_invocation: false\n")
     await writeSkill(root, "public-skill", "policy:\n  allow_implicit_invocation: true\n")
     await writeSkill(root, "plain-skill") // no agents/openai.yaml
 

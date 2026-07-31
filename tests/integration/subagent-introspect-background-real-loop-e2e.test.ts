@@ -62,7 +62,9 @@ const listAgents = (id: string): StreamEvent[] => [
 const conversationText = (input: StreamInput): string =>
   input.messages
     .flatMap((m) =>
-      m.content.map((b) => (b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "")),
+      m.content.map((b) =>
+        b.type === "text" ? b.text : b.type === "tool_result" ? b.content : "",
+      ),
     )
     .join(" ")
 
@@ -89,7 +91,9 @@ class RoutingLLM implements LLMPort {
 
 const toolResults = (out: Awaited<ReturnType<typeof runAgent>>) =>
   out.messages.flatMap((m) =>
-    m.content.filter((b): b is Extract<typeof b, { type: "tool_result" }> => b.type === "tool_result"),
+    m.content.filter(
+      (b): b is Extract<typeof b, { type: "tool_result" }> => b.type === "tool_result",
+    ),
   )
 
 // The background child's task description ⇒ its list_agents label.
@@ -158,7 +162,11 @@ describe("subagent-introspect + background — REAL loop: list_agents enumerates
       { match: "PARENT-GO", events: bgSpawn("s1", BG_TASK), once: true },
       { match: "task_id:", events: listAgents("l1"), once: true },
       // list_agents is unregistered ⇒ Unknown tool ⇒ parent recovers + finishes.
-      { match: "Unknown tool", events: text("parent recovered from missing list_agents"), once: true },
+      {
+        match: "Unknown tool",
+        events: text("parent recovered from missing list_agents"),
+        once: true,
+      },
     ])
     const out = await withTimeout(
       runAgent(

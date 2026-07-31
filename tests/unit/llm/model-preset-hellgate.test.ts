@@ -45,9 +45,7 @@ describe("§9.6 built-in opusplan preset", () => {
   test("MP-02: unmapped role falls back to preset default (no throw)", () => {
     const preset = resolveModelPreset("opusplan")!
     // a role the preset does not name explicitly
-    expect(() =>
-      resolveModelForRole(preset, "explorer" as never),
-    ).not.toThrow()
+    expect(() => resolveModelForRole(preset, "explorer" as never)).not.toThrow()
     expect(resolveModelForRole(preset, "explorer")).toBe(preset.defaultModel)
   })
 

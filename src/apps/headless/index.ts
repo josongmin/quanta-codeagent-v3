@@ -37,6 +37,8 @@ import type {
 } from "./types"
 
 export { buildFakeBootstrapDeps, buildFakeRuntime, RecordingStream } from "./fake-deps"
+export { FakeLlm, scriptFromCompletion } from "./fake-llm"
+export type { HeadlessSessionBridge } from "./session-bridge"
 // jul-16 (02 serve --stdio) — the reusable session opener + its bridge shape,
 // re-exported so a PRODUCTION surface (the `quanta serve --stdio` composition
 // root in @/apps/cli) can open a REAL headless runtime session and inject a
@@ -44,8 +46,6 @@ export { buildFakeBootstrapDeps, buildFakeRuntime, RecordingStream } from "./fak
 // headless smoke uses). Injecting real deps (real LLM + default tools) is the
 // caller's job — this opener is dep-agnostic.
 export { openHeadlessRuntimeSession } from "./session-bridge"
-export type { HeadlessSessionBridge } from "./session-bridge"
-export { FakeLlm, scriptFromCompletion } from "./fake-llm"
 export type {
   FakeCompletion,
   HeadlessRunInput,

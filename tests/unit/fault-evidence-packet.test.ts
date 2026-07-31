@@ -36,7 +36,11 @@ describe("buildFaultEvidencePacket", () => {
   test("merges provenance + boosts the owner-resolved / issue-named file to the top", () => {
     const p = buildFaultEvidencePacket(base)
     expect(p.candidates[0]?.file).toBe("django/core/paginator.py")
-    expect(p.candidates[0]?.sources.slice().sort()).toEqual(["issue-file", "owner-resolve", "stage1"])
+    expect(p.candidates[0]?.sources.slice().sort()).toEqual([
+      "issue-file",
+      "owner-resolve",
+      "stage1",
+    ])
     expect(p.candidates[0]?.symbols).toContain("Paginator")
   })
 
@@ -55,11 +59,19 @@ describe("buildFaultEvidencePacket", () => {
     const p = buildFaultEvidencePacket({ ...base, maxSymbols: 1 })
     expect(p.issueSymbols.length).toBe(1)
     // structural: a candidate exposes only path/score/sources/symbols — no file body
-    expect(Object.keys(p.candidates[0] ?? {}).sort()).toEqual(["file", "score", "sources", "symbols"])
+    expect(Object.keys(p.candidates[0] ?? {}).sort()).toEqual([
+      "file",
+      "score",
+      "sources",
+      "symbols",
+    ])
   })
 
   test("missing LSP (ownerResolved undefined) → partial, not throw", () => {
-    const p = buildFaultEvidencePacket({ issueText: base.issueText, stage1Files: base.stage1Files ?? [] })
+    const p = buildFaultEvidencePacket({
+      issueText: base.issueText,
+      stage1Files: base.stage1Files ?? [],
+    })
     expect(p.partial).toBe(true)
     expect(p.candidates.length).toBeGreaterThan(0)
   })

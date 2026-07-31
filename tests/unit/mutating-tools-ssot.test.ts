@@ -16,7 +16,13 @@ import { createVerifyGuardState, decideVerifyGuard } from "@/agent/verify-guard"
 
 describe("mutating-tools SSOT", () => {
   test("the shared set covers all 5 FS-edit tools", () => {
-    for (const t of ["edit", "write", "scripted_replace", "apply_patch", "apply_patch_structured"]) {
+    for (const t of [
+      "edit",
+      "write",
+      "scripted_replace",
+      "apply_patch",
+      "apply_patch_structured",
+    ]) {
       expect(MUTATING_FS_EDIT_TOOLS.has(t)).toBe(true)
     }
   })

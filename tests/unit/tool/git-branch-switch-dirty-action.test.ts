@@ -222,13 +222,14 @@ describe("git_branch_switch — dirtyAction:discard", () => {
 })
 
 describe("git_branch_switch — dirtyAction on a clean tree is a no-op pre-switch", () => {
-  test.each(["commit-wip", "stash", "discard"])(
-    "clean tree + dirtyAction:%s ⇒ only status + switch",
-    async (action) => {
-      const runner = new FakeRunner(resolver({ dirty: false }))
-      const r = await collect(gitBranchSwitchTool(runner), { branch: "feat", dirtyAction: action })
-      expect(r.ok).toBe(true)
-      expect(heads(runner)).toEqual(["status", "switch"])
-    },
-  )
+  test.each([
+    "commit-wip",
+    "stash",
+    "discard",
+  ])("clean tree + dirtyAction:%s ⇒ only status + switch", async (action) => {
+    const runner = new FakeRunner(resolver({ dirty: false }))
+    const r = await collect(gitBranchSwitchTool(runner), { branch: "feat", dirtyAction: action })
+    expect(r.ok).toBe(true)
+    expect(heads(runner)).toEqual(["status", "switch"])
+  })
 })

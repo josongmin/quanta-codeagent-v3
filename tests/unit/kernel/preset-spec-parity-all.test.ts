@@ -11,9 +11,9 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import type { PresetSpec } from "@/config/knob-schema/contracts"
 import { resolvePresetSpec } from "@/runner/batch/eval/kernel/preset-spec"
 import { PRESET_SPECS } from "@/runner/batch/eval/kernel/preset-specs"
-import type { PresetSpec } from "@/config/knob-schema/contracts"
 import { KNOB_PRESETS } from "@/runner/knobs/presets"
 
 const SPECS: readonly PresetSpec[] = Object.values(PRESET_SPECS)

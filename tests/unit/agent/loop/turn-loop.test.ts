@@ -43,9 +43,7 @@ describe("turn-loop #9 flush-failure stream emit", () => {
       guards: [],
     }
     const turnStateSeed = {
-      wm: createWorkingMemory<Message>([
-        { role: "user", content: [{ type: "text", text: "hi" }] },
-      ]),
+      wm: createWorkingMemory<Message>([{ role: "user", content: [{ type: "text", text: "hi" }] }]),
       breaker: undefined,
       toolHistory: undefined,
       workingState: undefined,

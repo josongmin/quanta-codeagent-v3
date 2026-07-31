@@ -48,8 +48,7 @@ export class DapFrameDecoder {
         // discard through this separator. Either way the buffer shrinks ⇒ no
         // infinite loop, and a subsequent valid frame decodes.
         const next = nextHeaderMarker(this.buf)
-        this.buf =
-          next > 0 ? this.buf.subarray(next) : this.buf.subarray(sepIdx + SEP_BYTES.length)
+        this.buf = next > 0 ? this.buf.subarray(next) : this.buf.subarray(sepIdx + SEP_BYTES.length)
         continue
       }
       const bodyStart = sepIdx + SEP_BYTES.length

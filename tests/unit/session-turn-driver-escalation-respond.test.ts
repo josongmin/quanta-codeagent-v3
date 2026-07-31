@@ -7,8 +7,8 @@
  * A NORMAL approval deny (no `scopeContext`) stays a hard abort (byte-identical).
  */
 import { describe, expect, test } from "bun:test"
-import { driveSessionTurn as runSessionTurn } from "@/runner/orchestrate"
 import type { PendingApprovalView } from "@/protocol/session"
+import { driveSessionTurn as runSessionTurn } from "@/runner/orchestrate"
 
 type RespondArgs = {
   approvalId: string
@@ -83,10 +83,7 @@ describe("turn driver — escalation approval scope/steer + recoverable deny", (
 
   test("escalation deny_and_steer forwards the steer AND does NOT throw (recoverable)", async () => {
     const { session, responds } = makeSession([{ approvalRequest: escalationApproval }, {}])
-    await run(
-      session,
-      (async () => ({ decision: "deny", steer: "use grep instead" })) as never,
-    )
+    await run(session, (async () => ({ decision: "deny", steer: "use grep instead" })) as never)
     expect(responds[0]?.decision).toBe("deny")
     expect(responds[0]?.meta).toMatchObject({ steer: "use grep instead" })
   })

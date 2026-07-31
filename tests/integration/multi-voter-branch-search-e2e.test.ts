@@ -162,10 +162,14 @@ const ctx = (cwd: string): ToolContext => ({ cwd, signal: new AbortController().
  *  tool result (whose `.structured` is the `BranchSearchResult`). */
 const runBranchSearchTool = async (config: RunnerConfig): Promise<ToolResult> => {
   const tool = buildBranchSearchTool(config)
-  if (tool === undefined) throw new Error("buildBranchSearchTool returned undefined (branchSearch unset?)")
+  if (tool === undefined)
+    throw new Error("buildBranchSearchTool returned undefined (branchSearch unset?)")
   let result: ToolResult | undefined
   const cwd = (config as unknown as { cwd: string }).cwd
-  for await (const ev of tool.execute({ task_description: "repair the failing edit", n: 2 }, ctx(cwd))) {
+  for await (const ev of tool.execute(
+    { task_description: "repair the failing edit", n: 2 },
+    ctx(cwd),
+  )) {
     if (ev.type === "result") result = ev.result
   }
   if (result === undefined) throw new Error("branch_search yielded no result")
@@ -175,7 +179,10 @@ const runBranchSearchTool = async (config: RunnerConfig): Promise<ToolResult> =>
 /** Extract the `BranchSearchResult` off the structured tool result. */
 interface ScoredEntry {
   cand: { id: string }
-  score: { total: number; breakdown: ReadonlyArray<{ kind: string; pass: boolean; magnitude?: number }> }
+  score: {
+    total: number
+    breakdown: ReadonlyArray<{ kind: string; pass: boolean; magnitude?: number }>
+  }
 }
 interface BSResult {
   winner: { id: string }
@@ -284,7 +291,11 @@ describe("ADR-0433 × ADR-0084 REAL branch_search — voter quorum drives SELECT
         cwd: srcDir,
         // voterQuorum intentionally OMITTED (default-OFF).
       })
-      const r = await withTimeout(runBranchSearchTool(config), TIMEOUT_MS, "branch_search no-quorum")
+      const r = await withTimeout(
+        runBranchSearchTool(config),
+        TIMEOUT_MS,
+        "branch_search no-quorum",
+      )
       const bs = structured(r)
 
       // (a) No candidate carries a voter signal — the fold did not run.

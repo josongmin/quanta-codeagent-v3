@@ -28,7 +28,11 @@ const clientDefaultHeaders = (
   model: string,
   env: Record<string, string | undefined> = {},
 ): Record<string, string> | undefined => {
-  const adapter = createLLM("anthropic", { model }, { ...KEY, ...env }) as unknown as AnthropicAdapter
+  const adapter = createLLM(
+    "anthropic",
+    { model },
+    { ...KEY, ...env },
+  ) as unknown as AnthropicAdapter
   // The adapter holds the real SDK client; the SDK stashes constructor options
   // (incl. defaultHeaders) on `_options`. Structural access — no src edit.
   const client = (adapter as unknown as { client: { _options?: { defaultHeaders?: unknown } } })

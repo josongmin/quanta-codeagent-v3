@@ -13,21 +13,34 @@ import { isAbsolute, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import { z } from "zod"
 import { errMessage } from "@/shared"
+import type { Tool, ToolContext, ToolEvent } from "../types"
 import { CdpClient, type CdpTransport } from "./cdp-client"
 import { inspectViaCdp } from "./cdp-inspect"
 import { DapClient } from "./dap-client"
 import { type DapVariable, type Inspection, inspectViaDap } from "./inspect-driver"
-import { defaultDebugAdapterPort, type DebugAdapterPort, type NodeCdpSpawnSpec, spawnNodeCdpInspector } from "./port"
-import type { Tool, ToolContext, ToolEvent } from "../types"
+import {
+  type DebugAdapterPort,
+  defaultDebugAdapterPort,
+  type NodeCdpSpawnSpec,
+  spawnNodeCdpInspector,
+} from "./port"
 
 const schema = z.object({
-  program: z.string().min(1).describe("Path to the program/script to debug (relative to cwd or absolute)."),
+  program: z
+    .string()
+    .min(1)
+    .describe("Path to the program/script to debug (relative to cwd or absolute)."),
   breakpoints: z
     .array(
       z.object({
         file: z.string().min(1),
         line: z.number().int().positive(),
-        condition: z.string().optional().describe("Conditional breakpoint: only stop when this expression is truthy (e.g. 'i == 3')."),
+        condition: z
+          .string()
+          .optional()
+          .describe(
+            "Conditional breakpoint: only stop when this expression is truthy (e.g. 'i == 3').",
+          ),
       }),
     )
     .min(1)
@@ -35,16 +48,26 @@ const schema = z.object({
   adapter: z
     .enum(["python", "lldb", "node"])
     .optional()
-    .describe("Built-in adapter preset. `python`=debugpy (pip install debugpy). `lldb`=lldb-dap for C/C++/Rust/Swift (program=compiled binary built with -g). `node`=Node via the built-in inspector (CDP over `node --inspect-brk`; no install — stops at the FIRST breakpoint, condition/evaluate not supported on this preset). Omit to use adapterCommand."),
+    .describe(
+      "Built-in adapter preset. `python`=debugpy (pip install debugpy). `lldb`=lldb-dap for C/C++/Rust/Swift (program=compiled binary built with -g). `node`=Node via the built-in inspector (CDP over `node --inspect-brk`; no install — stops at the FIRST breakpoint, condition/evaluate not supported on this preset). Omit to use adapterCommand.",
+    ),
   adapterCommand: z
     .array(z.string())
     .optional()
     .describe("Explicit debug-adapter argv (e.g. for non-preset languages). Overrides `adapter`."),
   args: z.array(z.string()).optional().describe("Arguments passed to the program."),
-  cwd: z.string().optional().describe("Working directory for the program (defaults to the session cwd)."),
+  cwd: z
+    .string()
+    .optional()
+    .describe("Working directory for the program (defaults to the session cwd)."),
   evaluate: z.string().optional().describe("Expression to evaluate in the top frame once stopped."),
   stopOnEntry: z.boolean().optional().describe("Stop at the program's first line as well."),
-  exceptionBreakpoints: z.boolean().optional().describe("Break-on-throw: also stop at the throw site of an UNCAUGHT exception (not just line breakpoints) and report its type+message. Useful when the failure is an exception thrown somewhere you can't pin a line."),
+  exceptionBreakpoints: z
+    .boolean()
+    .optional()
+    .describe(
+      "Break-on-throw: also stop at the throw site of an UNCAUGHT exception (not just line breakpoints) and report its type+message. Useful when the failure is an exception thrown somewhere you can't pin a line.",
+    ),
 })
 type Input = z.infer<typeof schema>
 
@@ -96,9 +119,14 @@ const render = (program: string, r: Inspection): string => {
   }
   const lines: string[] = []
   const top = r.stack[0]
-  lines.push(`⏸ Stopped (${r.reason})${top ? ` at ${top.name} (${top.source ?? "?"}:${top.line})` : ""}`)
+  lines.push(
+    `⏸ Stopped (${r.reason})${top ? ` at ${top.name} (${top.source ?? "?"}:${top.line})` : ""}`,
+  )
   // Break-on-throw: surface the exception type+message right under the header.
-  if (r.exception) lines.push(`⚠ Exception: ${r.exception.id}${r.exception.description ? `: ${r.exception.description}` : ""}`)
+  if (r.exception)
+    lines.push(
+      `⚠ Exception: ${r.exception.id}${r.exception.description ? `: ${r.exception.description}` : ""}`,
+    )
   if (r.stack.length > 0) {
     lines.push("Call stack:")
     for (const f of r.stack) lines.push(`  ${f.name} (${f.source ?? "?"}:${f.line})`)
@@ -162,17 +190,27 @@ export const makeDebugInspectTool = (
       const bpFile = isAbsolute(bp.file) ? bp.file : resolve(cwd, bp.file)
       let cdp: CdpClient | undefined
       try {
-        const transport = await nodeCdp({ command: (p) => ["node", `--inspect-brk=${p}`, program, ...(input.args ?? [])], cwd })
+        const transport = await nodeCdp({
+          command: (p) => ["node", `--inspect-brk=${p}`, program, ...(input.args ?? [])],
+          cwd,
+        })
         cdp = new CdpClient(transport)
         const result = await inspectViaCdp(
           cdp,
           // node wraps the entry module, so a top-level throw looks "caught" to
           // V8 ⇒ "uncaught" never fires; use "all" (stops at the first throw —
           // for a focused break-on-throw run that is the failing exception).
-          { url: pathToFileURL(bpFile).href, line: bp.line, ...(input.exceptionBreakpoints === true ? { pauseOnExceptions: "all" as const } : {}) },
+          {
+            url: pathToFileURL(bpFile).href,
+            line: bp.line,
+            ...(input.exceptionBreakpoints === true ? { pauseOnExceptions: "all" as const } : {}),
+          },
           { ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}) },
         )
-        yield { type: "result", result: { ok: result.outcome !== "error", output: render(input.program, result) } }
+        yield {
+          type: "result",
+          result: { ok: result.outcome !== "error", output: render(input.program, result) },
+        }
       } catch (e) {
         yield err(`debug_inspect: ${errMessage(e)}`)
       } finally {
@@ -181,31 +219,40 @@ export const makeDebugInspectTool = (
       return
     }
 
-    const command = input.adapterCommand ?? (input.adapter ? ADAPTER_PRESETS[input.adapter] : undefined)
+    const command =
+      input.adapterCommand ?? (input.adapter ? ADAPTER_PRESETS[input.adapter] : undefined)
     if (command === undefined || command.length === 0) {
-      yield err("debug_inspect: provide `adapter` (preset) or `adapterCommand` (explicit adapter argv)")
+      yield err(
+        "debug_inspect: provide `adapter` (preset) or `adapterCommand` (explicit adapter argv)",
+      )
       return
     }
     let client: DapClient | undefined
     try {
       const transport = await port.spawn({ command: [...command], cwd })
       client = new DapClient(transport)
-      const result = await inspectViaDap(client, {
-        adapterID: input.adapter ?? "custom",
-        launch: buildLaunchConfig(input, cwd),
-        breakpoints: input.breakpoints.map((b) => ({
-          file: b.file,
-          line: b.line,
-          ...(b.condition !== undefined ? { condition: b.condition } : {}),
-        })),
-        ...(input.evaluate !== undefined ? { evaluate: input.evaluate } : {}),
-        // Break-on-throw filters by adapter (debugpy uses uncaught/userUnhandled;
-        // lldb-dap uses cpp_throw). Only armed when the caller opts in.
-        ...(input.exceptionBreakpoints === true ? { exceptionFilters: EXCEPTION_FILTERS[input.adapter ?? "custom"] ?? [] } : {}),
-      }, {
-        // Turn-abort tears the session down instead of lingering to the timeout.
-        ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
-      })
+      const result = await inspectViaDap(
+        client,
+        {
+          adapterID: input.adapter ?? "custom",
+          launch: buildLaunchConfig(input, cwd),
+          breakpoints: input.breakpoints.map((b) => ({
+            file: b.file,
+            line: b.line,
+            ...(b.condition !== undefined ? { condition: b.condition } : {}),
+          })),
+          ...(input.evaluate !== undefined ? { evaluate: input.evaluate } : {}),
+          // Break-on-throw filters by adapter (debugpy uses uncaught/userUnhandled;
+          // lldb-dap uses cpp_throw). Only armed when the caller opts in.
+          ...(input.exceptionBreakpoints === true
+            ? { exceptionFilters: EXCEPTION_FILTERS[input.adapter ?? "custom"] ?? [] }
+            : {}),
+        },
+        {
+          // Turn-abort tears the session down instead of lingering to the timeout.
+          ...(ctx.signal !== undefined ? { signal: ctx.signal } : {}),
+        },
+      )
       yield {
         type: "result",
         result: { ok: result.outcome !== "error", output: render(input.program, result) },

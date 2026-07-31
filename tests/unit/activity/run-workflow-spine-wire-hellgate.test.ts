@@ -26,7 +26,10 @@ const ctx = (): ToolContext => ({
   toolCallId: "wf-call-1",
 })
 
-const drive = async (tool: ReturnType<typeof createRunWorkflowTool>, input: unknown): Promise<ToolResult> => {
+const drive = async (
+  tool: ReturnType<typeof createRunWorkflowTool>,
+  input: unknown,
+): Promise<ToolResult> => {
   let result: ToolResult | undefined
   for await (const ev of tool.execute(input as never, ctx())) {
     if (ev.type === "result") result = ev.result
@@ -59,7 +62,10 @@ describe("run_workflow → activity spine (write path)", () => {
     // run closed ok ⇒ derives done (all steps ok)
     expect(snap.byId.get("wf-call-1")?.status).toBe("done")
     // L1: both phases present + nested; L2: their steps.
-    expect(snap.childIds.get("wf-call-1")).toEqual(["wf-call-1/phase/Find", "wf-call-1/phase/Verify"])
+    expect(snap.childIds.get("wf-call-1")).toEqual([
+      "wf-call-1/phase/Find",
+      "wf-call-1/phase/Verify",
+    ])
     expect(snap.byId.get("wf-call-1/step/f1")?.status).toBe("done")
     expect(snap.byId.get("wf-call-1/step/v1")?.status).toBe("done")
   })

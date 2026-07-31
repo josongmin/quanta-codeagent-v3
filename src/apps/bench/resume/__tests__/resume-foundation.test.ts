@@ -10,12 +10,7 @@
  *     with an injected fake runAws so it is asserted offline.
  */
 import { describe, expect, test } from "bun:test"
-import {
-  resolveResumeConfig,
-  resumeActive,
-  resumeKey,
-  resumeStore,
-} from "@/apps/bench/resume"
+import { resolveResumeConfig, resumeActive, resumeKey, resumeStore } from "@/apps/bench/resume"
 import type { RunAwsResult } from "@/shared/remote-store"
 
 describe("resumeKey — pure S3-safe identity", () => {
@@ -27,9 +22,7 @@ describe("resumeKey — pure S3-safe identity", () => {
 
   test("collapses unsafe chars to '_' in each component", () => {
     // spaces, colons, slashes-inside-a-component, etc. are unsafe for an S3 key.
-    expect(resumeKey({ campaignId: "my camp/v2", instanceId: "a:b c" })).toBe(
-      "my_camp_v2/a_b_c",
-    )
+    expect(resumeKey({ campaignId: "my camp/v2", instanceId: "a:b c" })).toBe("my_camp_v2/a_b_c")
   })
 
   test("strips leading/trailing slashes from each sanitized component", () => {
@@ -76,9 +69,9 @@ describe("resolveResumeConfig — DEFAULT-OFF + resolution", () => {
 
   test("region prefers AWS_REGION, then QUANTA_FULL_REMOTE_REGION", () => {
     expect(resolveResumeConfig({ AWS_REGION: "us-east-1" }).region).toBe("us-east-1")
-    expect(
-      resolveResumeConfig({ QUANTA_FULL_REMOTE_REGION: "ap-northeast-2" }).region,
-    ).toBe("ap-northeast-2")
+    expect(resolveResumeConfig({ QUANTA_FULL_REMOTE_REGION: "ap-northeast-2" }).region).toBe(
+      "ap-northeast-2",
+    )
     // AWS_REGION wins when both are present
     expect(
       resolveResumeConfig({
@@ -90,9 +83,7 @@ describe("resolveResumeConfig — DEFAULT-OFF + resolution", () => {
   })
 
   test("campaignId comes from QUANTA_BENCH_CAMPAIGN_ID, else 'default-campaign'", () => {
-    expect(resolveResumeConfig({ QUANTA_BENCH_CAMPAIGN_ID: "jun-27" }).campaignId).toBe(
-      "jun-27",
-    )
+    expect(resolveResumeConfig({ QUANTA_BENCH_CAMPAIGN_ID: "jun-27" }).campaignId).toBe("jun-27")
     expect(resolveResumeConfig({}).campaignId).toBe("default-campaign")
   })
 })
@@ -158,9 +149,7 @@ describe("resumeStore — thin composition over s3Backend/segmentStore/replaySto
       metadata: { recordedAt: 0, model: "test", durationMs: 0 },
     })
 
-    const putCall = calls.find(
-      (c) => c.includes("cp") && c[c.indexOf("cp") + 1] === "-",
-    )
+    const putCall = calls.find((c) => c.includes("cp") && c[c.indexOf("cp") + 1] === "-")
     expect(putCall).toBeDefined()
     const target = putCall?.[putCall.indexOf("cp") + 2] ?? ""
     expect(target).toBe(`s3://bucket-x/${key}/events/000000.json`)
@@ -180,8 +169,7 @@ describe("resumeStore — thin composition over s3Backend/segmentStore/replaySto
     })
     const receiptPut = calls.find(
       (c) =>
-        c.includes("cp") &&
-        (c[c.indexOf("cp") + 2] ?? "").endsWith(`${key}/resume-state.json`),
+        c.includes("cp") && (c[c.indexOf("cp") + 2] ?? "").endsWith(`${key}/resume-state.json`),
     )
     expect(receiptPut).toBeDefined()
   })

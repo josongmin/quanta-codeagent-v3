@@ -95,7 +95,8 @@ describe("extractIssueReproSeed (repro-seed provenance)", () => {
     // extractor returns it. This is exactly the ambiguous false-positive the bug
     // is about: the value MUST be consumed as a repro-seed (not executed as an
     // authoritative oracle) — its provenance proves it is only a heuristic guess.
-    const ps = "The MathML printer drops subscripts.\n\nExpected output:\n```python\nprint('<msub>...</msub>')\n```"
+    const ps =
+      "The MathML printer drops subscripts.\n\nExpected output:\n```python\nprint('<msub>...</msub>')\n```"
     const seed = extractIssueReproSeed(ps)
     expect(seed?.code).toContain("print(")
     // The marker is the structural guard: a consumer cannot mistake this for a

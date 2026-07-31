@@ -29,8 +29,8 @@ import {
   type PermissionContext,
   type ReviewContext,
   type ReviewerPort,
-  type ToolActionKeyed,
   setAutoApprovalReviewObserver,
+  type ToolActionKeyed,
 } from "@/permission"
 import { RulesStore } from "@/rules"
 import { __resetRuntimeConfig } from "@/shared"
@@ -48,8 +48,9 @@ const bashWithShell: Tool = {
     yield { type: "result", result: { ok: true, output: "ran" } }
   },
 }
-;(bashWithShell as Tool & { extractShellCommand: (i: unknown) => string | null }).extractShellCommand =
-  (i) => (i as { command: string }).command
+;(
+  bashWithShell as Tool & { extractShellCommand: (i: unknown) => string | null }
+).extractShellCommand = (i) => (i as { command: string }).command
 
 const call = (input: unknown, id = "cWIRE"): ToolUseBlock => ({
   type: "tool_use",

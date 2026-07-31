@@ -54,9 +54,7 @@ describe("stream-consume #6 half-wired timeout fail-loud", () => {
     expect(out).toBe(src) // fell through (un-wrapped)
     expect(warn).toHaveBeenCalledTimes(1)
     expect(String(warn.mock.calls[0]?.[0])).toContain("HALF-WIRED")
-    expect(
-      emitted.some((e) => e.type === "error" && e.message.includes("HALF-WIRED")),
-    ).toBe(true)
+    expect(emitted.some((e) => e.type === "error" && e.message.includes("HALF-WIRED"))).toBe(true)
     warn.mockRestore()
   })
 

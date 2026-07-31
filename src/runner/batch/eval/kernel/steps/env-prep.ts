@@ -22,8 +22,8 @@
  */
 
 import { runEnvPrep } from "../../env-prep"
-import { foldState } from "../eval-step"
 import type { EvalCtx, EvalStep } from "../eval-step"
+import { foldState } from "../eval-step"
 
 export const envPrepStep: EvalStep = {
   id: "env-prep",

@@ -135,11 +135,7 @@ describe("T04 — continue_from ownership gate", () => {
 describe("F-D — task_output cross-lineage read gate", () => {
   const sharedReg = (): TaskRegistry => new TaskRegistry()
 
-  const launchOwned = async (
-    agent: Tool,
-    c: ToolContext,
-    _finalText: string,
-  ): Promise<string> => {
+  const launchOwned = async (agent: Tool, c: ToolContext, _finalText: string): Promise<string> => {
     const id = await launchBg(agent, c)
     await settle()
     return id

@@ -38,7 +38,9 @@ export type KnobKind = "bool" | "int" | "float" | "enum" | "string"
 
 /** Domain constraint: enum members, or an inclusive [min, max] for ints. Used to
  *  validate raw values at resolve time (Pillar A: "garbage validated at startup"). */
-export type KnobDomain = { readonly enum: readonly string[] } | { readonly range: readonly [number, number] }
+export type KnobDomain =
+  | { readonly enum: readonly string[] }
+  | { readonly range: readonly [number, number] }
 
 /**
  * Pillar D — experiment lifecycle metadata. PRESENT on a `KnobSchema` ⇒ the knob

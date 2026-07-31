@@ -163,7 +163,10 @@ describe("A2 double-settle — first decision latches; later settle is a no-op",
 describe("A3 cross-terminal ordering — first terminal wins, later ones are no-ops (not gaps)", () => {
   test("expire then settle: status stays expired; settle is a no-op; NO gap", () => {
     const sink = gapSink()
-    const asm = createApprovalStateMachine({ now: stepClock(), onUnattributed: sink.onUnattributed })
+    const asm = createApprovalStateMachine({
+      now: stepClock(),
+      onUnattributed: sink.onUnattributed,
+    })
     asm.request(REQ("xo-1"))
     expect(asm.expire("xo-1")?.status).toBe("expired")
     const late = asm.settle("xo-1", "approve")
@@ -173,7 +176,10 @@ describe("A3 cross-terminal ordering — first terminal wins, later ones are no-
 
   test("settle then cancel then expire: latched at first (approved); the rest no-op, NO gaps", () => {
     const sink = gapSink()
-    const asm = createApprovalStateMachine({ now: stepClock(), onUnattributed: sink.onUnattributed })
+    const asm = createApprovalStateMachine({
+      now: stepClock(),
+      onUnattributed: sink.onUnattributed,
+    })
     asm.request(REQ("xo-2"))
     expect(asm.settle("xo-2", "approve")?.status).toBe("approved")
     expect(asm.cancel("xo-2")?.status).toBe("approved")
@@ -285,7 +291,10 @@ describe("A6 snapshot round-trip — hostile entries dropped, back-refs preserve
 
   test("settle on a RESTORED pending id attributes (NOT a false gap)", () => {
     const sink = gapSink()
-    const asm = createApprovalStateMachine({ now: stepClock(), onUnattributed: sink.onUnattributed })
+    const asm = createApprovalStateMachine({
+      now: stepClock(),
+      onUnattributed: sink.onUnattributed,
+    })
     asm.fromSnapshot({
       approvals: [
         {
@@ -339,7 +348,12 @@ describe("A7 eviction — pending escalations are never LRU-evicted", () => {
     // Both pending escalations MUST still be observable (never evicted).
     expect(asm.get("pend-A")?.status).toBe("pending")
     expect(asm.get("pend-B")?.status).toBe("pending")
-    expect(asm.pending().map((r) => r.id).sort()).toEqual(["pend-A", "pend-B"])
+    expect(
+      asm
+        .pending()
+        .map((r) => r.id)
+        .sort(),
+    ).toEqual(["pend-A", "pend-B"])
     // Settling a never-evicted pending id attributes ⇒ NO gap.
     asm.settle("pend-A", "approve")
     expect(sink.gaps).toHaveLength(0)
@@ -384,7 +398,10 @@ describe("A8 property — no HITL escalation is silently un-attributed", () => {
 
   test("a non-string / empty id terminal op on an empty machine STILL surfaces a gap (never silent)", () => {
     const sink = gapSink()
-    const asm = createApprovalStateMachine({ now: stepClock(), onUnattributed: sink.onUnattributed })
+    const asm = createApprovalStateMachine({
+      now: stepClock(),
+      onUnattributed: sink.onUnattributed,
+    })
     asm.settle("" as never, "approve")
     asm.settle(undefined as never, "deny")
     asm.settle(null as never, "deny")

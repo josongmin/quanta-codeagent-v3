@@ -50,11 +50,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { runAgent } from "@/agent"
+import { microcompactToolResults } from "@/agent/tool-result-evict"
 import { FallbackLLM, type LLMPort, type Message, type StreamEvent, type StreamInput } from "@/llm"
 import type { PermissionContext } from "@/permission"
 import { __resetRuntimeConfig, LLMError, reconcileToolPairing } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
-import { microcompactToolResults } from "@/agent/tool-result-evict"
 import { defaultTools, ToolRegistry } from "@/tool"
 
 // ── doubles ────────────────────────────────────────────────────────────────
@@ -394,9 +394,7 @@ describe("H5 — fallback swap × microcompact tool_result eviction pairing inte
     // content. Drop the first tool_result block from the evicted array.
     const broken: Message[] = (evicted.messages as Message[]).map((m) => ({
       ...m,
-      content: m.content.filter(
-        (b) => !(b.type === "tool_result" && b.tool_use_id === "a0"),
-      ),
+      content: m.content.filter((b) => !(b.type === "tool_result" && b.tool_use_id === "a0")),
     }))
     // The structural witness must now see an orphan tool_use (`a0` with no result).
     expect(everyPairMatched(broken)).toBe(false)

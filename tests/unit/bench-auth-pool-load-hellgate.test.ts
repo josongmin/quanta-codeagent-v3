@@ -117,8 +117,14 @@ describe("T-1 resolveAuthSource", () => {
     fs.mkdirSync(dir, { recursive: true })
     const envManifest = `${dir}/env.yaml`
     const flagManifest = `${dir}/flag.yaml`
-    fs.writeFileSync(envManifest, `accounts:\n  - { label: env, auth_file: /e.json, max_parallel: 1 }`)
-    fs.writeFileSync(flagManifest, `accounts:\n  - { label: flag, auth_file: /f.json, max_parallel: 1 }`)
+    fs.writeFileSync(
+      envManifest,
+      `accounts:\n  - { label: env, auth_file: /e.json, max_parallel: 1 }`,
+    )
+    fs.writeFileSync(
+      flagManifest,
+      `accounts:\n  - { label: flag, auth_file: /f.json, max_parallel: 1 }`,
+    )
 
     const viaEnv = resolveAuthSource({ env: { QUANTA_BENCH_AUTH_POOL: envManifest } })
     if (viaEnv.kind !== "pool") throw new Error("expected pool from env")

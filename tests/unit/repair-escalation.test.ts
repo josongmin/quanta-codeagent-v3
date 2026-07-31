@@ -18,11 +18,16 @@ describe("decideEscalation", () => {
   })
 
   test("rail not red → never widen (even with multi-owner)", () => {
-    expect(decideEscalation({ candidates: [strongA, strongB], primaryRailRedAfterRepair: false }).escalate).toBe(false)
+    expect(
+      decideEscalation({ candidates: [strongA, strongB], primaryRailRedAfterRepair: false })
+        .escalate,
+    ).toBe(false)
   })
 
   test("single corroborated (non-sibling) owner → no widen", () => {
-    expect(decideEscalation({ candidates: [strongA], primaryRailRedAfterRepair: true }).escalate).toBe(false)
+    expect(
+      decideEscalation({ candidates: [strongA], primaryRailRedAfterRepair: true }).escalate,
+    ).toBe(false)
   })
 
   test("bare stage-1 hunches (uncorroborated) are not strong owners", () => {
@@ -30,7 +35,9 @@ describe("decideEscalation", () => {
       { file: "x.py", score: 9, sources: ["stage1"] },
       { file: "y.py", score: 9, sources: ["stage1"] },
     ]
-    expect(decideEscalation({ candidates: weak, primaryRailRedAfterRepair: true }).escalate).toBe(false)
+    expect(decideEscalation({ candidates: weak, primaryRailRedAfterRepair: true }).escalate).toBe(
+      false,
+    )
   })
 })
 
@@ -43,7 +50,11 @@ describe("decideEscalation — sibling_coverage_missing (WS2)", () => {
   const MYSQL = "django/db/backends/mysql/client.py"
 
   test("siblingFiles + rail red → sibling_coverage_missing over the siblings", () => {
-    const d = decideEscalation({ candidates: [], primaryRailRedAfterRepair: true, siblingFiles: [PG, MYSQL] })
+    const d = decideEscalation({
+      candidates: [],
+      primaryRailRedAfterRepair: true,
+      siblingFiles: [PG, MYSQL],
+    })
     expect(d.escalate).toBe(true)
     expect(d.reason).toContain("sibling_coverage_missing")
     expect(d.owners).toContain(PG)
@@ -52,14 +63,19 @@ describe("decideEscalation — sibling_coverage_missing (WS2)", () => {
   test("TEETH: a SINGLE sibling file escalates (legacy strong≥2 gate would NOT)", () => {
     // The legacy gate needs ≥2 strong owners → no widen. The feeder-keyed sibling
     // gate fires on the single co-change site, with no candidates at all.
-    const d = decideEscalation({ candidates: [], primaryRailRedAfterRepair: true, siblingFiles: [PG] })
+    const d = decideEscalation({
+      candidates: [],
+      primaryRailRedAfterRepair: true,
+      siblingFiles: [PG],
+    })
     expect(d.escalate).toBe(true)
     expect(d.reason).toContain("sibling_coverage_missing")
   })
 
   test("rail not red ⇒ no widen even with siblings present", () => {
     expect(
-      decideEscalation({ candidates: [], primaryRailRedAfterRepair: false, siblingFiles: [PG] }).escalate,
+      decideEscalation({ candidates: [], primaryRailRedAfterRepair: false, siblingFiles: [PG] })
+        .escalate,
     ).toBe(false)
   })
 
@@ -76,6 +92,8 @@ describe("decideEscalation — sibling_coverage_missing (WS2)", () => {
   })
 
   test("no candidates and no siblings ⇒ no escalation", () => {
-    expect(decideEscalation({ candidates: [], primaryRailRedAfterRepair: true }).escalate).toBe(false)
+    expect(decideEscalation({ candidates: [], primaryRailRedAfterRepair: true }).escalate).toBe(
+      false,
+    )
   })
 })

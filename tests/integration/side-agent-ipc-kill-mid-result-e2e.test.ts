@@ -103,10 +103,7 @@ beforeAll(() => {
   writeWorker("missing-summary", `flushThenKill({ kind: "finding" })`)
   // A finding frame whose `summary` is a NON-STRING slot (a half-serialized
   // object left in place when the child died mid-build).
-  writeWorker(
-    "object-summary",
-    `flushThenKill({ kind: "finding", summary: { partial: true } })`,
-  )
+  writeWorker("object-summary", `flushThenKill({ kind: "finding", summary: { partial: true } })`)
   // A finding frame with an EMPTY-STRING summary (degenerate truncation to "").
   writeWorker("empty-summary", `flushThenKill({ kind: "finding", summary: "" })`)
   // SIGKILL with NO finding written at all (pure mid-result death — sends

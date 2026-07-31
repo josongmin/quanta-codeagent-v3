@@ -21,12 +21,12 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import type { ConfirmDecision } from "@/agent"
 import {
   decideScopeEscalation,
   type EscalationRequest,
   type EscalationResolution,
 } from "@/agent/skill-scope-escalation"
-import type { ConfirmDecision } from "@/agent"
 
 const base = {
   tool: "edit",

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { runAgent } from "@/agent"
-import type { Message } from "@/llm"
 import type { TurnContextInput } from "@/agent/prompt"
+import type { Message } from "@/llm"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { ev, RecordingStream, ScriptedLLM, text, toolUse, withTimeout } from "./_harness"
 

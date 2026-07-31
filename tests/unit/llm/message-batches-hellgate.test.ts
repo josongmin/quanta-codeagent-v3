@@ -106,7 +106,11 @@ describe("§9.6 Message Batches client", () => {
       requests: [
         {
           custom_id: "r1",
-          params: { model: "claude-opus-4-8", max_tokens: 16, messages: [{ role: "user", content: "hi" }] },
+          params: {
+            model: "claude-opus-4-8",
+            max_tokens: 16,
+            messages: [{ role: "user", content: "hi" }],
+          },
         },
       ],
     })
@@ -194,7 +198,10 @@ describe("§9.6 Message Batches client", () => {
   test("MB-06: non-2xx ⇒ typed {ok:false} carrying status (NO-THROW)", async () => {
     const { fetch } = fakeFetch(() => ({
       status: 429,
-      body: JSON.stringify({ type: "error", error: { type: "rate_limit_error", message: "slow down" } }),
+      body: JSON.stringify({
+        type: "error",
+        error: { type: "rate_limit_error", message: "slow down" },
+      }),
     }))
     const client = mkClient(fetch)
     const res = await client.retrieve("msgbatch_01")
@@ -241,7 +248,11 @@ describe("§9.6 Message Batches e2e", () => {
       requests: [
         {
           custom_id: "r1",
-          params: { model: "claude-opus-4-8", max_tokens: 16, messages: [{ role: "user", content: "hi" }] },
+          params: {
+            model: "claude-opus-4-8",
+            max_tokens: 16,
+            messages: [{ role: "user", content: "hi" }],
+          },
         },
       ],
     })

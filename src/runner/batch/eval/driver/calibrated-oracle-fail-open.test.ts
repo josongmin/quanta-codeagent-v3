@@ -33,7 +33,9 @@ describe("B2 calibratedOracleMustFailOpen — vacuous fail-open", () => {
     // gold ALSO resolves (it resolves everything) ⇒ falseNegative:false, but the
     // oracle is worthless: base is already "resolved".
     expect(
-      calibratedOracleMustFailOpen(cal({ vacuous: true, baseResolved: true, falseNegative: false })),
+      calibratedOracleMustFailOpen(
+        cal({ vacuous: true, baseResolved: true, falseNegative: false }),
+      ),
     ).toBe(true)
   })
 

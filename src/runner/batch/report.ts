@@ -23,8 +23,6 @@
  */
 import { createHash } from "node:crypto"
 import { quantaHomePath, runtimeConfig } from "@/shared"
-import { ObservationError } from "./eval/report"
-import type { BenchObserver, LocalizeData } from "./observe"
 import {
   aggregate,
   classify,
@@ -37,8 +35,10 @@ import {
   llmEvidencePacketCounts,
   summarizeLlmEvidenceArtifacts,
 } from "./eval/llm-evidence-packet"
+import { ObservationError } from "./eval/report"
 import type { ReceiptEvidence, ScoreLabel } from "./eval/score-label"
 import { filesFromPatch } from "./eval/selection-paths"
+import type { BenchObserver, LocalizeData } from "./observe"
 import { resolvedTotals, scoreTotals } from "./observe"
 import type {
   BenchInstanceBudget,
@@ -48,9 +48,9 @@ import type {
   InstanceUsage,
   LlmEvidenceArtifacts,
   PublicRegressionProofState,
+  RepairValidationDecision,
   ReproConsensusProofState,
   ReproOracleCalibration,
-  RepairValidationDecision,
   ReproVoteTelemetry,
   SelectionProofSource,
   SelectionProofState,
@@ -66,10 +66,7 @@ import type {
  * + candidate breadth so post-mortem localization RCA is no longer blind to a
  * dropped-gold-file mislocalization.
  */
-export const emitLocalize = (
-  observer: BenchObserver | undefined,
-  data: LocalizeData,
-): void => {
+export const emitLocalize = (observer: BenchObserver | undefined, data: LocalizeData): void => {
   if (observer === undefined) return
   try {
     observer.localize(data)

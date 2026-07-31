@@ -45,7 +45,11 @@
 import { describe, expect, test } from "bun:test"
 import { BENCH as BENCH_INVENTORY } from "@/config/knob-inventory/bench"
 import type { AnyKnobSchema } from "@/config/knob-schema/contracts"
-import { deriveInventoryDefault, deriveInventoryEntry, isDefaultOff } from "@/config/knob-schema/derive-inventory"
+import {
+  deriveInventoryDefault,
+  deriveInventoryEntry,
+  isDefaultOff,
+} from "@/config/knob-schema/derive-inventory"
 import { ALL_BENCH_SCHEMAS } from "@/config/knob-schema/schemas"
 
 // ---------------------------------------------------------------------------
@@ -173,7 +177,9 @@ describe("bench knob default-OFF byte-identical GLOBAL guard (ALL_BENCH_SCHEMAS)
     const bad = ALL_BENCH_SCHEMAS.filter((s) => !/^QUANTA_[A-Z0-9_]+$/.test(s.envKey))
     expect(bad.map((s) => s.envKey)).toEqual([])
     // biome-ignore lint/suspicious/noConsole: the spec requires PRINTING the covered knob count
-    console.log(`[global-knob-guard] covering ${ALL_BENCH_SCHEMAS.length} bench knobs from ALL_BENCH_SCHEMAS`)
+    console.log(
+      `[global-knob-guard] covering ${ALL_BENCH_SCHEMAS.length} bench knobs from ALL_BENCH_SCHEMAS`,
+    )
   })
 
   test("every schema is default-OFF byte-identical (falsy default OR justified allowlist)", () => {
@@ -266,7 +272,9 @@ describe("global knob guard — red-on-injection (proves it bites)", () => {
   test("FLAGS an allowlisted knob whose default DRIFTS from the documented value", () => {
     // Clone the real protect-tests schema (allowlisted expected `true`) but flip its
     // default → the guard must catch the drift, not wave it through.
-    const protect = ALL_BENCH_SCHEMAS.find((s) => s.envKey === "QUANTA_BENCH_PROTECT_TESTS") as AnyKnobSchema
+    const protect = ALL_BENCH_SCHEMAS.find(
+      (s) => s.envKey === "QUANTA_BENCH_PROTECT_TESTS",
+    ) as AnyKnobSchema
     expect(protect).toBeDefined()
     const drifted: AnyKnobSchema = { ...protect, default: "sneaky" }
     const v = classify(drifted, NON_FALSY_DEFAULT_ALLOWLIST)

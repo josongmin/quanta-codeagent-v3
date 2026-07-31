@@ -21,9 +21,9 @@ export {
   mask,
   type SecretFinding,
   type SecretKind,
-  SecretScanReadError,
   type SecretScanner,
   type SecretScannerOpts,
+  SecretScanReadError,
   type SecretScanTextOpts,
 } from "./port"
 export {

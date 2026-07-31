@@ -24,21 +24,18 @@
  */
 
 import { describe, expect, mock, test } from "bun:test"
-import type { Instance } from "@/runner/batch/types"
-import {
-  benchPostureFromState,
-  resolveBenchKnobs,
-  type BenchPosture,
-} from "@/runner/batch/eval/knobs-bench"
 import type { EvalCtx, EvalPhaseDeps } from "@/runner/batch/eval/kernel/eval-step"
 import { runPipeline, type StepObserver } from "@/runner/batch/eval/kernel/pipeline"
 import { localizeStep } from "@/runner/batch/eval/kernel/steps/localize"
-import { reproStep } from "@/runner/batch/eval/kernel/steps/repro"
 import { repairStep } from "@/runner/batch/eval/kernel/steps/repair"
-import type {
-  RunRepairRoundsArgs,
-  RunRepairRoundsResult,
-} from "@/runner/batch/eval/repair/types"
+import { reproStep } from "@/runner/batch/eval/kernel/steps/repro"
+import {
+  type BenchPosture,
+  benchPostureFromState,
+  resolveBenchKnobs,
+} from "@/runner/batch/eval/knobs-bench"
+import type { RunRepairRoundsArgs, RunRepairRoundsResult } from "@/runner/batch/eval/repair/types"
+import type { Instance } from "@/runner/batch/types"
 
 // The pipeline under test, in the SAME order as the driver's inline sequence.
 const EVAL_STEPS = [localizeStep, reproStep, repairStep] as const

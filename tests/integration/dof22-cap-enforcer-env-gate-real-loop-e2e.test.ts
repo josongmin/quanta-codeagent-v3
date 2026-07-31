@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { z } from "zod"
 import { runAgent } from "@/agent"
 import type { Message, StreamEvent, StreamInput } from "@/llm"
 import { __resetRuntimeConfig } from "@/shared"
 import type { NextAction, Tool, ToolEvent } from "@/tool"
 import { defaultTools, ToolRegistry } from "@/tool"
-import { z } from "zod"
 import { cfg, eventsOf, RecordingStream, text, withTimeout } from "./_harness"
 
 /**
@@ -180,9 +180,7 @@ describe("DOF-22 cap-enforcer — real runAgent loop builds the enforcer from th
       15_000,
       "dof22-cap-inj-off",
     )
-    const offHit = offLlm.seenMessages.some((m) =>
-      toolResultText(m).includes(REMINDER_ENVELOPE),
-    )
+    const offHit = offLlm.seenMessages.some((m) => toolResultText(m).includes(REMINDER_ENVELOPE))
 
     expect(onHit).toBe(true)
     expect(offHit).toBe(false)

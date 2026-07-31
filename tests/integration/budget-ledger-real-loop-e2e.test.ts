@@ -64,7 +64,11 @@ class UsageLLM implements LLMPort {
       // A read tool call keeps the loop going (dispatch → next turn) so the
       // post-continue budget stop condition gets a chance to fire.
       yield { type: "tool_use_start", id: `r${this.turns}`, name: "read" }
-      yield { type: "tool_use_end", id: `r${this.turns}`, input: { path: "/tmp/__budget_nope__.txt" } }
+      yield {
+        type: "tool_use_end",
+        id: `r${this.turns}`,
+        input: { path: "/tmp/__budget_nope__.txt" },
+      }
       yield { type: "message_stop", stop_reason: "tool_use" }
       return
     }

@@ -12,12 +12,11 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { execSync } from "node:child_process"
-import { readFileSync } from "node:fs"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
-import { astGrepTool } from "@/tool/ast-grep"
 import type { ToolContext, ToolEvent } from "@/tool"
+import { astGrepTool } from "@/tool/ast-grep"
 
 // ─── source-level ratchets ──────────────────────────────────────────────────
 
@@ -38,10 +37,7 @@ try {
 
 // ─── helper: drain the execute generator ────────────────────────────────────
 
-async function runTool(
-  input: unknown,
-  cwd: string,
-): Promise<{ ok: boolean; output: string }> {
+async function runTool(input: unknown, cwd: string): Promise<{ ok: boolean; output: string }> {
   const ctx: ToolContext = { cwd, signal: new AbortController().signal }
   let last: { ok: boolean; output: string } = { ok: false, output: "no result" }
   for await (const ev of astGrepTool.execute(input as never, ctx) as AsyncIterable<ToolEvent>) {
@@ -195,10 +191,7 @@ describe("B1: path argument is validated against fs-jail", () => {
     // Red-on-injection: remove the resolveJailed call in ast-grep/index.ts →
     // the tool passes '/etc/passwd' straight to ast-grep, reads an arbitrary
     // file outside the workspace; ok:true with real content instead of ok:false.
-    const result = await runTool(
-      { pattern: "root", path: "/etc/passwd" },
-      tmpDir,
-    )
+    const result = await runTool({ pattern: "root", path: "/etc/passwd" }, tmpDir)
 
     // The jail check must reject the path and return ok:false.
     expect(result.ok).toBe(false)
@@ -218,10 +211,7 @@ describe("B1: path argument is validated against fs-jail", () => {
 
     // Red-on-injection: if resolveJailed rejects ALL paths (over-strict), this
     // test fails (ok:false for an in-jail path), catching the over-correction.
-    const result = await runTool(
-      { pattern: "console.log($A)", path: file },
-      tmpDir,
-    )
+    const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
 
     expect(result.ok).toBe(true)
     expect(result.output).toContain("b1-sample.ts")
@@ -239,10 +229,7 @@ describe("B1: path argument is validated against fs-jail", () => {
 
     // Red-on-injection: without resolveJailed, the tool passes the path as-is;
     // ast-grep reads /etc/hosts; result.ok is true.
-    const result = await runTool(
-      { pattern: "localhost", path: escapePath },
-      tmpDir,
-    )
+    const result = await runTool({ pattern: "localhost", path: escapePath }, tmpDir)
 
     // Either the jail rejects it (ok:false) or the resolved path resolves
     // inside tmpDir and returns no matches (ok:true with no-match).
@@ -350,15 +337,18 @@ describe("B4: multi-line match text must be collapsed to single output line", ()
     // Write a file with a multi-line function that ast-grep can match as a
     // whole (using a pattern that captures the function body).
     const file = join(tmpDir, "b4-multiline.ts")
-    writeFileSync(file, [
-      "function greet(name: string) {",
-      "  const msg = `Hello, ${name}!`;",
-      "  return msg;",
-      "}",
-      "function add(a: number, b: number) {",
-      "  return a + b;",
-      "}",
-    ].join("\n") + "\n")
+    writeFileSync(
+      file,
+      [
+        "function greet(name: string) {",
+        "  const msg = `Hello, ${name}!`;",
+        "  return msg;",
+        "}",
+        "function add(a: number, b: number) {",
+        "  return a + b;",
+        "}",
+      ].join("\n") + "\n",
+    )
 
     // Use a pattern that matches a function declaration — ast-grep may return
     // the entire multi-line function body as m.text.
@@ -405,10 +395,7 @@ describe("B4: multi-line match text must be collapsed to single output line", ()
     const file = join(tmpDir, "b4-singleline.ts")
     writeFileSync(file, "console.log('hello');\n")
 
-    const result = await runTool(
-      { pattern: "console.log($A)", path: file },
-      tmpDir,
-    )
+    const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
 
     expect(result.ok).toBe(true)
 
@@ -431,18 +418,18 @@ describe("B4: multi-line match text must be collapsed to single output line", ()
 
     // Create a file with exactly 3 single-statement matches.
     const file = join(tmpDir, "b4-count.ts")
-    writeFileSync(file, [
-      "console.log('a');",
-      "const x = 1;",
-      "console.log('b');",
-      "const y = 2;",
-      "console.log('c');",
-    ].join("\n") + "\n")
-
-    const result = await runTool(
-      { pattern: "console.log($A)", path: file },
-      tmpDir,
+    writeFileSync(
+      file,
+      [
+        "console.log('a');",
+        "const x = 1;",
+        "console.log('b');",
+        "const y = 2;",
+        "console.log('c');",
+      ].join("\n") + "\n",
     )
+
+    const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
 
     expect(result.ok).toBe(true)
 
@@ -451,9 +438,7 @@ describe("B4: multi-line match text must be collapsed to single output line", ()
     // (extra lines without the file:line: prefix would appear).
     // For single-line matches, this is trivially 3 = 3.
     // The real test is B4-1 which forces multi-line matches.
-    const matchLines = result.output
-      .split("\n")
-      .filter((l) => l.includes("console.log"))
+    const matchLines = result.output.split("\n").filter((l) => l.includes("console.log"))
     expect(matchLines.length).toBe(3)
   })
 })
@@ -486,10 +471,7 @@ describe("B7: stdout is capped before JSON.parse to prevent OOM", () => {
     try {
       // Use a pattern on a very broad match to stress-test output size.
       // Since we can't generate GB of output in a test, we just verify no throw.
-      result = await runTool(
-        { pattern: "$A", path: tmpDir },
-        tmpDir,
-      )
+      result = await runTool({ pattern: "$A", path: tmpDir }, tmpDir)
     } catch {
       threw = true
     }

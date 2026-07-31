@@ -11,10 +11,7 @@
 
 import { describe, expect, test } from "bun:test"
 import { evaluateSuccessPredicate, type SuccessPredicate } from "@/agent/closure"
-import {
-  type IssueDeclaredExpected,
-  PUBLIC_ISSUE_TEXT_PROVENANCE,
-} from "@/agent/verification-plan"
+import { type IssueDeclaredExpected, PUBLIC_ISSUE_TEXT_PROVENANCE } from "@/agent/verification-plan"
 import {
   buildSpecGateEvaluatePredicate,
   resolveRepairEvaluatePredicate,

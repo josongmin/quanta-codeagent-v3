@@ -99,53 +99,49 @@ describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
     T,
   )
 
-  test(
-    "#5/#6 mid-turn typing is captured + echoed in the visible lane DURING a turn",
-    async () => {
-      // A sustained turn (per-event delay) so there's a window to type during it.
-      const cassette = join(dir, "slow.jsonl")
-      writeFileSync(
-        cassette,
-        `${JSON.stringify({
-          id: "replay",
-          events: [
-            { type: "thinking_delta", text: "REASONING start" },
-            { type: "text_delta", delta: "one " },
-            { type: "text_delta", delta: "two " },
-            { type: "text_delta", delta: "three " },
-            { type: "text_delta", delta: "DONE_ANSWER" },
-            { type: "usage", inputTokens: 1, outputTokens: 1, model: "replay" },
-            { type: "message_stop", stop_reason: "end_turn" },
-          ],
-        })}\n`,
-      )
-      const c = drivePtyCli({
-        cwd: dir,
-        env: {
-          QUANTA_SESSIONS_DIR: join(dir, "sessions"),
-          QUANTA_LLM_REPLAY: cassette,
-          QUANTA_LLM_REPLAY_DELAY_MS: "700", // ~5s turn
-          QUANTA_MIDTURN_CAPTURE: "1",
-          QUANTA_MIDTURN_VISIBLE: "1",
-          QUANTA_MEMORY: "off",
-          QUANTA_MEMORY_AUTO: "0",
-        },
-      })
-      cli = c
-      await c.waitFor(BOOT, 15_000)
-      c.send("hello\r") // submit ⇒ sustained turn begins
-      await c.waitFor("REASONING start", 12_000) // turn is mid-stream now
-      c.send("QUEUEDFOLLOWUP") // type DURING the turn
-      // The visible input lane (`» ` prompt, distinct from the between-turns `› `)
-      // echoes the mid-turn keystrokes — proving capture (#5) is reading stdin
-      // during the turn AND the lane (#6) is rendering it (default-OFF before).
-      await c.waitFor("QUEUEDFOLLOWUP", 12_000)
-      expect(c.screen()).toContain("»") // the mid-turn lane rendered (not the normal prompt)
-      // The turn still completes normally underneath the lane.
-      await c.waitFor("DONE_ANSWER", 12_000)
-    },
-    45_000,
-  )
+  test("#5/#6 mid-turn typing is captured + echoed in the visible lane DURING a turn", async () => {
+    // A sustained turn (per-event delay) so there's a window to type during it.
+    const cassette = join(dir, "slow.jsonl")
+    writeFileSync(
+      cassette,
+      `${JSON.stringify({
+        id: "replay",
+        events: [
+          { type: "thinking_delta", text: "REASONING start" },
+          { type: "text_delta", delta: "one " },
+          { type: "text_delta", delta: "two " },
+          { type: "text_delta", delta: "three " },
+          { type: "text_delta", delta: "DONE_ANSWER" },
+          { type: "usage", inputTokens: 1, outputTokens: 1, model: "replay" },
+          { type: "message_stop", stop_reason: "end_turn" },
+        ],
+      })}\n`,
+    )
+    const c = drivePtyCli({
+      cwd: dir,
+      env: {
+        QUANTA_SESSIONS_DIR: join(dir, "sessions"),
+        QUANTA_LLM_REPLAY: cassette,
+        QUANTA_LLM_REPLAY_DELAY_MS: "700", // ~5s turn
+        QUANTA_MIDTURN_CAPTURE: "1",
+        QUANTA_MIDTURN_VISIBLE: "1",
+        QUANTA_MEMORY: "off",
+        QUANTA_MEMORY_AUTO: "0",
+      },
+    })
+    cli = c
+    await c.waitFor(BOOT, 15_000)
+    c.send("hello\r") // submit ⇒ sustained turn begins
+    await c.waitFor("REASONING start", 12_000) // turn is mid-stream now
+    c.send("QUEUEDFOLLOWUP") // type DURING the turn
+    // The visible input lane (`» ` prompt, distinct from the between-turns `› `)
+    // echoes the mid-turn keystrokes — proving capture (#5) is reading stdin
+    // during the turn AND the lane (#6) is rendering it (default-OFF before).
+    await c.waitFor("QUEUEDFOLLOWUP", 12_000)
+    expect(c.screen()).toContain("»") // the mid-turn lane rendered (not the normal prompt)
+    // The turn still completes normally underneath the lane.
+    await c.waitFor("DONE_ANSWER", 12_000)
+  }, 45_000)
 
   test(
     "#12 done + compact usage render after a turn",
@@ -203,10 +199,7 @@ describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
       await c.waitFor(/— done \(completed,[\s\S]*ask before every edit/, 12_000)
       c.send("world\r") // prompt 2 — starts second session
       // Wait for "done" to appear a SECOND time in the accumulated buffer.
-      await c.waitFor(
-        /— done \(completed,.*\n.*— done \(completed,/s,
-        12_000,
-      )
+      await c.waitFor(/— done \(completed,.*\n.*— done \(completed,/s, 12_000)
     },
     T,
   )

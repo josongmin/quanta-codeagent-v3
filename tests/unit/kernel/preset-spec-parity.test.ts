@@ -9,9 +9,12 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { resolvePresetSpec } from "@/runner/batch/eval/kernel/preset-spec"
-import { AGENTLESS_V1, AGENTLESS_V6_SINGLEPASS_EXECFULL } from "@/runner/batch/eval/kernel/preset-specs"
 import type { PresetSpec } from "@/config/knob-schema/contracts"
+import { resolvePresetSpec } from "@/runner/batch/eval/kernel/preset-spec"
+import {
+  AGENTLESS_V1,
+  AGENTLESS_V6_SINGLEPASS_EXECFULL,
+} from "@/runner/batch/eval/kernel/preset-specs"
 import { KNOB_PRESETS } from "@/runner/knobs/presets"
 
 const SPECS: readonly PresetSpec[] = [AGENTLESS_V1, AGENTLESS_V6_SINGLEPASS_EXECFULL]

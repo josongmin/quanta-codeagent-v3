@@ -1,15 +1,14 @@
 import { createHash } from "node:crypto"
-import { isRecord } from "@/shared"
 import { readFileSync } from "node:fs"
 import { filesFromPatch } from "@/runner/batch/eval/selection-paths"
+import { isRecord } from "@/shared"
 import { loadVerdicts, type RunVerdicts } from "./verdicts"
 
 export const ANSWER_KEY_CLEAN_AFTER = "2026-06-22T14:14:55+09:00"
 
 const ANSWER_KEY_CLEAN_AFTER_MS = Date.parse(ANSWER_KEY_CLEAN_AFTER)
 
-const hasOwn = (value: Record<string, unknown>, key: string): boolean =>
-  Object.prototype.hasOwnProperty.call(value, key)
+const hasOwn = (value: Record<string, unknown>, key: string): boolean => Object.hasOwn(value, key)
 
 const asNonEmptyString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() !== "" ? value : undefined

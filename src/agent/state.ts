@@ -1,13 +1,7 @@
 import type { Message } from "@/llm"
 import { firstInvalidMessageElement } from "@/session/store"
 import { errMessage, logger } from "@/shared"
-import {
-  type AtomicWriteSync,
-  fileExists,
-  parentDir,
-  readFile,
-  writeFileAtomic,
-} from "@/storage"
+import { type AtomicWriteSync, fileExists, parentDir, readFile, writeFileAtomic } from "@/storage"
 
 /**
  * Session state persistence / resume (RFC §13 Q2 → DECISION: a plain JSON

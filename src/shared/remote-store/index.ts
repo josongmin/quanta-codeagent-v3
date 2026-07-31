@@ -4,11 +4,11 @@
  * `apps/` or `llm/` — the dependency arrow points one way.
  */
 export type { RemoteBackend } from "./backend"
-export { type SegmentStore, segmentStore } from "./segment-store"
 export {
   isResumeEligible,
-  readReceipt,
   type ResumeReceipt,
+  readReceipt,
   writeReceipt,
 } from "./resume-receipt"
 export { type RunAwsResult, type S3BackendOptions, s3Backend } from "./s3-backend"
+export { type SegmentStore, segmentStore } from "./segment-store"

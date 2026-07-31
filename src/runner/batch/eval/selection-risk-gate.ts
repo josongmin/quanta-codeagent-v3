@@ -65,7 +65,9 @@ export const buildSelectionRiskGate = (
           expand: structural.expand,
           reasons: structural.reasons,
           ...(structural.patchBudget !== undefined ? { patchBudget: structural.patchBudget } : {}),
-          ...(llm.llmEvidencePacket !== undefined ? { llmEvidencePacket: llm.llmEvidencePacket } : {}),
+          ...(llm.llmEvidencePacket !== undefined
+            ? { llmEvidencePacket: llm.llmEvidencePacket }
+            : {}),
           shadow: {
             expand: llm.expand,
             reasons: llm.reasons,
@@ -75,7 +77,9 @@ export const buildSelectionRiskGate = (
           expand: structural.expand || llm.expand,
           reasons: [...structural.reasons, ...llm.reasons],
           ...(structural.patchBudget !== undefined ? { patchBudget: structural.patchBudget } : {}),
-          ...(llm.llmEvidencePacket !== undefined ? { llmEvidencePacket: llm.llmEvidencePacket } : {}),
+          ...(llm.llmEvidencePacket !== undefined
+            ? { llmEvidencePacket: llm.llmEvidencePacket }
+            : {}),
         }
   }
 }

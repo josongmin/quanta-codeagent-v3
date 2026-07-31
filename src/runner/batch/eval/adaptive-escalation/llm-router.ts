@@ -37,8 +37,8 @@
  * *interpret* the model's reply; it never hides a failed call.
  */
 
-import { ADAPTIVE_DECISION_JSON_SCHEMA } from "./decision-schema"
 import type { AdaptiveRouterInput } from "./controller"
+import { ADAPTIVE_DECISION_JSON_SCHEMA } from "./decision-schema"
 import type { RouterEvidence } from "./router-evidence"
 import { buildRouterPrompt } from "./router-prompt"
 

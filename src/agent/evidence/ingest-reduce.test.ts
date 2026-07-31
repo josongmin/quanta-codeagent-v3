@@ -19,7 +19,11 @@ const frame = (over: Partial<ParsedTestFrame> = {}): ParsedTestFrame => ({
 describe("ingestTestFrames", () => {
   test("drops vendored frames, keeps user/test as parsed cards at file:line", () => {
     const cards = ingestTestFrames(
-      [frame(), frame({ tier: "vendored", file: "site-packages/x.py" }), frame({ tier: "test", file: "test_fib.py", line: 9 })],
+      [
+        frame(),
+        frame({ tier: "vendored", file: "site-packages/x.py" }),
+        frame({ tier: "test", file: "test_fib.py", line: 9 }),
+      ],
       4,
     )
     expect(cards.length).toBe(2)
@@ -43,7 +47,12 @@ describe("ingestTestFrames", () => {
 describe("ingestRawObservation", () => {
   test("raw card carries a reveal handle, confidence=raw", () => {
     const c = ingestRawObservation("build_log", "compile failed (see raw)", 2, "raw-7")
-    expect(c).toMatchObject({ source: "build_log", confidence: "raw", revealHandle: "raw-7", turn: 2 })
+    expect(c).toMatchObject({
+      source: "build_log",
+      confidence: "raw",
+      revealHandle: "raw-7",
+      turn: 2,
+    })
   })
 })
 
@@ -64,7 +73,13 @@ describe("renderEvidenceDigest — end to end through the ledger", () => {
   test("contradiction leads with a banner", () => {
     const l = createEvidenceLedger()
     const base = l.add(ingestTestFrames([frame()], 1)[0]!)
-    l.add({ turn: 2, source: "grep", claim: "code returns 34 unconditionally", confidence: "parsed", contradicts: [base.id] })
+    l.add({
+      turn: 2,
+      source: "grep",
+      claim: "code returns 34 unconditionally",
+      confidence: "parsed",
+      contradicts: [base.id],
+    })
     const out = renderEvidenceDigest(l.snapshot())
     expect(out).toContain("1 CONTRADICTION(s) — resolve these first")
     expect(out).toContain("⚠contradicts")
@@ -72,7 +87,8 @@ describe("renderEvidenceDigest — end to end through the ledger", () => {
 
   test("bounds to most-recent maxCards and says so", () => {
     const l = createEvidenceLedger()
-    for (let i = 0; i < 20; i++) l.add({ turn: i, source: "grep", claim: `hit ${i}`, confidence: "parsed" })
+    for (let i = 0; i < 20; i++)
+      l.add({ turn: i, source: "grep", claim: `hit ${i}`, confidence: "parsed" })
     const out = renderEvidenceDigest(l.snapshot(), 5)
     expect(out).toContain("showing most recent 5")
     expect(out).toContain("hit 19") // newest kept

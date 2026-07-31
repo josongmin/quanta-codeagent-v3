@@ -82,7 +82,7 @@ describe("session_config — op:get", () => {
     // Section header rule + title.
     expect(out).toMatch(/^── session_config ─+$/m)
     // Effort + budget line — uses thousands separator and explicit "thinking budget".
-    expect(out).toMatch(/effort\s+high  ·  thinking budget: 16,384 tokens/)
+    expect(out).toMatch(/effort\s+high {2}· {2}thinking budget: 16,384 tokens/)
     expect(out).toContain("permission mode  bypass")
     expect(out).toMatch(/identity mode\s+code_agent/)
     expect(out).toMatch(/tool profile\s+write/)

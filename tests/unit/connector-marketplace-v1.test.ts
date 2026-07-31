@@ -100,7 +100,10 @@ describe("§1.6 lifecycle core — install / enable / disable / uninstall", () =
 
   test("disable then enable round-trips state + bumps lastUpdatedAt", async () => {
     let t = 100
-    const m = createConnectorMarketplace({ store: createInMemoryInstalledAppStore(), clock: { now: () => t } })
+    const m = createConnectorMarketplace({
+      store: createInMemoryInstalledAppStore(),
+      clock: { now: () => t },
+    })
     await m.install(APP)
     t = 200
     const d = await m.disable("acme-notes")

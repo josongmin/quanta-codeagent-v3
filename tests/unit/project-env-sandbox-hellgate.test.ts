@@ -37,8 +37,8 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from "node:fs"
@@ -47,6 +47,7 @@ import { join } from "node:path"
 import {
   buildProjectEnvUvRunArgv,
   hasProjectEnvSandboxBlock,
+  hasProjectEnvSourceShimBlock,
   materializeProjectEnvPyproject,
   materializeProjectEnvSourceShimFile,
   PROJECT_ENV_SANDBOX_BEGIN,
@@ -54,7 +55,6 @@ import {
   PROJECT_ENV_SOURCE_SHIM_BEGIN,
   PROJECT_ENV_SOURCE_SHIM_END,
   type ProjectEnvSandboxFs,
-  hasProjectEnvSourceShimBlock,
   prepareProjectEnvSandbox,
   revertProjectEnvSandbox,
   stripProjectEnvSandboxBlock,
@@ -115,9 +115,7 @@ const writeNestedDepUtilPackage = (dir: string, pyproject: string): void => {
   )
   writeFileSync(
     join(dir, "astropy", "wcs", "setup_package.py"),
-    ["from setuptools.dep_util import newer_group", "NEEDS_DEP_UTIL = newer_group", ""].join(
-      "\n",
-    ),
+    ["from setuptools.dep_util import newer_group", "NEEDS_DEP_UTIL = newer_group", ""].join("\n"),
   )
   writeFileSync(join(dir, "astropy_stub.py"), "VALUE = 1\n")
   writeFileSync(join(dir, "pyproject.toml"), pyproject)
@@ -527,9 +525,9 @@ describe("materializeProjectEnvSourceShimFile / stripProjectEnvSourceShimBlocks"
 
   test("non-target files / repos get NO source shim", () => {
     const base = "from setuptools.dep_util import newer_group\n"
-    expect(materializeProjectEnvSourceShimFile("django/django", "/tmp/setup_package.py", base)).toBe(
-      undefined,
-    )
+    expect(
+      materializeProjectEnvSourceShimFile("django/django", "/tmp/setup_package.py", base),
+    ).toBe(undefined)
     expect(materializeProjectEnvSourceShimFile("astropy/astropy", "/tmp/module.py", base)).toBe(
       undefined,
     )

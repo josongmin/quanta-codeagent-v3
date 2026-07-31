@@ -39,21 +39,18 @@
 // pair (emoji, CJK-ext) is NOT torn apart — a per-code-unit class would match both
 // halves of a legitimate pair and corrupt it. `new RegExp(string)` keeps the
 // control-range literals out of the source (no biome rule trip).
-const BIDI_ZW_RE = new RegExp("[\\u00ad\\u200b-\\u200f\\u202a-\\u202e\\u2066-\\u2069\\ufeff]", "g")
+const BIDI_ZW_RE = /[\u00ad\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g
 // Strip only UNPAIRED surrogates (a high not followed by a low, or a low not
 // preceded by a high) — these corrupt UTF-8 at a terminal but carry no content.
 // A well-formed PAIR is left intact.
-const LONE_SURROGATE_RE = new RegExp(
-  "[\\ud800-\\udbff](?![\\udc00-\\udfff])|(?<![\\ud800-\\udbff])[\\udc00-\\udfff]",
-  "g",
-)
+const LONE_SURROGATE_RE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g
 // Dangerous C0 (everything U+0000-U+001F EXCEPT TAB U+0009 / LF U+000A, the only
 // two legible-structure controls) + DEL U+007F + C1 (U+0080-U+009F — includes the
 // 8-bit CSI introducer U+009B and OSC introducer U+009D). ESC (U+001B) is matched
 // here, so no raw CSI/OSC opener byte survives. CR U+000D is DELIBERATELY matched
 // (defanged to `^M`): a bare/mid-line CR moves the cursor to column 0 and is an
 // OVERWRITE-forge control.
-const CONTROL_RE = new RegExp("[\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f]", "g")
+const CONTROL_RE = /[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g
 
 /** Rewrite one matched control char to its visible caret/hex notation: a C0
  *  char `X` => `^` + (X XOR 0x40) (so ESC U+001B => `^[`, BEL U+0007 => `^G`);

@@ -137,9 +137,14 @@ describe("buildAcceptanceSelector — onSelection tier telemetry (observe-only)"
   test("a THROWING onSelection sink never sinks the round (swallowed)", async () => {
     // observe-only contract: telemetry failure must not crash the repair round.
     const cands = [outcome("A"), outcome("B")]
-    const winner = await buildAcceptanceSelector({ runRepro: async () => true }, undefined, undefined, () => {
-      throw new Error("telemetry sink boom")
-    })(cands)
+    const winner = await buildAcceptanceSelector(
+      { runRepro: async () => true },
+      undefined,
+      undefined,
+      () => {
+        throw new Error("telemetry sink boom")
+      },
+    )(cands)
     expect(cands.includes(winner)).toBe(true) // selection survived the throwing sink
   })
 

@@ -1,7 +1,7 @@
 import { __resetRuntimeConfig } from "@/shared"
 
 const hasOwn = (obj: Record<string, string | undefined>, key: string): boolean =>
-  Object.prototype.hasOwnProperty.call(obj, key)
+  Object.hasOwn(obj, key)
 
 const writeEnv = (vars: ReadonlyMap<string, string | undefined>): void => {
   for (const [key, value] of vars) {

@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { runAgent } from "@/agent"
-import type { Message } from "@/llm"
 import { resolveForkExperiments } from "@/apps/bench/eval/fork-experiments"
+import type { Message } from "@/llm"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { ev, RecordingStream, ScriptedLLM, text, toolUse, withTimeout } from "./_harness"
 
@@ -44,7 +44,8 @@ const isTurnCall = (messages: Message[]): boolean => {
   return tail.startsWith(`${OPEN}\n`) && tail.endsWith(`\n${CLOSE}`)
 }
 const turnCalls = (llm: ScriptedLLM): Message[][] => llm.seenMessages.filter(isTurnCall)
-const containsSentinel = (messages: Message[]): boolean => JSON.stringify(messages).includes(SENTINEL)
+const containsSentinel = (messages: Message[]): boolean =>
+  JSON.stringify(messages).includes(SENTINEL)
 
 const seedUser = (t: string): Message[] =>
   [{ role: "user", content: [{ type: "text", text: t }] }] as Message[]

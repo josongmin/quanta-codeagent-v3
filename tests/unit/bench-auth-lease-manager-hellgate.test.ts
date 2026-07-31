@@ -9,8 +9,8 @@
  *  - tie-break is deterministic (preferred > least-loaded > manifest order).
  */
 import { beforeEach, describe, expect, test } from "bun:test"
-import { AuthLeaseManager } from "@/apps/bench/auth-pool"
 import type { AuthPoolEntry } from "@/apps/bench/auth-pool"
+import { AuthLeaseManager } from "@/apps/bench/auth-pool"
 
 const ENTRIES: readonly AuthPoolEntry[] = [
   { label: "a", authFile: "/a.json", maxParallel: 6, maxBoxes: 1, cooldownBaseSec: 10 },
@@ -135,9 +135,9 @@ describe("T-2 per-account cooldown isolation", () => {
 describe("T-2 deterministic tie-break", () => {
   test("preferred account wins when ready", () => {
     const m = mgrOf()
-    expect(m.acquire({ requestedSlots: 1, runId: "r1", preferredAccountLabel: "b" })?.accountLabel).toBe(
-      "b",
-    )
+    expect(
+      m.acquire({ requestedSlots: 1, runId: "r1", preferredAccountLabel: "b" })?.accountLabel,
+    ).toBe("b")
   })
 
   test("preferred but saturated ⇒ falls through to another ready account", () => {

@@ -217,7 +217,11 @@ describe("ADR-0296 — bash background + bash_await + bash_kill (hellgate)", () 
     installBashBgRegistry(registry)
     const { result } = await collect(
       bashTool,
-      { command: "printf partial-output; sleep 30", timeout_behavior: "background", timeout_ms: 100 },
+      {
+        command: "printf partial-output; sleep 30",
+        timeout_behavior: "background",
+        timeout_ms: 100,
+      },
       ctx(),
     )
     expect(result.ok).toBe(true)

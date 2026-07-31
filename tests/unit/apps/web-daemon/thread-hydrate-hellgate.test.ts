@@ -29,7 +29,8 @@ describe("HELLGATE P1 Phase 2 — swap live session onto a thread", () => {
     let active: string | null = null
     const activeThreadId = (): string | null => active
     const out = await hydrateThreadIntoLiveSession("t-abc", {
-      loadThread: async (id) => (id === "t-abc" ? { meta: meta("t-abc"), messages: msgs } : undefined),
+      loadThread: async (id) =>
+        id === "t-abc" ? { meta: meta("t-abc"), messages: msgs } : undefined,
       replaceTranscript: async (m) => void replaced.push(m),
       setActiveThreadId: (id) => (active = id),
     })

@@ -93,7 +93,9 @@ describe("grade backend — error-log fetch (jun-28 observability)", () => {
       const fetch = issued.find(
         (i) =>
           i.cmd === "scp" &&
-          i.args.some((a) => a.includes(`ubuntu@1.2.3.4:~/logs/run_evaluation/run-xyz/quanta/${id}`)) &&
+          i.args.some((a) =>
+            a.includes(`ubuntu@1.2.3.4:~/logs/run_evaluation/run-xyz/quanta/${id}`),
+          ) &&
           i.args.some((a) => a.includes(`error-logs/${id}`)) &&
           i.args.includes("-r"),
       )
@@ -108,9 +110,9 @@ describe("grade backend — error-log fetch (jun-28 observability)", () => {
 
   test("error_ids EMPTY → no error-log scp issued (no wasted round-trips)", async () => {
     const { issued, outcome } = await runGrade(REPORT_NO_ERROR)
-    expect(issued.some((i) => i.cmd === "scp" && i.args.some((a) => a.includes("error-logs")))).toBe(
-      false,
-    )
+    expect(
+      issued.some((i) => i.cmd === "scp" && i.args.some((a) => a.includes("error-logs"))),
+    ).toBe(false)
     expect(outcome.errorLogDir).toBeUndefined()
   })
 

@@ -219,9 +219,9 @@ describe("connect({resumeFromSeq}) — door-level resume against the real bridge
     )
 
     expect(harness.serverSent.filter((m) => m.kind === "snapshot")).toEqual([])
-    expect(
-      harness.serverSent.flatMap((m) => (m.kind === "event" ? [m.event.seq] : [])),
-    ).toEqual([12, 13])
+    expect(harness.serverSent.flatMap((m) => (m.kind === "event" ? [m.event.seq] : []))).toEqual([
+      12, 13,
+    ])
     expect(resumedKinds(harness.serverSent)).toEqual([
       { kind: "resumed", sessionId: "session-1", servedThroughSeq: 13, mode: "replay" },
     ])
@@ -266,9 +266,9 @@ describe("connect({resumeFromSeq}) — door-level resume against the real bridge
     )
 
     expect(harness.serverSent.filter((m) => m.kind === "snapshot")).toEqual([])
-    expect(
-      harness.serverSent.flatMap((m) => (m.kind === "event" ? [m.event.seq] : [])),
-    ).toEqual([11, 12, 13, 14])
+    expect(harness.serverSent.flatMap((m) => (m.kind === "event" ? [m.event.seq] : []))).toEqual([
+      11, 12, 13, 14,
+    ])
     expect(resumedKinds(harness.serverSent)).toEqual([
       { kind: "resumed", sessionId: "session-1", servedThroughSeq: 14, mode: "replay" },
     ])
