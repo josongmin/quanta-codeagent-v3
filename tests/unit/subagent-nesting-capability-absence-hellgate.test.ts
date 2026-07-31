@@ -57,11 +57,11 @@ import { defaultTools, type Tool, ToolRegistry } from "@/tool"
 
 /** Set the runtime cap through the real env→runtimeConfig seam. */
 const withCap = (cap: number): void => {
-  process.env["QUANTA_MAX_DESCENDANT_DEPTH"] = String(cap)
+  process.env.QUANTA_MAX_DESCENDANT_DEPTH = String(cap)
   __resetRuntimeConfig()
 }
 const clearCap = (): void => {
-  delete process.env["QUANTA_MAX_DESCENDANT_DEPTH"]
+  delete process.env.QUANTA_MAX_DESCENDANT_DEPTH
   __resetRuntimeConfig()
 }
 

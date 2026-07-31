@@ -121,7 +121,7 @@ beforeEach(() => {
   __resetRuntimeConfig()
 })
 afterEach(() => {
-  delete process.env["QUANTA_PASSIVE_VCS"]
+  delete process.env.QUANTA_PASSIVE_VCS
   __resetRuntimeConfig()
   for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
@@ -140,7 +140,7 @@ describe("A/B. classified VcsEvent reaches config.stream as an AgentEvent", () =
     git(dir, ["checkout", "-q", "main"])
 
     const stream = recordingStream()
-    process.env["QUANTA_PASSIVE_VCS"] = "1"
+    process.env.QUANTA_PASSIVE_VCS = "1"
     __resetRuntimeConfig()
     await runDispatch("git merge --no-ff -m 'merge feature' feature", dir, stream, true)
 
@@ -157,7 +157,7 @@ describe("A/B. classified VcsEvent reaches config.stream as an AgentEvent", () =
     git(dir, ["add", "."])
 
     const stream = recordingStream()
-    process.env["QUANTA_PASSIVE_VCS"] = "1"
+    process.env.QUANTA_PASSIVE_VCS = "1"
     __resetRuntimeConfig()
     await runDispatch("git commit -m 'add c'", dir, stream, true)
 
@@ -179,13 +179,13 @@ describe("C/D. default-OFF byte-identical", () => {
 
     // ON reference run (sink wired): capture the tool output.
     const onStream = recordingStream()
-    process.env["QUANTA_PASSIVE_VCS"] = "1"
+    process.env.QUANTA_PASSIVE_VCS = "1"
     __resetRuntimeConfig()
     const on = await runDispatch("git status --porcelain", dir, onStream, true)
 
     // OFF run (sink still wired on config, but the knob gates the hook off).
     const offStream = recordingStream()
-    delete process.env["QUANTA_PASSIVE_VCS"]
+    delete process.env.QUANTA_PASSIVE_VCS
     __resetRuntimeConfig()
     const off = await runDispatch("git status --porcelain", dir, offStream, true)
 
@@ -204,7 +204,7 @@ describe("C/D. default-OFF byte-identical", () => {
     git(dir, ["checkout", "-q", "main"])
 
     const stream = recordingStream()
-    process.env["QUANTA_PASSIVE_VCS"] = "1"
+    process.env.QUANTA_PASSIVE_VCS = "1"
     __resetRuntimeConfig()
     const r = await runDispatch("git merge --no-ff -m 'merge feature' feature", dir, stream, false)
 
@@ -221,7 +221,7 @@ describe("E/F. knob ON negative paths emit NOTHING", () => {
   test("HELL-BUS-E: FAILED git (exitCode≠0) → NO vcs_event", async () => {
     const dir = makeRepo()
     const stream = recordingStream()
-    process.env["QUANTA_PASSIVE_VCS"] = "1"
+    process.env.QUANTA_PASSIVE_VCS = "1"
     __resetRuntimeConfig()
     const r = await runDispatch("git merge does-not-exist-branch", dir, stream, true)
 
@@ -232,7 +232,7 @@ describe("E/F. knob ON negative paths emit NOTHING", () => {
   test("HELL-BUS-F: non-git command echoing a git phrase → NO vcs_event", async () => {
     const dir = makeRepo()
     const stream = recordingStream()
-    process.env["QUANTA_PASSIVE_VCS"] = "1"
+    process.env.QUANTA_PASSIVE_VCS = "1"
     __resetRuntimeConfig()
     await runDispatch('echo "Fast-forward main -> main"', dir, stream, true)
 

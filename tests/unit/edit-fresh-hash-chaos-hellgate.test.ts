@@ -376,8 +376,6 @@ describe("jul-13 edit-fresh-hash CHAOS — seeded property (interleaved multi-fi
         }
       }
     } catch (e) {
-      // Deterministic replay: print the seed so the exact interleaving reproduces.
-      console.error(`[edit-fresh-hash chaos] FAILED — replay with SEED=0x${SEED.toString(16)}`)
       throw e
     }
 

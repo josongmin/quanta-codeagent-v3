@@ -170,9 +170,8 @@ const validateStateContract = (groundingCase: GroundingCase): void => {
     )
   }
   if (
-    visibleThreadIds !== undefined &&
-    pausedThreadIds !== undefined &&
-    pausedThreadIds.some((threadId) => !visibleThreadIds.includes(threadId))
+    visibleThreadIds &&
+    pausedThreadIds?.some((threadId) => !visibleThreadIds.includes(threadId))
   ) {
     throw new Error(
       `grounding case ${groundingCase.id} stateContract.pausedThreadIds must be a subset of visibleThreadIds`,

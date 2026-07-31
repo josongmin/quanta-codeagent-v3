@@ -79,13 +79,13 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v)
 
 const isResponse = (v: Record<string, unknown>): boolean =>
-  v["jsonrpc"] === "2.0" &&
-  typeof v["id"] === "number" &&
+  v.jsonrpc === "2.0" &&
+  typeof v.id === "number" &&
   !("method" in v) &&
   ("result" in v || "error" in v)
 
 const isNotification = (v: Record<string, unknown>): boolean =>
-  v["jsonrpc"] === "2.0" && typeof v["method"] === "string" && !("id" in v)
+  v.jsonrpc === "2.0" && typeof v.method === "string" && !("id" in v)
 
 export interface PluginHostOpts {
   readonly defaultCallTimeoutMs?: number

@@ -81,10 +81,10 @@ export const isHandoffRequiredEvent = (v: unknown): v is HandoffRequiredEvent =>
   if (v === null || typeof v !== "object") return false
   const o = v as Record<string, unknown>
   return (
-    o["kind"] === "hitl-handoff" &&
-    typeof o["tool"] === "string" &&
-    typeof o["handoffMessage"] === "string" &&
-    typeof o["reason"] === "string" &&
-    typeof o["timestamp"] === "number"
+    o.kind === "hitl-handoff" &&
+    typeof o.tool === "string" &&
+    typeof o.handoffMessage === "string" &&
+    typeof o.reason === "string" &&
+    typeof o.timestamp === "number"
   )
 }

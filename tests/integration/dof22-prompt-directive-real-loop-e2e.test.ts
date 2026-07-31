@@ -58,7 +58,7 @@ class MessageCapturingLLM {
  *  rides a user-role `<system-reminder>` text block. */
 const reminderText = (seen: Message[][]): string =>
   seen
-    .flatMap((msgs) => msgs)
+    .flat()
     .flatMap((m) => (Array.isArray(m.content) ? m.content : []))
     .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
     .map((b) => b.text)

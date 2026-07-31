@@ -189,58 +189,42 @@ const auditRow = (row: Row, tier: "A" | "B" | "C"): string[] => {
 const printAudit = async (): Promise<void> => {
   const all = await fetchAll()
   const byId = new Map(all.map((r) => [r.instance_id, r]))
-  console.log(
-    `SWE-bench Verified 10-pick audit — ${PICKS_10.length} pinned, ${all.length} dataset rows\n`,
-  )
+
   let bad = 0
   for (const id of PICKS_10) {
     const t = tierOf(id)
     const r = byId.get(id)
     if (!r) {
-      console.log(`✗ [${t}] ${id.padEnd(28)} — MISSING from dataset`)
       bad++
       continue
     }
     const v = auditRow(r, t === "?" ? "B" : t)
-    const f2p = f2pCount(r)
-    const files = goldFileCount(r.patch)
-    const tag = v.length === 0 ? "✓" : "✗"
-    console.log(
-      `${tag} [${t}] ${id.padEnd(28)} ${r.repo.padEnd(20)} diff=${r.difficulty.padEnd(16)} files=${files} f2p=${f2p}${v.length ? `  VIOLATIONS: ${v.join(", ")}` : ""}`,
-    )
+    const _f2p = f2pCount(r)
+    const _files = goldFileCount(r.patch)
+    const _tag = v.length === 0 ? "✓" : "✗"
+
     if (v.length) bad++
   }
   if (bad > 0) {
-    console.error(`\nAUDIT FAILED: ${bad} pinned instance(s) missing or out of tier criteria.`)
-    console.error(
-      "Run `--suggest` to find alternates within each tier and edit DISCRIM_PICKS / STRETCH_PICKS.",
-    )
     process.exit(1)
   }
-  console.log("\nAUDIT OK: all 10 pinned picks satisfy their tier criteria.")
 }
 
 const printSuggest = async (): Promise<void> => {
   const all = await fetchAll()
-  console.log("Tier B candidates (15 min - 1 hour, single/dual-file, f2p≤5):")
+
   const b = all
     .filter((r) => violationsB(r).length === 0)
     .filter((r) => !(PICKS_10 as readonly string[]).includes(r.instance_id))
     .slice(0, 30)
-  for (const r of b) {
-    console.log(
-      `  ${r.instance_id.padEnd(28)} ${r.repo.padEnd(20)} ${r.difficulty.padEnd(16)} f2p=${f2pCount(r)} patch=${r.patch.split("\n").length}L`,
-    )
+  for (const _r of b) {
   }
-  console.log("\nTier C candidates (15 min - 4 hours, ≤3 files, f2p≤10):")
+
   const c = all
     .filter((r) => violationsC(r).length === 0)
     .filter((r) => !(PICKS_10 as readonly string[]).includes(r.instance_id))
     .slice(0, 30)
-  for (const r of c) {
-    console.log(
-      `  ${r.instance_id.padEnd(28)} ${r.repo.padEnd(20)} ${r.difficulty.padEnd(16)} f2p=${f2pCount(r)} patch=${r.patch.split("\n").length}L`,
-    )
+  for (const _r of c) {
   }
 }
 
@@ -256,7 +240,6 @@ const writePicksImpl = async (ids: readonly string[], outName: string): Promise<
     lines.push(JSON.stringify(r))
   }
   await Bun.write(`${import.meta.dir}/${outName}`, `${lines.join("\n")}\n`)
-  console.log(`wrote ${outName} (${lines.length} verbatim rows)`)
 }
 
 const writePicks = async (): Promise<void> => {

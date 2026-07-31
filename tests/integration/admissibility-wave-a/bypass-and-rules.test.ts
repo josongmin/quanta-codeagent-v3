@@ -1,24 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { type AdmissibilityWaveAOptions, runAdmissibilityGate } from "@/agent/admissibility-gate"
-import {
-  type DenialMemory,
-  OutcomeInvariantError,
-  type PermissionContext,
-  ReviewerUnavailableError,
-  type ToolActionKeyed,
-} from "@/permission"
 import { RulesStore } from "@/rules"
 import { ToolRegistry } from "@/tool"
-import {
-  actionOf,
-  bashSchema,
-  call,
-  cfg,
-  decision,
-  loadedStore,
-  makePort,
-  makeTool,
-} from "./_fixtures"
+import { actionOf, bashSchema, call, cfg, loadedStore, makeTool } from "./_fixtures"
 
 describe("Wave A: byte-identical bypass when no option supplied", () => {
   test("undefined wave → behaves exactly like legacy 5-arg call", async () => {

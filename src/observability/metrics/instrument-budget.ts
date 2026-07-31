@@ -15,7 +15,7 @@
 import type { BudgetLedger, BudgetSnapshot, RecordResult, UsageEvent } from "@/agent/budget-ledger"
 import type { MetricsRegistry } from "./port"
 
-const safe = (m: MetricsRegistry, fn: () => void): void => {
+const safe = (_m: MetricsRegistry, fn: () => void): void => {
   try {
     fn()
   } catch {

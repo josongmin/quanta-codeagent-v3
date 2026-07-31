@@ -24,7 +24,7 @@ const ctx = {
   signal: new AbortController().signal,
 }
 
-const runOnce = async <I>(
+const runOnce = async <_I>(
   tool: ReturnType<typeof ghTools>[number],
   input: unknown,
 ): Promise<{ ok: boolean; output?: string }> => {

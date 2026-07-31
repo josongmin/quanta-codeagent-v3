@@ -14,7 +14,7 @@ beforeAll(() => {
   datasetFile = join(dir, "instances.jsonl")
   writeFileSync(
     datasetFile,
-    [
+    `${[
       JSON.stringify({
         instance_id: "demo__inst-1",
         repo: "demo/repo",
@@ -27,7 +27,7 @@ beforeAll(() => {
         base_commit: "1".repeat(40),
         problem_statement: "fix two",
       }),
-    ].join("\n") + "\n",
+    ].join("\n")}\n`,
   )
 })
 

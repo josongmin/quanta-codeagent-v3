@@ -127,14 +127,14 @@ const safeParseOne = (
   // REFUSE wrong usecase / wrong schema rather than silently coercing — the
   // model picking the wrong leaf is a real signal that the prompt or the
   // taxonomy needs work; masking it strands future drift.
-  const declaredUsecase = r["usecase"]
+  const declaredUsecase = r.usecase
   if (declaredUsecase !== requestedUsecase) {
     return {
       ok: false,
       reason: `usecase mismatch: model produced "${String(declaredUsecase)}" but request was "${requestedUsecase}"`,
     }
   }
-  const declaredSchema = r["schema"]
+  const declaredSchema = r.schema
   if (declaredSchema !== SCENARIO_SCHEMA_VERSION) {
     return {
       ok: false,

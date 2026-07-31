@@ -40,7 +40,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   rmSync(tmp, { recursive: true, force: true })
-  delete process.env["QUANTA_HITL_OVERRIDES"]
+  delete process.env.QUANTA_HITL_OVERRIDES
   __resetRuntimeConfig()
   __resetHitlOverrides()
 })
@@ -160,7 +160,7 @@ describe("onHandoff event seam", () => {
       }),
       "utf8",
     )
-    process.env["QUANTA_HITL_OVERRIDES"] = overridePath
+    process.env.QUANTA_HITL_OVERRIDES = overridePath
     __resetRuntimeConfig()
     __resetHitlOverrides()
 

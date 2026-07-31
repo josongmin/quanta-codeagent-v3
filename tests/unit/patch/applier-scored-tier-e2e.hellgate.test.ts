@@ -47,8 +47,7 @@ describe("[hellgate] apply_patch scored-tier decisive-best — end-to-end", () =
     //   @5: ["  foo","  bar","  baz"] verbatim score 0 (all indented)
     // EXACT tier finds neither (line 0 indented in both) ⇒ falls to the TRIMMED
     // tier → 2 hits → was an ambiguous throw; the scored tie-break recovers @0.
-    const original =
-      ["  foo", "bar", "baz", "MID-1", "MID-2", "  foo", "  bar", "  baz"].join("\n") + "\n"
+    const original = `${["  foo", "bar", "baz", "MID-1", "MID-2", "  foo", "  bar", "  baz"].join("\n")}\n`
     const file = join(dir, "code.txt")
     writeFileSync(file, original)
 
@@ -71,7 +70,7 @@ describe("[hellgate] apply_patch scored-tier decisive-best — end-to-end", () =
     // The edit landed at the decisive window @0 (its context rewritten verbatim
     // from the patch + baz→BAZ). The SECOND window (indices 5..7) is UNTOUCHED.
     expect(out).toBe(
-      ["foo", "bar", "BAZ", "MID-1", "MID-2", "  foo", "  bar", "  baz"].join("\n") + "\n",
+      `${["foo", "bar", "BAZ", "MID-1", "MID-2", "  foo", "  bar", "  baz"].join("\n")}\n`,
     )
     // MISAPPLY guard: the wrong (lower-score) window kept its exact original bytes.
     expect(out.split("\n").slice(5, 8)).toEqual(["  foo", "  bar", "  baz"])
@@ -81,8 +80,7 @@ describe("[hellgate] apply_patch scored-tier decisive-best — end-to-end", () =
     const dir = mkdtempSync(join(root, "tie-"))
     // Two trimmed-equal windows that BOTH score 2 verbatim (line 0 indented in
     // both; lines 1,2 exact in both) ⇒ no strict winner ⇒ stay ambiguous.
-    const original =
-      ["  foo", "bar", "baz", "MID-1", "MID-2", "  foo", "bar", "baz"].join("\n") + "\n"
+    const original = `${["  foo", "bar", "baz", "MID-1", "MID-2", "  foo", "bar", "baz"].join("\n")}\n`
     const file = join(dir, "code.txt")
     writeFileSync(file, original)
 
@@ -109,7 +107,7 @@ describe("[hellgate] apply_patch scored-tier decisive-best — end-to-end", () =
   test("EXACT-tier path is unaffected — a unique exact match still lands without the scored tier", async () => {
     const dir = mkdtempSync(join(root, "exact-"))
     // One verbatim-exact window + an indented decoy. The exact tier wins outright.
-    const original = ["foo", "bar", "baz", "MID", "  foo", "  bar", "  baz"].join("\n") + "\n"
+    const original = `${["foo", "bar", "baz", "MID", "  foo", "  bar", "  baz"].join("\n")}\n`
     const file = join(dir, "code.txt")
     writeFileSync(file, original)
 
@@ -127,7 +125,7 @@ describe("[hellgate] apply_patch scored-tier decisive-best — end-to-end", () =
     const r = await run(patch, dir)
     expect(r.ok).toBe(true)
     expect(readFileSync(file, "utf8")).toBe(
-      ["foo", "bar", "BAZ", "MID", "  foo", "  bar", "  baz"].join("\n") + "\n",
+      `${["foo", "bar", "BAZ", "MID", "  foo", "  bar", "  baz"].join("\n")}\n`,
     )
   })
 })

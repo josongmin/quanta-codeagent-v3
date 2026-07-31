@@ -84,11 +84,6 @@ describe("E2E-1: probe failure → ok:false with install hint", () => {
 
   test("execute yields ok:false when ast-grep binary is absent", async () => {
     if (astGrepAvailable) {
-      // If ast-grep IS available on the host we cannot exercise the no-binary
-      // path without monkey-patching the module cache.  Mark as a known skip.
-      console.log(
-        "[E2E-1] ast-grep is available on this host — probe-failure path not exercisable; skip",
-      )
       return
     }
 
@@ -110,7 +105,6 @@ describe("E2E-1: probe failure → ok:false with install hint", () => {
 describe("E2E-2: real pattern search finds matches (skipIf !astGrepAvailable)", () => {
   it("finds 2 console.log matches in a temp JS file", async () => {
     if (!astGrepAvailable) {
-      console.log("[E2E-2] ast-grep not available — skipping live execution")
       return
     }
 
@@ -139,14 +133,13 @@ describe("E2E-2: real pattern search finds matches (skipIf !astGrepAvailable)", 
 describe("E2E-3: 50-match cap fires when file has 60 matches (skipIf !astGrepAvailable)", () => {
   it("output contains cap message OR ≤50 match lines", async () => {
     if (!astGrepAvailable) {
-      console.log("[E2E-3] ast-grep not available — skipping live execution")
       return
     }
 
     // Build a file with exactly 60 console.log lines
     const lines = Array.from({ length: 60 }, (_, i) => `console.log(${i});`)
     const file = join(tmpDir, "e2e3-many-matches.js")
-    writeFileSync(file, lines.join("\n") + "\n")
+    writeFileSync(file, `${lines.join("\n")}\n`)
 
     const result = await run(astGrepTool, { pattern: "console.log($A)", path: file }, tmpDir)
 
@@ -170,7 +163,6 @@ describe("E2E-3: 50-match cap fires when file has 60 matches (skipIf !astGrepAva
 describe("E2E-4: nonexistent path → does not throw (skipIf !astGrepAvailable)", () => {
   it("returns a {ok, output} object without throwing", async () => {
     if (!astGrepAvailable) {
-      console.log("[E2E-4] ast-grep not available — skipping live execution")
       return
     }
 
@@ -193,7 +185,6 @@ describe("E2E-4: nonexistent path → does not throw (skipIf !astGrepAvailable)"
 describe("E2E-5: language override flag does not crash (skipIf !astGrepAvailable)", () => {
   it("accepts language:'rust' without throwing", async () => {
     if (!astGrepAvailable) {
-      console.log("[E2E-5] ast-grep not available — skipping live execution")
       return
     }
 

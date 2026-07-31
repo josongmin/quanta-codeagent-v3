@@ -35,7 +35,7 @@ const lldbDap = (): boolean => {
   }
 }
 const D = hasDebugpy() ? describe : describe.skip
-const buildSources = (dir: string) => ({
+const buildSources = (_dir: string) => ({
   detect: (c: string) =>
     detectToolchain(c, { fileExists: async (n: string) => existsSync(join(c, n)) }),
   runTests: (tc: never, c: string) => runToolchain(tc, c),

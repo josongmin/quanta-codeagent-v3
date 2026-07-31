@@ -70,8 +70,7 @@ export const deriveEvidenceFactsFromPacket = (packet: LlmEvidencePacket): Eviden
     ),
     // primary rail present ⇒ the declared condition has an executable check;
     // a target with no rail ⇒ declared-but-not-evidenced; no target ⇒ none.
-    declaredConditionEvidenced:
-      target === undefined ? null : target.primaryRail !== null ? true : false,
+    declaredConditionEvidenced: target === undefined ? null : target.primaryRail !== null,
     // B9: only THIS candidate's executed green counts as its positive proof.
     positiveProof: receipts.some(
       (r) => r.state === "candidate_green" && isThisCandidatesReceipt(r),

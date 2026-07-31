@@ -10,12 +10,7 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { RemoteBackend } from "@/shared/remote-store"
-import {
-  fileSpanSink,
-  noopSpanSink,
-  resolveSpanSink,
-  s3SpanSink,
-} from "../../src/apps/bench/span-sink"
+import { fileSpanSink, resolveSpanSink, s3SpanSink } from "../../src/apps/bench/span-sink"
 
 const tmp = (name: string): string => join(mkdtempSync(join(tmpdir(), "spansink-")), name)
 

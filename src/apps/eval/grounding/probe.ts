@@ -4,7 +4,7 @@ import type { LLMPort, Message } from "@/llm"
 import { costUsd } from "@/observability/pricing"
 import { errMessage } from "@/shared"
 import type { TokenUsage } from "../storage/schema"
-import { classifyGroundingInfraError, type GroundingErrorKind } from "./diagnostics"
+import { classifyGroundingInfraError } from "./diagnostics"
 import { type GroundingParseResult, parseGroundingDecisionText } from "./parser"
 import type {
   GroundingCase,
@@ -145,15 +145,15 @@ const toRepoRules = (
 
 const renderHistoryEntry = (entry: GroundingCase["history"][number]): string => {
   const meta: Record<string, unknown> = {}
-  if (entry.kind !== undefined) meta["kind"] = entry.kind
-  if (entry.threadId !== undefined) meta["threadId"] = entry.threadId
-  if (entry.referentId !== undefined) meta["referentId"] = entry.referentId
-  if (entry.mentionedFileIds !== undefined) meta["mentionedFileIds"] = entry.mentionedFileIds
+  if (entry.kind !== undefined) meta.kind = entry.kind
+  if (entry.threadId !== undefined) meta.threadId = entry.threadId
+  if (entry.referentId !== undefined) meta.referentId = entry.referentId
+  if (entry.mentionedFileIds !== undefined) meta.mentionedFileIds = entry.mentionedFileIds
   if (entry.mentionedReferentIds !== undefined)
-    meta["mentionedReferentIds"] = entry.mentionedReferentIds
-  if (entry.toolName !== undefined) meta["toolName"] = entry.toolName
-  if (entry.mentionedThreadIds !== undefined) meta["mentionedThreadIds"] = entry.mentionedThreadIds
-  if (entry.policyMarkers !== undefined) meta["policyMarkers"] = entry.policyMarkers
+    meta.mentionedReferentIds = entry.mentionedReferentIds
+  if (entry.toolName !== undefined) meta.toolName = entry.toolName
+  if (entry.mentionedThreadIds !== undefined) meta.mentionedThreadIds = entry.mentionedThreadIds
+  if (entry.policyMarkers !== undefined) meta.policyMarkers = entry.policyMarkers
   if (Object.keys(meta).length === 0) return entry.text
   return [`<grounding-meta>${JSON.stringify(meta)}</grounding-meta>`, entry.text].join("\n")
 }

@@ -173,10 +173,6 @@ export const maybeTeeResumeRecording = (
 
   const instanceId = env.QUANTA_BENCH_INSTANCE_ID
   if (instanceId === undefined || instanceId === "") {
-    // fail-closed: enabled but no instance id ⇒ do NOT guess, resume-write OFF.
-    console.warn(
-      "[bench-resume] QUANTA_BENCH_RESUME active but QUANTA_BENCH_INSTANCE_ID is unset — resume-write OFF (not guessing the instance id)",
-    )
     return llm
   }
 

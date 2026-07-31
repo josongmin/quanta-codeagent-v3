@@ -39,7 +39,7 @@ const build = (deps: Parameters<typeof buildConfig>[1]) =>
 
 describe("bench fork-experiment buildConfig wiring", () => {
   test("threads deps.turnContextMutator onto the AgentConfig (the exact function, by reference)", () => {
-    const marker = (turn: number, input: unknown) => input as never
+    const marker = (_turn: number, input: unknown) => input as never
     const cfg = build({
       llm: new StubLLM(),
       maxTurns: 1,

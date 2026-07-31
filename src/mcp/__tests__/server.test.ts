@@ -62,7 +62,7 @@ const req = (id: number, method: string, params?: unknown): string =>
   `${JSON.stringify({ jsonrpc: "2.0", id, method, ...(params !== undefined ? { params } : {}) })}\n`
 
 const replyFor = (writer: Captured, id: number): Record<string, unknown> => {
-  const found = (writer.parsed() as Array<Record<string, unknown>>).find((m) => m["id"] === id)
+  const found = (writer.parsed() as Array<Record<string, unknown>>).find((m) => m.id === id)
   if (found === undefined) throw new Error(`no reply for id ${id}`)
   return found
 }
@@ -74,12 +74,12 @@ describe("McpServer.initialize", () => {
     const server = makeServer(spy.port, w)
     server.feed(req(1, "initialize", { protocolVersion: "2025-06-18" }))
     const reply = replyFor(w, 1)
-    const result = reply["result"] as Record<string, unknown>
+    const result = reply.result as Record<string, unknown>
     expect(SUPPORTED_PROTOCOL_VERSIONS as readonly string[]).toContain(
-      result["protocolVersion"] as string,
+      result.protocolVersion as string,
     )
-    expect((result["serverInfo"] as Record<string, unknown>)["name"]).toBe("quanta")
-    expect((result["capabilities"] as Record<string, unknown>)["tools"]).toBeDefined()
+    expect((result.serverInfo as Record<string, unknown>).name).toBe("quanta")
+    expect((result.capabilities as Record<string, unknown>).tools).toBeDefined()
   })
 
   test("notifications/initialized produces NO reply", () => {
@@ -95,7 +95,7 @@ describe("McpServer.tools/list (whitelist projection)", () => {
     const w = captureWriter()
     const server = makeServer(createSpy().port, w)
     server.feed(req(2, "tools/list"))
-    const result = replyFor(w, 2)["result"] as { tools: Array<{ name: string }> }
+    const result = replyFor(w, 2).result as { tools: Array<{ name: string }> }
     const names = result.tools.map((t) => t.name)
     expect(names).toContain("read")
     // red-on-injection: if the whitelist regressed, `bash` would appear here.
@@ -106,7 +106,7 @@ describe("McpServer.tools/list (whitelist projection)", () => {
     const w = captureWriter()
     const server = makeServer(createSpy().port, w)
     server.feed(req(2, "tools/list"))
-    const result = replyFor(w, 2)["result"] as {
+    const result = replyFor(w, 2).result as {
       tools: Array<{ name: string; description: string }>
     }
     const read = result.tools.find((t) => t.name === "read")
@@ -118,7 +118,7 @@ describe("McpServer.tools/list (whitelist projection)", () => {
     const empty: ToolListSource = { specs: () => [], readOnly: () => false }
     const server = makeServer(createSpy().port, w, empty)
     server.feed(req(3, "tools/list"))
-    const result = replyFor(w, 3)["result"] as { tools: unknown[] }
+    const result = replyFor(w, 3).result as { tools: unknown[] }
     expect(result.tools).toEqual([])
   })
 
@@ -147,7 +147,7 @@ describe("McpServer.tools/list (whitelist projection)", () => {
     let id = 10
     for (let page = 0; page < 10; page += 1) {
       server.feed(req(id, "tools/list", cursor === undefined ? {} : { cursor }))
-      const result = replyFor(w, id)["result"] as {
+      const result = replyFor(w, id).result as {
         tools: Array<{ name: string }>
         nextCursor?: string
       }
@@ -167,7 +167,7 @@ describe("McpServer.tools/list (whitelist projection)", () => {
     const server = makeServer(createSpy().port, w)
     server.feed(req(4, "tools/list", { cursor: "not-a-real-cursor" }))
     const reply = replyFor(w, 4)
-    expect((reply["error"] as { code: number }).code).toBe(-32602)
+    expect((reply.error as { code: number }).code).toBe(-32602)
   })
 })
 
@@ -179,7 +179,7 @@ describe("McpServer.tools/call (dispatch fence)", () => {
     server.feed(req(5, "tools/call", { name: "bash", arguments: { command: "rm -rf /" } }))
     await drain()
     const reply = replyFor(w, 5)
-    const error = reply["error"] as { code: number; message: string }
+    const error = reply.error as { code: number; message: string }
     expect(error.code).toBe(-32602)
     // red-on-injection: the RCE path must never reach the dispatcher.
     expect(spy.calls).toHaveLength(0)
@@ -195,7 +195,7 @@ describe("McpServer.tools/call (dispatch fence)", () => {
     server.feed(req(6, "tools/call", { name: "read", arguments: { path: "x" } }))
     await drain()
     expect(spy.calls).toEqual([["read", { path: "x" }]])
-    const result = replyFor(w, 6)["result"] as {
+    const result = replyFor(w, 6).result as {
       content: Array<{ type: string; text: string }>
       isError: boolean
     }
@@ -209,7 +209,7 @@ describe("McpServer.tools/call (dispatch fence)", () => {
     const server = makeServer(spy.port, w)
     server.feed(req(7, "tools/call", { name: "read", arguments: {} }))
     await drain()
-    const result = replyFor(w, 7)["result"] as { isError: boolean }
+    const result = replyFor(w, 7).result as { isError: boolean }
     expect(result.isError).toBe(true)
   })
 
@@ -219,7 +219,7 @@ describe("McpServer.tools/call (dispatch fence)", () => {
     const server = makeServer(spy.port, w)
     server.feed(req(8, "tools/call", { arguments: {} }))
     await drain()
-    expect((replyFor(w, 8)["error"] as { code: number }).code).toBe(-32602)
+    expect((replyFor(w, 8).error as { code: number }).code).toBe(-32602)
     expect(spy.calls).toHaveLength(0)
   })
 
@@ -231,10 +231,10 @@ describe("McpServer.tools/call (dispatch fence)", () => {
     const server = makeServer(spy.port, w)
     server.feed(req(9, "tools/call", { name: "read", arguments: {} }))
     await drain()
-    expect((replyFor(w, 9)["error"] as { code: number }).code).toBe(-32603)
+    expect((replyFor(w, 9).error as { code: number }).code).toBe(-32603)
     // pump survives: a subsequent valid request still gets serviced.
     server.feed(req(11, "tools/list"))
-    expect(replyFor(w, 11)["result"]).toBeDefined()
+    expect(replyFor(w, 11).result).toBeDefined()
   })
 
   test("result over MAX_RESULT_CHARS is truncated (local cap)", async () => {
@@ -244,7 +244,7 @@ describe("McpServer.tools/call (dispatch fence)", () => {
     const server = makeServer(spy.port, w)
     server.feed(req(12, "tools/call", { name: "read", arguments: {} }))
     await drain()
-    const result = replyFor(w, 12)["result"] as { content: Array<{ text: string }> }
+    const result = replyFor(w, 12).result as { content: Array<{ text: string }> }
     expect(result.content[0]?.text.length).toBeLessThan(big.length)
   })
 })
@@ -254,7 +254,7 @@ describe("McpServer routing", () => {
     const w = captureWriter()
     const server = makeServer(createSpy().port, w)
     server.feed(req(13, "nonsense/method"))
-    expect((replyFor(w, 13)["error"] as { code: number }).code).toBe(-32601)
+    expect((replyFor(w, 13).error as { code: number }).code).toBe(-32601)
   })
 })
 

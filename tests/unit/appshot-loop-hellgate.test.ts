@@ -28,7 +28,6 @@ import {
   type AppshotArtifactSink,
   type AppshotPort,
   clampIter,
-  isRealJudgePass,
   judgeVerdict,
   runAppshotLoop,
   type ScaffoldResult,

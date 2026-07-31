@@ -115,10 +115,10 @@ const readLog = (path: string): ReadonlyArray<{ path: string; body: unknown }> =
 }
 
 const exportLines = (prefix: string, count: number): string =>
-  Array.from(
+  `${Array.from(
     { length: count },
     (_, i) => `export const ${prefix}_${String(i + 1).padStart(3, "0")} = ${i + 1}`,
-  ).join("\n") + "\n"
+  ).join("\n")}\n`
 
 const expectedInitialIds = [
   "src/main.ts:1-50",
@@ -332,9 +332,7 @@ const inspectRealTable = (
 
 describe("search pipeline Lance wire (real LanceDB backing via compatible REST shim)", () => {
   if (!available || python === null) {
-    test.skip("python+lancedb unavailable — skipping real LanceDB-backed shim round trip", () => {
-      console.log("[lance-real-wire.test] python+lancedb unavailable; tests skipped")
-    })
+    test.skip("python+lancedb unavailable — skipping real LanceDB-backed shim round trip", () => {})
     return
   }
 

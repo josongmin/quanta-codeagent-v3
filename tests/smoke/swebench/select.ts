@@ -107,45 +107,36 @@ const main = async (): Promise<void> => {
       return JSON.stringify(r)
     })
     await Bun.write(`${import.meta.dir}/picks.jsonl`, `${lines.join("\n")}\n`)
-    console.log(`wrote picks.jsonl (${lines.length} official-format rows)`)
+
     return
   }
 
   // audit
   let bad = 0
-  console.log(
-    `SWE-bench Verified smoke audit — ${PINNED.length} pinned, ${all.length} dataset rows\n`,
-  )
+
   for (const id of PINNED) {
     const r = byId.get(id)
     if (!r) {
-      console.log(`✗ ${id} — MISSING from dataset`)
       bad++
       continue
     }
     const v = violations(r)
-    const f2p = f2pCount(r)
-    const tag = v.length === 0 ? "✓" : "✗"
-    console.log(
-      `${tag} ${id.padEnd(26)} ${r.repo.padEnd(20)} patch=${r.patch.split("\n").length}L f2p=${f2p}${v.length ? `  VIOLATIONS: ${v.join(", ")}` : ""}`,
-    )
+    const _f2p = f2pCount(r)
+    const _tag = v.length === 0 ? "✓" : "✗"
+
     if (v.length) bad++
   }
 
-  const alts = all
+  const _alts = all
     .filter(
       (r) =>
         violations(r).length === 0 && !PINNED.includes(r.instance_id as (typeof PINNED)[number]),
     )
     .map((r) => r.instance_id)
-  console.log(`\nEqually-qualified alternatives (same criteria, not pinned): ${alts.length}`)
-  console.log(alts.slice(0, 20).join(", ") + (alts.length > 20 ? ", …" : ""))
 
   if (bad > 0) {
-    console.error(`\nAUDIT FAILED: ${bad} pinned instance(s) missing or out of criteria.`)
     process.exit(1)
   }
-  console.log("\nAUDIT OK: all pinned smoke picks satisfy criteria.")
 }
 
 // Run as a CLI only; importing (e.g. the guard test) must not fetch.

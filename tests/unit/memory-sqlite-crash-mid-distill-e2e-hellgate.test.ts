@@ -59,7 +59,6 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { SqliteStore } from "@/memory/adapters/sqlite"
 import { EMBED_DIM } from "@/memory/types"
-import { deserializeVec } from "@/memory/vector"
 
 const IS_WIN = process.platform === "win32"
 const bunBin = process.execPath // bun runs the test ⇒ same bin spawns children

@@ -135,12 +135,6 @@ describe("3-axis consistency ratchet — capability ↔ manifest ↔ feature-cat
     )
     const unreferenced = CAPABILITIES.map((c) => c.id).filter((id) => !referenced.has(id))
     if (unreferenced.length > 0) {
-      // Report-only: a capability without a feature record is a documentation gap,
-      // not a split-brain. Surfaced loudly so it is visible, but does not block.
-      // eslint-disable-next-line no-console
-      console.warn(
-        `[capability-axis] capabilities with NO feature-catalog entry: ${unreferenced.join(", ")}`,
-      )
     }
     // The 4 seeded caps (workflow/artifact-store/image-gen/office-authoring) are all
     // linked, so today this is empty — assert that as a forward ratchet.
@@ -201,11 +195,6 @@ describe("3-axis consistency ratchet — capability ↔ manifest ↔ feature-cat
       }
     }
     if (mismatches.length > 0) {
-      // eslint-disable-next-line no-console
-      console.warn(
-        `[capability-axis] PRE-EXISTING gate inconsistencies (capability gate has no ` +
-          `matching manifest entry): ${mismatches.join(", ")}`,
-      )
     }
     expect(mismatches).toEqual([])
   })

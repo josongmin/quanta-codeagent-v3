@@ -6,7 +6,7 @@
  * image pull fail, OOM, naming collision, etc.) without a live daemon.
  */
 import { describe, expect, test } from "bun:test"
-import type { DockerExecResult, DockerProcess, RemoteHandle, RemoteSpec } from "@/remote"
+import type { DockerExecResult, DockerProcess, RemoteSpec } from "@/remote"
 import {
   classifyDockerStderr,
   composeDockerRunArgv,
@@ -412,9 +412,9 @@ describe("HELL-DK-15 — 1000-cycle no zombie", () => {
     })
     for (let i = 0; i < N; i += 1) {
       const sp = await adapter.spawn(baseSpec())
-      if (!sp.ok) throw new Error("spawn failed at " + i)
+      if (!sp.ok) throw new Error(`spawn failed at ${i}`)
       const c = await adapter.cancel(sp.value)
-      if (!c.ok) throw new Error("cancel failed at " + i)
+      if (!c.ok) throw new Error(`cancel failed at ${i}`)
     }
     expect(runs).toBe(N)
     expect(stops).toBe(N)

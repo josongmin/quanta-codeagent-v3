@@ -79,7 +79,7 @@ export const createPrCommentTriggerSource = (opts: PrCommentTriggerOpts): Trigge
   return {
     async poll(pollOpts): Promise<readonly ProactiveTrigger[]> {
       const signal = pollOpts?.signal
-      if (signal !== undefined && signal.aborted) return []
+      if (signal?.aborted) return []
 
       // Boundary gate (audit L9 H6): never interpolate an unvalidated slug /
       // number into the gh-api path. A bad value collapses to an empty poll
@@ -99,7 +99,7 @@ export const createPrCommentTriggerSource = (opts: PrCommentTriggerOpts): Trigge
       // only to NEW activity).
       const loaded = await safeLoadWatermark(opts.watermarkStore, opts.watermarkKey, opts.onError)
       if (!loaded.ok) return []
-      if (signal !== undefined && signal.aborted) return []
+      if (signal?.aborted) return []
       const existing = loaded.value
       const watermark = existing ?? new Date(opts.clockPort.now()).toISOString()
       if (existing === undefined) {
@@ -115,12 +115,12 @@ export const createPrCommentTriggerSource = (opts: PrCommentTriggerOpts): Trigge
           return []
         return []
       }
-      if (signal !== undefined && signal.aborted) return []
+      if (signal?.aborted) return []
 
       const path = `repos/${opts.repoSlug}/issues/${opts.prNumber}/comments?since=${encodeURIComponent(watermark)}`
       const res = await safeRun(opts.ghCliPort, ["api", path], opts.repoCwd, signal)
       if (res === undefined || res.exitCode !== 0) return []
-      if (signal !== undefined && signal.aborted) return []
+      if (signal?.aborted) return []
 
       const rows = safeJsonArray<GhCommentRow>(res.stdout)
       if (rows === undefined || rows.length === 0) return []
@@ -137,7 +137,7 @@ export const createPrCommentTriggerSource = (opts: PrCommentTriggerOpts): Trigge
         fresh.push({ row, stamp })
       }
       if (fresh.length === 0) return []
-      if (signal !== undefined && signal.aborted) return []
+      if (signal?.aborted) return []
 
       // Build triggers FIRST, tracking two stamps that drive an idempotency-safe
       // watermark:

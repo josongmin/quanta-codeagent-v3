@@ -266,7 +266,7 @@ describe("runFromPrCmd", () => {
       ) {
         const idx = args.indexOf("-f")
         const bodyArg = idx >= 0 ? args[idx + 1] : undefined
-        if (bodyArg !== undefined && bodyArg.startsWith("body=")) {
+        if (bodyArg?.startsWith("body=")) {
           postedBody = bodyArg.slice("body=".length)
         }
         return { stdout: JSON.stringify({ html_url: "url" }), stderr: "", exitCode: 0 }

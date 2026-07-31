@@ -6,7 +6,7 @@
 import { describe, expect, test } from "bun:test"
 import type { FileSystemPort } from "@/storage"
 import { defaultRuntimePort } from "@/tool/evidence"
-import { buildEvidence, type EvidenceSources } from "@/tool/evidence/builder"
+import { buildEvidence } from "@/tool/evidence/builder"
 import { makeCollectEvidenceTool, parseGitPorcelain } from "@/tool/evidence/tool"
 import type { TestRunResult, Toolchain } from "@/tool/testrun"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
@@ -35,7 +35,7 @@ const failing: TestRunResult = {
   ok: false,
   failed: [{ name: "t", file: "src/lib.rs", line: 6 }],
 }
-const green: TestRunResult = { runner: "cargo", passed: 2, ok: true, failed: [] }
+const _green: TestRunResult = { runner: "cargo", passed: 2, ok: true, failed: [] }
 
 describe("buildEvidence — absolute-path handoff to enrichment ports", () => {
   test("lspStatic receives an ABSOLUTE path even when the failure file is relative", async () => {

@@ -122,8 +122,7 @@ const segmentsOf = (path: string): ReadonlyArray<string> =>
  * submodule or linked worktree, e.g. `vendor/lib/.git/hooks/pre-commit`) is
  * matched by scanning every segment, not just the first.
  */
-const firstGitDirIndex = (segments: ReadonlyArray<string>): number =>
-  segments.findIndex((seg) => seg === ".git")
+const firstGitDirIndex = (segments: ReadonlyArray<string>): number => segments.indexOf(".git")
 
 /**
  * Classify why writing `path` would be a security escape vector, or `null` if
@@ -172,7 +171,7 @@ export const gitWriteProtectReason = (relativeOrAbsPath: string): GitWriteProtec
     }
   }
 
-  const vscodeIdx = segments.findIndex((seg) => seg === ".vscode")
+  const vscodeIdx = segments.indexOf(".vscode")
   if (vscodeIdx !== -1 && segments.length > vscodeIdx + 1) {
     // A file UNDER `.vscode/`. A bare `.vscode` directory write is not flagged
     // (creating the empty dir alone has no execution effect).

@@ -134,13 +134,13 @@ describe("parseRewindArgs / parseForkArgs", () => {
   })
   test("/rewind <id> --yes parses", () => {
     const p = __test.parseRewindArgs(["m2", "--yes"])
-    if (typeof p === "string") throw new Error("unexpected string: " + p)
+    if (typeof p === "string") throw new Error(`unexpected string: ${p}`)
     expect(p.idPrefix).toBe("m2")
     expect(p.yes).toBe(true)
   })
   test("/rewind --to-last accepted", () => {
     const p = __test.parseRewindArgs(["--to-last"])
-    if (typeof p === "string") throw new Error("unexpected string: " + p)
+    if (typeof p === "string") throw new Error(`unexpected string: ${p}`)
     expect(p.toLast).toBe(true)
   })
   test("/rewind unknown flag rejected", () => {

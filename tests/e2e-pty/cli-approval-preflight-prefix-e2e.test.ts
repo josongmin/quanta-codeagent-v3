@@ -46,37 +46,36 @@ const EDIT_STALE_CASSETTE = `${JSON.stringify({
 /** Three assistant rounds in ONE session: bash `echo` twice (sibling commands),
  *  then a final text turn. Round 2's `echo` must ride the prefix grant minted on
  *  round 1, so the operator answers exactly ONCE. */
-const BASH_PREFIX_CASSETTE =
-  [
-    {
-      id: "replay",
-      events: [
-        { type: "tool_use_start", id: "call_b1", name: "bash" },
-        { type: "tool_use_end", id: "call_b1", input: { command: "echo PREFIX_ONE" } },
-        { type: "usage", inputTokens: 10, outputTokens: 5, model: "replay" },
-        { type: "message_stop", stop_reason: "tool_use" },
-      ],
-    },
-    {
-      id: "replay",
-      events: [
-        { type: "tool_use_start", id: "call_b2", name: "bash" },
-        { type: "tool_use_end", id: "call_b2", input: { command: "echo PREFIX_TWO" } },
-        { type: "usage", inputTokens: 10, outputTokens: 5, model: "replay" },
-        { type: "message_stop", stop_reason: "tool_use" },
-      ],
-    },
-    {
-      id: "replay",
-      events: [
-        { type: "text_delta", delta: "ALL_DONE_PREFIX" },
-        { type: "usage", inputTokens: 10, outputTokens: 5, model: "replay" },
-        { type: "message_stop", stop_reason: "end_turn" },
-      ],
-    },
-  ]
-    .map((e) => JSON.stringify(e))
-    .join("\n") + "\n"
+const BASH_PREFIX_CASSETTE = `${[
+  {
+    id: "replay",
+    events: [
+      { type: "tool_use_start", id: "call_b1", name: "bash" },
+      { type: "tool_use_end", id: "call_b1", input: { command: "echo PREFIX_ONE" } },
+      { type: "usage", inputTokens: 10, outputTokens: 5, model: "replay" },
+      { type: "message_stop", stop_reason: "tool_use" },
+    ],
+  },
+  {
+    id: "replay",
+    events: [
+      { type: "tool_use_start", id: "call_b2", name: "bash" },
+      { type: "tool_use_end", id: "call_b2", input: { command: "echo PREFIX_TWO" } },
+      { type: "usage", inputTokens: 10, outputTokens: 5, model: "replay" },
+      { type: "message_stop", stop_reason: "tool_use" },
+    ],
+  },
+  {
+    id: "replay",
+    events: [
+      { type: "text_delta", delta: "ALL_DONE_PREFIX" },
+      { type: "usage", inputTokens: 10, outputTokens: 5, model: "replay" },
+      { type: "message_stop", stop_reason: "end_turn" },
+    ],
+  },
+]
+  .map((e) => JSON.stringify(e))
+  .join("\n")}\n`
 
 const countOccurrences = (haystack: string, needle: string): number =>
   haystack.split(needle).length - 1

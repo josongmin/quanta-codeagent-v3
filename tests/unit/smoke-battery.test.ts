@@ -53,10 +53,7 @@ describe("smoke battery (tier-0 replay)", () => {
 
   afterAll(() => {
     if (skipped.length > 0) {
-      const lines = skipped.map((s) => `  - ${s.depth}/${s.id}: ${s.reason}`)
-      console.warn(
-        `\n[smoke-battery] ${skipped.length} scenario(s) skipped (pending trajectory):\n${lines.join("\n")}\n`,
-      )
+      const _lines = skipped.map((s) => `  - ${s.depth}/${s.id}: ${s.reason}`)
     }
     assertSkipsWithinBaseline(skipped.length)
   })

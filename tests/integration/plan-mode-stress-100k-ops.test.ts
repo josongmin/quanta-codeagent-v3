@@ -64,11 +64,7 @@ describe("stress: 100k isMutatingTool calls", () => {
     expect(trueCount + falseCount).toBe(100_000)
     expect(trueCount).toBeGreaterThan(0)
     expect(falseCount).toBeGreaterThan(0)
-    // Soft signal: log timing. NOT a hard gate — CI variance would force a
-    // heuristic. The intent is to catch O(n²) regressions: if someone "fixes"
-    // the table by serializing per call, this test wall-clocks at minutes.
-    // eslint-disable-next-line no-console -- intentional perf signal
-    console.log(`[stress] 100k isMutatingTool calls completed in ${elapsedMs.toFixed(1)}ms`)
+
     // Generous ceiling: a properly O(1) implementation easily fits in 5s; if
     // we ever hit this, something has gone REALLY wrong (memory thrash,
     // allocation explosion). The intent is to flag pathology, not to gate
@@ -97,8 +93,7 @@ describe("stress: 100k mode transition cycles", () => {
     // Parity: started at default, flipped even number of times (100_000 is
     // even) → end at default.
     expect(mode).toBe("default")
-    // eslint-disable-next-line no-console -- intentional perf signal
-    console.log(`[stress] 100k mode transitions completed in ${elapsedMs.toFixed(1)}ms`)
+
     expect(elapsedMs).toBeLessThan(5000)
   })
 

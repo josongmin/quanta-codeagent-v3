@@ -648,15 +648,15 @@ export class HttpSseMcpTransport implements McpTransport {
 const isValidEnvelope = (m: unknown): m is JsonRpcMessage => {
   if (typeof m !== "object" || m === null) return false
   const o = m as Record<string, unknown>
-  if (o["jsonrpc"] !== "2.0") return false
+  if (o.jsonrpc !== "2.0") return false
   const hasId = "id" in o
   const hasMethod = "method" in o
   if (!hasId && !hasMethod) return false
   if (hasId) {
-    const id = o["id"]
+    const id = o.id
     if (typeof id !== "string" && typeof id !== "number") return false
   }
-  if (hasMethod && typeof o["method"] !== "string") return false
+  if (hasMethod && typeof o.method !== "string") return false
   return true
 }
 

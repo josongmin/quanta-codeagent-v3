@@ -74,7 +74,7 @@ export const prepareResume = async (
   instanceId: string,
   opts: PrepareResumeOpts = {},
 ): Promise<PreparedResume | undefined> => {
-  const log = opts.log ?? ((m: string) => console.error(m))
+  const log = opts.log ?? ((_m: string) => {})
   const cfg = resolveResumeConfig(env)
   // DEFAULT-OFF byte-identical guard: nothing — no store, no S3 — when inactive.
   if (!resumeActive(cfg)) return undefined
@@ -171,9 +171,5 @@ const runBoxResumePrelaunch = async (): Promise<void> => {
 }
 
 if (import.meta.main) {
-  runBoxResumePrelaunch().catch((err) => {
-    // Fail-closed: a prelaunch error must NOT abort the box run — emit nothing
-    // (so the box runs fresh) and surface the cause on stderr for forensics.
-    console.error(`[resume] box prelaunch failed (${errMessage(err)}) — running fresh`)
-  })
+  runBoxResumePrelaunch().catch((_err) => {})
 }

@@ -368,8 +368,7 @@ describe("G. idempotence / no-throw", () => {
   })
 
   test("G3 — large input does not throw and still finds the embedded secret", () => {
-    const big =
-      "x".repeat(200_000) + " ghp_1234567890abcdefghijklmnopqrstuvwxyz " + "y".repeat(50_000)
+    const big = `${"x".repeat(200_000)} ghp_1234567890abcdefghijklmnopqrstuvwxyz ${"y".repeat(50_000)}`
     const r = R(big)
     expect(r.unchanged).toBe(false)
     expect(r.text).not.toContain("ghp_")

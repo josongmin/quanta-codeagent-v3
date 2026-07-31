@@ -1,5 +1,5 @@
 import { mkdir, unlink } from "node:fs/promises"
-import { connect, createServer, type Server, type Socket } from "node:net"
+import { connect, createServer, type Socket } from "node:net"
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import type { ProactiveTrigger, TriggerEvidence, TriggerReason } from "@/reactor"

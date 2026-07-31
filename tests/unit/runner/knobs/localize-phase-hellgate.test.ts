@@ -27,13 +27,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { applyBenchKnobs, resolveBenchKnobs } from "@/runner/batch/eval/knobs-bench"
-import {
-  __resetRegistry,
-  __restoreRegistry,
-  __snapshotRegistry,
-  allKnobs,
-  registerKnob,
-} from "@/runner/knobs"
+import { __restoreRegistry, __snapshotRegistry, allKnobs, registerKnob } from "@/runner/knobs"
 // Import the real knob so the registry is populated.
 import { localizePhaseKnob } from "@/runner/knobs/knobs/localize-phase"
 import { ToolRegistry } from "@/tool"

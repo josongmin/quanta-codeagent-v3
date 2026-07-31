@@ -114,8 +114,8 @@ export const runtimeConfigFromEnv = (env: RuntimeConfigEnv): RuntimeConfig => {
  *  gates (the leading run of the legacy literal, up to `mcpSampling`). */
 const parseCompactionSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
   return {
-    logLevel: parseLogLevel(env["QUANTA_LOG_LEVEL"]),
-    compactTokens: parsePositiveInt(env["QUANTA_COMPACT_TOKENS"], "QUANTA_COMPACT_TOKENS"),
+    logLevel: parseLogLevel(env.QUANTA_LOG_LEVEL),
+    compactTokens: parsePositiveInt(env.QUANTA_COMPACT_TOKENS, "QUANTA_COMPACT_TOKENS"),
     // ADR-0473 — strict `=== "1"` opt-in (matches the `bgCompactionEnabled`
     // slice gate; `parseBool` also accepts true/on but the slice gate is the
     // SSOT, so keep it strict here too).
@@ -125,9 +125,9 @@ const parseCompactionSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // past its deadline DETACHES into the bg-registry instead of being killed.
     // Completion before the deadline is byte-identical; opt out per-session with
     // `QUANTA_BASH_AUTO_BACKGROUND=kill` or per-call.
-    bashAutoBackground: parseBashAutoBackground(env["QUANTA_BASH_AUTO_BACKGROUND"]),
+    bashAutoBackground: parseBashAutoBackground(env.QUANTA_BASH_AUTO_BACKGROUND),
     bashAutoBackgroundThresholdMs: parsePositiveInt(
-      env["QUANTA_BASH_AUTO_BACKGROUND_THRESHOLD_MS"],
+      env.QUANTA_BASH_AUTO_BACKGROUND_THRESHOLD_MS,
       "QUANTA_BASH_AUTO_BACKGROUND_THRESHOLD_MS",
     ),
     // RFC jun-6-microcompaction — opt-in (gateOn vocab `1`/`on`/`true`/`yes`;
@@ -137,15 +137,15 @@ const parseCompactionSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // ⇒ the wire applies its own named defaults.
     microcompact: gateOn(env, "QUANTA_MICROCOMPACT"),
     microcompactKeepRecent: parsePositiveInt(
-      env["QUANTA_MICROCOMPACT_KEEP_RECENT"],
+      env.QUANTA_MICROCOMPACT_KEEP_RECENT,
       "QUANTA_MICROCOMPACT_KEEP_RECENT",
     ),
     microcompactFloorTokens: parsePositiveInt(
-      env["QUANTA_MICROCOMPACT_FLOOR_TOKENS"],
+      env.QUANTA_MICROCOMPACT_FLOOR_TOKENS,
       "QUANTA_MICROCOMPACT_FLOOR_TOKENS",
     ),
     microcompactIntervalMs: parsePositiveInt(
-      env["QUANTA_MICROCOMPACT_INTERVAL_MS"],
+      env.QUANTA_MICROCOMPACT_INTERVAL_MS,
       "QUANTA_MICROCOMPACT_INTERVAL_MS",
     ),
     // ADR-0471 — strict `=== "1"` opt-in (matches the `untrustedEnvelopeEnabled`
@@ -256,19 +256,19 @@ const parseCapabilitySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // Default false ⇒ no steering directive (byte-identical dynamic tail).
     codeModeOnly: gateOnStrict(env, "QUANTA_CODE_MODE_ONLY"),
     codeModeMemBytes: parsePositiveInt(
-      env["QUANTA_CODE_MODE_MEM_BYTES"],
+      env.QUANTA_CODE_MODE_MEM_BYTES,
       "QUANTA_CODE_MODE_MEM_BYTES",
     ),
     codeModeTimeoutMs: parsePositiveInt(
-      env["QUANTA_CODE_MODE_TIMEOUT_MS"],
+      env.QUANTA_CODE_MODE_TIMEOUT_MS,
       "QUANTA_CODE_MODE_TIMEOUT_MS",
     ),
     codeModeMaxCalls: parsePositiveInt(
-      env["QUANTA_CODE_MODE_MAX_CALLS"],
+      env.QUANTA_CODE_MODE_MAX_CALLS,
       "QUANTA_CODE_MODE_MAX_CALLS",
     ),
     codeModeOutputCap: parsePositiveInt(
-      env["QUANTA_CODE_MODE_OUTPUT_CAP"],
+      env.QUANTA_CODE_MODE_OUTPUT_CAP,
       "QUANTA_CODE_MODE_OUTPUT_CAP",
     ),
   }
@@ -292,7 +292,7 @@ const parseToolSurfaceSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> =>
     rememberPatternsDangerous: gateOnStrict(env, "QUANTA_REMEMBER_PATTERNS_DANGEROUS"),
     // jun-6 paste-burst — positive-integer min-char threshold. Absent / invalid
     // ⇒ undefined ⇒ the CLI reader echoes a paste inline (byte-identical).
-    pasteBurstMinChars: parsePositiveInt(env["QUANTA_PASTE_BURST"], "QUANTA_PASTE_BURST"),
+    pasteBurstMinChars: parsePositiveInt(env.QUANTA_PASTE_BURST, "QUANTA_PASTE_BURST"),
     // jun-6 skill-creator — opt-in (`gateOn` vocab; #24). Default false ⇒ no writer
     // port, `skill_create` not registered (byte-identical default tool surface).
     skillCreator: gateOn(env, "QUANTA_SKILL_CREATOR"),
@@ -315,7 +315,7 @@ const parseToolSurfaceSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> =>
     // byte-identical to a plain failure). Default-ON flip is OUT OF SCOPE.
     sandboxEscalation: gateOn(env, "QUANTA_SANDBOX_ESCALATION"),
     sandboxEscalationMax: parsePositiveInt(
-      env["QUANTA_SANDBOX_ESCALATION_MAX"],
+      env.QUANTA_SANDBOX_ESCALATION_MAX,
       "QUANTA_SANDBOX_ESCALATION_MAX",
     ),
     // account-ratelimit — opt-in (`gateOn` vocab; #24). Default false ⇒ adapters
@@ -324,7 +324,7 @@ const parseToolSurfaceSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> =>
     proactiveRateLimit: gateOn(env, "QUANTA_RATELIMIT_PROACTIVE"),
     ratelimitNotice: ratelimitNoticeWanted(env.QUANTA_RATELIMIT_NOTICE),
     // N6 PTY backend selector. Default "tmux" ⇒ byte-identical to pre-slice path.
-    ptyBackend: parsePtyBackend(env["QUANTA_PTY_BACKEND"]),
+    ptyBackend: parsePtyBackend(env.QUANTA_PTY_BACKEND),
     // H18/keyring — opt-in (`gateOn` vocab; #24). Default false ⇒ MCP OAuth uses the
     // plain 0600 file token store (byte-identical, no keyring wrap).
     mcpOAuthKeyring: gateOn(env, "QUANTA_MCP_OAUTH_KEYRING"),
@@ -367,7 +367,7 @@ const parseToolSurfaceSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> =>
     // off-by-one fixed: the cap names the max descendant depth, not the max depth
     // that receives tools.)
     maxDescendantDepth:
-      parseNonNegativeInt(env["QUANTA_MAX_DESCENDANT_DEPTH"], "QUANTA_MAX_DESCENDANT_DEPTH") ?? 1,
+      parseNonNegativeInt(env.QUANTA_MAX_DESCENDANT_DEPTH, "QUANTA_MAX_DESCENDANT_DEPTH") ?? 1,
     // §4.3 — opt-in OS-process side-agent daemon V1. Default false ⇒ in-process.
     sideAgentProcess: gateOn(env, "QUANTA_SIDE_AGENT_PROCESS"),
     // N2 — opt-in (gateOn vocab `1`/`on`/`true`/`yes`; #24 doc-fix). Default false ⇒ no MCP connector tools.
@@ -381,7 +381,7 @@ const parseToolSurfaceSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> =>
     // no longer disagree with the consumer). Unset ⇒ false (annotationsHonored
     // stays false; every MCP tool keeps its conservative read/concurrency
     // classification, byte-identical default).
-    mcpToolAnnotations: parseBool(env["QUANTA_MCP_TOOL_ANNOTATIONS"]),
+    mcpToolAnnotations: parseBool(env.QUANTA_MCP_TOOL_ANNOTATIONS),
     progressUpdate: gateOn(env, "QUANTA_PROGRESS_UPDATE"),
     // #8 — opt-in (gateOn vocab `1`/`on`/`true`/`yes`; #24 doc-fix). Default false ⇒ no mid-turn capture facade.
     midTurnCapture: gateOn(env, "QUANTA_MIDTURN_CAPTURE"),
@@ -390,10 +390,10 @@ const parseToolSurfaceSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> =>
     ptyAttach: gateOn(env, "QUANTA_PTY_ATTACH"),
     // D3 — PTY env-inherit escape hatch. Default false ⇒ scrubbed (secure).
     // Truthy (`1`/`true`/`on`) ⇒ full parent-env inherit (interactive opt-out).
-    ptyInheritEnv: parseBool(env["QUANTA_PTY_INHERIT_ENV"]),
+    ptyInheritEnv: parseBool(env.QUANTA_PTY_INHERIT_ENV),
     // C3 — brief-mode SEED. Uses the standard boolean knob vocabulary (1/true/on)
     // so it reads like the `effort` env seed; default-OFF ⇒ byte-identical.
-    brief: parseBool(env["QUANTA_BRIEF"]),
+    brief: parseBool(env.QUANTA_BRIEF),
     // §5 prompt-directive bundle — CANONICAL opt-in (gateOn: full truthy vocab
     // 1/on/true/yes) per the gate-vocab unification; directives are behavior
     // toggles, NOT security gates (the SSOT carve-out in session-knobs keeps only
@@ -423,93 +423,90 @@ const parseSessionBenchSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> =
     // SECURITY protection (filesystem jail) — tearing it down requires the
     // deliberate, unambiguous `=off`; a loose `=0` must NOT silently drop the jail.
     fsJailDisabled: gateDisabledStrict(env, "QUANTA_FS_JAIL"),
-    capEnforce: parseBool(env["QUANTA_CAP_ENFORCE"]),
-    gitSha: stringOrUndef(env["QUANTA_GIT_SHA"]),
-    pricingVersion: stringOrUndef(env["QUANTA_PRICING_VERSION"]),
-    sessionsDir: stringOrUndef(env["QUANTA_SESSIONS_DIR"]),
+    capEnforce: parseBool(env.QUANTA_CAP_ENFORCE),
+    gitSha: stringOrUndef(env.QUANTA_GIT_SHA),
+    pricingVersion: stringOrUndef(env.QUANTA_PRICING_VERSION),
+    sessionsDir: stringOrUndef(env.QUANTA_SESSIONS_DIR),
     sessionTranscriptMaxBytes: parsePositiveInt(
-      env["QUANTA_SESSION_TRANSCRIPT_MAX_BYTES"],
+      env.QUANTA_SESSION_TRANSCRIPT_MAX_BYTES,
       "QUANTA_SESSION_TRANSCRIPT_MAX_BYTES",
     ),
-    hitlOverridesPath: stringOrUndef(env["QUANTA_HITL_OVERRIDES"]),
-    toolOutputMaxChars: parsePositiveInt(env["QUANTA_TOOL_OUTPUT_MAX"], "QUANTA_TOOL_OUTPUT_MAX"),
+    hitlOverridesPath: stringOrUndef(env.QUANTA_HITL_OVERRIDES),
+    toolOutputMaxChars: parsePositiveInt(env.QUANTA_TOOL_OUTPUT_MAX, "QUANTA_TOOL_OUTPUT_MAX"),
     toolOutputSpillKeep: parsePositiveInt(
-      env["QUANTA_TOOL_OUTPUT_SPILL_KEEP"],
+      env.QUANTA_TOOL_OUTPUT_SPILL_KEEP,
       "QUANTA_TOOL_OUTPUT_SPILL_KEEP",
     ),
     llmStreamFirstChunkMs: parsePositiveInt(
-      env["QUANTA_LLM_STREAM_FIRST_CHUNK_MS"],
+      env.QUANTA_LLM_STREAM_FIRST_CHUNK_MS,
       "QUANTA_LLM_STREAM_FIRST_CHUNK_MS",
     ),
-    llmStreamIdleMs: parsePositiveInt(
-      env["QUANTA_LLM_STREAM_IDLE_MS"],
-      "QUANTA_LLM_STREAM_IDLE_MS",
-    ),
+    llmStreamIdleMs: parsePositiveInt(env.QUANTA_LLM_STREAM_IDLE_MS, "QUANTA_LLM_STREAM_IDLE_MS"),
     llmEmptyStreamBreakerK: parsePositiveInt(
-      env["QUANTA_LLM_EMPTY_STREAM_BREAKER_K"],
+      env.QUANTA_LLM_EMPTY_STREAM_BREAKER_K,
       "QUANTA_LLM_EMPTY_STREAM_BREAKER_K",
     ),
     llmStreamTraceMs: parseNonNegativeInt(
-      env["QUANTA_LLM_STREAM_TRACE_MS"],
+      env.QUANTA_LLM_STREAM_TRACE_MS,
       "QUANTA_LLM_STREAM_TRACE_MS",
     ),
-    quantaHome: stringOrUndef(env["QUANTA_HOME"]),
-    benchHome: stringOrUndef(env["QUANTA_BENCH_HOME"]),
-    benchResultsDir: stringOrUndef(env["QUANTA_BENCH_RESULTS_DIR"]),
+    quantaHome: stringOrUndef(env.QUANTA_HOME),
+    benchHome: stringOrUndef(env.QUANTA_BENCH_HOME),
+    benchResultsDir: stringOrUndef(env.QUANTA_BENCH_RESULTS_DIR),
     // Daemon/persistence path knobs (ADR-0503 P4 read-routing) — string-or-undef
     // (no fixed default); the consumers keep their exact HOME-based fallback +
     // non-empty guards, so absent ⇒ byte-identical to the prior raw process.env reads.
-    webDbDir: stringOrUndef(env["QUANTA_WEB_DB_DIR"]),
-    sessionRegistrySqlitePath: stringOrUndef(env["QUANTA_SESSION_REGISTRY_SQLITE_PATH"]),
-    sessionRegistryDiskDir: stringOrUndef(env["QUANTA_SESSION_REGISTRY_DISK_DIR"]),
-    cachePathspecsExtra: parseStringList(env["QUANTA_BENCH_CACHE_PATHSPECS_EXTRA"]),
-    dedupEnvPrefixesExtra: parseStringList(env["QUANTA_DEDUP_ENV_PREFIXES_EXTRA"]),
-    permissionStateFile: stringOrUndef(env["QUANTA_PERMISSION_STATE"]),
-    profilesDir: stringOrUndef(env["QUANTA_PROFILES_DIR"]),
-    sshConnection: stringOrUndef(env["SSH_CONNECTION"]),
-    swebenchCacheLevel: parseSwebenchCacheLevel(env["QUANTA_SWEBENCH_CACHE_LEVEL"]),
-    swebenchClean: parseBool(env["QUANTA_SWEBENCH_CLEAN"]),
+    webDbDir: stringOrUndef(env.QUANTA_WEB_DB_DIR),
+    sessionRegistrySqlitePath: stringOrUndef(env.QUANTA_SESSION_REGISTRY_SQLITE_PATH),
+    sessionRegistryDiskDir: stringOrUndef(env.QUANTA_SESSION_REGISTRY_DISK_DIR),
+    cachePathspecsExtra: parseStringList(env.QUANTA_BENCH_CACHE_PATHSPECS_EXTRA),
+    dedupEnvPrefixesExtra: parseStringList(env.QUANTA_DEDUP_ENV_PREFIXES_EXTRA),
+    permissionStateFile: stringOrUndef(env.QUANTA_PERMISSION_STATE),
+    profilesDir: stringOrUndef(env.QUANTA_PROFILES_DIR),
+    sshConnection: stringOrUndef(env.SSH_CONNECTION),
+    swebenchCacheLevel: parseSwebenchCacheLevel(env.QUANTA_SWEBENCH_CACHE_LEVEL),
+    swebenchClean: parseBool(env.QUANTA_SWEBENCH_CLEAN),
     swebenchMaxWorkers: parsePositiveInt(
-      env["QUANTA_SWEBENCH_MAX_WORKERS"],
+      env.QUANTA_SWEBENCH_MAX_WORKERS,
       "QUANTA_SWEBENCH_MAX_WORKERS",
     ),
-    swebenchNamespace: stringOrUndef(env["QUANTA_SWEBENCH_NAMESPACE"]),
-    swebenchRepoCacheDir: stringOrUndef(env["QUANTA_SWEBENCH_REPO_CACHE"]),
-    swebenchForceRebuild: parseBool(env["QUANTA_SWEBENCH_FORCE_REBUILD"]),
-    swebenchPythonBin: stringOrUndef(env["QUANTA_SWEBENCH_PYTHON_BIN"]),
-    benchTimeoutMs: parsePositiveInt(env["QUANTA_BENCH_TIMEOUT_MS"], "QUANTA_BENCH_TIMEOUT_MS"),
-    maxTurnsBatch: parsePositiveInt(env["QUANTA_MAX_TURNS"], "QUANTA_MAX_TURNS"),
+    swebenchNamespace: stringOrUndef(env.QUANTA_SWEBENCH_NAMESPACE),
+    swebenchRepoCacheDir: stringOrUndef(env.QUANTA_SWEBENCH_REPO_CACHE),
+    swebenchForceRebuild: parseBool(env.QUANTA_SWEBENCH_FORCE_REBUILD),
+    swebenchPythonBin: stringOrUndef(env.QUANTA_SWEBENCH_PYTHON_BIN),
+    benchTimeoutMs: parsePositiveInt(env.QUANTA_BENCH_TIMEOUT_MS, "QUANTA_BENCH_TIMEOUT_MS"),
+    maxTurnsBatch: parsePositiveInt(env.QUANTA_MAX_TURNS, "QUANTA_MAX_TURNS"),
     lspReadyTimeoutMs: parsePositiveInt(
-      env["QUANTA_LSP_READY_TIMEOUT_MS"],
+      env.QUANTA_LSP_READY_TIMEOUT_MS,
       "QUANTA_LSP_READY_TIMEOUT_MS",
     ),
     fullRemoteRelaunch:
       parsePositiveInt(
-        env["QUANTA_BENCH_FULL_REMOTE_RELAUNCH"],
+        env.QUANTA_BENCH_FULL_REMOTE_RELAUNCH,
         "QUANTA_BENCH_FULL_REMOTE_RELAUNCH",
       ) ?? 1,
-    swebenchPrepareForce: parseBool(env["QUANTA_SWEBENCH_PREPARE_FORCE"]),
-    runId: stringOrUndef(env["QUANTA_RUN_ID"]),
-    prefsHome: stringOrUndef(env["QUANTA_PREFS_HOME"]),
-    lastTokens: stringOrUndef(env["QUANTA_LAST_TOKENS"]),
-    sessionListFormat: parseSessionListFormat(env["QUANTA_SESSION_LIST_FORMAT"]),
-    sessionListMax: parsePositiveInt(env["QUANTA_SESSION_LIST_MAX"], "QUANTA_SESSION_LIST_MAX"),
-    hookTimeoutMs: parsePositiveInt(env["QUANTA_HOOK_TIMEOUT_MS"], "QUANTA_HOOK_TIMEOUT_MS"),
-    hookMaxHandlers: parsePositiveInt(env["QUANTA_HOOK_MAX_HANDLERS"], "QUANTA_HOOK_MAX_HANDLERS"),
+    swebenchPrepareForce: parseBool(env.QUANTA_SWEBENCH_PREPARE_FORCE),
+    runId: stringOrUndef(env.QUANTA_RUN_ID),
+    prefsHome: stringOrUndef(env.QUANTA_PREFS_HOME),
+    lastTokens: stringOrUndef(env.QUANTA_LAST_TOKENS),
+    sessionListFormat: parseSessionListFormat(env.QUANTA_SESSION_LIST_FORMAT),
+    sessionListMax: parsePositiveInt(env.QUANTA_SESSION_LIST_MAX, "QUANTA_SESSION_LIST_MAX"),
+    hookTimeoutMs: parsePositiveInt(env.QUANTA_HOOK_TIMEOUT_MS, "QUANTA_HOOK_TIMEOUT_MS"),
+    hookMaxHandlers: parsePositiveInt(env.QUANTA_HOOK_MAX_HANDLERS, "QUANTA_HOOK_MAX_HANDLERS"),
     hookMaxPayloadBytes: parsePositiveInt(
-      env["QUANTA_HOOK_MAX_PAYLOAD_BYTES"],
+      env.QUANTA_HOOK_MAX_PAYLOAD_BYTES,
       "QUANTA_HOOK_MAX_PAYLOAD_BYTES",
     ),
-    asyncTools: parseBool(env["QUANTA_ASYNC_TOOLS"]),
-    deferredCap: parsePositiveInt(env["QUANTA_DEFERRED_CAP"], "QUANTA_DEFERRED_CAP"),
+    asyncTools: parseBool(env.QUANTA_ASYNC_TOOLS),
+    deferredCap: parsePositiveInt(env.QUANTA_DEFERRED_CAP, "QUANTA_DEFERRED_CAP"),
     // H16 — opt-in (`gateOn` vocab; #24) (matches the slice gate; default-OFF).
     // OFF ⇒ no CrossSessionDreamTrigger constructed, byte-identical.
     autoDream: gateOn(env, "QUANTA_AUTO_DREAM"),
     autoDreamSessions: parsePositiveInt(
-      env["QUANTA_AUTO_DREAM_SESSIONS"],
+      env.QUANTA_AUTO_DREAM_SESSIONS,
       "QUANTA_AUTO_DREAM_SESSIONS",
     ),
-    autoDreamHours: parsePositiveNumber(env["QUANTA_AUTO_DREAM_HOURS"], "QUANTA_AUTO_DREAM_HOURS"),
+    autoDreamHours: parsePositiveNumber(env.QUANTA_AUTO_DREAM_HOURS, "QUANTA_AUTO_DREAM_HOURS"),
   }
 }
 
@@ -523,17 +520,17 @@ const parseSecuritySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
     logRateLimitDisabled: gateDisabledStrict(env, "QUANTA_LOG_RATE_LIMIT"),
     // H7 — rotating cloud credentials. All default-UNSET ⇒ no helper, no
     // pre-call refresh, byte-identical provider paths.
-    apiKeyHelper: stringOrUndef(env["QUANTA_API_KEY_HELPER"]),
+    apiKeyHelper: stringOrUndef(env.QUANTA_API_KEY_HELPER),
     apiKeyHelperTtlMs: parsePositiveInt(
-      env["QUANTA_API_KEY_HELPER_TTL_MS"],
+      env.QUANTA_API_KEY_HELPER_TTL_MS,
       "QUANTA_API_KEY_HELPER_TTL_MS",
     ),
-    awsAuthRefresh: stringOrUndef(env["QUANTA_AWS_AUTH_REFRESH"]),
-    gcpAuthRefresh: stringOrUndef(env["QUANTA_GCP_AUTH_REFRESH"]),
+    awsAuthRefresh: stringOrUndef(env.QUANTA_AWS_AUTH_REFRESH),
+    gcpAuthRefresh: stringOrUndef(env.QUANTA_GCP_AUTH_REFRESH),
     // H7 / ADR-0139 — explicit main-agent cloud-transport selector. Absent ⇒
     // the surface uses the registry env precedence ladder; the legacy vendor
     // path stays byte-identical when neither this nor a cloud env signal is set.
-    llmTransport: stringOrUndef(env["QUANTA_LLM_TRANSPORT"]),
+    llmTransport: stringOrUndef(env.QUANTA_LLM_TRANSPORT),
     // H7 — explicit fail-closed trust attestation for the credential-helper
     // shell. Strict `=== "1"`: only an explicit opt-in authorizes arbitrary
     // command execution; unset / anything else ⇒ untrusted (no shell). Strict
@@ -544,7 +541,7 @@ const parseSecuritySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
     // Prompt-cache 1h TTL — only the literal "1h" opts in; any other value
     // (incl. absent) ⇒ "5m" (byte-identical fixed-5m cache_control). The
     // factory additionally gates "1h" behind a model allowlist.
-    cacheTtl: env["QUANTA_PROMPT_CACHE_TTL"] === "1h" ? "1h" : "5m",
+    cacheTtl: env.QUANTA_PROMPT_CACHE_TTL === "1h" ? "1h" : "5m",
     // OAuth revoke-on-logout — opt-in (`gateOn` vocab; #24). Default false ⇒ logout
     // only clears local state (byte-identical, no network revoke call).
     oauthRevokeOnLogout: gateOn(env, "QUANTA_OAUTH_REVOKE_ON_LOGOUT"),
@@ -552,21 +549,21 @@ const parseSecuritySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
     // whether `.ipynb` TEXTUAL outputs are appended; cell-source render + base64
     // stripping are unconditional. NO effect on non-`.ipynb` reads (extension
     // gate). Off only when explicitly set to 0/false/off.
-    ipynbIncludeOutputs: parseBoolDefaultTrue(env["QUANTA_IPYNB_OUTPUTS"]),
+    ipynbIncludeOutputs: parseBoolDefaultTrue(env.QUANTA_IPYNB_OUTPUTS),
     // jun-6 BYOK — opt-in (`gateOn` vocab; #24). Default false ⇒ the legacy LLM-build
     // seam passes `source: undefined` (byte-identical key resolution).
     apiKeyHelperLegacyVendor: gateOn(env, "QUANTA_API_KEY_HELPER_LEGACY_VENDOR"),
     // jun-6 AI session title — boolean knob vocabulary (1/true/on). Default false
     // ⇒ no autoTitlePort built, loop branch dead (byte-identical). Both this and
     // sessionTitleModel must be present for the feature to arm.
-    sessionAutoTitle: parseBool(env["QUANTA_SESSION_AUTO_TITLE"]),
-    sessionTitleModel: stringOrUndef(env["QUANTA_SESSION_TITLE_MODEL"]),
+    sessionAutoTitle: parseBool(env.QUANTA_SESSION_AUTO_TITLE),
+    sessionTitleModel: stringOrUndef(env.QUANTA_SESSION_TITLE_MODEL),
     // jun-6 tool-interrupt — opt-in (`gateOn` vocab; #24). Default false ⇒ dispatch
     // threads the raw signal, no criticalSection (block behaves like cancel).
     toolInterruptBlock: gateOn(env, "QUANTA_TOOL_INTERRUPT_BLOCK"),
     // jun-6 — watchdog cap (ms). Absent / invalid ⇒ DEFAULT_CRITICAL_SECTION_MAX_MS.
     criticalSectionMaxMs:
-      parsePositiveInt(env["QUANTA_CRITICAL_SECTION_MAX_MS"], "QUANTA_CRITICAL_SECTION_MAX_MS") ??
+      parsePositiveInt(env.QUANTA_CRITICAL_SECTION_MAX_MS, "QUANTA_CRITICAL_SECTION_MAX_MS") ??
       DEFAULT_CRITICAL_SECTION_MAX_MS,
     // jun-6 permission_request hook — opt-in (`gateOn` vocab; #24) kill-switch.
     // Default false ⇒ the gate does NOT emit permission_request (byte-identical;
@@ -582,7 +579,7 @@ const parseSecuritySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
     // jun-6 exfil-rail (a) — the CONFIGURABLE cap N (positive integer). No
     // hardcoded default (no-heuristics rule): absent/invalid ⇒ undefined ⇒ the
     // budget stays inert even when QUANTA_WRITE_BUDGET=1.
-    writeBudgetMax: parsePositiveInt(env["QUANTA_WRITE_BUDGET_MAX"], "QUANTA_WRITE_BUDGET_MAX"),
+    writeBudgetMax: parsePositiveInt(env.QUANTA_WRITE_BUDGET_MAX, "QUANTA_WRITE_BUDGET_MAX"),
     // jun-6 exfil-rail (c) — strict `=== "1"` opt-in. Default false ⇒ detector
     // never called + scouting taxonomy line omitted (byte-identical). Requires
     // a configured K below to fire.
@@ -590,18 +587,18 @@ const parseSecuritySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
     // jun-6 exfil-rail (c) — the CONFIGURABLE threshold K (positive integer). No
     // hardcoded default (no-heuristics rule): absent/invalid ⇒ undefined ⇒ the
     // detector stays inert even when QUANTA_EXFIL_SCOUTING=1.
-    exfilScoutingK: parsePositiveInt(env["QUANTA_EXFIL_SCOUTING_K"], "QUANTA_EXFIL_SCOUTING_K"),
+    exfilScoutingK: parsePositiveInt(env.QUANTA_EXFIL_SCOUTING_K, "QUANTA_EXFIL_SCOUTING_K"),
     // jun-6 exfil-rail (B) — egress mode token (`deny`|`redact`). Any other
     // value ⇒ undefined (OFF) ⇒ host-only egress decision (byte-identical).
     secretEgress:
-      env["QUANTA_SECRET_EGRESS"] === "deny" || env["QUANTA_SECRET_EGRESS"] === "redact"
-        ? env["QUANTA_SECRET_EGRESS"]
+      env.QUANTA_SECRET_EGRESS === "deny" || env.QUANTA_SECRET_EGRESS === "redact"
+        ? env.QUANTA_SECRET_EGRESS
         : undefined,
     // jun-6 exfil-rail (B) — buffered-body byte cap (positive integer). No
     // hardcoded default (no-heuristics rule): absent/invalid ⇒ undefined ⇒ the
     // wire treats secret-egress as inert until an operator sets the cap.
     secretEgressMaxBody: parsePositiveInt(
-      env["QUANTA_SECRET_EGRESS_MAX_BODY"],
+      env.QUANTA_SECRET_EGRESS_MAX_BODY,
       "QUANTA_SECRET_EGRESS_MAX_BODY",
     ),
   }
@@ -620,8 +617,7 @@ const parseConfigTailSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     tlsMitm: tlsMitmAuthorized(env),
     // jun-7 TLS-MITM — fail-closed policy. `opaque-tunnel` only on the exact
     // token; everything else (incl. unset) ⇒ `deny` (fail closed by default).
-    tlsMitmOnFailure:
-      env["QUANTA_TLS_MITM_ON_FAILURE"] === "opaque-tunnel" ? "opaque-tunnel" : "deny",
+    tlsMitmOnFailure: env.QUANTA_TLS_MITM_ON_FAILURE === "opaque-tunnel" ? "opaque-tunnel" : "deny",
     // syntax-aware-chunking (RFC jun-6) — opt-in (`gateOn` vocab; #24). Default
     // false ⇒ indexer uses the line-window chunkFile (byte-identical), parser
     // never constructed, no WASM.
@@ -630,7 +626,7 @@ const parseConfigTailSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // `read outline:true` returns the line-range fallback, parser never built.
     readOutline: gateOn(env, "QUANTA_READ_OUTLINE"),
     // Grammar-wasm dir override. Absent ⇒ resolve tree-sitter-wasms/out.
-    treeSitterDir: stringOrUndef(env["QUANTA_TREE_SITTER_DIR"]),
+    treeSitterDir: stringOrUndef(env.QUANTA_TREE_SITTER_DIR),
     // jun-7-misc 02 — strict `=== "1"` opt-in. SECURITY-relevant (LOOSENS
     // manifest validation by accepting a coerced foreign/codex shape on ingest),
     // so it stays strict — a loose truthy spelling must NOT arm it. Default false
@@ -647,7 +643,7 @@ const parseConfigTailSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // T03 — named approval-ladder posture. Parsed/validated at the consumer
     // (`@/permission/approval-ladder#parseApprovalLadderName`); an unknown / empty
     // / `custom` value seeds NO posture (byte-identical).
-    approvalLadder: env["QUANTA_APPROVAL_LADDER"],
+    approvalLadder: env.QUANTA_APPROVAL_LADDER,
     // jun-7-misc 04 — strict `=== "1"` opt-in. Default false ⇒ `evaluateAuto`
     // flows the exact current CLASSIFIER_SYSTEM_PROMPT unchanged (byte-identical).
     autoModeRules: gateOnStrict(env, "QUANTA_AUTO_MODE_RULES"),
@@ -687,34 +683,31 @@ const parseConfigTailSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // Absent ⇒ no port built even when fastApplyMerge is on (both required —
     // advertise-iff-able). NO default model (no-heuristics rule: measure vs the
     // re-emit baseline; never default to the main agent model).
-    fastApplyModel: stringOrUndef(env["QUANTA_FAST_APPLY_MODEL"]),
+    fastApplyModel: stringOrUndef(env.QUANTA_FAST_APPLY_MODEL),
     // jun-7-misc 01 — OPTIONAL max-offered MCP protocol version override. Absent
     // ⇒ undefined ⇒ negotiation offers the code-side SSOT max (src/mcp);
     // negotiation is otherwise always-on/backward-compatible (NO gate). When set,
     // pins the MAX version offered. The raw string is carried as-is; the mcp lane
     // validates it against its SSOT version list.
-    mcpProtocolMax: stringOrUndef(env["QUANTA_MCP_PROTOCOL_MAX"]),
+    mcpProtocolMax: stringOrUndef(env.QUANTA_MCP_PROTOCOL_MAX),
     // jun-7-misc 05 — user-config-dir override for the @/config USER layer.
     // Absent ⇒ undefined ⇒ config lane defaults to ~/.quanta. No effect unless
     // centralConfig is on (loader never invoked otherwise) ⇒ byte-identical.
-    centralConfigDir: stringOrUndef(env["QUANTA_CONFIG_DIR"]),
+    centralConfigDir: stringOrUndef(env.QUANTA_CONFIG_DIR),
     // jun-7-misc 05 — `--setting-sources` analogue (subset of
     // managed,user,project,local). Absent ⇒ undefined ⇒ all layers. Carried
     // raw; the @/config lane parses/validates. No effect unless centralConfig.
-    centralConfigSources: stringOrUndef(env["QUANTA_SETTING_SOURCES"]),
+    centralConfigSources: stringOrUndef(env.QUANTA_SETTING_SOURCES),
     // jun-7-misc 05 — static trusted-path allow-list for headless/CI (§9 Q3).
     // Absent ⇒ undefined ⇒ NO static trust (headless ⇒ untrusted, the safe
     // default). EXPLICIT CI opt-in; never auto-trusts cwd. No effect unless
     // centralConfig is on.
-    trustedPaths: stringOrUndef(env["QUANTA_TRUSTED_PATHS"]),
+    trustedPaths: stringOrUndef(env.QUANTA_TRUSTED_PATHS),
     // ticket-15 (§11.7) — DOUBLE-gated default-OFF scriptable statusLine config.
     // `undefined` unless QUANTA_STATUS_LINE is on AND QUANTA_STATUS_LINE_CONFIG
     // is a valid JSON object with a usable `command` (byte-identical otherwise —
     // the built-in segmented `/context` status render stays the sole render).
-    statusLineConfig: parseStatusLineConfig(
-      env["QUANTA_STATUS_LINE"],
-      env["QUANTA_STATUS_LINE_CONFIG"],
-    ),
+    statusLineConfig: parseStatusLineConfig(env.QUANTA_STATUS_LINE, env.QUANTA_STATUS_LINE_CONFIG),
   }
 }
 

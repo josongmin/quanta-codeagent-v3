@@ -22,7 +22,7 @@ import type { StreamEvent, StreamInput } from "@/llm"
 import type { LlmProvider } from "@/llm/providers"
 import type { MetricsRegistry } from "./port"
 
-const safe = (metrics: MetricsRegistry, fn: () => void): void => {
+const safe = (_metrics: MetricsRegistry, fn: () => void): void => {
   try {
     fn()
   } catch {

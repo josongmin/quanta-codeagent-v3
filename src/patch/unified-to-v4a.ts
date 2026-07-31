@@ -30,7 +30,7 @@ const stripGitPrefix = (p: string): string =>
  *  NOTE: this is ONLY safe for the outer loop context where we know we are
  *  looking at potential file headers, NOT inside hunk bodies. For the inner
  *  while loops, use isTrueFileBoundary which requires lookahead. */
-const isFileBoundary = (line: string): boolean =>
+const _isFileBoundary = (line: string): boolean =>
   line.startsWith("--- ") || line.startsWith("diff --git ")
 
 /**
@@ -195,7 +195,7 @@ export const unifiedDiffToV4A = (text: string): string => {
             seenHunk = true
             const m = l.match(/^@@ [^@]+ @@(?:\s+(.*))?$/)
             const ctx = m?.[1]?.trim()
-            out.push(ctx ? "@@ " + ctx : "@@")
+            out.push(ctx ? `@@ ${ctx}` : "@@")
             continue
           }
           if (l.startsWith("+") || l.startsWith("-") || l.startsWith(" ") || l === "") {

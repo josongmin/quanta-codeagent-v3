@@ -184,7 +184,7 @@ describe("git_conflict_inspect tool hellgate", () => {
 
   test("6: maxFiles cap — 10 conflicts, cap=3 → message + only 3 read", async () => {
     // Discover 10 UU files; cap to 3.
-    const porcelain = Array.from({ length: 10 }, (_, i) => `UU f${i}.ts`).join("\n") + "\n"
+    const porcelain = `${Array.from({ length: 10 }, (_, i) => `UU f${i}.ts`).join("\n")}\n`
     for (let i = 0; i < 10; i += 1) writeFile(`f${i}.ts`, twoWay())
     const runner = new FakeRunner(ok(porcelain))
     const tool = gitConflictInspectTool(runner)

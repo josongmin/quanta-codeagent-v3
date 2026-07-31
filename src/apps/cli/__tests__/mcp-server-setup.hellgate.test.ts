@@ -140,21 +140,19 @@ describe("B+C+D. gate ON — RCE-deny default + permission gate + pure stdout", 
 
         const frames = stdoutFrames(io)
         // initialize replied.
-        const init = frames.find((f) => f["id"] === 1)
-        expect(init?.["result"]).toBeDefined()
+        const init = frames.find((f) => f.id === 1)
+        expect(init?.result).toBeDefined()
 
         // tools/list NEVER exposes a mutating tool by default.
-        const list = frames.find((f) => f["id"] === 2)
-        const names = (list?.["result"] as { tools: Array<{ name: string }> }).tools.map(
-          (t) => t.name,
-        )
+        const list = frames.find((f) => f.id === 2)
+        const names = (list?.result as { tools: Array<{ name: string }> }).tools.map((t) => t.name)
         expect(names).not.toContain("bash")
         expect(names).not.toContain("write")
         expect(names.length).toBeGreaterThan(0) // read-only tools DO show.
 
         // tools/call bash ⇒ -32602, dispatcher never reached.
-        const call = frames.find((f) => f["id"] === 3)
-        expect((call?.["error"] as { code: number }).code).toBe(-32602)
+        const call = frames.find((f) => f.id === 3)
+        expect((call?.error as { code: number }).code).toBe(-32602)
 
         // stdout is PURE JSON-RPC; the banner is on stderr only.
         expect(io.err.join("")).toContain("quanta MCP server")
@@ -197,9 +195,9 @@ describe("B+C+D. gate ON — RCE-deny default + permission gate + pure stdout", 
           // …and the denial surfaces as an `isError` tool_result, NOT a -32602
           // (the tool IS whitelisted via QUANTA_MCP_SERVER_EXPOSE — it reaches
           // the dispatcher, which blocks it), and NOT a raw FS breakout.
-          const reply = stdoutFrames(io).find((f) => f["id"] === 2)
-          expect(reply?.["error"]).toBeUndefined()
-          expect((reply?.["result"] as { isError?: boolean }).isError).toBe(true)
+          const reply = stdoutFrames(io).find((f) => f.id === 2)
+          expect(reply?.error).toBeUndefined()
+          expect((reply?.result as { isError?: boolean }).isError).toBe(true)
         } finally {
           // Defense-in-depth: if a regression DID write the probe, never leave it
           // in the repo tree.

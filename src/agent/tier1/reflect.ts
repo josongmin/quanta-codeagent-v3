@@ -53,7 +53,7 @@ export const reflectConsultFromLLM = (opts: ReflectConsultFromLLMOptions): Refle
         ...(signal !== undefined ? { signal } : {}),
       })
       for await (const ev of stream) events.push(ev)
-    } catch (e) {
+    } catch (_e) {
       // Re-read the signal at catch time (an external AbortSignal is mutable).
       return (signal?.aborted ?? false)
         ? { ok: false, reason: "cancelled" }

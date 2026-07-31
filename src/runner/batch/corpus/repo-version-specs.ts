@@ -4247,5 +4247,5 @@ export const specRunnerKind = (
   version: string | undefined,
 ): "runtests" | "pytest" => {
   const t = specResolvedRunner(repo, version)
-  return t !== undefined && t.includes("runtests.py") ? "runtests" : "pytest"
+  return t?.includes("runtests.py") ? "runtests" : "pytest"
 }

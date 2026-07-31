@@ -36,8 +36,8 @@ describe("§4.3/§4.4 new gates — DEFAULT-OFF", () => {
 
   test("=1 ⇒ true (opt-in)", () => {
     const prev = snapshot()
-    process.env["QUANTA_SUBAGENT_TYPED_KIND"] = "1"
-    process.env["QUANTA_SIDE_AGENT_PROCESS"] = "1"
+    process.env.QUANTA_SUBAGENT_TYPED_KIND = "1"
+    process.env.QUANTA_SIDE_AGENT_PROCESS = "1"
     __resetRuntimeConfig()
     const cfg = runtimeConfig()
     expect(cfg.subagentTypedKind).toBe(true)

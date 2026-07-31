@@ -18,7 +18,7 @@
 
 import { POSTURE_ATOMS, type PromptContext, renderAtoms } from "../prompt-graph"
 import { BATCH_RULES } from "./benchmark"
-import { CORE_RULES, DEFAULT_BASE, OWNED_RULES, type PromptRule } from "./core"
+import type { PromptRule } from "./core"
 import { PR_RULES } from "./pr-agent"
 import { HEADLESS_RULES } from "./task-runner"
 

@@ -254,7 +254,7 @@ describe("serialize — parseRecord is TOTAL", () => {
   })
   it("round-trips secrets with newline / quote / unicode / NUL / very-long field values EXACTLY", () => {
     const nasty: TokenRecord = {
-      accessToken: 'line1\nline2\t"q"\\\x00\u{1F510}π—' + "x".repeat(8192),
+      accessToken: `line1\nline2\t"q"\\\x00\u{1F510}π—${"x".repeat(8192)}`,
       refreshToken: "ref\r\nwith\x00nul and 日本語",
       expiresAt: 1_700_000_000_000,
       tokenType: 'Bea"rer\n',

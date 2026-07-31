@@ -36,12 +36,12 @@ export const extractJsonObject = (text: string): string | null => {
 
 export const parseGroundingDecisionObject = (raw: unknown): GroundingDecision => {
   if (!isRecord(raw)) throw new Error("decision is not an object")
-  const activeThreadId = raw["activeThreadId"]
-  const referentId = raw["referentId"]
-  const intent = raw["intent"]
-  const scope = raw["scope"]
-  const shouldClarify = raw["shouldClarify"]
-  const confidence = raw["confidence"]
+  const activeThreadId = raw.activeThreadId
+  const referentId = raw.referentId
+  const intent = raw.intent
+  const scope = raw.scope
+  const shouldClarify = raw.shouldClarify
+  const confidence = raw.confidence
   if (activeThreadId !== null && typeof activeThreadId !== "string") {
     throw new Error("activeThreadId must be string|null")
   }

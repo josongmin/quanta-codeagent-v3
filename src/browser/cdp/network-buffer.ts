@@ -126,7 +126,6 @@ export const buildNetworkEntry = (method: string, params: unknown): NetworkEntry
       const size = num(p?.encodedDataLength)
       return { method: "", url: "", ...(size !== undefined ? { size } : {}) }
     }
-    case "Network.loadingFailed":
     default:
       // A failure event carries only an errorText (page-derived, unbounded) — we
       // do NOT surface it here; `status` is simply absent and the entry marks a

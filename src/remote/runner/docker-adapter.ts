@@ -91,7 +91,7 @@ export const composeDockerRunArgv = (spec: RemoteSpec, name: string): readonly s
       if (k === "QUANTA_REMOTE_NETWORK" && v === "none") continue
       argv.push("-e", `${k}=${v}`)
     }
-    if (spec.env["QUANTA_REMOTE_NETWORK"] === "none") {
+    if (spec.env.QUANTA_REMOTE_NETWORK === "none") {
       argv.push("--network=none")
     }
   }
@@ -297,7 +297,7 @@ export const createDockerAdapter = (opts: DockerAdapterOpts): RemoteRunner => {
         return err(new RemoteError("unknown-handle", handle.id, "docker"))
       }
       const cached = cache.get(handle.id)
-      if (cached !== undefined && cached.terminal) {
+      if (cached?.terminal) {
         return ok({
           kind: cached.status,
           exitCode: cached.exitCode,
@@ -333,7 +333,7 @@ export const createDockerAdapter = (opts: DockerAdapterOpts): RemoteRunner => {
       }
       const cached = cache.get(handle.id)
       // HELL-RR-11: idempotent — terminal handle returns ok without reissuing.
-      if (cached !== undefined && cached.terminal) return ok(undefined)
+      if (cached?.terminal) return ok(undefined)
       const stop = await proc.exec(["docker", "stop", handle.id])
       // best-effort rm even when stop reports non-zero
       await proc.exec(["docker", "rm", "-f", handle.id])

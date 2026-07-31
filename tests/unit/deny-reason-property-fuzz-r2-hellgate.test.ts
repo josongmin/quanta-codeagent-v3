@@ -59,7 +59,7 @@ const HOSTILE_FRAGMENTS = [
 const mkHostileReason = (rng: () => number): string => {
   let s = ""
   const n = 1 + Math.floor(rng() * 4)
-  for (let i = 0; i < n; i++) s += pick(rng, HOSTILE_FRAGMENTS) + " ::"
+  for (let i = 0; i < n; i++) s += `${pick(rng, HOSTILE_FRAGMENTS)} ::`
   // append random control/unicode noise
   const m = Math.floor(rng() * 12)
   for (let i = 0; i < m; i++) s += String.fromCharCode(Math.floor(rng() * 0x100))

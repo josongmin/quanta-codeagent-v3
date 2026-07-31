@@ -44,7 +44,7 @@ export function buildLspServerEnv(
     return parentEnv as Record<string, string | undefined>
   }
   const existing = parentEnv.NODE_OPTIONS
-  if (existing && existing.includes(MAX_OLD_SPACE_FLAG)) {
+  if (existing?.includes(MAX_OLD_SPACE_FLAG)) {
     // Operator already pinned a heap size — respect it, change nothing.
     return parentEnv as Record<string, string | undefined>
   }

@@ -228,34 +228,34 @@ const parseStringList = (raw: unknown, label: string): readonly string[] => {
 
 const parseHistoryEntry = (raw: unknown): GroundingHistoryEntry => {
   if (!isRecord(raw)) throw new Error("history entry must be an object")
-  const role = raw["role"]
-  const text = raw["text"]
+  const role = raw.role
+  const text = raw.text
   if ((role !== "user" && role !== "assistant") || typeof text !== "string") {
     throw new Error("history entry requires role=user|assistant and text:string")
   }
-  const kind = raw["kind"]
+  const kind = raw.kind
   if (kind !== undefined && !isOneOf(kind, GROUNDING_HISTORY_KINDS)) {
     throw new Error(`history entry kind must be one of ${GROUNDING_HISTORY_KINDS.join(", ")}`)
   }
   if ((kind === "summary" || kind === "tool_result") && role !== "assistant") {
     throw new Error(`history entry kind=${String(kind)} requires role=assistant`)
   }
-  const threadId = raw["threadId"]
+  const threadId = raw.threadId
   if (threadId !== undefined && threadId !== null && typeof threadId !== "string") {
     throw new Error("history entry threadId must be string|null when present")
   }
-  const referentId = raw["referentId"]
+  const referentId = raw.referentId
   if (referentId !== undefined && referentId !== null && typeof referentId !== "string") {
     throw new Error("history entry referentId must be string|null when present")
   }
-  const mentionedFileIds = raw["mentionedFileIds"]
-  const mentionedReferentIds = raw["mentionedReferentIds"]
-  const toolName = raw["toolName"]
+  const mentionedFileIds = raw.mentionedFileIds
+  const mentionedReferentIds = raw.mentionedReferentIds
+  const toolName = raw.toolName
   if (toolName !== undefined && typeof toolName !== "string") {
     throw new Error("history entry toolName must be a string when present")
   }
-  const mentionedThreadIds = raw["mentionedThreadIds"]
-  const policyMarkers = raw["policyMarkers"]
+  const mentionedThreadIds = raw.mentionedThreadIds
+  const policyMarkers = raw.policyMarkers
   return {
     role,
     text,
@@ -290,11 +290,11 @@ const parseHistoryEntry = (raw: unknown): GroundingHistoryEntry => {
 
 const parseStateContract = (raw: unknown): GroundingStateContract => {
   if (!isRecord(raw)) throw new Error("grounding case stateContract must be an object")
-  const activeThreadId = raw["activeThreadId"]
+  const activeThreadId = raw.activeThreadId
   if (activeThreadId !== null && typeof activeThreadId !== "string") {
     throw new Error("grounding case stateContract.activeThreadId must be string|null")
   }
-  const latestToolResultId = raw["latestToolResultId"]
+  const latestToolResultId = raw.latestToolResultId
   if (
     latestToolResultId !== undefined &&
     latestToolResultId !== null &&
@@ -304,18 +304,18 @@ const parseStateContract = (raw: unknown): GroundingStateContract => {
       "grounding case stateContract.latestToolResultId must be string|null when present",
     )
   }
-  const latestToolName = raw["latestToolName"]
+  const latestToolName = raw.latestToolName
   if (latestToolName !== undefined && typeof latestToolName !== "string") {
     throw new Error("grounding case stateContract.latestToolName must be a string when present")
   }
-  const candidateFileIds = raw["candidateFileIds"]
-  const primaryFileId = raw["primaryFileId"]
+  const candidateFileIds = raw.candidateFileIds
+  const primaryFileId = raw.primaryFileId
   if (primaryFileId !== undefined && primaryFileId !== null && typeof primaryFileId !== "string") {
     throw new Error("grounding case stateContract.primaryFileId must be string|null when present")
   }
-  const visibleThreadIds = raw["visibleThreadIds"]
-  const pausedThreadIds = raw["pausedThreadIds"]
-  const policyMarkers = raw["policyMarkers"]
+  const visibleThreadIds = raw.visibleThreadIds
+  const pausedThreadIds = raw.pausedThreadIds
+  const policyMarkers = raw.policyMarkers
   return {
     activeThreadId,
     ...(visibleThreadIds !== undefined
@@ -360,17 +360,17 @@ const parseStateContract = (raw: unknown): GroundingStateContract => {
 
 const parseSourceProvenance = (raw: unknown): GroundingSourceProvenance => {
   if (!isRecord(raw)) throw new Error("grounding case sourceProvenance must be an object")
-  const kind = raw["kind"]
+  const kind = raw.kind
   if (kind !== "manual" && kind !== "trajectory_freeze" && kind !== "session_freeze") {
     throw new Error(
       "grounding case sourceProvenance.kind must be manual|trajectory_freeze|session_freeze",
     )
   }
-  const sessionId = raw["sessionId"]
+  const sessionId = raw.sessionId
   if (sessionId !== undefined && typeof sessionId !== "string") {
     throw new Error("grounding case sourceProvenance.sessionId must be a string when present")
   }
-  const seqRange = raw["seqRange"]
+  const seqRange = raw.seqRange
   if (
     seqRange !== undefined &&
     (!Array.isArray(seqRange) ||
@@ -391,15 +391,15 @@ const parseSourceProvenance = (raw: unknown): GroundingSourceProvenance => {
 
 const parseHumanAudit = (raw: unknown): GroundingHumanAudit => {
   if (!isRecord(raw)) throw new Error("grounding case humanAudit must be an object")
-  const status = raw["status"]
+  const status = raw.status
   if (status !== "none" && status !== "reviewed") {
     throw new Error("grounding case humanAudit.status must be none|reviewed")
   }
-  const reviewer = raw["reviewer"]
+  const reviewer = raw.reviewer
   if (reviewer !== undefined && typeof reviewer !== "string") {
     throw new Error("grounding case humanAudit.reviewer must be a string when present")
   }
-  const reviewedAt = raw["reviewedAt"]
+  const reviewedAt = raw.reviewedAt
   if (reviewedAt !== undefined && typeof reviewedAt !== "string") {
     throw new Error("grounding case humanAudit.reviewedAt must be a string when present")
   }
@@ -412,12 +412,12 @@ const parseHumanAudit = (raw: unknown): GroundingHumanAudit => {
 
 const parseDecision = (raw: unknown, label: string): GroundingDecision => {
   if (!isRecord(raw)) throw new Error(`${label} must be an object`)
-  const activeThreadId = raw["activeThreadId"]
-  const referentId = raw["referentId"]
-  const intent = raw["intent"]
-  const scope = raw["scope"]
-  const shouldClarify = raw["shouldClarify"]
-  const confidence = raw["confidence"]
+  const activeThreadId = raw.activeThreadId
+  const referentId = raw.referentId
+  const intent = raw.intent
+  const scope = raw.scope
+  const shouldClarify = raw.shouldClarify
+  const confidence = raw.confidence
   if (activeThreadId !== null && typeof activeThreadId !== "string") {
     throw new Error(`${label}.activeThreadId must be string|null`)
   }
@@ -441,7 +441,7 @@ const parseDecision = (raw: unknown, label: string): GroundingDecision => {
 
 const parseContextChange = (raw: unknown): GroundingContextChange => {
   if (!isRecord(raw)) throw new Error("contextChanges entry must be an object")
-  const field = raw["field"]
+  const field = raw.field
   if (
     field !== "cwd" &&
     field !== "mode" &&
@@ -451,32 +451,32 @@ const parseContextChange = (raw: unknown): GroundingContextChange => {
   ) {
     throw new Error("contextChanges.field must be one of cwd|mode|repo_rules|active_skills|model")
   }
-  const at = raw["at"]
+  const at = raw.at
   if (at !== undefined && (typeof at !== "number" || !Number.isFinite(at))) {
     throw new Error("contextChanges.at must be a finite number when present")
   }
   return {
     field,
-    prev: raw["prev"],
-    next: raw["next"],
+    prev: raw.prev,
+    next: raw.next,
     ...(typeof at === "number" ? { at } : {}),
   }
 }
 
 export const parseGroundingCase = (raw: unknown): GroundingCase => {
   if (!isRecord(raw)) throw new Error("grounding case must be an object")
-  const schema = raw["schema"]
+  const schema = raw.schema
   if (schema !== GROUNDING_SCHEMA_VERSION) {
     throw new Error(
       `grounding case schema mismatch: got ${String(schema)}, want ${GROUNDING_SCHEMA_VERSION}`,
     )
   }
-  const id = raw["id"]
-  const usecase = raw["usecase"]
-  const history = raw["history"]
-  const targetUtterance = raw["targetUtterance"]
-  const bucket = raw["bucket"]
-  const severity = raw["severity"]
+  const id = raw.id
+  const usecase = raw.usecase
+  const history = raw.history
+  const targetUtterance = raw.targetUtterance
+  const bucket = raw.bucket
+  const severity = raw.severity
   if (typeof id !== "string" || id.trim() === "") {
     throw new Error("grounding case id must be a non-empty string")
   }
@@ -493,41 +493,41 @@ export const parseGroundingCase = (raw: unknown): GroundingCase => {
   if (!isOneOf(severity, GROUNDING_SEVERITIES)) {
     throw new Error(`grounding case severity must be one of ${GROUNDING_SEVERITIES.join(", ")}`)
   }
-  const corpus = raw["corpus"]
+  const corpus = raw.corpus
   if (corpus !== undefined && !isOneOf(corpus, GROUNDING_CORPORA)) {
     throw new Error(`grounding case corpus must be one of ${GROUNDING_CORPORA.join(", ")}`)
   }
-  const mode = raw["mode"]
+  const mode = raw.mode
   if (mode !== undefined && !isOneOf(mode, AGENT_MODES)) {
     throw new Error(`grounding case mode must be one of ${AGENT_MODES.join(", ")}`)
   }
-  const cwd = raw["cwd"]
+  const cwd = raw.cwd
   if (cwd !== undefined && typeof cwd !== "string") {
     throw new Error("grounding case cwd must be a string when present")
   }
-  const memoryContext = raw["memoryContext"]
+  const memoryContext = raw.memoryContext
   if (memoryContext !== undefined && typeof memoryContext !== "string") {
     throw new Error("grounding case memoryContext must be a string when present")
   }
-  const repoRulesText = raw["repoRulesText"]
+  const repoRulesText = raw.repoRulesText
   if (repoRulesText !== undefined && typeof repoRulesText !== "string") {
     throw new Error("grounding case repoRulesText must be a string when present")
   }
-  const stateContract = raw["stateContract"]
-  const candidateThreadIds = raw["candidateThreadIds"]
-  const candidateReferentIds = raw["candidateReferentIds"]
-  const ambiguityClass = raw["ambiguityClass"]
+  const stateContract = raw.stateContract
+  const candidateThreadIds = raw.candidateThreadIds
+  const candidateReferentIds = raw.candidateReferentIds
+  const ambiguityClass = raw.ambiguityClass
   if (ambiguityClass !== undefined && !isOneOf(ambiguityClass, GROUNDING_AMBIGUITY_CLASSES)) {
     throw new Error(
       `grounding case ambiguityClass must be one of ${GROUNDING_AMBIGUITY_CLASSES.join(", ")}`,
     )
   }
-  const blockingEligible = raw["blockingEligible"]
+  const blockingEligible = raw.blockingEligible
   if (blockingEligible !== undefined && typeof blockingEligible !== "boolean") {
     throw new Error("grounding case blockingEligible must be a boolean when present")
   }
-  const pairId = raw["pairId"]
-  const pairRole = raw["pairRole"]
+  const pairId = raw.pairId
+  const pairRole = raw.pairRole
   if (pairId !== undefined && typeof pairId !== "string") {
     throw new Error("grounding case pairId must be a string when present")
   }
@@ -546,19 +546,17 @@ export const parseGroundingCase = (raw: unknown): GroundingCase => {
     usecase: GROUNDING_USECASE,
     history: history.map(parseHistoryEntry),
     targetUtterance,
-    gold: parseDecision(raw["gold"], "gold"),
+    gold: parseDecision(raw.gold, "gold"),
     bucket,
     severity,
     ...(corpus !== undefined ? { corpus } : {}),
     ...(mode !== undefined ? { mode } : {}),
     ...(cwd !== undefined ? { cwd } : {}),
     ...(memoryContext !== undefined ? { memoryContext } : {}),
-    ...(raw["workingState"] !== undefined
-      ? { workingState: raw["workingState"] as WorkingState }
-      : {}),
+    ...(raw.workingState !== undefined ? { workingState: raw.workingState as WorkingState } : {}),
     ...(repoRulesText !== undefined ? { repoRulesText } : {}),
-    ...(Array.isArray(raw["contextChanges"])
-      ? { contextChanges: raw["contextChanges"].map(parseContextChange) }
+    ...(Array.isArray(raw.contextChanges)
+      ? { contextChanges: raw.contextChanges.map(parseContextChange) }
       : {}),
     ...(stateContract !== undefined ? { stateContract: parseStateContract(stateContract) } : {}),
     ...(candidateThreadIds !== undefined
@@ -579,10 +577,10 @@ export const parseGroundingCase = (raw: unknown): GroundingCase => {
       : {}),
     ...(ambiguityClass !== undefined ? { ambiguityClass } : {}),
     ...(blockingEligible !== undefined ? { blockingEligible } : {}),
-    ...(raw["sourceProvenance"] !== undefined
-      ? { sourceProvenance: parseSourceProvenance(raw["sourceProvenance"]) }
+    ...(raw.sourceProvenance !== undefined
+      ? { sourceProvenance: parseSourceProvenance(raw.sourceProvenance) }
       : {}),
-    ...(raw["humanAudit"] !== undefined ? { humanAudit: parseHumanAudit(raw["humanAudit"]) } : {}),
+    ...(raw.humanAudit !== undefined ? { humanAudit: parseHumanAudit(raw.humanAudit) } : {}),
     ...(pairId !== undefined ? { pairId } : {}),
     ...(pairRole !== undefined ? { pairRole } : {}),
   }

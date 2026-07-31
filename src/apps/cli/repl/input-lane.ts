@@ -80,7 +80,7 @@ export const clearInputLane = (geom: Pick<InputLaneGeometry, "rows">): string =>
 export const enterLaneMode = (rows: number): string => {
   const r = Math.floor(rows) || 0
   if (r < 2) return ""
-  return `\x1b[1;${r - 1}r` + cursorTo(r - 1, 1)
+  return `\x1b[1;${r - 1}r${cursorTo(r - 1, 1)}`
 }
 
 /** Audit R2#2 — EXIT lane mode: reset the scroll region to the full screen, erase

@@ -49,8 +49,8 @@ const writeOverridesFile = (json: string): string => {
 }
 
 const applyOverridePath = (path: string | undefined): void => {
-  if (path === undefined) delete process.env["QUANTA_HITL_OVERRIDES"]
-  else process.env["QUANTA_HITL_OVERRIDES"] = path
+  if (path === undefined) delete process.env.QUANTA_HITL_OVERRIDES
+  else process.env.QUANTA_HITL_OVERRIDES = path
   __resetRuntimeConfig()
   __resetHitlOverrides()
 }
@@ -63,7 +63,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(tmp, { recursive: true, force: true })
-  delete process.env["QUANTA_HITL_OVERRIDES"]
+  delete process.env.QUANTA_HITL_OVERRIDES
   __resetRuntimeConfig()
   __resetHitlOverrides()
   restoreStderr()
@@ -371,7 +371,7 @@ describe("override file loader — failure modes", () => {
   })
 
   test("override path is empty string ⇒ treated as absent (no read attempt)", () => {
-    process.env["QUANTA_HITL_OVERRIDES"] = ""
+    process.env.QUANTA_HITL_OVERRIDES = ""
     __resetRuntimeConfig()
     __resetHitlOverrides()
     const r = resolveHitlAnnotation("bash", { command: "x" }, "pre-approval-ok")

@@ -93,7 +93,7 @@ describe("pptx-read OOXML-DoS + positional-drift + text-loss (jun-06)", () => {
   test("self-closing blank <a:p/> does NOT swallow the next paragraph's runs", () => {
     // first / blank / third — body-shape paragraphs. Before the fix the blank
     // <a:p/> swallowed up to "third"'s </a:p>, dropping a paragraph.
-    const r = parseOrThrow(pptxFrom(sp(bodyPh + para("first") + "<a:p/>" + para("third"))))
+    const r = parseOrThrow(pptxFrom(sp(`${bodyPh + para("first")}<a:p/>${para("third")}`)))
     if (!r.ok) return
     const slide = r.slides[0]
     expect(slide).toBeDefined()
@@ -103,7 +103,7 @@ describe("pptx-read OOXML-DoS + positional-drift + text-loss (jun-06)", () => {
   })
 
   test("leading self-closing <a:p/> does NOT absorb the first real paragraph", () => {
-    const r = parseOrThrow(pptxFrom(sp(bodyPh + "<a:p/>" + para("real"))))
+    const r = parseOrThrow(pptxFrom(sp(`${bodyPh}<a:p/>${para("real")}`)))
     if (!r.ok) return
     expect(r.slides[0]?.body).toEqual(["real"])
   })
@@ -113,7 +113,7 @@ describe("pptx-read OOXML-DoS + positional-drift + text-loss (jun-06)", () => {
     // A self-closing empty shape, THEN the title placeholder. Before the fix the
     // <p:sp/> swallowed the title shape, mis-attributing the run.
     const r = parseOrThrow(
-      pptxFrom("<p:sp/>" + sp(titlePh + para("Real Title")) + sp(bodyPh + para("body"))),
+      pptxFrom(`<p:sp/>${sp(titlePh + para("Real Title"))}${sp(bodyPh + para("body"))}`),
     )
     if (!r.ok) return
     expect(r.slides[0]?.title).toBe("Real Title")
@@ -121,7 +121,7 @@ describe("pptx-read OOXML-DoS + positional-drift + text-loss (jun-06)", () => {
   })
 
   test("self-closing <p:sp/> between title and body keeps body intact", () => {
-    const r = parseOrThrow(pptxFrom(sp(titlePh + para("T")) + "<p:sp/>" + sp(bodyPh + para("B"))))
+    const r = parseOrThrow(pptxFrom(`${sp(titlePh + para("T"))}<p:sp/>${sp(bodyPh + para("B"))}`))
     if (!r.ok) return
     expect(r.slides[0]?.title).toBe("T")
     expect(r.slides[0]?.body).toEqual(["B"])
@@ -130,7 +130,7 @@ describe("pptx-read OOXML-DoS + positional-drift + text-loss (jun-06)", () => {
   // ── 4. TEXT LOSS: <a:t> with attributes (foreign decks) ────────────────────
   test('foreign-deck <a:t xml:space="preserve"> run is NOT dropped', () => {
     const r = parseOrThrow(
-      pptxFrom(sp(bodyPh + `<a:p><a:r><a:t xml:space="preserve">Hello World</a:t></a:r></a:p>`)),
+      pptxFrom(sp(`${bodyPh}<a:p><a:r><a:t xml:space="preserve">Hello World</a:t></a:r></a:p>`)),
     )
     if (!r.ok) return
     expect(r.slides[0]?.body).toEqual(["Hello World"])
@@ -138,7 +138,7 @@ describe("pptx-read OOXML-DoS + positional-drift + text-loss (jun-06)", () => {
 
   test("<a:t\\b> does NOT spuriously match siblings like <a:tab/> / <a:tcPr>", () => {
     // A paragraph with a <a:tab/> control element and a real <a:t>.
-    const r = parseOrThrow(pptxFrom(sp(bodyPh + `<a:p><a:r><a:tab/><a:t>kept</a:t></a:r></a:p>`)))
+    const r = parseOrThrow(pptxFrom(sp(`${bodyPh}<a:p><a:r><a:tab/><a:t>kept</a:t></a:r></a:p>`)))
     if (!r.ok) return
     expect(r.slides[0]?.body).toEqual(["kept"])
   })

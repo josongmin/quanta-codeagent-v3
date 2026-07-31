@@ -128,8 +128,6 @@ describe("R4-1 — differential fuzz: new DP matcher ≡ old regex on a 500-pair
       if (oracle !== dp) disagreements.push({ glob, path, oracle, dp })
     }
     if (disagreements.length > 0) {
-      // surface the first divergence with full detail for actionable failure
-      console.error("differential-fuzz divergences:", disagreements.slice(0, 5))
     }
     expect(disagreements).toEqual([])
   })

@@ -410,7 +410,7 @@ const runOrFail = async (
 }
 
 const checkAbort = (signal: AbortSignal | undefined, stage: SnapshotStage): void => {
-  if (signal !== undefined && signal.aborted) {
+  if (signal?.aborted) {
     throw new SnapshotErrorThrown({ kind: "aborted", stage })
   }
 }
@@ -471,7 +471,7 @@ const findStashIndex = (raw: string, needle: string): number | undefined => {
   const lines = raw.split("\n")
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    if (line !== undefined && line.includes(needle)) return i
+    if (line?.includes(needle)) return i
   }
   return undefined
 }

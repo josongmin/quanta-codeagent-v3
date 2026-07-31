@@ -120,7 +120,7 @@ describe("ipynb render property fuzz R2 — no-throw / null / blob-safety / orde
         typeof value === "object" &&
         value !== null &&
         !Array.isArray(value) &&
-        Array.isArray((value as Record<string, unknown>)["cells"])
+        Array.isArray((value as Record<string, unknown>).cells)
       if (!isNotebookShape && out !== null) {
         throw new Error(`N2 VIOLATION non-notebook rendered non-null: text=${text.slice(0, 120)}`)
       }

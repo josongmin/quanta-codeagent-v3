@@ -48,7 +48,6 @@ import {
   createProjectsKbStore,
   gitTools,
   type ProjectsKbSlot,
-  pollDeferredTool,
   type Tool,
 } from "@/tool"
 import { resolveGitBudget } from "@/tool/git"

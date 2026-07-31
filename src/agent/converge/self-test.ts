@@ -87,7 +87,7 @@ const isSelfTestSegment = (segment: string, unfair: (tok: string) => boolean): b
     TEST_RUNNERS.has(base) ||
     (INTERPRETERS.has(base) &&
       (() => {
-        const mIdx = args.findIndex((a) => a === "-m")
+        const mIdx = args.indexOf("-m")
         return mIdx >= 0 && TEST_RUNNERS.has((args[mIdx + 1] ?? "").toLowerCase())
       })())
   if (

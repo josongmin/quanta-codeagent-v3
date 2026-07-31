@@ -130,19 +130,19 @@ const renderDataOutput = (data: JsonObject, opts: NotebookRenderOpts): string[] 
  *  lines (fail-soft). */
 const renderOutput = (output: unknown, opts: NotebookRenderOpts): string[] => {
   if (!isObject(output)) return []
-  const kind = output["output_type"]
+  const kind = output.output_type
   if (kind === "stream") {
-    return [cap(joinText(output["text"]), opts.maxOutputChars)]
+    return [cap(joinText(output.text), opts.maxOutputChars)]
   }
   if (kind === "execute_result" || kind === "display_data") {
-    const data = output["data"]
+    const data = output.data
     return isObject(data) ? renderDataOutput(data, opts) : []
   }
   if (kind === "error") {
-    const ename = typeof output["ename"] === "string" ? output["ename"] : "Error"
-    const evalue = typeof output["evalue"] === "string" ? output["evalue"] : ""
-    const tb = Array.isArray(output["traceback"])
-      ? output["traceback"].filter((l): l is string => typeof l === "string")
+    const ename = typeof output.ename === "string" ? output.ename : "Error"
+    const evalue = typeof output.evalue === "string" ? output.evalue : ""
+    const tb = Array.isArray(output.traceback)
+      ? output.traceback.filter((l): l is string => typeof l === "string")
       : []
     const head = `${ename}: ${evalue}`.trimEnd()
     // Traceback lines carry ANSI color escapes from the kernel; keep them as-is
@@ -158,13 +158,13 @@ const renderOutput = (output: unknown, opts: NotebookRenderOpts): string[] => {
  *  (when `includeOutputs`) its textual/base64-stripped outputs. */
 const renderCell = (cell: unknown, index: number, opts: NotebookRenderOpts): string => {
   if (!isObject(cell)) return `[cell ${index} · unknown]`
-  const type = typeof cell["cell_type"] === "string" ? cell["cell_type"] : "unknown"
+  const type = typeof cell.cell_type === "string" ? cell.cell_type : "unknown"
   const header = `[cell ${index} · ${type}]`
-  const body = numberLines(joinSource(cell["source"]))
+  const body = numberLines(joinSource(cell.source))
   let block = body === "" ? header : `${header}\n${body}`
 
-  if (opts.includeOutputs && Array.isArray(cell["outputs"]) && cell["outputs"].length > 0) {
-    const allOutputs = cell["outputs"]
+  if (opts.includeOutputs && Array.isArray(cell.outputs) && cell.outputs.length > 0) {
+    const allOutputs = cell.outputs
     const shownOutputs = Math.min(allOutputs.length, MAX_OUTPUTS_PER_CELL)
     const outLines: string[] = []
     for (let j = 0; j < shownOutputs; j++) outLines.push(...renderOutput(allOutputs[j], opts))
@@ -189,8 +189,8 @@ export const renderNotebook = (text: string, opts: NotebookRenderOpts): string |
   } catch {
     return null // not JSON ⇒ raw fallback
   }
-  if (!isObject(parsed) || !Array.isArray(parsed["cells"])) return null
-  const cells = parsed["cells"]
+  if (!isObject(parsed) || !Array.isArray(parsed.cells)) return null
+  const cells = parsed.cells
   if (cells.length === 0) return "(empty notebook: 0 cells)"
   const shown = Math.min(cells.length, MAX_NOTEBOOK_CELLS)
   const blocks: string[] = []

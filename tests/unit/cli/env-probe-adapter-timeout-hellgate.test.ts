@@ -36,8 +36,7 @@ describe("env-probe adapter — real-spawn timeout bounds a hanging probe (no st
     // Returned promptly — bounded by the timeout, NOT the 30s sleep. Generous
     // ceiling (spawn + kill reap overhead) but far below the 30s hang.
     expect(elapsed).toBeLessThan(5_000)
-  }, // regression FAILS loudly instead of stalling the suite. // Belt-and-suspenders: cap the test itself well under the 30s sleep so a
-  10_000)
+  }, 10_000) // regression FAILS loudly instead of stalling the suite. // Belt-and-suspenders: cap the test itself well under the 30s sleep so a
 
   it("timeout detail names the window (advisory, no throw)", async () => {
     const exec = createProbeExecPort(80)

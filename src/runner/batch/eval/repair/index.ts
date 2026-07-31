@@ -210,7 +210,7 @@ const selectCandidate = (
 ): RepairCandidateOutcome => {
   const green = chooseBestCandidate(
     candidates.filter((c) => clearedAsValidated(args, c.validator)),
-    (c) => 1,
+    (_c) => 1,
   )
   if (green !== undefined) return green
   // None green ⇒ argmax over the validator rank, first index wins ties. Seeded

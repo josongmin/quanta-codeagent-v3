@@ -90,7 +90,7 @@ export const parseRetryWithArgs = (args: readonly string[]): RetryWithArgs => {
   if (args.length === 0) return { requested: undefined }
   if (args.length > 1) {
     throw new Error(
-      "/retry-with: expected at most one argument (model id); got " + String(args.length),
+      `/retry-with: expected at most one argument (model id); got ${String(args.length)}`,
     )
   }
   const requested = args[0]

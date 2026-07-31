@@ -28,10 +28,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { prepareTurnContext } from "@/agent/loop/context-assembler"
-import {
-  getGlobalSessionResourceRegistry,
-  resetGlobalSessionResourceRegistry,
-} from "@/agent/session-resource-registry/global"
+import { resetGlobalSessionResourceRegistry } from "@/agent/session-resource-registry/global"
 import type { AgentConfig } from "@/agent/types"
 import { type AssembleRequest, assembleAgentConfig } from "@/apps/agent/assemble"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
@@ -70,7 +67,7 @@ interface CapturedEmit {
   value: number
 }
 
-const mkRegistry = (): { reg: MetricsRegistry; log: CapturedEmit[] } => {
+const _mkRegistry = (): { reg: MetricsRegistry; log: CapturedEmit[] } => {
   const log: CapturedEmit[] = []
   const reg: MetricsRegistry = {
     increment(name, delta = 1) {

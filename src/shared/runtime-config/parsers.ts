@@ -197,7 +197,7 @@ export const parseStatusLineConfig = (
     return undefined
   }
   const obj = parsed as Record<string, unknown>
-  const command = obj["command"]
+  const command = obj.command
   const commandOk =
     (typeof command === "string" && command.trim().length > 0) ||
     (Array.isArray(command) && command.length > 0 && command.every((c) => typeof c === "string"))
@@ -210,14 +210,14 @@ export const parseStatusLineConfig = (
   const cfg: { -readonly [K in keyof StatusLineConfig]: StatusLineConfig[K] } = {
     command: command as string | readonly string[],
   }
-  if (typeof obj["padding"] === "number" && Number.isFinite(obj["padding"])) {
-    cfg.padding = obj["padding"]
+  if (typeof obj.padding === "number" && Number.isFinite(obj.padding)) {
+    cfg.padding = obj.padding
   }
-  if (typeof obj["refreshInterval"] === "number" && Number.isFinite(obj["refreshInterval"])) {
-    cfg.refreshInterval = obj["refreshInterval"]
+  if (typeof obj.refreshInterval === "number" && Number.isFinite(obj.refreshInterval)) {
+    cfg.refreshInterval = obj.refreshInterval
   }
-  if (typeof obj["hideVimModeIndicator"] === "boolean") {
-    cfg.hideVimModeIndicator = obj["hideVimModeIndicator"]
+  if (typeof obj.hideVimModeIndicator === "boolean") {
+    cfg.hideVimModeIndicator = obj.hideVimModeIndicator
   }
   return Object.freeze(cfg)
 }

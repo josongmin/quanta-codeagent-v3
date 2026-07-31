@@ -228,7 +228,7 @@ describe("[F4] FsJailFileSystemPort.writeFile is atomic (temp + rename)", () => 
       expect(await fsp.readFile(created, "utf8")).toBe("hi")
       // It is a regular readable/writable file; we do not pin an exact mode
       // (umask-dependent) — only that no executable bit was spuriously added.
-      const st = await fsp.stat(dir + "/fresh.txt")
+      const st = await fsp.stat(`${dir}/fresh.txt`)
       expect(st.mode & 0o111).toBe(0)
     } finally {
       await fsp.rm(dir, { recursive: true, force: true })

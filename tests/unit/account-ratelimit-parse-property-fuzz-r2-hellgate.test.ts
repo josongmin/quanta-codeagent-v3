@@ -60,7 +60,7 @@ const mkResetRaw = (rng: () => number): string => {
         Math.floor(rng() * 9)
       ] as string
     case 6:
-      return "1e" + Math.floor(rng() * 320) // power-of-ten exponent (huge/absurd)
+      return `1e${Math.floor(rng() * 320)}` // power-of-ten exponent (huge/absurd)
     case 7:
       return "9".repeat(1 + Math.floor(rng() * 25)) // long digit run
     case 8:

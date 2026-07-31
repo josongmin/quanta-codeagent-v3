@@ -1,13 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { type AdmissibilityWaveAOptions, runAdmissibilityGate } from "@/agent/admissibility-gate"
-import {
-  type DenialMemory,
-  OutcomeInvariantError,
-  type PermissionContext,
-  ReviewerUnavailableError,
-  type ToolActionKeyed,
-} from "@/permission"
-import { RulesStore } from "@/rules"
+import type { DenialMemory } from "@/permission"
 import { ToolRegistry } from "@/tool"
 import {
   actionOf,

@@ -73,41 +73,41 @@ describe("S1 LLMError typed cause", () => {
 
 describe("S5 runtimeConfig validates QUANTA_LOG_LEVEL (no `as LogLevel`)", () => {
   test("garbage QUANTA_LOG_LEVEL falls back to 'info' instead of dropping all logs", () => {
-    const original = process.env["QUANTA_LOG_LEVEL"]
-    process.env["QUANTA_LOG_LEVEL"] = "garbage"
+    const original = process.env.QUANTA_LOG_LEVEL
+    process.env.QUANTA_LOG_LEVEL = "garbage"
     __resetRuntimeConfig()
     try {
       const cfg = runtimeConfig()
       expect(cfg.logLevel).toBe("info")
     } finally {
-      if (original === undefined) delete process.env["QUANTA_LOG_LEVEL"]
-      else process.env["QUANTA_LOG_LEVEL"] = original
+      if (original === undefined) delete process.env.QUANTA_LOG_LEVEL
+      else process.env.QUANTA_LOG_LEVEL = original
       __resetRuntimeConfig()
     }
   })
 
   test("valid QUANTA_LOG_LEVEL passes through", () => {
-    const original = process.env["QUANTA_LOG_LEVEL"]
-    process.env["QUANTA_LOG_LEVEL"] = "warn"
+    const original = process.env.QUANTA_LOG_LEVEL
+    process.env.QUANTA_LOG_LEVEL = "warn"
     __resetRuntimeConfig()
     try {
       expect(runtimeConfig().logLevel).toBe("warn")
     } finally {
-      if (original === undefined) delete process.env["QUANTA_LOG_LEVEL"]
-      else process.env["QUANTA_LOG_LEVEL"] = original
+      if (original === undefined) delete process.env.QUANTA_LOG_LEVEL
+      else process.env.QUANTA_LOG_LEVEL = original
       __resetRuntimeConfig()
     }
   })
 
   test("invalid QUANTA_COMPACT_TOKENS is rejected (not silently coerced)", () => {
-    const original = process.env["QUANTA_COMPACT_TOKENS"]
-    process.env["QUANTA_COMPACT_TOKENS"] = "not a number"
+    const original = process.env.QUANTA_COMPACT_TOKENS
+    process.env.QUANTA_COMPACT_TOKENS = "not a number"
     __resetRuntimeConfig()
     try {
       expect(runtimeConfig().compactTokens).toBeUndefined()
     } finally {
-      if (original === undefined) delete process.env["QUANTA_COMPACT_TOKENS"]
-      else process.env["QUANTA_COMPACT_TOKENS"] = original
+      if (original === undefined) delete process.env.QUANTA_COMPACT_TOKENS
+      else process.env.QUANTA_COMPACT_TOKENS = original
       __resetRuntimeConfig()
     }
   })
@@ -224,7 +224,7 @@ describe("S19 loadSessionById refuses messages that don't shape-check", () => {
   // test sees the env-based session dir we set.
   test("a session file with a malformed message is REFUSED (not partially loaded)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "sessions-"))
-    process.env["QUANTA_SESSIONS_DIR"] = dir
+    process.env.QUANTA_SESSIONS_DIR = dir
     __resetRuntimeConfig()
     try {
       const { loadSessionById } = await import("@/session")
@@ -250,14 +250,14 @@ describe("S19 loadSessionById refuses messages that don't shape-check", () => {
       const loaded = await loadSessionById(id)
       expect(loaded).toBeUndefined()
     } finally {
-      delete process.env["QUANTA_SESSIONS_DIR"]
+      delete process.env.QUANTA_SESSIONS_DIR
       __resetRuntimeConfig()
     }
   })
 
   test("a well-formed session round-trips through load", async () => {
     const dir = mkdtempSync(join(tmpdir(), "sessions-"))
-    process.env["QUANTA_SESSIONS_DIR"] = dir
+    process.env.QUANTA_SESSIONS_DIR = dir
     __resetRuntimeConfig()
     try {
       const { loadSessionById } = await import("@/session")
@@ -283,7 +283,7 @@ describe("S19 loadSessionById refuses messages that don't shape-check", () => {
       expect(loaded).toBeDefined()
       expect(loaded?.messages.length).toBe(1)
     } finally {
-      delete process.env["QUANTA_SESSIONS_DIR"]
+      delete process.env.QUANTA_SESSIONS_DIR
       __resetRuntimeConfig()
     }
   })

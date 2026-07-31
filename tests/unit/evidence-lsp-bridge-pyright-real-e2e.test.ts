@@ -14,7 +14,7 @@
  * same gate as the rust-analyzer real e2e: QUANTA_REAL_TOOLCHAIN_E2E=1).
  */
 import { describe, expect, test } from "bun:test"
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs"
+import { mkdtempSync, realpathSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { evidenceLspStatic } from "@/agent/lsp-bridge"

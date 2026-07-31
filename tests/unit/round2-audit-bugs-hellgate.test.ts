@@ -25,14 +25,14 @@ const SESSION_PICKER_SRC = readFileSync(
   "utf8",
 )
 
-const UNIFIED_TO_V4A_SRC = readFileSync(
+const _UNIFIED_TO_V4A_SRC = readFileSync(
   join(import.meta.dir, "../..", "src/patch/unified-to-v4a.ts"),
   "utf8",
 )
 
 // ── imports for live tests ────────────────────────────────────────────────────
 
-import type { CodeActionKind, CodeActionPort, FormatPort, SignatureHelpPort } from "@/lsp"
+import type { CodeActionPort, FormatPort, SignatureHelpPort } from "@/lsp"
 import { isUnifiedDiff, parsePatch, unifiedDiffToV4A } from "@/patch"
 import { lspCodeActionTool, lspFormatTool, lspSignatureHelpTool } from "@/tool/lsp_nav"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"

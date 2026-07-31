@@ -116,7 +116,7 @@ describe("ADR-0076 Gap-4 HELL — whitespace and control chars in steer", () => 
 
 describe("ADR-0076 Gap-4 HELL — large + non-ASCII steer", () => {
   test("C-4: 100KB+ steer roundtrips without truncation", () => {
-    const steer = "S".repeat(100 * 1024) + "_END"
+    const steer = `${"S".repeat(100 * 1024)}_END`
     const out = normalizeConfirm({ decision: "deny_and_steer", steer })
     if (out.decision !== "deny_and_steer") throw new Error("unreachable")
     expect(out.steer.length).toBe(100 * 1024 + 4)

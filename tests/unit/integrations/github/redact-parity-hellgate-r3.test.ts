@@ -248,7 +248,7 @@ describe("ADR-0313 hellgate R3 — redact parity (fake-vs-prod)", () => {
 
   /* (3) Composite shapes. */
   test("secret embedded in markdown code block STILL redacts", () => {
-    const body = ["please rotate:", "", "```", `OPENAI_KEY=${"sk-" + "Z".repeat(48)}`, "```"].join(
+    const body = ["please rotate:", "", "```", `OPENAI_KEY=${`sk-${"Z".repeat(48)}`}`, "```"].join(
       "\n",
     )
     const r = productionPort.redact(body)
@@ -276,14 +276,14 @@ describe("ADR-0313 hellgate R3 — redact parity (fake-vs-prod)", () => {
   })
 
   test("secret at body start redacts", () => {
-    const body = `${"AKIA" + "Z".repeat(16)} is leaked`
+    const body = `${`AKIA${"Z".repeat(16)}`} is leaked`
     const r = productionPort.redact(body)
     expect(r).toContain("[REDACTED:aws_access_key_id]")
     expect(r.startsWith("[REDACTED:aws_access_key_id]")).toBe(true)
   })
 
   test("secret at body end redacts", () => {
-    const body = `leaked: ${"AKIA" + "Z".repeat(16)}`
+    const body = `leaked: ${`AKIA${"Z".repeat(16)}`}`
     const r = productionPort.redact(body)
     expect(r).toContain("[REDACTED:aws_access_key_id]")
     expect(r.endsWith("[REDACTED:aws_access_key_id]")).toBe(true)
@@ -340,7 +340,7 @@ describe("ADR-0313 hellgate R3 — redact parity (fake-vs-prod)", () => {
 
   /* (5) Determinism — same input ⇒ same output. */
   test("redact is deterministic across calls", () => {
-    const body = `aws=${"AKIA" + "Z".repeat(16)} gh=ghp_${"Y".repeat(40)}`
+    const body = `aws=${`AKIA${"Z".repeat(16)}`} gh=ghp_${"Y".repeat(40)}`
     const a = productionPort.redact(body)
     const b = productionPort.redact(body)
     const c = productionPort.redact(body)

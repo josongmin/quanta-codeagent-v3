@@ -30,7 +30,6 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { buildSystemPrompt } from "@/agent"
-import type { AgentConfig } from "@/agent/types"
 import { main } from "@/apps/web-daemon"
 import { createCanvasArtifactSource } from "@/apps/web-daemon/canvas-artifact-source"
 import {

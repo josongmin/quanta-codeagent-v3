@@ -81,10 +81,10 @@ const validateOpts = (opts: SpawnOpts): void => {
 
 const buildEnv = (opts: SpawnOpts): Record<string, string> => {
   const base: Record<string, string> = {}
-  const path = process.env["PATH"]
-  if (path !== undefined) base["PATH"] = path
-  base["QUANTA_SERVICE_NAME"] = opts.serviceName
-  if (opts.allowLoadingUnsignedLibraries === true) base["QUANTA_ALLOW_UNSIGNED"] = "1"
+  const path = process.env.PATH
+  if (path !== undefined) base.PATH = path
+  base.QUANTA_SERVICE_NAME = opts.serviceName
+  if (opts.allowLoadingUnsignedLibraries === true) base.QUANTA_ALLOW_UNSIGNED = "1"
   return opts.env === undefined ? base : { ...base, ...opts.env }
 }
 

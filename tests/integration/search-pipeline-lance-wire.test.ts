@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { once } from "node:events"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http"
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -158,10 +158,10 @@ const startLanceRestFixture = async (): Promise<LanceRestFixture> => {
 }
 
 const exportLines = (prefix: string, count: number): string =>
-  Array.from(
+  `${Array.from(
     { length: count },
     (_, i) => `export const ${prefix}_${String(i + 1).padStart(3, "0")} = ${i + 1}`,
-  ).join("\n") + "\n"
+  ).join("\n")}\n`
 
 const expectedInitialIds = [
   "src/main.ts:1-50",

@@ -13,7 +13,6 @@ import { errMessage, gateOn } from "@/shared"
 import { presetRequiresLiveLspGrounding } from "../../preset"
 import { defaultSpawn, type SpawnFn, type SpawnResult } from "../backend"
 import { createBootstrapTracer } from "../bootstrap-tracer"
-import { lookupCurrentPublicIpv4 } from "../ec2"
 import { PHANTOM_DEPS } from "./auth"
 import { readDatasetInstanceIds } from "./dataset-preflight"
 import { probePyrightGrounding, verifyPyrightGrounding } from "./pyright-grounding"
@@ -227,7 +226,7 @@ const userData = (ttl: number): string =>
  *  error by blindly creating). */
 const ensureSecurityGroup = async (
   awsFn: (args: readonly string[]) => Promise<SpawnResult>,
-  spawn: SpawnFn,
+  _spawn: SpawnFn,
   sgName: string,
   vpcId: string,
   region: string,

@@ -197,7 +197,7 @@ describe("MCP auto-restart — REAL process crash → transparent supervised res
       [configWithMarker("crashsrv", marker)],
       undefined,
       {
-        supervisorDepsFor: (config) =>
+        supervisorDepsFor: (_config) =>
           realSchedulerDeps(
             // REAL factory: each (re)start builds a real McpClient → real
             // subprocess. The supervisor calls this on the initial start AND on
@@ -292,7 +292,7 @@ describe("MCP auto-restart — REAL process crash → transparent supervised res
       [configWithMarker("crashsrv", marker)],
       undefined,
       {
-        supervisorDepsFor: (config) =>
+        supervisorDepsFor: (_config) =>
           realSchedulerDeps(
             (cfg) => {
               spawnCount += 1

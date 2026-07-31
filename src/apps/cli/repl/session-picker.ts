@@ -62,7 +62,7 @@ export const maybePickSession = async (): Promise<void> => {
 
   if (ans === "" || ans.toLowerCase() === "n") return
   const num = parseInt(ans, 10)
-  if (!isNaN(num) && num >= 1 && num <= sessions.length) {
+  if (!Number.isNaN(num) && num >= 1 && num <= sessions.length) {
     process.argv.push("--resume", sessions[num - 1]!.id)
   }
 }

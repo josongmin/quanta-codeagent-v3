@@ -190,7 +190,7 @@ export class McpServer {
    *  infinite re-page. */
   private parseCursor(params: unknown): number | null {
     if (typeof params !== "object" || params === null) return 0
-    const raw = (params as Record<string, unknown>)["cursor"]
+    const raw = (params as Record<string, unknown>).cursor
     if (raw === undefined) return 0
     if (typeof raw !== "string" || !raw.startsWith(CURSOR_PREFIX)) return null
     const n = Number.parseInt(raw.slice(CURSOR_PREFIX.length), 10)
@@ -271,9 +271,9 @@ export class McpServer {
   private parseCallParams(params: unknown): { name: string; args: unknown } | null {
     if (typeof params !== "object" || params === null) return null
     const p = params as Record<string, unknown>
-    const name = p["name"]
+    const name = p.name
     if (typeof name !== "string" || name.length === 0) return null
-    const args = p["arguments"]
+    const args = p.arguments
     // `arguments` is optional; when present it must be an object (not array/scalar).
     if (args !== undefined && (typeof args !== "object" || args === null || Array.isArray(args))) {
       return null

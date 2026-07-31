@@ -26,10 +26,6 @@ export const requireContract = (name: string, available: boolean): boolean => {
   }
   if (!available && !warned.has(name)) {
     warned.add(name)
-    console.warn(
-      `[contract] skipping "${name}" — runtime unavailable. ` +
-        "Set REQUIRE_CONTRACT=1 to fail instead of skip.",
-    )
   }
   return available
 }

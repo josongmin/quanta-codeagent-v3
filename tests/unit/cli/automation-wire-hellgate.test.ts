@@ -39,11 +39,7 @@ import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { startAutomationEngineTicker } from "@/agent/loop-helpers"
 import { createInboxBanner } from "@/apps/cli/repl/automation-banner"
-import {
-  type AutomationEnginePort,
-  inMemoryAutomationEngine,
-  tickScheduler,
-} from "@/scheduler/automation-engine"
+import { inMemoryAutomationEngine, tickScheduler } from "@/scheduler/automation-engine"
 import { parseRRule } from "@/scheduler/rrule-parser"
 import {
   type AssembleAutomationDeps,

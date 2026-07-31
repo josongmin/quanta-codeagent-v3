@@ -108,7 +108,7 @@ export const stripEnvManifestPins = (patch: string): string => {
     const target = targetPathOf(headerLine)
     const isRootManifest = target !== undefined && ROOT_MANIFESTS.has(target)
     if (isRootManifest && isPureDependencyPinSection(body)) continue // drop env-pin section
-    kept.push("diff --git " + body)
+    kept.push(`diff --git ${body}`)
   }
   return head + kept.join("")
 }

@@ -36,7 +36,7 @@ import { createWorkingMemory } from "@/memory"
 
 const assistant = (...content: Message["content"]): Message => ({ role: "assistant", content })
 const textMsg = (text: string): Message => assistant({ type: "text", text })
-const toolMsg = (id: string): Message =>
+const _toolMsg = (id: string): Message =>
   assistant({ type: "tool_use", id, name: "read", input: { path: "/x" } })
 const thinkingMsg = (think: string): Message => assistant({ type: "thinking", thinking: think })
 const empty = (): Message => assistant()

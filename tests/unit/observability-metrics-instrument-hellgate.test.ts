@@ -4,7 +4,6 @@ import type {
   SubagentResult,
   SubagentSpec,
 } from "@/agent/subagent-background"
-import type { StreamEvent } from "@/llm"
 import type { LlmProvider } from "@/llm/providers"
 import { defaultMetricsRegistry } from "@/observability/metrics/index"
 import {

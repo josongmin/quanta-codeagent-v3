@@ -44,7 +44,6 @@ import {
   MAX_POOL_SIZE,
   parseRowsFromCsv,
   type RowDispatchPort,
-  type RowDispatchResult,
 } from "@/agent/batch-jobs"
 import { buildRowDispatchAdapter } from "@/agent/batch-jobs-dispatch"
 import { SqliteJobStore } from "@/host/runtime/batch-jobs-sqlite-store"

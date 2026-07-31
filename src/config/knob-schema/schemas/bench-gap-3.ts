@@ -38,7 +38,7 @@ const parseGateBool = (raw: string | undefined): boolean | undefined =>
  *  turn it OFF; everything else leaves it ON). Best-effort for PROTECT_TESTS. */
 const parseKillSwitchBool = (raw: string | undefined): boolean | undefined => {
   if (raw === undefined) return undefined
-  return isFalsyToken(raw) ? false : true
+  return !isFalsyToken(raw)
 }
 
 /** Positive-int parser (matches resolveConcurrency: `^\d+$`, > 0). Best-effort

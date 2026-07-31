@@ -393,7 +393,7 @@ describe("ADR-0311 hellgate R3 — CLI with real node-fs + real redact", () => {
   test("composite — proj-key + anthropic + ghp in one body → all 3 kinds in post", async () => {
     await writeEvent(ctx.eventPath, makeIssueCommentPayload())
     const body = [
-      `pkey=${"sk-proj-" + "abcDEF12".repeat(4)}`,
+      `pkey=${`sk-proj-${"abcDEF12".repeat(4)}`}`,
       `akey=sk-ant-${"X".repeat(40)}`,
       `gh=ghp_${"Y".repeat(36)}`,
     ].join("\n")

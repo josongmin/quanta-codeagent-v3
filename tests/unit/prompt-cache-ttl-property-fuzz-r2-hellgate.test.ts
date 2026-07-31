@@ -153,8 +153,8 @@ describe("prompt-cache TTL property fuzz R2 — gate invariants on the open slug
       "\x00\x00",
       "@".repeat(1000),
       "-".repeat(1000),
-      "anthropic.".repeat(50) + "claude-opus-4-8",
-      "claude-opus-4-8" + "@".repeat(100) + "1234567890",
+      `${"anthropic.".repeat(50)}claude-opus-4-8`,
+      `claude-opus-4-8${"@".repeat(100)}1234567890`,
       "claude-opus-4-8-99999999".repeat(40),
     ]
     for (const h of hostile) {

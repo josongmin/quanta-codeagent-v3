@@ -149,7 +149,7 @@ describe("gh_pr_resolve_thread (hellgate)", () => {
   test("HELL-2: RESOLVE-ONE builds the exact mutation argv with a NAMED -F threadId var", async () => {
     const gh = ghRunner({ threads: threadsJson("feat/x", [{ id: "T_a" }]) })
     await drain(ghPrResolveThreadTool(gh, gitRunner({})).execute({ pr: 1, threadId: "T_a" }, ctx()))
-    const mut = gh.argv.find((a) => a.some((x) => x === "query=" + RESOLVE_THREAD_MUTATION))
+    const mut = gh.argv.find((a) => a.some((x) => x === `query=${RESOLVE_THREAD_MUTATION}`))
     expect(mut).toEqual([
       "gh",
       "api",
@@ -157,7 +157,7 @@ describe("gh_pr_resolve_thread (hellgate)", () => {
       "-F",
       "threadId=T_a",
       "-f",
-      "query=" + RESOLVE_THREAD_MUTATION,
+      `query=${RESOLVE_THREAD_MUTATION}`,
     ])
     // The mutation body is the module constant — user input never appears in it.
     expect(RESOLVE_THREAD_MUTATION).toContain("resolveReviewThread")
@@ -199,7 +199,7 @@ describe("gh_pr_resolve_thread (hellgate)", () => {
   test("HELL-6: the unresolved-threads query argv passes owner/repo/pr as NAMED -F vars", async () => {
     const gh = ghRunner({ threads: threadsJson("feat/x", []) })
     await drain(ghPrResolveThreadTool(gh, gitRunner({})).execute({ pr: 9 }, ctx()))
-    const query = gh.argv.find((a) => a.some((x) => x === "query=" + UNRESOLVED_THREADS_QUERY))
+    const query = gh.argv.find((a) => a.some((x) => x === `query=${UNRESOLVED_THREADS_QUERY}`))
     expect(query).toEqual([
       "gh",
       "api",
@@ -211,7 +211,7 @@ describe("gh_pr_resolve_thread (hellgate)", () => {
       "-F",
       "pr=9",
       "-f",
-      "query=" + UNRESOLVED_THREADS_QUERY,
+      `query=${UNRESOLVED_THREADS_QUERY}`,
     ])
   })
 
@@ -223,7 +223,7 @@ describe("gh_pr_resolve_thread (hellgate)", () => {
     )
     expect(resultOf(events)?.ok).toBe(true)
     expect(gitCmds(git)).not.toContain("rebase")
-    expect(gh.argv.some((a) => a.includes("query=" + RESOLVE_THREAD_MUTATION))).toBe(true)
+    expect(gh.argv.some((a) => a.includes(`query=${RESOLVE_THREAD_MUTATION}`))).toBe(true)
   })
 
   test("HELL-8: diverged + rebaseOnDivergence:false → head_moved, NO git mutation", async () => {
@@ -236,7 +236,7 @@ describe("gh_pr_resolve_thread (hellgate)", () => {
     expect(resultOf(events)?.failure?.reason).toBe("head_moved")
     // fetch + rev-list are reads; NO rebase mutation, NO resolve mutation.
     expect(gitCmds(git)).not.toContain("rebase")
-    expect(gh.argv.some((a) => a.includes("query=" + RESOLVE_THREAD_MUTATION))).toBe(false)
+    expect(gh.argv.some((a) => a.includes(`query=${RESOLVE_THREAD_MUTATION}`))).toBe(false)
   })
 
   test("HELL-9: diverged + rebaseOnDivergence:true + clean rebase → fetch, rebase, then resolve", async () => {
@@ -252,7 +252,7 @@ describe("gh_pr_resolve_thread (hellgate)", () => {
     const cmds = gitCmds(git)
     expect(cmds).toContain("fetch")
     expect(cmds.filter((c) => c === "rebase").length).toBe(1)
-    expect(gh.argv.some((a) => a.includes("query=" + RESOLVE_THREAD_MUTATION))).toBe(true)
+    expect(gh.argv.some((a) => a.includes(`query=${RESOLVE_THREAD_MUTATION}`))).toBe(true)
   })
 
   test("HELL-10: diverged + rebase CONFLICTS → rebase --abort, fail-closed, NO resolve", async () => {
@@ -268,7 +268,7 @@ describe("gh_pr_resolve_thread (hellgate)", () => {
     expect(resultOf(events)?.failure?.reason).toBe("rebase_conflict")
     // The abort must have run; the resolve mutation must NOT.
     expect(git.calls.some((c) => c[0] === "rebase" && c[1] === "--abort")).toBe(true)
-    expect(gh.argv.some((a) => a.includes("query=" + RESOLVE_THREAD_MUTATION))).toBe(false)
+    expect(gh.argv.some((a) => a.includes(`query=${RESOLVE_THREAD_MUTATION}`))).toBe(false)
   })
 
   test("HELL-11: BOUNDED — a SECOND divergence after the single rebase fails closed (≤1 rebase)", async () => {
@@ -284,7 +284,7 @@ describe("gh_pr_resolve_thread (hellgate)", () => {
     expect(resultOf(events)?.ok).toBe(false)
     expect(resultOf(events)?.failure?.reason).toBe("head_moved")
     expect(gitCmds(git).filter((c) => c === "rebase").length).toBe(1)
-    expect(gh.argv.some((a) => a.includes("query=" + RESOLVE_THREAD_MUTATION))).toBe(false)
+    expect(gh.argv.some((a) => a.includes(`query=${RESOLVE_THREAD_MUTATION}`))).toBe(false)
   })
 
   test("HELL-12: resolve-all resolves every unresolved thread", async () => {
@@ -302,7 +302,7 @@ describe("gh_pr_resolve_thread (hellgate)", () => {
       ),
     )
     expect(resultOf(events)?.ok).toBe(true)
-    const mutations = gh.argv.filter((a) => a.includes("query=" + RESOLVE_THREAD_MUTATION))
+    const mutations = gh.argv.filter((a) => a.includes(`query=${RESOLVE_THREAD_MUTATION}`))
     const ids = mutations.map((a) => a.find((x) => x.startsWith("threadId=")))
     expect(ids).toContain("threadId=T_a")
     expect(ids).toContain("threadId=T_b")
@@ -369,7 +369,7 @@ describe("gh_pr_resolve_thread (hellgate)", () => {
     // poisoned ref — fail-closed BEFORE any argv is built.
     expect(git.calls.length).toBe(0)
     // …and the resolve mutation never ran either.
-    expect(gh.argv.some((a) => a.includes("query=" + RESOLVE_THREAD_MUTATION))).toBe(false)
+    expect(gh.argv.some((a) => a.includes(`query=${RESOLVE_THREAD_MUTATION}`))).toBe(false)
   })
 
   test("HELL-18: a whitespace/control-char headRefName is REJECTED before git argv", async () => {

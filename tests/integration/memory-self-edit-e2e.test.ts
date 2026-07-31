@@ -150,7 +150,7 @@ describe("self-edit memory tools — real loop dispatch through runAgent", () =>
   test("NEUTER control: registry WITHOUT the memory tools ⇒ store never changes, search never surfaces (non-vacuous)", async () => {
     __resetRuntimeConfig()
     const store = new InMemoryStore()
-    const embedder = new NullEmbedder()
+    const _embedder = new NullEmbedder()
 
     const llm = new SelfEditLLM()
     // Same scripted `memory_write` / `memory_search` calls, but the loop's

@@ -261,7 +261,7 @@ const textScript = (text: string): StreamEvent[] => [
   { type: "text_delta", delta: text },
   { type: "message_stop", stop_reason: "end_turn" },
 ]
-const toolUseScript = (id: string, name: string, input: unknown): StreamEvent[] => [
+const _toolUseScript = (id: string, name: string, input: unknown): StreamEvent[] => [
   { type: "tool_use_start", id, name },
   { type: "tool_use_end", id, input },
   { type: "message_stop", stop_reason: "tool_use" },

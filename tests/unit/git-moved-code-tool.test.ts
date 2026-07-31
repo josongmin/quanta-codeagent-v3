@@ -325,7 +325,7 @@ describe("gitMovedCodeTool", () => {
     // Defense-in-depth: the FIRST `--` must come BEFORE any user-supplied path.
     if (argv === undefined) throw new Error("unreachable")
     const firstSep = argv.indexOf("--")
-    const firstUserPath = argv.findIndex((a) => a === "../../etc/passwd")
+    const firstUserPath = argv.indexOf("../../etc/passwd")
     expect(firstSep).toBeGreaterThanOrEqual(0)
     expect(firstUserPath).toBeGreaterThan(firstSep)
   })

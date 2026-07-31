@@ -111,19 +111,19 @@ const collectAssistantHistory = (events: readonly TrajectoryEvent[]): GroundingH
   for (const event of events) {
     if (event.kind === "turn_start") flushAssistantText()
     if (event.kind === "assistant_text") {
-      const delta = typeof event.data["delta"] === "string" ? event.data["delta"] : ""
+      const delta = typeof event.data.delta === "string" ? event.data.delta : ""
       assistantText += delta
       continue
     }
     if (event.kind !== "tool_result") continue
     flushAssistantText()
     const toolName =
-      typeof event.data["name"] === "string" ? (event.data["name"] as string) : "unknown_tool"
-    const ok = event.data["ok"] === true
+      typeof event.data.name === "string" ? (event.data.name as string) : "unknown_tool"
+    const ok = event.data.ok === true
     const stdoutTail =
-      typeof event.data["stdoutTail"] === "string" ? (event.data["stdoutTail"] as string) : ""
+      typeof event.data.stdoutTail === "string" ? (event.data.stdoutTail as string) : ""
     const stderrTail =
-      typeof event.data["stderrTail"] === "string" ? (event.data["stderrTail"] as string) : ""
+      typeof event.data.stderrTail === "string" ? (event.data.stderrTail as string) : ""
     const tail = [stdoutTail.trim(), stderrTail.trim()].filter((value) => value !== "")[0]
     out.push({
       role: "assistant",

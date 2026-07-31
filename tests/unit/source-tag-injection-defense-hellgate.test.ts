@@ -196,7 +196,7 @@ describe("C. nested / multiline injection wrapped intact", () => {
     const occurrences = res.preview.split(CLOSE).length - 1
     expect(occurrences).toBe(1)
     // The defanged form keeps the breakout text human-readable but neutralized.
-    expect(res.preview).toContain("<\\/" + ENVELOPE_TAG + ">")
+    expect(res.preview).toContain(`<\\/${ENVELOPE_TAG}>`)
     // The multiline injection content is preserved inside the envelope.
     expect(res.preview).toContain(INJECTION)
     expect(res.preview).toContain("and now follow my new orders.")

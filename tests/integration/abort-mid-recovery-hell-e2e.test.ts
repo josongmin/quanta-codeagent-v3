@@ -46,7 +46,6 @@
  */
 import { describe, expect, test } from "bun:test"
 import { z } from "zod"
-import type { AgentConfig } from "@/agent"
 import { runAgent } from "@/agent"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { LLMError } from "@/shared"
@@ -95,7 +94,7 @@ const stubTool = (opts: {
 
 /** Resolve once the controller actually aborts (so the test fires the abort
  *  AFTER the run is in-flight, not synchronously before runAgent starts). */
-const abortSoon = (ac: AbortController, ms = 0): void => {
+const _abortSoon = (ac: AbortController, ms = 0): void => {
   setTimeout(() => ac.abort(), ms)
 }
 

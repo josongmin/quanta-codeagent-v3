@@ -59,7 +59,7 @@
  */
 
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"

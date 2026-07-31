@@ -25,7 +25,6 @@ import {
   EVIDENCE_GAPS,
   type EvidenceFacts,
   fullyEvidencedFacts,
-  isExpensiveAction,
   isRerouteAction,
   isTerminalAction,
   parseAdaptiveDecision,

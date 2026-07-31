@@ -29,28 +29,27 @@ const PROPOSED = ["line1", "CHANGED2", "line3", "line4", "line5", "CHANGED6", "l
 /** One assistant turn: a `write` that proposes BOTH changes, then (after the
  *  partial apply denies the whole-call with a steer) a final text turn so the
  *  loop has an entry to consume for the steer-injected follow-up round. */
-const WRITE_CASSETTE =
-  [
-    {
-      id: "replay",
-      events: [
-        { type: "tool_use_start", id: "call_w1", name: "write" },
-        { type: "tool_use_end", id: "call_w1", input: { path: "f.txt", content: PROPOSED } },
-        { type: "usage", inputTokens: 10, outputTokens: 5, model: "replay" },
-        { type: "message_stop", stop_reason: "tool_use" },
-      ],
-    },
-    {
-      id: "replay",
-      events: [
-        { type: "text_delta", delta: "HUNK_FLOW_DONE" },
-        { type: "usage", inputTokens: 10, outputTokens: 5, model: "replay" },
-        { type: "message_stop", stop_reason: "end_turn" },
-      ],
-    },
-  ]
-    .map((e) => JSON.stringify(e))
-    .join("\n") + "\n"
+const WRITE_CASSETTE = `${[
+  {
+    id: "replay",
+    events: [
+      { type: "tool_use_start", id: "call_w1", name: "write" },
+      { type: "tool_use_end", id: "call_w1", input: { path: "f.txt", content: PROPOSED } },
+      { type: "usage", inputTokens: 10, outputTokens: 5, model: "replay" },
+      { type: "message_stop", stop_reason: "tool_use" },
+    ],
+  },
+  {
+    id: "replay",
+    events: [
+      { type: "text_delta", delta: "HUNK_FLOW_DONE" },
+      { type: "usage", inputTokens: 10, outputTokens: 5, model: "replay" },
+      { type: "message_stop", stop_reason: "end_turn" },
+    ],
+  },
+]
+  .map((e) => JSON.stringify(e))
+  .join("\n")}\n`
 
 describe.skipIf(!PTY_AVAILABLE)("CLI per-hunk approval e2e (PTY + replay)", () => {
   let dir: string

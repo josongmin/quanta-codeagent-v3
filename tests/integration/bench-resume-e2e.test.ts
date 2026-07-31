@@ -255,7 +255,7 @@ describe("bench spot-resume KEYSTONE e2e (record → durable → reclaim → res
     // inject a ResumeStore over the reclaimed durable backend so no real S3 is
     // hit; the workDir seam pins where the materialized cassette lands.
     const resumeWorkDir = mkTmp()
-    const makeStore = (cfg: { bucket: string; region?: string }, key: string): ResumeStore => {
+    const makeStore = (_cfg: { bucket: string; region?: string }, key: string): ResumeStore => {
       // Compose the real resumeStore but with a runAws that is never reached —
       // we override the backend entirely by going through segmentStore directly.
       // Simpler + faithful: build a ResumeStore whose layers point at the

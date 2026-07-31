@@ -145,7 +145,7 @@ export const installStatusBar = (
     // Reset scroll region to full screen, clear the status row, leave
     // cursor on the first column of the (former) status row so the
     // shell prompt that follows quanta exit starts on a clean line.
-    return `${ESC}r` + `${ESC}${rows};1H` + ERASE_LINE + `${ESC}${rows};1H`
+    return `${ESC}r${ESC}${rows};1H${ERASE_LINE}${ESC}${rows};1H`
   }
 
   const setupScrollRegion = (): void => {
@@ -176,7 +176,7 @@ export const installStatusBar = (
     // NOTE: suspension by a NON-bottom-row owner (timeline band) is NOT a
     // conflict — the bar keeps painting (the row is outside every region).
     currentText = text
-    if (region !== null && region.isBottomRowOccluded()) return
+    if (region?.isBottomRowOccluded()) return
     const rows = termRows()
     const cols = termCols()
     // Reserve 1 col for the leading space inside the painted band, so the

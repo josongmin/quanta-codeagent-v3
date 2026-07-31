@@ -117,7 +117,7 @@ export const createCiTriggerSource = (opts: CiTriggerOpts): TriggerSourcePort =>
   return {
     async poll(pollOpts): Promise<readonly ProactiveTrigger[]> {
       const signal = pollOpts?.signal
-      if (signal !== undefined && signal.aborted) return []
+      if (signal?.aborted) return []
 
       const checksRes = await safeRun(
         opts.ghCliPort,
@@ -127,7 +127,7 @@ export const createCiTriggerSource = (opts: CiTriggerOpts): TriggerSourcePort =>
       )
       if (checksRes === undefined) return [] // network failure / spawn failure
       if (checksRes.exitCode !== 0) return [] // gh signaled "I don't know"
-      if (signal !== undefined && signal.aborted) return []
+      if (signal?.aborted) return []
 
       const rows = safeJsonArray<GhCheckRow>(checksRes.stdout)
       if (rows === undefined || rows.length === 0) return []
@@ -145,7 +145,7 @@ export const createCiTriggerSource = (opts: CiTriggerOpts): TriggerSourcePort =>
       if (completed.length === 0) return []
 
       const url = (await fetchPrUrl(signal)) ?? `gh://pr/${opts.prRef}`
-      if (signal !== undefined && signal.aborted) return []
+      if (signal?.aborted) return []
       for (const item of completed) seen.add(item.runId)
       const at = opts.clockPort.now()
       const summary = summarizeRollup(completed.map((item) => item.row))

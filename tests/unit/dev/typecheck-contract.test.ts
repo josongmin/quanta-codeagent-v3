@@ -13,10 +13,10 @@ const readText = (relativePath: string): string =>
 describe("typecheck contract", () => {
   test("package scripts split fast and full typecheck lanes", () => {
     const pkg = readJson<{ scripts: Record<string, string> }>("package.json")
-    expect(pkg.scripts["typecheck"]).toBe("bun run tools/dev/typecheck.ts src")
+    expect(pkg.scripts.typecheck).toBe("bun run tools/dev/typecheck.ts src")
     expect(pkg.scripts["typecheck:tests"]).toBe("bun run tools/dev/typecheck.ts tests")
     expect(pkg.scripts["typecheck:all"]).toBe("bun run tools/dev/typecheck.ts all")
-    expect(pkg.scripts["test"]).toContain("bun run typecheck")
+    expect(pkg.scripts.test).toContain("bun run typecheck")
     expect(pkg.scripts["test:unit"]).toContain("bun run typecheck")
     expect(pkg.scripts["test:fast"]).toContain("bun run typecheck")
     expect(pkg.scripts["test:ci"]).toContain("bun run typecheck:all")

@@ -78,11 +78,11 @@ const runnerAt = (depth: number, maxDepth?: number): ((r: SubagentRequest) => Pr
   })
 
 const setPolicy = (cap: number): void => {
-  process.env["QUANTA_MAX_DESCENDANT_DEPTH"] = String(cap)
+  process.env.QUANTA_MAX_DESCENDANT_DEPTH = String(cap)
   __resetRuntimeConfig()
 }
 const clearPolicy = (): void => {
-  delete process.env["QUANTA_MAX_DESCENDANT_DEPTH"]
+  delete process.env.QUANTA_MAX_DESCENDANT_DEPTH
   __resetRuntimeConfig()
 }
 

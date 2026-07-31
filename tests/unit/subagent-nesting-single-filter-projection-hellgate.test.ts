@@ -38,8 +38,8 @@ import { defaultTools, GATED_TOOLS, ToolRegistry } from "@/tool"
 // ── env cap helpers ───────────────────────────────────────────────────────────
 
 const withCap = (cap: number | undefined): void => {
-  if (cap === undefined) delete process.env["QUANTA_MAX_DESCENDANT_DEPTH"]
-  else process.env["QUANTA_MAX_DESCENDANT_DEPTH"] = String(cap)
+  if (cap === undefined) delete process.env.QUANTA_MAX_DESCENDANT_DEPTH
+  else process.env.QUANTA_MAX_DESCENDANT_DEPTH = String(cap)
   __resetRuntimeConfig()
 }
 

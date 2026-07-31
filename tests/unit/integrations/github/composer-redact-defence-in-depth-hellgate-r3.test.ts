@@ -126,7 +126,7 @@ const buildStub = (o: GhStubOpts): GhCliPort => ({
     ) {
       const idx = args.indexOf("-f")
       const ba = idx >= 0 ? args[idx + 1] : undefined
-      if (ba !== undefined && ba.startsWith("body=")) {
+      if (ba?.startsWith("body=")) {
         o.postBodySink.last = ba.slice("body=".length)
       }
       return {

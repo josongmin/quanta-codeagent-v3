@@ -120,16 +120,16 @@ const driveLast = async (tool: Tool, input: unknown, c: ToolContext): Promise<To
  *  root-only cap, so they set it explicitly (the default-3 value is owned by
  *  max-descendant-depth-config-pin.test.ts). */
 const withCap1 = (): void => {
-  process.env["QUANTA_MAX_DESCENDANT_DEPTH"] = "1"
+  process.env.QUANTA_MAX_DESCENDANT_DEPTH = "1"
   __resetRuntimeConfig()
 }
 /** Pin the runtime operator policy to an arbitrary cap through the real env seam. */
 const withCap = (cap: number): void => {
-  process.env["QUANTA_MAX_DESCENDANT_DEPTH"] = String(cap)
+  process.env.QUANTA_MAX_DESCENDANT_DEPTH = String(cap)
   __resetRuntimeConfig()
 }
 const clearCap = (): void => {
-  delete process.env["QUANTA_MAX_DESCENDANT_DEPTH"]
+  delete process.env.QUANTA_MAX_DESCENDANT_DEPTH
   __resetRuntimeConfig()
 }
 
@@ -233,7 +233,7 @@ describe("A1 — block-built `agent` tool uses the resolved cap, NOT DEFAULT_MAX
   })
 
   test("rev.4 min-cap: per-config maxDepth=1 TIGHTENS an env policy 3 to 1", async () => {
-    process.env["QUANTA_MAX_DESCENDANT_DEPTH"] = "3"
+    process.env.QUANTA_MAX_DESCENDANT_DEPTH = "3"
     __resetRuntimeConfig()
     // policy 3, requested 1 ⇒ min(3,1)=1. childDepth 2 (ctx.depth 1) now REJECTED
     // (would be admitted at policy 3). Proves the config tightens.
@@ -370,8 +370,8 @@ describe("QUANTA_MAX_DESCENDANT_DEPTH=0 is a total kill-switch (root included)",
   }
 
   test("cap 0: root (depth 0) gets NO spawn tools after projection", () => {
-    const original = process.env["QUANTA_MAX_DESCENDANT_DEPTH"]
-    process.env["QUANTA_MAX_DESCENDANT_DEPTH"] = "0"
+    const original = process.env.QUANTA_MAX_DESCENDANT_DEPTH
+    process.env.QUANTA_MAX_DESCENDANT_DEPTH = "0"
     __resetRuntimeConfig()
     try {
       expect(spawnDepthCap()).toBe(0)
@@ -383,8 +383,8 @@ describe("QUANTA_MAX_DESCENDANT_DEPTH=0 is a total kill-switch (root included)",
       expect(spawnToolsAvailable(cfg({}))).toBe(false)
       expect(spawnNamesAfterProjection({})).toEqual([])
     } finally {
-      if (original === undefined) delete process.env["QUANTA_MAX_DESCENDANT_DEPTH"]
-      else process.env["QUANTA_MAX_DESCENDANT_DEPTH"] = original
+      if (original === undefined) delete process.env.QUANTA_MAX_DESCENDANT_DEPTH
+      else process.env.QUANTA_MAX_DESCENDANT_DEPTH = original
       __resetRuntimeConfig()
     }
   })

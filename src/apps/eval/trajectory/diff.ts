@@ -45,10 +45,10 @@ const projectKey = (e: TrajectoryEvent): string => {
     case "turn_start":
       return "turn_start"
     case "tool_call": {
-      const name = (e.data["name"] as string | undefined) ?? "?"
+      const name = (e.data.name as string | undefined) ?? "?"
       // Keys-only fingerprint of input: same shape ⇒ same key. Values are
       // intentionally ignored (path strings, query text, etc. are noisy).
-      const input = e.data["input"]
+      const input = e.data.input
       const shape =
         typeof input === "object" && input !== null
           ? Object.keys(input as Record<string, unknown>)
@@ -58,18 +58,18 @@ const projectKey = (e: TrajectoryEvent): string => {
       return `tool_call:${name}[${shape}]`
     }
     case "tool_result": {
-      const name = (e.data["name"] as string | undefined) ?? "?"
-      const ok = e.data["ok"] === true ? "ok" : "err"
+      const name = (e.data.name as string | undefined) ?? "?"
+      const ok = e.data.ok === true ? "ok" : "err"
       return `tool_result:${name}:${ok}`
     }
     case "error":
       return "error"
     case "recovery": {
-      const reason = (e.data["reason"] as string | undefined) ?? "?"
+      const reason = (e.data.reason as string | undefined) ?? "?"
       return `recovery:${reason}`
     }
     case "session_end": {
-      const reason = (e.data["reason"] as string | undefined) ?? "?"
+      const reason = (e.data.reason as string | undefined) ?? "?"
       return `session_end:${reason}`
     }
     default:

@@ -79,7 +79,7 @@ describe("[GAP A] applyPatch — scored-candidate decisive-best tie-break", () =
     // window @0 becomes ["foo","bar","BAZ"] (the patch's un-indented context).
     // The SECOND window @5 must be byte-untouched (still indented "  foo"/etc).
     expect(out).toBe(
-      ["foo", "bar", "BAZ", "MID-1", "MID-2", "  foo", "  bar", "  baz"].join("\n") + "\n",
+      `${["foo", "bar", "BAZ", "MID-1", "MID-2", "  foo", "  bar", "  baz"].join("\n")}\n`,
     )
   })
 
@@ -143,7 +143,7 @@ describe("[GAP A] applyPatch — scored-candidate decisive-best tie-break", () =
     ].join("\n")
     await applyPatch(parsePatch(text), fs)
     expect(fs.snapshot()["a.txt"]).toBe(
-      ["foo", "bar", "BAZ", "MID", "  foo", "  bar", "  baz"].join("\n") + "\n",
+      `${["foo", "bar", "BAZ", "MID", "  foo", "  bar", "  baz"].join("\n")}\n`,
     )
   })
 

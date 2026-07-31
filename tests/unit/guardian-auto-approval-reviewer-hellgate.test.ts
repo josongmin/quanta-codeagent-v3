@@ -24,7 +24,6 @@ import { createOnConfirmReviewerPort } from "@/agent/reviewer-port"
 import { createSubagentBackedGuardianReview } from "@/agent/tier1/reviewer-subagent"
 import {
   __resetAutoApprovalReviewObserver,
-  type ApprovalDecision,
   type AutoApprovalReviewEvent,
   evaluate,
   isAllowed,

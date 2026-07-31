@@ -15,7 +15,6 @@ import {
   type CircumventionTracker,
   classifyCommand,
   type DenialMemory,
-  type DenyLayer,
   type DenyPillar,
   grantAndCascade,
   type HITLTier,
@@ -39,7 +38,6 @@ import { errMessage, type HITLTierReason, runtimeConfig, writeStderr } from "@/s
 import { safeEmitDecision } from "@/stream"
 import { buildDenySteerMessage, type ConfirmDecision } from "../confirm-decision"
 import {
-  denyReason,
   hardDenyStructuredReason,
   hookDenyReason,
   reviewerApprovalDenyReason,

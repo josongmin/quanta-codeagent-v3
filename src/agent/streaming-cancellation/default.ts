@@ -16,7 +16,6 @@ import type {
   CancellationOutcome,
   CancellationSignal,
   CleanupHandler,
-  PartialResult,
 } from "./types"
 
 export interface DefaultControllerOpts {

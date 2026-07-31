@@ -64,9 +64,6 @@ export interface NormalizedRedactionConfig {
 
 export class RedactionConfigError extends Error {
   override readonly name = "RedactionConfigError"
-  constructor(message: string) {
-    super(message)
-  }
 }
 
 /** Exact error message — surfaced as the startup contract. Tests assert

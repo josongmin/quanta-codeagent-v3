@@ -90,12 +90,12 @@ const rewriteTaskId = (
   const obj = inp as Record<string, unknown>
   const next: Record<string, unknown> = { ...obj }
   let changed = false
-  if (fields.taskId !== undefined && obj["task_id"] === "__PLACEHOLDER__") {
-    next["task_id"] = fields.taskId
+  if (fields.taskId !== undefined && obj.task_id === "__PLACEHOLDER__") {
+    next.task_id = fields.taskId
     changed = true
   }
-  if (fields.ownerToken !== undefined && obj["owner_token"] === "__PLACEHOLDER__") {
-    next["owner_token"] = fields.ownerToken
+  if (fields.ownerToken !== undefined && obj.owner_token === "__PLACEHOLDER__") {
+    next.owner_token = fields.ownerToken
     changed = true
   }
   return changed ? { ...e, input: next } : e

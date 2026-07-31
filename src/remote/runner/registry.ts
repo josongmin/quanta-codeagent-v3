@@ -63,7 +63,7 @@ export const selectRemoteRunner = (
   env: Readonly<Record<string, string | undefined>>,
   seams: RemoteRunnerSeams = {},
 ): RemoteRunner | null => {
-  const name = parseRemoteRunnerEnv(env["QUANTA_REMOTE_RUNNER"])
+  const name = parseRemoteRunnerEnv(env.QUANTA_REMOTE_RUNNER)
   if (name === null) return null
   switch (name) {
     case "headless":

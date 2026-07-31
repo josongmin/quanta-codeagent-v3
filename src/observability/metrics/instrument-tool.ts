@@ -18,7 +18,7 @@ import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { defaultMetricsRegistry, getDefaultMetricSink } from "./in-memory-registry"
 import type { MetricsRegistry } from "./port"
 
-const safe = (metrics: MetricsRegistry, fn: () => void): void => {
+const safe = (_metrics: MetricsRegistry, fn: () => void): void => {
   try {
     fn()
   } catch {

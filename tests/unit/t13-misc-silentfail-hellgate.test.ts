@@ -17,7 +17,7 @@
  *  (h) dispatch-seam-guard: doc claim "wiring deferred" is false — guard is wired.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createJsonlCustom3pRegistry } from "@/connectors/custom-3p/jsonl-store"

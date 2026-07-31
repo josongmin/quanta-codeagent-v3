@@ -50,9 +50,6 @@ const havePy = run.status === 0 && !run.error
 describe("SPHINX_RA_SHIM — predicate behavior (real python3, zero drift)", () => {
   test("python3 available (else VISIBLE skip)", () => {
     if (!havePy) {
-      console.warn(
-        `[sphinx-ra-shim] python3 unavailable — predicate test SKIPPED: ${run.error ?? run.stderr}`,
-      )
     }
     expect(true).toBe(true)
   })

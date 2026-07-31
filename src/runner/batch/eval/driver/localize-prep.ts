@@ -13,7 +13,6 @@ import {
   type AgentlessLocalizeDeps,
   type AgentlessLocalizeResult,
   agentlessLocalize,
-  composeAgentlessHint,
   composeIssueHint,
   extractIssueHint,
 } from "@/agent"

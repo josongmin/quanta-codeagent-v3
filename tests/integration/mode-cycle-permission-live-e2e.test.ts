@@ -35,7 +35,7 @@ const writePatch = (file: string): string =>
     "\n",
   )
 
-const lastUserText = (messages: readonly Message[]): string => {
+const _lastUserText = (messages: readonly Message[]): string => {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]
     if (message?.role !== "user") continue

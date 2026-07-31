@@ -69,16 +69,16 @@ export const readMetaResult = (jsonlPath: string): MetaReadResult => {
     return { kind: "malformed", error: "sidecar root is not an object" }
   }
   const o = raw as Record<string, unknown>
-  if (o["schema"] !== EVAL_META_SCHEMA) {
+  if (o.schema !== EVAL_META_SCHEMA) {
     return {
       kind: "malformed",
-      error: `schema mismatch: got ${String(o["schema"])}, want ${EVAL_META_SCHEMA}`,
+      error: `schema mismatch: got ${String(o.schema)}, want ${EVAL_META_SCHEMA}`,
     }
   }
-  const userPrompt = o["userPrompt"]
-  const cwd = o["cwd"]
-  const producer = o["producer"]
-  const recordedAt = o["recordedAt"]
+  const userPrompt = o.userPrompt
+  const cwd = o.cwd
+  const producer = o.producer
+  const recordedAt = o.recordedAt
   if (typeof userPrompt !== "string") {
     return { kind: "malformed", error: "userPrompt missing or not a string" }
   }
@@ -91,11 +91,11 @@ export const readMetaResult = (jsonlPath: string): MetaReadResult => {
   if (typeof producer !== "object" || producer === null) {
     return { kind: "malformed", error: "producer missing or not an object" }
   }
-  const prodName = (producer as Record<string, unknown>)["name"]
+  const prodName = (producer as Record<string, unknown>).name
   if (typeof prodName !== "string") {
     return { kind: "malformed", error: "producer.name missing or not a string" }
   }
-  const prodVer = (producer as Record<string, unknown>)["version"]
+  const prodVer = (producer as Record<string, unknown>).version
   const meta: EvalMeta = {
     schema: EVAL_META_SCHEMA,
     userPrompt,
@@ -105,9 +105,9 @@ export const readMetaResult = (jsonlPath: string): MetaReadResult => {
       ...(typeof prodVer === "string" ? { version: prodVer } : {}),
     },
     recordedAt,
-    ...(typeof o["model"] === "string" ? { model: o["model"] } : {}),
-    ...(typeof o["scenarioId"] === "string" ? { scenarioId: o["scenarioId"] } : {}),
-    ...(typeof o["usecase"] === "string" ? { usecase: o["usecase"] } : {}),
+    ...(typeof o.model === "string" ? { model: o.model } : {}),
+    ...(typeof o.scenarioId === "string" ? { scenarioId: o.scenarioId } : {}),
+    ...(typeof o.usecase === "string" ? { usecase: o.usecase } : {}),
   }
   return { kind: "ok", meta }
 }

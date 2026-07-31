@@ -90,7 +90,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  delete process.env["QUANTA_PASSIVE_VCS"]
+  delete process.env.QUANTA_PASSIVE_VCS
   __resetRuntimeConfig()
   for (const d of tmpDirs.splice(0)) rmSync(d, { recursive: true, force: true })
 })
@@ -109,7 +109,7 @@ describe("A/B. default-OFF byte-identical", () => {
     git(dir, ["checkout", "-q", "main"])
 
     const sink = recordingSink()
-    delete process.env["QUANTA_PASSIVE_VCS"] // OFF
+    delete process.env.QUANTA_PASSIVE_VCS // OFF
     __resetRuntimeConfig()
     await runBash("git merge --no-ff -m merge feature", ctxWith(dir, sink))
     expect(sink.events).toHaveLength(0)
@@ -117,7 +117,7 @@ describe("A/B. default-OFF byte-identical", () => {
 
   test("HELL-E2E-B: knob ON but NO sink wired → no crash, host opt-in still required", async () => {
     const dir = repo()
-    process.env["QUANTA_PASSIVE_VCS"] = "1"
+    process.env.QUANTA_PASSIVE_VCS = "1"
     __resetRuntimeConfig()
     // No sink on ctx ⇒ the hook resolves nothing and skips classification.
     const r = await runBash("git status", ctxWith(dir))
@@ -139,7 +139,7 @@ describe("C/D. knob ON → classified events reach the wired sink", () => {
     git(dir, ["checkout", "-q", "main"])
 
     const sink = recordingSink()
-    process.env["QUANTA_PASSIVE_VCS"] = "1"
+    process.env.QUANTA_PASSIVE_VCS = "1"
     __resetRuntimeConfig()
     await runBash("git merge --no-ff -m 'merge feature' feature", ctxWith(dir, sink))
 
@@ -157,7 +157,7 @@ describe("C/D. knob ON → classified events reach the wired sink", () => {
     git(dir, ["add", "."])
 
     const sink = recordingSink()
-    process.env["QUANTA_PASSIVE_VCS"] = "1"
+    process.env.QUANTA_PASSIVE_VCS = "1"
     __resetRuntimeConfig()
     await runBash("git commit -m 'add c'", ctxWith(dir, sink))
 
@@ -169,7 +169,7 @@ describe("C/D. knob ON → classified events reach the wired sink", () => {
   test("HELL-E2E-D2: real --amend → commit.kind 'amend' + branch 'amended' reaches sink", async () => {
     const dir = repo()
     const sink = recordingSink()
-    process.env["QUANTA_PASSIVE_VCS"] = "1"
+    process.env.QUANTA_PASSIVE_VCS = "1"
     __resetRuntimeConfig()
     await runBash("git commit --amend -m 'reworded init'", ctxWith(dir, sink))
 
@@ -187,7 +187,7 @@ describe("E/F. knob ON negative paths", () => {
   test("HELL-E2E-E: non-git command (echo of a git phrase) → no event", async () => {
     const dir = repo()
     const sink = recordingSink()
-    process.env["QUANTA_PASSIVE_VCS"] = "1"
+    process.env.QUANTA_PASSIVE_VCS = "1"
     __resetRuntimeConfig()
     await runBash('echo "Fast-forward main -> main"', ctxWith(dir, sink))
     expect(sink.events).toHaveLength(0)
@@ -196,7 +196,7 @@ describe("E/F. knob ON negative paths", () => {
   test("HELL-E2E-F: FAILED git (exitCode≠0) → no event", async () => {
     const dir = repo()
     const sink = recordingSink()
-    process.env["QUANTA_PASSIVE_VCS"] = "1"
+    process.env.QUANTA_PASSIVE_VCS = "1"
     __resetRuntimeConfig()
     // Merge a nonexistent ref ⇒ git exits non-zero.
     const r = await runBash("git merge does-not-exist-branch", ctxWith(dir, sink))
@@ -216,13 +216,13 @@ describe("G. hook is pure observability — output unchanged", () => {
     git(dir, ["add", "."])
 
     // OFF run.
-    delete process.env["QUANTA_PASSIVE_VCS"]
+    delete process.env.QUANTA_PASSIVE_VCS
     __resetRuntimeConfig()
     const off = await runBash("git status --porcelain", ctxWith(dir))
 
     // ON run (same command, with a sink).
     const sink = recordingSink()
-    process.env["QUANTA_PASSIVE_VCS"] = "1"
+    process.env.QUANTA_PASSIVE_VCS = "1"
     __resetRuntimeConfig()
     const on = await runBash("git status --porcelain", ctxWith(dir, sink))
 

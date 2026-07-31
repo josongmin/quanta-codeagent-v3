@@ -43,7 +43,7 @@ interface Patch {
 const parsePatch = (p: string): Patch => {
   const fix = /(^|;)fix=1(;|$)/.test(p)
   const m = p.match(/breaks=([^;]*)/)
-  const breaks = m && m[1] ? m[1].split(",").filter(Boolean) : []
+  const breaks = m?.[1] ? m[1].split(",").filter(Boolean) : []
   return { fix, breaks }
 }
 

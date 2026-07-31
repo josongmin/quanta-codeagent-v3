@@ -53,7 +53,7 @@ const mkReplayEntry = (): string =>
     ],
   })
 
-const CASSETTE_MULTI = [mkReplayEntry(), mkReplayEntry()].join("\n") + "\n"
+const CASSETTE_MULTI = `${[mkReplayEntry(), mkReplayEntry()].join("\n")}\n`
 
 describe.skipIf(!PTY_AVAILABLE)("CLI turn-layer e2e (PTY + replay)", () => {
   let dir: string

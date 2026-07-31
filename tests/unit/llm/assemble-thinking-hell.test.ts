@@ -275,7 +275,7 @@ describe("ADR-0076 Gap-2 HELL — signature accumulation modes", () => {
   })
 
   test("I-G: 4KB+ signature roundtrip (no truncation)", () => {
-    const sig = "S".repeat(4096) + "_TAIL"
+    const sig = `${"S".repeat(4096)}_TAIL`
     const events: StreamEvent[] = [
       { type: "thinking_delta", text: "t" },
       { type: "signature_delta", signature: sig },

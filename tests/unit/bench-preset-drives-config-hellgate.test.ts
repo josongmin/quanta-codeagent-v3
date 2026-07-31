@@ -28,7 +28,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
-import { KNOB_PRESETS, presetRequiresLiveLspGrounding } from "@/runner/knobs"
+import { KNOB_PRESETS } from "@/runner/knobs"
 import { __resetKnobOverrides, getKnobOverride } from "@/shared/knob-overrides"
 import type { StreamPort } from "@/stream"
 import {

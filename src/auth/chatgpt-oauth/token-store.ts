@@ -35,7 +35,7 @@ export interface ResolvedTokenRecord {
   readonly record: TokenRecord
 }
 
-const assertPrivateFileMode = (path: string, mode: number): void => {
+const assertPrivateFileMode = (_path: string, mode: number): void => {
   if (process.platform === "win32") return
   if ((mode & 0o077) !== 0) {
     throw new TokenStoreError(

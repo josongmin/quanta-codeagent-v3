@@ -4,7 +4,7 @@ import { type RetryWithSessionState, retryWithCmd } from "@/apps/cli/retry-with"
 import type { SlashContext } from "@/apps/cli/slash-commands"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import { defaultTools, ToolRegistry } from "@/tool"
-import { cfg, RecordingStream, text, withTimeout } from "./_harness"
+import { cfg, RecordingStream, withTimeout } from "./_harness"
 
 /**
  * REAL-LOOP FAKE-LLM e2e for `model-swap-retry` (ADR-0066 / feature

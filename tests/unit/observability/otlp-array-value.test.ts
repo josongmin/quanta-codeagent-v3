@@ -63,8 +63,8 @@ describe("otel-exporter / OTLP arrayValue", () => {
     const { fetch, calls } = makeFakeFetch()
     const exp = otelHttpExporter({ endpoint: ENDPOINT, fetch, ...noTimer, batchSize: 1 })
     exp.recordSpan({
-      traceId: "0".repeat(31) + "1",
-      spanId: "0".repeat(15) + "1",
+      traceId: `${"0".repeat(31)}1`,
+      spanId: `${"0".repeat(15)}1`,
       name: "run_sampling_request",
       startTimeEpochMs: 1_000,
       endTimeEpochMs: 2_000,
@@ -86,8 +86,8 @@ describe("otel-exporter / OTLP arrayValue", () => {
     const { fetch, calls } = makeFakeFetch()
     const exp = otelHttpExporter({ endpoint: ENDPOINT, fetch, ...noTimer, batchSize: 1 })
     exp.recordSpan({
-      traceId: "0".repeat(31) + "2",
-      spanId: "0".repeat(15) + "2",
+      traceId: `${"0".repeat(31)}2`,
+      spanId: `${"0".repeat(15)}2`,
       name: "run_sampling_request",
       startTimeEpochMs: 1_000,
       endTimeEpochMs: 2_000,
@@ -116,8 +116,8 @@ describe("otel-exporter / OTLP arrayValue", () => {
     const { fetch, calls } = makeFakeFetch()
     const exp = otelHttpExporter({ endpoint: ENDPOINT, fetch, ...noTimer, batchSize: 1 })
     exp.recordSpan({
-      traceId: "0".repeat(31) + "3",
-      spanId: "0".repeat(15) + "3",
+      traceId: `${"0".repeat(31)}3`,
+      spanId: `${"0".repeat(15)}3`,
       name: "op",
       startTimeEpochMs: 1_000,
       endTimeEpochMs: 2_000,
@@ -140,8 +140,8 @@ describe("otel-exporter / OTLP arrayValue", () => {
     const { fetch, calls } = makeFakeFetch()
     const exp = otelHttpExporter({ endpoint: ENDPOINT, fetch, ...noTimer, batchSize: 1 })
     exp.recordSpan({
-      traceId: "0".repeat(31) + "4",
-      spanId: "0".repeat(15) + "4",
+      traceId: `${"0".repeat(31)}4`,
+      spanId: `${"0".repeat(15)}4`,
       name: "run_sampling_request",
       startTimeEpochMs: 1_000,
       endTimeEpochMs: 2_000,
@@ -180,8 +180,8 @@ describe("otel-exporter / OTLP arrayValue", () => {
     const { fetch, calls } = makeFakeFetch()
     const exp = otelHttpExporter({ endpoint: ENDPOINT, fetch, ...noTimer, batchSize: 1 })
     exp.recordSpan({
-      traceId: "0".repeat(31) + "5",
-      spanId: "0".repeat(15) + "5",
+      traceId: `${"0".repeat(31)}5`,
+      spanId: `${"0".repeat(15)}5`,
       name: "run_sampling_request",
       startTimeEpochMs: 1_000,
       endTimeEpochMs: 2_000,

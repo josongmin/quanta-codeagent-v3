@@ -58,17 +58,17 @@ export const parseScenario = (raw: unknown): Scenario => {
     throw new Error("scenario must be an object")
   }
   const r = raw as Record<string, unknown>
-  const schema = r["schema"]
+  const schema = r.schema
   if (schema !== SCENARIO_SCHEMA_VERSION) {
     throw new Error(
       `scenario schema mismatch: got ${String(schema)}, want ${SCENARIO_SCHEMA_VERSION}`,
     )
   }
-  const id = r["id"]
-  const usecase = r["usecase"]
-  const title = r["title"]
-  const prompt = r["prompt"]
-  const rubric = r["rubric"]
+  const id = r.id
+  const usecase = r.usecase
+  const title = r.title
+  const prompt = r.prompt
+  const rubric = r.rubric
   if (
     typeof id !== "string" ||
     typeof usecase !== "string" ||
@@ -84,7 +84,7 @@ export const parseScenario = (raw: unknown): Scenario => {
   // `[{pattern:"rm -rf"}]` → empty list → unguarded). `maxTurns` is the
   // loop ceiling, so a NaN/negative/zero value would either crash runAgent or
   // produce a zero-turn run scored as fail.
-  const forbiddenRaw = r["forbidden"]
+  const forbiddenRaw = r.forbidden
   let forbidden: readonly string[] | undefined
   if (forbiddenRaw !== undefined) {
     if (!Array.isArray(forbiddenRaw)) {
@@ -97,7 +97,7 @@ export const parseScenario = (raw: unknown): Scenario => {
     }
     forbidden = forbiddenRaw as readonly string[]
   }
-  const maxTurnsRaw = r["maxTurns"]
+  const maxTurnsRaw = r.maxTurns
   let maxTurns: number | undefined
   if (maxTurnsRaw !== undefined) {
     if (typeof maxTurnsRaw !== "number" || !Number.isInteger(maxTurnsRaw) || maxTurnsRaw < 1) {
@@ -112,8 +112,8 @@ export const parseScenario = (raw: unknown): Scenario => {
     title,
     prompt,
     rubric: rubric.map(parseRubric),
-    ...(Array.isArray(r["files"]) ? { files: r["files"].map(parseFile) } : {}),
-    ...(typeof r["setupCmd"] === "string" ? { setupCmd: r["setupCmd"] } : {}),
+    ...(Array.isArray(r.files) ? { files: r.files.map(parseFile) } : {}),
+    ...(typeof r.setupCmd === "string" ? { setupCmd: r.setupCmd } : {}),
     ...(forbidden !== undefined ? { forbidden } : {}),
     ...(maxTurns !== undefined ? { maxTurns } : {}),
   }
@@ -123,25 +123,23 @@ export const parseScenario = (raw: unknown): Scenario => {
 const parseRubric = (raw: unknown): RubricItem => {
   if (typeof raw !== "object" || raw === null) throw new Error("rubric item must be object")
   const r = raw as Record<string, unknown>
-  const id = r["id"]
-  const description = r["description"]
+  const id = r.id
+  const description = r.description
   if (typeof id !== "string" || typeof description !== "string") {
     throw new Error("rubric item requires id, description")
   }
   return {
     id,
     description,
-    ...(typeof r["weight"] === "number" && r["weight"] > 0 && r["weight"] <= 1
-      ? { weight: r["weight"] }
-      : {}),
+    ...(typeof r.weight === "number" && r.weight > 0 && r.weight <= 1 ? { weight: r.weight } : {}),
   }
 }
 
 const parseFile = (raw: unknown): ScenarioFile => {
   if (typeof raw !== "object" || raw === null) throw new Error("file entry must be object")
   const r = raw as Record<string, unknown>
-  const path = r["path"]
-  const content = r["content"]
+  const path = r.path
+  const content = r.content
   if (typeof path !== "string" || typeof content !== "string") {
     throw new Error("file entry requires path, content")
   }

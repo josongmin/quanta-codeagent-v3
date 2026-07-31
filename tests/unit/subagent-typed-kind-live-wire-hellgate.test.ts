@@ -67,13 +67,13 @@ const runTool = async (tool: Tool, input: unknown): Promise<ToolEvent> => {
 }
 
 const setGate = (on: boolean): void => {
-  if (on) process.env["QUANTA_SUBAGENT_TYPED_KIND"] = "1"
-  else delete process.env["QUANTA_SUBAGENT_TYPED_KIND"]
+  if (on) process.env.QUANTA_SUBAGENT_TYPED_KIND = "1"
+  else delete process.env.QUANTA_SUBAGENT_TYPED_KIND
   __resetRuntimeConfig()
 }
 
 afterEach(() => {
-  delete process.env["QUANTA_SUBAGENT_TYPED_KIND"]
+  delete process.env.QUANTA_SUBAGENT_TYPED_KIND
   __resetRuntimeConfig()
 })
 

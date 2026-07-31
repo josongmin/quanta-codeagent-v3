@@ -160,7 +160,7 @@ describe("HELLGATE — abort mid FallbackLLM provider swap (zombie-stream / leak
     const ac = new AbortController()
     const channel = new ChannelSpy()
     let secondaryEntered = 0
-    let secondaryYields = 0
+    let _secondaryYields = 0
 
     // PRIMARY throws an overload WITHOUT aborting — so the loop legitimately
     // advances to the secondary (post-catch guard passes because the signal is
@@ -188,9 +188,9 @@ describe("HELLGATE — abort mid FallbackLLM provider swap (zombie-stream / leak
           // first event. The next `throwIfAborted` in `streamProvider` aborts.
           ac.abort(new Error("cancelled while secondary preamble ran"))
           await Promise.resolve()
-          secondaryYields += 1
+          _secondaryYields += 1
           yield { type: "text_delta", delta: "ZOMBIE event that must not leak" }
-          secondaryYields += 1
+          _secondaryYields += 1
           yield { type: "message_stop", stop_reason: "end_turn" }
         } finally {
           ch.release()

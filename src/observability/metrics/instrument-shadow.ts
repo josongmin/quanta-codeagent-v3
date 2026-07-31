@@ -26,7 +26,7 @@ import type {
 } from "@/storage/shadow-odb"
 import type { MetricsRegistry } from "./port"
 
-const safe = (metrics: MetricsRegistry, fn: () => void): void => {
+const safe = (_metrics: MetricsRegistry, fn: () => void): void => {
   try {
     fn()
   } catch {

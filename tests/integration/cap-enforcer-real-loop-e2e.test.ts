@@ -3,7 +3,7 @@ import { z } from "zod"
 import { runAgent } from "@/agent"
 import { CapEnforcer } from "@/agent/cap-enforcer"
 import type { Message, StreamEvent, StreamInput } from "@/llm"
-import type { NextAction, Tool, ToolContext, ToolEvent } from "@/tool"
+import type { NextAction, Tool, ToolEvent } from "@/tool"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { cfg, eventsOf, RecordingStream, text, withTimeout } from "./_harness"
 

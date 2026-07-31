@@ -96,11 +96,11 @@ const INSTANCE_PREFIXES: readonly string[] = [
  *  `db/backends/<engine>` so no full literal appears here. */
 const DB = "db" + "/" + "backends"
 const CONTAMINATED_PATHS: readonly string[] = [
-  DB + "/" + "postgresql",
-  DB + "/" + "base" + "/" + "client",
-  DB + "/" + "mysql",
-  DB + "/" + "oracle",
-  DB + "/" + "sqlite3",
+  `${DB}/postgresql`,
+  `${DB}/base/client`,
+  `${DB}/mysql`,
+  `${DB}/oracle`,
+  `${DB}/sqlite3`,
 ]
 
 /** Hidden grader labels used as a RUNTIME dependency — none should legitimately
@@ -155,8 +155,8 @@ describe("SCAFF-08: static-witness scaffold sources carry no benchmark-shaped co
   test("matcher self-test: flags a synthetic embedded needle, real sources lack it", () => {
     // Build the self-test needles from fragments directly (non-undefined string,
     // and identical by construction to the corresponding ALL_NEEDLES members).
-    const instanceNeedle: string = "django" + SEP // e.g. `django` + `__`
-    const pathNeedle: string = DB + "/" + "postgresql" // db/backends/postgresql
+    const instanceNeedle: string = `django${SEP}` // e.g. `django` + `__`
+    const pathNeedle: string = `${DB}/postgresql` // db/backends/postgresql
     const graderNeedle: string = ["FAIL", "TO", "PASS"].join("_") // FAIL_TO_PASS
     // Provenance: each self-test needle IS one of the real forbidden needles.
     expect(ALL_NEEDLES).toContain(instanceNeedle)

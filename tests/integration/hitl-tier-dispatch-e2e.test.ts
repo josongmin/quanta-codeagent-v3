@@ -45,7 +45,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   rmSync(tmp, { recursive: true, force: true })
-  delete process.env["QUANTA_HITL_OVERRIDES"]
+  delete process.env.QUANTA_HITL_OVERRIDES
   __resetRuntimeConfig()
   __resetHitlOverrides()
 })
@@ -53,7 +53,7 @@ afterEach(() => {
 const setOverrides = (annotations: unknown[]): string => {
   const path = join(tmp, "h.json")
   writeFileSync(path, JSON.stringify({ version: 1, annotations }), "utf8")
-  process.env["QUANTA_HITL_OVERRIDES"] = path
+  process.env.QUANTA_HITL_OVERRIDES = path
   __resetRuntimeConfig()
   __resetHitlOverrides()
   return path
@@ -183,7 +183,7 @@ describe("dispatchTool + HITL registry (ADR-0047) e2e", () => {
   })
 
   test("absent override file ⇒ byte-identical legacy behavior (no handoff for pre-approval-ok)", async () => {
-    delete process.env["QUANTA_HITL_OVERRIDES"]
+    delete process.env.QUANTA_HITL_OVERRIDES
     __resetRuntimeConfig()
     __resetHitlOverrides()
     const captured: HandoffRequiredEvent[] = []

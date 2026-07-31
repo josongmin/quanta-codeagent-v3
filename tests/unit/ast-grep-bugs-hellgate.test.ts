@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { execSync } from "node:child_process"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import type { ToolContext, ToolEvent } from "@/tool"
 import { astGrepTool } from "@/tool/ast-grep"
 
@@ -178,13 +178,6 @@ describe("SRC-7: stdout is capped before JSON.parse (B7 source ratchet)", () => 
 describe("B1: path argument is validated against fs-jail", () => {
   test("B1-1: path outside the workspace cwd produces ok:false (FsJailError caught)", async () => {
     if (!astGrepAvailable) {
-      // Even without ast-grep, the jail check fires before probeAstGrep,
-      // so this test is valid regardless of binary availability.
-      // Actually: probe runs first. If probe fails, we never reach jail check.
-      // So this test requires binary OR we need to test structurally.
-      // Since we want to test the actual jail behavior when binary IS available,
-      // we skip if binary is absent (probe error would mask the jail error).
-      console.log("[B1-1] ast-grep not available — jail check is after probe; skip live test")
       return
     }
 
@@ -201,7 +194,6 @@ describe("B1: path argument is validated against fs-jail", () => {
 
   test("B1-2: path inside the workspace cwd succeeds (paired control)", async () => {
     if (!astGrepAvailable) {
-      console.log("[B1-2] ast-grep not available — skipping")
       return
     }
 
@@ -219,7 +211,6 @@ describe("B1: path argument is validated against fs-jail", () => {
 
   test("B1-3: path with '..' escape sequence is rejected by jail (structural)", async () => {
     if (!astGrepAvailable) {
-      console.log("[B1-3] ast-grep not available — skipping")
       return
     }
 
@@ -304,8 +295,6 @@ describe("B2: probe cache must not permanently cache failure", () => {
     //
     // The meaningful test: call twice, verify shape.
     if (astGrepAvailable) {
-      // Cannot exercise probe-failure path when binary is present.
-      console.log("[B2-2] ast-grep IS available — probe-failure test not applicable; skip")
       return
     }
 
@@ -330,7 +319,6 @@ describe("B2: probe cache must not permanently cache failure", () => {
 describe("B4: multi-line match text must be collapsed to single output line", () => {
   test("B4-1: multi-line function body match produces one output line per match", async () => {
     if (!astGrepAvailable) {
-      console.log("[B4-1] ast-grep not available — skipping")
       return
     }
 
@@ -339,7 +327,7 @@ describe("B4: multi-line match text must be collapsed to single output line", ()
     const file = join(tmpDir, "b4-multiline.ts")
     writeFileSync(
       file,
-      [
+      `${[
         "function greet(name: string) {",
         "  const msg = `Hello, ${name}!`;",
         "  return msg;",
@@ -347,7 +335,7 @@ describe("B4: multi-line match text must be collapsed to single output line", ()
         "function add(a: number, b: number) {",
         "  return a + b;",
         "}",
-      ].join("\n") + "\n",
+      ].join("\n")}\n`,
     )
 
     // Use a pattern that matches a function declaration — ast-grep may return
@@ -358,9 +346,6 @@ describe("B4: multi-line match text must be collapsed to single output line", ()
     )
 
     if (!result.ok) {
-      // If the pattern doesn't match or ast-grep returns an error, skip the
-      // format assertion (the binary version may not support this pattern).
-      console.log(`[B4-1] tool returned ok:false: ${result.output} — skipping format check`)
       return
     }
 
@@ -388,7 +373,6 @@ describe("B4: multi-line match text must be collapsed to single output line", ()
 
   test("B4-2: single-line match format is unchanged (paired control)", async () => {
     if (!astGrepAvailable) {
-      console.log("[B4-2] ast-grep not available — skipping")
       return
     }
 
@@ -412,7 +396,6 @@ describe("B4: multi-line match text must be collapsed to single output line", ()
 
   test("B4-3: output line count equals match count (one line per match invariant)", async () => {
     if (!astGrepAvailable) {
-      console.log("[B4-3] ast-grep not available — skipping")
       return
     }
 
@@ -420,13 +403,13 @@ describe("B4: multi-line match text must be collapsed to single output line", ()
     const file = join(tmpDir, "b4-count.ts")
     writeFileSync(
       file,
-      [
+      `${[
         "console.log('a');",
         "const x = 1;",
         "console.log('b');",
         "const y = 2;",
         "console.log('c');",
-      ].join("\n") + "\n",
+      ].join("\n")}\n`,
     )
 
     const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
@@ -450,7 +433,6 @@ describe("B4: multi-line match text must be collapsed to single output line", ()
 describe("B7: stdout is capped before JSON.parse to prevent OOM", () => {
   test("B7-1: tool handles truncated / oversized JSON gracefully (no throw)", async () => {
     if (!astGrepAvailable) {
-      console.log("[B7-1] ast-grep not available — skipping")
       return
     }
 
@@ -487,14 +469,13 @@ describe("B7: stdout is capped before JSON.parse to prevent OOM", () => {
 
   test("B7-2: result count is bounded at MAX_MATCHES (50) regardless of input size", async () => {
     if (!astGrepAvailable) {
-      console.log("[B7-2] ast-grep not available — skipping")
       return
     }
 
     // Create a file with 60 matches. Cap should limit output to 50.
     const lines = Array.from({ length: 60 }, (_, i) => `const v${i} = ${i};`)
     const file = join(tmpDir, "b7-60vars.ts")
-    writeFileSync(file, lines.join("\n") + "\n")
+    writeFileSync(file, `${lines.join("\n")}\n`)
 
     // Red-on-injection: remove the --max-count flag and/or the stdout cap →
     // ast-grep returns all 60 matches; after JSON.parse and slice(0, 50),

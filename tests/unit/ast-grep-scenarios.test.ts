@@ -141,7 +141,6 @@ describe("S-PROBE-5: description contains 'ast-grep'", () => {
 describe("S-BIN-1: execute with real args but no binary -> ok:false", () => {
   test("yields ok:false when ast-grep binary is absent", async () => {
     if (astGrepAvailable) {
-      console.log("[S-BIN-1] ast-grep IS available — binary-absent path not exercisable; skip")
       return
     }
     // Red-on-injection: remove the probeAstGrep guard → the tool attempts to
@@ -155,7 +154,6 @@ describe("S-BIN-1: execute with real args but no binary -> ok:false", () => {
 describe("S-BIN-2: error message contains installation guidance", () => {
   test("output mentions 'brew' or 'cargo' or 'install'", async () => {
     if (astGrepAvailable) {
-      console.log("[S-BIN-2] ast-grep IS available — binary-absent path not exercisable; skip")
       return
     }
     // Red-on-injection: strip the installation-hint string in probeAstGrep →
@@ -169,7 +167,6 @@ describe("S-BIN-2: error message contains installation guidance", () => {
 describe("S-BIN-3: result shape is {ok:false, output:string} not a throw", () => {
   test("binary-absent path returns object, does not throw", async () => {
     if (astGrepAvailable) {
-      console.log("[S-BIN-3] ast-grep IS available — binary-absent path not exercisable; skip")
       return
     }
     // Red-on-injection: replace the probeError yield with a bare `throw` →
@@ -197,7 +194,6 @@ describe("S-BIN-3: result shape is {ok:false, output:string} not a throw", () =>
 describe("S-FMT-1: output line format matches /^.+:\\d+: .+/", () => {
   test("each match line is file:lineno: text", async () => {
     if (!astGrepAvailable) {
-      console.log("[S-FMT-1] ast-grep not available — skipping")
       return
     }
     const file = join(tmpDir, "fmt1-sample.ts")
@@ -221,7 +217,6 @@ describe("S-FMT-1: output line format matches /^.+:\\d+: .+/", () => {
 describe("S-FMT-2: line numbers are 1-indexed", () => {
   test("first line of file produces line number 1, not 0", async () => {
     if (!astGrepAvailable) {
-      console.log("[S-FMT-2] ast-grep not available — skipping")
       return
     }
     const file = join(tmpDir, "fmt2-sample.ts")
@@ -243,7 +238,6 @@ describe("S-FMT-2: line numbers are 1-indexed", () => {
 describe("S-FMT-3: multiple matches each appear on separate output lines", () => {
   test("3 matches → at least 3 non-empty output lines", async () => {
     if (!astGrepAvailable) {
-      console.log("[S-FMT-3] ast-grep not available — skipping")
       return
     }
     const file = join(tmpDir, "fmt3-sample.ts")
@@ -264,7 +258,6 @@ describe("S-FMT-3: multiple matches each appear on separate output lines", () =>
 describe("S-FMT-4: file path in output matches the path passed in", () => {
   test("output lines contain the exact file path supplied", async () => {
     if (!astGrepAvailable) {
-      console.log("[S-FMT-4] ast-grep not available — skipping")
       return
     }
     const file = join(tmpDir, "fmt4-sample.ts")
@@ -288,7 +281,6 @@ describe("S-FMT-4: file path in output matches the path passed in", () => {
 describe("S-ZERO-1: pattern matching nothing → ok:true with empty/no-match output", () => {
   test("zero matches returns ok:true and empty-ish output", async () => {
     if (!astGrepAvailable) {
-      console.log("[S-ZERO-1] ast-grep not available — skipping")
       return
     }
     const file = join(tmpDir, "zero-sample.ts")
@@ -310,7 +302,6 @@ describe("S-ZERO-1: pattern matching nothing → ok:true with empty/no-match out
 describe("S-ZERO-2: zero matches does not throw", () => {
   test("execute completes without throwing on zero matches", async () => {
     if (!astGrepAvailable) {
-      console.log("[S-ZERO-2] ast-grep not available — skipping")
       return
     }
     const file = join(tmpDir, "zero2-sample.ts")
@@ -335,12 +326,11 @@ describe("S-ZERO-2: zero matches does not throw", () => {
 describe("S-CAP-1: 60-match file → output has at most 50 match lines", () => {
   test("result output contains ≤50 match lines when 60 exist", async () => {
     if (!astGrepAvailable) {
-      console.log("[S-CAP-1] ast-grep not available — skipping")
       return
     }
     const lines = Array.from({ length: 60 }, (_, i) => `console.log(${i});`)
     const file = join(tmpDir, "cap-60.js")
-    writeFileSync(file, lines.join("\n") + "\n")
+    writeFileSync(file, `${lines.join("\n")}\n`)
 
     const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
     expect(result.ok).toBe(true)
@@ -355,12 +345,11 @@ describe("S-CAP-1: 60-match file → output has at most 50 match lines", () => {
 describe("S-CAP-2: cap hit → output contains a 'more' indicator", () => {
   test("'... N more matches' appears when 60 matches exist (cap=50)", async () => {
     if (!astGrepAvailable) {
-      console.log("[S-CAP-2] ast-grep not available — skipping")
       return
     }
     const lines = Array.from({ length: 60 }, (_, i) => `console.log(${i});`)
     const file = join(tmpDir, "cap-60b.js")
-    writeFileSync(file, lines.join("\n") + "\n")
+    writeFileSync(file, `${lines.join("\n")}\n`)
 
     const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
     expect(result.ok).toBe(true)
@@ -374,12 +363,11 @@ describe("S-CAP-2: cap hit → output contains a 'more' indicator", () => {
 describe("S-CAP-3: 5 matches → no 'more' indicator", () => {
   test("output has no 'more matches' text when only 5 matches exist", async () => {
     if (!astGrepAvailable) {
-      console.log("[S-CAP-3] ast-grep not available — skipping")
       return
     }
     const lines = Array.from({ length: 5 }, (_, i) => `console.log(${i});`)
     const file = join(tmpDir, "cap-5.js")
-    writeFileSync(file, lines.join("\n") + "\n")
+    writeFileSync(file, `${lines.join("\n")}\n`)
 
     const result = await runTool({ pattern: "console.log($A)", path: file }, tmpDir)
     expect(result.ok).toBe(true)
@@ -397,7 +385,6 @@ describe("S-CAP-3: 5 matches → no 'more' indicator", () => {
 describe("S-PATH-1: path=undefined → searches current dir, no crash", () => {
   test("omitting path argument does not crash or throw", async () => {
     if (!astGrepAvailable) {
-      console.log("[S-PATH-1] ast-grep not available — skipping")
       return
     }
     // Red-on-injection: make path required (remove optional()) → the schema
@@ -420,7 +407,6 @@ describe("S-PATH-1: path=undefined → searches current dir, no crash", () => {
 describe("S-PATH-2: path=specific file → only that file's matches returned", () => {
   test("when path is a single file, output only mentions that file", async () => {
     if (!astGrepAvailable) {
-      console.log("[S-PATH-2] ast-grep not available — skipping")
       return
     }
     const fileA = join(tmpDir, "path2-a.ts")
@@ -442,7 +428,6 @@ describe("S-PATH-2: path=specific file → only that file's matches returned", (
 describe("S-PATH-3: path=nonexistent → ok:false or empty, no throw or crash", () => {
   test("nonexistent path returns a result object without throwing", async () => {
     if (!astGrepAvailable) {
-      console.log("[S-PATH-3] ast-grep not available — skipping")
       return
     }
     // Red-on-injection: remove the `r.exitCode > 1` guard in execute() →
@@ -473,7 +458,6 @@ describe("S-PATH-3: path=nonexistent → ok:false or empty, no throw or crash", 
 describe("S-LANG-1: language='typescript' with .ts file → valid results", () => {
   test("explicit typescript language produces ok:true on a TS file", async () => {
     if (!astGrepAvailable) {
-      console.log("[S-LANG-1] ast-grep not available — skipping")
       return
     }
     const file = join(tmpDir, "lang1-sample.ts")
@@ -494,7 +478,6 @@ describe("S-LANG-1: language='typescript' with .ts file → valid results", () =
 describe("S-LANG-2: language='nonexistentlang999' → ok:false with error, no throw", () => {
   test("bogus language returns ok:false and does not throw", async () => {
     if (!astGrepAvailable) {
-      console.log("[S-LANG-2] ast-grep not available — skipping")
       return
     }
     const file = join(tmpDir, "lang2-sample.ts")

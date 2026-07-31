@@ -224,14 +224,14 @@ describe("G2 ack-bypass matrix — every non-genuine ack fails closed", () => {
   for (const ack of WHITESPACE_ACKS) {
     test(`ack=${JSON.stringify(ack)} with enabled:true ⇒ throw OR disarm, never a silent arm`, () => {
       let threw: unknown
-      let armed: boolean | undefined
+      let _armed: boolean | undefined
       try {
         const gate = normalizeCommandHookGate({
           enabled: true,
           acknowledgedRisk: ack,
           bindings: [{ event: "PreToolUse", command: uniqueCommand("g2") }],
         })
-        armed = gate.armed
+        _armed = gate.armed
       } catch (e) {
         threw = e
       }

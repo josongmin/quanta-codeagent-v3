@@ -294,7 +294,7 @@ export const shouldWireBackground = (args: {
   if (args.portal === undefined) return false
   if (args.inboundMode?.current === "weave") return false
   const ca = args.conversationActions
-  if (ca !== undefined && ca.activeTurnRef.current.isInterrupted) return false
+  if (ca?.activeTurnRef.current.isInterrupted) return false
   return true
 }
 

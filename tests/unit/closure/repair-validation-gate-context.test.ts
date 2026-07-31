@@ -29,7 +29,7 @@ describe("runRepairRounds — validation gate context", () => {
       observed: { exitCode: 1, stdout: "Issue reproduced\n", stderr: "" },
     })
 
-    const out = await runRepairRounds({
+    const _out = await runRepairRounds({
       config: { maxRounds: 1 },
       problem: "fix it",
       runOnce,
@@ -74,7 +74,7 @@ describe("runRepairRounds — validation gate context", () => {
       observed: { exitCode: 1, stdout: "", stderr: "AssertionError\n" },
     })
 
-    const out = await runRepairRounds({
+    const _out = await runRepairRounds({
       config: { maxRounds: 1 },
       problem: "fix it",
       runOnce,
@@ -113,7 +113,7 @@ describe("runRepairRounds — validation gate context", () => {
       failTail: "",
     })
 
-    const out = await runRepairRounds({
+    const _out = await runRepairRounds({
       config: { maxRounds: 1 },
       problem: "fix it",
       runOnce,

@@ -101,19 +101,6 @@ export class RulesStore {
     })
   }
 
-  // ─── internals ───────────────────────────────────────────────────────
-
-  private getLayer(layer: RuleLayer): readonly Rule[] {
-    switch (layer) {
-      case "system":
-        return this.system
-      case "user":
-        return this.user
-      case "project":
-        return this.project
-    }
-  }
-
   private assignLayer(layer: RuleLayer, rules: readonly Rule[]): void {
     // The parser already freezes its return value, but `clear()` passes an
     // empty literal — freeze defensively so the invariant holds for both

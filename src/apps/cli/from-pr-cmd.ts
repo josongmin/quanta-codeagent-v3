@@ -127,7 +127,7 @@ export const runFromPrCmd = async (
     emit({ type: "dry-run-body", body: redactedBody })
     return { exitCode: 0, triggers: triggers.length, contextLoaded: true, posted: false }
   }
-  if (signal !== undefined && signal.aborted) {
+  if (signal?.aborted) {
     emit({ type: "skipped", reason: "abort" })
     return { exitCode: 0, triggers: triggers.length, contextLoaded: true, posted: false }
   }

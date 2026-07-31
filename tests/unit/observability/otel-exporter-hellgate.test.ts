@@ -159,8 +159,8 @@ describe("otel-exporter / OTLP HTTP", () => {
       batchSize: 1,
     })
     exp.recordSpan({
-      traceId: "0".repeat(31) + "1",
-      spanId: "0".repeat(15) + "1",
+      traceId: `${"0".repeat(31)}1`,
+      spanId: `${"0".repeat(15)}1`,
       name: "tool.bash",
       startTimeEpochMs: 1_000,
       endTimeEpochMs: 2_000,

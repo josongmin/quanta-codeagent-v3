@@ -368,7 +368,7 @@ describe("GROUP 6: Content line edge cases", () => {
   // Red-on-injection: strip tabs from content lines => "\tindented" becomes "indented"
   it("S-LINE-1: tab at start of content line passes through", () => {
     const input = ["--- a/foo.py", "+++ b/foo.py", "@@ -1 +1 @@", "\tindented_context"].join("\n")
-    const v4a = unifiedDiffToV4A(input)
+    const _v4a = unifiedDiffToV4A(input)
     // Tab-prefixed line treated as context line (starts with " " or as-is)
     // Actually a tab isn't +/-/space so the converter skips it per the filter
     // Let's verify the converter behavior: the update loop only emits lines

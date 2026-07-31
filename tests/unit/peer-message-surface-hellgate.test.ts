@@ -33,10 +33,7 @@ import {
   teamScopedMailbox,
 } from "@/agent/subagent-mailbox"
 import { type AssembleRequest, assembleAgentConfig } from "@/host/runtime/agent-config-assembler"
-import {
-  createPeerMessageStreamSink,
-  maybeWirePeerMessageSurface,
-} from "@/host/runtime/peer-message-sink-wire"
+import { createPeerMessageStreamSink } from "@/host/runtime/peer-message-sink-wire"
 import { __resetRuntimeConfig } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 

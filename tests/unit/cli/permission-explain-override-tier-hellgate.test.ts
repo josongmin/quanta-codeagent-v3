@@ -62,7 +62,7 @@ let tmp: string
 const applyOverrides = (annotations: unknown[]): void => {
   const path = join(tmp, "hitl-overrides.json")
   writeFileSync(path, JSON.stringify({ version: 1, annotations }), "utf8")
-  process.env["QUANTA_HITL_OVERRIDES"] = path
+  process.env.QUANTA_HITL_OVERRIDES = path
   __resetRuntimeConfig()
   __resetHitlOverrides()
 }
@@ -75,7 +75,7 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(tmp, { recursive: true, force: true })
-  delete process.env["QUANTA_HITL_OVERRIDES"]
+  delete process.env.QUANTA_HITL_OVERRIDES
   __resetRuntimeConfig()
   __resetHitlOverrides()
   setColorPolicy(null)
@@ -124,7 +124,7 @@ describe("/permission inspector reflects operator override (no under-report)", (
 
   test("baseline (no override) keeps read in tier 'none' — fix does not over-report", async () => {
     // Sanity guard: without an override the read tool stays at its baseline.
-    process.env["QUANTA_HITL_OVERRIDES"] = join(tmp, "absent.json")
+    process.env.QUANTA_HITL_OVERRIDES = join(tmp, "absent.json")
     __resetRuntimeConfig()
     __resetHitlOverrides()
 

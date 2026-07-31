@@ -21,7 +21,6 @@
  * provider dependency.
  */
 
-import type { Message } from "@/llm"
 import type { EventMsgRecord, SessionEnvelopeRecord } from "@/session"
 import type { InspectGroup } from "@/session/inspect-source"
 import { redactValue } from "@/shared"

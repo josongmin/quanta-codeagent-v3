@@ -200,12 +200,12 @@ describe("StdioMcpTransport — stdout pump death while the server process lives
     })
     const client = new McpClient(cfg(), { transport })
     const startP = client.start()
-    await waitFor(() => stdinWrites.some((w) => w["method"] === "initialize"), "initialize sent")
-    const init = stdinWrites.find((w) => w["method"] === "initialize") as { id: number }
+    await waitFor(() => stdinWrites.some((w) => w.method === "initialize"), "initialize sent")
+    const init = stdinWrites.find((w) => w.method === "initialize") as { id: number }
     ps.push(enc(`{"jsonrpc":"2.0","id":${init.id},"result":{"capabilities":{}}}\n`))
     await startP
     const pending = client.listTools()
-    await waitFor(() => stdinWrites.some((w) => w["method"] === "tools/list"), "tools/list sent")
+    await waitFor(() => stdinWrites.some((w) => w.method === "tools/list"), "tools/list sent")
     // Injection: pump dies, child stays alive — old code wedged to timeout.
     ps.fail(new Error("EIO pump exploded"))
     const outcome = await Promise.race([

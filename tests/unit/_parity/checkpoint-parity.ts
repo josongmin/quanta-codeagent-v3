@@ -25,7 +25,7 @@ export interface CheckpointParityHarness {
 }
 
 let tickValue = 1_000
-const tick = (): number => {
+const _tick = (): number => {
   tickValue += 1
   return tickValue
 }

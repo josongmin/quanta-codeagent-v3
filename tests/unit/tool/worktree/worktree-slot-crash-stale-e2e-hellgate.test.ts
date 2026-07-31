@@ -54,7 +54,7 @@ const repos: string[] = []
  *  to /private/tmp, which would make `pwd`-string containment flaky). */
 const makeRepo = async (): Promise<string> => {
   const dir = await mkdtemp(path.join(tmpdir(), "wt-crash-"))
-  const real = execFileSync("bash", ["-lc", "cd " + JSON.stringify(dir) + " && pwd -P"])
+  const real = execFileSync("bash", ["-lc", `cd ${JSON.stringify(dir)} && pwd -P`])
     .toString()
     .trim()
   repos.push(real)

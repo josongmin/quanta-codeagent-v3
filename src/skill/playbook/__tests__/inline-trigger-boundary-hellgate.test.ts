@@ -23,7 +23,7 @@ import { dispatchScan, expandBraces, matchesGlobSubset } from "@/skill/playbook"
 
 describe("inline-trigger brace-expansion DoS bound (L3 C-13)", () => {
   test("HELL-PB-01: combinatorial {a,b} repeated 20× is bounded (≤ 256)", () => {
-    const glob = "x" + "{a,b}".repeat(20) // 2^20 ≈ 1M if unbounded
+    const glob = `x${"{a,b}".repeat(20)}` // 2^20 ≈ 1M if unbounded
     const start = performance.now()
     const out = expandBraces(glob)
     const ms = performance.now() - start
@@ -38,7 +38,7 @@ describe("inline-trigger brace-expansion DoS bound (L3 C-13)", () => {
   })
 
   test("HELL-PB-03: overflow falls back to the literal glob (fail-safe)", () => {
-    const glob = "p" + "{a,b}".repeat(20) + "q"
+    const glob = `p${"{a,b}".repeat(20)}q`
     const out = expandBraces(glob)
     // On overflow we return exactly the original literal.
     expect(out).toEqual([glob])

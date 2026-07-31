@@ -90,7 +90,7 @@ describe("repro artifact sink", () => {
   test("stdout/stderr are TAIL-BOUNDED (no full dump)", async () => {
     const { port, writes } = fakePort()
     const sink = makeReproArtifactSink(port)
-    const huge = "A".repeat(5000) + "TAILEND"
+    const huge = `${"A".repeat(5000)}TAILEND`
     await sink.persist({
       instanceId: "i",
       index: 0,
