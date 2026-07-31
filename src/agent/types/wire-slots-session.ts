@@ -193,8 +193,8 @@ export interface WireSlotsSessionConfig {
     readonly port: ControlRequestPort
     readonly applier: ControlEffectApplier
     readonly context: ControlRequestContext
-    /** Env for the gate check. Defaults to `process.env` at poll time. */
-    readonly env?: Record<string, string | undefined>
+    /** Env for the gate check. Provided explicitly by the composition root. */
+    readonly env: Record<string, string | undefined>
   }
   /**
    * L4 wiring — control-op cluster (2026-05-23). Per-thread paused-reason

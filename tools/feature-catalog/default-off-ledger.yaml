@@ -38,6 +38,7 @@ runtime_cli_seed_mappings:
   QUANTA_SIDE_AGENT: background-side-agent
   QUANTA_SUBAGENT_MAILBOX: subagent-read-inbox
   QUANTA_PEER_MSG_SURFACE: peer-message-surfacing
+  QUANTA_MEMORY: memory-self-edit-tools
 
 row_defaults: {}
 
@@ -1032,6 +1033,18 @@ rows:
     rollback: QUANTA_MEMORY_AUTO=off
     duplicate_of: null
     lifecycle_evidence: null
+  - feature_id: memory-self-edit-tools
+    gate_owner: [QUANTA_MEMORY]
+    activation: host-seeded
+    effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
+    reachability: wired
+    proof: { on: unit, off_identity: unit, receipt: null }
+    risk: behavioral-cost
+    decision: enable-now
+    owner_seam: src/tool/surface/gated-tools.ts
+    rollback: QUANTA_MEMORY=off
+    duplicate_of: null
+    lifecycle_evidence: null
   - feature_id: message-batches-client-core
     gate_owner: [createMessageBatchesClient caller]
     activation: unwired
@@ -1562,7 +1575,7 @@ rows:
     activation: host-seeded
     effective_default: { cli: on, web: off, bench: off, headless: off, daemon: off }
     reachability: wired
-    proof: { on: unit, off_identity: unit, receipt: null }
+    proof: { on: real-loop, off_identity: unit, receipt: null }
     risk: behavioral-cost
     decision: enable-now
     owner_seam: src/tool/read/index.ts

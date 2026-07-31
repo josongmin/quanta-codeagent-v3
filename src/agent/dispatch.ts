@@ -35,7 +35,7 @@ import {
 } from "./ownership-policy"
 import { reproDoubtStep } from "./repro-doubt-guard"
 import { toolGenAiAttrs, withActiveSpanScope } from "./session-resources"
-import { contentCaptureEnabled, redactThenPreview } from "./span-content-redact"
+import { redactThenPreview } from "./span-content-redact"
 import type { AgentConfig } from "./types"
 
 export type { DispatchResult } from "./dispatch-types"
@@ -124,9 +124,13 @@ export const dispatchTool = async (
   // Default-OFF (no sink) ⇒ all `startSpan`/`endSpan` calls are the shared
   // NOOP_SPAN sentinel (zero allocation), so dispatch is byte-identical to
   // the pre-span path.
+  const captureContent = getSpanSink() !== null && (config.contentCaptureEnabled ?? false)
   const toolSpan: Span = startSpan(
     SPAN_NAMES.handleToolCall,
-    mergeAttrs(toolSpanAttrs(call.name, call.id, call.input), toolGenAiAttrs(call.name, call.id)),
+    mergeAttrs(
+      toolSpanAttrs(call.name, call.id, captureContent, call.input),
+      toolGenAiAttrs(call.name, call.id),
+    ),
   )
   try {
     // Activate the `execute_tool` span in async context so the legacy
@@ -147,12 +151,12 @@ export const dispatchTool = async (
     endSpan(
       toolSpan,
       out.ok ? "ok" : "error",
-      toolCloseAttrs(out.ok ? "success" : "error", out.preview),
+      toolCloseAttrs(out.ok ? "success" : "error", captureContent, out.preview),
     )
     return out
   } catch (e) {
     if (isSessionApprovalRequiredError(e)) {
-      endSpan(toolSpan, "error", toolCloseAttrs("error"))
+      endSpan(toolSpan, "error", toolCloseAttrs("error", captureContent))
       throw e
     }
     // NO-THROW CONTRACT (AUDIT-FIX). `dispatchTool` is the loop's single-tool
@@ -173,7 +177,7 @@ export const dispatchTool = async (
     // contract holds structurally for EVERY path. The span is still closed
     // error before returning.
     const message = e instanceof QuantaError ? e.message : toError(e).message
-    endSpan(toolSpan, "error", toolCloseAttrs("error", message))
+    endSpan(toolSpan, "error", toolCloseAttrs("error", captureContent, message))
     return deny(call.id, `Tool dispatch failed for ${call.name}: ${message}`, "dispatch-error")
   }
 }
@@ -591,7 +595,7 @@ const emitPostToolUseHooks = async (
  *  active so the operator can click the span and see WHAT was dispatched
  *  (the bash command, the edited path …); with no sink the `previewPayload`
  *  stringify never runs (default-OFF allocation-free). */
-const toolSpanAttrs = (name: string, callId: string, input?: unknown) =>
+const toolSpanAttrs = (name: string, callId: string, captureContent: boolean, input?: unknown) =>
   attrs({
     [QUANTA_ATTRS.tool.name]: name,
     [QUANTA_ATTRS.tool.callId]: callId,
@@ -599,7 +603,7 @@ const toolSpanAttrs = (name: string, callId: string, input?: unknown) =>
     // carry a secret. Attach it ONLY when the content-capture knob is on, and
     // REDACT-before-truncate (T-D1) — matching the LLM-sampling span path. Was a
     // raw `previewPayload` gated on sink-presence only = unredacted secret egress.
-    ...(input !== undefined && getSpanSink() !== null && contentCaptureEnabled()
+    ...(input !== undefined && captureContent
       ? { [QUANTA_ATTRS.tool.input]: redactThenPreview(input) }
       : {}),
   })
@@ -607,10 +611,10 @@ const toolSpanAttrs = (name: string, callId: string, input?: unknown) =>
 /** Build the close-attrs for a `handle_tool_call` span: the terminal status,
  *  plus a REDACTED, truncated preview of the tool OUTPUT when the content-capture
  *  knob is on. Keeps the two `endSpan` sites (success / error) consistent. */
-const toolCloseAttrs = (status: "success" | "error", output?: unknown) =>
+const toolCloseAttrs = (status: "success" | "error", captureContent: boolean, output?: unknown) =>
   attrs({
     [QUANTA_ATTRS.tool.status]: status,
-    ...(output !== undefined && getSpanSink() !== null && contentCaptureEnabled()
+    ...(output !== undefined && captureContent
       ? { [QUANTA_ATTRS.tool.output]: redactThenPreview(output) }
       : {}),
   })

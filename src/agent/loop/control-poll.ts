@@ -128,7 +128,7 @@ export const pollPeerInbox = (cfg: AgentConfig): Message | null => {
 export const pollControlRequests = (cfg: AgentConfig): void => {
   const slot = cfg.controlRequest
   if (slot === undefined) return
-  if (!isControlRequestEnabled(slot.env ?? process.env)) return
+  if (!isControlRequestEnabled(slot.env)) return
   try {
     drainControlRequests(slot.port, slot.context, slot.applier)
   } catch (e) {

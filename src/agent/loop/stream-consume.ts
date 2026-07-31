@@ -525,6 +525,7 @@ export const streamConsume = async (
       errorKind: capturedErrorKind,
       sessionId: config.sessionId,
       system,
+      contentCaptureEnabled: config.contentCaptureEnabled ?? false,
     })
   }
 }

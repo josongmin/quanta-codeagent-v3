@@ -58,6 +58,7 @@ import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-regis
 import { buildCallerOwnedRegistryWithTelemetry } from "@/agent/session-resource-registry/caller-owned-builder"
 import { wireSideAgentDaemons } from "@/agent/side-agent-runner"
 import { buildSkillMcpSession } from "@/agent/skill-mcp-wire"
+import { CONTENT_CAPTURE_ENV } from "@/agent/span-content-redact"
 import {
   type BackgroundSubagentScheduler,
   defaultBackgroundSubagentScheduler,
@@ -90,8 +91,8 @@ import {
   withCacheMetrics,
 } from "@/observability/codex-r2-metrics"
 import { defaultPromptCacheObserver } from "@/observability/prompt-cache"
-import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
 import { getBashBgRegistry } from "@/runtime/bash-bg-registry"
+import { CI_BOT_DEFAULT_ALLOWLIST } from "@/runtime/network-allowlist"
 import type { RuntimeAgentConfigBase } from "@/sdk/runtime"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
 import { gateOn, runtimeConfigFromEnv } from "@/shared"
@@ -925,6 +926,7 @@ export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): Ag
     if (networkGuard !== undefined) cfg.dispatchGuard = networkGuard
   }
   if (cfg.bgShellRegistry === undefined) cfg.bgShellRegistry = getBashBgRegistry()
+  cfg.contentCaptureEnabled = gateOn(env, CONTENT_CAPTURE_ENV)
   // ADR-0427 + jun-03 — open the optional agent-capability slots (browser /
   // objective / mailbox / web_search / background-subagent). Each is env-gated +
   // caller-override-safe + byte-identical when its gate/resource is absent (see

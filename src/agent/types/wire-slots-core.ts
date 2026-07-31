@@ -438,6 +438,11 @@ export interface WireSlotsCoreConfig {
    *  root wires the host singleton; the loop only needs the narrow killAll port,
    *  which keeps session-end disposal testable and slice-local. */
   bgShellRegistry?: { killAll(): Promise<void> }
+  /** ADR-0144 slice-boundary — pre-computed OTLP span-content capture gate.
+   *  Set at the composition root via `gateOn(env, CONTENT_CAPTURE_ENV)` so the
+   *  @/agent core slice never reads `process.env` directly. Absent ⇒ false
+   *  (content attributes are never attached — byte-identical default-OFF). */
+  contentCaptureEnabled?: boolean
   /** ADR-0472 — OPTIONAL diagnostics provider for the edit-repair lint-delta.
    *  When present (host wired an LSP diagnostics source) AND
    *  `runtimeConfig().editRepairLoop` is on, the dispatch seam brackets a

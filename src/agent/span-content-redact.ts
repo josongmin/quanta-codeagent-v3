@@ -14,13 +14,10 @@
  */
 import { PREVIEW_MAX, previewPayload } from "@/observability"
 import { redactSecrets } from "@/security"
-import { gateOn } from "@/shared"
 
-const CONTENT_CAPTURE_ENV = "QUANTA_OTEL_CAPTURE_CONTENT"
-
-/** Span/OTLP content (Plane B) is captured ONLY when this gate is on — default-OFF
- *  (byte-identical: with the gate off, no content attribute is attached at all). */
-export const contentCaptureEnabled = (): boolean => gateOn(process.env, CONTENT_CAPTURE_ENV)
+/** Gate key for OTLP span-content capture. Exported so the composition root can
+ *  evaluate it against the injected env and store the result on AgentConfig. */
+export const CONTENT_CAPTURE_ENV = "QUANTA_OTEL_CAPTURE_CONTENT"
 
 /** Redact a text payload for the span-content plane. Origin `tool_result` is the
  *  general content-observation origin the rollup already understands. */

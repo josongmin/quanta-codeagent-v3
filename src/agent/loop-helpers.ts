@@ -34,7 +34,7 @@ import type { LocalizePhaseState } from "./localize-phase-guard"
 import type { AgentMode } from "./prompt"
 import type { ReproDoubtState } from "./repro-doubt-guard"
 import { buildLocalizePhase, buildReproDoubt } from "./session-resources"
-import { contentCaptureEnabled, redactForSpan, redactThenPreview } from "./span-content-redact"
+import { redactForSpan, redactThenPreview } from "./span-content-redact"
 import { extractSeedMessages, isUserInputSubmission } from "./submission"
 import type { AgentConfig } from "./types"
 
@@ -702,6 +702,9 @@ export const closeSamplingSpan = (
    *  `gen_ai.system_instructions` content attr under the content-capture knob.
    *  Omitted ⇒ that attr is never stamped. */
   system?: readonly SystemBlock[],
+  /** ADR-0144 — pre-computed from AgentConfig.contentCaptureEnabled so this
+   *  function never reads process.env. Absent ⇒ false (default-OFF). */
+  contentCaptureEnabled = false,
 ): void => {
   // T-D1 preview-leak fix + content capture: the prompt/completion previews were
   // gated on sink-active ONLY. Since T-B flips the sink true on ordinary
@@ -709,7 +712,7 @@ export const closeSamplingSpan = (
   // Re-gate them (and the pinned structured content attrs) behind the SAME
   // content-capture knob AND redact them, so NO content leaves the process unless
   // the operator opted in. Off ⇒ empty bag (byte-identical, zero-alloc).
-  const captureContent = getSpanSink() !== null && contentCaptureEnabled()
+  const captureContent = getSpanSink() !== null && contentCaptureEnabled
   const content = buildSpanContentBag(captureContent, messages, responseMessage, system)
   endSpan(
     span,
@@ -759,6 +762,9 @@ export interface FinalizeSamplingSpanArgs {
   /** The session identity used for the T-C3 conversation id (see below). */
   readonly sessionId: string | undefined
   readonly system: readonly SystemBlock[] | undefined
+  /** ADR-0144 — forwarded from AgentConfig.contentCaptureEnabled; keeps the
+   *  span-close path process.env-free. Absent ⇒ false (default-OFF). */
+  readonly contentCaptureEnabled?: boolean
 }
 
 /**
@@ -797,6 +803,7 @@ export const finalizeSamplingSpan = (span: Span, args: FinalizeSamplingSpanArgs)
     args.errorKind,
     conversationId,
     args.system,
+    args.contentCaptureEnabled,
   )
 }
 
