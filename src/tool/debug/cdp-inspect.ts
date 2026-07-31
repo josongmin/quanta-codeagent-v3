@@ -132,6 +132,124 @@ const expandObject = async (
   return out
 }
 
+/** Arm/resume loop result: either an early {@link Inspection} the caller must
+ *  return verbatim (dispose already done here), or the matched paused body. */
+type PausedResolution =
+  | { readonly kind: "return"; readonly value: Inspection }
+  | { readonly kind: "paused"; readonly body: Record<string, unknown> }
+
+/**
+ * Drive the arm→trigger→(resume past unrelated pauses)→our-pause loop until the
+ * target breakpoint / exception stop is hit, budget is exhausted, or the turn is
+ * aborted. Extracted verbatim from {@link inspectViaCdp} — every `dispose()`,
+ * abort-sentinel race, timeout, and CDP request is preserved in the SAME order;
+ * `pausedP` (armed by the caller BEFORE the first trigger) is re-armed here before
+ * each `Debugger.resume` to keep the fast-inspector race-proofing intact.
+ */
+const resolvePausedBody = async (
+  client: CdpClient,
+  spec: CdpInspectSpec,
+  initialPausedP: Promise<unknown>,
+  stopTimeoutMs: number,
+  aborted: () => boolean,
+  abortP: Promise<symbol>,
+  ABORTED: symbol,
+  bpId: string,
+  bound: boolean,
+): Promise<PausedResolution> => {
+  let pausedP = initialPausedP
+  let pausedBody: Record<string, unknown> | undefined
+  for (let i = 0; i < MAX_RESUMES; i++) {
+    if (aborted()) {
+      client.dispose()
+      return { kind: "return", value: { outcome: "error", message: "aborted" } }
+    }
+    const ev = await Promise.race([withTimeout(pausedP, stopTimeoutMs, undefined), abortP])
+    if (ev === ABORTED) {
+      client.dispose()
+      return { kind: "return", value: { outcome: "error", message: "aborted" } }
+    }
+    if (ev === undefined) {
+      // No pause within budget: either the program ran to completion (bp never
+      // bound) or the inspector wedged. Report exited with the bind verdict.
+      client.dispose()
+      return {
+        kind: "return",
+        value: { outcome: "exited", ...(bpId.length > 0 ? { breakpointsBound: bound } : {}) },
+      }
+    }
+    const body = asObj(ev)
+    const hit = asArr(body.hitBreakpoints).map((h) => str(h))
+    const isExceptionStop =
+      spec.pauseOnExceptions !== undefined &&
+      spec.pauseOnExceptions !== "none" &&
+      str(body.reason) === "exception"
+    if ((bpId.length > 0 && hit.includes(bpId)) || isExceptionStop) {
+      pausedBody = body
+      break
+    }
+    // Unrelated pause (entry break / debugger statement) — re-arm THEN resume.
+    pausedP = client.waitForEvent("Debugger.paused")
+    await client.request("Debugger.resume")
+  }
+  if (pausedBody === undefined) {
+    client.dispose()
+    return {
+      kind: "return",
+      value: { outcome: "error", message: "did not stop at the breakpoint" },
+    }
+  }
+  return { kind: "paused", body: pausedBody }
+}
+
+/**
+ * Snapshot the top-K call frames' locals/closures into {@link FrameScopes},
+ * sharing ONE var budget + visited-id set across all frames (so the total cap is
+ * global). Extracted verbatim from {@link inspectViaCdp} — CDP local/block/catch
+ * scopes merge into "Locals", closures into "Closure", same order and caps.
+ */
+const captureFrameScopes = async (
+  callFrames: readonly unknown[],
+  getProps: (objectId: string) => Promise<unknown[]>,
+  aborted: () => boolean,
+  signal?: AbortSignal,
+): Promise<FrameScopes[]> => {
+  const budget: VarBudget = { remaining: MAX_TOTAL_VARS }
+  const visited = new Set<string>()
+  const frames: FrameScopes[] = []
+  for (let i = 0; i < Math.min(callFrames.length, MAX_FRAMES_WITH_LOCALS); i++) {
+    if (aborted()) break
+    const fo = asObj(callFrames[i])
+    const loc = asObj(fo.location)
+    const url = str(fo.url)
+    // Merge local/block/catch CDP scopes into one "Locals" bucket (CDP splits
+    // the loop/block bindings out; the headline wants them together); keep
+    // closures as a separate "Closure" scope.
+    const localVars: DapVariable[] = []
+    const closureVars: DapVariable[] = []
+    for (const sc of asArr(fo.scopeChain)) {
+      const so = asObj(sc)
+      const kind = str(so.type)
+      const objectId = str(asObj(so.object).objectId)
+      if (objectId.length === 0) continue
+      if (kind === "local" || kind === "block" || kind === "catch")
+        localVars.push(...(await expandObject(getProps, objectId, 1, budget, visited, signal)))
+      else if (kind === "closure")
+        closureVars.push(...(await expandObject(getProps, objectId, 1, budget, visited, signal)))
+    }
+    const scopes: ScopeVars[] = []
+    if (localVars.length > 0) scopes.push({ scope: "Locals", vars: localVars })
+    if (closureVars.length > 0) scopes.push({ scope: "Closure", vars: closureVars })
+    frames.push({
+      frame: str(fo.functionName, "(anonymous)") || "(anonymous)",
+      line: num(loc.lineNumber) + 1,
+      ...(url.length > 0 ? { source: url } : {}),
+      scopes,
+    })
+  }
+  return frames
+}
+
 export const inspectViaCdp = async (
   client: CdpClient,
   spec: CdpInspectSpec,
@@ -170,44 +288,22 @@ export const inspectViaCdp = async (
     // resume) — a fast inspector can emit `Debugger.paused` synchronously, so
     // arming after the trigger would miss it and hang. (Same race-proofing as
     // the DAP driver arming its event waiters before the first request.)
-    let pausedP = client.waitForEvent("Debugger.paused")
+    const pausedP = client.waitForEvent("Debugger.paused")
     await client.request("Runtime.runIfWaitingForDebugger")
 
-    let pausedBody: Record<string, unknown> | undefined
-    for (let i = 0; i < MAX_RESUMES; i++) {
-      if (aborted()) {
-        client.dispose()
-        return { outcome: "error", message: "aborted" }
-      }
-      const ev = await Promise.race([withTimeout(pausedP, stopTimeoutMs, undefined), abortP])
-      if (ev === ABORTED) {
-        client.dispose()
-        return { outcome: "error", message: "aborted" }
-      }
-      if (ev === undefined) {
-        // No pause within budget: either the program ran to completion (bp never
-        // bound) or the inspector wedged. Report exited with the bind verdict.
-        client.dispose()
-        return { outcome: "exited", ...(bpId.length > 0 ? { breakpointsBound: bound } : {}) }
-      }
-      const body = asObj(ev)
-      const hit = asArr(body.hitBreakpoints).map((h) => str(h))
-      const isExceptionStop =
-        spec.pauseOnExceptions !== undefined &&
-        spec.pauseOnExceptions !== "none" &&
-        str(body.reason) === "exception"
-      if ((bpId.length > 0 && hit.includes(bpId)) || isExceptionStop) {
-        pausedBody = body
-        break
-      }
-      // Unrelated pause (entry break / debugger statement) — re-arm THEN resume.
-      pausedP = client.waitForEvent("Debugger.paused")
-      await client.request("Debugger.resume")
-    }
-    if (pausedBody === undefined) {
-      client.dispose()
-      return { outcome: "error", message: "did not stop at the breakpoint" }
-    }
+    const resolved = await resolvePausedBody(
+      client,
+      spec,
+      pausedP,
+      stopTimeoutMs,
+      aborted,
+      abortP,
+      ABORTED,
+      bpId,
+      bound,
+    )
+    if (resolved.kind === "return") return resolved.value
+    const pausedBody = resolved.body
 
     const callFrames = asArr(pausedBody.callFrames)
     const stack: StackFrameInfo[] = callFrames.map((f): StackFrameInfo => {
@@ -230,43 +326,7 @@ export const inspectViaCdp = async (
       return asArr(asObj(r.result).result)
     }
 
-    const budget: VarBudget = { remaining: MAX_TOTAL_VARS }
-    const visited = new Set<string>()
-    const frames: FrameScopes[] = []
-    for (let i = 0; i < Math.min(callFrames.length, MAX_FRAMES_WITH_LOCALS); i++) {
-      if (aborted()) break
-      const fo = asObj(callFrames[i])
-      const loc = asObj(fo.location)
-      const url = str(fo.url)
-      // Merge local/block/catch CDP scopes into one "Locals" bucket (CDP splits
-      // the loop/block bindings out; the headline wants them together); keep
-      // closures as a separate "Closure" scope.
-      const localVars: DapVariable[] = []
-      const closureVars: DapVariable[] = []
-      for (const sc of asArr(fo.scopeChain)) {
-        const so = asObj(sc)
-        const kind = str(so.type)
-        const objectId = str(asObj(so.object).objectId)
-        if (objectId.length === 0) continue
-        if (kind === "local" || kind === "block" || kind === "catch")
-          localVars.push(
-            ...(await expandObject(getProps, objectId, 1, budget, visited, opts.signal)),
-          )
-        else if (kind === "closure")
-          closureVars.push(
-            ...(await expandObject(getProps, objectId, 1, budget, visited, opts.signal)),
-          )
-      }
-      const scopes: ScopeVars[] = []
-      if (localVars.length > 0) scopes.push({ scope: "Locals", vars: localVars })
-      if (closureVars.length > 0) scopes.push({ scope: "Closure", vars: closureVars })
-      frames.push({
-        frame: str(fo.functionName, "(anonymous)") || "(anonymous)",
-        line: num(loc.lineNumber) + 1,
-        ...(url.length > 0 ? { source: url } : {}),
-        scopes,
-      })
-    }
+    const frames = await captureFrameScopes(callFrames, getProps, aborted, opts.signal)
 
     // Best-effort: let the program finish, then tear down (dispose kills the WS,
     // and the caller kills the node process). A rejecting resume is attributed
