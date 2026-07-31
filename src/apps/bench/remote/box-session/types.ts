@@ -59,6 +59,12 @@ export interface FullRemoteConfig {
    *  4–17 min, killing runs faster than relaunch can recover. On-demand has no
    *  reclaim. Default false (spot). */
   readonly onDemand?: boolean
+  /** SWE-bench dataset name forwarded to the box (drives pip-spec + namespace selection). */
+  readonly swebenchDatasetName?: string
+  /** Explicit pip-spec override for the swebench grading shim on the box. */
+  readonly swebenchPipSpec?: string
+  /** SWE-bench dataset family (e.g. "live", "pro") forwarded to the box. */
+  readonly swebenchDatasetFamily?: string
   /** Fail-closed single-box guard: if another quanta-bench box is already
    *  running, callers must opt in before launching a fresh one. */
   readonly allowExtraBoxes?: boolean

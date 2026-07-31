@@ -34,10 +34,12 @@ import {
   buildGroundingRegressionResult,
   buildGroundingReport,
   buildGroundingRouteMatrixGateResult,
+  GROUNDING_BUCKETS,
   GROUNDING_CORPORA,
   GROUNDING_GATE_PROFILES,
   GROUNDING_MODES,
   GROUNDING_REGRESSION_PROFILES,
+  GROUNDING_SEVERITIES,
   isGroundingGateProfile,
   isGroundingRegressionProfile,
   isGroundingRouteMatrixName,
@@ -48,6 +50,7 @@ import {
   writeGroundingReplayDraft,
   writePromotedGroundingReplayCase,
 } from "./grounding"
+import { GROUNDING_AMBIGUITY_CLASSES } from "./grounding/schema"
 import { runSwebenchAdapter } from "./public"
 import { buildReport } from "./report"
 import { ResultStore } from "./storage"
@@ -381,24 +384,46 @@ const groundingScaffoldReplay = (): number => {
     )
     return 1
   }
+  if (!(GROUNDING_BUCKETS as readonly string[]).includes(bucket)) {
+    console.error(
+      `eval grounding scaffold-replay: --bucket must be one of ${GROUNDING_BUCKETS.join(", ")}`,
+    )
+    return 1
+  }
+  if (!(GROUNDING_SEVERITIES as readonly string[]).includes(severity)) {
+    console.error(
+      `eval grounding scaffold-replay: --severity must be one of ${GROUNDING_SEVERITIES.join(", ")}`,
+    )
+    return 1
+  }
   const sessionSnapshotPath = argValue("--session-snapshot")
   const stateJsonPath = argValue("--state-json")
   const candidateThreadIds = csvValues(argValue("--candidate-threads"))
   const candidateReferentIds = csvValues(argValue("--candidate-referents"))
   const ambiguityClass = argValue("--ambiguity-class")
+  if (
+    ambiguityClass !== undefined &&
+    !(GROUNDING_AMBIGUITY_CLASSES as readonly string[]).includes(ambiguityClass)
+  ) {
+    console.error(
+      `eval grounding scaffold-replay: --ambiguity-class must be one of ${GROUNDING_AMBIGUITY_CLASSES.join(", ")}`,
+    )
+    return 1
+  }
   const scaffoldOpts: Parameters<typeof writeGroundingReplayDraft>[0] = {
     source,
     id,
     targetUtterance,
-    bucket: bucket as never,
-    severity: severity as never,
+    bucket: bucket as (typeof GROUNDING_BUCKETS)[number],
+    severity: severity as (typeof GROUNDING_SEVERITIES)[number],
     outPath,
   }
   if (sessionSnapshotPath !== undefined) scaffoldOpts.sessionSnapshotPath = sessionSnapshotPath
   if (stateJsonPath !== undefined) scaffoldOpts.stateContract = readJsonFile(stateJsonPath) as never
   if (candidateThreadIds !== undefined) scaffoldOpts.candidateThreadIds = candidateThreadIds
   if (candidateReferentIds !== undefined) scaffoldOpts.candidateReferentIds = candidateReferentIds
-  if (ambiguityClass !== undefined) scaffoldOpts.ambiguityClass = ambiguityClass as never
+  if (ambiguityClass !== undefined)
+    scaffoldOpts.ambiguityClass = ambiguityClass as (typeof GROUNDING_AMBIGUITY_CLASSES)[number]
   const result = writeGroundingReplayDraft(scaffoldOpts)
   const jsonOut = argValue("--json-out")
   const payload = {

@@ -118,7 +118,7 @@ export const runInteractiveLoop = async (
               setLastTurnOutcome(
                 lastTurnOutcomeFromAgentOutcome({
                   reason: result.outcomeReason,
-                } as AgentOutcome),
+                }),
               )
             }
             recordTurnSnapshot(convCheckpointWire, result.messages)
@@ -151,7 +151,7 @@ export const runInteractiveLoop = async (
     // to the SSOT so a future Guard-3 loosening cannot make the mislabel
     // silently load-bearing.
     if (out.turnAborted) {
-      setLastTurnOutcome(lastTurnOutcomeFromAgentOutcome({ reason: "aborted" } as AgentOutcome))
+      setLastTurnOutcome(lastTurnOutcomeFromAgentOutcome({ reason: "aborted" }))
     } else if (out.result === undefined) {
       setLastTurnOutcome("fail")
     }

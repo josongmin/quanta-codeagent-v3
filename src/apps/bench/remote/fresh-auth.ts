@@ -6,7 +6,7 @@ import {
   type TokenRecord,
   writeToken,
 } from "@/auth/chatgpt-oauth"
-import { errMessage } from "@/shared"
+import { errMessage, isRecord } from "@/shared"
 
 export interface RefreshRemoteAuthJsonOptions {
   readonly env?: Record<string, string | undefined>
@@ -46,7 +46,11 @@ export const refreshRemoteAuthJson = async (
   authFile: string,
   opts: RefreshRemoteAuthJsonOptions = {},
 ): Promise<string> => {
-  const current = JSON.parse(await readFile(authFile, "utf8")) as TokenRecord
+  const parsed: unknown = JSON.parse(await readFile(authFile, "utf8"))
+  if (!isRecord(parsed) || typeof parsed.access_token !== "string") {
+    throw new Error("[full-remote] auth file malformed: missing access_token")
+  }
+  const current = parsed as unknown as TokenRecord
   const now = opts.nowMs?.() ?? Date.now()
   try {
     const next = await refreshToken({

@@ -404,3 +404,26 @@ export const loadVerdicts = (reportJson: unknown): RunVerdicts => {
 
 export const loadVerdictsFromFile = (path: string): RunVerdicts =>
   loadVerdicts(JSON.parse(readFileSync(path, "utf8")))
+
+export interface ReportMeta {
+  readonly model?: string
+  readonly knobs?: { readonly preset?: string }
+}
+
+export const loadVerdictsWithMeta = (path: string): { verdicts: RunVerdicts; meta: ReportMeta } => {
+  const report: unknown = JSON.parse(readFileSync(path, "utf8"))
+  const verdicts = loadVerdicts(report)
+  const rec = isRecord(report) ? report : {}
+  const knobs = isRecord(rec.knobs) ? rec.knobs : undefined
+  const meta: ReportMeta = {
+    ...(typeof rec.model === "string" ? { model: rec.model } : {}),
+    ...(knobs !== undefined
+      ? {
+          knobs: {
+            ...(typeof knobs.preset === "string" ? { preset: knobs.preset } : {}),
+          },
+        }
+      : {}),
+  }
+  return { verdicts, meta }
+}

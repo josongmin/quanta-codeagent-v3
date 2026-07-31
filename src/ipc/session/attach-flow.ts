@@ -329,7 +329,7 @@ export interface SessionApprovalFlowDeps {
    *  handle-owning caller can settle that approval's turn chain typed (jul-16
    *  audit M-1 — the decision never reached the server, so no continuation
    *  can ever exist); arity-0 consumers (the attach client) stay assignable. */
-  readonly onRespondSendFailed?: (approvalId: string) => void
+  readonly onRespondSendFailed?: (approvalId: string, error?: unknown) => void
   /** §3.2 succession supply: the marker-OFF continuation `turn.run` was
    *  SUBMITTED as `commandId` for `approvalId` — report it into the handle's
    *  chain (`SessionHandle.reportApprovalContinuation`). */
@@ -380,8 +380,8 @@ export const createSessionApprovalFlow = (deps: SessionApprovalFlowDeps): Sessio
     // against a dead socket.
     try {
       await deps.sendCommand(respond)
-    } catch {
-      deps.onRespondSendFailed?.(approval.approvalId)
+    } catch (error) {
+      deps.onRespondSendFailed?.(approval.approvalId, error)
       return
     }
     // ADR-0512 P3 — the kernel does NOT auto-continue a resolved approval: a

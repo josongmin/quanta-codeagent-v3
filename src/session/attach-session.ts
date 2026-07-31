@@ -40,8 +40,11 @@ export interface AttachSessionDeps {
   readonly loadSession: (
     id: string,
   ) => Promise<{ readonly meta: SessionMeta; readonly messages: readonly Message[] } | undefined>
-  /** Kernel transcript swap (`session.transcript.replace` adapter). Throws
-   *  `transcript_replace_unavailable` mid-turn (mapped to `refused-mid-turn`).
+  /** Kernel transcript swap (`session.transcript.replace` adapter). Throws an
+   *  error whose message matches `/transcript_replace_unavailable/` mid-turn
+   *  (mapped to `refused-mid-turn`). The catch block in `attachSessionToLive`
+   *  narrows by that message contract — implementations MUST use this sentinel
+   *  string so the pattern match is reliable. Any OTHER error propagates.
    *  Returns the history the kernel actually holds after the swap (drives the
    *  attached `messageCount`). */
   readonly replaceTranscript: (msgs: readonly Message[]) => Promise<readonly Message[]>

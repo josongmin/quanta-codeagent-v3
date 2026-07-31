@@ -5,7 +5,6 @@ import { resolveRepairEvaluatePredicate } from "@/runner/batch/eval/declared-exp
 import {
   type BenchKnobState,
   type BenchPosture,
-  benchPostureFromState,
   buildRepairBreadthRunCandidates,
   buildReproVoteValidate,
   makeAcceptanceSelectCandidates,
@@ -13,7 +12,6 @@ import {
   type PreparedAttemptContext,
   repairLocalizePhaseSuppressed,
   resolveAcceptanceLlmRerank,
-  resolveBenchKnobs,
   runRepairRoundsInSnapshot,
 } from "@/runner/batch/eval/driver"
 import type {
@@ -46,7 +44,7 @@ export const runRepairPhase = async (
    *  closure session). Only consumed when `QUANTA_BENCH_REPAIR_SPEC_GATE` is on AND
    *  a `primaryRailStep` is set; absent / knob-off ⇒ never read (byte-identical). */
   issueDeclaredExpected: IssueDeclaredExpected | undefined,
-  postureOverride?: BenchPosture,
+  postureOverride: BenchPosture,
   stateOverride?: BenchKnobState,
   chaRepairTargets?: PreparedAttemptContext["chaRepairTargets"],
   /** Strategy #7 location-set fanout: per-candidate seed factory (built from the
@@ -62,10 +60,7 @@ export const runRepairPhase = async (
   // or the env-derived posture `runAgentOnce`→`buildConfig` would otherwise
   // compute) and strip `phase1Turns`; the advisory steer is preserved. INITIAL
   // generation is unchanged.
-  const resolvedPosture =
-    postureOverride ??
-    benchPostureFromState(stateOverride ?? resolveBenchKnobs({ envVars: process.env }), process.env)
-  const repairPosture = repairLocalizePhaseSuppressed(resolvedPosture)
+  const repairPosture = repairLocalizePhaseSuppressed(postureOverride)
   // B1/B3: thread the slice-resolving inputs into the classic-repair packet so
   // its owner evidence carries exact slices (paired with issue symbols) and it
   // names the active proof target — parity with the selector-repair sibling.

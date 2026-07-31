@@ -25,9 +25,7 @@ import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runti
 import { gateOn, runtimeConfigFromEnv } from "@/shared"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import type { WorktreeSlotHandle } from "@/tool"
-import type { IdleMonitor } from "../idle-monitor"
 import { buildShellSnapshotConfig, buildSummarizerLlm } from "../internal"
-import type { RejectCounter } from "../reject-counter"
 import {
   buildAdmissibility,
   ladderAutoReviewEnabled,
@@ -267,8 +265,8 @@ export const composeCliRuntimeContext = async (
       })()
     : undefined
   const surfaceOnConfirm = buildCliOnConfirm({
-    idleMonitor: boot.idleMonitor as IdleMonitor,
-    rejectCounter: boot.rejectCounter as RejectCounter,
+    idleMonitor: boot.idleMonitor,
+    rejectCounter: boot.rejectCounter,
     channel: midTurnApprovalChannel,
     cwd: boot.cwd, // #19
     ...(trustScope !== undefined ? { trustScope } : {}), // #20 durable
@@ -382,8 +380,8 @@ export const composeCliRuntimeContext = async (
   })
   return {
     approvalPrompt: buildCliApprovalPrompt({
-      idleMonitor: boot.idleMonitor as IdleMonitor,
-      rejectCounter: boot.rejectCounter as RejectCounter,
+      idleMonitor: boot.idleMonitor,
+      rejectCounter: boot.rejectCounter,
       channel: midTurnApprovalChannel,
       cwd: boot.cwd, // session-resolved cwd for preflight/hunk reads in the shared prompt helpers
     }),

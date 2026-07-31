@@ -157,7 +157,7 @@ export const runExternalEdit = async (rt: ReaderRuntime): Promise<void> => {
         state.cursor = state.buf.length
       }
     } catch {
-      /* editor port threw — draft kept; restore happens in finally */
+      stdout.write("\r\x1b[K[editor returned an error; draft unchanged]\n")
     }
   } finally {
     if (!rt.settled.value) {

@@ -19,7 +19,7 @@
  * deterministic winner. Default-OFF ⇒ never invoked ⇒ byte-identical.
  */
 
-import { sliceWholeChars } from "@/shared"
+import { errMessage, logger, sliceWholeChars } from "@/shared"
 import type { CandidateLocationFocus } from "./location-set-fanout"
 
 /** One candidate as the selector sees it (no full source — bounded diff + signals). */
@@ -193,7 +193,8 @@ export const chooseBestCandidate = async (
   try {
     const text = await ask(buildChooserPrompt(admissible, problemStatement))
     return parseChooserIndex(text, new Set(admissible.map((c) => c.id)))
-  } catch {
+  } catch (e) {
+    logger.debug("llm-chooser: ask failed", { error: errMessage(e) })
     return null
   }
 }
@@ -215,7 +216,8 @@ export const reviewBestCandidate = async (
     let score: number | null
     try {
       score = parseReviewerScore(await ask(buildReviewerPrompt(c, problemStatement)))
-    } catch {
+    } catch (e) {
+      logger.debug("llm-chooser: ask failed", { error: errMessage(e) })
       score = null
     }
     if (score !== null && score > bestScore) {

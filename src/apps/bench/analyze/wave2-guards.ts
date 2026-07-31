@@ -44,6 +44,11 @@ export function assertWave2BenchReportProvenance(
       `${sourceLabel}: wave2 analysis requires a bench report carrying perInstance provenance`,
     )
   }
+  for (const item of reportJson.perInstance) {
+    if (!isRecord(item)) {
+      throw new Error(`${sourceLabel}: perInstance contains a non-object entry`)
+    }
+  }
   const timestampMs = parsedTimestampMs(reportJson.timestamp)
   if (timestampMs === undefined) {
     throw new Error(`${sourceLabel}: missing/invalid timestamp; refuse wave2 analysis input`)

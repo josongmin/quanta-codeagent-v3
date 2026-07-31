@@ -231,6 +231,19 @@ export const linkAbortController = (
   }
 }
 
+const buildCommonBodyOpts = (args: PrepareResponsesContinuationRequestArgs) => ({
+  ...(args.maxOutputTokens !== undefined ? { maxOutputTokens: args.maxOutputTokens } : {}),
+  ...(args.serviceTier !== undefined ? { serviceTier: args.serviceTier } : {}),
+  ...(args.reasoningEffort !== undefined ? { reasoningEffort: args.reasoningEffort } : {}),
+  ...(args.reasoningSummary === true ? { reasoningSummary: true as const } : {}),
+  ...(args.reasoningSummaryDetail !== undefined
+    ? { reasoningSummaryDetail: args.reasoningSummaryDetail }
+    : {}),
+  ...(args.reasoningVerbosity !== undefined
+    ? { reasoningVerbosity: args.reasoningVerbosity }
+    : {}),
+})
+
 export const prepareResponsesContinuationRequest = (
   args: PrepareResponsesContinuationRequestArgs,
 ): ResponsesPreparedRequest => {
@@ -253,16 +266,7 @@ export const prepareResponsesContinuationRequest = (
       : {}
   const fullBody = buildResponsesBody(args.input, args.model, {
     inputItems: fullInputItems,
-    ...(args.maxOutputTokens !== undefined ? { maxOutputTokens: args.maxOutputTokens } : {}),
-    ...(args.serviceTier !== undefined ? { serviceTier: args.serviceTier } : {}),
-    ...(args.reasoningEffort !== undefined ? { reasoningEffort: args.reasoningEffort } : {}),
-    ...(args.reasoningSummary === true ? { reasoningSummary: true } : {}),
-    ...(args.reasoningSummaryDetail !== undefined
-      ? { reasoningSummaryDetail: args.reasoningSummaryDetail }
-      : {}),
-    ...(args.reasoningVerbosity !== undefined
-      ? { reasoningVerbosity: args.reasoningVerbosity }
-      : {}),
+    ...buildCommonBodyOpts(args),
     ...carryoverOpts,
     store: false,
   })
@@ -367,16 +371,8 @@ export const prepareResponsesContinuationRequest = (
     body: buildResponsesBody(args.input, args.model, {
       inputItems: tail,
       previousResponseId: previous.responseId,
-      ...(args.maxOutputTokens !== undefined ? { maxOutputTokens: args.maxOutputTokens } : {}),
-      ...(args.serviceTier !== undefined ? { serviceTier: args.serviceTier } : {}),
-      ...(args.reasoningEffort !== undefined ? { reasoningEffort: args.reasoningEffort } : {}),
-      ...(args.reasoningSummary === true ? { reasoningSummary: true } : {}),
-      ...(args.reasoningSummaryDetail !== undefined
-        ? { reasoningSummaryDetail: args.reasoningSummaryDetail }
-        : {}),
-      ...(args.reasoningVerbosity !== undefined
-        ? { reasoningVerbosity: args.reasoningVerbosity }
-        : {}),
+      ...buildCommonBodyOpts(args),
+      ...carryoverOpts,
       store: false,
     }),
     fullBody,

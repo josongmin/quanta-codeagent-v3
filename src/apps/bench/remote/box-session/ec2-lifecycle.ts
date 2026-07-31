@@ -445,9 +445,9 @@ const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise
   // dataset signal drives BOTH grading params and the harness build; QUANTA_SWEBENCH_PIP_SPEC
   // is an explicit operator override. Default `swebench` ⇒ Verified/Pro unchanged.
   const swebenchPipSpec = resolveSwebenchPipSpec(
-    process.env.QUANTA_SWEBENCH_DATASET_NAME ?? "",
-    process.env.QUANTA_SWEBENCH_PIP_SPEC,
-    process.env.QUANTA_SWEBENCH_DATASET_FAMILY,
+    cfg.swebenchDatasetName ?? process.env.QUANTA_SWEBENCH_DATASET_NAME ?? "",
+    cfg.swebenchPipSpec ?? process.env.QUANTA_SWEBENCH_PIP_SPEC,
+    cfg.swebenchDatasetFamily ?? process.env.QUANTA_SWEBENCH_DATASET_FAMILY,
   )
   log(
     `[full-remote] creating swebench-python shim + warming uvx cache (from=${swebenchPipSpec}, first pull ~30-60s)…`,
@@ -467,7 +467,11 @@ const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise
       `[full-remote] swebench toolchain warm failed (code ${warm.code}):\n${warm.stdout}${warm.stderr}`,
     )
   }
-  await setupProHarnessIfNeeded((cmd) => ssh(cmd), log)
+  await setupProHarnessIfNeeded(
+    (cmd) => ssh(cmd),
+    log,
+    cfg.swebenchDatasetFamily ?? process.env.QUANTA_SWEBENCH_DATASET_FAMILY,
+  )
   // #1-P0 (jun-19/20): prove LSP grounding is actually LIVE after bootstrap.
   // The thin-strict family is fail-closed: proceeding with silent no-nav
   // degrade would violate the preset's contract.
@@ -483,8 +487,9 @@ const bootstrapBox = async (session: BoxSession, cfg: FullRemoteConfig): Promise
 const setupProHarnessIfNeeded = async (
   ssh: (cmd: string) => Promise<SpawnResult>,
   log: (m: string) => void,
+  datasetFamily?: string,
 ): Promise<void> => {
-  if ((process.env.QUANTA_SWEBENCH_DATASET_FAMILY ?? "").toLowerCase() !== "pro") return
+  if ((datasetFamily ?? "").toLowerCase() !== "pro") return
   log("[full-remote] Pro: cloning ScaleAI harness (scaleapi/SWE-bench_Pro-os) + grading venv…")
   const clone = await ssh(
     "test -d ~/swebench-pro/.git || git clone --depth 1 https://github.com/scaleapi/SWE-bench_Pro-os ~/swebench-pro 2>&1 | tail -3",

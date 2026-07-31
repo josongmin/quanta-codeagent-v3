@@ -19,7 +19,7 @@ import { costSummaryFromReport, renderCost } from "../analyze/cost"
 import { diffRuns, renderDiff } from "../analyze/diff"
 import { explainFailure } from "../analyze/explain"
 import { renderLeaderboardMarkdown, rowsFromRun } from "../analyze/leaderboard"
-import { loadVerdictsFromFile } from "../analyze/verdicts"
+import { loadVerdictsFromFile, loadVerdictsWithMeta } from "../analyze/verdicts"
 import {
   buildWave2AbRail,
   buildWave2BacklogArtifact,
@@ -80,17 +80,7 @@ export const cmdLeaderboard = (): void => {
   // under — never a single blanket label. `--preset` is an explicit override.
   const presetOverride = argValue("--preset")
   const rows = reports.flatMap((p) => {
-    const verdicts = loadVerdictsFromFile(p)
-    const meta = (() => {
-      try {
-        return JSON.parse(readFileSync(p, "utf8")) as {
-          model?: string
-          knobs?: { preset?: string }
-        }
-      } catch {
-        return {} as { model?: string; knobs?: { preset?: string } }
-      }
-    })()
+    const { verdicts, meta } = loadVerdictsWithMeta(p)
     const model = meta.model ?? "unknown"
     const preset = presetOverride ?? meta.knobs?.preset ?? "unknown"
     return rowsFromRun(verdicts, { preset, model })

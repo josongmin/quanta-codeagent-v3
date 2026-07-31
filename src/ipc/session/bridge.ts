@@ -276,8 +276,9 @@ export const createSessionTransportBridge = (
   opts: CreateSessionTransportBridgeOpts,
 ): SessionTransportBridge => {
   let closed = false
+  const tailLimit = opts.tailLimit ?? DEFAULT_TAIL_LIMIT
   let snapshot = cloneSnapshot(opts.snapshot)
-  let tail = trimTail(snapshot, [], opts.tailLimit ?? DEFAULT_TAIL_LIMIT)
+  let tail = trimTail(snapshot, [], tailLimit)
   let commandReplayIndex = rebuildCommandReplayIndex(tail)
   // M18(a): the command-dedup window. Previously this Map only ever GREW —
   // a long-lived daemon session accumulated one entry per accepted command
@@ -287,7 +288,7 @@ export const createSessionTransportBridge = (
   // eviction. `pending` entries are pruned the moment the command reaches a
   // terminal transition (accepted → keep for dedup; errored → delete), and the
   // whole Map is capped so it cannot outgrow the replay window it guards.
-  const commandStateCap = Math.max(1, opts.tailLimit ?? DEFAULT_TAIL_LIMIT)
+  const commandStateCap = Math.max(1, tailLimit)
   const commandStates = new Map<string, "pending" | "accepted">()
   const recordCommandState = (commandId: string, state: "pending" | "accepted"): void => {
     // Re-insert to refresh FIFO recency on the accepted-terminal transition.
@@ -391,7 +392,7 @@ export const createSessionTransportBridge = (
 
   const updateSnapshotState = (nextSnapshot: SessionSnapshotLite): void => {
     snapshot = cloneSnapshot(nextSnapshot)
-    tail = trimTail(snapshot, tail, opts.tailLimit ?? DEFAULT_TAIL_LIMIT)
+    tail = trimTail(snapshot, tail, tailLimit)
     commandReplayIndex = rebuildCommandReplayIndex(tail)
   }
 
@@ -745,7 +746,7 @@ export const createSessionTransportBridge = (
     },
     async publishEvents(events) {
       if (events.length === 0) return
-      tail = trimTail(snapshot, [...tail, ...events], opts.tailLimit ?? DEFAULT_TAIL_LIMIT)
+      tail = trimTail(snapshot, [...tail, ...events], tailLimit)
       commandReplayIndex = rebuildCommandReplayIndex(tail)
       const messages = toEventMessages(events)
       await Promise.all(

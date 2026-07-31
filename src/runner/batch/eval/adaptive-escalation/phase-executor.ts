@@ -60,7 +60,7 @@ export interface AdaptiveExecutorDeps {
   /** Resolved base knob state, captured ONCE at run start. */
   readonly base: BenchKnobState
   /** Process env snapshot the posture projector reads. */
-  readonly env: NodeJS.ProcessEnv
+  readonly env: Record<string, string | undefined>
   /** Injected phase runner (real ⇒ driver; tests ⇒ fake). */
   readonly runPhase: RunPhasePort
 }

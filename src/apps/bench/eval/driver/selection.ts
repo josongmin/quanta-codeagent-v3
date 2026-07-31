@@ -681,6 +681,45 @@ const readSelectionSource = (sandbox: string): ((rel: string) => string | null) 
   return (rel) => readSandboxSource(sandbox, rel)
 }
 
+export interface RunSelectionPhaseArgs {
+  readonly instance: Instance
+  readonly deps: RunInstanceDeps
+  readonly sandbox: string
+  readonly signal: AbortSignal
+  readonly w: Wiring
+  readonly n: number
+  readonly concurrency: number | undefined
+  readonly earlyAccept: boolean
+  readonly riskGate: boolean
+  readonly llmRiskGateMode: BenchPosture["verifySelectLlmRiskGate"]
+  readonly counterfactual: boolean
+  readonly selectorMode: BenchPosture["selectorMode"]
+  readonly verifySelectProofRequired: boolean
+  readonly publicContracts: SelectionContractBundle | undefined
+  readonly verifySelectRegression: BenchPosture["verifySelectRegression"]
+  /**
+   * Future wiring: max tests to run for regression verification. Expected to be
+   * forwarded to `makeSelectionRegressionPort` when per-instance test-count
+   * budgeting is wired. Currently accepted for forward compatibility but not
+   * yet consumed by any downstream component.
+   */
+  readonly regressionMaxTests: number | undefined
+  readonly verifySelectRepro: BenchPosture["verifySelectRepro"]
+  readonly selectionOwnerCandidates: readonly string[]
+  readonly ownerResolved: PreparedAttemptContext["ownerResolved"]
+  readonly baseValidatedRed: boolean
+  readonly verificationPlan: PreparedAttemptContext["verificationPlan"]
+  readonly existingTestExpectations: PreparedAttemptContext["existingTestExpectations"]
+  readonly reproTest: BenchReproTestTelemetry | undefined
+  readonly precomputedHint: string | undefined
+  readonly reproHint: string | undefined
+  readonly closureHint: string | undefined
+  readonly reproSources: readonly string[]
+  readonly postureOverride?: BenchPosture
+  readonly stateOverride?: BenchKnobState
+  readonly chaRepairTargets?: PreparedAttemptContext["chaRepairTargets"]
+}
+
 /**
  * TD — verify-and-select phase. Generates N closure-diversity-seeded candidates
  * (candidate 0 = unbiased; candidate i>0 nudged toward the i-th ranked owner so
@@ -689,38 +728,37 @@ const readSelectionSource = (sandbox: string): ((rel: string) => string | null) 
  * resets the tree between them). Reached ONLY when the `verify-select` knob set
  * `verifySelectN`; otherwise the single-pass path runs (byte-identical).
  */
-export const runSelectionPhase = async (
-  instance: Instance,
-  deps: RunInstanceDeps,
-  sandbox: string,
-  signal: AbortSignal,
-  w: Wiring,
-  n: number,
-  concurrency: number | undefined,
-  earlyAccept: boolean,
-  riskGate: boolean,
-  llmRiskGateMode: BenchPosture["verifySelectLlmRiskGate"],
-  counterfactual: boolean,
-  selectorMode: BenchPosture["selectorMode"],
-  verifySelectProofRequired: boolean,
-  publicContracts: SelectionContractBundle | undefined,
-  verifySelectRegression: BenchPosture["verifySelectRegression"],
-  _regressionMaxTests: number | undefined,
-  verifySelectRepro: BenchPosture["verifySelectRepro"],
-  selectionOwnerCandidates: readonly string[],
-  ownerResolved: PreparedAttemptContext["ownerResolved"],
-  baseValidatedRed: boolean,
-  verificationPlan: PreparedAttemptContext["verificationPlan"],
-  existingTestExpectations: PreparedAttemptContext["existingTestExpectations"],
-  reproTest: BenchReproTestTelemetry | undefined,
-  precomputedHint: string | undefined,
-  reproHint: string | undefined,
-  closureHint: string | undefined,
-  reproSources: readonly string[],
-  postureOverride?: BenchPosture,
-  stateOverride?: BenchKnobState,
-  chaRepairTargets?: PreparedAttemptContext["chaRepairTargets"],
-): Promise<Phase> => {
+export const runSelectionPhase = async ({
+  instance,
+  deps,
+  sandbox,
+  signal,
+  w,
+  n,
+  concurrency,
+  earlyAccept,
+  riskGate,
+  llmRiskGateMode,
+  counterfactual,
+  selectorMode,
+  verifySelectProofRequired,
+  publicContracts,
+  verifySelectRegression,
+  verifySelectRepro,
+  selectionOwnerCandidates,
+  ownerResolved,
+  baseValidatedRed,
+  verificationPlan,
+  existingTestExpectations,
+  reproTest,
+  precomputedHint,
+  reproHint,
+  closureHint,
+  reproSources,
+  postureOverride,
+  stateOverride,
+  chaRepairTargets,
+}: RunSelectionPhaseArgs): Promise<Phase> => {
   const selectionContext = prepareSelectionEvidenceContext({
     problemStatement: instance.problemStatement,
     sandbox,

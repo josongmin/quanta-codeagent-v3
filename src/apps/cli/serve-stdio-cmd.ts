@@ -37,7 +37,7 @@ import type { SessionBootstrapDeps, SessionRuntimeConfigShape } from "@/host/boo
 import { createSessionStdioTransport } from "@/ipc/session"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import { DEFAULT_MODEL, pickProvider, tryCreateLLM } from "@/llm"
-import { isPermissionMode, type PermissionMode } from "@/permission"
+import { isPermissionMode, type PermissionMode, type ApprovalDecision, type ActionAssessment } from "@/permission"
 import type { ResolveResumeInput, ResumeResolution } from "@/runner/orchestrate/resume-fsm"
 import { errMessage, gateOnStrict } from "@/shared"
 import type { StreamPort } from "@/stream"
@@ -288,12 +288,26 @@ const buildServeStdioDeps = (llm: LLMPort, stream: StreamPort): SessionBootstrap
     composeShellEvent: () => undefined,
     switchToSessionCwd: (cwd) => cwd,
     materializeReviewerAgent: () => undefined,
-    createSubagentBackedGuardianReview: () => (async () => ({})) as never,
-    createSubagentBackedGuardianAssess: () => (async () => ({})) as never,
+    createSubagentBackedGuardianReview: () => async (): Promise<ApprovalDecision> => ({
+      reviewer: "guardian_subagent",
+      outcome: "guardian_denied",
+      riskLevel: "high",
+      rationale: "guardian not available on stdio surface",
+      decidedAt: Date.now(),
+    }),
+    createSubagentBackedGuardianAssess: () => async (): Promise<ActionAssessment> => ({
+      kind: "deny",
+      rationale: "guardian not available on stdio surface",
+      denyReason: {
+        verdict: "deny",
+        layer: "reviewer",
+        safeReason: "guardian not available on stdio surface",
+      },
+    }),
     buildMcpSurfaceInfo: () => undefined,
     buildIdleGuards: () => ({
       idleMonitor: { markActive: () => undefined },
-      rejectCounter: { recordAccept: () => undefined, recordDeny: () => undefined },
+      rejectCounter: { recordAccept: () => undefined, recordDeny: () => 0, shouldAutoExit: () => false },
     }),
   }
 }

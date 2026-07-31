@@ -220,7 +220,7 @@ export const resolveTrackedScanOutcome = (
 }
 
 const startIndexer = (
-  env: NodeJS.ProcessEnv,
+  env: Record<string, string | undefined>,
   cwd: string,
   metrics?: SearchIndexMetrics,
 ): {
@@ -311,7 +311,7 @@ const fallbackPreset = (indexOn: boolean): PipelinePreset =>
   indexOn ? DEFAULT_INDEXED_PRESET : DEFAULT_NO_INDEX_PRESET
 
 const buildRequestedPreset = (
-  env: NodeJS.ProcessEnv,
+  env: Record<string, string | undefined>,
   indexOn: boolean,
 ): { readonly preset: PipelinePreset | "none"; readonly explicit: boolean } => {
   const raw = env.QUANTA_PIPELINE
@@ -321,13 +321,13 @@ const buildRequestedPreset = (
 }
 
 const lexicalOnlyPipeline = (
-  env: NodeJS.ProcessEnv,
+  env: Record<string, string | undefined>,
   lex: NonNullable<PipelineWireOverrides["lex"]>,
 ): SearchPipeline | null =>
   assemblePipeline({ ...env, QUANTA_PIPELINE: DEFAULT_NO_INDEX_PRESET }, { lex })
 
 export const buildSearchPipelineFromEnv = (
-  env: NodeJS.ProcessEnv,
+  env: Record<string, string | undefined>,
   cwd: string,
   metrics?: SearchIndexMetrics,
 ): WiredSearchPipeline | null => {

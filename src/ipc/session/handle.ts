@@ -386,13 +386,13 @@ const handleStateUpdated = (
   }
 }
 
-const handleTerminal = (state: CorrelatorState, event: SessionEvent): void => {
+const handleTerminal = (state: CorrelatorState, event: SessionTurnEndEvent): void => {
   const chain =
     event.causedByCommandId === undefined
       ? undefined
       : state.byCommandId.get(event.causedByCommandId)
   if (chain !== undefined) {
-    settleChain(chain, { kind: "end", event: event as SessionTurnEndEvent })
+    settleChain(chain, { kind: "end", event })
   }
 }
 
@@ -493,7 +493,7 @@ export const createTurnEndCorrelator = (
       } else if (event.type === "session.state.updated") {
         handleStateUpdated(state, event)
       } else if (TURN_END_TYPES.has(event.type)) {
-        handleTerminal(state, event)
+        handleTerminal(state, event as SessionTurnEndEvent)
       }
     },
     succeed(approvalId, commandId) {

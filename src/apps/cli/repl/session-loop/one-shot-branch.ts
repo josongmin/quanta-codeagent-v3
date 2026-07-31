@@ -60,7 +60,7 @@ export const runOneShotBranch = async (ctx: OneShotBranchCtx): Promise<void> => 
               setLastTurnOutcome(
                 lastTurnOutcomeFromAgentOutcome({
                   reason: result.outcomeReason,
-                } as AgentOutcome),
+                }),
               )
             }
             // ADR-0292 — turn-end snapshot. No-op when the wire is null.

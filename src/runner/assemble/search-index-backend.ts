@@ -225,7 +225,7 @@ const buildLegacyHashEmbedder = (): ResolvedIndexEmbedder => ({
  *
  * Probe order matches the registry's switch; first key present wins.
  */
-const promoteProviderFromKey = (env: NodeJS.ProcessEnv): EmbedProvider | undefined => {
+const promoteProviderFromKey = (env: Record<string, string | undefined>): EmbedProvider | undefined => {
   if (env.QUANTA_EMBED_PROVIDER !== undefined && env.QUANTA_EMBED_PROVIDER !== "") return undefined
   if (gateDisabled(env, "QUANTA_INDEX_AUTO_EMBED")) return undefined
   if (env.VOYAGE_API_KEY !== undefined && env.VOYAGE_API_KEY !== "") return "voyage"
@@ -262,7 +262,7 @@ const fallbackHeadless = async (
  *     `hashEmbed` for that call so the wire never blocks or throws.
  */
 export const resolveIndexEmbedder = (
-  env: NodeJS.ProcessEnv,
+  env: Record<string, string | undefined>,
   factory: EmbedderFactory = createEmbedderFromEnv,
   opts: ResolveIndexEmbedderOptions = {},
 ): ResolvedIndexEmbedder => {
@@ -326,12 +326,12 @@ export const resolveIndexEmbedder = (
 }
 
 export const selectIndexEmbedder = (
-  env: NodeJS.ProcessEnv,
+  env: Record<string, string | undefined>,
   factory: EmbedderFactory = createEmbedderFromEnv,
 ): IndexEmbed => resolveIndexEmbedder(env, factory).embed
 
 /** `QUANTA_INDEX_PERSIST=on` toggles the sqlite-backed delta store. */
-export const isPersistOn = (env: NodeJS.ProcessEnv): boolean => gateOn(env, "QUANTA_INDEX_PERSIST")
+export const isPersistOn = (env: Record<string, string | undefined>): boolean => gateOn(env, "QUANTA_INDEX_PERSIST")
 
 const chunkId = (c: IndexerFileChunk): string => `${c.path}:${c.startLine}-${c.endLine}`
 
@@ -467,7 +467,7 @@ const parseMaxDim = (raw: string | undefined): number | undefined =>
   raw !== undefined && /^\d+$/.test(raw) ? Number(raw) : undefined
 
 const openLocalIndexDb = (
-  env: NodeJS.ProcessEnv,
+  env: Record<string, string | undefined>,
   purpose: "store" | "manifest",
 ): SqliteDb | null => {
   try {
@@ -484,7 +484,7 @@ const openLocalIndexDb = (
   }
 }
 
-const resolveRequestedStore = (env: NodeJS.ProcessEnv): RequestedStoreSelection => {
+const resolveRequestedStore = (env: Record<string, string | undefined>): RequestedStoreSelection => {
   const requested = env.QUANTA_VECTOR_STORE
   if (requested !== undefined && requested !== "") {
     if (
@@ -501,7 +501,7 @@ const resolveRequestedStore = (env: NodeJS.ProcessEnv): RequestedStoreSelection 
 }
 
 const resolveStoreDeps = (
-  env: NodeJS.ProcessEnv,
+  env: Record<string, string | undefined>,
   provider: "in-memory" | "sqlite" | "lance" | "qdrant",
   opts: BuildSemanticBackendOptions,
 ): { readonly deps: Parameters<typeof createStoreFromEnv>[1]; readonly dbHandle?: SqliteDb } => {
@@ -556,7 +556,7 @@ const resolveStoreDeps = (
 }
 
 const resolveManifestStore = (
-  env: NodeJS.ProcessEnv,
+  env: Record<string, string | undefined>,
   provider: "in-memory" | "sqlite" | "lance" | "qdrant",
   opts: BuildSemanticBackendOptions,
   dbHandle: SqliteDb | undefined,
@@ -576,7 +576,7 @@ const resolveManifestStore = (
 }
 
 const buildVectorStoreRuntime = async (
-  env: NodeJS.ProcessEnv,
+  env: Record<string, string | undefined>,
   selection: RequestedStoreSelection,
   resolvedEmbedder: ResolvedIndexEmbedder,
   opts: BuildSemanticBackendOptions,
@@ -764,7 +764,7 @@ const newDisabledBackend = (reason: string): SemanticBackend => ({
  * failures degrade to `null` so the caller can fall back to in-memory.
  */
 export const buildSemanticBackend = (
-  env: NodeJS.ProcessEnv,
+  env: Record<string, string | undefined>,
   embed: IndexEmbed,
   opts: BuildSemanticBackendOptions = {},
 ): SemanticBackend => {

@@ -139,12 +139,24 @@ export type BootstrapCostPanel = unknown
 /** Bootstrap-shaped branch-progress tracker — opaque to the host. */
 export type BootstrapBranchProgress = unknown
 
-/** Minimal surface contract for the idle monitor — opaque from the host; the
- *  surface-side concrete port carries the real type. */
-export type BootstrapIdleMonitor = unknown
+/** Minimal surface contract for the idle monitor — the host never calls any
+ *  methods on it (it only carries the value through `SessionBootstrapResult`).
+ *  Surface-side HITL helpers read only `markActive`; the full concrete type
+ *  from `apps/cli/idle-monitor#IdleMonitor` is a structural superset and is
+ *  therefore assignable here without a cast. */
+export interface BootstrapIdleMonitor {
+  markActive(): void
+}
 
-/** Minimal surface contract for the reject counter — opaque from the host. */
-export type BootstrapRejectCounter = unknown
+/** Minimal surface contract for the reject counter — the host carries it
+ *  opaquely.  Surface-side HITL helpers read `recordAccept`, `recordDeny`,
+ *  and `shouldAutoExit`; the full concrete type from
+ *  `apps/cli/reject-counter#RejectCounter` is a structural superset. */
+export interface BootstrapRejectCounter {
+  recordAccept(): void
+  recordDeny(): number
+  shouldAutoExit(): boolean
+}
 
 // ── Dep factories injected by the surface.
 

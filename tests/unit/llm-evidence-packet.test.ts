@@ -744,7 +744,7 @@ describe("llm evidence packet — intake (typed, public-only)", () => {
       localizeCandidates: ["pkg/core.py"],
       reproTest: {
         installed: false,
-        reason: "env_exec_failed",
+        reason: "execution_failed",
         sampleStdoutTail: `STDOUT_HEAD\n${"o".repeat(900)}${tailMarker}`,
         sampleStderrTail: `STDERR_HEAD\n${"e".repeat(900)}${tailMarker}`,
       },
@@ -945,7 +945,7 @@ describe("OPC-07 3-case golden snapshots (full-shape regression fence)", () => {
           localizeCandidates: ["astropy/io/fits/header.py"],
           reproTest: {
             installed: false,
-            reason: "env prep failed: gcc missing",
+            reason: "execution_failed",
             samples: 0,
             reproducedCount: 0,
           },
@@ -1008,13 +1008,13 @@ describe("OPC-07 3-case golden snapshots (full-shape regression fence)", () => {
 
 // OPC-07 acceptance: the three failed cases must route to the right ask.
 describe("llm evidence packet — 3-case packet semantics", () => {
-  test("astropy env failure ⇒ infra state (env_prep_failed), never candidate blame", () => {
+  test("astropy env failure ⇒ infra state (execution_failed), never candidate blame", () => {
     const packet = buildIntakeLlmEvidencePacket({
       problemStatement: "astropy: import fails building C extension.",
       localizeCandidates: ["astropy/io/fits/x.py"],
       reproTest: {
         installed: false,
-        reason: "env prep failed: gcc missing",
+        reason: "execution_failed",
         samples: 0,
         reproducedCount: 0,
       },
@@ -1022,7 +1022,7 @@ describe("llm evidence packet — 3-case packet semantics", () => {
     const mwe = packet.proofReceipts.find(
       (r) => r.source === "public_mwe" && r.state !== "static_only",
     )
-    expect(mwe?.state).toBe("env_prep_failed")
+    expect(mwe?.state).toBe("execution_failed")
     expect(packet.proofReceipts.every((r) => r.state !== "candidate_red")).toBe(true)
   })
 
@@ -1368,11 +1368,11 @@ describe("B8 — ProofReceiptFact source policy is explicit + typed", () => {
     const intake = buildIntakeLlmEvidencePacket({
       problemStatement: "A public bug in run().",
       localizeCandidates: ["pkg/x.py"],
-      reproTest: { installed: false, reason: "env prep failed", samples: 0, reproducedCount: 0 },
+      reproTest: { installed: false, reason: "execution_failed", samples: 0, reproducedCount: 0 },
     })
-    // env failure ⇒ infra policy (not a public-repro verdict).
+    // exec failure ⇒ infra policy (not a public-repro verdict).
     expect(
-      intake.proofReceipts.some((r) => r.state === "env_prep_failed" && r.sourcePolicy === "infra"),
+      intake.proofReceipts.some((r) => r.state === "execution_failed" && r.sourcePolicy === "infra"),
     ).toBe(true)
     // the static issue-seed receipt is public_issue provenance.
     expect(

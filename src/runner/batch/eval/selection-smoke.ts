@@ -1,5 +1,6 @@
 import { rm } from "node:fs/promises"
 import { join } from "node:path"
+import { errMessage, logger } from "@/shared"
 import {
   extractIssueReproSeed,
   type IssueReproSeed,
@@ -76,7 +77,8 @@ export const runIssueSmokeScript = async (
   const path = join(sandbox, ISSUE_SMOKE_FILE)
   try {
     await (deps.writeFile ?? defaultWriteFile)(path, source)
-  } catch {
+  } catch (e) {
+    logger.debug(`issue-smoke: write failed: ${errMessage(e)}`)
     return null
   }
   try {
@@ -85,7 +87,8 @@ export const runIssueSmokeScript = async (
     if (argv === null) return null
     const r = await exec(argv, sandbox, timeoutMs)
     return typeof r.code === "number" ? r.code === 0 : false
-  } catch {
+  } catch (e) {
+    logger.debug(`issue-smoke: exec failed: ${errMessage(e)}`)
     return null
   } finally {
     await (deps.removeFile ?? defaultRemoveFile)(path).catch(() => {})

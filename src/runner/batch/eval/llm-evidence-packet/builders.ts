@@ -25,6 +25,7 @@ import { assertEvidenceTextBlind } from "./guards"
 import { opaqueInstanceIdHash } from "./hash"
 import { ownerTestResultReceipt, sourcePolicyOf } from "./policy"
 import { boundHead, boundTail, fmtList } from "./text-utils"
+import type { BenchReproTestReason } from "../../types"
 import type {
   CandidateEditSurfaceFact,
   ContractFact,
@@ -50,7 +51,7 @@ type IntakeReproTelemetry =
     }
   | {
       readonly installed: false
-      readonly reason: string
+      readonly reason: BenchReproTestReason
       readonly samples?: number
       readonly reproducedCount?: number
       readonly sampleOutcomes?: readonly string[]
@@ -102,7 +103,7 @@ const reproReceipts = (repro: IntakeReproTelemetry | undefined): ProofReceiptFac
       source: "public_mwe",
       // B8: an env/exec failure is an INFRA outcome, not a public-repro verdict.
       sourcePolicy: "infra",
-      state: repro.reason.includes("env") ? "env_prep_failed" : "execution_failed",
+      state: "execution_failed",
       ...(repro.sampleStdoutTail !== undefined
         ? { stdoutTail: boundTail(repro.sampleStdoutTail, 600) }
         : {}),

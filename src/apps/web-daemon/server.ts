@@ -299,7 +299,7 @@ export const startWebDaemon = async (config: WebDaemonServerConfig): Promise<Web
     followerApproval,
     followerApprovalUnsub: followerApprovalUnsub0,
     followerSweepTimer: followerSweepTimer0,
-  } = setupFollowerApproval(config, sharedSession)
+  } = setupFollowerApproval(config, sharedSession, process.env)
   let followerApprovalUnsub = followerApprovalUnsub0
   let followerSweepTimer = followerSweepTimer0
   // ADR-0540 W1-B — daemon-owned post-approval continuation. Gate ON ⇒ every

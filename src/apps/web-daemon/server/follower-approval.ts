@@ -29,7 +29,10 @@ export interface FollowerApprovalWiring {
 /** Parse QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS — the ms deadline for a follower to
  *  respond to a pending approval. 0 / unset / invalid ⇒ 0 (DISABLED ⇒ the
  *  coordinator passes relays straight through, byte-identical to no timeout). */
-export const parseFollowerApprovalTimeoutMs = (raw: string | undefined): number => {
+export const parseFollowerApprovalTimeoutMs = (
+  raw: string | undefined,
+  env: Record<string, string | undefined> = process.env,
+): number => {
   if (raw === undefined) return 0
   const n = Number(raw)
   return Number.isInteger(n) && n > 0 ? n : 0
@@ -38,9 +41,10 @@ export const parseFollowerApprovalTimeoutMs = (raw: string | undefined): number 
 export const setupFollowerApproval = (
   config: Pick<WebDaemonServerConfig, "followerCoControl">,
   sharedSession: RuntimeSession,
+  env: Record<string, string | undefined> = process.env,
 ): FollowerApprovalWiring => {
   const followerApprovalTimeoutMs = parseFollowerApprovalTimeoutMs(
-    process.env.QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS,
+    env.QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS,
   )
   // ADR-0540 W1-B — when the daemon owns the post-approval continuation, the
   // follower relay's respond must ride the session's transport dispatch tail
@@ -50,7 +54,7 @@ export const setupFollowerApproval = (
   // (a direct dispatch would race the re-issue on the single-writer lease).
   // Gate OFF ⇒ `undefined` options ⇒ the historical direct dispatch,
   // byte-identical.
-  const respondOptions = gateOn(process.env, WEB_INLINE_APPROVAL_GATE)
+  const respondOptions = gateOn(env, WEB_INLINE_APPROVAL_GATE)
     ? { enqueue: true }
     : undefined
   const followerApproval =

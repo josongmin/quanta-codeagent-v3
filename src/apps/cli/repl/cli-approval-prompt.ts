@@ -6,16 +6,15 @@ import {
   type ToolAction,
   type TrustScopeRegistry,
 } from "@/permission"
+import type { BootstrapIdleMonitor, BootstrapRejectCounter } from "@/host/bootstrap"
 import { type ActionDiff, diffPreviewEnabled, renderActionDiff } from "../diff-preview"
-import type { IdleMonitor } from "../idle-monitor"
 import { preflightApplyWarning, preflightCheckEnabled } from "../preflight"
-import type { RejectCounter } from "../reject-counter"
 import type { MidTurnApprovalChannel } from "./mid-turn-approval-channel"
 import { maybeHunkOption, runHunkSelect } from "./cli-hunk-select-flow"
 
 export interface CliHitlDeps {
-  readonly idleMonitor: IdleMonitor
-  readonly rejectCounter: RejectCounter
+  readonly idleMonitor: BootstrapIdleMonitor
+  readonly rejectCounter: BootstrapRejectCounter
   readonly channel: MidTurnApprovalChannel
   readonly cwd: string
   readonly trustScope?: { registry: TrustScopeRegistry; projectKey: string }

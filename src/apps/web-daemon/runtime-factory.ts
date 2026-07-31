@@ -524,7 +524,8 @@ const loadDaemonMcp = async (
       })
     }
     return { tools, clients, mcpAccessor }
-  } catch {
+  } catch (e) {
+    logger.warn("web-daemon: MCP load failed", { error: errMessage(e) })
     return { tools: [], clients: [], mcpAccessor: undefined }
   }
 }
