@@ -955,8 +955,7 @@ export const assembleAgentConfig = (req: AssembleRequest, env: AssemblerEnv): Ag
   // callers / one-shot bench-style usage) fall back to the fresh
   // factory pair — byte-identical to the ADR-0334 baseline.
   //
-  // (ADR-0358/0372/0360 + the Codex-R2 install moved into the helper below
-  // to keep this closure under the god-function line cap — behaviour-identical.)
+  // (ADR-0358/0372/0360 + Codex-R2 install → wireSessionResourcesAndCodexR2 — behaviour-identical.)
   wireSessionResourcesAndCodexR2(cfg, env)
   // ADR-0350 — auto-wire `cfg.activatePlugins` from a workspace-anchored
   // plugin scan so the ADR-0346 loop hook gets a real activator instead
