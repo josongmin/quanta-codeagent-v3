@@ -51,7 +51,14 @@
     }
   },
   "files": {
-    "includes": ["**", "!node_modules", "!dist", "!**/*.d.ts", "!tests/smoke/fixtures"]
+    "includes": [
+      "**",
+      "!node_modules",
+      "!dist",
+      "!**/*.d.ts",
+      "!tests/smoke/fixtures",
+      "!src/runner/batch/corpus/repo-version-specs.ts"
+    ]
   },
   "overrides": [
     {
