@@ -33,7 +33,8 @@ const WRITE_CALL = /\bwriteFileAtomic\s*\(|\.writeFile\s*\(/
 // Require an actual CALL (identifier + open paren), NOT a bare import reference —
 // otherwise a tool that `import`s the helper but never invokes it would pass
 // vacuously (exactly the "declared but inert" failure mode this guards against).
-const REFRESH_REF = /(refreshStaleReadBaseline|refreshApplyBaselines|recordFreshBaseline)\s*\(/
+const REFRESH_REF =
+  /(refreshStaleReadBaseline|refreshApplyBaselines|refreshPatchBaselines|recordFreshBaseline)\s*\(/
 
 /** Tools that write a file but LEGITIMATELY do not need a baseline refresh, each
  *  with a documented reason. EMPTY today (all 6 file-mutating tools refresh).
