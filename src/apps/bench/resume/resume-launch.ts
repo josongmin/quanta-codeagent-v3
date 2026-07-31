@@ -171,5 +171,8 @@ const runBoxResumePrelaunch = async (): Promise<void> => {
 }
 
 if (import.meta.main) {
-  runBoxResumePrelaunch().catch((_err) => {})
+  runBoxResumePrelaunch().catch((e) => {
+    process.stderr.write(`[resume-launch] prelaunch failed: ${errMessage(e)}\n`)
+    process.exit(1)
+  })
 }

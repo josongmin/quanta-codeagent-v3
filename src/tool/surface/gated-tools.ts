@@ -933,6 +933,24 @@ export const GATED_TOOLS: readonly ToolSurfaceEntry[] = [
     adr: "A3",
     note: "A3 (Projects knowledge-base / context-offloading, Cursor·Claude project-knowledge parity) — index a LOCAL file into a session KB (project_write) then search / inspect it WITHOUT the raw bytes ever entering the model's context window. op: project_info | project_read | project_search | project_write | project_delete. THE VALUE PROP is the 'never enters context' invariant: project_write encodes bytes THROUGH resolveJailedDoc (the same FS-jail chokepoint the document readers use), indexes them, and returns ONLY metadata (doc_uuid + byte size) — the raw contents are NEVER placed in the tool ToolResult.output/structured that feeds the model; project_search returns bounded snippets + doc_uuids. Delegates search to the EXISTING @/retrieval/pipeline SearchPipeline seam (the same interface search_codebase injects) scoped to a KB namespace, with a lexical-substring fallback when no pipeline is wired (fail-soft). knowledge{} accounting (knowledge_size / max_knowledge_size / search_threshold / rag_active / remaining_budget) is a REAL byte count of the indexed corpus; rag_active flips at a knob-DEFAULTED byte threshold (DEFAULT_PROJECTS_KB_RAG_THRESHOLD_BYTES — measure-first, NOT a validated cutoff) and `force` bypasses it. risk:read-only (records into the in-session store; the local file is READ, never mutated) — self-reports isReadOnly + hitlTier:none like ci_finding / communicate_update. NO-THROW: a thrown store/backend-port/pipeline collapses to a leak-SAFE ok:false whose message never echoes the doc body. Pure in-memory store (injected clock + id-factory, oldest-evicted ring). Registered only when DefaultToolPorts.projectsKb is wired (QUANTA_PROJECTS_KB); absent ⇒ tool absent, byte-identical default menu. Opt-in EVERYWHERE.",
   },
+  {
+    name: "memory_search",
+    group: ["memory_write", "memory_update"],
+    origin: "@/agent/memory-tools (memoryTools — memory_search + memory_write + memory_update)",
+    gate: { kind: "config-slot", slot: "store", env: "QUANTA_MEMORY" },
+    default: { cli: "on", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "read-only",
+    note: "Long-term memory self-edit trio (ADR-0413 default-ON for CLI). Unset QUANTA_MEMORY ⇒ volatile InMemoryStore wired ⇒ all three tools registered for CLI. QUANTA_MEMORY=off ⇒ no store ⇒ tools absent (byte-identical legacy escape hatch). memory_search: semantic + keyword recall over past sessions. memory_write: persist a new memory entry. memory_update: revise or delete an existing entry (write-guard blocks updates below QUANTA_MEMORY_WRITE_GUARD_PCT budget). All three absent when store absent; CLI seeds QUANTA_MEMORY to on by default (volatile), all other surfaces opt-in.",
+  },
+  {
+    name: "budget_status",
+    origin: "@/agent/budget-tool (createBudgetStatusTool via tier1/budget.ts buildBudgetBlock)",
+    gate: { kind: "config-slot", slot: "budgetLedger", env: "QUANTA_BUDGET_LEDGER" },
+    default: { cli: "opt-in", bench: "opt-in", web: "opt-in", ide: "opt-in", headless: "opt-in" },
+    risk: "read-only",
+    adr: "ADR-0136",
+    note: "ADR-0136 budget ledger tool. Agent-queryable cost surface: shows per-session / per-day / per-model cumulative spend and soft/hard breach state. Wired by tier1/budget.ts buildBudgetBlock when config.budgetLedger is provided (QUANTA_BUDGET_LEDGER on + ledger minted by the composition root). Absent ⇒ tool not registered, byte-identical default menu. Read-only (the ledger is an event-log; budget_status only reads the computed snapshot). Opt-in EVERYWHERE.",
+  },
 ]
 
 /** Resolve a single tool/group's availability on a surface given a default-state

@@ -23,8 +23,8 @@
  *       and never deep-equal the `default:undefined` inventory entry. There is no
  *       authorable schema default that round-trips (`false` ⇒ derives `false`,
  *       collapsing the tri-state; `undefined` ⇒ also derives `false`).
- *   - QUANTA_BENCH_NO_PATCH_FORCE_FRACTION: inventory `kind:"float"`. `KnobKind`
- *     has no `"float"` member, so no KnobSchema.kind can reproduce the entry.
+ *   - QUANTA_BENCH_NO_PATCH_FORCE_FRACTION: inventory `kind:"float"` — authored
+ *     in `bench-gap-3.ts` (which added `"float"` to `KnobKind` in contracts.ts).
  *   - QUANTA_BENCH_MODEL_LANES: read directly in src/apps/bench/model-lanes.ts
  *     with NO registry knob in src/runner/knobs/knobs — there is no live `parse`
  *     to prove parse-parity against, so it is out of scope for the schema SSOT.
@@ -538,5 +538,5 @@ export const verifySelectLlmRiskGateSchema: KnobSchema<VerifySelectLlmRiskGateMo
 //   - QUANTA_BENCH_LSP_CHEAP                  (bool kind + inventory default:undefined)
 //   - QUANTA_BENCH_VERIFY_SELECT_EARLY_ACCEPT (bool kind + inventory default:undefined)
 //   - QUANTA_BENCH_VERIFY_SELECT_RISK_GATE    (bool kind + inventory default:undefined)
-//   - QUANTA_BENCH_NO_PATCH_FORCE_FRACTION    (kind:"float" — no KnobKind member)
+//   - QUANTA_BENCH_NO_PATCH_FORCE_FRACTION    (kind:"float" — authored in bench-gap-3.ts)
 //   - QUANTA_BENCH_MODEL_LANES                (no registry knob/parse to prove parity)

@@ -47,6 +47,12 @@ evidence:
       - tests/unit/budget-ledger-hellgate.test.ts
     integration: []
     contract: []
+config_refs:
+  env:
+    - QUANTA_BUDGET_LEDGER
+    - QUANTA_BUDGET_LEDGER_SESSION_USD
+    - QUANTA_BUDGET_LEDGER_DAILY_USD
+    - QUANTA_BUDGET_LEDGER_PATH
 knobs: []
 deliberate_hold: null
 notes: |

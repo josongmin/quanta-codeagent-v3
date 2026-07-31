@@ -41,6 +41,11 @@ export { buildPlanMutationBlock } from "./plan-mutation"
 export { buildPrShipBlock } from "./pr-ship"
 export { buildPromptCacheBlock } from "./prompt-cache"
 export { type ReflectConsultFromLLMOptions, reflectConsultFromLLM } from "./reflect"
+export {
+  materializeReviewerAgent,
+  createSubagentBackedGuardianReview,
+  createSubagentBackedGuardianAssess,
+} from "./reviewer-subagent"
 export { buildShadowBlock } from "./shadow"
 export { buildShadowVerifyBlock } from "./shadow-verify"
 export { buildSideAgentBlock } from "./side-agent"

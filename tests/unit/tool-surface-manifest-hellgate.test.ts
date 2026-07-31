@@ -193,6 +193,7 @@ describe("tool-surface manifest — CLI default-ON seed derives from the SSOT", 
       [
         "QUANTA_COVERAGE_TOOL",
         "QUANTA_ENABLE_STRUCTURED_PATCH",
+        "QUANTA_MEMORY", // memory_search/write/update trio — CLI default-ON (ADR-0413)
         "QUANTA_PROMPT_CACHE_STATUS",
         "QUANTA_SIDE_AGENT",
         "QUANTA_SUBAGENT",
@@ -245,7 +246,11 @@ describe("tool-surface manifest — FULL-universe completeness (the guard that w
       // src/agent/tier1) cannot escape the manifest completeness scan. Scoped to the
       // single source file (not all of src/skill) to avoid picking up SKILL.md
       // frontmatter names / test-fixture `name:` literals that are not tools.
-      "grep -rhoE 'name: \"[a-z_]+\"' src/tool src/subagent src/agent/tier1 src/skill/skill-creator.ts",
+      // src/agent/budget-tool.ts and src/agent/memory-tools.ts define tools that
+      // live outside src/agent/tier1 (they are not tier-1 session-feature builders,
+      // but leaf tool factories that get composed at the runner level). Extend the
+      // scan so these tools cannot silently escape the two-way drift guard.
+      "grep -rhoE 'name: \"[a-z_]+\"' src/tool src/subagent src/agent/tier1 src/agent/budget-tool.ts src/agent/memory-tools.ts src/skill/skill-creator.ts",
     ).toString()
     const re = /name: "([a-z_]+)"/g
     const found = new Set<string>()

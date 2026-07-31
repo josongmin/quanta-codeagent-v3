@@ -83,7 +83,7 @@ export const deriveInventoryDefault = (schema: AnyKnobSchema): KnobInventoryEntr
  *
  * Field mapping:
  *   - `envKey`     ← schema.envKey (typed `QUANTA_${string}` by the entry shape)
- *   - `kind`       ← schema.kind (1:1; `KnobSchema` has no `"float"`)
+ *   - `kind`       ← schema.kind (1:1; `KnobKind` includes `"float"` — see bench-gap-3.ts)
  *   - `default`    ← derived (see {@link deriveInventoryDefault})
  *   - `group`      ← `"bench"` (these are bench-domain schemas)
  *   - `home`       ← derived from surfaces (see {@link deriveHome})
