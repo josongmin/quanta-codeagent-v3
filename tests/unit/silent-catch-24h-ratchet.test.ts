@@ -79,7 +79,7 @@ const PINNED_LABELS: ReadonlyArray<{ file: string; labels: readonly string[] }> 
  * NEW bare-catch beyond the baseline" — i.e. the count must NEVER grow.
  */
 const BARE_CATCH_BASELINE: Readonly<Record<string, number>> = {
-  "src/agent/approval-state-machine/store.ts": 12,
+  "src/agent/approval-state-machine/store.ts": 2,
   "src/agent/codex-r2-wire-install/install.ts": 4,
   "src/agent/compaction.ts": 0,
   // jul-2 (FIX 5): two silent `} catch {` in the loop slice

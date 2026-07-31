@@ -25,18 +25,9 @@ import type { ImageBlock } from "./protocol"
 
 export const SESSION_PROTOCOL_VERSION = "session.v1" as const
 
-export const SURFACE_READ_MODEL_IDS = [
-    "session",
-    "agentState",
-    "canvas",
-    "observability",
-] as const
+export const SURFACE_READ_MODEL_IDS = ["session", "agentState", "canvas", "observability"] as const
 
-export const SURFACE_READ_MODEL_STATUSES = [
-    "subscribed",
-    "supported",
-    "unsupported",
-] as const
+export const SURFACE_READ_MODEL_STATUSES = ["subscribed", "supported", "unsupported"] as const
 
 export type SurfaceReadModelId = (typeof SURFACE_READ_MODEL_IDS)[number]
 
