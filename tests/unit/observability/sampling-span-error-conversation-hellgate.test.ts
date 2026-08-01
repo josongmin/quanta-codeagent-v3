@@ -66,19 +66,20 @@ const closeChat = (opts: {
     attrs({ [GEN_AI_ATTRS.operation.name]: "chat" }),
     "client",
   )
-  closeSamplingSpan(
+  closeSamplingSpan({
     span,
-    opts.status,
-    TIMING,
-    undefined, // usage
-    undefined, // finishReason
-    [], // messages
-    undefined, // responseMessage
-    "gpt-5", // requestModel
-    "openai", // provider
-    opts.errorKind,
-    opts.conversationId,
-  )
+    status: opts.status,
+    timing: TIMING,
+    usage: undefined,
+    finishReason: undefined,
+    messages: [],
+    responseMessage: undefined,
+    requestModel: "gpt-5",
+    provider: "openai",
+    errorKind: opts.errorKind,
+    conversationId: opts.conversationId,
+    system: undefined,
+  })
 }
 
 /** All spans across every captured `/v1/traces` POST body. */
@@ -218,19 +219,20 @@ describe("OFF byte-identical — no sink ⇒ no bytes even with error + identity
     // Drive the full error+identity path with no sink: startSpan returns the
     // NOOP sentinel, closeSamplingSpan → endSpan short-circuits, zero emit.
     const span = startSpan(SPAN_NAMES.runSamplingRequest, attrs({}), "client")
-    closeSamplingSpan(
+    closeSamplingSpan({
       span,
-      "error",
-      TIMING,
-      undefined,
-      undefined,
-      [],
-      undefined,
-      "gpt-5",
-      "openai",
-      "network",
-      "inst-A#0",
-    )
+      status: "error",
+      timing: TIMING,
+      usage: undefined,
+      finishReason: undefined,
+      messages: [],
+      responseMessage: undefined,
+      requestModel: "gpt-5",
+      provider: "openai",
+      errorKind: "network",
+      conversationId: "inst-A#0",
+      system: undefined,
+    })
     // No sink ⇒ no exporter ⇒ nothing could have been serialized. The absence
     // of a throw + null sink is the byte-identical guarantee. (A raw-OTLP proof
     // of emptiness is the sink-installed harness above; here we prove the

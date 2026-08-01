@@ -37,6 +37,7 @@ import {
   type TurnTiming,
 } from "@/observability"
 import { redactSecrets } from "@/security"
+import { gateOn } from "@/shared"
 import type { OtlpSpan } from "../../helpers/otlp-capture"
 import { captureOtlp } from "../../helpers/otlp-capture"
 
@@ -86,20 +87,25 @@ const closeChat = (opts: {
     attrs({ [GEN_AI_ATTRS.operation.name]: "chat" }),
     "client",
   )
-  closeSamplingSpan(
+  closeSamplingSpan({
     span,
-    opts.status ?? "ok",
-    TIMING,
-    undefined,
-    undefined,
-    opts.messages ?? [],
-    opts.response,
-    "gpt-5",
-    "openai",
-    undefined,
-    undefined,
-    opts.system,
-  )
+    status: opts.status ?? "ok",
+    timing: TIMING,
+    usage: undefined,
+    finishReason: undefined,
+    messages: opts.messages ?? [],
+    responseMessage: opts.response,
+    requestModel: "gpt-5",
+    provider: "openai",
+    errorKind: undefined,
+    conversationId: undefined,
+    system: opts.system,
+    // ADR-0144: `closeSamplingSpan` no longer reads `process.env`; the knob is
+    // pre-computed at the composition root via `gateOn(env, CONTENT_CAPTURE_ENV)`
+    // and threaded in. Mirror that here so this test's `process.env[KNOB]`
+    // toggling drives capture on/off exactly as the production wiring does.
+    contentCaptureEnabled: gateOn(process.env, KNOB),
+  })
 }
 
 const allSpans = (traces: Awaited<ReturnType<typeof captureOtlp>>["traces"]): OtlpSpan[] =>

@@ -460,41 +460,60 @@ const samplingIdentityAttrs = (
  *  `gen_ai.response.finish_reasons` is emitted as a homogeneous string ARRAY per
  *  the OTel GenAI semconv (a turn may report several reasons; the exporter's
  *  Wave-1 `arrayValue` support serializes it) — NOT a bare scalar. */
-export const buildSamplingSpanAttrs = (
-  timing: TurnTiming,
-  usage?: SamplingUsage,
-  finishReason?: string,
+/** Named-opts bag for {@link buildSamplingSpanAttrs}. Every forwarded field is
+ *  required-nullable (`T | undefined`) mirroring {@link FinalizeSamplingSpanArgs}
+ *  so the sole internal caller ({@link closeSamplingSpan}) forwards its own
+ *  `T | undefined` values without an `exactOptionalPropertyTypes` cast. */
+export interface SamplingSpanAttrsArgs {
+  readonly timing: TurnTiming
+  readonly usage: SamplingUsage | undefined
+  readonly finishReason: string | undefined
   /** Truncated previews (built by the caller ONLY when a span sink is active)
    *  of the last input message we sent and the model's response — so clicking a
    *  `run_sampling_request` span in the live trace UI reveals what was asked /
    *  what came back. Omitted (undefined) on the default-OFF path. */
-  promptPreview?: string,
-  completionPreview?: string,
+  readonly promptPreview: string | undefined
+  readonly completionPreview: string | undefined
   /** The REQUESTED model + provider (from the turn's `LLMPort`), distinct from
    *  the RESPONSE model in `usage`. `gen_ai.request.model` is the model we asked
    *  for; `gen_ai.provider.name` is its provider slug (adapter-reported when
    *  available, else derived from the model prefix). Both omitted when unknown. */
-  requestModel?: string,
-  provider?: string,
+  readonly requestModel: string | undefined
+  readonly provider: string | undefined
   /** Terminal status of the sampling request. When `"error"` the semconv makes
    *  `error.type` Conditionally-Required — we stamp it here (T-B5). `"ok"` /
    *  `"aborted"` never carry `error.type` (an abort is a HITL hand-off / user
-   *  cancel, not an operation error). Defaulted to `"ok"` so existing callers
-   *  (and the empty-safe test doubles) stay byte-identical. */
-  status: SpanStatus = "ok",
+   *  cancel, not an operation error). */
+  readonly status: SpanStatus
   /** T-B5 low-cardinality error CLASS (a `LLMErrorKind` slug like `"network"` /
    *  `"rate_limit"`), used verbatim as `error.type` when `status==="error"`.
    *  Absent ⇒ the semconv canonical fallback `"_OTHER"`. NEVER a raw error
    *  message — the value is a bounded enum so error dashboards stay
    *  low-cardinality. */
-  errorKind?: string,
+  readonly errorKind: string | undefined
   /** T-B5 stable conversation grouping id (`gen_ai.conversation.id`): the SAME
    *  value for every turn of one instance/attempt, DIFFERENT across instances
    *  (sourced from the session/instance identity). Omitted (undefined / empty)
    *  ⇒ key not stamped, so non-bench or identity-less callers stay
    *  byte-identical. */
-  conversationId?: string,
+  readonly conversationId: string | undefined
+}
+
+export const buildSamplingSpanAttrs = (
+  args: SamplingSpanAttrsArgs,
 ): Record<string, string | number | readonly string[]> => {
+  const {
+    timing,
+    usage,
+    finishReason,
+    promptPreview,
+    completionPreview,
+    requestModel,
+    provider,
+    status,
+    errorKind,
+    conversationId,
+  } = args
   const out: Record<string, string | number | readonly string[]> = {
     // `chat` is the canonical GenAI operation for a provider sampling request.
     [GEN_AI_ATTRS.operation.name]: "chat",
@@ -678,34 +697,56 @@ const buildSpanContentBag = (
  *  attrs (T-D1). Default-OFF path pays nothing (no stringify, no redact).
  *  Extracted from `streamConsume` to keep that turn function under the
  *  god-FUNCTION size cap. */
-export const closeSamplingSpan = (
-  span: Span,
-  status: SpanStatus,
-  timing: TurnTiming,
-  usage: SamplingUsage | undefined,
-  finishReason: string | undefined,
-  messages: readonly Message[],
-  responseMessage: unknown,
+/** Named-opts bag for {@link closeSamplingSpan}. The forwarded fields are
+ *  required-nullable (`T | undefined`) mirroring {@link FinalizeSamplingSpanArgs}
+ *  so the orchestrator forwards its own values without an
+ *  `exactOptionalPropertyTypes` cast; `contentCaptureEnabled` stays optional
+ *  (absent ⇒ false, default-OFF). */
+export interface CloseSamplingSpanArgs {
+  readonly span: Span
+  readonly status: SpanStatus
+  readonly timing: TurnTiming
+  readonly usage: SamplingUsage | undefined
+  readonly finishReason: string | undefined
+  readonly messages: readonly Message[]
+  readonly responseMessage: unknown
   /** The turn's requested model + provider (from the `LLMPort`) for
    *  `gen_ai.request.model` / `gen_ai.provider.name`. Omitted (undefined) for
    *  test doubles that don't expose a model. */
-  requestModel?: string,
-  provider?: string,
+  readonly requestModel: string | undefined
+  readonly provider: string | undefined
   /** T-B5 — low-cardinality error CLASS (a `LLMErrorKind` slug) when
    *  `status==="error"`; forwarded verbatim to `error.type`. Absent ⇒ `"_OTHER"`.
    *  Never a raw message. */
-  errorKind?: string,
+  readonly errorKind: string | undefined
   /** T-C3 — stable `gen_ai.conversation.id` (same for every turn of one
    *  instance/attempt). Omitted ⇒ key not stamped. */
-  conversationId?: string,
+  readonly conversationId: string | undefined
   /** T-D1 — the turn's system prompt blocks, used ONLY to build the (redacted)
    *  `gen_ai.system_instructions` content attr under the content-capture knob.
    *  Omitted ⇒ that attr is never stamped. */
-  system?: readonly SystemBlock[],
+  readonly system: readonly SystemBlock[] | undefined
   /** ADR-0144 — pre-computed from AgentConfig.contentCaptureEnabled so this
    *  function never reads process.env. Absent ⇒ false (default-OFF). */
-  contentCaptureEnabled = false,
-): void => {
+  readonly contentCaptureEnabled?: boolean
+}
+
+export const closeSamplingSpan = (args: CloseSamplingSpanArgs): void => {
+  const {
+    span,
+    status,
+    timing,
+    usage,
+    finishReason,
+    messages,
+    responseMessage,
+    requestModel,
+    provider,
+    errorKind,
+    conversationId,
+    system,
+  } = args
+  const contentCaptureEnabled = args.contentCaptureEnabled ?? false
   // T-D1 preview-leak fix + content capture: the prompt/completion previews were
   // gated on sink-active ONLY. Since T-B flips the sink true on ordinary
   // (no-endpoint) runs, that emitted raw-ish truncated previews UN-KNOBBED.
@@ -718,18 +759,18 @@ export const closeSamplingSpan = (
     span,
     status,
     attrs({
-      ...buildSamplingSpanAttrs(
+      ...buildSamplingSpanAttrs({
         timing,
         usage,
         finishReason,
-        content.promptPreview,
-        content.completionPreview,
+        promptPreview: content.promptPreview,
+        completionPreview: content.completionPreview,
         requestModel,
         provider,
         status,
         errorKind,
         conversationId,
-      ),
+      }),
       ...content.attrs,
     }),
   )
@@ -790,21 +831,23 @@ export const finalizeSamplingSpan = (span: Span, args: FinalizeSamplingSpanArgs)
     args.sessionId !== undefined && args.sessionId !== "" && args.sessionId !== "default"
       ? args.sessionId
       : undefined
-  closeSamplingSpan(
+  closeSamplingSpan({
     span,
-    args.status,
+    status: args.status,
     timing,
-    args.usage,
-    args.finishReason,
-    args.messages,
-    args.responseMessage,
-    args.requestModel,
-    args.provider,
-    args.errorKind,
+    usage: args.usage,
+    finishReason: args.finishReason,
+    messages: args.messages,
+    responseMessage: args.responseMessage,
+    requestModel: args.requestModel,
+    provider: args.provider,
+    errorKind: args.errorKind,
     conversationId,
-    args.system,
-    args.contentCaptureEnabled,
-  )
+    system: args.system,
+    ...(args.contentCaptureEnabled !== undefined
+      ? { contentCaptureEnabled: args.contentCaptureEnabled }
+      : {}),
+  })
 }
 
 // ─── ADR-0240 §B — Automation engine tick wire ─────────────────────────

@@ -51,19 +51,20 @@ describe("provider-plane divergence (model absent, provider present)", () => {
         "client",
       )
       // requestModel = undefined, provider = "anthropic".
-      closeSamplingSpan(
+      closeSamplingSpan({
         span,
-        "ok",
-        TIMING,
-        { model: "claude-x", inputTokens: 10, outputTokens: 20 },
-        undefined,
-        [],
-        undefined,
-        undefined, // ← requestModel ABSENT
-        "anthropic", // ← provider PRESENT
-        undefined,
-        undefined,
-      )
+        status: "ok",
+        timing: TIMING,
+        usage: { model: "claude-x", inputTokens: 10, outputTokens: 20 },
+        finishReason: undefined,
+        messages: [],
+        responseMessage: undefined,
+        requestModel: undefined, // ← requestModel ABSENT
+        provider: "anthropic", // ← provider PRESENT
+        errorKind: undefined,
+        conversationId: undefined,
+        system: undefined,
+      })
     })
 
     const span = traces

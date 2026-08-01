@@ -75,19 +75,20 @@ const closeWithMetrics = async (opts: {
       attrs({ [GEN_AI_ATTRS.operation.name]: "chat" }),
       "client",
     )
-    closeSamplingSpan(
+    closeSamplingSpan({
       span,
-      opts.status,
-      TIMING,
-      opts.usage,
-      undefined,
-      [],
-      undefined,
-      "gpt-5",
-      "openai",
-      opts.errorKind,
-      undefined,
-    )
+      status: opts.status,
+      timing: TIMING,
+      usage: opts.usage,
+      finishReason: undefined,
+      messages: [],
+      responseMessage: undefined,
+      requestModel: "gpt-5",
+      provider: "openai",
+      errorKind: opts.errorKind,
+      conversationId: undefined,
+      system: undefined,
+    })
   })
 
 afterEach(() => {
@@ -165,19 +166,20 @@ describe("T-C2 OFF byte-identical + no collision", () => {
         attrs({ [GEN_AI_ATTRS.operation.name]: "chat" }),
         "client",
       )
-      closeSamplingSpan(
+      closeSamplingSpan({
         span,
-        "error",
-        TIMING,
-        USAGE,
-        undefined,
-        [],
-        undefined,
-        "gpt-5",
-        "openai",
-        "network",
-        undefined,
-      )
+        status: "error",
+        timing: TIMING,
+        usage: USAGE,
+        finishReason: undefined,
+        messages: [],
+        responseMessage: undefined,
+        requestModel: "gpt-5",
+        provider: "openai",
+        errorKind: "network",
+        conversationId: undefined,
+        system: undefined,
+      })
     })
     expect(allMetrics(metrics).length).toBe(0)
   })
