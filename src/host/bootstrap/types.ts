@@ -28,7 +28,9 @@ import type { ProxyEnvInput } from "@/runtime/network-proxy"
 import type { StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
 import type { ShellExecObserver, Tool } from "@/tool"
+import type { McpResourceCaptureHolder } from "@/tool/mcp_resources/capture"
 import type { ReviewerRunner } from "@/tool/types"
+import type { McpHealthHolder } from "../mcp-health"
 
 /** Closed enum of bootstrap failure kinds. The single source of truth used by
  *  `SessionBootstrapError.kind` and surface-side error handlers. */
@@ -76,10 +78,12 @@ export interface BootstrapMcpClient {
 }
 
 /** The feature-flag bundle the bootstrap consumes from `deps.loadFeatures`.
- *  Mirrors `apps/cli/internal#Features` byte-for-byte. The tool arrays are
- *  declared mutable because the per-turn tooling builder mutates the registry
- *  through them; the bootstrap itself never mutates the bundle (the host
- *  body treats every field as read-only). */
+ *  Structurally compatible with `apps/cli/internal#Features` so CLI composition
+ *  can assign through. `mcpClients` uses the narrower {@link BootstrapMcpClient}
+ *  shape (only `.stop()` required). The tool arrays are declared mutable because
+ *  the per-turn tooling builder mutates the registry through them; the bootstrap
+ *  itself never mutates the bundle (the host body treats every field as
+ *  read-only). */
 export interface BootstrapFeatures {
   readonly planMode: boolean
   readonly metrics: Metrics | undefined
@@ -92,6 +96,8 @@ export interface BootstrapFeatures {
   readonly lspNavTools: Tool[]
   readonly gitToolList: Tool[]
   readonly astGrepTools: Tool[]
+  readonly mcpResourceCapture?: McpResourceCaptureHolder
+  readonly mcpHealth?: McpHealthHolder
 }
 
 /** Per-surface MCP pill descriptor — the host only forwards rows from

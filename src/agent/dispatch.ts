@@ -10,6 +10,7 @@ import {
   startSpan,
 } from "@/observability"
 import { type AutoModeClassifier, extractWriteEffects, type PermissionContext } from "@/permission"
+import { redactSecrets } from "@/security"
 import { QuantaError, toError } from "@/shared"
 import type { ToolContext, WorkingStateHandle } from "@/tool"
 import { runAdmissibilityGate } from "./admissibility-gate"
@@ -177,8 +178,9 @@ export const dispatchTool = async (
     // contract holds structurally for EVERY path. The span is still closed
     // error before returning.
     const message = e instanceof QuantaError ? e.message : toError(e).message
-    endSpan(toolSpan, "error", toolCloseAttrs("error", captureContent, message))
-    return deny(call.id, `Tool dispatch failed for ${call.name}: ${message}`, "dispatch-error")
+    const redactedMessage = redactSecrets(message, { origin: "tool_result" }).text
+    endSpan(toolSpan, "error", toolCloseAttrs("error", captureContent, redactedMessage))
+    return deny(call.id, `Tool dispatch failed for ${call.name}: ${redactedMessage}`, "dispatch-error")
   }
 }
 

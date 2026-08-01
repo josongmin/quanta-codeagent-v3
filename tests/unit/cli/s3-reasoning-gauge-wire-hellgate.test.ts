@@ -300,6 +300,7 @@ describe("S3 render-root — buildSurfaceDispatch /context renders Reasoning fro
       // The live wiring: dispatch's OWN contextUsage slot reads the SAME holder.
       contextUsage: () => holder.view(),
       inboundMode: { current: "queue" },
+      sessionCwd: process.cwd(),
     })
     const out = await captureStdout(async () => {
       await dispatch("/context")
@@ -320,6 +321,7 @@ describe("S3 render-root — buildSurfaceDispatch /context renders Reasoning fro
       sessionIo: stubSessionIo,
       contextUsage: () => holder.view(),
       inboundMode: { current: "queue" },
+      sessionCwd: process.cwd(),
     })
     const out = await captureStdout(async () => {
       await dispatch("/context")
