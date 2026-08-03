@@ -32,6 +32,7 @@ import {
   parseFallbackModels,
   parseRecallTiers,
   pickProviderCore,
+  type ResolvedEndpoint,
   type Provider as RunnerProvider,
   resolveMemoryConfigFromEnv,
   selectLlmTransport,
@@ -53,6 +54,7 @@ import {
 import { resolveGitBudget } from "@/tool/git"
 import { buildCliAskUserTool } from "./ask-user-wire"
 import { readCliKnob } from "./cli-knobs-accessor"
+import { resolveConfiguredEndpointForCli } from "./configured-endpoint-wire"
 import { buildCliFetchRulesTool } from "./fetch-rules-wire"
 import {
   astGrepEnabled,
@@ -191,6 +193,7 @@ export const buildLLM = (
   provider: Provider,
   model: string,
   seams: BuildLlmTestSeams = {},
+  endpoint?: ResolvedEndpoint,
 ): LLMPort => {
   const cfg = runtimeConfig()
   const selection = selectLlmTransport({ transport: cfg.llmTransport, env: process.env })
@@ -215,6 +218,12 @@ export const buildLLM = (
     },
     // Test-only cloud-client DI (production omits ⇒ the lazy SDK import is live).
     ...(seams.multicloudOpts !== undefined ? { multicloudOpts: seams.multicloudOpts } : {}),
+    // RFC05 wireE — a SELECTED configured OpenAI endpoint (resolved lazily in
+    // `buildLLMWithByok` only when `QUANTA_LLM_ENDPOINT` names one). ABSENT ⇒
+    // byte-identical vendor path (the four providers + ctor args untouched); the
+    // legacy branch of `buildMainLLMCore` routes to the OpenAI-wire adapter with
+    // the endpoint's baseUrl + guarded fetch only when present.
+    ...(endpoint !== undefined ? { endpoint } : {}),
   })
 }
 
@@ -537,6 +546,15 @@ export const buildLLMWithByok = async (
 ): Promise<LLMPort> => {
   const cfg = runtimeConfig()
   const selection = selectLlmTransport({ transport: cfg.llmTransport, env: process.env })
+  // RFC05 wireE — SELECT a configured OpenAI endpoint (lazy: no disk read unless
+  // `QUANTA_LLM_ENDPOINT` names one). GATE-OFF ⇒ `undefined` ⇒ byte-identical
+  // vendor path below. A configured endpoint OWNS its own auth (the host-resolved
+  // `QUANTA_ENDPOINT_API_KEY`, not a vendor env key), so it routes DIRECTLY
+  // through `buildLLM` (the legacy branch of `buildMainLLMCore` picks the
+  // OpenAI-wire adapter) — the vendor `apiKeyHelper` mint below is not applicable
+  // to a custom endpoint and is bypassed.
+  const endpoint = await resolveConfiguredEndpointForCli()
+  if (endpoint !== undefined) return buildLLM(provider, model, seams, endpoint)
   // Mint only applies to the LEGACY vendor path; the multicloud transports use
   // the sibling cloud-credential refresh (not the vendor apiKeyHelper mint), so
   // route them through the unchanged sync seam.

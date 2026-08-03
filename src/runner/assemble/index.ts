@@ -12,6 +12,7 @@
  * `@/agent`).
  */
 
+export type { ResolvedEndpoint } from "@/llm/endpoint-transport"
 export {
   buildCompactionBreakerConfigCore,
   buildSummarizerLlmCore,
@@ -40,6 +41,8 @@ export {
   type Provider,
   parseFallbackModels,
   pickProviderCore,
+  type ResolveConfiguredEndpointInput,
+  resolveConfiguredEndpoint,
   type SelectTransportInput,
   selectLlmTransport,
 } from "./llm"

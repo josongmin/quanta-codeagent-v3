@@ -865,6 +865,16 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     readSite: "apps/cli/repl/surface-compose/runtime-compose.ts",
   },
   {
+    envKey: "QUANTA_LLM_ENDPOINT",
+    kind: "string",
+    default: undefined,
+    group: "llm",
+    home: "runtime-config",
+    describe:
+      "Name of a configured openaiEndpoints profile (central config) to drive the CLI LLM (custom baseUrl / local model). Unset ⇒ the vendor path. Secret via QUANTA_ENDPOINT_API_KEY.",
+    readSite: "apps/cli/configured-endpoint-wire.ts",
+  },
+  {
     envKey: "QUANTA_MENTION_APP_PLUGIN",
     kind: "bool",
     default: false,
