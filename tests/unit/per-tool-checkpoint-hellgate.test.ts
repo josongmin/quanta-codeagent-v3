@@ -25,6 +25,7 @@ import {
   type GranularCheckpointPolicy,
 } from "@/agent/per-tool-checkpoint"
 import { __test as restoreTest } from "@/agent/per-tool-checkpoint/three-way-restore"
+import { captureCheckpoint, resolveRollbackTarget } from "@/agent/thread-rollback-checkpoint"
 import type { Message, ToolUseBlock } from "@/llm"
 import { type ShadowOdb, ShadowOdbError } from "@/storage/shadow-odb"
 import type { Tool, ToolContext } from "@/tool"
@@ -672,6 +673,209 @@ describe("tag collision + abort-mid-checkpoint (HELL-G22)", () => {
       await policy.shouldAnchorBefore(makeTool(false), makeCall(), makeCtx({ turnId: "t1" })),
     ).toBe(false)
     expect(await policy.shouldAnchorAfterTurn("t1", "/ws")).toBe(false)
+  })
+})
+
+/* ================================================================== */
+/* RFC01-2 — durable checkpoint MAPPING capture (aug-02 absorption)     */
+/* ================================================================== */
+
+describe("thread-rollback-checkpoint — durable mapping capture (RFC01-2)", () => {
+  test("captureCheckpoint binds the ShadowOdb head SHA to (turnId, messageId)", async () => {
+    let registerCalls = 0
+    const port = {
+      registerHead: async (ws: string) => {
+        expect(ws).toBe("/ws")
+        registerCalls += 1
+        return "sha-head-1"
+      },
+    }
+    const { checkpoints, record } = await captureCheckpoint(port, [], {
+      workspace: "/ws",
+      turnId: "turn-3",
+      messageId: "m-3",
+      expectedFileHashes: { "src/a.ts": "h1" },
+    })
+    expect(registerCalls).toBe(1)
+    expect(record.checkpointSha).toBe("sha-head-1")
+    expect(record.turnId).toBe("turn-3")
+    expect(record.messageId).toBe("m-3")
+    expect(record.expectedFileHashes).toEqual({ "src/a.ts": "h1" })
+    // The mapping is now resolvable as a rollback target.
+    expect(resolveRollbackTarget(checkpoints, "turn-3")).toEqual({ kind: "ok", checkpoint: record })
+  })
+
+  test("capture does NOT invent hashes — the caller's boundary set is stored verbatim + copied", async () => {
+    const live: Record<string, string> = { "src/a.ts": "h1" }
+    const port = { registerHead: async () => "sha-x" }
+    const { record } = await captureCheckpoint(port, [], {
+      workspace: "/ws",
+      turnId: "t1",
+      messageId: "m1",
+      expectedFileHashes: live,
+    })
+    // Mutating the caller's map after capture must not rewrite the durable record.
+    live["src/a.ts"] = "TAMPERED"
+    live["src/b.ts"] = "new"
+    expect(record.expectedFileHashes).toEqual({ "src/a.ts": "h1" })
+  })
+
+  test("a failed head capture writes NO record (fail-closed; error surfaces)", async () => {
+    const port = {
+      registerHead: async () => {
+        throw new ShadowOdbError("uninitialized", "registerHead never called")
+      },
+    }
+    await expect(
+      captureCheckpoint(port, [], {
+        workspace: "/ws",
+        turnId: "t1",
+        messageId: "m1",
+        expectedFileHashes: {},
+      }),
+    ).rejects.toThrow(ShadowOdbError)
+  })
+
+  // RED: a MISSING mapping must resolve to a typed refusal — NOT a fabricated
+  // target. The coordinator performs NO restore on `missing`.
+  test("resolveRollbackTarget: missing mapping ⇒ typed `missing` refusal (no target invented)", async () => {
+    const port = { registerHead: async () => "sha-1" }
+    const { checkpoints } = await captureCheckpoint(port, [], {
+      workspace: "/ws",
+      turnId: "turn-1",
+      messageId: "m-1",
+      expectedFileHashes: {},
+    })
+    // A target turn with no recorded checkpoint is unknown — fail-closed.
+    expect(resolveRollbackTarget(checkpoints, "turn-99")).toEqual({
+      kind: "missing",
+      targetTurnId: "turn-99",
+    })
+  })
+
+  // A re-capture of the SAME boundary replaces (newest SHA/hashes authoritative);
+  // a DIFFERENT boundary appends. No duplicate-boundary rollback targets.
+  test("re-capture of same boundary replaces; new boundary appends", async () => {
+    const port1 = { registerHead: async () => "sha-old" }
+    const port2 = { registerHead: async () => "sha-new" }
+    const first = await captureCheckpoint(port1, [], {
+      workspace: "/ws",
+      turnId: "turn-1",
+      messageId: "m-1",
+      expectedFileHashes: {},
+    })
+    const second = await captureCheckpoint(port2, first.checkpoints, {
+      workspace: "/ws",
+      turnId: "turn-1",
+      messageId: "m-1",
+      expectedFileHashes: {},
+    })
+    expect(second.checkpoints.length).toBe(1)
+    const r1 = resolveRollbackTarget(second.checkpoints, "turn-1")
+    expect(r1.kind === "ok" && r1.checkpoint.checkpointSha).toBe("sha-new")
+
+    const third = await captureCheckpoint(port1, second.checkpoints, {
+      workspace: "/ws",
+      turnId: "turn-2",
+      messageId: "m-2",
+      expectedFileHashes: {},
+    })
+    expect(third.checkpoints.length).toBe(2)
+  })
+})
+
+/* ================================================================== */
+/* RFC01-2 — dirty/untracked/moved-SHA preservation on the file leg    */
+/* ================================================================== */
+
+describe("ThreeWayRestorePort preservation matrix (RFC01-2)", () => {
+  const buildTagged = (sha: string) => {
+    const policy = defaultGranularCheckpointPolicy({
+      base: buildBasePolicy("per-mutating"),
+      granularity: "tool",
+    })
+    const ctx = { workspace: "/ws", turnId: "turn-1", toolName: "edit_file", callIndex: 0 }
+    const tag = policy.computeTag(ctx) as string
+    policy.recordAnchorSha(tag, sha, ctx)
+    return { policy, tag }
+  }
+
+  // MOVED SHA: the recorded snapshot no longer carries the expected sha ⇒ the
+  // file leg fails closed with a typed refusal and NEVER calls rewindToRef (no
+  // mutation), so any unrelated dirty file on disk is left byte-identical.
+  test("moved SHA ⇒ typed `shadow-rewind-failed`, rewindToRef NEVER called (no mutation)", async () => {
+    const { policy, tag } = buildTagged("expected-sha")
+    let rewindCalls = 0
+    const odb = makeFakeOdb({
+      // The snapshot list no longer contains `expected-sha` (it moved).
+      listSnapshots: async () => [
+        { ref: "refs/quanta/snapshots/last-registered", sha: "different-sha", timestampSec: 2 },
+      ],
+      rewindToRef: async () => {
+        rewindCalls += 1
+        return { ref: "x", sha: "different-sha", timestampSec: 2 }
+      },
+    })
+    const restore = defaultThreeWayRestore({
+      registry: policy.registry,
+      workspace: "/ws",
+      shadowOdb: odb,
+    })
+    const out = await restore.restoreFiles(tag)
+    expect(out.ok).toBe(false)
+    expect(out.errorCode).toBe("shadow-rewind-failed")
+    // The destructive op was NEVER attempted — nothing on disk changed.
+    expect(rewindCalls).toBe(0)
+  })
+
+  // UNTRACKED PRESERVATION: the file leg forwards `untracked:"preserve"` so an
+  // unrelated untracked file is never discarded by a restore.
+  test("restoreFiles forwards untracked:preserve (unrelated untracked files kept)", async () => {
+    const { policy, tag } = buildTagged("abc123")
+    let seenUntracked: string | undefined
+    const odb = makeFakeOdb({
+      listSnapshots: async () => [
+        { ref: "refs/quanta/snapshots/last-registered", sha: "abc123", timestampSec: 1 },
+      ],
+      diffSinceRef: async () => ({
+        snap: { ref: "refs/quanta/snapshots/last-registered", sha: "abc123", timestampSec: 1 },
+        diff: "",
+      }),
+      rewindToRef: async (_ws, _ord, opts) => {
+        seenUntracked = opts?.untracked
+        return { ref: "refs/quanta/snapshots/last-registered", sha: "abc123", timestampSec: 1 }
+      },
+    })
+    const restore = defaultThreeWayRestore({
+      registry: policy.registry,
+      workspace: "/ws",
+      shadowOdb: odb,
+    })
+    const out = await restore.restoreFiles(tag)
+    expect(out.ok).toBe(true)
+    expect(seenUntracked).toBe("preserve")
+  })
+
+  // MISSING MAPPING at the port: an unknown tag ⇒ `tag-not-found`, rewind never
+  // called (the coordinator's missing-mapping refusal is honored end-to-end).
+  test("unknown tag ⇒ `tag-not-found`, no restore attempted", async () => {
+    const { policy } = buildTagged("abc123")
+    let rewindCalls = 0
+    const odb = makeFakeOdb({
+      rewindToRef: async () => {
+        rewindCalls += 1
+        return { ref: "x", sha: "abc123", timestampSec: 1 }
+      },
+    })
+    const restore = defaultThreeWayRestore({
+      registry: policy.registry,
+      workspace: "/ws",
+      shadowOdb: odb,
+    })
+    const out = await restore.restoreFiles("tool:edit_file:turn-1:99")
+    expect(out.ok).toBe(false)
+    expect(out.errorCode).toBe("tag-not-found")
+    expect(rewindCalls).toBe(0)
   })
 })
 
