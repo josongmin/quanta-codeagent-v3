@@ -357,6 +357,26 @@ const commitMetaAfterSnapshot = async (
   }
 }
 
+/** RFC-01 A2 — read the durable rollback ledger ALREADY on disk so a save whose
+ *  payload OMITS the fields PRESERVES them instead of wiping them. Fail-soft: a
+ *  missing / corrupt / legacy file ⇒ nothing to preserve (⇒ byte-identical). */
+const readExistingRollback = async (
+  path: string,
+): Promise<Pick<SavedSession, "rollbackCheckpoints" | "rollbackOperations">> => {
+  if (!(await fileExists(path))) return {}
+  try {
+    const parsed = JSON.parse(await readFile(path)) as Partial<SavedSession>
+    const out: Pick<SavedSession, "rollbackCheckpoints" | "rollbackOperations"> = {}
+    if (Array.isArray(parsed.rollbackCheckpoints))
+      out.rollbackCheckpoints = parsed.rollbackCheckpoints
+    if (Array.isArray(parsed.rollbackOperations))
+      out.rollbackOperations = parsed.rollbackOperations
+    return out
+  } catch {
+    return {}
+  }
+}
+
 export const saveSessionById = async (
   meta: SessionMeta,
   payload: SavePayload,
@@ -366,26 +386,32 @@ export const saveSessionById = async (
   const path = touched.archived
     ? await resolveArchivedFilePath(touched.id, provider)
     : await resolveSessionFilePath(touched.id, provider)
+  // RFC-01 A2 — the rollback ledger is PERSISTED ACROSS SAVES, not a per-payload
+  // field. `messages` is threaded by every caller, but rollback records are only
+  // known to the `@/agent` coordinator; a plain transcript save (per-turn
+  // auto-save, crash-resume markers) omits them. PRESERVE whatever is already on
+  // disk when the payload omits a field — the coordinator's explicit fold still
+  // wins when it DOES provide them. Closes a data-loss class (a re-submitted
+  // rollback would otherwise re-run the destructive restore; pending-intent
+  // recovery markers would vanish).
+  const preserved =
+    payload.rollbackCheckpoints === undefined || payload.rollbackOperations === undefined
+      ? await readExistingRollback(path)
+      : {}
+  const rollbackCheckpoints = payload.rollbackCheckpoints ?? preserved.rollbackCheckpoints
+  const rollbackOperations = payload.rollbackOperations ?? preserved.rollbackOperations
   const saved: SavedSession = {
     version: SESSION_VERSION,
     meta: touched,
     reason: payload.reason,
     turns: payload.turns,
     messages: payload.messages,
-    // RFC-01 A2 — persist durable rollback records through the SAME atomic
-    // snapshot + canonical encoder. Conditional spread (never `field:
-    // undefined`) so a payload that omits them serializes BYTE-IDENTICALLY to
-    // the pre-RFC on-disk shape (the fields are simply absent). Callers that
-    // mutate rollback state (the `@/agent` coordinator) read the full snapshot,
-    // fold a record, and re-save the whole payload — mirroring how `messages`
-    // is a full-snapshot field, so a plain transcript save never has to know
-    // about rollback records to avoid dropping them.
-    ...(payload.rollbackCheckpoints !== undefined
-      ? { rollbackCheckpoints: payload.rollbackCheckpoints }
-      : {}),
-    ...(payload.rollbackOperations !== undefined
-      ? { rollbackOperations: payload.rollbackOperations }
-      : {}),
+    // Conditional spread (never `field: undefined`) so a session with NO rollback
+    // ledger (legacy / never rolled back) still serializes BYTE-IDENTICALLY to the
+    // pre-RFC on-disk shape. `rollbackCheckpoints`/`rollbackOperations` are the
+    // payload's when provided, else the preserved on-disk values (see above).
+    ...(rollbackCheckpoints !== undefined ? { rollbackCheckpoints } : {}),
+    ...(rollbackOperations !== undefined ? { rollbackOperations } : {}),
   }
   await writeSessionFile(path, JSON.stringify(saved))
   await commitMetaAfterSnapshot(touched, provider)
