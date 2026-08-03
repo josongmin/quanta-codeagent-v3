@@ -192,11 +192,20 @@ export const rewindSession = async (opts: RewindOptions): Promise<RewindResult> 
   } else if (opts.git === undefined) {
     fileStateNote = "git port not wired; working tree unchanged"
   } else {
-    // restoreFiles requested WITH a git port, but we have no accurate
-    // per-message checkpoint to restore to. Refuse the unsafe session-start
-    // reset rather than destroy turns 1..N of work. `opts.git` is left
-    // deliberately unused here — `stash`/`resetHard` would only let us target
-    // the WRONG (coarse, session-start) SHA.
+    // restoreFiles requested WITH a git port, but THIS transcript-owner path
+    // still has no accurate per-message checkpoint to restore to. Refuse the
+    // unsafe session-start reset rather than destroy turns 1..N of work.
+    //
+    // RFC01-3 (aug-02): accurate per-turn file restore is now owned by the
+    // `@/agent` ThreadRollback coordinator (`src/agent/thread-rollback.ts`),
+    // which orders `requested`→`ThreeWayRestorePort.restore`→terminal receipt
+    // over the durable checkpoint mapping (RFC01-2) and calls back into THIS
+    // rewind owner to truncate the transcript AFTER a successful effect. This
+    // wrapper stays the transcript-projection authority and NEVER shells out /
+    // resets the tree itself — so when the coordinator is not wired (the
+    // default here), the safe degrade below is byte-identical. `opts.git` is
+    // left deliberately unused: `stash`/`resetHard` would only ever target the
+    // WRONG (coarse, session-start) SHA.
     fileStateNote = "no per-message checkpoint; working tree unchanged (file restore not yet wired)"
   }
 

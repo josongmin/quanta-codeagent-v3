@@ -38,6 +38,8 @@ import {
   type GranularRegistry,
   type ThreeWayRestorePort,
 } from "@/agent/per-tool-checkpoint"
+import type { RollbackEffectPort } from "@/agent/thread-rollback"
+import type { RollbackCheckpointRecord } from "@/session"
 import type { ShadowOdb } from "@/storage"
 
 /** Inputs the composition root already has on hand at session-compose time. */
@@ -92,3 +94,28 @@ export const buildPerToolCheckpointWire = (
   })
   return { policy, registry: policy.registry, restore, dispose: () => policy.registry.clear() }
 }
+
+/**
+ * RFC01-3 — adapt the per-tool `ThreeWayRestorePort` into the coordinator's
+ * `RollbackEffectPort`. Resolves a durable `RollbackCheckpointRecord` to the
+ * live registry tag whose SHA matches (`checkpointSha`), then drives
+ * `restoreFiles(tag)` — the SINGLE tree-mutation owner. The SHA→tag lookup is an
+ * EXACT match against the recorded content-addressed SHA (no branch/path/ordinal
+ * guessing); when no live anchor carries that SHA the effect fails closed
+ * (`checkpoint-anchor-missing`) and the coordinator records `rollback_failed`
+ * WITHOUT mutating the tree. No second restore path is created — the coordinator
+ * and the `/rewind-tool` slash consume the SAME `restore` port.
+ */
+export const buildRollbackEffectPort = (wire: {
+  readonly registry: GranularRegistry
+  readonly restore: ThreeWayRestorePort
+}): RollbackEffectPort => ({
+  async restoreToCheckpoint(checkpoint: RollbackCheckpointRecord) {
+    const entry = wire.registry.list().find((e) => e.sha === checkpoint.checkpointSha)
+    if (entry === undefined) return { ok: false, code: "checkpoint-anchor-missing" }
+    const outcome = await wire.restore.restoreFiles(entry.tag)
+    return outcome.ok
+      ? { ok: true }
+      : { ok: false, code: outcome.errorCode ?? outcome.originalCode ?? "restore-failed" }
+  },
+})

@@ -16,7 +16,10 @@
  * NO tmpdir, NO loop, NO registry.
  */
 
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { defaultCheckpointPolicy } from "@/agent/checkpoint-policy"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import {
@@ -25,10 +28,22 @@ import {
   type GranularCheckpointPolicy,
 } from "@/agent/per-tool-checkpoint"
 import { __test as restoreTest } from "@/agent/per-tool-checkpoint/three-way-restore"
+import { createSavedSessionRollbackStore, executeRollback } from "@/agent/thread-rollback"
 import { captureCheckpoint, resolveRollbackTarget } from "@/agent/thread-rollback-checkpoint"
 import type { Message, ToolUseBlock } from "@/llm"
+import {
+  latestOperation,
+  loadSessionById,
+  ROLLBACK_RECORD_VERSION,
+  saveSessionById,
+} from "@/session"
+import { __resetRuntimeConfig } from "@/shared"
 import { type ShadowOdb, ShadowOdbError } from "@/storage/shadow-odb"
 import type { Tool, ToolContext } from "@/tool"
+import {
+  buildPerToolCheckpointWire,
+  buildRollbackEffectPort,
+} from "../../src/apps/cli/repl/per-tool-checkpoint-wire"
 import { __test as rewindToolTest } from "../../src/apps/cli/rewind-tool-cmd"
 
 /* ------------------------------------------------------------------ */
@@ -876,6 +891,124 @@ describe("ThreeWayRestorePort preservation matrix (RFC01-2)", () => {
     expect(out.ok).toBe(false)
     expect(out.errorCode).toBe("tag-not-found")
     expect(rewindCalls).toBe(0)
+  })
+})
+
+/* ================================================================== */
+/* RFC01-3 — front-door: CLI effect-port adapter drives the coordinator */
+/*           end-to-end (SHA→tag→ONE ThreeWayRestorePort), no second    */
+/*           restore path, over the REAL SavedSession store. This lives  */
+/*           in the CLI-import-allowed hellgate so a library test never   */
+/*           reaches into `@/apps/cli` internals (slice isolation).       */
+/* ================================================================== */
+
+describe("thread-rollback front-door composition (RFC01-3)", () => {
+  let dir: string
+  let snap: NodeJS.ProcessEnv
+  beforeEach(() => {
+    snap = { ...process.env }
+    dir = mkdtempSync(join(tmpdir(), "rollback-frontdoor-"))
+    process.env.QUANTA_SESSIONS_DIR = dir
+    __resetRuntimeConfig()
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    for (const k of Object.keys(process.env)) if (!(k in snap)) delete process.env[k]
+    Object.assign(process.env, snap)
+    __resetRuntimeConfig()
+  })
+
+  test("CLI effect port resolves SHA→tag and drives ONE restore through the coordinator", async () => {
+    const SHA = "c".repeat(40)
+    let rewindCalls = 0
+    const odb = makeFakeOdb({
+      registerHead: async () => SHA,
+      listSnapshots: async () => [
+        { ref: "refs/quanta/snapshots/last-registered", sha: SHA, timestampSec: 1 },
+      ],
+      diffSinceRef: async () => ({
+        snap: { ref: "refs/quanta/snapshots/last-registered", sha: SHA, timestampSec: 1 },
+        diff: "",
+      }),
+      rewindToRef: async (_ws, _ord, opts) => {
+        expect(opts?.expectSha).toBe(SHA)
+        rewindCalls += 1
+        return { ref: "refs/quanta/snapshots/last-registered", sha: SHA, timestampSec: 1 }
+      },
+    })
+    const wire = buildPerToolCheckpointWire({ shadowOdb: odb, workspace: "/ws" })
+    // Register a live anchor carrying SHA (what dispatch does at a boundary).
+    const tag = wire.policy.computeTag({
+      workspace: "/ws",
+      turnId: "turn-1",
+      toolName: "edit_file",
+      callIndex: 0,
+    }) as string
+    wire.policy.recordAnchorSha(tag, SHA, {
+      workspace: "/ws",
+      turnId: "turn-1",
+      toolName: "edit_file",
+      callIndex: 0,
+    })
+
+    // Seed the session, capture the durable checkpoint mapping (RFC01-2), persist it.
+    await saveSessionById(
+      {
+        id: "fd-1",
+        title: "T",
+        cwd: "/ws",
+        createdAt: 1_000,
+        lastTouched: 1_000,
+        archived: false,
+      },
+      {
+        reason: "ok",
+        turns: 1,
+        messages: [{ id: "m1", role: "user", content: [{ type: "text", text: "hi" }] }],
+      },
+    )
+    const cap = await captureCheckpoint(odb, [], {
+      workspace: "/ws",
+      turnId: "turn-1",
+      messageId: "m1",
+      expectedFileHashes: {},
+    })
+    const s = await loadSessionById("fd-1")
+    if (s === undefined) throw new Error("seed missing")
+    await saveSessionById(s.meta, {
+      reason: s.reason,
+      turns: s.turns,
+      messages: s.messages,
+      rollbackCheckpoints: [...cap.checkpoints],
+    })
+
+    // Front door: build the effect port from the CLI wire and run the coordinator.
+    const store = createSavedSessionRollbackStore()
+    const effect = buildRollbackEffectPort(wire)
+    let clock = 1
+    const out = await executeRollback(
+      { store, effect, now: () => clock++ },
+      { sessionId: "fd-1", operationId: "op-fd", targetTurnId: "turn-1" },
+    )
+    expect(out.kind).toBe("rolled_back")
+    // The REAL ThreeWayRestorePort → ShadowOdb rewindToRef ran exactly once.
+    expect(rewindCalls).toBe(1)
+    const finalOps = (await loadSessionById("fd-1"))?.rollbackOperations ?? []
+    expect(latestOperation(finalOps, "op-fd")?.state).toBe("rolled_back")
+  })
+
+  test("effect port fails closed when no live anchor carries the recorded SHA", async () => {
+    const odb = makeFakeOdb({})
+    const wire = buildPerToolCheckpointWire({ shadowOdb: odb, workspace: "/ws" })
+    const effect = buildRollbackEffectPort(wire)
+    const res = await effect.restoreToCheckpoint({
+      recordVersion: ROLLBACK_RECORD_VERSION,
+      turnId: "turn-1",
+      messageId: "m1",
+      checkpointSha: "d".repeat(40),
+      expectedFileHashes: {},
+    })
+    expect(res).toEqual({ ok: false, code: "checkpoint-anchor-missing" })
   })
 })
 
