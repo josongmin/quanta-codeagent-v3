@@ -134,6 +134,14 @@ export interface SkillGate {
 export interface TurnSession {
   readonly config: AgentConfig
   readonly specs: ReturnType<AgentConfig["registry"]["specs"]>
+  /** RFC04-0 — the immutable capability generation pinned for this session's
+   *  turns. `specs` above are the SAME generation's specs and `config.registry`
+   *  is the SAME generation's registry, so model advertisement and dispatch can
+   *  never diverge across generations. Present whenever the session was built
+   *  through `createRunAgentContext` (always, in production); absent only in
+   *  minimal hand-built test sessions, where the loop reads `specs`/`registry`
+   *  directly (byte-identical to the pre-snapshot path). */
+  readonly registrySnapshot?: import("./turn-registry-snapshot").TurnRegistrySnapshot
   readonly recorder?: AgentRecorder
   readonly classifier?: AutoModeClassifier
   readonly skillGate?: SkillGate

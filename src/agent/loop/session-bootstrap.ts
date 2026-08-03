@@ -39,6 +39,7 @@ import { runSessionPrewarm, type TtfmMarker } from "../startup-prewarm"
 import { decorateWithDeltaCounter } from "../token-delta/wm-decorator"
 import { createToolChoiceTurnState } from "../tool-choice"
 import type { TurnSession } from "../turn-context"
+import { buildTurnRegistrySnapshot } from "../turn-registry-snapshot"
 import type { AgentConfig, MemoryCitation } from "../types"
 import {
   disposeSessionResources,
@@ -225,9 +226,18 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
     cfg.shellSnapshotSession = shellSnapshotSession
   }
 
+  // RFC04-0 — pin ONE capability generation binding the pinned registry to its
+  // OWN specs. `specs` below is read from the snapshot (derived from
+  // `cfg.registry`), so the model advertisement and the dispatch registry are
+  // provably the same generation. Byte-identical: `snapshot.specs` is exactly
+  // `cfg.registry.specs()` — the prior expression — just routed through the
+  // record that carries the generation id for the reload publish (RFC04-3).
+  const registrySnapshot = buildTurnRegistrySnapshot(cfg.registry)
+
   const session: TurnSession = {
     config: cfg,
-    specs: cfg.registry.specs(),
+    specs: registrySnapshot.specs,
+    registrySnapshot,
     ...(recorder !== undefined ? { recorder } : {}),
     ...(features.classifier !== undefined ? { classifier: features.classifier } : {}),
     ...(skillGate !== undefined ? { skillGate } : {}),
