@@ -20,6 +20,7 @@ import type {
 } from "@/tool"
 import { planErrorMessage } from "@/tool"
 import type { PlanStore } from "./state"
+import { projectPlanTasks } from "./task-projection"
 import type {
   CreatePlanArgs,
   NewTodo,
@@ -181,6 +182,14 @@ export const planStoreToMutator = (store: PlanStore): PlanMutator => ({
       isProject: p.isProject,
       todoCount: Object.keys(p.todos).length,
       phaseCount: p.phases.length,
+      // RFC07-3 read projection: owner/blockedBy/blocks derived by value from
+      // the canonical plan. No stored reverse edge, no second owner field.
+      tasks: projectPlanTasks(p).map((t) => ({
+        id: t.id,
+        ...(t.owner !== undefined ? { owner: t.owner } : {}),
+        blockedBy: t.blockedBy,
+        blocks: t.blocks,
+      })),
     }
   },
 })

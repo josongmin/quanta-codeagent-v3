@@ -81,6 +81,7 @@ describe("current_plan", () => {
             isProject: true,
             todoCount: 3,
             phaseCount: 2,
+            tasks: [],
           }),
         }),
       ),

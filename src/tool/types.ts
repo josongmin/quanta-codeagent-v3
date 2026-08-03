@@ -618,6 +618,7 @@ export type {
   PlanReadonlyView,
   ProgressSink,
   ProgressUpdateMirror,
+  ProjectedPlanTaskView,
   ReviewerRequest,
   ReviewerResult,
   ReviewerRunner,
