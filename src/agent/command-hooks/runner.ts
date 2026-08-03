@@ -172,7 +172,39 @@ const interpret = (
       timedOut: false,
     }
   }
+  // RFC09-1 (A-GAP-2) — an exit-0 observer may ALSO ask to inject additive
+  // prompt context, reusing the existing HookPromptInject channel. Untrusted
+  // producer ⇒ user-side (`injectBeforeUser`) ONLY (see `appendContextFrom`).
+  const beforeUser = appendContextFrom(json)
+  if (beforeUser !== null) {
+    return { deny: null, promptHook: { injectBeforeUser: beforeUser }, timedOut: false }
+  }
   return NEUTRAL
+}
+
+/** RFC09-1 (A-GAP-2) — extract the user-side append-context string a command
+ *  hook asked to inject, from its exit-0 stdout JSON.
+ *
+ *  TRUST (HARD): a command hook is a spawned, repo-/import-shipped script and is
+ *  therefore UNTRUSTED-by-construction. It may reach ONLY the `injectBeforeUser`
+ *  user-side channel (which the prompt fold wraps in `embedUntrusted`). It can
+ *  NEVER mint `injectAfterSystem` (raw system-prompt authority). We recognize
+ *  two spellings of the user-side field — `additionalContext` (the Claude Code
+ *  alias) and `injectBeforeUser` (the native {@link HookPromptInject} field) —
+ *  and DELIBERATELY do not read `injectAfterSystem` at all: a hook attempting
+ *  system authority yields NO injection (its system-side text is not silently
+ *  promoted to the user side either — a refusal, not a downgrade).
+ *
+ *  Returns the trimmed-non-empty string to inject, or null when the JSON carries
+ *  no user-side append field (or only an empty / non-string one). */
+const appendContextFrom = (json: unknown): string | null => {
+  if (typeof json !== "object" || json === null) return null
+  const o = json as Record<string, unknown>
+  const claude = o.additionalContext
+  if (typeof claude === "string" && claude.length > 0) return claude
+  const before = o.injectBeforeUser
+  if (typeof before === "string" && before.length > 0) return before
+  return null
 }
 
 const tryParseJson = (text: string): unknown | undefined => {
@@ -252,11 +284,7 @@ export const runCommandHooks = async (
   // any bound the HookBus / caller may already apply).
   const stdinJson = serializePayload(event, gate.maxOutputBytes)
 
-  let deny: { reason: string } | null = null
-  let updatedInput: unknown
-  let mutated = false
-  let anyTimedOut = false
-
+  const acc = freshFold()
   for (const binding of runnable) {
     const result = await deps.exec.exec({
       command: binding.command,
@@ -266,21 +294,54 @@ export const runCommandHooks = async (
       maxOutputBytes: gate.maxOutputBytes,
       cwd: deps.cwd,
     })
-    const verdict = interpret(result, binding.command)
-    if (verdict.timedOut) anyTimedOut = true
-    if (deny === null && verdict.deny !== null) deny = verdict.deny
-    if ("updatedInput" in verdict) {
-      updatedInput = verdict.updatedInput
-      mutated = true
-    }
-    // First deny wins for the deny channel, but later observers/rewriters still
-    // run (mirrors HookBus: deny stops further deny consideration, not the
-    // chain). A timed-out command already recorded its deny.
+    foldVerdict(acc, interpret(result, binding.command))
   }
+  return materializeFold(acc)
+}
 
-  const out: CommandHookVerdict = { deny, timedOut: anyTimedOut }
-  if (mutated) return { ...out, updatedInput }
-  return out
+/** Mutable accumulator threaded across matching command verdicts. */
+interface VerdictFold {
+  deny: { reason: string } | null
+  updatedInput: unknown
+  mutated: boolean
+  anyTimedOut: boolean
+  /** RFC09-1 (A-GAP-2) — user-side append context, joined in binding order
+   *  (mirrors the HookBus per-side FIFO fold). ONLY ever `injectBeforeUser` —
+   *  never system authority. */
+  beforeUser: string | undefined
+}
+
+const freshFold = (): VerdictFold => ({
+  deny: null,
+  updatedInput: undefined,
+  mutated: false,
+  anyTimedOut: false,
+  beforeUser: undefined,
+})
+
+/** Fold one command's verdict into `acc`. First deny wins for the deny channel,
+ *  but later observers/rewriters/append-producers still contribute (mirrors
+ *  HookBus: deny stops further deny consideration, not the chain). */
+const foldVerdict = (acc: VerdictFold, verdict: CommandHookVerdict): void => {
+  if (verdict.timedOut) acc.anyTimedOut = true
+  if (acc.deny === null && verdict.deny !== null) acc.deny = verdict.deny
+  if ("updatedInput" in verdict) {
+    acc.updatedInput = verdict.updatedInput
+    acc.mutated = true
+  }
+  const side = verdict.promptHook?.injectBeforeUser
+  if (typeof side === "string" && side.length > 0) {
+    acc.beforeUser = acc.beforeUser === undefined ? side : `${acc.beforeUser}\n${side}`
+  }
+}
+
+const materializeFold = (acc: VerdictFold): CommandHookVerdict => {
+  const out: CommandHookVerdict = { deny: acc.deny, timedOut: acc.anyTimedOut }
+  const withInput = acc.mutated ? { ...out, updatedInput: acc.updatedInput } : out
+  if (acc.beforeUser !== undefined) {
+    return { ...withInput, promptHook: { injectBeforeUser: acc.beforeUser } }
+  }
+  return withInput
 }
 
 /** Serialize the event into the Claude Code stdin shape. We include the quanta

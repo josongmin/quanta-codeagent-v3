@@ -36,6 +36,8 @@
  * (which can be model- or tool-derived) could alter the command string.
  */
 
+import type { HookPromptInject } from "../hooks"
+
 /** Provenance of a command-hook binding (T04 trust gate, Codex `source`).
  *  DERIVED from the config layer (or the migration importer) by TRUSTED code —
  *  NEVER read from disk in a loosening direction (a hostile repo cannot stamp
@@ -102,6 +104,16 @@ export interface CommandHookVerdict {
   /** Present (key included) only when stdout JSON carried `{updatedInput}`.
    *  The value is opaque — the tool re-validates its own schema. */
   readonly updatedInput?: unknown
+  /** RFC09-1 (A-GAP-2) — additive prompt-context this command asked to fold
+   *  into the NEXT LLM turn, reusing the existing {@link HookPromptInject}
+   *  channel. **Untrusted-by-construction:** a spawned command hook is a
+   *  repo-/import-shipped script, so ONLY the `injectBeforeUser` (user-side,
+   *  {@link HookPromptInject.injectBeforeUser}) channel is ever populated here.
+   *  `injectAfterSystem` (raw system-prompt authority) is NEVER minted from a
+   *  command hook — the runner refuses it (in-process host code keeps that
+   *  channel because it is trusted-by-construction). Absent ⇒ the command was
+   *  not an append-context producer (byte-identical to the pre-RFC09-1 path). */
+  readonly promptHook?: HookPromptInject
   /** True when the command exceeded its timeout (killed). A timed-out command
    *  is treated as a DENY (fail-closed — an unbounded hook must not silently
    *  pass the tool through). */

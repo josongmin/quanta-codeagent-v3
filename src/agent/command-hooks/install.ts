@@ -75,6 +75,21 @@ const projectHookResult = (type: HookEvent["type"], result: CommandHookRun): unk
   if (type === TOOL_GATING_EVENT && "updatedInput" in result.verdict) {
     return { updatedInput: result.verdict.updatedInput }
   }
+  // RFC09-1 (A-GAP-2) — an append-context producer forwards its `promptHook`
+  // onto the SAME `HookEmitResult.promptHook` accumulator the in-process path
+  // fills (hooks.ts `accumulatePromptHook`). ZERO new inject site. Available on
+  // every event the runner runs (not just the tool-gating one) so a
+  // `session_start` / `user_prompt_submit` command hook can inject context.
+  //
+  // TRUST BOUNDARY (defense-in-depth): this adapter bridges an UNTRUSTED spawned
+  // command into the TRUSTED HookBus prompt channel. The runner already emits
+  // `injectBeforeUser`-only, but we re-clamp HERE at the boundary so a future
+  // runner regression can NEVER hand `injectAfterSystem` (raw system-prompt
+  // authority) to the bus. Only the user-side channel crosses.
+  const before = result.verdict.promptHook?.injectBeforeUser
+  if (typeof before === "string" && before.length > 0) {
+    return { promptHook: { injectBeforeUser: before } }
+  }
   return undefined
 }
 
