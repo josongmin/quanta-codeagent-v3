@@ -88,6 +88,31 @@ export type {
 } from "./migration"
 // ADR-0134 Phase D — pre-0134 ~/.claude/skills/ migration helper.
 export { migrateClaudeSkillsToQuanta, nodeMigrationFs } from "./migration"
+// RFC03-2/3 — immutable evidence→proposal compiler + content-addressed staging
+// + approval-bound CAS promotion. NO live-dir writer (skill_create cutover).
+export { compileSkillProposal, type ProposalIo } from "./proposal/compiler"
+export type {
+  PromoteResult,
+  SkillProposalArtifactPort,
+  SkillProposalStagePort,
+  SkillProposalStageResult,
+  StagedArtifact,
+} from "./proposal/port"
+export {
+  createSkillProposalArtifactPort,
+  type PromoteStorageIo,
+  type StagingStore,
+} from "./proposal/promote"
+export {
+  ABSENT_PREIMAGE,
+  type CompileResult,
+  type SkillEvidenceAnchor,
+  type SkillProposal,
+  type SkillProposalDraftInput,
+  type SkillProposalError,
+  type SkillProposalKind,
+  type SkillProposalValidationReceipt,
+} from "./proposal/types"
 export type {
   SkillRegistry,
   SkillRegistryCollision,
@@ -107,8 +132,7 @@ export {
 export {
   createSkillCreatorTool,
   renderSkillMarkdown,
-  type SkillWriteResult,
-  type SkillWriterPort,
+  type SkillCreatorDeps,
   validateScaffold,
 } from "./skill-creator"
 // ADR-0457 — codex skill ECOSYSTEM bundled resources (agents/openai.yaml +

@@ -88,6 +88,8 @@ const buildPending = (
     proposedAction: string
     resumeStep: string
     options?: readonly string[]
+    artifactRef?: string
+    artifactHash?: string
   },
   at: number,
 ): ApprovalRequest => {
@@ -100,6 +102,9 @@ const buildPending = (
     proposedAction: isString(init.proposedAction) ? init.proposedAction : "",
     resumeStep: isString(init.resumeStep) ? init.resumeStep : "",
     ...(opts !== null ? { options: opts } : {}),
+    // RFC03-3 — additive artifact binding; omitted when absent (exactOptional).
+    ...(isString(init.artifactRef) ? { artifactRef: init.artifactRef } : {}),
+    ...(isString(init.artifactHash) ? { artifactHash: init.artifactHash } : {}),
     status: "pending",
     createdAt: at,
   }
@@ -131,6 +136,11 @@ const hasValidRequired = (r: Record<string, unknown>): boolean => {
   return true
 }
 
+/** Spread-or-omit a string optional (exactOptional): included only when the raw
+ *  value is a string. Keeps {@link buildOptionalFields} flat. */
+const optStr = <K extends string>(key: K, raw: unknown): Partial<Record<K, string>> =>
+  isString(raw) ? ({ [key]: raw } as Record<K, string>) : {}
+
 /** Build the optional-fields portion of a record (everything beyond the
  *  required gate). Each optional is omitted when absent (exactOptional). */
 const buildOptionalFields = (r: Record<string, unknown>): Partial<ApprovalRequest> => {
@@ -140,16 +150,15 @@ const buildOptionalFields = (r: Record<string, unknown>): Partial<ApprovalReques
   const decision = APPROVAL_DECISION.has(r.decision as ApprovalDecision)
     ? (r.decision as ApprovalDecision)
     : undefined
-  const modifiedAction = isString(r.modifiedAction) ? r.modifiedAction : undefined
-  const blockerId = isString(r.blockerId) ? r.blockerId : undefined
-  const runEntryId = isString(r.runEntryId) ? r.runEntryId : undefined
   return {
     ...(opts !== null ? { options: opts } : {}),
     ...(settledAt !== undefined ? { settledAt } : {}),
     ...(decision !== undefined ? { decision } : {}),
-    ...(modifiedAction !== undefined ? { modifiedAction } : {}),
-    ...(blockerId !== undefined ? { blockerId } : {}),
-    ...(runEntryId !== undefined ? { runEntryId } : {}),
+    ...optStr("modifiedAction", r.modifiedAction),
+    ...optStr("blockerId", r.blockerId),
+    ...optStr("runEntryId", r.runEntryId),
+    ...optStr("artifactRef", r.artifactRef),
+    ...optStr("artifactHash", r.artifactHash),
   }
 }
 

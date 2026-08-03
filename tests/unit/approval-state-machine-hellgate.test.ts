@@ -633,3 +633,38 @@ describe("ADR-0403 approval-state-machine — frozen returns", () => {
     for (const id of ids) expect(asm.get(id)?.status).toBe("pending")
   })
 })
+
+describe("RFC03-3 — artifact ref/hash binding (additive, byte-identical when absent)", () => {
+  it("request WITHOUT artifact fields ⇒ neither field is present (legacy parity)", () => {
+    const asm = createApprovalStateMachine({ now: stepClock() })
+    const r = ask(asm)
+    expect(r.artifactRef).toBeUndefined()
+    expect(r.artifactHash).toBeUndefined()
+  })
+
+  it("request WITH artifact fields persists them verbatim + survives snapshot round-trip", () => {
+    const asm = createApprovalStateMachine({ now: stepClock() })
+    const r = asm.request({
+      threadId: "t-skill",
+      kind: "permission",
+      reason: "Promote proposed skill",
+      proposedAction: "write pdf-extract/SKILL.md",
+      resumeStep: "promote",
+      artifactRef: "proposal-123",
+      artifactHash: "abc123hash",
+    })
+    expect(r.artifactRef).toBe("proposal-123")
+    expect(r.artifactHash).toBe("abc123hash")
+    // settle does NOT drop the binding (status/settle semantics unchanged).
+    const settled = asm.settle(r.id, "approve")
+    expect(settled?.artifactRef).toBe("proposal-123")
+    expect(settled?.artifactHash).toBe("abc123hash")
+    // snapshot round-trip preserves the binding.
+    const snap = asm.toSnapshot()
+    const asm2 = createApprovalStateMachine({ now: stepClock() })
+    asm2.fromSnapshot(snap)
+    const restored = asm2.get(r.id)
+    expect(restored?.artifactRef).toBe("proposal-123")
+    expect(restored?.artifactHash).toBe("abc123hash")
+  })
+})

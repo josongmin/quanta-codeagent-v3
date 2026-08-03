@@ -82,6 +82,17 @@ export interface ApprovalRequest {
   readonly blockerId?: string
   /** Back-ref to the Run Ledger entry (only when attribution succeeded). */
   readonly runEntryId?: string
+  /**
+   * RFC03-3 — optional binding to an immutable staged proposal artifact. When
+   * present, the decision is bound to EXACTLY these bytes: a promotion re-reads
+   * the staged artifact by `artifactHash` and refuses if it (or the target
+   * preimage) drifted. `artifactRef` is an opaque locator (e.g. proposalId);
+   * `artifactHash` is the content hash the CAS promote re-verifies. These
+   * additive fields DO NOT change status/settle/store semantics — absent ⇒
+   * byte-identical legacy record.
+   */
+  readonly artifactRef?: string
+  readonly artifactHash?: string
 }
 
 /** Serializable point-in-time view of every approval in a machine. */
@@ -173,6 +184,9 @@ export interface ApprovalStateMachinePort {
     proposedAction: string
     resumeStep: string
     options?: readonly string[]
+    /** RFC03-3 — optional staged-artifact binding (opaque ref + content hash). */
+    artifactRef?: string
+    artifactHash?: string
   }): ApprovalRequest
 
   settle(
