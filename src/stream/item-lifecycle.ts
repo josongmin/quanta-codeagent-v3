@@ -103,6 +103,9 @@ export class ItemLifecycleTracker {
       // RFC-01 A7 — render-only advisory (same class as budget_breach); the
       // item-lifecycle projector passes it through untouched.
       case "context_headroom_crossed":
+      // RFC02-3 A8 — model-route transition is a render-only witness (no
+      // per-item projection); the item-lifecycle projector passes it through.
+      case "model_route_changed":
         return []
       default: {
         // Exhaustiveness pin (runtime-safe: no throw).

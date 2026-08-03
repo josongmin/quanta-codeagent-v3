@@ -42,6 +42,7 @@ import {
   streamWithModel,
 } from "@/llm"
 import { errMessage } from "@/shared"
+import type { AgentEvent } from "@/stream"
 import type { SlashCommand, SlashContext } from "./slash-commands"
 
 /**
@@ -75,6 +76,19 @@ export interface RetryWithSessionState {
   readonly streamInput: StreamInput
   readonly signal?: AbortSignal | undefined
   readonly onEvent: (ev: StreamEvent) => void | Promise<void>
+  /** RFC02-3 (A8) — optional model-route transition sink. When wired, this
+   *  operator caller PROJECTS its OWN `model_route_changed` AgentEvent the moment
+   *  the swap is resolved (BEFORE re-streaming): `routeKind:"operator_retry"`,
+   *  reason `operator_requested` (explicit `/retry-with <id>`) or
+   *  `operator_escalation` (no-arg next-in-list). This is the caller-owned route
+   *  observation — NOT the `StreamEvent` stream `onEvent` carries. Default-OFF:
+   *  absent ⇒ no event emitted ⇒ byte-identical (the swap behavior itself is
+   *  unchanged). The operator caller OWNS the reason; `streamWithModel` never
+   *  infers it (it does not know `from`). */
+  readonly onModelReroute?: (ev: AgentEvent) => void
+  /** Injected clock for the transition's `at` timestamp (determinism seam). No
+   *  bare `Date.now()` in the emit path. Absent ⇒ `Date.now`. */
+  readonly now?: () => number
 }
 
 /** Parsed `/retry-with` argv. Pure value object so the parser stays
@@ -117,6 +131,29 @@ export const dropLastAssistantMessage = (messages: Message[]): Message | undefin
 
 const formatCandidateList = (candidates: readonly ModelCandidate[]): string =>
   candidates.length === 0 ? "(none)" : candidates.map((c) => c.id).join(", ")
+
+/** RFC02-3 (A8) — project the operator-owned `model_route_changed` transition
+ *  onto the session's `onModelReroute` sink. No-op when the sink is absent
+ *  (default-OFF ⇒ byte-identical). The reason is caller-owned: an explicit
+ *  `/retry-with <id>` (`wasRequested`) is `operator_requested`; a no-arg
+ *  next-in-list swap is `operator_escalation`. Extracted so the dispatch stays
+ *  under the cognitive-complexity budget. */
+const emitOperatorRouteTransition = (
+  state: RetryWithSessionState,
+  toModel: string,
+  wasRequested: boolean,
+): void => {
+  if (state.onModelReroute === undefined) return
+  const now = state.now ?? Date.now
+  state.onModelReroute({
+    type: "model_route_changed",
+    fromModel: state.currentModelId,
+    toModel,
+    reason: wasRequested ? "operator_requested" : "operator_escalation",
+    routeKind: "operator_retry",
+    at: now(),
+  })
+}
 
 /**
  * The slash command itself. Mirrors the table-driven shape of the five Tier-2
@@ -172,6 +209,10 @@ export const retryWithCmd: SlashCommand = {
       }
       throw e
     }
+
+    // RFC02-3 (A8) — project the operator-owned route transition BEFORE the
+    // re-stream (helper below; keeps this dispatch under the complexity budget).
+    emitOperatorRouteTransition(state, chosen.id, parsed.requested !== undefined)
 
     // Drop the prior assistant message BEFORE re-streaming so the re-stream
     // doesn't observe a half-replaced transcript.

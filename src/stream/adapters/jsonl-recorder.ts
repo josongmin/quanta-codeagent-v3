@@ -7,6 +7,7 @@ import type { AgentEvent } from "../types"
 import { communicationDataOf, isCommunicationDataEvent } from "./jsonl-recorder-communication-data"
 import {
   llmRequestData,
+  modelRouteChangedData,
   recoveryData,
   toolResultData,
   usageData,
@@ -612,6 +613,8 @@ const KIND_MAP: Record<RecordedEventType, TrajectoryKind> = {
   // in `dataOf` keeps it greppable; the body is already redacted at the emit boundary.
   peer_message: "recovery",
   subagent_delivery: "recovery",
+  // RFC02-3 A8 — durable route transition (OQ2); rides `recovery`, greppable via `reason:"model_route_changed"`.
+  model_route_changed: "recovery",
   error: "error",
   usage: "llm_usage",
   done: "session_end",
@@ -690,6 +693,7 @@ type ControlDataEvent = Extract<
       | "progress_update"
       | "peer_message"
       | "subagent_delivery"
+      | "model_route_changed"
       | "done"
   }
 >
@@ -735,6 +739,9 @@ const controlDataOf = (e: ControlDataEvent): Record<string, unknown> => {
       return { reason: "escalation_resolved", id: e.id, decision: e.decision }
     case "mode_changed":
       return modeChangedData(e)
+    case "model_route_changed":
+      // RFC02-3 A8 — durable route transition (payload builder in sibling module).
+      return modelRouteChangedData(e)
     default:
       return finalDataOf(e)
   }

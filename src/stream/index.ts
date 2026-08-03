@@ -25,6 +25,8 @@ export type {
   AgentEvent,
   AgentEventType,
   EscalationOption,
+  ModelRouteKind,
+  ModelRouteReason,
   PlanDeltaKindMirror,
   PlanDeltaReadonlyMirror,
   PlanReadonlyMirror,
@@ -33,4 +35,10 @@ export type {
   TodoStatusMirror,
   ToolRiskMirror,
 } from "./types"
-export { AGENT_EVENT_TYPES, ALL_PLAN_DELTA_KIND_MIRROR, isAgentEventType } from "./types"
+export {
+  AGENT_EVENT_TYPES,
+  ALL_MODEL_ROUTE_KINDS,
+  ALL_MODEL_ROUTE_REASONS,
+  ALL_PLAN_DELTA_KIND_MIRROR,
+  isAgentEventType,
+} from "./types"

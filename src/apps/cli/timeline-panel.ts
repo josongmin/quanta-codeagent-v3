@@ -172,6 +172,13 @@ export const TIMELINE_FALLBACK_AGENT_EVENT_TYPES = [
   // ALBB-21 — advisory budget-cap crossing; rendered via the generic fallback
   // row (`<type>`), the same posture as `ratelimit_snapshot` (non-mutating notice).
   "budget_breach",
+  // RFC-01 A7 (aug-02) — advisory context-headroom crossing; generic fallback
+  // row, the same non-mutating-notice posture as `budget_breach`.
+  "context_headroom_crossed",
+  // RFC02-3 A8 (aug-02) — caller-owned model-route transition witness; generic
+  // fallback row (the CLI turn-header / stdout adapter renders the detailed
+  // "↻ from → to (reason)" line — this timeline shows the bare type).
+  "model_route_changed",
   // Multi-agent-panel SUBSTRATE — subagent lifecycle events render via the
   // generic fallback row here; the DEDICATED `/agents --tree` panel (a later
   // wave) consumes them off the `@/protocol/subagent` seam, not this timeline.

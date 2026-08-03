@@ -632,6 +632,12 @@ describe("Exhaustive AgentEvent switch covers the 6 new variants (drift gate)", 
         return "subagent_delivery"
       case "budget_breach":
         return "budget_breach"
+      // RFC-01 A7 (aug-02) — advisory context-headroom crossing.
+      case "context_headroom_crossed":
+        return "context_headroom_crossed"
+      // RFC02-3 A8 (aug-02) — caller-owned model-route transition.
+      case "model_route_changed":
+        return "model_route_changed"
       default: {
         const _exhaustive: never = e
         return _exhaustive

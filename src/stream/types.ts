@@ -57,6 +57,63 @@ export type ToolRiskMirror =
  *  the SAME tool is not re-asked (prompt-fatigue guard). */
 export type EscalationOption = "allow_once" | "allow_session" | "deny" | "deny_and_steer"
 
+/** RFC02-3 (A8) — WHICH caller owns this model-route transition. A closed
+ *  union: the three route callers each have DIFFERENT route semantics (they are
+ *  NOT one authority), so the `routeKind` distinguishes them at the surface.
+ *   - `operator_retry`   — a human at the REPL ran `/retry-with` (intentional
+ *                          swap of an already-completed turn).
+ *   - `provider_fallback`— `FallbackLLM` failed over to a backup provider mid/
+ *                          pre-stream after a provider-death (reactive).
+ *   - `scheduler_reroute`— the scheduler probed a preferred model unavailable
+ *                          and picked a fallback from its chain.
+ *  Adding a new caller MUST extend this union AND the reason union below AND the
+ *  `ALL_MODEL_ROUTE_KINDS` runtime list. */
+export type ModelRouteKind = "operator_retry" | "provider_fallback" | "scheduler_reroute"
+
+/** RFC02-3 (A8) — the caller-owned SEMANTIC reason for the transition. A closed
+ *  union so each of the three route callers maps its own reason EXPLICITLY (no
+ *  inference at `streamWithModel`, which does not know `from`). Grouped by
+ *  `routeKind`:
+ *   - operator_retry:  `operator_escalation` (no-arg `/retry-with`, next in
+ *                      list) | `operator_requested` (explicit `/retry-with <id>`).
+ *   - provider_fallback: `provider_overloaded` | `provider_server_error` |
+ *                      `provider_network` | `provider_not_implemented` — the four
+ *                      `LLMError.kind`s the fallback classifier swaps on.
+ *   - scheduler_reroute: `preferred_unavailable` (a chosen fallback because the
+ *                      preference was down).
+ *  Adding a reason MUST extend `ALL_MODEL_ROUTE_REASONS` (the drift guard fires
+ *  otherwise) and the caller that produces it. */
+export type ModelRouteReason =
+  | "operator_escalation"
+  | "operator_requested"
+  | "provider_overloaded"
+  | "provider_server_error"
+  | "provider_network"
+  | "provider_not_implemented"
+  | "preferred_unavailable"
+
+/** All {@link ModelRouteKind} values as a runtime list. SSOT for the
+ *  drift-guard (`model-route-transition-hellgate` asserts this equals the union
+ *  and that every `routeKind` a caller emits is a member). */
+export const ALL_MODEL_ROUTE_KINDS = Object.freeze([
+  "operator_retry",
+  "provider_fallback",
+  "scheduler_reroute",
+] as const satisfies readonly ModelRouteKind[])
+
+/** All {@link ModelRouteReason} values as a runtime list. SSOT for the
+ *  drift-guard: a reason added to the union but not here (or vice versa) breaks
+ *  the `satisfies` + the runtime keys==union assertion. */
+export const ALL_MODEL_ROUTE_REASONS = Object.freeze([
+  "operator_escalation",
+  "operator_requested",
+  "provider_overloaded",
+  "provider_server_error",
+  "provider_network",
+  "provider_not_implemented",
+  "preferred_unavailable",
+] as const satisfies readonly ModelRouteReason[])
+
 /** Single todo entry inside a plan — mirrors `TodoReadonly` in
  *  `@/agent/plan/types.ts`.
  *
@@ -163,6 +220,7 @@ export const AGENT_EVENT_TYPES = [
   "ratelimit_snapshot",
   "budget_breach",
   "context_headroom_crossed",
+  "model_route_changed",
   "done",
 ] as const satisfies readonly AgentEvent["type"][]
 
@@ -707,6 +765,41 @@ export type AgentEvent =
       usedTokens: number
       limitTokens: number
       thresholdTokens: number
+    }
+  // RFC02-3 (A8, aug-02 absorption) — model-route transition witness. Emitted
+  // when the model a turn runs on CHANGES: an operator `/retry-with` swap, a
+  // `FallbackLLM` provider fail-over, or a scheduler model-reroute. The REASON
+  // and route KIND are OWNED BY THE CALLER (retry/fallback/scheduler) — there is
+  // NO route bus/store/`modelsUsed` store; each caller PROJECTS its own known
+  // semantic reason directly onto this ONE event shape. `FallbackLLM` (which
+  // lives in the `@/llm` slice and may not import `@/stream`) supplies a plain
+  // structural transition via its `onTransition` callback; the `@/runner`
+  // adapter converts that to THIS event. PURE OBSERVABILITY: the loop never
+  // inspects it (render-only, no control authority). `fromModel`/`toModel` are
+  // model ids (low-risk, but the caller passes them ALREADY as ids, never raw
+  // command/URL strings). DURABLE: recorded in the trajectory (post-hoc "which
+  // model ran this turn") — the recorder maps it to the `recovery` family with a
+  // `reason:"model_route_changed"` discriminant. Default-OFF: emitted ONLY when a
+  // caller is wired to project it (`/retry-with` `onModelReroute` sink, the
+  // fallback `onTransition` runner adapter, the scheduler emit) — absent ⇒ never
+  // emitted, byte-identical event stream + model text.
+  | {
+      type: "model_route_changed"
+      /** Model id the turn WAS running on (the caller knows this — `from`). */
+      fromModel: string
+      /** Model id the turn is NOW routed to (`to`). */
+      toModel: string
+      /** Caller-owned semantic reason (closed union — see {@link ModelRouteReason}). */
+      reason: ModelRouteReason
+      /** Which caller produced the transition (closed union — see {@link ModelRouteKind}). */
+      routeKind: ModelRouteKind
+      /** Optional turn correlation id — the turn whose model changed. */
+      turnId?: string
+      /** Wall-clock epoch ms at the transition (caller-provided; no bare clock
+       *  read in the pure projection). */
+      at: number
+      /** Optional provider id of the `toModel` (e.g. `anthropic`/`openai`). */
+      provider?: string
     }
   | { type: "done"; reason: string; turns: number }
 

@@ -27,6 +27,7 @@ import { Database } from "bun:sqlite"
 import { mkdirSync } from "node:fs"
 import { dirname } from "node:path"
 import { logger, quantaHomePath, writeStderr } from "@/shared"
+import type { AgentEvent } from "@/stream"
 import {
   type AutomationEnginePort,
   type AutomationHandler,
@@ -36,7 +37,7 @@ import {
   type TickEligibilityVerdict,
   type TickOutcome,
 } from "./automation-engine"
-import { chooseModel } from "./model-reroute"
+import { chooseModel, rerouteResultToRouteEvent } from "./model-reroute"
 import type { AgentLoopPort, ModelAvailabilityPort } from "./types"
 
 /** ENV gate — strict `"on"` enables the wire. Absent / any other value
@@ -116,6 +117,14 @@ export interface AssembleAutomationDeps {
   /** ADR-0453 — OPTIONAL autorun-eligibility gate forwarded onto the slot (and
    *  thence into `tickScheduler`). Absent ⇒ no gate (byte-identical). */
   readonly eligibility?: () => TickEligibilityVerdict
+  /** RFC02-3 (A8) — OPTIONAL model-route transition sink. When wired AND a fire
+   *  actually REROUTES onto a fallback (the preference was unavailable), this
+   *  scheduler caller PROJECTS its OWN `model_route_changed` AgentEvent
+   *  (`routeKind:"scheduler_reroute"`, reason `preferred_unavailable`). Only the
+   *  `fallback` arm is a transition — `preference-available` / `all-unavailable`
+   *  emit nothing. Default-OFF: absent ⇒ no emit ⇒ byte-identical fire behavior.
+   *  The scheduler OWNS the reason; `chooseModel` stays pure. */
+  readonly onModelReroute?: (ev: AgentEvent) => void
 }
 
 /** Minimal env reader port. Matches `EnvPort` in shape but kept local so
@@ -168,7 +177,10 @@ export const assembleAutomation = (
   // with tickScheduler is that any throw here surfaces as `outcome:"errored"` +
   // `kind:"errored"` — we don't swallow.
   const handler: AutomationHandler = async (a) => {
-    const override = await resolveFireModel(a, availability)
+    const override = await resolveFireModel(a, availability, {
+      ...(deps.onModelReroute !== undefined ? { onModelReroute: deps.onModelReroute } : {}),
+      now: deps.now ?? Date.now,
+    })
     const heartbeat =
       a.kind === "heartbeat" && a.targetThreadId !== undefined && a.inheritedPolicy !== undefined
         ? { targetThreadId: a.targetThreadId, inheritedPolicy: a.inheritedPolicy }
@@ -249,6 +261,7 @@ const ALWAYS_AVAILABLE: ModelAvailabilityPort = { isAvailable: () => Promise.res
 const resolveFireModel = async (
   a: EngineAutomation,
   availability: ModelAvailabilityPort,
+  route: { readonly onModelReroute?: (ev: AgentEvent) => void; readonly now: () => number },
 ): Promise<string | undefined> => {
   if (a.model === undefined) return undefined
   const chosen = await chooseModel({
@@ -260,6 +273,18 @@ const resolveFireModel = async (
     throw new Error(
       `automation '${a.id}' has no available model (preference '${a.model}' and all fallbacks unavailable)`,
     )
+  }
+  // RFC02-3 (A8) — project the scheduler-owned route transition when (and only
+  // when) the fire actually rerouted onto a fallback. `rerouteResultToRouteEvent`
+  // returns `null` for the `preference-available` arm, so no sink call happens
+  // unless a real transition occurred. Default-OFF: no `onModelReroute` sink ⇒
+  // no emit ⇒ byte-identical. Observability only — never alters the override.
+  if (route.onModelReroute !== undefined) {
+    const ev = rerouteResultToRouteEvent(
+      { preference: a.model, result: chosen },
+      { at: route.now() },
+    )
+    if (ev !== null) route.onModelReroute(ev)
   }
   return chosen.chosen
 }

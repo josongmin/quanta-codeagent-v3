@@ -61,7 +61,7 @@ export {
 } from "./deeplink-route"
 export type { ChooseModelOpts, ChooseModelResult, ModelRerouteReason } from "./model-reroute"
 // Model reroute
-export { chooseModel } from "./model-reroute"
+export { chooseModel, rerouteResultToRouteEvent } from "./model-reroute"
 // Evaluator
 export { computeNextFire, iterateFires } from "./next-fire"
 export type { RRuleParseResult } from "./rrule-parser"

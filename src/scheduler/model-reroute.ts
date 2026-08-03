@@ -17,6 +17,7 @@
  * exception leak to the caller.
  */
 
+import type { AgentEvent } from "@/stream"
 import type { ModelAvailabilityPort } from "./types"
 
 /** Reason arm — closed set. Caller branches deterministically. */
@@ -75,6 +76,42 @@ export const chooseModel = async (opts: ChooseModelOpts): Promise<ChooseModelRes
     }
   }
   return { chosen: opts.preference, reason: "all-unavailable" }
+}
+
+/**
+ * RFC02-3 (A8) — project a scheduler reroute `ChooseModelResult` onto a
+ * `model_route_changed` AgentEvent, OR `null` when NO transition occurred.
+ *
+ * The scheduler OWNS its route reason: the ONLY transition is `reason:"fallback"`
+ * (the preference was down and a fallback was chosen) → `preferred_unavailable`.
+ * The other two arms are NOT transitions:
+ *   - `preference-available` — the preference WAS used; nothing changed → `null`.
+ *   - `all-unavailable`      — no model ran at all (the caller throws) → `null`.
+ *
+ * `from` is the preference (`opts.preference` the caller passed); `to` is the
+ * chosen fallback. Pure: `now`/`turnId`/`provider` are injected by the caller
+ * (no bare clock read here). Default-OFF at the call site: the runtime wires
+ * this ONLY when it has an event sink, so a scheduler tick with no sink emits
+ * nothing (byte-identical).
+ */
+export const rerouteResultToRouteEvent = (
+  args: {
+    readonly preference: string
+    readonly result: ChooseModelResult
+  },
+  ctx: { readonly at: number; readonly turnId?: string; readonly provider?: string },
+): Extract<AgentEvent, { type: "model_route_changed" }> | null => {
+  if (args.result.reason !== "fallback") return null
+  return {
+    type: "model_route_changed",
+    fromModel: args.preference,
+    toModel: args.result.chosen,
+    reason: "preferred_unavailable",
+    routeKind: "scheduler_reroute",
+    at: ctx.at,
+    ...(ctx.turnId !== undefined ? { turnId: ctx.turnId } : {}),
+    ...(ctx.provider !== undefined ? { provider: ctx.provider } : {}),
+  }
 }
 
 /** Run the availability probe. A thrown / rejected promise is treated as
