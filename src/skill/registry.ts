@@ -26,6 +26,7 @@
 
 import { join } from "node:path"
 import { discoverSkills } from "./discover"
+import { systemSkillsDir } from "./system-skills"
 import { SKILL_SCOPES_PRECEDENCE_DESC, type Skill, type SkillScope, skillScope } from "./types"
 
 /**
@@ -99,6 +100,14 @@ export interface SkillRegistryOptions extends SkillSourceInputs {
   readonly extraSkills?: readonly Skill[]
   /** Default true — see {@link SkillRegistryOptions}. */
   readonly legacyClaudeSkillsFallback?: boolean
+  /**
+   * RFC03-0 — explicit override for the `user` source directory (ADR-0045
+   * arbitrary user skills `dir`). When set, this exact path is discovered as
+   * the `user` source INSTEAD of deriving `~/.quanta/skills` from `homeDir`.
+   * Keeps the registry the single precedence authority for a host that mounts
+   * its user skills anywhere. Absent ⇒ the canonical home-derived layout.
+   */
+  readonly userDirOverride?: string
 }
 
 /** One resolved-name entry in the registry. */
@@ -226,7 +235,16 @@ const resolveByPrecedence = (
  * resolver. No caching, no global state — the registry is a snapshot.
  */
 export const buildSkillRegistry = async (opts: SkillRegistryOptions): Promise<SkillRegistry> => {
-  const sources = defaultSkillSources(opts)
+  // RFC03-0: an explicit `userDirOverride` replaces the home-derived `user`
+  // source dir so an ADR-0045 arbitrary user skills dir rides the SAME
+  // precedence resolver as every canonical source.
+  const baseSources = defaultSkillSources(opts)
+  const sources =
+    opts.userDirOverride !== undefined
+      ? baseSources.map((s) =>
+          s.scope === "user" ? { ...s, dir: opts.userDirOverride ?? null } : s,
+        )
+      : baseSources
   const buckets = new Map<SkillScope, Skill[]>()
   const sourceBuckets = await discoverSkillSourcesIn(sources)
   for (const [k, v] of sourceBuckets.entries()) buckets.set(k, [...v])
@@ -255,4 +273,56 @@ export const buildSkillRegistry = async (opts: SkillRegistryOptions): Promise<Sk
     lookup: (name) => byName.get(name),
     bySope: (scope) => byScope.get(scope) ?? [],
   }
+}
+
+/**
+ * RFC03-0 — canonical runtime skill snapshot.
+ *
+ * The single discovery+precedence authority every runtime surface (prompt
+ * `buildSkillBlock`, `Skill` tool, CLI `/skills`, ToolSearch skill mode)
+ * consumes so no surface performs its own `discoverSkills`/precedence merge.
+ *
+ * Maps a host's runtime inputs (user skills `dir`, bundled system skills dir,
+ * optional home/repo/org dirs) into {@link buildSkillRegistry} and returns the
+ * resolved, precedence-applied winners as a deterministic sorted `Skill[]`
+ * plus the registry (for collision receipts / `lookup`).
+ *
+ * PRECEDENCE (ADR-0134): `admin > repo > team > user > personal > system >
+ * builtIn`. A user skill therefore WINS over a bundled system skill of the same
+ * name — the canonical decision (§0134 "system: 사용자 disable 가능"). Any
+ * "system cannot be shadowed" security posture belongs to the PROPOSAL/IMPORT
+ * layer (a proposal/import whose name collides with a system skill is refused),
+ * NOT to a read-time precedence inversion — one authority only.
+ */
+export interface SkillSnapshot {
+  /** Precedence-resolved winners, sorted alphabetically by name. */
+  readonly skills: readonly Skill[]
+  /** The underlying registry (collision receipts + `lookup`). */
+  readonly registry: SkillRegistry
+}
+
+/** Host inputs for {@link buildSkillSnapshot}. `userDir` is the ADR-0045 user
+ *  skills directory (undefined ⇒ system skills only). `systemDir` defaults to
+ *  the bundled {@link systemSkillsDir}. */
+export interface SkillSnapshotInputs {
+  readonly userDir?: string
+  readonly systemDir?: string
+  readonly repoRoot?: string | null
+  readonly homeDir?: string | null
+  readonly orgConfigDir?: string | null
+}
+
+export const buildSkillSnapshot = async (inp: SkillSnapshotInputs): Promise<SkillSnapshot> => {
+  // The arbitrary ADR-0045 user `dir` rides the registry's `user` source via
+  // `userDirOverride`, and the bundled system dir rides the `system` source.
+  // The registry is the single precedence resolver: user WINS over system per
+  // ADR-0134 (§0134 "system: 사용자 disable 가능").
+  const registry = await buildSkillRegistry({
+    systemSkillsDir: inp.systemDir ?? systemSkillsDir(),
+    ...(inp.repoRoot !== undefined ? { repoRoot: inp.repoRoot } : {}),
+    ...(inp.homeDir !== undefined ? { homeDir: inp.homeDir } : {}),
+    ...(inp.orgConfigDir !== undefined ? { orgConfigDir: inp.orgConfigDir } : {}),
+    ...(inp.userDir !== undefined ? { userDirOverride: inp.userDir } : {}),
+  })
+  return { skills: registry.entries.map((e) => e.skill), registry }
 }

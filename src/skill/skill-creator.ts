@@ -1,53 +1,47 @@
 /**
- * jun-6 (Codex skill-creator parity) — an AGENT-CALLABLE tool that SCAFFOLDS a
- * new skill, VALIDATES its frontmatter + size, and INSTALLS it through an
- * injected writer port.
+ * jun-6 (Codex skill-creator parity) — an AGENT-CALLABLE tool that AUTHORS a
+ * skill.
  *
- * Gap closed: the skill ecosystem could DISCOVER + INVOKE skills (`discover.ts`,
- * `createSkillTool`) and READ bundled resources (`skill-resources.ts`), but had
- * no way for the model to AUTHOR one. Codex ships a `skill-creator` that writes
- * `<dir>/<name>/SKILL.md`; this is the v3 equivalent.
+ * RFC03-2 CUTOVER: `skill_create` no longer writes to the LIVE skill directory
+ * on invoke. It COMPILES an immutable, content-addressed proposal (evidence →
+ * deterministic draft) and STAGES it for human review through the injected
+ * {@link SkillProposalStagePort}. Promotion into the live directory happens ONLY
+ * on an operator approve, through the existing `ApprovalStateMachine` + CAS
+ * artifact port (RFC03-3). The old direct live-dir writer is REMOVED — a
+ * live-writer and a proposal pipeline must not coexist.
  *
- * Pipeline (all pure except the final write through the port):
- *   1. SCAFFOLD — render a canonical SKILL.md from the typed input
- *      ({@link renderSkillMarkdown}). Kebab-case frontmatter, `---` fences,
- *      author body.
- *   2. VALIDATE — run the rendered frontmatter back through the SAME
- *      `SkillFrontmatterSchema` discovery uses, so an invalid skill is rejected
- *      with the schema's own message (no second, drifting validator). Also
- *      enforce the byte-size cap ({@link MAX_SKILL_SIZE_BYTES}) BEFORE writing
- *      (a model could emit a megabyte body — reject, don't slurp).
- *   3. INSTALL — write `<name>/SKILL.md` via the injected {@link SkillWriterPort}.
- *      The port owns the FS jail + path safety; this slice never touches `fs`
- *      directly (closed-port DI, slice-isolated, unit-testable with a fake).
+ * Pipeline (pure except evidence/target reads via `ProposalIo` and the final
+ * stage hop):
+ *   1. COMPILE — {@link compileSkillProposal} renders normalized SKILL.md bytes
+ *      via the SAME `renderSkillMarkdown` / `SkillFrontmatterSchema` discovery
+ *      uses, enforces the size cap, gates on non-vacuous evidence (cited paths
+ *      must resolve under an allowed root), and refuses system-shadow /
+ *      unknown-target proposals. Same input ⇒ same `draftHash` (replayable).
+ *   2. STAGE — the compiled bytes + hash are staged for review via the port; the
+ *      approval is bound to the exact `artifactHash`. NOTHING reaches disk here.
  *
  * SECURITY / SAFETY:
- *   - The skill `name` is re-validated against the kebab-case regex BEFORE it is
- *     used as a path segment, so a `../escape` or absolute path can never reach
- *     the writer (defence-in-depth atop whatever jail the port enforces).
- *   - The writer port is REQUIRED; absent ⇒ the tool is never registered
- *     (default-OFF at the composition root). No port can be reached without an
- *     operator opt-in knob (`QUANTA_SKILL_CREATOR`).
+ *   - The skill `name` is re-validated against the kebab-case regex (in the
+ *     compiler) BEFORE it is ever a path segment.
+ *   - Evidence is mandatory + path-resolving (anti-vacuous: no invented skills).
+ *   - The stage port is REQUIRED; absent ⇒ the tool is never registered
+ *     (default-OFF, `QUANTA_SKILL_CREATOR`), byte-identical default surface.
  *
  * Pure functions never throw; the tool surfaces every failure as a typed
- * `{ ok:false, output }` result (the discovery + size validators already use the
- * explicit-result idiom, so there is no try/catch noise on the happy path).
+ * `{ ok:false, output }` result.
  */
 
 import { z } from "zod"
 import { errMessage } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
+import { compileSkillProposal, type ProposalIo } from "./proposal/compiler"
+import type { SkillProposalStagePort } from "./proposal/port"
+import type { SkillProposalKind } from "./proposal/types"
 import {
   SkillCategorySchema,
   SkillFrontmatterSchema,
   SkillStabilitySchema,
 } from "./skill-frontmatter"
-import { MAX_SKILL_SIZE_BYTES } from "./skill-size"
-
-/** Re-validated kebab-case skill name (mirrors `SkillFrontmatterSchema.name`).
- *  Load-bearing for path safety: a name that fails this can never be used as a
- *  directory segment. */
-const NAME_RE = /^[a-z0-9][a-z0-9-]*$/
 
 const schema = z.object({
   name: z
@@ -59,6 +53,24 @@ const schema = z.object({
     .string()
     .min(1)
     .describe("The SKILL.md markdown body (the instructions the model follows)."),
+  // RFC03-2 — mandatory, non-vacuous evidence. Each path MUST resolve under an
+  // allowed root (memory/repo). Empty ⇒ the proposal is refused: a skill must be
+  // distilled from an observed procedure, never invented from nothing.
+  evidence: z
+    .array(z.string().min(1))
+    .min(1)
+    .describe(
+      "Paths to the observed evidence this skill distills (e.g. a memory file). " +
+        "REQUIRED and each must resolve — a skill cannot be proposed from nothing.",
+    ),
+  kind: z
+    .enum(["new", "improvement"])
+    .optional()
+    .describe('"new" (default) creates a skill; "improvement" targets an existing one.'),
+  target: z
+    .string()
+    .optional()
+    .describe('For kind:"improvement" — the existing skill name being improved.'),
   userInvocable: z
     .boolean()
     .optional()
@@ -86,18 +98,6 @@ interface ScaffoldFields {
   readonly category: "skill" | "extension"
   readonly stability: "experimental" | "stable" | "deprecated"
 }
-
-/** Apply defaults to the optional input fields (Codex defaults: user-invocable,
- *  no tool allowlist, experimental skill). Pure. */
-const withDefaults = (input: Input): ScaffoldFields => ({
-  name: input.name,
-  description: input.description,
-  body: input.body,
-  userInvocable: input.userInvocable ?? true,
-  allowedTools: input.allowedTools ?? [],
-  category: input.category ?? "skill",
-  stability: input.stability ?? "experimental",
-})
 
 /** Quote a YAML scalar that needs it (contains `:` or leading/trailing space or
  *  a `#`). Conservative — when in doubt, double-quote. Pure. */
@@ -151,119 +151,125 @@ export const validateScaffold = (fields: ScaffoldFields): string | null => {
     : "invalid frontmatter"
 }
 
-/** Outcome of a write attempt. The port reports success/failure explicitly so
- *  the tool never has to catch. */
-export type SkillWriteResult =
-  | { readonly ok: true; readonly path: string }
-  | { readonly ok: false; readonly reason: string }
-
-/**
- * Closed port: persist `<name>/SKILL.md`. The composition root injects an
- * implementation that owns the FS jail (writes under the user/repo skills
- * directory) and path safety. `relPath` is always `<name>/SKILL.md` with a
- * pre-validated kebab-case `<name>`. The port MUST NOT throw — it returns a
- * typed result so the tool can surface a clean failure.
- */
-export interface SkillWriterPort {
-  write(relPath: string, content: string): Promise<SkillWriteResult>
+/** Human-readable message for each compiler refusal. */
+const COMPILE_ERROR_MSG: Record<string, string> = {
+  no_evidence: "no evidence cited — a skill must be distilled from an observed procedure",
+  evidence_unresolved: "a cited evidence path does not resolve under an allowed root",
+  invalid_name: "the skill name must be kebab-case",
+  invalid_frontmatter: "the rendered frontmatter failed the skill schema",
+  too_large: "the rendered SKILL.md exceeds the size cap",
+  unknown_target: "the improvement target is not a discovered skill",
+  system_shadow: "the name/target collides with a system skill (system cannot be shadowed)",
 }
 
 /**
- * Build the `skill_create` tool. The writer port is REQUIRED — the composition
+ * Dependencies the `skill_create` tool needs after the RFC03-2 cutover. No live
+ * writer — the tool compiles an immutable proposal and STAGES it for review.
+ *   - `io`               — evidence/target hashing + jail (host reuses `@/storage`).
+ *   - `stage`            — the closed stage port (host composes artifact `put` +
+ *                          existing approval `request`). NO live write here.
+ *   - `generatorVersion` — provenance stamp (model/config/compiler id).
+ */
+export interface SkillCreatorDeps {
+  readonly io: ProposalIo
+  readonly stage: SkillProposalStagePort
+  readonly generatorVersion: string
+}
+
+/**
+ * Build the `skill_create` tool. The stage deps are REQUIRED — the composition
  * root only constructs (and registers) this when the operator opts in
  * (`QUANTA_SKILL_CREATOR`), so absent ⇒ the tool is never on the menu
  * (default-OFF, byte-identical default surface).
  */
-export const createSkillCreatorTool = (writer: SkillWriterPort): Tool<Input> => {
+/** The single terminal result shape the tool yields. */
+type ToolResultShape = Extract<ToolEvent, { type: "result" }>["result"]
+
+/** Map a compiler input from the tool's Zod input. Pure. */
+const toDraftInput = (input: Input) => ({
+  name: input.name,
+  description: input.description,
+  body: input.body,
+  kind: (input.kind ?? "new") as SkillProposalKind,
+  ...(input.target !== undefined ? { target: input.target } : {}),
+  ...(input.userInvocable !== undefined ? { userInvocable: input.userInvocable } : {}),
+  ...(input.allowedTools !== undefined ? { allowedTools: input.allowedTools } : {}),
+  ...(input.category !== undefined ? { category: input.category } : {}),
+  ...(input.stability !== undefined ? { stability: input.stability } : {}),
+})
+
+/** A structured error result (mirrors permission_propose_pattern). */
+const errorResult = (output: string, modelVisibleError: string, e: unknown): ToolResultShape => ({
+  ok: false,
+  output,
+  failure: { mode: "error", modelVisibleError, clientVisibleError: errMessage(e) },
+})
+
+/**
+ * COMPILE the proposal then STAGE it for review. NEVER throws — a thrown
+ * compiler / stage port maps to a typed `ok:false` result (the Tool contract
+ * requires exactly one terminal result). NO live write happens here.
+ */
+const compileAndStage = async (deps: SkillCreatorDeps, input: Input): Promise<ToolResultShape> => {
+  let compiled: Awaited<ReturnType<typeof compileSkillProposal>>
+  try {
+    compiled = await compileSkillProposal(
+      deps.io,
+      toDraftInput(input),
+      input.evidence,
+      deps.generatorVersion,
+    )
+  } catch (e) {
+    return errorResult(
+      "Skill proposal failed: the compiler threw unexpectedly.",
+      "skill_create failed while compiling the proposal.",
+      e,
+    )
+  }
+  if (!compiled.ok) {
+    const why = COMPILE_ERROR_MSG[compiled.error] ?? compiled.error
+    return { ok: false, output: `Skill proposal rejected: ${why} (${compiled.detail}).` }
+  }
+  const p = compiled.proposal
+  try {
+    const staged = await deps.stage.stage({
+      proposalId: p.proposalId,
+      artifactHash: p.draftHash,
+      bytes: p.draftBytes,
+      name: p.name,
+      targetPath: p.targetPath,
+      kind: p.kind,
+    })
+    return {
+      ok: true,
+      output: `Proposed skill "${p.name}" (proposal ${staged.proposalId}, ${p.validationReceipt.byteLength} bytes) — staged for review. It is installed only after you approve it.`,
+    }
+  } catch (e) {
+    return errorResult(
+      "Skill proposal failed: the stage port threw unexpectedly.",
+      "skill_create failed while staging the proposal.",
+      e,
+    )
+  }
+}
+
+export const createSkillCreatorTool = (deps: SkillCreatorDeps): Tool<Input> => {
   return {
     name: "skill_create",
     description:
-      "Author a new skill: scaffold its SKILL.md from the given frontmatter + " +
-      "body, validate it against the skill schema and size cap, and install it " +
-      "under the skills directory. The skill becomes discoverable next session.",
+      "Propose a new skill (or an improvement to an existing one) distilled from " +
+      "cited evidence. This does NOT write to disk: it compiles an immutable, " +
+      "content-addressed proposal and stages it for human review + approval. The " +
+      "skill is installed only after an operator approves the proposal.",
     inputSchema: schema,
-    // Writes a file ⇒ NOT read-only, and order-sensitive (two creates of the
-    // same name race), so NOT concurrency-safe.
+    // Stages a proposal (no live write) but it is still a state-changing
+    // authoring action gated behind review; keep it NOT read-only /
+    // NOT concurrency-safe (two proposals for the same name race on review).
     isReadOnly: () => false,
     isConcurrencySafe: () => false,
 
     async *execute(input: Input, _ctx: ToolContext): AsyncIterable<ToolEvent> {
-      const fields = withDefaults(input)
-
-      // 0. PATH SAFETY — re-validate the name before it is ever a path segment.
-      if (!NAME_RE.test(fields.name)) {
-        yield {
-          type: "result",
-          result: { ok: false, output: `Invalid skill name "${fields.name}": must be kebab-case.` },
-        }
-        return
-      }
-
-      // 1. SCAFFOLD.
-      const markdown = renderSkillMarkdown(fields)
-
-      // 2a. VALIDATE frontmatter against the discovery schema.
-      const invalid = validateScaffold(fields)
-      if (invalid !== null) {
-        yield {
-          type: "result",
-          result: { ok: false, output: `Skill validation failed — ${invalid}` },
-        }
-        return
-      }
-
-      // 2b. SIZE cap — reject BEFORE writing (a megabyte body must not be slurped
-      // onto disk; `MAX_SKILL_SIZE_BYTES` is the same cap discovery enforces).
-      const bytes = Buffer.byteLength(markdown, "utf8")
-      if (bytes > MAX_SKILL_SIZE_BYTES) {
-        yield {
-          type: "result",
-          result: {
-            ok: false,
-            output: `Skill too large: ${bytes} bytes exceeds the ${MAX_SKILL_SIZE_BYTES}-byte cap.`,
-          },
-        }
-        return
-      }
-
-      // 3. INSTALL through the injected port. The port is contractually no-throw
-      // (returns a typed result), but a buggy / hostile adapter (an EACCES that
-      // escapes, a programmer bug) must NEVER reject this iterator — the Tool
-      // contract requires exactly ONE terminal result. Wrap defensively and map a
-      // thrown port to a typed `error` result (mirrors permission_propose_pattern).
-      const relPath = `${fields.name}/SKILL.md`
-      let written: SkillWriteResult
-      try {
-        written = await writer.write(relPath, markdown)
-      } catch (e) {
-        yield {
-          type: "result",
-          result: {
-            ok: false,
-            output: "Skill install failed: writer port threw unexpectedly.",
-            failure: {
-              mode: "error",
-              modelVisibleError: "skill_create failed: the writer port threw.",
-              clientVisibleError: errMessage(e),
-            },
-          },
-        }
-        return
-      }
-      if (!written.ok) {
-        yield {
-          type: "result",
-          result: { ok: false, output: `Skill install failed: ${written.reason}` },
-        }
-        return
-      }
-      yield {
-        type: "result",
-        result: {
-          ok: true,
-          output: `Created skill "${fields.name}" at ${written.path} (${bytes} bytes). It is discoverable next session.`,
-        },
-      }
+      yield { type: "result", result: await compileAndStage(deps, input) }
     },
   }
 }

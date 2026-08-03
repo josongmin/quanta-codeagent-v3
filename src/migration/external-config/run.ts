@@ -25,7 +25,9 @@ import {
   convertCursorRules,
   convertHooks,
   convertMcp,
+  convertMemory,
   convertSettings,
+  convertSkills,
   convertSubagents,
 } from "./convert"
 import { detectExternalConfigs } from "./detect"
@@ -38,6 +40,7 @@ import type {
   MigrationItemType,
   MigrationScope,
   MigrationWarning,
+  SkillStagePort,
 } from "./types"
 
 /** Inputs to the orchestration. Every path injected (no env / homedir reads in
@@ -46,6 +49,16 @@ export interface RunConfigMigrationInput {
   readonly enabled: boolean
   readonly homeDir: string
   readonly projectDir: string
+  /** RFC03-4 — pinned system-skill names so an imported `skills` item that would
+   *  SHADOW a system skill is refused at convert time. The migration slice is
+   *  fenced from `@/skill` (cannot discover them itself), so the host supplies
+   *  them. Absent ⇒ empty set (no system to shadow — safe for detect/preview;
+   *  the host IMPORT path supplies the real set). */
+  readonly systemSkillNames?: ReadonlySet<string>
+  /** RFC03-4 — host-composed staging port for imported skills (real
+   *  `SkillProposalArtifactPort` + approval machine). Absent ⇒ imported skills
+   *  are NOT persisted (fail-closed). Only consumed by {@link importExternalConfig}. */
+  readonly skillStage?: SkillStagePort
 }
 
 /** Result of one orchestration run. */
@@ -72,6 +85,7 @@ const convertItem = async (
   item: DetectedConfigItem,
   projectDir: string,
   homeDir: string,
+  systemSkillNames: ReadonlySet<string>,
 ): Promise<ConvertedItem> => {
   switch (item.type) {
     case "settings":
@@ -87,6 +101,13 @@ const convertItem = async (
     case "cursor_rules":
       // glob-rules loader scans the rule DIRECTORY: use the scope root.
       return convertCursorRules(item.scope === "home" ? homeDir : projectDir)
+    case "skills":
+      // `item.path` is the `.claude/skills` dir; the converter re-walks it.
+      // System-shadow refusal uses the host-supplied name set.
+      return convertSkills(item.path, { systemSkillNames })
+    case "memory":
+      // `item.path` is the `~/.claude/CLAUDE.md` memory file.
+      return convertMemory(item.path)
   }
 }
 
@@ -107,8 +128,9 @@ const runForScope = async (
     return { throttled: true, converted: [], sourceKey }
   }
   const converted: ConvertedItem[] = []
+  const systemSkillNames = input.systemSkillNames ?? new Set<string>()
   for (const item of items) {
-    converted.push(await convertItem(item, input.projectDir, input.homeDir))
+    converted.push(await convertItem(item, input.projectDir, input.homeDir, systemSkillNames))
   }
   const itemTypes = [...new Set(items.map((i) => i.type))] as MigrationItemType[]
   // Best-effort throttle record so the NEXT launch is suppressed. A failed
@@ -266,8 +288,9 @@ export const importExternalConfig = async (
     if (items.length === 0) continue
     const sourceKey = sourceKeyOf(scope as MigrationScope, items)
     const converted: ConvertedItem[] = []
+    const systemSkillNames = input.systemSkillNames ?? new Set<string>()
     for (const item of items) {
-      converted.push(await convertItem(item, input.projectDir, input.homeDir))
+      converted.push(await convertItem(item, input.projectDir, input.homeDir, systemSkillNames))
     }
     allConverted.push(...converted)
     const persist = await persistConvertedItems({
@@ -276,6 +299,7 @@ export const importExternalConfig = async (
       projectDir: input.projectDir,
       converted,
       sourceKey,
+      ...(input.skillStage !== undefined ? { skillStage: input.skillStage } : {}),
     })
     persisted = persisted || persist.persisted
     persistWarnings.push(...persist.warnings)

@@ -15,6 +15,7 @@
  * node:fs/promises.
  */
 
+import { createHash } from "node:crypto"
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 
@@ -81,16 +82,44 @@ export interface MigrationEntry {
   readonly name: string
   readonly from: string
   readonly to: string
-  readonly outcome: "would-migrate" | "migrated" | "skipped-conflict" | "skipped-empty"
+  readonly outcome: "would-migrate" | "migrated" | "skipped-conflict" | "skipped-empty" | "staged"
+}
+
+/**
+ * RFC03-4 — the staging seam. `~/.claude/skills` is a Claude-Code import
+ * surface, so its skills are UNTRUSTED supply-chain artifacts. When a `stage`
+ * port is supplied, `apply` routes each SKILL.md through the RFC03-2/3
+ * proposal/promote pipeline (staged artifact + approval) INSTEAD of the legacy
+ * live-dir copy — an imported skill never lands in the live `~/.quanta/skills`
+ * directory without review. Absent ⇒ the legacy Phase-D behavior (a same-owner
+ * `.claude/skills → .quanta/skills` relocation copy) is byte-identical.
+ *
+ * Structurally identical to `@/migration/external-config#SkillStagePort` /
+ * `@/skill/proposal#SkillProposalStagePort`; declared locally so the caller can
+ * inject the same host-composed port without a slice import.
+ */
+export interface SkillMigrationStagePort {
+  stage(args: {
+    readonly artifactHash: string
+    readonly bytes: string
+    readonly name: string
+    readonly targetPath: string
+    readonly kind: string
+  }): Promise<{ readonly proposalId: string }>
 }
 
 export interface MigrationOptions {
   /** User home dir — source is `<homeDir>/.claude/skills/`, target is `<homeDir>/.quanta/skills/`. */
   readonly homeDir: string
-  /** When true, actually perform the copy. Default false (dry-run). */
+  /** When true, actually perform the copy (or stage, if a `stage` port is
+   *  wired). Default false (dry-run). */
   readonly apply?: boolean
   /** Test seam — defaults to {@link nodeMigrationFs}. */
   readonly fs?: MigrationFs
+  /** RFC03-4 — when set, `apply` STAGES each imported skill through the
+   *  proposal/promote pipeline instead of a live-dir copy (imported skills are
+   *  untrusted). Absent ⇒ legacy direct copy (byte-identical). */
+  readonly stage?: SkillMigrationStagePort
 }
 
 /**
@@ -158,6 +187,23 @@ export const migrateClaudeSkillsToQuanta = async (
       continue
     }
     const body = await fs.readFile(fromFile)
+    // RFC03-4 — an imported skill is UNTRUSTED. When a stage port is wired we
+    // route it through the proposal/promote pipeline (staged artifact +
+    // approval) instead of a live-dir copy; promotion into `~/.quanta/skills`
+    // happens ONLY on operator approve. Absent stage ⇒ the legacy direct copy.
+    if (opts.stage !== undefined) {
+      const artifactHash = createHash("sha256").update(body, "utf8").digest("hex")
+      await opts.stage.stage({
+        artifactHash,
+        bytes: body,
+        name,
+        targetPath: `${name}/SKILL.md`,
+        kind: "new",
+      })
+      entries.push({ name, from: fromFile, to: join(toDir, "SKILL.md"), outcome: "staged" })
+      migrated++
+      continue
+    }
     await fs.mkdirp(toDir)
     await fs.writeFile(join(toDir, "SKILL.md"), body)
     entries.push({ name, from: fromFile, to: join(toDir, "SKILL.md"), outcome: "migrated" })

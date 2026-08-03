@@ -1,5 +1,5 @@
 import { type AgentConfig, type EffortLevel, parseEffort, resolveAgentMode } from "@/agent"
-import { discoverSkills, discoverSystemSkills } from "@/skill"
+import { buildSkillSnapshot } from "@/skill"
 import { env } from "../internal"
 import { buildRuleInventory, isRulePillEnabled } from "../rule-indicator"
 import type { SkillRow } from "../slash-contract"
@@ -23,9 +23,13 @@ export const buildSkillsCallback = (
 ): (() => Promise<SkillRow[]>) | undefined => {
   if (skillsConfig === undefined) return undefined
   return async (): Promise<SkillRow[]> => {
-    const userSkills = skillsConfig.dir !== undefined ? await discoverSkills(skillsConfig.dir) : []
-    const systemSkills = await discoverSystemSkills()
-    const rows = mergeSkillRows(userSkills, systemSkills)
+    // RFC03-0 — same canonical snapshot the prompt block + `Skill` tool use, so
+    // the user-visible `/skills` list cannot drift from the model-visible
+    // inventory (single discovery+precedence authority; no CLI-local merge).
+    const snapshot = await buildSkillSnapshot(
+      skillsConfig.dir !== undefined ? { userDir: skillsConfig.dir } : {},
+    )
+    const rows = snapshotToRows(snapshot.skills)
     // WS-G (UUX-2-13) — best-effort pill refresh; a pill failure must never
     // break the slash.
     if (pills !== undefined) {
@@ -39,20 +43,17 @@ export const buildSkillsCallback = (
   }
 }
 
-/** Merge user + system skills into sorted display rows (system wins on a name
- *  collision — same override order `buildSkillBlock` uses). */
-const mergeSkillRows = (
-  userSkills: ReadonlyArray<{ name: string; description: string; paths?: readonly string[] }>,
-  systemSkills: ReadonlyArray<{ name: string; description: string; paths?: readonly string[] }>,
-): SkillRow[] => {
-  const byName = new Map<string, SkillRow>()
-  for (const skill of [...userSkills, ...systemSkills]) {
+/** Project the canonical precedence-resolved snapshot into display rows. The
+ *  snapshot is already deduplicated (registry precedence) and sorted by name,
+ *  so this is a pure projection — NO CLI-local merge/precedence (RFC03-0). */
+const snapshotToRows = (
+  skills: ReadonlyArray<{ name: string; description: string; paths?: readonly string[] }>,
+): SkillRow[] =>
+  skills.map((skill) => {
     const row: SkillRow = { name: skill.name, description: skill.description }
     if (skill.paths !== undefined) (row as { paths?: readonly string[] }).paths = skill.paths
-    byName.set(skill.name, row)
-  }
-  return [...byName.values()].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
-}
+    return row
+  })
 
 /** Build and wire the status chrome (workspace / mode+effort / skills /
  *  sandbox). This keeps pill-specific discovery and env policy out of the

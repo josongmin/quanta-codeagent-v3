@@ -141,20 +141,25 @@ describe("/skills (subprocess): real disk discovery, system + user merge", () =>
     expect(r.out).toContain("[paths: src/**/*.ts, tests/**/*.ts]")
   })
 
-  test("name collision: user skill with same name as a system skill ⇒ SYSTEM wins (precedence parity)", async () => {
-    // Shadow `localize-fault` (a known system skill) with a user skill that
-    // has a clearly-different description. Expectation: system precedence
-    // wins → user description does NOT leak into the rendered row.
-    const userMarker = "USER_OVERRIDE_SHOULD_NOT_APPEAR_IF_PRECEDENCE_HOLDS"
+  test("name collision: user skill with same name as a system skill ⇒ USER wins (ADR-0134 canonical precedence)", async () => {
+    // RFC03-0 cutover: the CLI `/skills` list now derives from the canonical
+    // `buildSkillSnapshot`, whose precedence is `admin > repo > team > user >
+    // personal > system` (ADR-0134 — "system: 사용자 disable 가능"). A user
+    // skill of the same name therefore WINS over the bundled system skill.
+    // This is a front-door proof of the cutover: it exercises the real CLI
+    // subprocess, not a projector. (The pre-registry ad-hoc "system wins"
+    // tier1/CLI merge was the deviation removed by RFC03-0; "system cannot be
+    // shadowed" is enforced at the proposal/import admission layer, not at
+    // read-time precedence.)
+    const userMarker = "USER_OVERRIDE_WINS_UNDER_ADR0134_PRECEDENCE"
     await writeSkill(userDir, "localize-fault", userMarker)
     const r = await spawnCli(["/skills"], { QUANTA_SKILLS_DIR: userDir })
     expect(r.exit).toBe(0)
     expect(r.out).toContain("localize-fault")
-    // Critical: the system skill's actual description must be the one rendered.
-    // System skill's description starts with "Localize a fault" (verified from
-    // src/skill/system-skills/localize-fault/SKILL.md).
-    expect(r.out).toContain("Localize a fault")
-    expect(r.out).not.toContain(userMarker)
+    // Critical: the USER skill's description is the one rendered (user wins);
+    // the system skill's "Localize a fault" description is shadowed.
+    expect(r.out).toContain(userMarker)
+    expect(r.out).not.toContain("Localize a fault")
   })
 
   test("malformed SKILL.md (missing frontmatter) is silently skipped; valid siblings still render", async () => {

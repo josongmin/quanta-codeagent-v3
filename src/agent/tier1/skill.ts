@@ -15,23 +15,114 @@
  */
 
 import { errMessage, runtimeConfig } from "@/shared"
-import { FsJailError, resolveJailed } from "@/storage"
-import type { Tool } from "@/tool"
-import type { Skill } from "../../skill"
 import {
+  canonicalizePath,
+  FsJailError,
+  readFile,
+  resolveJailed,
+  sha256Hex,
+  writeFileAtomic,
+} from "@/storage"
+import type { Tool } from "@/tool"
+import type {
+  PromoteStorageIo,
+  ProposalIo,
+  Skill,
+  SkillProposalStagePort,
+  SkillRegistry,
+} from "../../skill"
+import {
+  buildSkillSnapshot,
   createSkillCreatorTool,
+  createSkillProposalArtifactPort,
   createSkillTool,
   createToolSearchTool,
-  discoverSkills,
-  discoverSystemSkills,
-  type SkillWriterPort,
   skillEffortOverride,
   skillModelOverride,
   skillsActivatedFor,
   skillToolAllowlist,
 } from "../../skill"
+import type { ApprovalStateMachinePort } from "../approval-state-machine"
 import type { SkillTurnOverride } from "../loop"
 import type { AgentConfig } from "../types"
+
+/** RFC03-2 — the generator provenance stamp for compiled proposals. */
+const SKILL_PROPOSAL_GENERATOR = "quanta-skill-creator@rfc03"
+
+/** RFC03-2 — the storage primitives the host injects into the artifact port.
+ *  `@/skill` may not reach `@/storage`, so `@/agent` (this composition) threads
+ *  the existing storage owner's functions in. NO reimplementation. */
+const HOST_PROMOTE_STORAGE_IO: PromoteStorageIo = {
+  sha256: (content) => sha256Hex(content),
+  resolveJailed: (rel, root) => resolveJailed(rel, root),
+  writeFileAtomic: (abs, content) => writeFileAtomic(abs, content),
+  readFile: (abs) => readFile(abs),
+  isJailError: (e) => e instanceof FsJailError,
+  errMessage: (e) => errMessage(e),
+}
+
+/**
+ * RFC03-2 — build the `ProposalIo` the compiler needs, reusing `@/storage`
+ * (sha256 / canonicalize / readFile). Evidence roots gate cited paths; the
+ * snapshot supplies system + discovered names for shadow/unknown admission.
+ * `readIfExists` returns `null` on any read failure (a missing evidence path
+ * must be a clean refusal, never a throw).
+ */
+const buildProposalIo = (registry: SkillRegistry, evidenceRoots: string[]): ProposalIo => {
+  const canonRoots = evidenceRoots.map((r) => canonicalizePath(r))
+  const systemNames = new Set(registry.bySope("system").map((s) => s.name))
+  const discoveredNames = new Set(registry.entries.map((e) => e.skill.name))
+  return {
+    sha256: (content) => sha256Hex(content),
+    resolveUnderRoots: (path) => {
+      const canonical = canonicalizePath(path)
+      return canonRoots.some((r) => canonical === r || canonical.startsWith(`${r}/`))
+        ? canonical
+        : null
+    },
+    readIfExists: async (path) => {
+      try {
+        return await readFile(path)
+      } catch {
+        return null
+      }
+    },
+    systemSkillNames: systemNames,
+    discoveredSkillNames: discoveredNames,
+  }
+}
+
+/**
+ * RFC03-2 cutover — compose the `SkillProposalStagePort` from the artifact port
+ * (stage bytes) and the EXISTING approval machine (open a review bound to the
+ * artifact hash). NO live write — promotion runs later, on approve, via the
+ * artifact port's CAS `promote`. When no approval machine is wired the proposal
+ * is still staged (bytes are content-addressed + inert) so the tool degrades to
+ * "staged, review pending host wiring" rather than silently writing to disk. */
+const buildProposalStagePort = (
+  skillsDir: string,
+  approval: ApprovalStateMachinePort | undefined,
+  threadId: string,
+): SkillProposalStagePort => {
+  const artifact = createSkillProposalArtifactPort(skillsDir, HOST_PROMOTE_STORAGE_IO)
+  return {
+    stage: async (args) => {
+      await artifact.put(args.bytes)
+      // Bind an approval to EXACTLY these bytes. status/settle semantics are
+      // unchanged; the host's approve handler re-verifies + CAS-promotes.
+      approval?.request({
+        threadId,
+        kind: "permission",
+        reason: `Install proposed skill "${args.name}" (${args.kind})`,
+        proposedAction: `write ${args.targetPath}`,
+        resumeStep: "promote-skill-proposal",
+        artifactRef: args.proposalId,
+        artifactHash: args.artifactHash,
+      })
+      return { proposalId: args.proposalId }
+    },
+  }
+}
 
 /** Materialized skill block. All fields are required (the builder either
  *  returns this whole block or `undefined`); `allowlists` / `overrides` are
@@ -68,26 +159,6 @@ const skillOverrideEntry = (s: Skill): SkillTurnOverride | undefined => {
   }
 }
 
-/**
- * jun-6 (skill-creator) — a jailed {@link SkillWriterPort} rooted at the user
- * skills `dir`. The relative `<name>/SKILL.md` is resolved through
- * `resolveJailed` so a path escape can never write outside the skills dir
- * (defence-in-depth atop the slice's kebab-case name re-validation). `Bun.write`
- * creates the `<name>/` parent dir. NO-THROW: an escape or write error is
- * returned as a typed `{ ok:false }` so the tool surfaces it cleanly. */
-const buildJailedSkillWriter = (dir: string): SkillWriterPort => ({
-  write: async (relPath, content) => {
-    try {
-      const abs = resolveJailed(relPath, dir)
-      await Bun.write(abs, content)
-      return { ok: true, path: abs }
-    } catch (e) {
-      const reason = e instanceof FsJailError ? "path escapes the skills directory" : errMessage(e)
-      return { ok: false, reason }
-    }
-  },
-})
-
 /** Build the skill block from `config.skills`. Returns `undefined` when the
  *  block is absent so the composer can skip it. Pure except for
  *  `discoverSkills`'s directory IO. */
@@ -95,35 +166,42 @@ export const buildSkillBlock = async (config: AgentConfig): Promise<SkillBlock |
   if (!config.skills) return undefined
 
   const dir = config.skills.dir
-  // `dir` OPTIONAL (ADR-0045 follow-up): when omitted, only bundled system
-  // skills load. `discoverSkills` is only called when a user dir is given.
-  const userSkills = dir !== undefined ? await discoverSkills(dir) : []
-  // Bundled system skills (ADR-0045) — version-pinned, ship with the framework.
-  // Merged into the discoverable set so the model can invoke disciplines like
-  // `progress-audit` regardless of whether the user populated their own skills
-  // dir. System skills WIN on a name collision so a user-supplied skill cannot
-  // impersonate / weaken a system one (the `byName` second-pass overrides).
-  const systemSkills = await discoverSystemSkills()
-  const byName = new Map<string, Skill>()
-  for (const s of userSkills) byName.set(s.name, s)
-  for (const s of systemSkills) byName.set(s.name, s)
-  const skills = [...byName.values()].sort((a, b) =>
-    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
-  )
+  // RFC03-0 — canonical discovery+precedence authority. The prompt block, the
+  // `Skill` tool inventory, and the CLI `/skills` list all derive from the SAME
+  // `buildSkillSnapshot` so they cannot disagree on the collision winner or the
+  // ordering. `dir` OPTIONAL (ADR-0045): omitted ⇒ only bundled system skills.
+  // Precedence (ADR-0134): user WINS over system on a name collision — the
+  // canonical decision (§0134 "system: 사용자 disable 가능"). "System cannot be
+  // shadowed" belongs to the proposal/import admission layer, not read-time.
+  const snapshot = await buildSkillSnapshot(dir !== undefined ? { userDir: dir } : {})
+  const skills = [...snapshot.skills]
   const tools: Tool[] = [
     // `createSkillTool` ALWAYS receives the full discovered list — a user can
     // still invoke any skill by name. The `paths:` filter below only narrows
     // the per-turn SUGGESTION inventory, never the invocable surface (that
     // would silently strip authority).
     createSkillTool(skills),
-    createToolSearchTool(() => config.registry.specs()),
+    // RFC03-1 — ToolSearch gets the pinned snapshot's registry entries so its
+    // additive `catalog:"skills"` mode reads the SAME resolved set (no second
+    // discovery / scorer). `catalog` defaults to "tools" ⇒ byte-identical for
+    // any call that does not opt into skill mode.
+    createToolSearchTool(
+      () => config.registry.specs(),
+      () => snapshot.registry.entries,
+    ),
   ]
-  // jun-6 (skill-creator) — register the agent-callable `skill_create` tool ONLY
-  // when the operator opts in (`QUANTA_SKILL_CREATOR`) AND a writable user skills
-  // `dir` is configured (system-skills-only sessions have nowhere to install).
-  // Default-OFF / no-dir ⇒ the tool is NOT on the menu (byte-identical surface).
+  // jun-6 + RFC03-2 — register the agent-callable `skill_create` tool ONLY when
+  // the operator opts in (`QUANTA_SKILL_CREATOR`) AND a writable user skills
+  // `dir` is configured. RFC03-2 CUTOVER: the tool no longer writes to the live
+  // dir on invoke — it COMPILES an immutable proposal and STAGES it for review
+  // (promotion happens on approve via the CAS artifact port). Default-OFF /
+  // no-dir ⇒ the tool is NOT on the menu (byte-identical surface).
   if (runtimeConfig().skillCreator && dir !== undefined) {
-    tools.push(createSkillCreatorTool(buildJailedSkillWriter(dir)))
+    // Evidence roots: the user skills dir + the process cwd (memory/repo files
+    // the model cites). The host reuses `@/storage` for hash/jail — no new impl.
+    const io = buildProposalIo(snapshot.registry, [dir, process.cwd()])
+    const stage = buildProposalStagePort(dir, config.approvalStateMachine, config.sessionId ?? "")
+    tools.push(createSkillCreatorTool({ io, stage, generatorVersion: SKILL_PROPOSAL_GENERATOR }))
   }
   const al = new Map<string, string[]>()
   // ADR-0011 §6.2 → L4: build the per-skill model/effort override map alongside
