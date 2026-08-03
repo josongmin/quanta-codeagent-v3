@@ -575,11 +575,13 @@ describe("runSessionCommand", () => {
     expect(ids).not.toContain("del-arc")
   })
 
-  // HIGH-6 — `session delete` of a worktree-backed fork removes the worktree
-  // AND the local branch before deleting the session record. This is the
-  // strongest end-to-end proof that the cleanup wiring in cmdDelete actually
-  // calls removeWorktree with the correct (repoRoot, branch) derived from the
-  // session's cwd path layout.
+  // RFC-06 §RFC06-1 — `session delete` of a worktree-backed fork removes the
+  // worktree AND the local branch before deleting the session record. This is
+  // the strongest end-to-end proof that cmdDelete calls the hardened
+  // removeWorktree with the EXACT (repoRoot, path, branch) read from the
+  // PERSISTED `workspaceOwnership` authority — NOT the removed `deriveWorktreeInfo`
+  // cwd-path heuristic. (The fork path persists the ownership record; delete
+  // consumes it.)
   test.skipIf(!HAS_GIT)(
     "delete cleans the worktree + branch when the session lives in a fork-worktree",
     async () => {
@@ -596,6 +598,12 @@ describe("runSessionCommand", () => {
       const fork = await loadSessionById(forkId)
       const wtPath = fork?.meta.cwd ?? ""
       expect(existsSync(wtPath)).toBe(true)
+      // RFC-06 §RFC06-1: the fork PERSISTED the WorkspaceOwnership authority
+      // that delete/GC will consume — proves the delete cleanup below is driven
+      // by the durable record, not the removed cwd-path heuristic.
+      expect(fork?.meta.workspaceOwnership).toBeDefined()
+      expect(fork?.meta.workspaceOwnership?.path).toBe(wtPath)
+      expect(fork?.meta.workspaceOwnership?.state).toBe("ready")
 
       // Now delete the fork with --force; the worktree + branch must vanish.
       const cDel = captureDeps()

@@ -7,11 +7,16 @@ import {
   forkSession,
   listSessions,
   loadSessionById,
+  makeWorkspaceCreateIntent,
   renameSession,
   rewindToMessage,
   SessionIdError,
+  type SessionMeta,
+  saveSessionById,
   sessionFilePath,
+  transitionWorkspaceState,
   unarchiveSession,
+  type WorkspaceOwnership,
 } from "@/session"
 import { errMessage } from "@/shared"
 import {
@@ -487,38 +492,75 @@ const cmdFork = async (args: string[], deps: SessionCommandDeps): Promise<number
       ...(titleOpt !== undefined ? { title: titleOpt } : {}),
     }
     const minted = await forkSession(id, forkOpts)
+    // RFC-06 §RFC06-1 — persist the WorkspaceOwnership authority on the forked
+    // session so a later `delete`/GC targets the EXACT persisted path/branch
+    // instead of inferring them from the cwd. The fork effect already
+    // succeeded, so we publish a `ready` record (intent→effect→ready collapsed
+    // for the non-current-thread fork path; the full crash-matrix transaction
+    // is RFC06-2's current-thread transition). `baseSha` is the source's
+    // captured git sha when available (base-drift detection); absent ⇒ empty
+    // marker (still a valid record — the schema requires min(1), so fall back
+    // to "HEAD" convention when unknown).
+    await publishForkWorkspaceOwnership(minted, {
+      ownerThreadId: minted,
+      repoRoot: sourceCwd,
+      repoId: source.meta.gitOriginUrl ?? sourceCwd,
+      path: wt.worktreePath,
+      branch: wt.branch,
+      baseSha: source.meta.gitSha ?? "HEAD",
+    })
     deps.out(`forked ${id} → ${minted}\n`)
     deps.out(`worktree: ${wt.worktreePath} (branch: ${wt.branch})\n`)
     return 0
   } catch (e) {
     // Rollback: the session was never persisted but the worktree IS on disk.
+    // The just-created worktree is clean + owned, so the hardened non-force
+    // remove reaches absence; we only need it gone (branch delete is folded in).
     await removeWorktree(wt.worktreePath, sourceCwd, { branch: wt.branch }).catch(() => undefined)
     deps.err(errLine("fork", `failed to save forked session: ${errMessage(e)}`))
     return 1
   }
 }
 
-/** HIGH-6 helper: when a session's cwd lives under
- *  `<repoRoot>/.quanta/worktrees/<safeId>`, derive the repoRoot and branch
- *  (`fork-<safeId>`) so `delete` can call `removeWorktree`. Returns
- *  `undefined` when the cwd does NOT look like a fork-worktree path so the
- *  caller can skip cleanup. */
-const deriveWorktreeInfo = (
-  cwd: string,
-): { repoRoot: string; worktreePath: string; branch: string } | undefined => {
-  // Look for `/.quanta/worktrees/<segment>` ANYWHERE in the path (works for
-  // both `/abs/repo/.quanta/worktrees/safeId` and similar variants). The
-  // segment is whatever follows the marker — we reconstruct the branch as
-  // `fork-<segment>` to match createPersistentWorktree's branch naming.
-  const marker = "/.quanta/worktrees/"
-  const idx = cwd.lastIndexOf(marker)
-  if (idx < 0) return undefined
-  const repoRoot = cwd.slice(0, idx)
-  const remainder = cwd.slice(idx + marker.length)
-  // The worktree path layout is one segment deep; refuse anything nested or
-  // empty so we don't pass a malformed cwd through to `git`.
-  if (remainder.length === 0 || remainder.includes("/")) return undefined
-  return { repoRoot, worktreePath: cwd, branch: `fork-${remainder}` }
+/** RFC-06 §RFC06-1 — fold a `ready` WorkspaceOwnership record onto an
+ *  already-persisted session's meta and re-save through the EXISTING atomic
+ *  store (no new writer). Mints the `creating` intent then transitions to
+ *  `ready` (the fork effect already ran) so the persisted state is a valid
+ *  lifecycle position. Best-effort: a save failure is surfaced by the caller's
+ *  try/catch, never silently swallowed. */
+const publishForkWorkspaceOwnership = async (
+  sessionId: string,
+  facts: {
+    ownerThreadId: string
+    repoRoot: string
+    repoId: string
+    path: string
+    branch: string
+    baseSha: string
+  },
+): Promise<void> => {
+  const saved = await loadSessionById(sessionId)
+  if (saved === undefined) return
+  const now = Date.now()
+  const intent = makeWorkspaceCreateIntent({
+    ownershipId: crypto.randomUUID(),
+    ...facts,
+    now,
+  })
+  const ready = transitionWorkspaceState(intent, "ready", now)
+  const ownership = ready.ok ? ready.record : intent
+  const nextMeta: SessionMeta = { ...saved.meta, workspaceOwnership: ownership }
+  await saveSessionById(nextMeta, {
+    reason: saved.reason,
+    turns: saved.turns,
+    messages: saved.messages,
+    ...(saved.rollbackCheckpoints !== undefined
+      ? { rollbackCheckpoints: saved.rollbackCheckpoints }
+      : {}),
+    ...(saved.rollbackOperations !== undefined
+      ? { rollbackOperations: saved.rollbackOperations }
+      : {}),
+  })
 }
 
 const cmdRewind = async (args: string[], deps: SessionCommandDeps): Promise<number> => {
@@ -573,32 +615,52 @@ const cmdDelete = async (args: string[], deps: SessionCommandDeps): Promise<numb
       return 0
     }
   }
-  // HIGH-6: when a session was created via `fork --worktree`, its meta.cwd
-  // points inside `<repoRoot>/.quanta/worktrees/<safeId>`. Tear down the
-  // worktree + branch BEFORE removing the session file (failure is logged but
-  // does NOT abort the delete — the session record is what users see). The
-  // branch is derived from the path segment, matching the layout fixed by
-  // createPersistentWorktree so we don't need a new SessionMeta field.
-  const wtInfo = deriveWorktreeInfo(existing.meta.cwd)
-  if (wtInfo) {
-    try {
-      const ok = await removeWorktree(wtInfo.worktreePath, wtInfo.repoRoot, {
-        branch: wtInfo.branch,
-      })
-      if (ok) {
-        deps.out(`removed worktree: ${wtInfo.worktreePath}\n`)
-      } else {
-        deps.err(
-          `warning: worktree cleanup failed (path may already be gone): ${wtInfo.worktreePath}\n`,
-        )
-      }
-    } catch (e) {
-      deps.err(`warning: worktree cleanup failed: ${errMessage(e)}\n`)
-    }
-  }
+  // RFC-06 §RFC06-1: when a session PERSISTED a WorkspaceOwnership record, tear
+  // down the EXACT persisted worktree + branch BEFORE removing the session file.
+  // The target is read from the durable ownership authority — NOT inferred from
+  // the cwd path/branch name (the `deriveWorktreeInfo` heuristic was removed).
+  // The hardened `removeWorktree` is non-force + porcelain-exact: a dirty/locked
+  // worktree is REFUSED (report-only, never force-deleted) and the session file
+  // is still removed (the record is what users see). A session without a
+  // persisted ownership record simply skips cleanup (no inference).
+  await cleanupOwnedWorktreeOnDelete(existing.meta.workspaceOwnership, deps)
   await deleteSession(id)
   deps.out(`deleted ${id}\n`)
   return 0
+}
+
+/** RFC-06 §RFC06-1 — teardown the EXACT persisted worktree on session delete.
+ *  Report-only: dirty/locked refusals and git errors are surfaced as warnings
+ *  and NEVER escalated to a force delete. No-op when there is no persisted
+ *  ownership record (no path/branch inference). */
+const cleanupOwnedWorktreeOnDelete = async (
+  ownership: WorkspaceOwnership | undefined,
+  deps: SessionCommandDeps,
+): Promise<void> => {
+  if (ownership === undefined) return
+  try {
+    const outcome = await removeWorktree(ownership.path, ownership.repoRoot, {
+      branch: ownership.branch,
+    })
+    switch (outcome.kind) {
+      case "removed":
+        deps.out(`removed worktree: ${ownership.path}\n`)
+        break
+      case "absent":
+        deps.out(`worktree already gone: ${ownership.path}\n`)
+        break
+      case "refused":
+        deps.err(
+          `warning: worktree NOT removed (${outcome.reason}) — left in place: ${ownership.path}\n`,
+        )
+        break
+      case "error":
+        deps.err(`warning: worktree cleanup error (${outcome.error}): ${ownership.path}\n`)
+        break
+    }
+  } catch (e) {
+    deps.err(`warning: worktree cleanup failed: ${errMessage(e)}\n`)
+  }
 }
 
 const cmdPath = async (args: string[], deps: SessionCommandDeps): Promise<number> => {

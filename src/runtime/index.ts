@@ -72,5 +72,27 @@ export {
   WORKTREE_LOCK_BACKOFF_MS,
   withWorktree,
 } from "./worktree"
-export type { PersistentWorktree } from "./worktree-fork"
-export { createPersistentWorktree, removeWorktree, WorktreeForkError } from "./worktree-fork"
+export type {
+  PersistentWorktree,
+  RemoveOutcome,
+  RemoveRefusalReason,
+} from "./worktree-fork"
+export {
+  createPersistentWorktree,
+  forceRemoveWorktree,
+  removalReachedAbsence,
+  removeWorktree,
+  WorktreeForkError,
+} from "./worktree-fork"
+// RFC-06 §RFC06-1 — typed porcelain worktree inspector (read adapter only; no
+// ownership/state/remove authority).
+export type {
+  GitRunner,
+  InspectResult,
+  WorktreeInspection,
+} from "./worktree-inspect"
+export {
+  findByExactPath,
+  inspectWorktrees,
+  parseWorktreePorcelain,
+} from "./worktree-inspect"
