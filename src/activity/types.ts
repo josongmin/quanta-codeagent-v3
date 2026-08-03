@@ -64,6 +64,41 @@ export interface Stuck {
   readonly detail?: string
 }
 
+/**
+ * RFC02-5 operation-correlation contract (aug-02 absorption, B6).
+ *
+ * The STABLE correlation a long-running OPERATION (a worktree transition, an env
+ * setup) carries so a surface can stitch its `running`→`done|failed` transitions
+ * to the run/thread/turn that ORDERED it — WITHOUT a second status bus or a
+ * per-feature store. It is a thin annotation ON the existing spine node, not a
+ * new event type: a producer stamps it at `node_open`; the spine carries it
+ * verbatim; surfaces read it off the node.
+ *
+ * Cardinality discipline (mirrors the spine's status vocabulary rule): every
+ * field is a STABLE, low-cardinality identifier the caller MINTS (a run id, a
+ * thread id, an operation id) — NEVER a dynamic value (model/tool/path/free
+ * text) that would explode the id space. `sequence` is a monotonic per-operation
+ * step counter (0-based) so a surface can order an operation's transitions even
+ * when wall-clock stamps collide; `occurredAt` is the epoch-ms the correlated
+ * lifecycle position was reached.
+ */
+export interface OperationCorrelation {
+  /** The long-running operation's stable id (caller-minted, e.g. an
+   *  ownershipId). The SAME id for every transition of the one operation — this
+   *  is what makes `running`/`done`/`failed` correlate to ONE operation. */
+  readonly operationId: string
+  /** Owning thread/session id (correlates the operation to the agent thread). */
+  readonly threadId: string
+  /** Optional turn id when the operation was ordered inside a specific turn. */
+  readonly turnId?: string
+  /** Optional run/workflow id when the operation nests under a run root. */
+  readonly runId?: string
+  /** Monotonic 0-based per-operation step counter (orders transitions). */
+  readonly sequence: number
+  /** Epoch-ms the correlated lifecycle position was reached. */
+  readonly occurredAt: number
+}
+
 /** One node in the activity tree. Counters (`tokens`/`toolCalls`) are
  *  cumulative for THIS node only; aggregates roll up in the snapshot. */
 export interface ActivityNode {
@@ -77,6 +112,10 @@ export interface ActivityNode {
   readonly tokens: number
   readonly toolCalls: number
   readonly stuck?: Stuck
+  /** RFC02-5 — the stable operation correlation this node projects (when it is
+   *  a correlated long-running operation). Absent for ordinary spine nodes so
+   *  the default posture is byte-identical. Stamped at `node_open`. */
+  readonly correlation?: OperationCorrelation
   /** Free-form, surface-rendered hints (e.g. `{ tool: "Bash", model: "gpt-5" }`). */
   readonly meta?: Readonly<Record<string, string>>
 }
@@ -91,6 +130,8 @@ export interface NodeInit {
   readonly label: string
   readonly status?: ActivityStatus
   readonly at?: number
+  /** RFC02-5 — stable operation correlation stamped onto the opened node. */
+  readonly correlation?: OperationCorrelation
   readonly meta?: Readonly<Record<string, string>>
 }
 

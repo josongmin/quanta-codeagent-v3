@@ -52,6 +52,7 @@ const seedNode = (store: ActivityStore, snapshot: ActivitySnapshot, n: ActivityN
       label: n.label,
       status: "running",
       ...(n.startedAt !== undefined ? { at: n.startedAt } : {}),
+      ...(n.correlation !== undefined ? { correlation: n.correlation } : {}),
       ...(n.meta !== undefined ? { meta: n.meta } : {}),
     },
   })

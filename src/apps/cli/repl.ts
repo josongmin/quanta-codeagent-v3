@@ -1,4 +1,5 @@
 import * as readline from "node:readline/promises"
+import { createActivityStore } from "@/activity"
 import { RetryingLLM } from "@/agent"
 import { defaultConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import {
@@ -147,6 +148,11 @@ export const runSessionMain = async (): Promise<number> => {
     // RFC-06 §RFC06-3 — the `worktree-gc` subcommand operates on the CWD repo
     // by default; the runner slice never reads `process.cwd()` itself.
     cwd: process.cwd(),
+    // RFC02-5 / RFC06-2 — the `worktree` subcommand emits its correlated
+    // running→done|failed transition onto this live spine, then renders it. A
+    // fresh store per invocation (the CLI seam is the composition root; no
+    // ambient/global activity state).
+    activityStore: createActivityStore(),
     ...(listEnv !== undefined ? { listEnv } : {}),
   })
   rl.close()

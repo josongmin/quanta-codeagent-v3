@@ -28,6 +28,13 @@ export {
   workflowToActivity,
 } from "./producers/workflow"
 export {
+  type WorktreeOpenOpts,
+  type WorktreeSettledKind,
+  worktreeOpenActivity,
+  worktreeOpNodeId,
+  worktreeSettleActivity,
+} from "./producers/worktree"
+export {
   type ActivityTreeNode,
   type FleetRow,
   projectFleet,
@@ -57,6 +64,7 @@ export type {
   ActivityStatus,
   AgentActivityEvent,
   NodeInit,
+  OperationCorrelation,
   Stuck,
   StuckReason,
 } from "./types"

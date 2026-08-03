@@ -1,3 +1,4 @@
+import { type ActivityStore, renderActivity } from "@/activity"
 import type { Message } from "@/llm"
 import {
   createPersistentWorktree,
@@ -25,6 +26,7 @@ import {
   type WorkspaceOwnership,
 } from "@/session"
 import { errMessage } from "@/shared"
+import { type TransitionActivity, transitionThreadToWorktree } from "./current-thread-worktree"
 import {
   applyListPipeline,
   buildSessionListEntries,
@@ -97,6 +99,12 @@ export interface SessionCommandDeps {
    *  (the surface injects `process.cwd()`; the runner slice never reads it
    *  directly). Absent ⇒ `worktree-gc` requires an explicit `--repo <path>`. */
   cwd?: string
+  /** RFC02-5 / RFC06-2 — the observability spine the `worktree` subcommand emits
+   *  the correlated transition onto (the surface injects a live
+   *  {@link ActivityStore}). Absent ⇒ the transition runs WITHOUT emitting
+   *  activity (byte-identical to the pre-RFC02-5 path) but the subcommand still
+   *  functions; when present the surface renders the resulting activity state. */
+  activityStore?: ActivityStore
 }
 
 /** Render a single message's content as a single line of joined text. */
@@ -134,6 +142,7 @@ const usage = (): string =>
     "  path <id>                           print absolute file path",
     "  import <provider>                   import sessions from an external agent",
     "                                       (provider: claude_code | cursor | aider)",
+    "  worktree <id> [--branch <name>]     switch a thread into an isolated worktree",
     "  worktree-gc [--repo <path>] [--apply]  dry-run / apply owned-worktree GC",
     "",
   ].join("\n")
@@ -815,6 +824,81 @@ const cmdWorktreeGc = async (args: string[], deps: SessionCommandDeps): Promise<
   return 0
 }
 
+/**
+ * RFC-06 §RFC06-2 / RFC02-5 — the current-thread worktree switch front door.
+ * `worktree <id>` transitions the given session's thread into an isolated
+ * worktree as the durable intent→effect→publish transaction (the KEPT create
+ * owner does the git effect; the persisted `WorkspaceOwnership` authority is the
+ * lifecycle). This is the FIRST production caller of `transitionThreadToWorktree`
+ * and the FIRST real operation-correlated activity producer: when the surface
+ * injected an {@link ActivityStore}, the transition emits a correlated
+ * `running`→`done|failed` node the surface then renders (so the switch is
+ * observable — the north-star "뭐하고 있나").
+ *
+ * The `nextCwd` is pinned at the NEXT turn boundary by the caller (never
+ * mid-turn); this command reports it. Rejections (session missing / already owns
+ * a worktree) and git failures are surfaced as exit-1 with a clear reason.
+ */
+const cmdWorktree = async (args: string[], deps: SessionCommandDeps): Promise<number> => {
+  const unknown = checkUnknownArgs(args, 1, [], ["--branch"])
+  if (unknown !== undefined) {
+    deps.err(errLine("worktree", `unexpected argument: ${unknown}`))
+    return 1
+  }
+  const id = args[0]
+  if (id === undefined) {
+    deps.err(errLine("worktree", "missing <id>"))
+    return 1
+  }
+  const saved = await loadSessionById(id)
+  if (saved === undefined) {
+    deps.err(errLine("worktree", `not found: ${id}`))
+    return 1
+  }
+  const repoRoot = saved.meta.cwd
+  const branch = readValueFlag(args, "--branch")
+  const req = {
+    sessionId: id,
+    ownerThreadId: id,
+    repoRoot,
+    repoId: saved.meta.gitOriginUrl ?? repoRoot,
+    ownershipId: crypto.randomUUID(),
+    baseSha: saved.meta.gitSha ?? "HEAD",
+    ...(branch !== undefined ? { branch } : {}),
+  }
+  // The activity sink is OPTIONAL: when the surface wired a store, the
+  // transition emits the correlated running→done|failed node onto it (and we
+  // render the resulting state below). Absent ⇒ byte-identical, no activity.
+  const activity: TransitionActivity | undefined =
+    deps.activityStore !== undefined ? { store: deps.activityStore, turnId: id } : undefined
+  const result = await transitionThreadToWorktree(req, () => Date.now(), activity)
+  switch (result.kind) {
+    case "ready":
+      deps.out(`worktree ready: ${result.nextCwd} (branch ${result.ownership.branch})\n`)
+      deps.out(`  (pinned at the next turn boundary — not mid-turn)\n`)
+      break
+    case "failed":
+      deps.err(
+        errLine(
+          "worktree",
+          `git failed (${result.errorCode})${result.detail !== undefined ? `: ${result.detail}` : ""}`,
+        ),
+      )
+      break
+    case "rejected":
+      deps.err(errLine("worktree", result.reason))
+      break
+  }
+  // RFC02-5 — surface the correlated activity state so the transition is
+  // observable (only when a store was wired; otherwise byte-identical).
+  if (deps.activityStore !== undefined) {
+    for (const line of renderActivity(deps.activityStore.snapshot(), { now: Date.now() })) {
+      deps.out(`${line}\n`)
+    }
+  }
+  return result.kind === "ready" ? 0 : 1
+}
+
 /** Entry point for the `session` subcommand dispatcher.
  *
  * `args` is the slice AFTER `quanta session` (i.e. `process.argv.slice(3)`).
@@ -861,6 +945,8 @@ export const runSessionCommand = async (
         return await cmdImport(rest, deps)
       case "worktree-gc":
         return await cmdWorktreeGc(rest, deps)
+      case "worktree":
+        return await cmdWorktree(rest, deps)
       default:
         deps.err(`session: unknown subcommand: ${sub}\n`)
         deps.out(usage())
