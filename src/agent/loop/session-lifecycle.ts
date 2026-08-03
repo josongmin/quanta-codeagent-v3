@@ -285,10 +285,17 @@ export const runSessionStartSequence = async (args: {
   readonly wm: import("@/memory").WorkingMemory<Message>
   readonly sessionId: string
   readonly taskRegistry: { forceStop(id: string): boolean } | undefined
+  // RFC09-1 DRAIN — SHARED `hookPromptPending` accumulator (same one the
+  // `turn_start` drain and plan-mode reminders use). `session_start` /
+  // `user_prompt_submit` are the two command-hook-mappable emit sites this
+  // sequence runs; both may return `emit.promptHook`, which must reach real
+  // turn assembly rather than be discarded here.
+  readonly hookPromptPending: import("../hooks").HookPromptInject[]
 }): Promise<SessionStartOutcome> => {
   args.cfg.stream.emit({ type: "session_start" })
   if (args.cfg.hooks) {
-    await args.cfg.hooks.emit({ type: "session_start", sessionId: args.sessionId })
+    const started = await args.cfg.hooks.emit({ type: "session_start", sessionId: args.sessionId })
+    if (started.promptHook !== undefined) args.hookPromptPending.push(started.promptHook)
   }
   if (args.cfg.autoTitlePort !== undefined) {
     // ONCE-ONLY: title the session from its OPENING prompt — fire only when the
@@ -300,7 +307,12 @@ export const runSessionStartSequence = async (args: {
     }
   }
   if (args.cfg.hooks !== undefined) {
-    const denied = await emitUserPromptSubmitHook(args.cfg, args.wm, args.sessionId)
+    const denied = await emitUserPromptSubmitHook(
+      args.cfg,
+      args.wm,
+      args.sessionId,
+      args.hookPromptPending,
+    )
     // Hook DENY = policy/system block on the prompt (NOT a user Ctrl+C).
     if (denied !== null) return { status: "aborted", cause: "hook_deny" }
   }

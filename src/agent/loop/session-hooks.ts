@@ -1,5 +1,6 @@
 import type { Message } from "@/llm"
 import type { WorkingMemory } from "@/memory"
+import type { HookPromptInject } from "../hooks"
 import { isSyntheticUserMessage } from "../synthetic-user"
 import type { AgentConfig } from "../types"
 
@@ -7,6 +8,14 @@ export const emitUserPromptSubmitHook = async (
   cfg: AgentConfig,
   wm: WorkingMemory<Message>,
   sessionId: string,
+  // RFC09-1 DRAIN — the SAME `hookPromptPending` accumulator the `turn_start`
+  // drain (turn-iteration.ts) and the plan-mode reminders push into. A command
+  // hook shipped on `user_prompt_submit` returns its exit-0 stdout context on
+  // `emit.promptHook`; without draining it here the bridge is INERT for its
+  // intended event (the loop assembles the request from `hookPromptPending`).
+  // Optional so pre-existing callers/tests that don't thread the accumulator
+  // keep their old (deny/updatedPrompt-only) behavior byte-identical.
+  hookPromptPending?: HookPromptInject[],
 ): Promise<string | null> => {
   if (cfg.hooks === undefined) return null
   const lastUserIdx = findTrailingUserMessageIndex(wm)
@@ -26,6 +35,11 @@ export const emitUserPromptSubmitHook = async (
   if (typeof emit.updatedPrompt === "string") {
     rewriteUserPromptMessage(wm, lastUserIdx, userMsg, emit.updatedPrompt)
   }
+  // Drain the accumulated `promptHook` into the SHARED pending accumulator so it
+  // reaches real turn assembly. The `HookRegistry.emit` fold already bounded /
+  // sanitized the inject and (for untrusted command output) restricted it to
+  // `injectBeforeUser` — this site adds no new inject store, it only forwards.
+  if (emit.promptHook !== undefined) hookPromptPending?.push(emit.promptHook)
   return null
 }
 
