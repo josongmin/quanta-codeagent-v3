@@ -68,7 +68,14 @@ const AGENT_DIR = join(import.meta.dir, "..", "..", "src", "agent")
  *  `features.ts` now only imports value-symbols from the `./tier1/` sub-
  *  directory — which this analysis treats as external nodes — the return
  *  edges that closed the ring are gone and the SCC dissolved. */
-const WHITELIST: ReadonlyArray<ReadonlyArray<string>> = [["conversation-action.ts", "steering.ts"]]
+const WHITELIST: ReadonlyArray<ReadonlyArray<string>> = [
+  ["conversation-action.ts", "steering.ts"],
+  // RFC04 MCP hot-reload: mcp-reload-source re-uses mcp-bridge's converters
+  // (mcpToolToTool/tasksToolsFor/disambiguateMcpToolNames) so connect+reload
+  // share one assembly. The edge is runtime-lazy (function-scoped imports; no
+  // module-top-level call into the ring) — verified cycle-safe by the RFC04 wire.
+  ["mcp-bridge.ts", "mcp-reload-source.ts"],
+]
 
 interface ImportLine {
   /** File the import resolves to (basename + .ts, relative to AGENT_DIR), or

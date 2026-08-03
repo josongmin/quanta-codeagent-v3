@@ -24,6 +24,22 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     describe: "Background speculative compaction (ADR-0473).",
   },
   {
+    envKey: "QUANTA_CONTEXT_HEADROOM_ADVISORY",
+    kind: "bool",
+    default: false,
+    group: "compaction",
+    describe:
+      "Context-headroom advisory (RFC-01 A7): strict-1 opt-in, emits one edge-latched context_headroom_crossed event per upward threshold crossing. Default OFF ⇒ byte-identical.",
+  },
+  {
+    envKey: "QUANTA_HUNK_MUTATION_RECEIPT",
+    kind: "bool",
+    default: false,
+    group: "diff",
+    describe:
+      "Durable hunk-mutation receipt + CAS undo journal (RFC-06 B5): per-hunk apply persists an intent/effect/terminal receipt so it is undoable with content-verified (drift-refusing) revert. Default OFF ⇒ apply is byte-identical, no receipt.",
+  },
+  {
     envKey: "QUANTA_MICROCOMPACT",
     kind: "bool",
     default: false,
