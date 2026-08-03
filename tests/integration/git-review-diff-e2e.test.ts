@@ -240,6 +240,112 @@ describe("git_review_diff — e2e (real git + scripted reviewer)", () => {
     expect(r.output).toMatch(/no diff|empty/i)
   })
 
+  test.skipIf(!HAS_GIT)(
+    "RFC09-2: reviewer JSON with verdict/category/shortSummary round-trips through the real parser + render",
+    async () => {
+      // FULL old+new JSON fed through the real tryParseReport (anti-vacuity:
+      // not a hand-built object). The reviewer emits the richer shape and the
+      // tool result must surface verdict/category through the structured
+      // output AND the model-visible render.
+      const reviewer = scriptedReviewer({
+        ok: true,
+        finalText: JSON.stringify({
+          summary: "1 confirmed leak.",
+          findings: [
+            {
+              file: "feat.ts",
+              line: 2,
+              severity: "error",
+              what: "unvalidated multiplier",
+              why: "x may be negative",
+              impact: "downstream integer overflow",
+              verdict: "confirmed",
+              category: "input-validation",
+              shortSummary: "feat multiplies without validating x",
+            },
+          ],
+        }),
+        turns: 2,
+      })
+      const ctx: ToolContext = {
+        cwd: repoDir,
+        signal: new AbortController().signal,
+        reviewerAgent: reviewer.runner,
+      }
+      const r = await collect(
+        gitReviewDiffTool(defaultGitRunner),
+        { base: "HEAD~1", head: "HEAD" },
+        ctx,
+      )
+      expect(r.ok).toBe(true)
+      // Model-visible render carries verdict + category.
+      expect(r.output).toContain("confirmed")
+      expect(r.output).toContain("input-validation")
+      const struct = r.structured as
+        | {
+            findings: {
+              verdict?: string
+              category?: string
+              shortSummary?: string
+            }[]
+          }
+        | undefined
+      expect(struct?.findings[0]?.verdict).toBe("confirmed")
+      expect(struct?.findings[0]?.category).toBe("input-validation")
+      expect(struct?.findings[0]?.shortSummary).toBe("feat multiplies without validating x")
+    },
+  )
+
+  test.skipIf(!HAS_GIT)(
+    "RFC09-2: complete OLD-shape reviewer JSON still parses byte-identical (back-compat)",
+    async () => {
+      // Anti-vacuity: the FULL pre-RFC09-2 JSON string flows through the real
+      // tryParseReport. A strict-schema regression would make this RED.
+      const reviewer = scriptedReviewer({
+        ok: true,
+        finalText: JSON.stringify({
+          summary: "1 minor issue.",
+          findings: [
+            {
+              file: "feat.ts",
+              line: 2,
+              severity: "warning",
+              what: "TODO comment retained",
+              why: "Indicates incomplete validation",
+              impact: "May ship unverified input handling",
+            },
+          ],
+        }),
+        turns: 2,
+      })
+      const ctx: ToolContext = {
+        cwd: repoDir,
+        signal: new AbortController().signal,
+        reviewerAgent: reviewer.runner,
+      }
+      const r = await collect(
+        gitReviewDiffTool(defaultGitRunner),
+        { base: "HEAD~1", head: "HEAD" },
+        ctx,
+      )
+      expect(r.ok).toBe(true)
+      expect(r.output).toBe(
+        [
+          "1 minor issue.",
+          "",
+          "- [warning] feat.ts:2 — TODO comment retained",
+          "    why: Indicates incomplete validation",
+          "    impact: May ship unverified input handling",
+        ].join("\n"),
+      )
+      const struct = r.structured as { findings: Record<string, unknown>[] } | undefined
+      const finding = struct?.findings[0]
+      expect(finding && "verdict" in finding).toBe(false)
+      expect(finding && "category" in finding).toBe(false)
+      expect(finding && "shortSummary" in finding).toBe(false)
+    },
+  )
+
   test.skipIf(!HAS_GIT)("reviewer port absent ⇒ ok:false (no throw, deterministic)", async () => {
     const ctx: ToolContext = {
       cwd: repoDir,

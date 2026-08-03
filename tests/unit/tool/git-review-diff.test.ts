@@ -325,6 +325,145 @@ describe("gitReviewDiffTool — subagent reviewer", () => {
   })
 })
 
+describe("gitReviewDiffTool — RFC09-2 consumed finding fields (verdict/category/shortSummary)", () => {
+  test("verdict/category/shortSummary round-trip through real parser → structured → render", async () => {
+    const runner = new FakeRunner(okWithDiff())
+    const rv = fakeReviewer(
+      JSON.stringify({
+        summary: "1 confirmed issue",
+        findings: [
+          {
+            file: "src/watcher.ts",
+            line: 42,
+            severity: "error",
+            what: "watcher leaks on abort",
+            verdict: "confirmed",
+            category: "resource-leak",
+            shortSummary: "abort path never clears the fs watcher",
+          },
+        ],
+      }),
+    )
+    const r = await collect(gitReviewDiffTool(runner), {}, ctx(rv))
+    expect(r.ok).toBe(true)
+    // Renderer surfaces verdict + category when present.
+    expect(r.output).toContain("confirmed")
+    expect(r.output).toContain("resource-leak")
+    const struct = r.structured as
+      | {
+          findings?: {
+            verdict?: string
+            category?: string
+            shortSummary?: string
+          }[]
+        }
+      | undefined
+    expect(struct?.findings?.[0]?.verdict).toBe("confirmed")
+    expect(struct?.findings?.[0]?.category).toBe("resource-leak")
+    expect(struct?.findings?.[0]?.shortSummary).toBe("abort path never clears the fs watcher")
+  })
+
+  test("verdict 'plausible' accepted; category is an OPEN free string", async () => {
+    const runner = new FakeRunner(okWithDiff())
+    const rv = fakeReviewer(
+      JSON.stringify({
+        summary: "maybe",
+        findings: [
+          {
+            file: "a.ts",
+            severity: "info",
+            what: "possible race",
+            verdict: "plausible",
+            category: "some-novel-slug-not-in-any-enum",
+          },
+        ],
+      }),
+    )
+    const r = await collect(gitReviewDiffTool(runner), {}, ctx(rv))
+    const struct = r.structured as
+      | { findings?: { verdict?: string; category?: string }[] }
+      | undefined
+    expect(struct?.findings?.[0]?.verdict).toBe("plausible")
+    // Open string: an arbitrary slug is kept verbatim (NOT an enum).
+    expect(struct?.findings?.[0]?.category).toBe("some-novel-slug-not-in-any-enum")
+  })
+
+  test("malformed optional fields are OMITTED, not defaulted", async () => {
+    const runner = new FakeRunner(okWithDiff())
+    const rv = fakeReviewer(
+      JSON.stringify({
+        summary: "malformed extras",
+        findings: [
+          {
+            file: "a.ts",
+            severity: "warning",
+            what: "core finding survives",
+            verdict: "bogus-verdict-value", // not in the closed union
+            category: 123, // wrong type
+            shortSummary: { nested: true }, // wrong type
+          },
+        ],
+      }),
+    )
+    const r = await collect(gitReviewDiffTool(runner), {}, ctx(rv))
+    expect(r.ok).toBe(true)
+    const struct = r.structured as
+      | {
+          findings?: {
+            what?: string
+            verdict?: unknown
+            category?: unknown
+            shortSummary?: unknown
+          }[]
+        }
+      | undefined
+    const finding = struct?.findings?.[0]
+    // Core finding still parses (opportunistic; malformed optionals do not reject it).
+    expect(finding?.what).toBe("core finding survives")
+    // Each malformed optional is OMITTED (key absent), never defaulted.
+    expect(finding && "verdict" in finding).toBe(false)
+    expect(finding && "category" in finding).toBe(false)
+    expect(finding && "shortSummary" in finding).toBe(false)
+  })
+
+  test("OLD shape (no new fields) parses + renders byte-identical", async () => {
+    // The complete pre-RFC09-2 JSON shape must round-trip unchanged.
+    const oldJson = JSON.stringify({
+      summary: "1 minor issue",
+      findings: [
+        {
+          file: "src/foo.ts",
+          line: 2,
+          severity: "warning",
+          what: "TODO comment retained",
+          why: "Indicates incomplete validation",
+          impact: "May ship unverified input handling",
+        },
+      ],
+    })
+    const runner = new FakeRunner(okWithDiff())
+    const rv = fakeReviewer(oldJson)
+    const r = await collect(gitReviewDiffTool(runner), {}, ctx(rv))
+    expect(r.ok).toBe(true)
+    // Byte-identical render for the old shape (no verdict/category lines).
+    expect(r.output).toBe(
+      [
+        "1 minor issue",
+        "",
+        "- [warning] src/foo.ts:2 — TODO comment retained",
+        "    why: Indicates incomplete validation",
+        "    impact: May ship unverified input handling",
+      ].join("\n"),
+    )
+    // Structured payload carries no new keys for the old shape.
+    const struct = r.structured as { findings?: Record<string, unknown>[] } | undefined
+    const finding = struct?.findings?.[0]
+    expect(finding && "verdict" in finding).toBe(false)
+    expect(finding && "category" in finding).toBe(false)
+    expect(finding && "shortSummary" in finding).toBe(false)
+  })
+})
+
 describe("gitReviewDiffTool — error paths", () => {
   test("spawn failure ⇒ ok:false", async () => {
     const rv = fakeReviewer()

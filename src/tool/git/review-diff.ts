@@ -55,6 +55,22 @@ export const gitReviewDiffInputSchema = z.object({
 })
 export type GitReviewDiffInput = z.infer<typeof gitReviewDiffInputSchema>
 
+/** Reviewer disposition for a finding (RFC09-2 / A-GAP-4). CLOSED union — the
+ *  only exhaustive-guarded new field. `category` and `shortSummary` are OPEN
+ *  (free string), so they carry no drift-guard. Mirrors Codex's
+ *  `verdict:CONFIRMED|PLAUSIBLE`, lowercased to quanta's convention. */
+export type ReviewVerdict = "confirmed" | "plausible"
+
+/** Exhaustive-classification guard for `ReviewVerdict`. Adding a member to the
+ *  union without a `true` arm here fails compile (drift-guard). The runtime
+ *  `VALID_VERDICTS` set is derived from these keys so the parser cannot drift
+ *  from the type. Mirrors the `severity` manual guard (parseOneFinding). */
+const VERDICT_MEMBERS: Record<ReviewVerdict, true> = {
+  confirmed: true,
+  plausible: true,
+}
+const VALID_VERDICTS = new Set<string>(Object.keys(VERDICT_MEMBERS))
+
 /** Strongly-typed shape we try to parse out of the reviewer's `finalText`. The
  *  reviewer is asked (via REVIEW_NOTICE) to deliver findings in this shape;
  *  if it returns free text instead we fall back to a single-summary result.
@@ -67,6 +83,12 @@ export interface ReviewFinding {
   what: string
   why?: string
   impact?: string
+  /** Reviewer disposition (RFC09-2). Optional, closed union. */
+  verdict?: ReviewVerdict
+  /** Open-ended kebab category slug (RFC09-2). Free string, NOT an enum. */
+  category?: string
+  /** One-line reviewer summary of the finding (RFC09-2). */
+  shortSummary?: string
 }
 
 export interface ReviewReport {
@@ -126,8 +148,13 @@ const buildReviewerPrompt = (
   sections.push("```diff", diffText, "```", "")
   sections.push(
     "## Output shape",
-    "Return JSON: {summary: string, findings: [{file, line?, severity, what, why?, impact?}]}.",
+    "Return JSON: {summary: string, findings: [{file, line?, severity, what, " +
+      "why?, impact?, verdict?, category?, shortSummary?}]}.",
     'severity ∈ {"info","warning","error"}. Empty findings list = clean.',
+    'verdict ∈ {"confirmed","plausible"} (optional; confirmed = you verified it, ' +
+      "plausible = suspected). category = optional kebab-slug (e.g. resource-leak, " +
+      "input-validation). shortSummary = optional one-line gist. Omit any field you " +
+      "are unsure of rather than guessing.",
   )
   return sections.join("\n")
 }
@@ -146,6 +173,12 @@ const parseOneFinding = (raw: unknown): ReviewFinding | null => {
   if (typeof fo.line === "number") finding.line = fo.line
   if (typeof fo.why === "string") finding.why = fo.why
   if (typeof fo.impact === "string") finding.impact = fo.impact
+  // RFC09-2 consumed optional fields — opportunistic + omit-on-malformed.
+  if (typeof fo.verdict === "string" && VALID_VERDICTS.has(fo.verdict)) {
+    finding.verdict = fo.verdict as ReviewVerdict
+  }
+  if (typeof fo.category === "string") finding.category = fo.category
+  if (typeof fo.shortSummary === "string") finding.shortSummary = fo.shortSummary
   return finding
 }
 
@@ -186,6 +219,24 @@ const tryParseReport = (raw: string): ReviewReport | null => {
   return null
 }
 
+/** Render one finding into its display lines. Extracted from `renderReport`
+ *  so the RFC09-2 verdict/category line keeps the caller under the biome
+ *  cognitive-complexity cap (15). Absent verdict AND category ⇒ no tag line,
+ *  so the old-shape render stays byte-identical. */
+const renderFinding = (f: ReviewFinding): string[] => {
+  const where = f.line !== undefined ? `${f.file}:${f.line}` : f.file
+  const out: string[] = [`- [${f.severity}] ${where} — ${f.what}`]
+  if (f.verdict !== undefined || f.category !== undefined) {
+    const tags: string[] = []
+    if (f.verdict !== undefined) tags.push(f.verdict)
+    if (f.category !== undefined) tags.push(f.category)
+    out.push(`    ${tags.join(" · ")}`)
+  }
+  if (f.why) out.push(`    why: ${f.why}`)
+  if (f.impact) out.push(`    impact: ${f.impact}`)
+  return out
+}
+
 const renderReport = (report: ReviewReport): string => {
   const lines: string[] = [report.summary, ""]
   if (report.findings.length === 0) {
@@ -193,10 +244,7 @@ const renderReport = (report: ReviewReport): string => {
     return lines.join("\n").trimEnd()
   }
   for (const f of report.findings) {
-    const where = f.line !== undefined ? `${f.file}:${f.line}` : f.file
-    lines.push(`- [${f.severity}] ${where} — ${f.what}`)
-    if (f.why) lines.push(`    why: ${f.why}`)
-    if (f.impact) lines.push(`    impact: ${f.impact}`)
+    lines.push(...renderFinding(f))
   }
   return lines.join("\n").trimEnd()
 }
