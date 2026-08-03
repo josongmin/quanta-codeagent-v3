@@ -7,6 +7,7 @@ import {
   serverSupportsResourceSubscribe,
   serverSupportsResources,
   serverSupportsTasks,
+  serverSupportsToolsListChanged,
 } from "./client/capabilities-gate"
 import { isUnauthorizedError, McpError, unsupported } from "./client/errors"
 import {
@@ -260,7 +261,7 @@ export class McpClient {
       takePending: (id) => client.takePending(id),
       progressHandlers: this.progressHandlers,
       get resourceObserver() {
-        return client.resourceObserver
+        return client.gatedResourceObserver()
       },
       get rootsProvider() {
         return client.rootsProvider
@@ -393,6 +394,36 @@ export class McpClient {
    *  raw `-32601`. */
   serverSupportsCompletions(): boolean {
     return serverSupportsCompletions(this.serverCapabilities)
+  }
+
+  /** RFC04-1 — does the connected server advertise `tools.listChanged`? The
+   *  inbound router consults this to decide whether a
+   *  `notifications/tools/list_changed` is delivered to the reload observer as
+   *  an invalidation signal. A server that never negotiated the capability
+   *  cannot trigger a reload by emitting an unsolicited notification
+   *  (fail-closed). Re-read per notification off the live capability record so
+   *  a reconnect that renegotiates re-evaluates. */
+  serverSupportsToolsListChanged(): boolean {
+    return serverSupportsToolsListChanged(this.serverCapabilities)
+  }
+
+  /** RFC04-1 — capability-GATED view of the wired resource observer handed to
+   *  the inbound router. `resource_updated` / `resource_list_changed` /
+   *  `prompt_list_changed` pass through UNCHANGED (byte-identical to the raw
+   *  observer). A `tools_list_changed` is delivered ONLY when the server
+   *  advertised `tools.listChanged`; otherwise it is dropped so an unsolicited
+   *  notification from a non-negotiating server cannot trigger a hot-reload.
+   *  Returns `undefined` when no observer is wired (byte-identical no-op). This
+   *  wraps the SAME parser/observer channel — no second notification bus. */
+  private gatedResourceObserver(): McpResourceObserver | undefined {
+    const inner = this.resourceObserver
+    if (inner === undefined) return undefined
+    return {
+      onNotification: (event) => {
+        if (event.kind === "tools_list_changed" && !this.serverSupportsToolsListChanged()) return
+        inner.onNotification(event)
+      },
+    }
   }
 
   /** ADR-0431 — dispatch a single outbound JSON-RPC request and return the raw
