@@ -98,6 +98,16 @@ export const HOST: readonly KnobInventoryEntry[] = [
     readSite: "apps/cli/slash/registry-surface.ts",
   },
   {
+    envKey: "QUANTA_PROC_PANEL",
+    kind: "bool",
+    default: false,
+    group: "host-gate",
+    home: "runtime-config",
+    describe:
+      "/ps slash command — list-only, redacted background-shell inventory owned by this session (RFC02-1; opt-in, read-only).",
+    readSite: "apps/cli/slash/registry-surface.ts",
+  },
+  {
     envKey: "QUANTA_COMMAND_HOOKS",
     kind: "bool",
     default: false,
