@@ -619,4 +619,94 @@ describe("runSessionCommand", () => {
     },
     30_000,
   )
+
+  // RFC-06 §RFC06-3 — explicit operator GC front door. Fork a worktree (which
+  // persists ownership), then `worktree-gc --repo <repo>` dry-runs (eligible,
+  // nothing removed) and `--apply` removes it via the hardened non-force path.
+  test.skipIf(!HAS_GIT)(
+    "worktree-gc dry-run classifies owned worktrees; --apply removes eligible",
+    async () => {
+      const repo = await makeRepo()
+      cleanups.push(repo)
+      await saveSessionById(mkMeta({ id: "gc-src", title: "GcSrc", cwd: repo }), mkPayload())
+      const cFork = captureDeps()
+      expect(await runSessionCommand(["fork", "gc-src", "--worktree"], cFork.deps)).toBe(0)
+      const wtPath = cFork.out.match(/worktree: (\S+) /)?.[1] ?? ""
+      expect(existsSync(wtPath)).toBe(true)
+
+      // Dry-run: the owned worktree is eligible; nothing is removed.
+      const cDry = captureDeps()
+      const dryCode = await runSessionCommand(["worktree-gc", "--repo", repo], cDry.deps)
+      expect(dryCode).toBe(0)
+      expect(cDry.out).toContain("[eligible]")
+      expect(cDry.out).toContain(wtPath)
+      expect(cDry.out).toContain("Re-run with --apply")
+      expect(existsSync(wtPath)).toBe(true) // dry-run removed NOTHING
+
+      // Apply: the eligible worktree is removed via the hardened remover.
+      const cApply = captureDeps()
+      const applyCode = await runSessionCommand(
+        ["worktree-gc", "--repo", repo, "--apply"],
+        cApply.deps,
+      )
+      expect(applyCode).toBe(0)
+      expect(cApply.out).toContain(`removed: ${wtPath}`)
+      expect(existsSync(wtPath)).toBe(false)
+    },
+    30_000,
+  )
+
+  // RFC-06 §RFC06-3 — TOCTOU: a worktree eligible at dry-run that turns DIRTY
+  // before --apply must be SKIPPED (the fresh recheck refuses it), never
+  // force-removed.
+  test.skipIf(!HAS_GIT)(
+    "worktree-gc --apply SKIPS a target that turned dirty since dry-run (TOCTOU)",
+    async () => {
+      const repo = await makeRepo()
+      cleanups.push(repo)
+      await saveSessionById(mkMeta({ id: "gc-dirty", title: "GcDirty", cwd: repo }), mkPayload())
+      const cFork = captureDeps()
+      expect(await runSessionCommand(["fork", "gc-dirty", "--worktree"], cFork.deps)).toBe(0)
+      const wtPath = cFork.out.match(/worktree: (\S+) /)?.[1] ?? ""
+      expect(existsSync(wtPath)).toBe(true)
+
+      // Dirty it AFTER the fork (simulating drift between a dry-run and apply).
+      await writeFile(join(wtPath, "scratch.txt"), "uncommitted\n")
+
+      const cApply = captureDeps()
+      const code = await runSessionCommand(["worktree-gc", "--repo", repo, "--apply"], cApply.deps)
+      expect(code).toBe(0)
+      // The dirty tree is classified dirty (not eligible) ⇒ preserved on disk.
+      expect(existsSync(wtPath)).toBe(true)
+      expect(existsSync(join(wtPath, "scratch.txt"))).toBe(true)
+      expect(cApply.out).toContain("[dirty]")
+      expect(cApply.out).toContain("removed 0/0 eligible")
+    },
+    30_000,
+  )
+
+  // RFC-06 §RFC06-3 — a legacy `.claude/worktrees/agent-*` tree with NO
+  // persisted ownership is NEVER a GC candidate (provenance gate).
+  test.skipIf(!HAS_GIT)(
+    "worktree-gc ignores an unowned (legacy) worktree — no persisted ownership",
+    async () => {
+      const repo = await makeRepo()
+      cleanups.push(repo)
+      // Create a worktree that NO session owns (simulating a legacy agent tree).
+      const legacy = join(repo, ".claude", "worktrees", "agent-legacy")
+      await runShell(`git worktree add --no-track -B worktree-agent-legacy -- "${legacy}" HEAD`, {
+        cwd: repo,
+      })
+      expect(existsSync(legacy)).toBe(true)
+
+      const cGc = captureDeps()
+      const code = await runSessionCommand(["worktree-gc", "--repo", repo, "--apply"], cGc.deps)
+      expect(code).toBe(0)
+      // No persisted ownership points at it ⇒ it is not even a candidate.
+      expect(cGc.out).toContain("0 owned worktree(s)")
+      expect(cGc.out).not.toContain(legacy)
+      expect(existsSync(legacy)).toBe(true) // untouched
+    },
+    30_000,
+  )
 })

@@ -1,5 +1,11 @@
 import type { Message } from "@/llm"
-import { createPersistentWorktree, isGitRepo, removeWorktree, WorktreeForkError } from "@/runtime"
+import {
+  createPersistentWorktree,
+  isGitRepo,
+  removeWorktree,
+  runShell,
+  WorktreeForkError,
+} from "@/runtime"
 import {
   archivedFilePath,
   archiveSession,
@@ -25,6 +31,13 @@ import {
   renderSessionList,
   type SessionListOptions,
 } from "./list-tui"
+import {
+  applyWorktreeGc,
+  collectOwnedWorktrees,
+  type GcCandidate,
+  type GcPlan,
+  planWorktreeGc,
+} from "./worktree-gc"
 
 /**
  * `quanta session …` subcommand dispatcher.
@@ -80,6 +93,10 @@ export interface SessionCommandDeps {
    *  dispatcher falls back to safe defaults (plain format, cap=10) — so
    *  callers that never set this keep the byte-identical legacy output. */
   listEnv?: SessionListEnv
+  /** RFC-06 §RFC06-3 — the repo root the `worktree-gc` subcommand operates on
+   *  (the surface injects `process.cwd()`; the runner slice never reads it
+   *  directly). Absent ⇒ `worktree-gc` requires an explicit `--repo <path>`. */
+  cwd?: string
 }
 
 /** Render a single message's content as a single line of joined text. */
@@ -117,6 +134,7 @@ const usage = (): string =>
     "  path <id>                           print absolute file path",
     "  import <provider>                   import sessions from an external agent",
     "                                       (provider: claude_code | cursor | aider)",
+    "  worktree-gc [--repo <path>] [--apply]  dry-run / apply owned-worktree GC",
     "",
   ].join("\n")
 
@@ -697,6 +715,87 @@ const cmdImport = async (args: string[], deps: SessionCommandDeps): Promise<numb
   return deps.importHandler(args, deps)
 }
 
+/** RFC-06 §RFC06-3 — dirty probe: `git status --porcelain` inside a worktree.
+ *  Non-empty ⇒ dirty. `undefined` on a git error (⇒ the planner fails closed to
+ *  `dirty`, never treats an unknown state as clean). */
+const gcDirtyProbe = async (worktreePath: string): Promise<boolean | undefined> => {
+  const st = await runShell("git status --porcelain", { cwd: worktreePath }).catch(() => undefined)
+  if (st === undefined || st.exitCode !== 0) return undefined
+  return st.stdout.trim().length > 0
+}
+
+/** Render one GC candidate as a report line. */
+const gcLine = (c: GcCandidate): string =>
+  `  [${c.verdict}] ${c.ownership.path} (branch ${c.ownership.branch}, session ${c.sessionId}) — ${c.reason}\n`
+
+/** Run the GC `--apply` phase: remove eligible targets (TOCTOU-rechecked inside
+ *  `applyWorktreeGc`) and report per-target outcomes. Extracted from
+ *  `cmdWorktreeGc` to keep its cognitive complexity under the biome ceiling. */
+const runGcApply = async (
+  plan: GcPlan,
+  eligible: readonly GcCandidate[],
+  deps: SessionCommandDeps,
+): Promise<void> => {
+  const results = await applyWorktreeGc(plan, gcDirtyProbe)
+  let removedCount = 0
+  for (const r of results) {
+    if (r.action === "removed") {
+      removedCount += 1
+      deps.out(`removed: ${r.path} (${r.reason})\n`)
+    } else if (eligible.some((e) => e.ownership.path === r.path)) {
+      // Only report skips for targets that WERE eligible at dry-run (a TOCTOU
+      // drift); non-eligible verdicts were already reported above.
+      deps.err(`skipped: ${r.path} — ${r.reason}\n`)
+    }
+  }
+  deps.out(`worktree-gc: removed ${removedCount}/${eligible.length} eligible.\n`)
+}
+
+/**
+ * RFC-06 §RFC06-3 — explicit operator worktree GC. `worktree-gc [--repo <path>]`
+ * prints a dry-run classification of PERSISTED-OWNED worktrees; `--apply`
+ * additionally removes ONLY `eligible` targets after a TOCTOU recheck through
+ * the hardened non-force remover. NO daemon/reaper/force. Legacy
+ * `.claude/worktrees/agent-*` trees have no persisted ownership ⇒ they are
+ * never candidates.
+ */
+const cmdWorktreeGc = async (args: string[], deps: SessionCommandDeps): Promise<number> => {
+  const unknown = checkUnknownArgs(args, 0, ["--apply"], ["--repo"])
+  if (unknown !== undefined) {
+    deps.err(errLine("worktree-gc", `unexpected argument: ${unknown}`))
+    return 1
+  }
+  const repoRoot = readValueFlag(args, "--repo") ?? deps.cwd
+  if (repoRoot === undefined || repoRoot === "") {
+    deps.err(errLine("worktree-gc", "no repo root (pass --repo <path>)"))
+    return 1
+  }
+  const apply = hasFlag(args, "--apply")
+
+  const ids = (await listSessions({ includeArchived: true })).map((m) => m.id)
+  const owned = await collectOwnedWorktrees(ids, repoRoot)
+  const planned = await planWorktreeGc(owned, repoRoot, gcDirtyProbe)
+  if (!planned.ok) {
+    deps.err(errLine("worktree-gc", `inspection failed: ${planned.error}`))
+    return 1
+  }
+  const { candidates } = planned.plan
+  const eligible = candidates.filter((c) => c.verdict === "eligible")
+
+  deps.out(`worktree-gc: ${candidates.length} owned worktree(s) in ${repoRoot}\n`)
+  for (const c of candidates) deps.out(gcLine(c))
+  if (candidates.length === 0) deps.out("  (none owned by a persisted session)\n")
+
+  if (!apply) {
+    deps.out(`\n${eligible.length} eligible for removal. Re-run with --apply to remove.\n`)
+    return 0
+  }
+
+  // --apply: remove only eligible targets, with a fresh TOCTOU recheck each.
+  await runGcApply(planned.plan, eligible, deps)
+  return 0
+}
+
 /** Entry point for the `session` subcommand dispatcher.
  *
  * `args` is the slice AFTER `quanta session` (i.e. `process.argv.slice(3)`).
@@ -741,6 +840,8 @@ export const runSessionCommand = async (
         return await cmdPath(rest, deps)
       case "import":
         return await cmdImport(rest, deps)
+      case "worktree-gc":
+        return await cmdWorktreeGc(rest, deps)
       default:
         deps.err(`session: unknown subcommand: ${sub}\n`)
         deps.out(usage())
