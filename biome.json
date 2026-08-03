@@ -1171,6 +1171,7 @@
         "!tests/integration/debug-cli-surface-e2e-hellgate.test.ts",
         "!tests/unit/playbook-trigger-cli-bind-hellgate.test.ts",
         "!tests/unit/batch-cmd-wire-hellgate.test.ts",
+        "!tests/unit/config-migration-import-skill-stage-frontdoor.test.ts",
         "!tests/unit/integrations/github/cli-real-adapters-hellgate-r3.test.ts",
         "!tests/unit/integrations/github/composer-redact-defence-in-depth-hellgate-r3.test.ts",
         "!tests/unit/integrations/github/composer-fold-hellgate-r5.test.ts",
