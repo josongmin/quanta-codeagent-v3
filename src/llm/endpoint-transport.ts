@@ -20,6 +20,7 @@
  * NO new SSRF classifier, NO new retry loop, NO URL-shape wire inference.
  */
 
+import type { OpenAIEndpointOptions } from "@/config"
 import { fetchWithSsrfGuard, type HostResolver, type NetworkPolicy } from "@/shared/net/ssrf"
 
 /** The resolved (secret-materialized) endpoint contract. `wireApi` selects the
@@ -37,6 +38,46 @@ export interface ResolvedEndpoint {
   /** Resolved static query params (non-secret). Empty when none. */
   readonly query: Readonly<Record<string, string>>
 }
+
+// ─────────────────── RFC05-3 local-OSS preset sugar (D2) ────────────────────
+//
+// Ollama and LM Studio both expose an OpenAI-compatible `/v1/chat/completions`
+// endpoint. D2 is a thin PRESET over the RFC05-0 endpoint schema — NOT a new
+// adapter, NOT a local Chat grammar, NOT a provider registry. Each preset is
+// just a named `OpenAIEndpointOptions` pinned to `wireApi:"chat"`,
+// `networkPolicy:"loopback_local"`, and NO auth (loopback, no key). Server model
+// listing / health grammar is deliberately NOT modeled here — the caller states
+// the model + endpoint and the existing Chat adapter handles the wire.
+
+/** The two supported local-OSS preset kinds. Closed union. */
+export type LocalPresetKind = "ollama" | "lmstudio"
+
+/** Default loopback base URLs (OpenAI-compatible `/v1`). Ollama defaults to
+ *  11434, LM Studio to 1234. Both plain-http loopback (admitted ONLY by the
+ *  `loopback_local` network policy). */
+const LOCAL_PRESET_BASE_URL: Record<LocalPresetKind, string> = {
+  ollama: "http://127.0.0.1:11434/v1",
+  lmstudio: "http://127.0.0.1:1234/v1",
+}
+
+/**
+ * Build the named local-OSS endpoint profile (config sugar). The caller supplies
+ * the model id (a local install's model is user-chosen — there is no port-level
+ * default) and MAY override the base URL for a non-default port; an override is
+ * still pinned to `loopback_local`, so a non-loopback override is refused by the
+ * network policy at fetch time (RFC05-1). No `authRef`/`headerRefs` — local
+ * servers take no key.
+ */
+export const localEndpointPreset = (
+  kind: LocalPresetKind,
+  model: string,
+  baseUrl: string = LOCAL_PRESET_BASE_URL[kind],
+): OpenAIEndpointOptions => ({
+  baseUrl,
+  wireApi: "chat",
+  model,
+  networkPolicy: "loopback_local",
+})
 
 /** A `fetch`-shaped function (SDK `Fetch` / Responses `fetchImpl` compatible).
  *  Accepts a string/URL/Request first arg so it drops straight into the OpenAI
