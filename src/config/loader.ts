@@ -18,14 +18,19 @@
  */
 
 import type {
+  EndpointNetworkPolicy,
+  EndpointSecretRef,
+  EndpointWireApi,
   HookGroupSetting,
   HooksSettings,
   LayerSecurity,
   McpSettings,
+  OpenAIEndpointOptions,
   PermissionSettings,
   SettingsLayer,
   SettingsLayerName,
 } from "./types"
+import { ENDPOINT_SECRET_REFS } from "./types"
 
 /** Closed-port file read: returns the text, or `undefined` for a missing file
  *  (ENOENT/ENOTDIR), or THROWS for a real IO fault (EACCES, …). The concrete
@@ -106,6 +111,126 @@ const parseHookEvents = (
   return Object.keys(out).length > 0 ? out : undefined
 }
 
+const WIRE_APIS: ReadonlySet<string> = new Set<EndpointWireApi>(["chat", "responses"])
+const NETWORK_POLICIES: ReadonlySet<string> = new Set<EndpointNetworkPolicy>([
+  "public_https",
+  "loopback_local",
+])
+const SECRET_REFS: ReadonlySet<string> = new Set<string>(ENDPOINT_SECRET_REFS)
+
+/** Coerce a value to a member of the fixed symbolic-ref allowlist, or
+ *  `undefined` (which the caller treats as a REJECTION, not "absent"). */
+const asSecretRef = (v: unknown): EndpointSecretRef | undefined =>
+  typeof v === "string" && SECRET_REFS.has(v) ? (v as EndpointSecretRef) : undefined
+
+/** A string→string map with all NON-empty string values (query params).
+ *  `null` = present-but-malformed (reject the endpoint); `undefined` = absent. */
+const asStringMap = (v: unknown): Readonly<Record<string, string>> | null => {
+  const obj = asObject(v)
+  if (obj === undefined) return null
+  const out: Record<string, string> = {}
+  for (const [k, val] of Object.entries(obj)) {
+    if (typeof val !== "string" || val.length === 0) return null // any non-string ⇒ reject
+    out[k] = val
+  }
+  return out
+}
+
+/** Validate a `headerRefs` block: every value must be an allowlisted symbolic
+ *  ref (no raw values, no cross-provider env names). `null` = present-but-
+ *  invalid (reject the endpoint); a map (possibly empty) = valid. */
+const parseHeaderRefs = (v: unknown): Readonly<Record<string, EndpointSecretRef>> | null => {
+  const hr = asObject(v)
+  if (hr === undefined) return null
+  const refs: Record<string, EndpointSecretRef> = {}
+  for (const [header, refRaw] of Object.entries(hr)) {
+    const ref = asSecretRef(refRaw)
+    if (ref === undefined) return null // any non-allowlisted value ⇒ reject endpoint
+    refs[header] = ref
+  }
+  return refs
+}
+
+/** Parse the four REQUIRED endpoint fields (baseUrl/wireApi/model/networkPolicy)
+ *  into a base record, or `undefined` when any is missing/out-of-set. Also
+ *  refuses a raw `headers` block (a secret-value smuggling vector). */
+const parseEndpointCore = (
+  obj: Record<string, unknown>,
+): Pick<OpenAIEndpointOptions, "baseUrl" | "wireApi" | "model" | "networkPolicy"> | undefined => {
+  if ("headers" in obj) return undefined // static header VALUES could smuggle a token
+  const baseUrl = asString(obj.baseUrl)
+  const model = asString(obj.model)
+  if (baseUrl === undefined || model === undefined) return undefined
+  if (typeof obj.wireApi !== "string" || !WIRE_APIS.has(obj.wireApi)) return undefined
+  if (typeof obj.networkPolicy !== "string" || !NETWORK_POLICIES.has(obj.networkPolicy))
+    return undefined
+  return {
+    baseUrl,
+    model,
+    wireApi: obj.wireApi as EndpointWireApi,
+    networkPolicy: obj.networkPolicy as EndpointNetworkPolicy,
+  }
+}
+
+/**
+ * Parse ONE named OpenAI endpoint profile (RFC05-0). Returns the typed record
+ * or `undefined` (DROP the whole endpoint — fail-closed) when ANY field is
+ * missing/out-of-set. The load-bearing anti-exfil guards:
+ *   - `wireApi`/`networkPolicy` must be in their closed unions;
+ *   - `authRef` (if present) must be in {@link ENDPOINT_SECRET_REFS} — an
+ *     arbitrary env name like `ANTHROPIC_API_KEY` is REJECTED (audit A1);
+ *   - `headerRefs` values must all be symbolic refs (no raw values, no
+ *     cross-provider env names);
+ *   - a raw `headers` block (static header VALUES, which could smuggle a bearer
+ *     token) is REJECTED outright — only symbolic `headerRefs` are allowed.
+ *   - unknown keys are ignored (the whole shape is re-built field-by-field).
+ */
+const parseOneEndpoint = (raw: unknown): OpenAIEndpointOptions | undefined => {
+  const obj = asObject(raw)
+  if (obj === undefined) return undefined
+  const core = parseEndpointCore(obj)
+  if (core === undefined) return undefined
+
+  const out: { -readonly [K in keyof OpenAIEndpointOptions]: OpenAIEndpointOptions[K] } = {
+    ...core,
+  }
+  if (obj.authRef !== undefined) {
+    const ref = asSecretRef(obj.authRef)
+    if (ref === undefined) return undefined // present-but-not-allowlisted ⇒ reject
+    out.authRef = ref
+  }
+  if (obj.headerRefs !== undefined) {
+    const refs = parseHeaderRefs(obj.headerRefs)
+    if (refs === null) return undefined // present-but-invalid ⇒ reject
+    if (Object.keys(refs).length > 0) out.headerRefs = refs
+  }
+  if (obj.query !== undefined) {
+    const q = asStringMap(obj.query)
+    if (q === null) return undefined // present-but-malformed ⇒ reject
+    if (Object.keys(q).length > 0) out.query = q
+  }
+  return out
+}
+
+/** Parse the `openaiEndpoints` id→profile map (RFC05-0). Each id whose profile
+ *  fails validation is DROPPED (fail-closed); a valid sibling survives. Returns
+ *  `undefined` when nothing valid remains. */
+const parseOpenAIEndpoints = (
+  raw: unknown,
+): Readonly<Record<string, OpenAIEndpointOptions>> | undefined => {
+  const obj = asObject(raw)
+  if (obj === undefined) return undefined
+  // NULL-PROTOTYPE accumulator: an endpoint id of `__proto__` must be a safe
+  // own-key, never a reach into Object.prototype (parity with parseHookEvents).
+  const out: Record<string, OpenAIEndpointOptions> = Object.create(null)
+  for (const [id, rawEp] of Object.entries(obj)) {
+    if (id.trim().length === 0) continue
+    const ep = parseOneEndpoint(rawEp)
+    if (ep !== undefined) out[id] = ep
+  }
+  return Object.keys(out).length > 0 ? out : undefined
+}
+
 /** Parse one already-read JSON text into a typed {@link SettingsLayer}.
  *  Malformed text / non-object root ⇒ `undefined` (caller skips the layer).
  *  Unknown keys are DROPPED — nothing un-discriminated survives. Exported so a
@@ -163,9 +288,15 @@ export const parseSettingsLayer = (text: string): SettingsLayer | undefined => {
     if (Object.keys(m).length > 0) mcp = m
   }
 
+  const openaiEndpoints = parseOpenAIEndpoints(root.openaiEndpoints)
+
   const model = asString(root.model)
 
-  const hasSecurity = permissions !== undefined || hooks !== undefined || mcp !== undefined
+  const hasSecurity =
+    permissions !== undefined ||
+    hooks !== undefined ||
+    mcp !== undefined ||
+    openaiEndpoints !== undefined
   const hasBenign = model !== undefined
   if (!hasSecurity && !hasBenign) return {}
 
@@ -175,6 +306,7 @@ export const parseSettingsLayer = (text: string): SettingsLayer | undefined => {
     if (permissions !== undefined) sec.permissions = permissions
     if (hooks !== undefined) sec.hooks = hooks
     if (mcp !== undefined) sec.mcp = mcp
+    if (openaiEndpoints !== undefined) sec.openaiEndpoints = openaiEndpoints
     layer.security = sec
   }
   if (hasBenign && model !== undefined) layer.benign = { model }
