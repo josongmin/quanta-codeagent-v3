@@ -109,7 +109,14 @@ export const buildSkillBlock = async (config: AgentConfig): Promise<SkillBlock |
     // the per-turn SUGGESTION inventory, never the invocable surface (that
     // would silently strip authority).
     createSkillTool(skills),
-    createToolSearchTool(() => config.registry.specs()),
+    // RFC03-1 — ToolSearch gets the pinned snapshot's registry entries so its
+    // additive `catalog:"skills"` mode reads the SAME resolved set (no second
+    // discovery / scorer). `catalog` defaults to "tools" ⇒ byte-identical for
+    // any call that does not opt into skill mode.
+    createToolSearchTool(
+      () => config.registry.specs(),
+      () => snapshot.registry.entries,
+    ),
   ]
   // jun-6 (skill-creator) — register the agent-callable `skill_create` tool ONLY
   // when the operator opts in (`QUANTA_SKILL_CREATOR`) AND a writable user skills

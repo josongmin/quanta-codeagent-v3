@@ -1,5 +1,7 @@
 import { z } from "zod"
 import type { Tool, ToolContext, ToolEvent, ToolSpec } from "@/tool"
+import type { SkillRegistryEntry } from "./registry"
+import { SKILL_SCOPES, type SkillScope, skillScope } from "./types"
 
 const schema = z.object({
   query: z
@@ -10,6 +12,18 @@ const schema = z.object({
         "keywords for a ranked search.",
     ),
   max_results: z.number().optional().describe("Maximum number of results (default 5)"),
+  // RFC03-1 — additive catalog selector. Default "tools" ⇒ byte-identical
+  // existing behavior. "skills" runs DETERMINISTIC field filters (exact name,
+  // name prefix, scope) over the pinned SkillRegistry snapshot — no scorer.
+  catalog: z
+    .enum(["tools", "skills"])
+    .optional()
+    .describe('Which catalog to search: "tools" (default) or "skills".'),
+  // RFC03-1 — optional scope filter for skill mode only (ignored in tool mode).
+  scope: z
+    .enum(SKILL_SCOPES as unknown as [SkillScope, ...SkillScope[]])
+    .optional()
+    .describe("Skill mode only: restrict results to this scope."),
 })
 
 type Input = z.infer<typeof schema>
@@ -182,6 +196,62 @@ const runKeyword = (
   return { ok: true, output: ranked.map((r) => formatSpec(r.spec)).join("\n\n") }
 }
 
+/** Format a skill entry as bounded metadata (name + scope + description). The
+ *  BODY is never loaded here — the exact `Skill` tool loads it on demand
+ *  (progressive disclosure; RFC03-1 catalog virtualization). */
+const formatSkillEntry = (e: SkillRegistryEntry): string =>
+  `### ${e.skill.name} [${skillScope(e.skill)}]\n${e.skill.description}`
+
+/**
+ * RFC03-1 — skill-catalog mode. DETERMINISTIC field filters over the pinned
+ * `SkillRegistry.entries` snapshot: `select:<name>[,<name>]` exact match, else
+ * a case-insensitive name-PREFIX filter, optionally narrowed by `scope`. NO
+ * lexical scorer, NO description ranking — a separate measured ranking RFC owns
+ * fuzzy relevance. Output is bounded metadata only; the winner for an exact
+ * lookup is exactly the registry's resolved entry (single source, no drift).
+ */
+const runSkillCatalog = (
+  entries: readonly SkillRegistryEntry[],
+  query: string,
+  scope: SkillScope | undefined,
+  max: number,
+): { ok: boolean; output: string } => {
+  const scoped =
+    scope === undefined ? entries : entries.filter((e) => skillScope(e.skill) === scope)
+  const sel = query.match(/^select:(.+)$/i)
+  if (sel) {
+    const wanted = (sel[1] ?? "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean)
+    const byName = new Map(scoped.map((e) => [e.skill.name.toLowerCase(), e]))
+    const found: SkillRegistryEntry[] = []
+    const missing: string[] = []
+    for (const w of wanted) {
+      const hit = byName.get(w)
+      if (hit) found.push(hit)
+      else missing.push(w)
+    }
+    const head =
+      found.length === 0 ? "No matching skills found." : found.map(formatSkillEntry).join("\n\n")
+    const tail = missing.length > 0 ? `\n\nUnknown: ${missing.join(", ")}` : ""
+    return { ok: found.length > 0, output: head + tail }
+  }
+  const q = query.trim().toLowerCase()
+  // Deterministic name filter: exact name first, else name prefix. Sorted by
+  // name (the snapshot is already sorted, so this preserves determinism).
+  const matches = scoped
+    .filter((e) => {
+      const n = e.skill.name.toLowerCase()
+      return n === q || n.startsWith(q)
+    })
+    .slice(0, max)
+  if (matches.length === 0) {
+    return { ok: false, output: `No matching skills found for: ${query}` }
+  }
+  return { ok: true, output: matches.map(formatSkillEntry).join("\n\n") }
+}
+
 /**
  * The `ToolSearch` tool. Input `{ query, max_results? }`. Two modes:
  *   - `select:A,B,C` — return those tools' schemas by exact name or alias.
@@ -206,23 +276,40 @@ const runKeyword = (
  * deferred-tool mechanism here to expand; every tool in the catalog is already
  * callable. ToolSearch only helps the model *find* the right one by name/topic.
  */
-export const createToolSearchTool = (catalog: () => ToolSpec[]): Tool<Input> => ({
+export const createToolSearchTool = (
+  catalog: () => ToolSpec[],
+  /** RFC03-1 — pinned skill snapshot provider for `catalog:"skills"` mode. When
+   *  omitted, skill mode returns "no matching skills" (never a phantom entry).
+   *  Absent ⇒ tools-mode behavior is byte-identical. */
+  skillCatalog?: () => readonly SkillRegistryEntry[],
+): Tool<Input> => ({
   name: "ToolSearch",
   description:
     "Search this agent's tool catalog and return matching tool schemas as text " +
     "(name, description, input_schema) so you can find the right tool among many. " +
     'Use "select:Name1,Name2" for exact lookup by name or alias, or keywords for a ' +
     "ranked search. This is a discovery aid only: every returned tool is already " +
-    "available to call directly. It does not unlock or load anything.",
+    "available to call directly. It does not unlock or load anything. Pass " +
+    'catalog:"skills" to instead search the skill catalog by exact name / name ' +
+    "prefix / scope (metadata only; invoke the Skill tool to load a skill body).",
   inputSchema: schema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
   async *execute(input: Input, _ctx: ToolContext): AsyncIterable<ToolEvent> {
-    const all = catalog()
     const max = input.max_results ?? 5
     const query = input.query.trim()
 
+    // RFC03-1 — skill-catalog mode routes to deterministic field filters over
+    // the pinned snapshot. Default / "tools" is byte-identical to before.
+    if (input.catalog === "skills") {
+      const entries = skillCatalog ? skillCatalog() : []
+      const result = runSkillCatalog(entries, query, input.scope, max)
+      yield { type: "result", result }
+      return
+    }
+
+    const all = catalog()
     const sel = query.match(/^select:(.+)$/i)
     const result = sel ? runSelect(all, sel[1] ?? "") : runKeyword(all, query, max)
     yield { type: "result", result }
