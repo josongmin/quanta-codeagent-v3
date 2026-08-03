@@ -334,9 +334,25 @@ export type PlanMutationResult =
       readonly code: PlanMutationErrorCode
     }
 
+/** Slice-safe mirror of `ProjectedPlanTask` from `@/agent/plan/task-projection`.
+ *  RFC07-3 Claude-compatible read alias over the canonical plan: `owner` is the
+ *  `assignee` (omitted when absent), `blockedBy` is the canonical inbound
+ *  dependency edge, and `blocks` is the reverse edge (ids this task blocks).
+ *  These are READ-ONLY derived views — never stored, never mutation fields.
+ *  MIRROR INVARIANT: adding a field here MUST also add it to the producer
+ *  `ProjectedPlanTask`. */
+export interface ProjectedPlanTaskView {
+  readonly id: string
+  readonly owner?: string
+  readonly blockedBy: readonly string[]
+  readonly blocks: readonly string[]
+}
+
 /** Readonly summary view of the current plan (size signals + meta) — the
  *  surface tools can poll without dragging the whole plan through the seam.
- *  Full plan-state lives behind the producer; cross-slice flow stays by-value. */
+ *  Full plan-state lives behind the producer; cross-slice flow stays by-value.
+ *  `tasks` is the RFC07-3 owner/blockedBy/blocks read projection in canonical
+ *  (`createdAt`, then `id`) order; it carries no new write vocabulary. */
 export interface PlanReadonlyView {
   readonly version: number
   readonly name: string
@@ -344,6 +360,7 @@ export interface PlanReadonlyView {
   readonly isProject: boolean
   readonly todoCount: number
   readonly phaseCount: number
+  readonly tasks: readonly ProjectedPlanTaskView[]
 }
 
 /** Duck-typed mirror of the producer-side `PlanStore` (`@/agent/plan/state.ts`).

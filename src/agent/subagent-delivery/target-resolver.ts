@@ -57,3 +57,68 @@ export const createTargetResolver = (
     return label !== undefined ? { kind: "running", mailboxLabel: label } : { kind: "running" }
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RFC07-1 — named `to:` address resolution.
+//
+// Maps a caller-supplied NAME (e.g. "reviewer") to the one live, caller-visible
+// child whose exact `agentType` is that name, reusing the SAME live TaskRegistry
+// records + spawn-owner ledger the delivery resolver already trusts. There is NO
+// global name→id map, NO NamedAgentRegistry mutation, and NO fuzzy/prefix/
+// nearest/first-win heuristic — an exact `agentType` match among RUNNING records
+// OWNED by the caller lineage only.
+//
+// Security posture (admission-level, not hardening):
+//   - foreign-lineage records are filtered out BEFORE matching, so a foreign
+//     `reviewer` is indistinguishable from absence (`no_match`) — the task id,
+//     name, status, and mailbox label are never disclosed.
+//   - owner-less records (no lineage proof) do NOT resolve by name (fail-closed);
+//     the caller can still address them by raw id through the existing path.
+//   - two visible owned matches ⇒ `ambiguous` with candidate task ids and zero
+//     resolution (the caller MUST disambiguate by raw id).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Result of resolving a NAME (not a task id) to a mailbox address. `no_match`
+ *  is the caller's signal to fall through to the existing raw-id/parent/broadcast
+ *  path — it is deliberately indistinguishable from a foreign-lineage match. */
+export type NamedAddressResolution =
+  | { readonly kind: "resolved"; readonly mailboxLabel: string }
+  | { readonly kind: "ambiguous"; readonly candidates: readonly string[] }
+  | { readonly kind: "no_match" }
+
+export interface NamedAddressResolverDeps {
+  readonly registry: TaskRegistry
+  /** The requesting agent's lineage. Absent ⇒ `ROOT_LINEAGE`. Only records whose
+   *  spawn-owner ledger entry EXACTLY equals this lineage are visible for name
+   *  resolution (foreign/owner-less ⇒ invisible). */
+  readonly requesterLineage?: string
+}
+
+/**
+ * Build the named-address resolver closure over the concrete registry + owner
+ * ledger. Pure lookup — no mutation of any registry/ledger. Exact `agentType`
+ * match only; no normalization/fold/trim of the requested name.
+ */
+export const createNamedAddressResolver = (
+  deps: NamedAddressResolverDeps,
+): ((name: string) => NamedAddressResolution) => {
+  const requester = deps.requesterLineage ?? ROOT_LINEAGE
+  return (name: string): NamedAddressResolution => {
+    const owners = ownersForRegistry(deps.registry)
+    const matches = deps.registry.list().filter((rec) => {
+      if (rec.status !== "running") return false
+      if (rec.mailboxLabel === undefined) return false
+      if (rec.agentType !== name) return false // EXACT match only — no fuzzy/prefix/fold
+      // Owner MUST be present AND equal the caller lineage. Owner-less (no proof)
+      // and foreign-lineage are both filtered here, so both collapse to no_match.
+      return owners.get(rec.id) === requester
+    })
+    if (matches.length === 0) return { kind: "no_match" }
+    if (matches.length > 1) {
+      return { kind: "ambiguous", candidates: matches.map((r) => r.id) }
+    }
+    // Exactly one visible owned match — resolve to its canonical mailbox label.
+    // (mailboxLabel presence was asserted by the filter.)
+    return { kind: "resolved", mailboxLabel: matches[0]?.mailboxLabel as string }
+  }
+}

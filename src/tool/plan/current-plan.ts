@@ -9,15 +9,30 @@ import { errMessage } from "@/shared"
 import type { PlanReadonlyView, PlanToolContext, Tool, ToolEvent } from "../types"
 import { type CurrentPlanInput, currentPlanSchema } from "./schemas"
 
-const renderPlanView = (plan: PlanReadonlyView): string =>
-  [
+const renderTaskLine = (t: PlanReadonlyView["tasks"][number]): string => {
+  const parts = [`  - ${t.id}`]
+  if (t.owner !== undefined) parts.push(`owner=${t.owner}`)
+  parts.push(`blockedBy=[${t.blockedBy.join(", ")}]`)
+  parts.push(`blocks=[${t.blocks.join(", ")}]`)
+  return parts.join(" ")
+}
+
+const renderPlanView = (plan: PlanReadonlyView): string => {
+  const head = [
     `Current plan: v${plan.version}`,
     `name: ${plan.name}`,
     `overview: ${plan.overview}`,
     `isProject: ${plan.isProject ? "true" : "false"}`,
     `todos: ${plan.todoCount}`,
     `phases: ${plan.phaseCount}`,
-  ].join("\n")
+  ]
+  // RFC07-3: model-visible owner/blockedBy/blocks projection in canonical order.
+  if (plan.tasks.length > 0) {
+    head.push("tasks:")
+    for (const t of plan.tasks) head.push(renderTaskLine(t))
+  }
+  return head.join("\n")
+}
 
 export const currentPlanTool = (): Tool<CurrentPlanInput> => ({
   name: "current_plan",
