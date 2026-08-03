@@ -45,7 +45,16 @@ afterEach(async () => {
   __resetBashBgRegistry()
 })
 
-const ctx = (): ToolContext => ({ cwd: dir, signal: new AbortController().signal })
+// RFC02-2 — production dispatch stamps a stable session `ownerId`; the bash
+// tool marks the detached shell with it and `bash_kill` kills ONLY owner-scoped
+// shells. Both the adopt (bashTool) and the kill (bash_kill) run under the SAME
+// owner here, so the own-shell kill succeeds.
+const OWNER = "sess-e2e"
+const ctx = (): ToolContext => ({
+  cwd: dir,
+  signal: new AbortController().signal,
+  ownerId: OWNER,
+})
 
 const collect = async (
   tool: { execute: (i: never, c: ToolContext) => AsyncIterable<ToolEvent> },

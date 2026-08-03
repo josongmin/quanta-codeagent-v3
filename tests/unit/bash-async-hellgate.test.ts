@@ -342,9 +342,17 @@ describe("ADR-0296 — bash background + bash_await + bash_kill (hellgate)", () 
     const { port, children } = makeFakePort()
     const registry = createBashBgRegistry({ port })
     const kill_ = makeBashKillTool(registry)
-    const handle = await registry.register({ command: "long-running", cwd: dir })
+    // RFC02-2 — bash_kill is owner-scoped: register + kill under the same owner.
+    const handle = await registry.register({ command: "long-running", cwd: dir, ownerId: "own" })
     children[0]?.feedStdout("preserved-output\n")
-    const { result } = await collect(kill_, { shell_id: handle.id }, ctx())
+    const { result } = await collect(
+      kill_,
+      { shell_id: handle.id },
+      {
+        ...ctx(),
+        ownerId: "own",
+      },
+    )
     expect(result.ok).toBe(true)
     expect(result.output).toContain("[bash_kill killed]")
     expect(result.output).toContain("preserved-output")
@@ -356,7 +364,17 @@ describe("ADR-0296 — bash background + bash_await + bash_kill (hellgate)", () 
     const { port } = makeFakePort()
     const registry = createBashBgRegistry({ port })
     const kill_ = makeBashKillTool(registry)
-    const { result } = await collect(kill_, { shell_id: "no-such-handle" }, ctx())
+    // RFC02-2 — an OWNED caller asking for a wholly-unknown id gets not_found
+    // (an unowned caller would be refused before the lookup — covered by the
+    // dedicated ownership hellgate).
+    const { result } = await collect(
+      kill_,
+      { shell_id: "no-such-handle" },
+      {
+        ...ctx(),
+        ownerId: "own",
+      },
+    )
     expect(result.ok).toBe(false)
     expect(result.failure).toEqual({ mode: "not_found" })
   })
@@ -522,11 +540,18 @@ describe("ADR-0296 — bash background + bash_await + bash_kill (hellgate)", () 
     const { port, children } = makeFakePort()
     const registry = createBashBgRegistry({ port })
     const kill_ = makeBashKillTool(registry)
-    const handle = await registry.register({ command: "done-early", cwd: dir })
+    const handle = await registry.register({ command: "done-early", cwd: dir, ownerId: "own" })
     children[0]?.feedStdout("hello")
     children[0]?.finish(0)
     await handle.exited
-    const { result } = await collect(kill_, { shell_id: handle.id }, ctx())
+    const { result } = await collect(
+      kill_,
+      { shell_id: handle.id },
+      {
+        ...ctx(),
+        ownerId: "own",
+      },
+    )
     expect(result.ok).toBe(true)
     expect(result.output).toContain("completed")
     expect(result.evidence?.exitCode).toBe(0)
