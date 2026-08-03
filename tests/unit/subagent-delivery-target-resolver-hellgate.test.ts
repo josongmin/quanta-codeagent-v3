@@ -14,12 +14,11 @@
  * EXACT `agentType` match among running, owned, mailbox-addressable records.
  */
 import { describe, expect, test } from "bun:test"
+import { ownersForRegistry, TaskRegistry } from "@/subagent"
 import {
   createNamedAddressResolver,
   type NamedAddressResolution,
 } from "../../src/agent/subagent-delivery/target-resolver"
-import { ownersForRegistry } from "@/subagent"
-import { TaskRegistry } from "@/subagent"
 
 /** Register a running child with an agentType (name), mailbox label, owned by
  *  `ownerLineage`. Returns its task id. */

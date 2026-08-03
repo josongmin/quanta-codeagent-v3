@@ -75,11 +75,7 @@ const planFrom = (todos: readonly TodoItem[]): Plan => {
 
 describe("RFC07-3 projectPlanTasks — canonical reverse-edge projection", () => {
   test("A, B→A, C→A+B yields A.blocks=[B,C], B.blocks=[C], C.blocks=[]", () => {
-    const plan = planFrom([
-      todo("A", 1, []),
-      todo("B", 2, ["A"]),
-      todo("C", 3, ["A", "B"]),
-    ])
+    const plan = planFrom([todo("A", 1, []), todo("B", 2, ["A"]), todo("C", 3, ["A", "B"])])
     const tasks = projectPlanTasks(plan)
     const byId = new Map(tasks.map((t) => [t.id, t]))
 
@@ -94,10 +90,7 @@ describe("RFC07-3 projectPlanTasks — canonical reverse-edge projection", () =>
   })
 
   test("assignee renders owner; absent assignee omits the field entirely", () => {
-    const plan = planFrom([
-      todo("A", 1, [], "tester"),
-      todo("B", 2, ["A"]),
-    ])
+    const plan = planFrom([todo("A", 1, [], "tester"), todo("B", 2, ["A"])])
     const tasks = projectPlanTasks(plan)
     const a = tasks.find((t) => t.id === "A")
     const b = tasks.find((t) => t.id === "B")
@@ -120,19 +113,13 @@ describe("RFC07-3 projectPlanTasks — canonical reverse-edge projection", () =>
   })
 
   test("createdAt ties break by id (deterministic, canonical)", () => {
-    const tasks = projectPlanTasks(
-      planFrom([todo("z", 5, []), todo("a", 5, []), todo("m", 5, [])]),
-    )
+    const tasks = projectPlanTasks(planFrom([todo("z", 5, []), todo("a", 5, []), todo("m", 5, [])]))
     expect(tasks.map((t) => t.id)).toEqual(["a", "m", "z"])
   })
 
   test("reverse-edge (blocks) arrays follow the same canonical order", () => {
     // X blocks Y and Z; Z has an earlier createdAt than Y, so blocks must list Z before Y.
-    const plan = planFrom([
-      todo("X", 1, []),
-      todo("Y", 3, ["X"]),
-      todo("Z", 2, ["X"]),
-    ])
+    const plan = planFrom([todo("X", 1, []), todo("Y", 3, ["X"]), todo("Z", 2, ["X"])])
     const x = projectPlanTasks(plan).find((t) => t.id === "X")
     expect(x?.blocks).toEqual(["Z", "Y"])
   })

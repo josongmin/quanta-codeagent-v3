@@ -11,8 +11,8 @@
  * gate goes RED.
  */
 import { describe, expect, test } from "bun:test"
-import { createInMemoryPlanStore } from "../../../../src/agent/plan/state"
 import { planStoreToMutator } from "../../../../src/agent/plan/mutator-adapter"
+import { createInMemoryPlanStore } from "../../../../src/agent/plan/state"
 import { currentPlanTool } from "../../../../src/tool/plan/current-plan"
 import type { ToolContext, ToolEvent } from "../../../../src/tool/types"
 
@@ -90,7 +90,16 @@ describe("current_plan — RFC07-3 task projection front door", () => {
     const view = mutator.current()
     if (view === null) throw new Error("null view")
     // The seam must expose `tasks`.
-    const tasks = (view as unknown as { tasks?: ReadonlyArray<{ id: string; owner?: string; blockedBy: readonly string[]; blocks: readonly string[] }> }).tasks
+    const tasks = (
+      view as unknown as {
+        tasks?: ReadonlyArray<{
+          id: string
+          owner?: string
+          blockedBy: readonly string[]
+          blocks: readonly string[]
+        }>
+      }
+    ).tasks
     expect(tasks).toBeDefined()
     if (tasks === undefined) throw new Error("no tasks projection")
     expect(tasks.map((t) => t.id)).toEqual([ids.A, ids.B, ids.C])

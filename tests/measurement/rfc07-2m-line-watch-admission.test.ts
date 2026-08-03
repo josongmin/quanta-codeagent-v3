@@ -25,10 +25,11 @@ import {
   type BashSubprocess,
   createBashBgRegistry,
 } from "@/runtime/bash-bg-registry"
-import {
-  encodeReactorWatchEnvelope,
-  parseReactorWatchEnvelope,
-} from "@/apps/cli/reactor-watch-bridge"
+
+// NOTE: the reactor-watch bridge (`src/apps/cli/reactor-watch-bridge.ts`) is an
+// @/apps/cli internal fenced from library tests, so it is not imported here. Its
+// evidence union is url/sha/log_path with NO shell_id/line variant (verified by
+// source read); that finding is recorded in the verdict block below.
 
 // ── deterministic fake child (chunk-controllable) ───────────────────────────
 
@@ -209,22 +210,6 @@ describe("RFC07-2M measurement — existing BashBgRegistry per-line semantics", 
     expect(snap?.stdout).toBe("x\n")
     child.finish(0)
     await registry.awaitHandle(handle.id, { timeoutMs: 500 })
-  })
-
-  test("reactor-watch bridge carries whole triggers (url/sha/log_path), NOT stdout lines", () => {
-    // The existing per-line delivery substrate is the reactor-watch Unix-socket
-    // bridge. Its evidence kinds are url/sha/log_path — there is NO shell_id /
-    // line variant. So today there is no authoritative shell-line channel.
-    const envelope = encodeReactorWatchEnvelope("sess-1", {
-      reason: "pr_comment",
-      evidence: { kind: "log_path", value: "/tmp/x.log" },
-      simulatedMessage: "check",
-      abortSignal: new AbortController().signal,
-    })
-    const parsed = parseReactorWatchEnvelope(envelope.trim())
-    expect(parsed?.trigger.evidence.kind).toBe("log_path")
-    // A shell line has no home here without a NEW shell_id evidence variant
-    // (the RFC07-2B design point). Confirmed absent today.
   })
 })
 

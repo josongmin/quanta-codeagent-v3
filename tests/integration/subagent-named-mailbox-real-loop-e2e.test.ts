@@ -16,8 +16,8 @@
  */
 import { describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
-import { buildSubagentMailboxBlock } from "@/agent/tier1/subagent-mailbox"
 import { createSubagentMailbox, type MailboxPort } from "@/agent/subagent-mailbox"
+import { buildSubagentMailboxBlock } from "@/agent/tier1/subagent-mailbox"
 import { ownersForRegistry, TaskRegistry } from "@/subagent"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 

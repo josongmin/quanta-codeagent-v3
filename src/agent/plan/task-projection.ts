@@ -46,30 +46,30 @@ const byCanonicalOrder = (a: TodoItem, b: TodoItem): number =>
 export const projectPlanTasks = (plan: Plan): readonly ProjectedPlanTask[] => {
   const ordered = Object.values(plan.todos).slice().sort(byCanonicalOrder)
 
-  // Reverse-edge map: for each dependency `dep`, remember the canonical rank of
-  // the dependent so `blocks[dep]` can be emitted in canonical order without a
-  // second sort. Only edges whose endpoints both exist as real todos count.
-  const rank = new Map<string, number>()
-  ordered.forEach((t, i) => rank.set(t.id, i))
+  // Membership set of REAL todo ids so a dangling dependency edge (which the DAG
+  // validator normally rejects at mutation time) never invents a phantom blocker.
+  const known = new Set(ordered.map((t) => t.id))
 
+  // Reverse-edge map built by walking `ordered` once: each `blocks[dep]` list is
+  // appended in canonical iteration order, so no second sort is needed.
   const blocksOf = new Map<string, string[]>()
   for (const t of ordered) {
     for (const dep of t.dependencies) {
-      if (!rank.has(dep)) continue // dangling edge — not a live blocker
+      if (!known.has(dep)) continue // dangling edge — not a live blocker
       const list = blocksOf.get(dep)
       if (list === undefined) blocksOf.set(dep, [t.id])
       else list.push(t.id)
     }
   }
-  // Each `blocks` list was appended in canonical iteration order already, so no
-  // re-sort is needed; the pushes happened while walking `ordered`.
 
-  return ordered.map((t): ProjectedPlanTask => ({
-    id: t.id,
-    ...(t.assignee !== undefined ? { owner: t.assignee } : {}),
-    // `blockedBy` is the canonical inbound edge, verbatim — the DAG validator
-    // already rejects dangling/self/cycle deps at mutation time, so no filter.
-    blockedBy: t.dependencies,
-    blocks: blocksOf.get(t.id) ?? [],
-  }))
+  return ordered.map(
+    (t): ProjectedPlanTask => ({
+      id: t.id,
+      ...(t.assignee !== undefined ? { owner: t.assignee } : {}),
+      // `blockedBy` is the canonical inbound edge, verbatim — the DAG validator
+      // already rejects dangling/self/cycle deps at mutation time, so no filter.
+      blockedBy: t.dependencies,
+      blocks: blocksOf.get(t.id) ?? [],
+    }),
+  )
 }
