@@ -284,41 +284,42 @@ describe("R7 — HARD_DENY overrides every permission mode for the obfuscated fo
 
 describe("R7 — bash_kill targets registry ids only (no PID confusion)", () => {
   test("unknown shell_id ⇒ ok:false not_found, no kill attempted", async () => {
-    const killSeen: string[] = []
+    const killSeen: Array<[string, string]> = []
     const fakeRegistry = {
-      // Only `kill` is exercised by makeBashKillTool; record + return null.
-      kill: async (id: string) => {
-        killSeen.push(id)
-        return null
+      // RFC02-2 — the model tool now goes through the owner-scoped path.
+      killOwned: async (id: string, owner: string) => {
+        killSeen.push([id, owner])
+        return { ok: false as const, reason: "not_found" as const }
       },
     } as unknown as Parameters<typeof makeBashKillTool>[0]
     const tool = makeBashKillTool(fakeRegistry)
     const events = []
-    for await (const e of tool.execute({ shell_id: "12345" }, {} as never)) events.push(e)
+    for await (const e of tool.execute({ shell_id: "12345" }, { ownerId: "own" } as never))
+      events.push(e)
     const result = events.find((e) => e.type === "result")
     expect(result?.type).toBe("result")
     if (result?.type === "result") {
       expect(result.result.ok).toBe(false)
       expect(result.result.failure?.mode).toBe("not_found")
     }
-    // The id passed to kill is the registry KEY (a string), never a numeric PID
-    // resolved out of band — the registry owns the PID mapping.
-    expect(killSeen).toEqual(["12345"])
+    // The id passed to killOwned is the registry KEY (a string), never a numeric
+    // PID resolved out of band — the registry owns the PID mapping.
+    expect(killSeen).toEqual([["12345", "own"]])
   })
 
   test("a numeric-looking shell_id is still treated as an opaque registry key", async () => {
     const seen: string[] = []
     const fakeRegistry = {
-      kill: async (id: string) => {
+      killOwned: async (id: string) => {
         seen.push(id)
-        return null
+        return { ok: false as const, reason: "not_found" as const }
       },
     } as unknown as Parameters<typeof makeBashKillTool>[0]
     const tool = makeBashKillTool(fakeRegistry)
-    for await (const _ of tool.execute({ shell_id: "1" }, {} as never)) {
+    for await (const _ of tool.execute({ shell_id: "1" }, { ownerId: "own" } as never)) {
       /* drain */
     }
-    expect(seen).toEqual(["1"]) // forwarded verbatim to registry.kill, not process.kill(1)
+    expect(seen).toEqual(["1"]) // forwarded verbatim to killOwned, not process.kill(1)
   })
 
   test("bash_kill is mutating (fail-closed tier) and bash_await is read-only", () => {

@@ -11,6 +11,7 @@ import type {
   IdentityModeSessionState,
   ToolProfileSessionState,
 } from "@/runner/assemble/session-state"
+import { getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import type { RuntimeSideConversationArgs, RuntimeSideConversationResult } from "@/sdk/runtime"
 import type { SessionEnvelopeRecord } from "@/session"
 import { redactValue } from "@/shared"
@@ -25,9 +26,11 @@ import { runImageCmd } from "../image-cmd"
 import type { ImageQueue } from "../image-queue"
 import type { InspectSlashState } from "../inspect-cmd"
 import type { McpSurfaceInfo } from "../mcp-cmd"
+import type { ProcPanelRow } from "../proc-panel"
 import type { RewindSlashState } from "../rewind-cmd"
 import type { PerToolCheckpointSlashState } from "../rewind-tool-cmd"
 import type { SideCmdSlashState } from "../side-cmd"
+import { isProcPanelEnabled } from "../slash/registry-surface"
 import { isSlashCommand, runSlashCommand, type SkillRow } from "../slash-commands"
 import type { TextInbox } from "../text-inbox"
 import type { WhySlashState } from "../why-cmd"
@@ -631,6 +634,25 @@ export const buildReplSlashCtx = (args: BuildReplSlashCtxArgs): ReplSlashCtx => 
     // session registry. Absent registry ⇒ slot omitted ⇒ `/agents` "not wired".
     ...(taskRegistry !== undefined
       ? { agents: () => taskRegistry.list().map(toAgentFleetRow) }
+      : {}),
+    // RFC02-1 — `/ps` owner-scoped background-shell inventory. Wired ONLY when
+    // QUANTA_PROC_PANEL is on (same gate as the command registration). Reads the
+    // LIVE singleton registry each invocation, scoped to THIS session's owner
+    // (`sessionId`) via `listOwned`, and projects ONLY the redaction-safe fields
+    // (command/cwd/output are never read). Absent gate ⇒ slot omitted ⇒ `/ps`
+    // prints "not wired" (and is not even registered) — byte-identical when OFF.
+    ...(isProcPanelEnabled()
+      ? {
+          procShells: (): readonly ProcPanelRow[] =>
+            getBashBgRegistry()
+              .listOwned(sessionId)
+              .map((s) => ({
+                id: s.id,
+                status: s.status,
+                startedAt: s.startedAt,
+                exitCode: s.exitCode,
+              })),
+        }
       : {}),
     // ADR-0231 — `/radar` live store + prune cutoff. Absent store ⇒ slot
     // omitted ⇒ `/radar` "not wired" (default-OFF byte-identical).

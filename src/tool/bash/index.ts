@@ -227,6 +227,19 @@ const deriveBashFailure = (
   return undefined
 }
 
+/** RFC02-4 (C2) — the executor-known DEADLINE facts for a COMPLETED run's
+ *  evidence. Pure: a timed-out (kill-mode) command surfaces the `timedOut` flag
+ *  and the ms the executor applied (`input.timeout_ms`), together, from the ONE
+ *  evidence source. NOT parsed from stderr / the command string. Empty object
+ *  when the run completed inline (no deadline reached). */
+const deadlineEvidence = (
+  timedOut: boolean,
+  timeoutMs: number | undefined,
+): Pick<ToolResultEvidence, "timedOut" | "timeoutMs"> => {
+  if (!timedOut) return {}
+  return { timedOut: true, ...(timeoutMs !== undefined ? { timeoutMs } : {}) }
+}
+
 /** ADR-0295 — classify an OS-sandbox denial from the spawn result. Only runs
  *  when the caller selected `mode="read"`. Reads the OS signal (`stderr` +
  *  non-zero exit) and maps it to a CLOSED-enum {@link SandboxViolationReason}.
@@ -429,6 +442,13 @@ const buildBackgroundPlaceholderResult = (
         `--- output so far ---\n${outputSoFar || "(no output yet)"}`,
       evidence: {
         ...(snap.stderr ? { stderr: snap.stderr.slice(-STDERR_CAP) } : {}),
+        // RFC02-4 (C2) — executor-known detach facts from the ONE evidence
+        // source: the shell id from `adopt()`, the deadline the executor set,
+        // and the `detached` control flag. CLI/model/recorder each project
+        // these; no stderr/command parsing.
+        detached: true,
+        backgroundShellId: snap.id,
+        timeoutMs,
       },
     },
   }
@@ -466,7 +486,15 @@ const resolveBgDetach = (
     bgSeam: {
       seam: {
         adopt: async (args) => {
-          const { id } = await getBashBgRegistry().adopt(args)
+          // RFC02-0 — stamp the STABLE session owner (from the dispatch ctx)
+          // onto the detached shell so kill is owner-scoped. `runShell` does not
+          // carry an owner, so the tool injects it here from the captured ctx.
+          // ABSENT `ctx.ownerId` (no session id) ⇒ omitted ⇒ unowned shell
+          // (byte-identical). Never derived from a shell id / PID / cwd.
+          const { id } = await getBashBgRegistry().adopt({
+            ...args,
+            ...(ctx.ownerId !== undefined ? { ownerId: ctx.ownerId } : {}),
+          })
           return { id }
         },
         ...(confirm !== undefined ? { confirm } : {}),
@@ -765,6 +793,9 @@ async function* bashExecute(input: Input, ctx: ShellToolContext): AsyncIterable<
     ...(rr.stderr ? { stderr: rr.stderr.slice(-STDERR_CAP) } : {}),
     exitCode: rr.exitCode,
     executedCommand: cmd,
+    // RFC02-4 (C2) — executor-known deadline facts (timedOut + the applied ms)
+    // from the ONE evidence source; empty when the command completed inline.
+    ...deadlineEvidence(rr.timedOut, input.timeout_ms),
   }
 
   // ADR-0295 — when mode="read" and the spawn fails with an EACCES /

@@ -31,6 +31,7 @@ import { errMessage, logger, runtimeConfig } from "@/shared"
 import { renderAgentFleet, renderAgentInspect } from "../agents-fleet-panel"
 import { backgroundCmd } from "../background-cmd"
 import { formatBranchesPanel } from "../branch-search-progress"
+import { readCliKnob } from "../cli-knobs-accessor"
 import { editMessageCmd } from "../edit-message-cmd"
 import { editPlanCmd } from "../edit-plan-cmd"
 import { forkCheckpointCmd } from "../fork-checkpoint-cmd"
@@ -43,6 +44,7 @@ import { loginCmd } from "../login-cmd"
 import { buildLogoutCmd } from "../logout-cmd"
 import { pasteCmd } from "../paste-cmd"
 import { PLAN_PANEL_NOT_WIRED, writePlanPanel } from "../plan-panel"
+import { renderProcPanel } from "../proc-panel"
 import { queueCmd } from "../queue-cmd"
 import { renderItemSection } from "../repl/item-store"
 import { replayCmd } from "../replay-cmd"
@@ -381,6 +383,37 @@ const agentsCmd: SlashCommand = {
   },
 }
 
+/** RFC02-1 — `/ps` registration gate. Default-OFF (opt-IN): the command is only
+ *  REGISTERED when `QUANTA_PROC_PANEL` is on, so the `/help` catalog is
+ *  byte-identical when the gate is unset (T2 — a slash always in the registry
+ *  changes `/help`, breaking OFF parity). Routed through the typed accessor so a
+ *  `/config set` reaches it and the raw-env ratchet stays clean. */
+export const isProcPanelEnabled = (): boolean => readCliKnob("QUANTA_PROC_PANEL", "bool") ?? false
+
+/** RFC02-1 — `/ps` list-only, redacted background-shell inventory. Renders ONLY
+ *  the caller-owned shells' lifecycle facts (id/status/elapsed/exitCode) via
+ *  `renderProcPanel`; command/cwd/output are NEVER read (dropped at the read
+ *  model). Absent `ctx.procShells` ⇒ "not wired" + exit 0 (parity with
+ *  `/agents`). Registration itself is gated (see `isProcPanelEnabled`). */
+const psCmd: SlashCommand = {
+  name: "/ps",
+  describe: "List background shells owned by this session (id/status/elapsed/exitCode; no output)",
+  category: "loop",
+  async run(args, ctx) {
+    if (args.length > 0) {
+      ctx.err(`/ps: no arguments accepted (list-only; use bash_kill to terminate)\n`)
+      return 1
+    }
+    if (ctx.procShells === undefined) {
+      ctx.out("/ps: not wired in this surface\n")
+      return 0
+    }
+    const now = ctx.now?.() ?? Date.now()
+    ctx.out(`${renderProcPanel(ctx.procShells(), { now })}\n`)
+    return 0
+  },
+}
+
 /** `/radar` (ADR-0231) — the radar proposal-queue operator surface. Lists the
  *  active cards the producer hook has deposited and lets the operator
  *  adopt/dismiss/engage/prune them, sharing the SAME `RadarStore` instance the
@@ -599,6 +632,10 @@ export const buildSurfaceSlashCommands = (
   // immune to that timing. Non-CLI surfaces never import this registry ⇒ absent
   // there (the inventory keeps `default:false` as the runtime-config baseline).
   ...(isInitSlashEnabled() ? [buildInitCmd()] : []),
+  // RFC02-1 — `/ps` background-shell inventory. DEFAULT-OFF (opt-IN): only
+  // registered when QUANTA_PROC_PANEL is on, so `/help` is byte-identical when
+  // the gate is unset (registration ≠ execution; parity with the /init gate).
+  ...(isProcPanelEnabled() ? [psCmd] : []),
   forkCheckpointCmd,
   queueCmd,
   webCmd,

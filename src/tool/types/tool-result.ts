@@ -273,6 +273,22 @@ export interface ToolResultEvidence {
    *  verify-gate) must not treat a timed-out result as a completed observation. Absent ⇒ ran to
    *  completion. */
   timedOut?: boolean
+  /** RFC02-4 (C2) — the wall-clock DEADLINE (ms) the executor applied, present
+   *  ONLY when that deadline is a known fact the executor set (a `timed_out`
+   *  completion or a `background` auto-detach). This is the SAME `timeoutMs` the
+   *  bash tool passed to the runner — NOT parsed from stderr / the command
+   *  string. One unit (ms). Absent ⇒ the executor did not apply / did not reach a
+   *  deadline. A single evidence source; CLI/model/recorder each PROJECT it. */
+  timeoutMs?: number
+  /** RFC02-4 (C2) — the id of the background shell the command was DETACHED
+   *  into when it exceeded its deadline under a `background`/`prompt` seam. The
+   *  executor learns this directly from the registry `adopt()` return (not from
+   *  output parsing). Present iff {@link detached} is true. */
+  backgroundShellId?: string
+  /** RFC02-4 (C2) — the command did not complete inline: it was DETACHED into
+   *  the background-shell registry (auto-background on deadline). An executor-
+   *  known control fact, not a stderr/command inference. Absent ⇒ ran inline. */
+  detached?: boolean
 }
 
 /**

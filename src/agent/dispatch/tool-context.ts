@@ -178,6 +178,17 @@ export const buildToolContext = (args: {
       ? { criticalSection: interrupt.criticalSection }
       : {}),
     gitWriteGuard: gitWriteProtectReason,
+    // RFC02-0 — stamp the STABLE session owner onto the ctx so the bash tool can
+    // mark every background shell it detaches with `ownerId` (cross-session kill
+    // refusal). Prefer the composition's session identity (`AgentConfig.sessionId`,
+    // set whenever a memory store is wired — default-ON per ADR-0413); else the
+    // run correlation id (`run.runId`), which is also a composition-provided stable
+    // identity. BOTH are composition-supplied — NEVER derived from the shell id /
+    // PID / cwd. ABSENT both (a bare legacy caller with no session/run id) ⇒
+    // omitted ⇒ shells stay unowned (byte-identical; bash_kill fail-closes).
+    ...((config.sessionId ?? config.run?.runId)
+      ? { ownerId: config.sessionId ?? (config.run?.runId as string) }
+      : {}),
     ...(config.depth !== undefined ? { depth: config.depth } : {}),
     // ADR-0416 sibling-identity fix — surface the STABLE per-agent mailbox
     // label (and the parent's) so the subagent-mailbox tools address each

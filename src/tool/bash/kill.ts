@@ -42,7 +42,7 @@ export const makeBashKillTool = (
   inputSchema: bashKillInputSchema,
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
-  async *execute(input, _ctx: ToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input, ctx: ToolContext): AsyncIterable<ToolEvent> {
     const parsed = bashKillInputSchema.safeParse(input)
     if (!parsed.success) {
       yield {
@@ -56,18 +56,45 @@ export const makeBashKillTool = (
       return
     }
     const { shell_id } = parsed.data
-    const snap = await registry.kill(shell_id)
-    if (snap === null) {
+    // RFC02-2 — the model tool kills ONLY through the owner-scoped path. The
+    // owner is the dispatch-injected `ctx.ownerId` (stable session id). A caller
+    // WITHOUT an owner (no session id) cannot kill: its shells are unowned and
+    // `killOwned` refuses them (fail-closed, no unscoped kill from the model).
+    const ownerId = ctx.ownerId
+    if (ownerId === undefined) {
       yield {
         type: "result",
         result: {
           ok: false,
-          output: `bash_kill: unknown shell_id=${shell_id}`,
-          failure: { mode: "not_found" },
+          output: `bash_kill: refused — no session owner; background shells can only be killed by their owning session.`,
+          failure: { mode: "rejected", reason: "not_owned" },
         },
       }
       return
     }
+    const outcome = await registry.killOwned(shell_id, ownerId)
+    if (!outcome.ok) {
+      // CLOSED reason union → precise, redaction-safe refusal (no foreign
+      // command/cwd/output is ever revealed on a refusal).
+      const REFUSAL: Record<typeof outcome.reason, string> = {
+        not_found: `bash_kill: unknown shell_id=${shell_id}`,
+        ambiguous: `bash_kill: ambiguous shell_id=${shell_id} — supply an exact id or a unique prefix.`,
+        not_owned: `bash_kill: refused — shell_id=${shell_id} is not owned by this session.`,
+      }
+      yield {
+        type: "result",
+        result: {
+          ok: false,
+          output: REFUSAL[outcome.reason],
+          failure:
+            outcome.reason === "not_found"
+              ? { mode: "not_found" }
+              : { mode: "rejected", reason: outcome.reason },
+        },
+      }
+      return
+    }
+    const snap = outcome.snapshot
     const evidence: ToolResultEvidence = {
       ...(snap.stderr ? { stderr: snap.stderr.slice(-STDERR_CAP) } : {}),
       ...(snap.exitCode !== null ? { exitCode: snap.exitCode } : {}),

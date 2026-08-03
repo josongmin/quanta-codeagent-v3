@@ -308,6 +308,15 @@ export interface SlashContext {
    *  the rest of the presence-gated commands). Duck-typed via `@/llm` so this
    *  contract carries no runtime preset VALUES — only the interface. */
   readonly presets?: import("@/llm").StickyPresetResolver | undefined
+  /** RFC02-1 `/ps` — caller-owned background-shell inventory getter. Read each
+   *  invocation (so `/ps` reflects the CURRENT registry). Returns ONLY the
+   *  redaction-safe lifecycle facts (id/status/startedAt/exitCode) for the
+   *  shells owned by THIS session — never command/cwd/output, never another
+   *  session's shells. Present iff `QUANTA_PROC_PANEL` is on AND the surface
+   *  wired the live registry + session owner; absent ⇒ `/ps` prints "not wired"
+   *  + exit 0 (parity with `/agents`). `/ps` itself is only REGISTERED behind
+   *  the same gate (help catalog byte-identical when OFF). */
+  readonly procShells?: (() => readonly import("./proc-panel").ProcPanelRow[]) | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host
