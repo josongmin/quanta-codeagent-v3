@@ -21,6 +21,13 @@ interface OpenAIConfig {
   model: string
   maxTokens?: number
   baseURL?: string
+  /** RFC05-2 — guarded fetch injection seam, parity with the Responses adapter's
+   *  `fetchImpl`. When present it is handed to the OpenAI SDK client's `fetch`
+   *  option so a declarative endpoint's network policy (SSRF/scheme/redirect
+   *  admission via `fetchWithSsrfGuard`) governs the Chat wire the SAME way it
+   *  governs Responses. ABSENT ⇒ the SDK uses its default global fetch
+   *  (byte-identical to the pre-RFC05 path). Shape matches the SDK `Fetch`. */
+  fetchImpl?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>
   /** T1 stream-hang guard overrides. Caller-supplied wins over env knobs
    *  (`QUANTA_LLM_STREAM_FIRST_CHUNK_MS` / `QUANTA_LLM_STREAM_IDLE_MS`); env
    *  wins over the defaults baked into `src/llm/stream-timeout.ts`. Read
@@ -362,6 +369,10 @@ export class OpenAIAdapter implements LLMPort {
       timeout: this.streamTimeoutMs.firstChunkMs,
       maxRetries: 2,
       ...(config.baseURL ? { baseURL: config.baseURL } : {}),
+      // RFC05-2 — inject the guarded fetch so a declarative endpoint's network
+      // policy governs the Chat wire (parity with Responses `fetchImpl`). Absent
+      // ⇒ omitted ⇒ SDK default global fetch (byte-identical).
+      ...(config.fetchImpl ? { fetch: config.fetchImpl } : {}),
     })
     this.model = config.model
     this.maxTokens = config.maxTokens ?? 8192

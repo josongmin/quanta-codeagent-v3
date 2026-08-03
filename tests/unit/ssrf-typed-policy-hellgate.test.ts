@@ -24,6 +24,7 @@ import {
   classifyIpClass,
   fetchWithSsrfGuard,
   type HostResolver,
+  type IpClass,
   SsrfGuardError,
   ssrfDeny,
 } from "@/shared/net/ssrf"
@@ -31,7 +32,7 @@ import {
 const hostOf = (u: string): string => new URL(u).hostname
 
 describe("classifyIpClass — typed structural class", () => {
-  const CASES: ReadonlyArray<[string, string]> = [
+  const CASES: ReadonlyArray<[string, IpClass]> = [
     ["127.0.0.1", "loopback"],
     ["::1", "loopback"],
     ["::ffff:127.0.0.1", "loopback"],
