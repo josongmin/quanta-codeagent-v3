@@ -709,4 +709,31 @@ describe("runSessionCommand", () => {
     },
     30_000,
   )
+
+  // RFC-06 §RFC06-1 (R1 audit fix) — a LEGACY fork session (cwd inside
+  // .quanta/worktrees but NO persisted ownership) is NOT auto-removed on delete
+  // (the deriveWorktreeInfo heuristic was deleted). Instead a report-only
+  // salvage NOTICE is emitted — no silent leak, no inference-driven mutation.
+  test("delete of a legacy worktree session (no ownership) emits a report-only notice, no removal", async () => {
+    const legacyCwd = "/some/repo/.quanta/worktrees/legacy-uuid"
+    await saveSessionById(mkMeta({ id: "legacy-1", cwd: legacyCwd }), mkPayload())
+    const c = captureDeps()
+    const code = await runSessionCommand(["delete", "legacy-1", "--force"], c.deps)
+    expect(code).toBe(0)
+    expect(c.err).toContain("notice:")
+    expect(c.err).toContain(legacyCwd)
+    expect(c.err).toContain("no persisted ownership")
+    // No removal claim — the notice is report-only.
+    expect(c.out).not.toContain("removed worktree")
+  })
+
+  // A plain (non-worktree) session delete emits NO worktree notice (the marker
+  // gate is anti-vacuous — it only fires for a worktree-looking cwd).
+  test("delete of a normal session emits no worktree notice", async () => {
+    await saveSessionById(mkMeta({ id: "plain-1", cwd: "/home/u/project" }), mkPayload())
+    const c = captureDeps()
+    expect(await runSessionCommand(["delete", "plain-1", "--force"], c.deps)).toBe(0)
+    expect(c.err).not.toContain("notice:")
+    expect(c.err).not.toContain("worktree")
+  })
 })

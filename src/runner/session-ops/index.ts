@@ -639,23 +639,42 @@ const cmdDelete = async (args: string[], deps: SessionCommandDeps): Promise<numb
   // the cwd path/branch name (the `deriveWorktreeInfo` heuristic was removed).
   // The hardened `removeWorktree` is non-force + porcelain-exact: a dirty/locked
   // worktree is REFUSED (report-only, never force-deleted) and the session file
-  // is still removed (the record is what users see). A session without a
-  // persisted ownership record simply skips cleanup (no inference).
-  await cleanupOwnedWorktreeOnDelete(existing.meta.workspaceOwnership, deps)
+  // is still removed (the record is what users see). A LEGACY fork (created
+  // before RFC06-0 persisted ownership) has no record but its cwd may sit in a
+  // `.quanta/worktrees/` dir — we do NOT infer a removal target from the path
+  // (the `deriveWorktreeInfo` heuristic was deleted; inference must never drive
+  // a mutation). Instead a REPORT-ONLY salvage notice is emitted so the operator
+  // can clean it up explicitly — no silent leak, no force delete.
+  await cleanupOwnedWorktreeOnDelete(existing.meta.workspaceOwnership, existing.meta.cwd, deps)
   await deleteSession(id)
   deps.out(`deleted ${id}\n`)
   return 0
 }
 
+/** Marker of a quanta fork-worktree cwd — used ONLY to decide whether to emit a
+ *  report-only salvage NOTICE for a legacy (ownership-less) session, never as a
+ *  removal target. */
+const WORKTREE_CWD_MARKER = "/.quanta/worktrees/"
+
 /** RFC-06 §RFC06-1 — teardown the EXACT persisted worktree on session delete.
  *  Report-only: dirty/locked refusals and git errors are surfaced as warnings
- *  and NEVER escalated to a force delete. No-op when there is no persisted
- *  ownership record (no path/branch inference). */
+ *  and NEVER escalated to a force delete. When there is no persisted ownership
+ *  record but the cwd looks like a legacy fork-worktree, emit a salvage NOTICE
+ *  (report-only — no path/branch inference drives any git mutation). */
 const cleanupOwnedWorktreeOnDelete = async (
   ownership: WorkspaceOwnership | undefined,
+  cwd: string,
   deps: SessionCommandDeps,
 ): Promise<void> => {
-  if (ownership === undefined) return
+  if (ownership === undefined) {
+    if (cwd.includes(WORKTREE_CWD_MARKER)) {
+      deps.err(
+        `notice: session cwd looks like a worktree (${cwd}) but has no persisted ownership ` +
+          "(legacy fork) — not auto-removed; clean it up with `git worktree remove` if unused.\n",
+      )
+    }
+    return
+  }
   try {
     const outcome = await removeWorktree(ownership.path, ownership.repoRoot, {
       branch: ownership.branch,
