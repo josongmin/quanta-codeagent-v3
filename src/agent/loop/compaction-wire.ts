@@ -104,8 +104,9 @@ const emitContextHeadroomAdvisory = (
   usedTokens: number,
   limitTokens: number,
   thresholdTokens: number,
+  env: Record<string, string | undefined> = process.env,
 ): void => {
-  if (!gateOnStrict(process.env, CONTEXT_HEADROOM_ADVISORY_ENV)) return
+  if (!gateOnStrict(env, CONTEXT_HEADROOM_ADVISORY_ENV)) return
   if (config.stream === undefined) return
   const key = config.sessionId ?? ""
   let latch = headroomLatches.get(key)
