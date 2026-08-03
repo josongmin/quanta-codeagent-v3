@@ -24,6 +24,8 @@ import {
   runConfigMigration,
 } from "@/migration/external-config"
 import { gateOn, runtimeConfig } from "@/shared"
+import { discoverSystemSkills } from "@/skill"
+import { composeImportSkillStage, importSkillsDir } from "./config-migration-skill-stage"
 
 /** Order item types appear in the notice (stable, deterministic). */
 const TYPE_ORDER: readonly MigrationItemType[] = [
@@ -147,10 +149,24 @@ export const runConfigMigrationImport = async (
   // The persist is a SEPARATE confirmed opt-in beyond the feature gate.
   if (!migrateConfig || !gateOn(env, "QUANTA_MIGRATE_CONFIG_IMPORT")) return undefined
   try {
+    const home = homedir()
+    // RFC03-4 wire — compose the REAL imported-skill staging port (CAS artifact
+    // + approval machine) + the pinned system-skill name set so a startup skill
+    // import STAGES through approval instead of failing closed (silent drop).
+    // The staging port's CAS jail root is the live `<home>/.quanta/skills` dir;
+    // an imported skill that would SHADOW a system skill is refused at convert
+    // time using the discovered system names. `discoverSystemSkills` is a cheap
+    // read of the bundled dir (no user IO); an empty set is safe (nothing to
+    // shadow). Composing the port is what makes the proven staging seam live —
+    // absent it, `importExternalConfig` leaves imported skills unwritten.
+    const { stage } = composeImportSkillStage(importSkillsDir(home))
+    const systemSkillNames = new Set((await discoverSystemSkills()).map((s) => s.name))
     const result = await importExternalConfig({
       enabled: true,
-      homeDir: homedir(),
+      homeDir: home,
       projectDir: cwd,
+      skillStage: stage,
+      systemSkillNames,
     })
     if (!result.ran || result.throttled || !result.persisted) return undefined
     const writtenTypes = new Set<MigrationItemType>()
