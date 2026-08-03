@@ -47,6 +47,12 @@ export const KEY_ACTIONS = [
   // (this action has no reader branch). Listed so `/help` + the keybindings
   // config layer surface it as a bindable name.
   "move-to-background",
+  // RFC-08 BUILD-1 — cycle the active model's supported reasoning-effort tiers.
+  // Like `open-editor`, this action has NO canonical default chord (it is
+  // operator-bindable ONLY, so it is absent from DEFAULT_KEYBINDINGS and
+  // KEYBIND_TRUTH) and NO 1:1 reader branch — the keymap remap binding calls the
+  // injected `onCycleEffort` hook directly when a configured chord maps here.
+  "effort-cycle",
 ] as const
 
 export type KeyAction = (typeof KEY_ACTIONS)[number]

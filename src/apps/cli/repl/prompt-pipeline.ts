@@ -35,6 +35,11 @@ export interface PromptPipelineUxOpts {
    *  absent ⇒ no meta row, shift+tab ignored (byte-identical). */
   readonly modeMeta?: string
   readonly onCycleMode?: () => { meta?: string } | undefined
+  /** RFC-08 BUILD-1 — bound `effort-cycle` action hook. Present iff the effort
+   *  wires were composed (host `buildPromptUx`); calls the EXISTING slash
+   *  `effort.set` with the next supported tier off the live model wire. Absent ⇒
+   *  a bound `effort-cycle` chord is inert (byte-identical). */
+  readonly onCycleEffort?: () => void
   /** RFC-11 / ADR-0446 — external `$EDITOR` composition port. When present,
    *  `ctrl+x ctrl+e` opens the draft in `$EDITOR`. Absent ⇒ byte-identical. */
   readonly openEditor?: ExternalEditorPort
@@ -134,6 +139,7 @@ const defaultPromptLineReader: PromptLineReader = async (
       ...(ux?.atProvider !== undefined ? { atProvider: ux.atProvider } : {}),
       ...(ux?.modeMeta !== undefined ? { meta: ux.modeMeta } : {}),
       ...(ux?.onCycleMode !== undefined ? { onCycleMode: ux.onCycleMode } : {}),
+      ...(ux?.onCycleEffort !== undefined ? { onCycleEffort: ux.onCycleEffort } : {}),
       ...(ux?.openEditor !== undefined ? { openEditor: ux.openEditor } : {}),
       ...(ux?.keybindings !== undefined ? { keybindings: ux.keybindings } : {}),
       ...(ux?.pasteBurst !== undefined ? { pasteBurst: ux.pasteBurst } : {}),

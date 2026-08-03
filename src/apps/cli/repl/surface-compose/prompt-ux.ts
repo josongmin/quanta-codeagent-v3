@@ -1,11 +1,13 @@
-import type { AgentMode } from "@/agent"
+import type { AgentMode, EffortLevel } from "@/agent"
 import { buildMentionSymbolDeps } from "@/host/runtime/internal/mention-symbol-deps"
+import type { ModelEffortSupport } from "@/llm/provider-metadata"
 import { gateOn, runtimeConfig } from "@/shared"
 import {
   type AtCandidateProvider,
   atAutocompleteEnabled,
   createCompositeAtProvider,
 } from "../../at-autocomplete"
+import { nextSupportedEffort } from "../../effort-cycle"
 import { loadKeybindings } from "../../keybindings/load"
 import type { KeybindingMap } from "../../keybindings/types"
 import {
@@ -30,6 +32,14 @@ export interface PromptUxOpts {
   readonly modeCycle?: ModeCycleStore
   readonly modeMeta?: string
   readonly onCycleMode?: () => { meta?: string } | undefined
+  /** RFC-08 BUILD-1 — bound `effort-cycle` action hook. Present iff BOTH the
+   *  keybinding layer is enabled (a chord CAN be bound) AND the host supplied the
+   *  effort-cycle wire (slash `effort` + `model`). The callback reads the live
+   *  model + current effort, computes the next supported tier via
+   *  `nextSupportedEffort`, and calls the EXISTING `effort.set` (same store +
+   *  pill as `/effort`). Owns NO store/model/config. Absent ⇒ a bound chord is
+   *  inert (byte-identical). */
+  readonly onCycleEffort?: () => void
   /** RFC-11 / ADR-0446 — external `$EDITOR` composition port. Present iff
    *  `QUANTA_EXTERNAL_EDITOR=1`. Absent ⇒ ctrl-x ctrl-e inert (byte-identical). */
   readonly openEditor?: ExternalEditorPort
@@ -78,6 +88,41 @@ const buildModeCycle = (
   }
 }
 
+/** RFC-08 BUILD-1 — the live owner wires the effort-cycle callback composes over.
+ *  ALL three are EXISTING owners, projected as thunks so prompt-ux owns no state:
+ *   - `currentModel()` — the live slash model wire's `current()` (adapter shadow,
+ *     NOT boot `setup.model`), so a `/model` switch is reflected on the next press.
+ *   - `effortSupport(id)` — the live wire's per-model reasoning-effort metadata.
+ *   - `effort.get/set` — the SAME `EffortStore`-backed slash `effort` wire (its
+ *     `set` also repaints the pill), so `/effort`, the chord, and the next LLM
+ *     request all agree on one cell. */
+export interface EffortCycleWire {
+  readonly currentModel: () => string
+  readonly effortSupport: (id: string) => ModelEffortSupport | undefined
+  readonly effort: { readonly get: () => EffortLevel; readonly set: (level: EffortLevel) => void }
+}
+
+/** RFC-08 BUILD-1 — build the bound `effort-cycle` callback. Gated on BOTH the
+ *  keybinding layer (a chord CAN be bound) AND the host supplying the wire.
+ *  Absent either ⇒ `undefined` ⇒ a bound chord is inert (byte-identical). The
+ *  callback owns no store/model/config: it reads the live model + current
+ *  effort, computes the next SUPPORTED tier via the pure `nextSupportedEffort`
+ *  leaf, and calls the EXISTING `effort.set` (same store + pill as `/effort`). */
+const buildEffortCycle = (
+  env: NodeJS.ProcessEnv,
+  wire: EffortCycleWire | undefined,
+): Pick<PromptUxOpts, "onCycleEffort"> => {
+  if (wire === undefined || !gateOn(env, "QUANTA_KEYBINDINGS")) return {}
+  return {
+    onCycleEffort: () => {
+      const model = wire.currentModel()
+      const support = wire.effortSupport(model)
+      const next = nextSupportedEffort(wire.effort.get(), support)
+      wire.effort.set(next)
+    },
+  }
+}
+
 /** RFC-12 / ADR-0439 — build the `@`-mention autocomplete provider when the
  *  feature is enabled (`QUANTA_AT_AUTOCOMPLETE=1`). File listing is live (cwd
  *  jail = the resolver root); symbol listing reuses the SAME lazy union-LSP
@@ -111,6 +156,9 @@ export const buildPromptUx = async (
   // shift+tab cycle and `/mode` share ONE instance. Absent ⇒ buildModeCycle
   // mints its own (legacy / test path).
   modeCycleStore?: ModeCycleStore,
+  // RFC-08 BUILD-1 — the live effort-cycle owner wire (slash `effort` + `model`).
+  // Absent ⇒ no `onCycleEffort` ⇒ a bound `effort-cycle` chord is inert.
+  effortCycle?: EffortCycleWire,
 ): Promise<PromptUxOpts> => {
   const { history, multiline } = featureCfg
   const promptHistoryOpts: Parameters<typeof createPromptHistory>[0] = {
@@ -137,6 +185,7 @@ export const buildPromptUx = async (
     multiline: multiline.enabled,
     ...(atProvider !== undefined ? { atProvider } : {}),
     ...buildModeCycle(env, onPosture, modeCycleStore),
+    ...buildEffortCycle(env, effortCycle),
     ...(openEditor !== undefined ? { openEditor } : {}),
     ...(keybindings !== undefined ? { keybindings } : {}),
     ...(pasteBurstMinChars !== undefined ? { pasteBurst: { minChars: pasteBurstMinChars } } : {}),

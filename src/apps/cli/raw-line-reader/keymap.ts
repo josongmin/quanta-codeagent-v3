@@ -85,6 +85,8 @@ export interface KeymapOpts {
     list(query: string, signal?: AbortSignal): Promise<readonly AtCandidate[]>
   }
   readonly onCycleMode?: () => { meta?: string } | undefined
+  /** RFC-08 BUILD-1 — bound `effort-cycle` action hook (see `options.ts`). */
+  readonly onCycleEffort?: () => void
   readonly openEditor?: ExternalEditorPort
   readonly keybindings?: KeybindingMap
   readonly pasteBurst?: { readonly minChars: number }
@@ -227,6 +229,16 @@ export const KEY_BINDINGS: readonly KeyBinding[] = [
       const action = chord !== null ? c.opts.keybindings?.get(chord) : undefined
       if (action === "open-editor") {
         if (c.opts.openEditor !== undefined) c.runExternalEdit()
+        return "handled"
+      }
+      // RFC-08 BUILD-1 — a chord bound to `effort-cycle` invokes the injected
+      // hook and CONSUMES the key (like `open-editor`, it has no canonical
+      // reader branch to remap onto). The hook reads the live model/effort wires
+      // and calls the EXISTING `effort.set`; the reader owns no effort state. A
+      // bound chord with NO hook wired is an inert consume (byte-identical to the
+      // no-hook build apart from the key not reaching its raw insert).
+      if (action === "effort-cycle") {
+        c.opts.onCycleEffort?.()
         return "handled"
       }
       if (action !== undefined) {

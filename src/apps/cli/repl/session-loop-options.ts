@@ -8,6 +8,7 @@
  * entry routing; the per-turn loop wiring lives here.
  */
 
+import { resolveModelEffortSupport } from "@/llm/provider-metadata"
 import type { CliFeatureConfig } from "./cli-feature-config"
 import type { buildNotifyAndContextWarning } from "./factories"
 import type { runSessionLoop } from "./session-loop"
@@ -18,6 +19,7 @@ import {
   composeTurnSinks,
   type createSurfaceState,
 } from "./surface-compose"
+import type { EffortCycleWire } from "./surface-compose/prompt-ux"
 
 type SessionLoopArgs = Parameters<typeof runSessionLoop>[0]
 type Setup = Awaited<ReturnType<typeof setupSession>>
@@ -37,8 +39,42 @@ const buildReplPromptUx = (
   // shift+tab pill/hook reuses the SAME instance the `/mode` slash mutates.
   // Absent ⇒ buildModeCycle mints its own (gate off ⇒ undefined anyway).
   modeCycleStore?: Wires["modeCycleStore"],
+  // RFC-08 BUILD-1 — the live surface wires: `slashCtx.effort` (SAME EffortStore
+  // + pill `/effort` mutates) and `setup.liveModelSource` (re-pointed by
+  // surface-compose to the `/model` adapter's live `current()`). Absent the
+  // effort slot ⇒ no effort-cycle wire ⇒ a bound chord is inert. NOT a new store.
+  effortSlot?: NonNullable<Wires["slashCtx"]>["effort"],
 ): ReturnType<typeof buildPromptUx> =>
-  buildPromptUx(featureCfg, setup.cwd, env, (m) => setup.pills.update({ mode: m }), modeCycleStore)
+  buildPromptUx(
+    featureCfg,
+    setup.cwd,
+    env,
+    (m) => setup.pills.update({ mode: m }),
+    modeCycleStore,
+    buildEffortCycleWire(setup.liveModelSource, effortSlot),
+  )
+
+/** RFC-08 BUILD-1 — project the live slash `effort` wire + the live model source
+ *  onto the effort-cycle owner contract. Reuses the EXISTING `EffortStore`-backed
+ *  `effort.get/set` (its `set` also repaints the pill), the live model id via
+ *  `liveModelSource.source()` (surface-compose re-points it to the `/model`
+ *  adapter's `current()`), and the SSOT `resolveModelEffortSupport` (the SAME
+ *  function `buildModelAdapter.effortSupport` calls) — no second store/table.
+ *  Returns `undefined` when the effort slot is absent (a surface without the
+ *  `/effort` wire cannot cycle), so `buildEffortCycle` omits `onCycleEffort`.
+ *  Exported for the focused wiring hellgate (it reads the LIVE model, not boot).
+ */
+export const buildEffortCycleWire = (
+  liveModelSource: { readonly source: () => string },
+  effortSlot: NonNullable<Wires["slashCtx"]>["effort"] | undefined,
+): EffortCycleWire | undefined => {
+  if (effortSlot === undefined) return undefined
+  return {
+    currentModel: () => liveModelSource.source(),
+    effortSupport: (id) => resolveModelEffortSupport(id),
+    effort: { get: () => effortSlot.get(), set: (level) => effortSlot.set(level) },
+  }
+}
 
 /** Project the built bundles into the `runSessionLoop` argument object. */
 export const buildSessionLoopOptions = async (deps: {
@@ -68,7 +104,13 @@ export const buildSessionLoopOptions = async (deps: {
     ...rfc09,
     ...(surfaceState.imageQueue !== undefined ? { imageQueue: surfaceState.imageQueue } : {}),
     textInbox: wires.textInbox,
-    ux: await buildReplPromptUx(featureCfg, setup, env, wires.modeCycleStore),
+    ux: await buildReplPromptUx(
+      featureCfg,
+      setup,
+      env,
+      wires.modeCycleStore,
+      wires.slashCtx.effort,
+    ),
     registerExitTeardown: (cb) => {
       process.once("exit", cb)
     },
