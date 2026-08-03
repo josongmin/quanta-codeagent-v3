@@ -78,6 +78,27 @@ export interface SubagentMailboxToolPort {
   pendingFor(agentId: string): number
 }
 
+/** RFC07-1 — slice-safe mirror of `NamedAddressResolution` from
+ *  `@/agent/subagent-delivery/target-resolver`. The tool slice never imports
+ *  `@/agent`/`@/subagent`; the host injects a narrow callback that reuses the
+ *  live `TaskRegistry` + spawn-owner ledger. `no_match` is the signal to fall
+ *  through to the existing raw-id/parent/broadcast path (and is deliberately
+ *  indistinguishable from a foreign-lineage match — no disclosure). */
+export type NamedTargetResolution =
+  | { readonly kind: "resolved"; readonly mailboxLabel: string }
+  | { readonly kind: "ambiguous"; readonly candidates: readonly string[] }
+  | { readonly kind: "no_match" }
+
+/** Narrow optional callback: map a caller-supplied `to` NAME to a live mailbox
+ *  address. Injected at the Tier-1 composition seam; absent ⇒ named resolution
+ *  is inert and every `to` keeps its current verbatim/parent/broadcast path
+ *  (byte-identical OFF). The tool never enumerates registry state itself. */
+export type ResolveNamedTarget = (name: string) => NamedTargetResolution
+
+export interface SubagentMailboxToolOptions {
+  readonly resolveNamedTarget?: ResolveNamedTarget
+}
+
 /** Stable root mailbox address. This is protocol data, not a host dependency. */
 const ROOT_MAILBOX_AGENT_ID = "root"
 
@@ -153,6 +174,34 @@ const resolveTarget = (to: string, ctx: ToolContext): string => {
   return parentDepth === 0 ? "root" : `agent@depth-${parentDepth}`
 }
 
+/** RFC07-1 — outcome of applying named resolution to a raw `to` value.
+ *  `address` carries the mailbox address to send to (named-resolved OR the
+ *  verbatim/parent path); `ambiguous` short-circuits with candidate task ids so
+ *  the caller reports a typed failure and enqueues NOTHING. */
+type ResolvedAddress =
+  | { readonly kind: "address"; readonly to: string }
+  | { readonly kind: "ambiguous"; readonly candidates: readonly string[] }
+
+/** Apply named resolution before falling back to the existing verbatim/parent
+ *  path. `"parent"` and `"*"` are protocol literals and are NEVER treated as
+ *  names. Any other `to` is offered to the host resolver: a unique owned match
+ *  becomes its mailbox label, an ambiguous match short-circuits, and no_match
+ *  (including a foreign-lineage-only match — indistinguishable) falls through to
+ *  the verbatim/parent path so concrete ids and legacy addresses stay compatible. */
+const resolveNamedOrVerbatim = (
+  to: string,
+  ctx: ToolContext,
+  resolveNamedTarget: ResolveNamedTarget | undefined,
+): ResolvedAddress => {
+  if (resolveNamedTarget !== undefined && to !== "parent" && to !== "*") {
+    const named = resolveNamedTarget(to)
+    if (named.kind === "resolved") return { kind: "address", to: named.mailboxLabel }
+    if (named.kind === "ambiguous") return { kind: "ambiguous", candidates: named.candidates }
+    // no_match ⇒ fall through to the verbatim/parent path below.
+  }
+  return { kind: "address", to: resolveTarget(to, ctx) }
+}
+
 /** Render a sent message to concise model-facing confirmation text. */
 const renderSent = (m: SubagentMailboxMessage): string => {
   const lines: string[] = []
@@ -169,6 +218,7 @@ const errResult = (msg: string): ToolResult => ({ ok: false, output: msg })
 
 const buildSubagentSendMessage = (
   port: SubagentMailboxToolPort,
+  resolveNamedTarget?: ResolveNamedTarget,
 ): Tool<SubagentSendMessageInput> => ({
   name: "subagent_send_message",
   description:
@@ -194,7 +244,22 @@ const buildSubagentSendMessage = (
     }
     try {
       const from = senderId(ctx)
-      const to = resolveTarget(parsed.data.to, ctx)
+      // RFC07-1: named resolution BEFORE verbatim/parent. Ambiguous names fail
+      // closed with candidate ids and enqueue nothing; unique owned names become
+      // their mailbox label; no_match/foreign fall through unchanged.
+      const resolved = resolveNamedOrVerbatim(parsed.data.to, ctx, resolveNamedTarget)
+      if (resolved.kind === "ambiguous") {
+        yield {
+          type: "result",
+          result: errResult(
+            `ambiguous target "${parsed.data.to}": ${resolved.candidates.length} live agents ` +
+              `share that name (${resolved.candidates.join(", ")}). No message was sent — ` +
+              "address the intended agent by its concrete task id.",
+          ),
+        }
+        return
+      }
+      const to = resolved.to
       const init: {
         from: string
         to: string
@@ -316,8 +381,16 @@ const buildSubagentReadMessages = (
 /** Build the subagent-mailbox tools wired to a single narrow port. Returned as
  *  a stable array so the tier-1 composer can spread it uniformly (mirrors
  *  `objectiveTools` / `subagentBgTools` shape). Both the SEND (ADR-0416) and READ
- *  (ADR-0419) tools share the SAME port instance and the SAME id-derivation. */
-export const subagentMailboxTools = (port: SubagentMailboxToolPort): Tool[] => [
-  buildSubagentSendMessage(port) as Tool,
+ *  (ADR-0419) tools share the SAME port instance and the SAME id-derivation.
+ *
+ *  RFC07-1: an optional `opts.resolveNamedTarget` callback lets the host reuse
+ *  its live `TaskRegistry` + spawn-owner ledger to resolve a named `to:`. Absent
+ *  ⇒ named resolution is inert and delivery is byte-identical to the pre-RFC07-1
+ *  verbatim/parent/broadcast behavior. */
+export const subagentMailboxTools = (
+  port: SubagentMailboxToolPort,
+  opts?: SubagentMailboxToolOptions,
+): Tool[] => [
+  buildSubagentSendMessage(port, opts?.resolveNamedTarget) as Tool,
   buildSubagentReadMessages(port) as Tool,
 ]
