@@ -76,6 +76,14 @@ export interface CreateLLMOptions {
    *  by selecting `responses` on the official OpenAI API and
    *  `chat-completions` on custom OpenAI-compatible base URLs. */
   surface?: "auto" | "chat-completions" | "responses"
+  /** RFC05-2 — guarded-fetch injection for a configured named OpenAI endpoint.
+   *  Forwarded verbatim to the OpenAI adapter's existing `fetchImpl?` seam (both
+   *  Chat + Responses) so a declarative endpoint's network policy (SSRF / scheme
+   *  / redirect admission via `fetchWithSsrfGuard`) governs the wire. The
+   *  composition root (`@/runner/assemble/llm.ts`) builds it from the resolved
+   *  endpoint; it is NOT read from env. Ignored by Anthropic. ABSENT ⇒ the SDK
+   *  uses its default global fetch (byte-identical to the pre-RFC05 path). */
+  fetchImpl?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>
   /** Anthropic `anthropic-beta` channels. Ignored by OpenAI. */
   betaHeaders?: readonly string[]
   /** Per-adapter completion token cap (adapter default 8192 when omitted). */
@@ -140,6 +148,10 @@ const ADAPTER_REGISTRY: Record<
       apiKey,
       model,
       ...(opts.baseURL !== undefined ? { baseURL: opts.baseURL } : {}),
+      // RFC05-2 — plumb the configured endpoint's guarded fetch into BOTH OpenAI
+      // wires (the Chat + Responses adapters each expose the same `fetchImpl?`
+      // seam). Absent ⇒ omitted ⇒ SDK default global fetch (byte-identical).
+      ...(opts.fetchImpl !== undefined ? { fetchImpl: opts.fetchImpl } : {}),
       ...(opts.maxTokens !== undefined ? { maxTokens: opts.maxTokens } : {}),
       ...(opts.streamFirstChunkMs !== undefined
         ? { streamFirstChunkMs: opts.streamFirstChunkMs }
