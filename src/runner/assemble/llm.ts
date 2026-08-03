@@ -9,6 +9,7 @@ import {
   DEFAULT_MODEL,
   FallbackLLM,
   type FallbackMetricSink,
+  type FallbackTransition,
   type Provider as LLMFactoryProvider,
   type LLMPort,
   type ProviderEnv,
@@ -24,6 +25,7 @@ import type { StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode } from "@/permission"
 import { runShell } from "@/runtime"
 import { runtimeConfig } from "@/shared"
+import type { AgentEvent, ModelRouteReason } from "@/stream"
 
 /**
  * Surface-agnostic LLM assembly. The CLI / Web / Tauri surfaces parse their
@@ -449,5 +451,51 @@ export const parseFallbackModels = (raw: string | undefined): string[] => {
     .map((s) => s.trim())
     .filter((s) => s.length > 0 && s !== "1")
 }
+
+// ─────────────── RFC02-3 (A8) — FALLBACK route-transition OBSERVATION ────────
+//
+// The `@/runner` adapter that converts a `FallbackLLM` structural transition
+// (`FallbackTransition`, `@/llm`) into a `model_route_changed` AgentEvent
+// (`@/stream`). This is DELIBERATELY a SEPARATE function/dep from the endpoint-
+// selection + `composeLLMCore` stack (README shared-write-set rule: "route
+// observation과 endpoint selection을 별도 함수/dep로 유지; wrapper nesting/retry
+// 추가 금지"). It adds NO wrapper to the LLM stack — the caller wires the pure
+// mapper below to `FallbackLLMOptions.onTransition` and pushes the resulting
+// event onto the SAME AgentEvent stream the loop already emits. `FallbackLLM`
+// OWNS the route reason (it is the only party that knows WHY it swapped — the
+// triggering `LLMError.kind`); this maps that onto the closed `ModelRouteReason`.
+
+/** Map the fallback swap's `LLMError.kind` onto the closed `ModelRouteReason`.
+ *  Exhaustive over the FOUR kinds the fallback classifier swaps on
+ *  (`isFallbackKind` → `fallback_provider`); any other string fails CLOSED to
+ *  `provider_server_error` (a fallback swap always has a provider-side cause, so
+ *  a not-yet-mapped kind is still a provider fault, never a mislabelled operator
+ *  action). Kept as a `Record` so a new fallback kind that should surface
+ *  distinctly is a visible edit here. */
+const FALLBACK_KIND_TO_ROUTE_REASON: Readonly<Record<string, ModelRouteReason>> = Object.freeze({
+  overloaded: "provider_overloaded",
+  server_error: "provider_server_error",
+  network: "provider_network",
+  not_implemented: "provider_not_implemented",
+})
+
+/** Convert a `FallbackLLM` {@link FallbackTransition} into a
+ *  `model_route_changed` AgentEvent. Pure: `now`/`turnId`/`provider` are
+ *  injected by the caller (no bare clock read here). `routeKind` is fixed to
+ *  `provider_fallback` — this adapter is FALLBACK-specific; the operator-retry
+ *  and scheduler callers project their OWN events with their own `routeKind`. */
+export const fallbackTransitionToRouteEvent = (
+  t: FallbackTransition,
+  ctx: { readonly at: number; readonly turnId?: string; readonly provider?: string },
+): Extract<AgentEvent, { type: "model_route_changed" }> => ({
+  type: "model_route_changed",
+  fromModel: t.fromModel,
+  toModel: t.toModel,
+  reason: FALLBACK_KIND_TO_ROUTE_REASON[t.kind] ?? "provider_server_error",
+  routeKind: "provider_fallback",
+  at: ctx.at,
+  ...(ctx.turnId !== undefined ? { turnId: ctx.turnId } : {}),
+  ...(ctx.provider !== undefined ? { provider: ctx.provider } : {}),
+})
 
 export { DEFAULT_MODEL }

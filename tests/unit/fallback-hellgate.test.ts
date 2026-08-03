@@ -25,9 +25,11 @@
  *   - Abort during a swap terminates cleanly (no orphan stream).
  */
 import { describe, expect, test } from "bun:test"
-import type { LLMPort, StreamEvent } from "@/llm"
+import type { FallbackTransition, LLMPort, StreamEvent } from "@/llm"
 import { assembleFromEvents, FallbackLLM, isFallbackTrigger } from "@/llm"
+import { fallbackTransitionToRouteEvent } from "@/runner/assemble/llm"
 import { LLMError } from "@/shared"
+import type { AgentEvent, ModelRouteReason } from "@/stream"
 
 type Step =
   | { kind: "ok"; events: StreamEvent[] }
@@ -314,5 +316,163 @@ describe("A6 — abort during a swap", () => {
     expect(p2.calls).toBe(0) // no orphan replacement stream started
     // Consumer saw only the dead partial before the abort — never finalized.
     expect(seen.map((e) => (e.type === "text_delta" ? e.delta : e.type))).toEqual(["p1-partial"])
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RFC02-3 (A8) — FallbackLLM.onTransition → model_route_changed projection.
+//
+// The fallback OWNS the route reason (the triggering LLMError.kind); the runner
+// adapter (fallbackTransitionToRouteEvent) maps it onto the closed
+// ModelRouteReason and produces the ONE AgentEvent shape. Crown proof: drive the
+// REAL FallbackLLM swap and assert the transition reaches a wire through the
+// real adapter — NOT a pure-fn shape check. Red-on-injection: suppress the emit
+// and assert absence.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Provider WITH a model id (the base ScriptedLLM omits it). */
+class ModeledLLM implements LLMPort {
+  calls = 0
+  constructor(
+    readonly model: string,
+    private readonly step: Step,
+  ) {}
+  async *stream(): AsyncIterable<StreamEvent> {
+    this.calls += 1
+    if (this.step.kind === "ok") {
+      for (const ev of this.step.events) yield ev
+      return
+    }
+    if (this.step.kind === "yieldThenThrow") {
+      for (const ev of this.step.events) yield ev
+      throw this.step.error
+    }
+    throw this.step.error
+  }
+}
+
+describe("RFC02-3 A8 — FallbackLLM route transition", () => {
+  test("[crown] provider swap → onTransition fires → runner adapter emits model_route_changed on the AgentEvent wire", async () => {
+    const p1 = new ModeledLLM("gpt-5", { kind: "throw", error: status529() })
+    const p2 = new ModeledLLM("claude-opus", { kind: "ok", events: [text("hi"), stop()] })
+    // The runner-side observation wiring: onTransition → adapter → AgentEvent wire.
+    const wire: AgentEvent[] = []
+    const transitions: FallbackTransition[] = []
+    const llm = new FallbackLLM({
+      providers: [p1, p2],
+      onTransition: (t) => {
+        transitions.push(t)
+        wire.push(fallbackTransitionToRouteEvent(t, { at: 1000, turnId: "t7" }))
+      },
+    })
+    const events = await collect(llm.stream({ messages: [], tools: [] }))
+    // The stream itself is unchanged (swap transparent — no partial, no reset).
+    expect(assembledText(events)).toBe("hi")
+    expect(resets(events)).toBe(0)
+    // The structural transition fired exactly once with from/to/kind.
+    expect(transitions).toEqual([
+      { fromModel: "gpt-5", toModel: "claude-opus", kind: "overloaded", postYield: false },
+    ])
+    // The runner adapter produced ONE model_route_changed AgentEvent with the
+    // closed reason mapped from the kind + the fallback routeKind.
+    expect(wire).toEqual([
+      {
+        type: "model_route_changed",
+        fromModel: "gpt-5",
+        toModel: "claude-opus",
+        reason: "provider_overloaded",
+        routeKind: "provider_fallback",
+        at: 1000,
+        turnId: "t7",
+      },
+    ])
+  })
+
+  test("[reason-map] each fallback kind maps to its closed ModelRouteReason", async () => {
+    const cases: Array<[LLMError, ModelRouteReason]> = [
+      [new LLMError("529", { kind: "overloaded" }), "provider_overloaded"],
+      [new LLMError("503", { kind: "server_error" }), "provider_server_error"],
+      [new LLMError("ECONNRESET", { kind: "network" }), "provider_network"],
+      [new LLMError("stub", { kind: "not_implemented" }), "provider_not_implemented"],
+    ]
+    for (const [err, expectedReason] of cases) {
+      const p1 = new ModeledLLM("m-from", { kind: "throw", error: err })
+      const p2 = new ModeledLLM("m-to", { kind: "ok", events: [text("x"), stop()] })
+      const wire: AgentEvent[] = []
+      const llm = new FallbackLLM({
+        providers: [p1, p2],
+        onTransition: (t) => wire.push(fallbackTransitionToRouteEvent(t, { at: 5 })),
+      })
+      await collect(llm.stream({ messages: [], tools: [] }))
+      expect(wire).toHaveLength(1)
+      const ev = wire[0]
+      const actualReason = ev?.type === "model_route_changed" ? ev.reason : undefined
+      expect(actualReason).toBe(expectedReason)
+    }
+  })
+
+  test("[post_yield] a mid-stream swap that tombstoned a partial reports postYield:true", async () => {
+    const p1 = new ModeledLLM("gpt-5", {
+      kind: "yieldThenThrow",
+      events: [text("dead")],
+      error: status529(),
+    })
+    const p2 = new ModeledLLM("claude-opus", { kind: "ok", events: [text("live"), stop()] })
+    const transitions: FallbackTransition[] = []
+    const llm = new FallbackLLM({ providers: [p1, p2], onTransition: (t) => transitions.push(t) })
+    const events = await collect(llm.stream({ messages: [], tools: [] }))
+    expect(resets(events)).toBe(1) // partial tombstoned
+    expect(assembledText(events)).toBe("live") // dead partial discarded
+    expect(transitions[0]?.postYield).toBe(true)
+  })
+
+  test("[gate-OFF parity] NO onTransition ⇒ zero observation, byte-identical stream", async () => {
+    const p1 = new ModeledLLM("gpt-5", { kind: "throw", error: status529() })
+    const p2 = new ModeledLLM("claude-opus", { kind: "ok", events: [text("hi"), stop()] })
+    // With callback:
+    const withCb: FallbackTransition[] = []
+    const a = await collect(
+      new FallbackLLM({ providers: [p1, p2], onTransition: (t) => withCb.push(t) }).stream({
+        messages: [],
+        tools: [],
+      }),
+    )
+    // Without callback: fresh providers (p2 was consumed above).
+    const p1b = new ModeledLLM("gpt-5", { kind: "throw", error: status529() })
+    const p2b = new ModeledLLM("claude-opus", { kind: "ok", events: [text("hi"), stop()] })
+    const b = await collect(
+      new FallbackLLM({ providers: [p1b, p2b] }).stream({ messages: [], tools: [] }),
+    )
+    // Stream is byte-identical whether or not the callback is wired.
+    expect(b).toEqual(a)
+    // The callback path observed exactly one swap; the OFF path observed none
+    // (there is no sink to count, which IS the byte-identical property).
+    expect(withCb).toHaveLength(1)
+  })
+
+  test("[no-swap parity] a non-fallback error rethrows WITHOUT firing onTransition", async () => {
+    const p1 = new ModeledLLM("gpt-5", {
+      kind: "throw",
+      error: new LLMError("401", { kind: "auth" }),
+    })
+    const p2 = new ModeledLLM("claude-opus", { kind: "ok", events: [text("hi"), stop()] })
+    const transitions: FallbackTransition[] = []
+    const llm = new FallbackLLM({ providers: [p1, p2], onTransition: (t) => transitions.push(t) })
+    await expect(collect(llm.stream({ messages: [], tools: [] }))).rejects.toThrow()
+    expect(transitions).toHaveLength(0) // no swap ⇒ no route transition
+    expect(p2.calls).toBe(0)
+  })
+
+  test("[red-on-injection] SUPPRESSING the onTransition wiring ⇒ NO model_route_changed on the wire", async () => {
+    // Simulates removing the runner emit: the swap still happens, the fallback
+    // still works, but with no wiring the wire stays empty. This pins that the
+    // crown test's PASS is caused by the real emit, not the harness.
+    const p1 = new ModeledLLM("gpt-5", { kind: "throw", error: status529() })
+    const p2 = new ModeledLLM("claude-opus", { kind: "ok", events: [text("hi"), stop()] })
+    const wire: AgentEvent[] = []
+    // onTransition deliberately NOT wired to the adapter/wire (the injection).
+    const llm = new FallbackLLM({ providers: [p1, p2] })
+    await collect(llm.stream({ messages: [], tools: [] }))
+    expect(wire.filter((e) => e.type === "model_route_changed")).toHaveLength(0)
   })
 })

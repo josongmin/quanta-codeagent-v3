@@ -66,6 +66,31 @@ export const FALLBACK_METRIC_NAMES = Object.freeze({
  * Deterministic-testable: providers are injected as plain `LLMPort`s (mock
  * async-generators); no timers, no randomness, nothing else to inject.
  */
+/** RFC02-3 (A8) — the structural model-route transition `FallbackLLM` reports
+ *  when it fails over from one provider to the next. This is a PLAIN value shape
+ *  (NO `@/stream` import — the `@/llm` slice may not cross to `@/stream`): the
+ *  `@/runner` adapter (`src/runner/assemble/llm.ts`) converts it to the
+ *  `model_route_changed` AgentEvent. `reason` is the `LLMError.kind` that
+ *  triggered the swap (the fallback OWNS this semantic — it is the only party
+ *  that knows WHY it swapped); the runner maps the kind onto the closed
+ *  `ModelRouteReason`. NO lifecycle/store/bus here — a single stateless
+ *  callback. */
+export interface FallbackTransition {
+  /** Model id of the dying provider (the `from`). `"unknown"` when the provider
+   *  exposes no `model` (same sentinel the triggered metric uses). */
+  readonly fromModel: string
+  /** Model id of the replacement provider (the `to`). `"unknown"` when absent. */
+  readonly toModel: string
+  /** The `LLMError.kind` that triggered the swap (`overloaded` / `server_error`
+   *  / `network` / `not_implemented`). The runner maps this onto the closed
+   *  `ModelRouteReason`. */
+  readonly kind: string
+  /** True iff the dying provider had already yielded ≥1 event (a mid-stream swap
+   *  that tombstoned a partial) — more disruptive than a transparent pre-yield
+   *  swap. Mirrors the `post_yield` metric label. */
+  readonly postYield: boolean
+}
+
 export interface FallbackLLMOptions {
   /** Ordered providers: index 0 is the primary, the rest are fallbacks tried
    *  left-to-right. Must be non-empty. */
@@ -81,6 +106,16 @@ export interface FallbackLLMOptions {
    *    - `llm.fallback.exhausted.total`  labels: last_kind
    *  See {@link FALLBACK_METRIC_NAMES}. */
   metrics?: FallbackMetricSink
+  /** RFC02-3 (A8) — optional structural model-route transition callback. Fired
+   *  ONCE per provider swap (the same seam as the `triggered` metric), AFTER the
+   *  decision to fall over is made and the next provider is known. Structural
+   *  (no `@/stream` coupling): the `@/runner` adapter converts each
+   *  {@link FallbackTransition} to a `model_route_changed` AgentEvent. Default-
+   *  OFF: absent ⇒ never called ⇒ byte-identical stream (this callback NEVER
+   *  alters the yielded event sequence or model text — it is pure observation,
+   *  fired outside the `yield*`). A throwing callback is swallowed (observability
+   *  must not break the wrapped stream), same posture as {@link emit}. */
+  onTransition?: (t: FallbackTransition) => void
 }
 
 /** True iff `e` is a provider-overload / provider-side failure that warrants
@@ -129,6 +164,9 @@ export class FallbackLLM implements LLMPort {
   private readonly signal: AbortSignal | undefined
   private readonly isFallbackTrigger: (e: unknown) => boolean
   private readonly metrics: FallbackMetricSink
+  /** RFC02-3 (A8) — optional structural route-transition sink. Absent ⇒ never
+   *  called (byte-identical). */
+  private readonly onTransition: ((t: FallbackTransition) => void) | undefined
   /** The chain reports the PRIMARY (index 0) provider's model — the one it
    *  streams from first — so a fallback chain still emits a faithful
    *  pre-stream `llm_request`. Absent if the primary omits `model`. */
@@ -158,6 +196,19 @@ export class FallbackLLM implements LLMPort {
     this.signal = opts.signal
     this.isFallbackTrigger = opts.isFallbackTrigger ?? isFallbackTrigger
     this.metrics = opts.metrics ?? NOOP_FALLBACK_METRICS
+    this.onTransition = opts.onTransition
+  }
+
+  /** Fire the RFC02-3 route-transition callback without ever throwing — an
+   *  observability sink cannot break the wrapped stream (same posture as
+   *  {@link emit}). No-op when no callback was wired (byte-identical). */
+  private emitTransition(t: FallbackTransition): void {
+    if (this.onTransition === undefined) return
+    try {
+      this.onTransition(t)
+    } catch {
+      /* route-transition sink failure must not block the stream */
+    }
   }
 
   /** Emit a metric without ever throwing — observability cannot break the
@@ -267,12 +318,20 @@ export class FallbackLLM implements LLMPort {
         // a transparent pre-yield swap (false) from a tombstone-bearing
         // mid-stream swap (true) — the latter is more disruptive.
         const next = this.providers[i + 1]
+        const swapKind = this.kindOf(e)
+        const fromModel = provider.model ?? "unknown"
+        const toModel = next?.model ?? "unknown"
         this.emit(FALLBACK_METRIC_NAMES.triggered, {
-          kind: this.kindOf(e),
-          from: provider.model ?? "unknown",
-          to: next?.model ?? "unknown",
+          kind: swapKind,
+          from: fromModel,
+          to: toModel,
           post_yield: yielded.value ? "true" : "false",
         })
+        // RFC02-3 (A8) — report the structural route transition. Same seam as
+        // the `triggered` metric: fires ONCE per swap, after the fall-over is
+        // decided. The runner adapter converts this to a `model_route_changed`
+        // AgentEvent (byte-identical when no callback wired).
+        this.emitTransition({ fromModel, toModel, kind: swapKind, postYield: yielded.value })
         // If this provider streamed anything before failing, the next
         // provider must tombstone it. (Pre-yield failures stay transparent.)
         if (yielded.value) priorPartial = true

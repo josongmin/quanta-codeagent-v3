@@ -34,3 +34,20 @@ export const usageData = (event: EventOf<"usage">): Record<string, unknown> => (
   ...(event.cacheReadTokens !== undefined ? { cacheReadTokens: event.cacheReadTokens } : {}),
   costUsd: null,
 })
+
+/** RFC02-3 (A8) — durable model-route transition payload. `reason:"model_route_
+ *  changed"` is the recovery-family discriminant; the caller's semantic reason
+ *  rides as `routeReason` so it does not collide. from/to/routeKind are the
+ *  load-bearing facts; turnId/provider ride only when the caller knew them. */
+export const modelRouteChangedData = (
+  event: EventOf<"model_route_changed">,
+): Record<string, unknown> => ({
+  reason: "model_route_changed",
+  fromModel: event.fromModel,
+  toModel: event.toModel,
+  routeReason: event.reason,
+  routeKind: event.routeKind,
+  at: event.at,
+  ...(event.turnId !== undefined ? { turnId: event.turnId } : {}),
+  ...(event.provider !== undefined ? { provider: event.provider } : {}),
+})

@@ -6,8 +6,14 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { chooseModel } from "@/scheduler/model-reroute"
-import type { ModelAvailabilityPort } from "@/scheduler/types"
+import type { EngineAutomation } from "@/scheduler/automation-engine"
+import { chooseModel, rerouteResultToRouteEvent } from "@/scheduler/model-reroute"
+import {
+  AUTOMATION_ENV_FLAG,
+  assembleAutomation,
+} from "@/scheduler/runtime-wire"
+import type { AgentLoopPort, ModelAvailabilityPort, RRule } from "@/scheduler/types"
+import type { AgentEvent } from "@/stream"
 
 const portOf = (available: ReadonlyArray<string>): ModelAvailabilityPort => ({
   isAvailable: async (model) => available.includes(model),
@@ -324,5 +330,147 @@ describe("chooseModel hellgate", () => {
     })
     expect(r.reason).toBe("all-unavailable")
     expect(probeCount).toBe(11) // 1 preference + 10 fallbacks, every one probed
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RFC02-3 (A8) — scheduler model_route_changed projection.
+//
+// The scheduler OWNS its route reason: ONLY the `fallback` arm (preference was
+// down, a fallback was chosen) is a transition → `preferred_unavailable`. The
+// `preference-available` / `all-unavailable` arms emit NOTHING.
+// Crown proof: drive the REAL `assembleAutomation` handler (front door) with a
+// wired sink + an availability probe that forces a fallback, and assert the
+// scheduler-owned event reaches the sink. Red-on-injection: NO sink ⇒ no event.
+// ═══════════════════════════════════════════════════════════════════════════
+
+const RULE: RRule = { freq: "DAILY", interval: 1 }
+const noopLoop: AgentLoopPort = { enqueueUserMessage: async () => {} }
+const availabilityOf = (up: ReadonlySet<string>): ModelAvailabilityPort => ({
+  isAvailable: async (m) => up.has(m),
+})
+const automationOf = (over: Partial<EngineAutomation>): EngineAutomation => ({
+  id: "a1",
+  title: "t",
+  rule: RULE,
+  prompt: "do it",
+  nextRunAt: 0,
+  status: "scheduled",
+  createdAt: 0,
+  fireCount: 0,
+  ...over,
+})
+
+describe("RFC02-3 A8 — rerouteResultToRouteEvent (pure projection)", () => {
+  test("[fallback] a rerouted-to-fallback result → preferred_unavailable event from→to", () => {
+    const ev = rerouteResultToRouteEvent(
+      { preference: "gpt-5", result: { chosen: "claude-4", reason: "fallback", fallbackIndex: 0 } },
+      { at: 99, turnId: "auto-1" },
+    )
+    expect(ev).toEqual({
+      type: "model_route_changed",
+      fromModel: "gpt-5",
+      toModel: "claude-4",
+      reason: "preferred_unavailable",
+      routeKind: "scheduler_reroute",
+      at: 99,
+      turnId: "auto-1",
+    })
+  })
+
+  test("[non-transition] preference-available ⇒ null (nothing changed)", () => {
+    const ev = rerouteResultToRouteEvent(
+      { preference: "gpt-5", result: { chosen: "gpt-5", reason: "preference-available" } },
+      { at: 1 },
+    )
+    expect(ev).toBeNull()
+  })
+
+  test("[non-transition] all-unavailable ⇒ null (no model ran)", () => {
+    const ev = rerouteResultToRouteEvent(
+      { preference: "gpt-5", result: { chosen: "gpt-5", reason: "all-unavailable" } },
+      { at: 1 },
+    )
+    expect(ev).toBeNull()
+  })
+})
+
+describe("RFC02-3 A8 — scheduler front-door route transition", () => {
+  const makeEnv = (o: Record<string, string>): { get: (k: string) => string | undefined } => {
+    const m = new Map(Object.entries(o))
+    return { get: (k) => m.get(k) }
+  }
+
+  test("[crown] a fire whose preference is DOWN reroutes → handler emits the scheduler-owned event", async () => {
+    const routeEvents: AgentEvent[] = []
+    const slot = assembleAutomation(makeEnv({ [AUTOMATION_ENV_FLAG]: "on" }), {
+      agentLoop: noopLoop,
+      // preference "gpt-5.5" is DOWN; fallback "gpt-5.4" is UP.
+      modelAvailability: availabilityOf(new Set(["gpt-5.4"])),
+      onModelReroute: (ev) => routeEvents.push(ev),
+      now: () => 1234,
+    })
+    if (slot === null) throw new Error("unreachable")
+    await slot.handler(automationOf({ model: "gpt-5.5", modelFallbacks: ["gpt-5.4", "gpt-5"] }))
+    expect(routeEvents).toEqual([
+      {
+        type: "model_route_changed",
+        fromModel: "gpt-5.5",
+        toModel: "gpt-5.4",
+        reason: "preferred_unavailable",
+        routeKind: "scheduler_reroute",
+        at: 1234,
+      },
+    ])
+  })
+
+  test("[no-transition] preference AVAILABLE ⇒ handler fires but emits NO route event", async () => {
+    const routeEvents: AgentEvent[] = []
+    const slot = assembleAutomation(makeEnv({ [AUTOMATION_ENV_FLAG]: "on" }), {
+      agentLoop: noopLoop,
+      modelAvailability: availabilityOf(new Set(["gpt-5.5"])), // preference is UP
+      onModelReroute: (ev) => routeEvents.push(ev),
+    })
+    if (slot === null) throw new Error("unreachable")
+    await slot.handler(automationOf({ model: "gpt-5.5", modelFallbacks: ["gpt-5.4"] }))
+    expect(routeEvents).toHaveLength(0) // used the preference ⇒ nothing changed
+  })
+
+  test("[gate-OFF parity + red-on-injection] NO onModelReroute sink ⇒ reroute still happens, ZERO observation", async () => {
+    // Records the model actually dispatched so we PROVE the reroute happened
+    // (behavior byte-identical) while emitting no observation.
+    const calls: Array<string | undefined> = []
+    const loop: AgentLoopPort = {
+      enqueueUserMessage: async (_m, opts) => {
+        calls.push(opts?.modelOverride)
+      },
+    }
+    const slot = assembleAutomation(makeEnv({ [AUTOMATION_ENV_FLAG]: "on" }), {
+      agentLoop: loop,
+      modelAvailability: availabilityOf(new Set(["gpt-5.4"])),
+      // onModelReroute deliberately ABSENT (the injection).
+    })
+    if (slot === null) throw new Error("unreachable")
+    await slot.handler(automationOf({ model: "gpt-5.5", modelFallbacks: ["gpt-5.4"] }))
+    // The reroute DID happen (fallback dispatched) — byte-identical behavior.
+    expect(calls).toEqual(["gpt-5.4"])
+  })
+
+  test("[modelless parity] a fire with NO model emits NO route event and NO override", async () => {
+    const routeEvents: AgentEvent[] = []
+    const calls: Array<string | undefined> = []
+    const loop: AgentLoopPort = {
+      enqueueUserMessage: async (_m, opts) => {
+        calls.push(opts?.modelOverride)
+      },
+    }
+    const slot = assembleAutomation(makeEnv({ [AUTOMATION_ENV_FLAG]: "on" }), {
+      agentLoop: loop,
+      onModelReroute: (ev) => routeEvents.push(ev),
+    })
+    if (slot === null) throw new Error("unreachable")
+    await slot.handler(automationOf({})) // no model
+    expect(routeEvents).toHaveLength(0)
+    expect(calls).toEqual([undefined]) // no override (host default)
   })
 })

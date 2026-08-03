@@ -30,7 +30,10 @@ describe("surface-protocol inventory hellgate", () => {
     // projection seam. Transient render-only (recorder skips them).
     // Side-agent peer delivery adds `peer_message`; targeted steer adds the
     // correlated `subagent_delivery` admission/finalization lifecycle.
-    expect(AGENT_EVENT_TYPES.length).toBe(41)
+    // RFC-01 A7 (aug-02) — +1 advisory `context_headroom_crossed`.
+    // RFC02-3 A8 (aug-02) — +1 witness `model_route_changed` (caller-owned
+    // route transition: operator `/retry-with` / fallback / scheduler reroute).
+    expect(AGENT_EVENT_TYPES.length).toBe(43)
     // T01 — +3 additive session.v1 item events (item.started/delta/completed).
     // ALBB-04 — +1 dedicated cancel terminal (turn.aborted).
     // UUX-1-12 (jul-10) — +4 additive observability events (tool.progress /

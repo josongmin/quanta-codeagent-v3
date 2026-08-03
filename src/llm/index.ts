@@ -51,7 +51,7 @@ export {
   supportsAdaptiveThinking,
   tryCreateLLM,
 } from "./factory"
-export type { FallbackLLMOptions, FallbackMetricSink } from "./fallback"
+export type { FallbackLLMOptions, FallbackMetricSink, FallbackTransition } from "./fallback"
 export { FALLBACK_METRIC_NAMES, FallbackLLM, isFallbackTrigger } from "./fallback"
 export type { LiveUsageKnobs } from "./live-usage"
 export { estimateTokensFromChars, withLiveUsage } from "./live-usage"

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
+import type { AgentEvent } from "@/stream"
 import {
   dropLastAssistantMessage,
   parseRetryWithArgs,
@@ -417,5 +418,133 @@ describe("/retry-with — slash dispatch", () => {
     for (const e of _legacyExpected) {
       expect(names).toContain(e)
     }
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RFC02-3 (A8) — operator `/retry-with` model_route_changed projection.
+//
+// The operator caller OWNS the route reason: an explicit `/retry-with <id>` is
+// `operator_requested`; a no-arg next-in-list swap is `operator_escalation`.
+// Crown proof: drive the REAL slash command and assert the route event reaches
+// the injected sink with the caller-owned reason. Red-on-injection: NO sink ⇒
+// no event (byte-identical) while the swap itself still works.
+// ═══════════════════════════════════════════════════════════════════════════
+describe("RFC02-3 A8 — /retry-with route transition", () => {
+  const twoCandidates = () => [
+    { id: "sonnet", port: new ScriptedLLM("sonnet", []) },
+    {
+      id: "opus",
+      port: new ScriptedLLM("opus", [
+        { type: "text_delta", delta: "swapped" },
+        { type: "message_stop", stop_reason: "end_turn" },
+      ]),
+    },
+  ]
+
+  test("[crown][requested] explicit `/retry-with opus` emits reason:operator_requested from→to on the route sink", async () => {
+    const messages: Message[] = [userMsg("q", "u1"), asstMsg("a", "a1")]
+    const routeEvents: AgentEvent[] = []
+    const cap = buildCtx({
+      candidates: twoCandidates(),
+      currentModelId: "sonnet",
+      messages,
+      streamInput: emptyStreamInput,
+      onEvent: () => {},
+      onModelReroute: (ev) => routeEvents.push(ev),
+      now: () => 42,
+    })
+    const code = await retryWithCmd.run(["opus"], cap.ctx)
+    expect(code).toBe(0)
+    expect(routeEvents).toEqual([
+      {
+        type: "model_route_changed",
+        fromModel: "sonnet",
+        toModel: "opus",
+        reason: "operator_requested",
+        routeKind: "operator_retry",
+        at: 42,
+      },
+    ])
+  })
+
+  test("[crown][escalation] no-arg `/retry-with` emits reason:operator_escalation (next-in-list)", async () => {
+    const messages: Message[] = [userMsg("q", "u1"), asstMsg("a", "a1")]
+    const routeEvents: AgentEvent[] = []
+    const cap = buildCtx({
+      candidates: twoCandidates(),
+      currentModelId: "sonnet",
+      messages,
+      streamInput: emptyStreamInput,
+      onEvent: () => {},
+      onModelReroute: (ev) => routeEvents.push(ev),
+      now: () => 7,
+    })
+    const code = await retryWithCmd.run([], cap.ctx)
+    expect(code).toBe(0)
+    expect(routeEvents).toHaveLength(1)
+    const ev = routeEvents[0]
+    expect(ev?.type === "model_route_changed" && ev.reason).toBe("operator_escalation")
+    expect(ev?.type === "model_route_changed" && ev.fromModel).toBe("sonnet")
+    expect(ev?.type === "model_route_changed" && ev.toModel).toBe("opus")
+  })
+
+  test("[emit-ordering] the route event is emitted BEFORE the re-stream's first StreamEvent", async () => {
+    // The transition witnesses the swap decision; it must precede the new stream.
+    const messages: Message[] = [userMsg("q", "u1"), asstMsg("a", "a1")]
+    const order: string[] = []
+    const cap = buildCtx({
+      candidates: twoCandidates(),
+      currentModelId: "sonnet",
+      messages,
+      streamInput: emptyStreamInput,
+      onEvent: (ev) => {
+        order.push(`stream:${ev.type}`)
+      },
+      onModelReroute: () => {
+        order.push("route")
+      },
+    })
+    await retryWithCmd.run(["opus"], cap.ctx)
+    expect(order[0]).toBe("route")
+    expect(order[1]).toBe("stream:stream_reset")
+  })
+
+  test("[gate-OFF parity + red-on-injection] NO onModelReroute sink ⇒ swap still works, ZERO route observation", async () => {
+    const messages: Message[] = [userMsg("q", "u1"), asstMsg("a", "a1")]
+    const streamEvents: StreamEvent[] = []
+    const cap = buildCtx({
+      candidates: twoCandidates(),
+      currentModelId: "sonnet",
+      messages,
+      streamInput: emptyStreamInput,
+      onEvent: (ev) => {
+        streamEvents.push(ev)
+      },
+      // onModelReroute deliberately ABSENT (the injection): removing the sink.
+    })
+    const code = await retryWithCmd.run(["opus"], cap.ctx)
+    // The swap still succeeded (byte-identical behavior): assistant replaced,
+    // stream_reset tombstone leads, 3 stream events.
+    expect(code).toBe(0)
+    expect(messages.map((m) => m.role)).toEqual(["user"])
+    expect(streamEvents[0]).toEqual({ type: "stream_reset" })
+    expect(streamEvents.length).toBe(3)
+  })
+
+  test("[no-swap] an UNRESOLVABLE retry (unknown id) emits NO route transition", async () => {
+    const messages: Message[] = [userMsg("q", "u1"), asstMsg("a", "a1")]
+    const routeEvents: AgentEvent[] = []
+    const cap = buildCtx({
+      candidates: twoCandidates(),
+      currentModelId: "sonnet",
+      messages,
+      streamInput: emptyStreamInput,
+      onEvent: () => {},
+      onModelReroute: (ev) => routeEvents.push(ev),
+    })
+    const code = await retryWithCmd.run(["does-not-exist"], cap.ctx)
+    expect(code).toBe(1) // NoAlternateModelError surfaced
+    expect(routeEvents).toHaveLength(0) // no swap ⇒ no transition
   })
 })

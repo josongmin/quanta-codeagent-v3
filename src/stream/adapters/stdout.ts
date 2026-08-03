@@ -239,6 +239,12 @@ export class StdoutStream implements StreamPort {
         // existing reactive/proactive compaction paths).
         this.write(renderContextHeadroom(event))
         break
+      case "model_route_changed":
+        // RFC02-3 A8 — model-route transition banner ("↻ from → to (reason)").
+        // RENDER-ONLY: observing a model swap never re-routes the loop; the
+        // swap itself was decided by the caller (retry/fallback/scheduler).
+        this.write(renderModelRouteChanged(event))
+        break
       case "done":
         this.write(`${DIM}— done (${event.reason}, ${event.turns} turns) —${RESET}\n`)
         break
@@ -470,6 +476,15 @@ const renderContextHeadroom = (
   event: Extract<AgentEvent, { type: "context_headroom_crossed" }>,
 ): string =>
   `${DIM}⚠ context headroom low: ${formatTokenCount(event.usedTokens)} / ${formatTokenCount(event.limitTokens)} tokens (threshold ${formatTokenCount(event.thresholdTokens)})${RESET}\n`
+
+/** RFC02-3 A8 — model-route transition banner. One dim line: from → to +
+ *  reason. RENDER-ONLY (observing a swap never re-routes the loop). Model ids
+ *  are caller-passed ids (low-risk), but route through `redactStr` as defence-
+ *  in-depth (T3) — a future id/reason field could carry a token. */
+const renderModelRouteChanged = (
+  event: Extract<AgentEvent, { type: "model_route_changed" }>,
+): string =>
+  `${DIM}↻ model ${oneLine(redactStr(event.fromModel))} → ${oneLine(redactStr(event.toModel))} (${event.reason})${RESET}\n`
 
 /** ADR-0512 P3 — the interactive escalation APPROVAL card. YELLOW (an ask, not
  *  a red error). Shows which tool + its risk (read-only vs mutating) + WHY it is
