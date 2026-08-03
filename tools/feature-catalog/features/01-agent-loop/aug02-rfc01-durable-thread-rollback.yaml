@@ -1,0 +1,36 @@
+id: aug02-rfc01-durable-thread-rollback
+title: RFC01 — durable ThreadRollback records + checkpoint mapping + rollback saga
+section: 1
+subsystem: Persistence / durable thread rollback (aug-02 RFC01 A2-A4)
+order: 551
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: partial
+modes: [interactive, headless]
+configurable: static
+owners: ["@songmin"]
+labels: ["rfc:aug02-01", "surface:cli"]
+purpose: |
+  RFC-01 durable thread-rollback substrate: (A2) SavedSession carries durable
+  ThreadRollback records; (A3) each tool step captures a durable checkpoint
+  mapping (turn/message anchor → checkpoint id); (A4) the ThreadRollback effect
+  saga replays the mapping to rewind the thread with a CLI `/rewind` wire. The
+  three layers compose so a crashed/killed session can be rolled back to a
+  named tool boundary rather than only to the last full compaction. Always-on
+  additive record capture (no gate) — the records are written on the existing
+  save path and consumed by the rewind saga.
+evidence:
+  code:
+    - src/session/rollback-record.ts
+    - src/agent/thread-rollback-checkpoint.ts
+    - src/agent/thread-rollback.ts
+    - src/session/rewind.ts
+    - src/apps/cli/repl/per-tool-checkpoint-wire.ts
+  adrs: ["docs/plans/aug-02-absorption/rfc-01-persistence-resume.md"]
+  tests:
+    unit:
+      - tests/unit/session-store.test.ts
+      - tests/unit/per-tool-checkpoint-hellgate.test.ts
+    integration:
+      - tests/integration/session-rewind-e2e.test.ts
