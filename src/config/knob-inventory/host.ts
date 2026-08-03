@@ -108,6 +108,16 @@ export const HOST: readonly KnobInventoryEntry[] = [
     readSite: "apps/cli/slash/registry-surface.ts",
   },
   {
+    envKey: "QUANTA_CONTEXT_HEADROOM_ADVISORY",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "Context-headroom advisory — edge-latched one-shot event emitted once when compaction usage crosses the headroom threshold (RFC01 A7; strict-1 opt-in gate, byte-identical when unset).",
+    readSite: "agent/loop/compaction-wire.ts",
+  },
+  {
     envKey: "QUANTA_COMMAND_HOOKS",
     kind: "bool",
     default: false,
