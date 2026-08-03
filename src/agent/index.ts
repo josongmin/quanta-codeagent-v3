@@ -221,7 +221,6 @@ export {
 } from "./lsp-diagnostics-hook"
 export {
   applyMcpClientWiring,
-  disambiguateMcpToolNames,
   type ElicitationPrompterFactory,
   type LoadMcpToolsOpts,
   loadMcpTools,
@@ -230,7 +229,14 @@ export {
   mcpToolToTool,
   mcpToolToToolSupervised,
   type SamplingWiringInput,
+  tasksToolsFor,
 } from "./mcp-bridge"
+export {
+  disambiguateMcpToolNames,
+  type McpReloadableSource,
+  relistMcpTools,
+  reloadableSingleClientSource,
+} from "./mcp-reload-source"
 export {
   type PersistDeps,
   type PersistInput,

@@ -38,6 +38,18 @@ export function serverSupportsPrompts(caps: Record<string, unknown> | null): boo
   return caps !== null && asRecord(caps.prompts) !== null
 }
 
+/** RFC04-1 — does the connected server advertise `tools.listChanged`? A
+ *  `notifications/tools/list_changed` is delivered to the reload observer as an
+ *  invalidation signal ONLY when this is true, so a server that never
+ *  negotiated the capability cannot trigger a hot-reload by emitting an
+ *  unsolicited notification. Reads `capabilities.tools.listChanged === true`;
+ *  `false` before `start()` completes, when the slot is absent, or when
+ *  `listChanged` is not literally `true` (advertise-iff-able, fail-closed). */
+export function serverSupportsToolsListChanged(caps: Record<string, unknown> | null): boolean {
+  if (caps === null) return false
+  return asRecord(caps.tools)?.listChanged === true
+}
+
 /** TICKET-20 — does the connected server advertise `completions`? An
  *  outbound `completion/complete` is refused locally (typed `unsupported`)
  *  unless this is true, so we never emit a request the server answers with a

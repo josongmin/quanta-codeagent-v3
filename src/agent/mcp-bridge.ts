@@ -13,6 +13,7 @@ import {
   type McpProgress,
   type McpProgressHandler,
   McpReconnectSupervisor,
+  type McpResourceObserver,
   type McpServerConfig,
   type McpToolDef,
   type RootsProviderPort,
@@ -40,6 +41,10 @@ import {
   type ToolResult,
 } from "@/tool"
 import { MAX_PDF_BYTES, PDF_MEDIA_TYPE, sniffPdfMagic } from "@/tool/document"
+// RFC04-2/3 — the SHARED collision disambiguator lives with the relist assembly
+// (mcp-reload-source) so connect + reload run the SAME logic. Function-scoped use
+// (inside `loadMcpTools`) keeps this import cycle-safe.
+import { disambiguateMcpToolNames } from "./mcp-reload-source"
 
 /**
  * MCP → Tool bridge (RFC §13 Q5 → DECISION: bridge at the agent layer, Phase-3).
@@ -384,7 +389,7 @@ export type ElicitationPrompterFactory = (serverId: string) => ElicitationPrompt
  *  `tasks/*` capability in its `initialize` response (default-OFF). Absent ⇒
  *  empty array, so a server that does not speak tasks adds NO tools (the load
  *  is byte-identical to before this binding existed). */
-const tasksToolsFor = (client: McpClient): Tool[] => {
+export const tasksToolsFor = (client: McpClient): Tool[] => {
   if (!client.serverSupportsTasks()) return []
   // `McpTasksPort` and `TasksHandle` are structurally identical (the mirror is
   // maintained in lockstep); the assignment proves it at compile time.
@@ -654,6 +659,8 @@ export const applyMcpClientWiring = (
   wiring: SamplingWiringInput | undefined,
   oauthProvider?: McpOAuthProviderPort,
   proxyEnv?: ProxyEnvInput,
+  /** RFC04-2/3 (hot-reload) — reload observer, applied through this SAME point. */
+  resourceObserver?: McpResourceObserver,
 ): NonNullable<ConstructorParameters<typeof McpClient>[1]> => {
   // H3 (jun-10 session-scoped egress) — the egress-proxy env is applied through
   // the SAME unification point as the OAuth provider + inbound bundle so the
@@ -670,6 +677,9 @@ export const applyMcpClientWiring = (
   // consults it for a bearer when its `oauth:true` config opts in; absent ⇒ the
   // client keeps `headlessOAuthRejecter` (byte-identical: no token, no header).
   if (oauthProvider !== undefined) opts.oauthProvider = oauthProvider
+  // RFC04-2/3 — the reload observer rides the SAME point so a reconnected client
+  // re-subscribes its `tools/list_changed`. Absent ⇒ byte-identical (inbound drop).
+  if (resourceObserver !== undefined) opts.resourceObserver = resourceObserver
   if (wiring === undefined) return opts
   // The negotiator reflects BOTH sampling AND roots (computed together at the
   // source); set it whenever ANY inbound capability is wired.
@@ -746,6 +756,13 @@ export interface LoadMcpToolsOpts {
    *  intentionally NOT subscribed — the supervisor owns crash→restart (its
    *  give-up state is `degraded`). Best-effort/no-throw; absent ⇒ byte-identical. */
   onServerExit?: (info: { server: string; reason?: string }) => void
+  /** RFC04-2/3 (hot-reload) — the capability-gated reload observer threaded into
+   *  EVERY constructed client (single AND supervised) via {@link applyMcpClientWiring}.
+   *  A live server's `tools/list_changed` reaches it; the composition root bridges
+   *  `onNotification` to a `requestReload` (ONE shared instance ⇒ ANY server's
+   *  change ⇒ the SAME all-source relist). Absent ⇒ byte-identical; gated on
+   *  `QUANTA_MCP_HOT_RELOAD`. */
+  resourceObserver?: McpResourceObserver
 }
 
 /** WS-G — duck-subscribe a loaded client's transport-exit to `onServerExit`.
@@ -857,6 +874,7 @@ const loadSingle = async (
   annotationsHonored: boolean | undefined,
   proxyEnv: ProxyEnvInput | undefined,
   onServerLoadError: ((info: { server: string; error: unknown }) => void) | undefined,
+  resourceObserver: McpResourceObserver | undefined,
 ): Promise<{ tools: Tool[]; client: McpStoppable; resources?: ResourcesCapableClient } | null> => {
   const clientOpts: ConstructorParameters<typeof McpClient>[1] = {}
   if (elicitationPrompterFor !== undefined) {
@@ -873,7 +891,7 @@ const loadSingle = async (
   // helper so it is applied identically on both paths. Absent ⇒ no override
   // (defaultNegotiator + the client's headless rejecter + empty roots + the
   // headless OAuth rejecter), byte-identical to the legacy load.
-  applyMcpClientWiring(clientOpts, samplingWiring, oauthProvider, proxyEnv)
+  applyMcpClientWiring(clientOpts, samplingWiring, oauthProvider, proxyEnv, resourceObserver)
   const client = new McpClient(config, clientOpts)
   try {
     await client.start()
@@ -894,51 +912,6 @@ const loadSingle = async (
     await client.stop().catch(() => undefined)
     return null
   }
-}
-
-/** F1 — the registry is a name-keyed Map with last-write-wins, and
- *  {@link mcpToolName} sanitizes free-form server/tool names through
- *  `replace(/[^A-Za-z0-9_]+/g, "_")`. So two DISTINCT source tools — across
- *  servers (`my-srv` vs `my_srv`) or on one server (`get.x` vs `get-x`) — can
- *  collapse to the SAME bridged name and one would be SILENTLY shadowed (no log,
- *  no `/mcp` record, capability withheld).
- *
- *  This pass walks the bridged tools IN LOAD ORDER and, when a name is already
- *  taken, DISAMBIGUATES the later tool by appending the smallest `_<n>` (n≥2)
- *  suffix that is itself free — so BOTH tools stay callable (the registry no
- *  longer drops one). The first tool to claim a name keeps it verbatim, so the
- *  non-colliding common case is BYTE-IDENTICAL (every name unchanged). Each
- *  rename is `logger.warn`'d AND recorded so the collision is observable, never
- *  silent. Renaming only the `name` field is safe: the tool's `execute` dispatches
- *  on the captured ORIGINAL MCP tool name (`def.name`), not on this registry key.
- *
- *  Returns the (possibly renamed) tools plus the list of collision records for
- *  any observability surface (`/mcp`). */
-export const disambiguateMcpToolNames = (
-  tools: Tool[],
-): { tools: Tool[]; collisions: { kept: string; renamed: string; to: string }[] } => {
-  const seen = new Set<string>()
-  const collisions: { kept: string; renamed: string; to: string }[] = []
-  const out = tools.map((t) => {
-    if (!seen.has(t.name)) {
-      seen.add(t.name)
-      return t
-    }
-    let n = 2
-    let candidate = `${t.name}_${n}`
-    while (seen.has(candidate)) {
-      n += 1
-      candidate = `${t.name}_${n}`
-    }
-    seen.add(candidate)
-    collisions.push({ kept: t.name, renamed: t.name, to: candidate })
-    logger.warn(
-      `mcp: tool-name collision on "${t.name}" — a second tool maps to the same ` +
-        `identifier; renaming the later one to "${candidate}" so both stay callable`,
-    )
-    return { ...t, name: candidate }
-  })
-  return { tools: out, collisions }
 }
 
 export const loadMcpTools = async (
@@ -973,6 +946,7 @@ export const loadMcpTools = async (
             opts?.annotationsHonored,
             opts?.proxyEnv,
             opts?.onServerLoadError,
+            opts?.resourceObserver,
           )
     if (loaded === null) continue
     tools.push(...loaded.tools)
