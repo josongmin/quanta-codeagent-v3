@@ -11,11 +11,15 @@
  */
 
 export {
+  type ConvertSkillsOptions,
   convertAgentsMd,
   convertCursorRules,
   convertHooks,
   convertMcp,
+  convertMemory,
   convertSettings,
+  convertSkillFile,
+  convertSkills,
   convertSubagentFile,
   convertSubagents,
 } from "./convert"
@@ -48,8 +52,10 @@ export {
   type ConvertedHook,
   type ConvertedItem,
   type ConvertedMcpServer,
+  type ConvertedMemory,
   type ConvertedRepoRules,
   type ConvertedSettings,
+  type ConvertedSkill,
   type ConvertedSubagent,
   type DetectedConfigItem,
   type MigrationDisposition,
@@ -58,4 +64,5 @@ export {
   type MigrationLedgerEntry,
   type MigrationScope,
   type MigrationWarning,
+  type SkillStagePort,
 } from "./types"

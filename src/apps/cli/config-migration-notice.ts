@@ -33,6 +33,8 @@ const TYPE_ORDER: readonly MigrationItemType[] = [
   "mcp",
   "subagents",
   "cursor_rules",
+  "skills",
+  "memory",
 ]
 
 /** Human label for an item type in the notice. */
@@ -43,6 +45,8 @@ const LABEL: Readonly<Record<MigrationItemType, string>> = {
   mcp: "MCP servers",
   subagents: "subagents",
   cursor_rules: "Cursor rules",
+  skills: "skills (staged for review)",
+  memory: "memory (→ raw_memories.md)",
 }
 
 /** Count the OK converted items, grouped by type, for the notice summary. */

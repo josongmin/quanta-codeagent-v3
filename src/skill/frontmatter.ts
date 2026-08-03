@@ -232,4 +232,9 @@ export const parseFrontmatter = (text: string): ParsedFrontmatter => {
   return { data, body }
 }
 
-export { SkillCategorySchema, SkillStabilitySchema } from "./skill-frontmatter"
+export {
+  parseSkillMarkdown,
+  SkillCategorySchema,
+  SkillFrontmatterSchema,
+  SkillStabilitySchema,
+} from "./skill-frontmatter"

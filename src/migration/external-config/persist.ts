@@ -42,7 +42,7 @@
  * homeDir + projectDir and calls in.
  */
 
-import { randomBytes } from "node:crypto"
+import { createHash, randomBytes } from "node:crypto"
 import {
   chmod,
   copyFile,
@@ -64,11 +64,14 @@ import type {
   ConvertedHook,
   ConvertedItem,
   ConvertedMcpServer,
+  ConvertedMemory,
   ConvertedRepoRules,
   ConvertedSettings,
+  ConvertedSkill,
   ConvertedSubagent,
   MigrationItemType,
   MigrationWarning,
+  SkillStagePort,
 } from "./types"
 
 /**
@@ -134,6 +137,12 @@ export interface PersistConvertedInput {
    *  `fsync(2)`; a test injects a rejecting `syncFile` to prove the commit is
    *  fail-closed (rename skipped, original bytes intact, no temp residue). */
   readonly writeSync?: ConfigWriteSync
+  /** RFC03-4 — the host-composed staging port for imported SKILLS. When absent,
+   *  imported skills are NOT written anywhere (fail-closed: an imported skill
+   *  must go through the RFC03-2/3 proposal/promote pipeline, never a live-dir
+   *  write). The host (CLI surface) composes it from the real
+   *  `SkillProposalArtifactPort` + approval machine and injects it here. */
+  readonly skillStage?: SkillStagePort
 }
 
 /** Result of a persist run. */
@@ -699,13 +708,101 @@ const persistGlobRules = async (
   return { wrote: value.length > 0, warnings: [] }
 }
 
+// ─── skills → STAGED proposal (NEVER a live-dir write) ───────────────────
+//
+// RFC03-4 crux: an imported skill is UNTRUSTED. It does NOT land in the live
+// skills directory here — it is STAGED through the injected `SkillStagePort`
+// (which the host backs with the real `SkillProposalArtifactPort` + approval
+// machine). Promotion into the live dir happens ONLY on an operator approve,
+// via the artifact port's CAS `promote`. With NO stage port wired, an imported
+// skill is written NOWHERE (fail-closed) — surfaced as a typed warning.
+
+/** sha256 hex of `content` — the artifact hash the stage port binds the
+ *  approval to (the host's CAS promote re-verifies it). */
+const sha256Hex = (content: string): string =>
+  createHash("sha256").update(content, "utf8").digest("hex")
+
+/** skills → STAGED proposals via the injected `SkillStagePort`. Each imported
+ *  skill's normalized bytes are `stage`d (staged artifact + approval bound to
+ *  the hash); NO live-dir write. Absent stage port ⇒ fail-closed (nothing
+ *  written, a typed warning per skill). */
+const persistSkills = async (
+  value: readonly ConvertedSkill[],
+  stage: SkillStagePort | undefined,
+): Promise<WriteOutcome> => {
+  if (stage === undefined) {
+    return {
+      wrote: false,
+      warnings: value.map((s) =>
+        writeWarning(
+          s.sourcePath,
+          `no skill staging port wired — imported skill ${JSON.stringify(s.name)} not staged (fail-closed)`,
+        ),
+      ),
+    }
+  }
+  let stagedAny = false
+  for (const s of value) {
+    const artifactHash = sha256Hex(s.skillMd)
+    await stage.stage({
+      artifactHash,
+      bytes: s.skillMd,
+      name: s.name,
+      // The live target the CAS promote would write to (on approve) — the
+      // canonical `<name>/SKILL.md` under the skills dir jail root.
+      targetPath: `${s.name}/SKILL.md`,
+      kind: "new",
+    })
+    stagedAny = true
+  }
+  return { wrote: stagedAny, warnings: [] }
+}
+
+// ─── memory → raw_memories.md APPEND (never MEMORY.md, never clobber) ─────
+//
+// An imported `~/.claude/CLAUDE.md` (memory form) is APPENDED to the existing
+// `<homeDir>/.quanta/memory/raw_memories.md` evidence trail — never written to
+// `MEMORY.md` (which must pass consolidation). The append is guarded against
+// double-import: a provenance MARKER keyed by the source path means re-running
+// the import does not append the same source twice.
+
+/** A provenance marker line so a re-import does not double-append the same
+ *  source. Kept on ONE line (no source content) for a cheap idempotency probe. */
+const memoryMarker = (sourcePath: string): string =>
+  `<!-- quanta-imported-memory: ${sourcePath} -->`
+
+/** memory → APPEND to `<homeDir>/.quanta/memory/raw_memories.md`. Preserves any
+ *  prior content (append, never overwrite). NEVER touches `MEMORY.md`.
+ *  Idempotent: a source already appended (its provenance marker is present) is
+ *  skipped. */
+const persistMemory = async (homeDir: string, value: ConvertedMemory): Promise<WriteOutcome> => {
+  const rawPath = join(homeDir, ".quanta", "memory", "raw_memories.md")
+  const marker = memoryMarker(value.sourcePath)
+  let existing = ""
+  try {
+    existing = await readFile(rawPath, "utf8")
+  } catch {
+    existing = "" // absent ⇒ fresh file (append still creates it).
+  }
+  // Double-append guard — the SAME source is not appended twice.
+  if (existing.includes(marker)) return { wrote: false, warnings: [] }
+  await mkdir(dirname(rawPath), { recursive: true })
+  const sep = existing.length > 0 && !existing.endsWith("\n") ? "\n" : ""
+  const block = `${sep}${marker}\n${value.body}\n`
+  // Append-only: write existing + block (never clobber prior evidence).
+  await writeFile(rawPath, existing + block, "utf8")
+  return { wrote: true, warnings: [] }
+}
+
 /** Persist ONE ok item to its destination. Returns whether it wrote + any
  *  non-fatal warnings (corrupt-target refusal, dropped unsafe entry). Throws
  *  only on a real fs failure (caught by the per-item loop). */
 const persistOne = async (
   item: Extract<ConvertedItem, { ok: true }>,
   projectDir: string,
+  homeDir: string,
   sync: ConfigWriteSync,
+  skillStage: SkillStagePort | undefined,
 ): Promise<WriteOutcome> => {
   switch (item.type) {
     case "settings":
@@ -720,6 +817,10 @@ const persistOne = async (
       return persistRepoRules(projectDir, item.value)
     case "cursor_rules":
       return persistGlobRules(projectDir, item.value)
+    case "skills":
+      return persistSkills(item.value, skillStage)
+    case "memory":
+      return persistMemory(homeDir, item.value)
   }
 }
 
@@ -737,6 +838,12 @@ const destLabel = (projectDir: string, type: MigrationItemType): string => {
       return join(projectDir, "AGENTS.md")
     case "cursor_rules":
       return join(projectDir, ".quanta", "rules")
+    case "skills":
+      // Skills are STAGED, not written to a project path — label the staging
+      // sink (the diagnostic warning path is best-effort).
+      return join(projectDir, ".claude", "skills")
+    case "memory":
+      return "raw_memories.md"
   }
 }
 
@@ -766,7 +873,13 @@ export const persistConvertedItems = async (
   for (const item of input.converted) {
     if (!item.ok) continue
     try {
-      const outcome = await persistOne(item, input.projectDir, sync)
+      const outcome = await persistOne(
+        item,
+        input.projectDir,
+        input.homeDir,
+        sync,
+        input.skillStage,
+      )
       warnings.push(...outcome.warnings)
       if (outcome.wrote) writtenTypes.push(item.type)
     } catch (err) {

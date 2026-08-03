@@ -26,6 +26,8 @@ export type MigrationItemType =
   | "mcp" // .mcp.json → MCP server config (passthrough/normalize)
   | "subagents" // .claude/agents/*.md → subagent spec
   | "cursor_rules" // .cursor/rules/*.mdc / .cursorrules → glob-rules
+  | "skills" // .claude/skills/*/SKILL.md → STAGED skill proposal (never live-dir)
+  | "memory" // ~/.claude/CLAUDE.md (memory form) → raw_memories.md append
 
 /** All item types as a readonly array — used to iterate + to assert the
  *  detector covers every type in the suite. */
@@ -36,6 +38,8 @@ export const ALL_MIGRATION_ITEM_TYPES: readonly MigrationItemType[] = Object.fre
   "mcp",
   "subagents",
   "cursor_rules",
+  "skills",
+  "memory",
 ] as const)
 
 /** Where a detected item lives: the user's home (`~/.claude/...`) vs the
@@ -130,6 +134,35 @@ export interface ConvertedGlobRule {
   readonly body: string
 }
 
+/** A quanta skill spec produced by the skills converter. Imported skills are
+ *  UNTRUSTED supply-chain artifacts: the converter validates the imported
+ *  SKILL.md through the SAME discovery schema, stamps `stability:experimental`,
+ *  refuses system-name collisions, and carries the normalized `skillMd` bytes.
+ *  The PERSIST step routes these bytes through the RFC03-2/3 staging/promote
+ *  contract (an injected {@link SkillStagePort}) — NEVER a live-dir write. */
+export interface ConvertedSkill {
+  /** kebab-case skill name (validated). */
+  readonly name: string
+  readonly description: string
+  /** Always `experimental` — an imported skill is never presented as stable. */
+  readonly stability: "experimental"
+  /** The normalized SKILL.md bytes, ready to stage as a proposal artifact. */
+  readonly skillMd: string
+  /** Absolute source path (provenance). */
+  readonly sourcePath: string
+}
+
+/** A quanta memory fragment produced by the memory converter. Claude's
+ *  `~/.claude/CLAUDE.md` (memory form) is UNTRUSTED text: it is APPENDED to the
+ *  existing `raw_memories.md` evidence trail only — NEVER written to `MEMORY.md`
+ *  (which must pass consolidation). Carries the raw body + provenance source. */
+export interface ConvertedMemory {
+  /** Absolute source path (provenance + double-append dedup key). */
+  readonly sourcePath: string
+  /** The memory body text to append (trimmed, non-empty). */
+  readonly body: string
+}
+
 /** Discriminated union of converter outputs, tagged by item `type` so a
  *  caller can route each to the right quanta sink. A converter that finds no
  *  usable signal returns `ok: false` with a typed warning rather than throwing. */
@@ -144,7 +177,35 @@ export type ConvertedItem =
       readonly ok: true
       readonly value: readonly ConvertedGlobRule[]
     }
+  | { readonly type: "skills"; readonly ok: true; readonly value: readonly ConvertedSkill[] }
+  | { readonly type: "memory"; readonly ok: true; readonly value: ConvertedMemory }
   | { readonly type: MigrationItemType; readonly ok: false; readonly warning: MigrationWarning }
+
+/**
+ * Structural port for STAGING an imported skill through the RFC03-2/3
+ * proposal/promote contract. The migration slice is fenced away from `@/skill`
+ * (it may only reach `@/skill/frontmatter`), so it cannot construct the real
+ * `SkillProposalArtifactPort` / approval machine itself. Instead the host
+ * (the CLI surface, which CAN reach `@/skill` + `@/agent`) composes those and
+ * injects THIS structural port. An imported skill's bytes are `stage`d (staged
+ * artifact + approval bound to the hash) — promotion into the live skills
+ * directory happens ONLY on an operator approve, never here. Absent this port,
+ * an imported skill is NOT written anywhere (fail-closed).
+ *
+ * This mirrors `@/skill/proposal#SkillProposalStagePort` by structure (the host
+ * adapter is literally that port), declared locally to keep the slice fence.
+ */
+export interface SkillStagePort {
+  /** Stage the imported skill's bytes and open a review approval bound to the
+   *  artifact. NO live write happens here. NO-THROW: returns a typed result. */
+  stage(args: {
+    readonly artifactHash: string
+    readonly bytes: string
+    readonly name: string
+    readonly targetPath: string
+    readonly kind: string
+  }): Promise<{ readonly proposalId: string }>
+}
 
 /** The throttle ledger's per-source disposition. `offered` ⇒ the user was
  *  shown the prompt; `imported` ⇒ they ran the import; `declined` ⇒ they

@@ -22,12 +22,13 @@ import { readdir, stat } from "node:fs/promises"
 import { basename, join } from "node:path"
 import { type GlobRule, loadGlobRules } from "@/agent/glob-rules"
 import { loadRepoRules } from "@/agent/repo-rules"
-import { parseFrontmatter } from "@/skill/frontmatter"
+import { parseFrontmatter, parseSkillMarkdown } from "@/skill/frontmatter"
 import { readImportFile } from "../dedup"
 import type {
   ConvertedHook,
   ConvertedItem,
   ConvertedMcpServer,
+  ConvertedSkill,
   ConvertedSubagent,
   MigrationWarning,
 } from "./types"
@@ -392,4 +393,144 @@ export const convertCursorRules = async (projectDir: string): Promise<ConvertedI
     return { type: "cursor_rules", ok: false, warning: malformed(projectDir, "no rules found") }
   }
   return { type: "cursor_rules", ok: true, value: rules.map(fromGlobRule) }
+}
+
+// ─── .claude/skills/<name>/SKILL.md → STAGED skill proposal ──────────────
+//
+// Imported skills are UNTRUSTED executable-supply-chain artifacts. This
+// converter VALIDATES each imported `SKILL.md` through the SAME discovery
+// schema quanta's own loader uses (`parseSkillMarkdown`), FORCES
+// `stability:experimental`, and REFUSES a name that collides with a SYSTEM
+// skill (system cannot be shadowed — RFC03-4 §Trust). It emits ONLY typed
+// `ConvertedSkill` data (name + normalized bytes + provenance). The PERSIST
+// step routes those bytes through the RFC03-2/3 staging/promote contract (an
+// injected `SkillStagePort`) — this converter NEVER writes to the live skills
+// directory (that is a promotion-after-approve action, not an import action).
+
+/** Options for {@link convertSkills}. `systemSkillNames` is the pinned
+ *  snapshot's system-skill name set (the host supplies it — the migration slice
+ *  cannot reach `@/skill` to discover it) so a name collision is REFUSED. */
+export interface ConvertSkillsOptions {
+  readonly systemSkillNames: ReadonlySet<string>
+}
+
+/** Cap on skill dirs scanned — a hostile competitor tree cannot pin the import. */
+const MAX_IMPORT_SKILLS = 256
+
+/** Force `stability:experimental` in the frontmatter of a validated SKILL.md so
+ *  an imported skill is never presented as stable, without re-rendering (we
+ *  keep the author's body/description verbatim). Replaces an existing
+ *  `stability:` frontmatter line; the schema guaranteed one is present. */
+const forceExperimentalStability = (skillMd: string): string =>
+  skillMd.replace(/^stability:.*$/m, "stability: experimental")
+
+/**
+ * Convert ONE imported `SKILL.md` file. Validates through the discovery schema;
+ * refuses a system-name collision; forces experimental stability. Returns the
+ * typed `ConvertedSkill` or `null` (skip — malformed / shadowed). Public for
+ * per-file testing.
+ */
+export const convertSkillFile = async (
+  path: string,
+  systemSkillNames: ReadonlySet<string>,
+): Promise<ConvertedSkill | null> => {
+  let raw: string
+  try {
+    raw = await readImportFile(path)
+  } catch {
+    return null
+  }
+  const parsed = parseSkillMarkdown(raw)
+  if (!parsed.ok) return null
+  const { name, description } = parsed.value.frontmatter
+  // System-shadow refusal — a system skill cannot be shadowed by an import.
+  if (systemSkillNames.has(name)) return null
+  return {
+    name,
+    description,
+    stability: "experimental",
+    skillMd: forceExperimentalStability(raw),
+    sourcePath: path,
+  }
+}
+
+/**
+ * Translate a Claude Code SKILLS DIRECTORY (`.claude/skills/`) → all the quanta
+ * skill specs it holds. Each `<name>/SKILL.md` is validated + shadow-checked via
+ * {@link convertSkillFile}; entries that fail validation OR shadow a system
+ * skill are skipped. Absent dir / zero usable skills ⇒ `ok:false`.
+ */
+export const convertSkills = async (
+  skillsDir: string,
+  opts: ConvertSkillsOptions,
+): Promise<ConvertedItem> => {
+  let names: string[]
+  try {
+    names = await readdir(skillsDir)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return { type: "skills", ok: false, warning: malformed(skillsDir, "absent") }
+    }
+    return {
+      type: "skills",
+      ok: false,
+      warning: { kind: "scan_failed", path: skillsDir, detail: code ?? "readdir failed" },
+    }
+  }
+  const specs: ConvertedSkill[] = []
+  let scanned = 0
+  for (const name of [...names].sort()) {
+    if (scanned >= MAX_IMPORT_SKILLS) break
+    const skillMdPath = join(skillsDir, name, "SKILL.md")
+    let isFile: boolean
+    try {
+      isFile = (await stat(skillMdPath)).isFile()
+    } catch {
+      continue // no SKILL.md under this entry ⇒ not a skill.
+    }
+    if (!isFile) continue
+    scanned += 1
+    const spec = await convertSkillFile(skillMdPath, opts.systemSkillNames)
+    if (spec !== null) specs.push(spec)
+  }
+  if (specs.length === 0) {
+    return { type: "skills", ok: false, warning: malformed(skillsDir, "no usable skills") }
+  }
+  return { type: "skills", ok: true, value: specs }
+}
+
+// ─── ~/.claude/CLAUDE.md (memory form) → raw_memories.md append ───────────
+//
+// Claude's home `~/.claude/CLAUDE.md` is the cross-project MEMORY file. It is
+// UNTRUSTED text: the PERSIST step APPENDS it to the existing `raw_memories.md`
+// evidence trail ONLY — never to `MEMORY.md` (which must pass consolidation).
+// This converter reads + validates non-emptiness and carries the body +
+// provenance (the source path is the double-append dedup key in persist).
+
+/**
+ * Convert an imported memory file (`~/.claude/CLAUDE.md`) → a `ConvertedMemory`.
+ * Empty / whitespace-only ⇒ `ok:false` (no phantom append). Absent / unreadable
+ * ⇒ typed warning (never throws).
+ */
+export const convertMemory = async (path: string): Promise<ConvertedItem> => {
+  let raw: string
+  try {
+    raw = await readImportFile(path)
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code === "ENOENT" || code === "ENOTDIR") {
+      return { type: "memory", ok: false, warning: malformed(path, "absent") }
+    }
+    return {
+      type: "memory",
+      ok: false,
+      warning: { kind: "unreadable", path, detail: code ?? "read failed" },
+    }
+  }
+  const body = raw.trim()
+  if (body.length === 0) {
+    return { type: "memory", ok: false, warning: malformed(path, "empty memory file") }
+  }
+  return { type: "memory", ok: true, value: { sourcePath: path, body } }
 }

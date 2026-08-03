@@ -121,8 +121,9 @@ describe("detectExternalConfigs", () => {
     expect(inv.items.find((i) => i.type === "settings")).toBeUndefined()
   })
 
-  test("ALL_MIGRATION_ITEM_TYPES has 6 members, all reachable by detect", async () => {
-    expect(ALL_MIGRATION_ITEM_TYPES.length).toBe(6)
+  test("ALL_MIGRATION_ITEM_TYPES has 8 members, all reachable by detect", async () => {
+    // RFC03-4 added `skills` + `memory` to the closed union (6 → 8).
+    expect(ALL_MIGRATION_ITEM_TYPES.length).toBe(8)
   })
 })
 

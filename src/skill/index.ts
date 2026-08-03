@@ -85,6 +85,7 @@ export type {
   MigrationFs,
   MigrationOptions,
   MigrationReport,
+  SkillMigrationStagePort,
 } from "./migration"
 // ADR-0134 Phase D — pre-0134 ~/.claude/skills/ migration helper.
 export { migrateClaudeSkillsToQuanta, nodeMigrationFs } from "./migration"
