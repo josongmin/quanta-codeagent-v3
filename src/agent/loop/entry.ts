@@ -98,6 +98,11 @@ export const runAgentInner = async (config: AgentConfig): Promise<AgentOutcome> 
       wm: ctx.wm,
       sessionId: ctx.sessionId,
       taskRegistry: ctx.features.taskRegistry,
+      // RFC09-1 DRAIN — forward the SHARED pending accumulator (created in
+      // session-bootstrap via `wireHookPromptPending`, also read by the turn
+      // loop) so command-hook context on `session_start`/`user_prompt_submit`
+      // reaches real turn assembly instead of being dropped.
+      hookPromptPending: ctx.hookPromptPending,
     })
     if (startOutcome.status === "aborted") {
       // Attribute the abort to its CAUSE (same class as FIX 2c parkSettleFinish):
