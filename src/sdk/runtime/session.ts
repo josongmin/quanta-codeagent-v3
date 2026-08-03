@@ -5,6 +5,7 @@ import {
   type KernelDispatchContext,
   toSessionSnapshotLite,
 } from "@/kernel/session"
+import type { Message } from "@/llm"
 import {
   buildApprovalRespond,
   buildIdentitySet,
@@ -30,6 +31,17 @@ import type { RuntimeSession } from "./types"
 interface CreateRuntimeSessionArgs {
   readonly hostSession: SessionHost
   readonly kernel: Pick<KernelDispatchContext, "clock" | "eventLog">
+  /** RFC01-4 A1 — cold-start rehydrate INJECTION. When the runtime resumes a
+   *  durable session (`runtime.ts` `createSession` sees `durableLog.tip() > 0`),
+   *  it loads the lossless `SavedSession` snapshot via `loadSessionById`,
+   *  validates it fail-closed (`./session/rehydrate`), and passes the full
+   *  transcript here. `createdState` is then seeded with these messages instead
+   *  of the empty-transcript default — the resumed conversation is restored.
+   *  ABSENT (in-memory log / no durable tip) ⇒ undefined ⇒ the empty-transcript
+   *  cold start, byte-identical to the pre-feature runtime. This owner NEVER
+   *  folds `SessionEvent`s (the confirmed-correction DROP); the SavedSession is
+   *  the SOLE durable transcript authority. */
+  readonly rehydratedMessages?: readonly Message[]
 }
 
 export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSession => {
@@ -49,7 +61,15 @@ export const createRuntimeSession = (args: CreateRuntimeSessionArgs): RuntimeSes
   const durableLog = isDurableSessionEventLog(args.kernel.eventLog)
     ? args.kernel.eventLog
     : undefined
-  const createdState = createKernelSessionState(hostDescription)
+  // RFC01-4 A1 — when the caller injected a rehydrated transcript (durable
+  // resume; validated fail-closed upstream in `runtime.ts`), seed the created
+  // state with it as the AUTHORITATIVE transcript. Absent ⇒ the host
+  // description's transcript (usually empty), preserving the pre-feature
+  // empty-transcript cold start byte-identically.
+  const createdState =
+    args.rehydratedMessages !== undefined
+      ? createKernelSessionState({ ...hostDescription, messages: args.rehydratedMessages })
+      : createKernelSessionState(hostDescription)
   const durableTip = durableLog?.tip() ?? 0
   const initialState = durableTip > 0 ? { ...createdState, seq: durableTip } : createdState
   const sessionId = initialState.sessionId

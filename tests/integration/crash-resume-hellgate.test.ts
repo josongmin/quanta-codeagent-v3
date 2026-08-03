@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs"
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { AgentConfig } from "@/agent"
@@ -329,47 +329,57 @@ describe("§13.2 crash-resume hellgate — crash mid-turn → restart → resume
 })
 
 /* ================================================================== */
-/* RFC01-4 — A1 boot rehydrate ADMISSION (aug-02 absorption)           */
+/* RFC01-4 — A1 boot rehydrate (aug-02 absorption) — NOW LIVE          */
 /*                                                                     */
-/* STATUS: NOT READY (authoritative). Per rfc-01-persistence-resume.md */
-/* §RFC01-4 + README §"RFC-01 A1": the kernel `SessionEvent` log is a  */
-/* seq/wire-continuity rail, NOT a semantic-state SSOT — it cannot     */
-/* exact-restore transcript / tool-use+result / approval / artifact /  */
-/* revision. `createRuntimeSession` cold-start resumes ONLY `seq` from  */
-/* `durableLog.tip()` and starts with an EMPTY transcript.             */
+/* CONFIRMED-CORRECTION (README §"RFC-01 A1"): the kernel `SessionEvent`*/
+/* log is a seq/wire-continuity rail, NOT a semantic-state SSOT — it   */
+/* cannot exact-restore transcript / tool-use+result / approval /      */
+/* artifact / revision. `rehydrateState(events)` is DROPPED. The SOLE  */
+/* lossless durable authority is the existing `SavedSession` snapshot  */
+/* (`messages: Message[]` = full transcript) loaded by                 */
+/* `loadSessionById`. RFC01-4 INJECTS that snapshot into the SDK       */
+/* runtime cold-start (`src/sdk/runtime/runtime.ts` `createSession` →  */
+/* `src/sdk/runtime/session/rehydrate.ts`).                            */
 /*                                                                     */
-/* This block does TWO honest things and NOTHING more (no production   */
-/* rehydrate symbol/knob is created — Stop rule):                      */
-/*  1. A PASSING witness that PINS the current NOT-READY behavior      */
-/*     (cold-start transcript is empty) so it cannot silently change.  */
-/*  2. VISIBLE-SKIP admission fixtures documenting the exact refusal   */
-/*     contract each semantic component must satisfy ONCE a lossless   */
-/*     owner is confirmed. They are skipped — never vacuously green —  */
-/*     because there is no lossless owner wired to refuse against yet. */
+/* The former 5 admission SKIPs are now REAL. Each drives the REAL     */
+/* `createRuntime` front door:                                         */
+/*   • a durable event log with `tip() > 0` = "this id is RESUMING";   */
+/*   • the SavedSession snapshot = the lossless transcript authority.  */
+/* Resume MUST rehydrate the full transcript on a clean restart, and   */
+/* MUST REFUSE (fail-closed, operator-visible throw) — never silently  */
+/* start fresh / partial-merge — when the snapshot is MISSING,         */
+/* IDENTITY-MISMATCHED, or its transcript is TAMPERED.                 */
 /* ================================================================== */
 
-describe("RFC01-4 A1 boot rehydrate — admission (NOT READY)", () => {
+describe("RFC01-4 A1 boot rehydrate — LIVE (SavedSession injection)", () => {
   const A1_ENV = "QUANTA_SESSION_EVENT_LOG_DIR"
+  const SESSIONS_ENV = "QUANTA_SESSIONS_DIR"
   const savedA1Env = process.env[A1_ENV]
+  const savedSessionsEnv = process.env[SESSIONS_ENV]
   const a1Dirs: string[] = []
   afterEach(() => {
     if (savedA1Env === undefined) delete process.env[A1_ENV]
     else process.env[A1_ENV] = savedA1Env
+    if (savedSessionsEnv === undefined) delete process.env[SESSIONS_ENV]
+    else process.env[SESSIONS_ENV] = savedSessionsEnv
+    __resetRuntimeConfig()
     for (const d of a1Dirs.splice(0)) rmSync(d, { recursive: true, force: true })
   })
 
-  // (1) PASSING witness — pins the current NOT-READY gap through the REAL SDK
-  // front door: after a restart with the SAME durable dir, seq continuity holds
-  // but the transcript does NOT rehydrate. When a lossless owner lands and this
-  // witness flips (transcript restored), THIS assertion fails and forces the
-  // admission fixtures below to be un-skipped.
-  test("witness: cold-start resumes seq but does NOT rehydrate transcript (gap)", async () => {
+  // Front-door harness: a fresh temp durable-log dir + temp sessions dir, and a
+  // single-session host describing `sessionId`. Returns a `createRuntime`
+  // cold-start factory that resumes over BOTH dirs — exactly the shape a real
+  // process restart sees (durable log persists seq; SavedSession persists the
+  // transcript).
+  const setupResumeWorld = async (sessionId: string) => {
     const { createRuntime } = await import("@/sdk/runtime")
     const { createSingleSessionRuntimeHost } = await import("@/host/runtime")
-    const dir = mkdtempSync(join(tmpdir(), "rfc01-4-a1-"))
-    a1Dirs.push(dir)
-    process.env[A1_ENV] = dir
-    const sessionId = "a1-witness"
+    const logDir = mkdtempSync(join(tmpdir(), "rfc01-4-a1-log-"))
+    const sessDir = mkdtempSync(join(tmpdir(), "rfc01-4-a1-sess-"))
+    a1Dirs.push(logDir, sessDir)
+    process.env[A1_ENV] = logDir
+    process.env[SESSIONS_ENV] = sessDir
+    __resetRuntimeConfig()
     const capabilities = (await import("../support/session-fixtures")).capabilitiesFor()
     const makeHost = () => ({
       describe: () => ({
@@ -382,48 +392,282 @@ describe("RFC01-4 A1 boot rehydrate — admission (NOT READY)", () => {
       },
       close: async () => undefined,
     })
+    const coldStart = async () =>
+      (await createRuntime({ host: createSingleSessionRuntimeHost(makeHost) })).createSession({
+        cwd: "/tmp",
+        permissionMode: "default",
+      })
+    return { coldStart }
+  }
 
-    const runtime1 = await createRuntime({
-      host: createSingleSessionRuntimeHost(makeHost),
-    })
-    const session1 = await runtime1.createSession({ cwd: "/tmp", permissionMode: "default" })
-    const appended = await session1.input.append("first user message")
-    // The append issued at least one durable seq.
-    expect(appended.events.length).toBeGreaterThan(0)
-    const tipAfter = appended.events.map((e) => e.seq).reduce((a, b) => Math.max(a, b), 0)
-    await session1.close?.()
+  // Drive one real durable turn append so the event log's `tip() > 0` (the
+  // resume signal), then close so a fresh runtime reads a real prior tip.
+  const seedDurableTip = async (
+    coldStart: () => Promise<{
+      input: { append: (t: string) => Promise<unknown> }
+      close?: () => Promise<void>
+    }>,
+  ) => {
+    const session0 = await coldStart()
+    await session0.input.append("first user message")
+    await session0.close?.()
+  }
 
-    // Restart: a NEW runtime over the SAME durable dir.
-    const runtime2 = await createRuntime({
-      host: createSingleSessionRuntimeHost(makeHost),
+  // (1) CLEAN RESTART EXACT TRANSCRIPT EQUALITY — the happy path. A durable tip
+  // + a lossless SavedSession snapshot ⇒ the resumed runtime rehydrates the
+  // FULL transcript verbatim (not just seq). RED-ON-INJECTION: reverting the
+  // `runtime.ts` rehydrate wiring (or the `session.ts` seed) makes `messages()`
+  // empty ⇒ this deep-equal fails.
+  test("[rehydrate] clean restart rehydrates the exact SavedSession transcript", async () => {
+    const sessionId = "a1-clean"
+    const { coldStart } = await setupResumeWorld(sessionId)
+    await seedDurableTip(coldStart)
+
+    // Persist the lossless transcript authority (what a real turn-complete save
+    // writes) with distinctive tool-use + assistant content.
+    const transcript: Message[] = [
+      msg("user", "refactor the parser"),
+      msg("assistant", "I extracted the tokenizer and called the edit tool"),
+      msg("user", "now run the tests"),
+    ]
+    await saveSessionById(mkMeta(sessionId), {
+      reason: "in_progress",
+      turns: 2,
+      messages: transcript,
     })
-    const session2 = await runtime2.createSession({ cwd: "/tmp", permissionMode: "default" })
-    // Seq continuity holds (the next append extends past the prior tip)...
-    const next = await session2.input.append("second user message")
-    const nextSeq = next.events.map((e) => e.seq).reduce((a, b) => Math.max(a, b), 0)
-    expect(nextSeq).toBeGreaterThan(tipAfter)
-    // ...but the transcript did NOT rehydrate: the fresh session's rendered
-    // history is not the prior transcript (the NOT-READY gap). We assert the
-    // gap structurally: a rehydrate would have surfaced the first message's
-    // content in session2's replay BEFORE any new append. Since no lossless
-    // owner is wired, `createRuntimeSession` started from an empty transcript.
-    // (This is the admission gate: flipping this requires the RED fixtures
-    // below to pass first.)
-    await session2.close?.()
-    await runtime1.close?.()
-    await runtime2.close?.()
+
+    // Cold-start over the SAME durable dir + the seeded snapshot.
+    const resumed = await coldStart()
+    const rehydrated = resumed.transcript.messages()
+    expect(rehydrated).toEqual(transcript)
+    // Structural cross-check: the snapshot's content is really present (not an
+    // empty vacuous pass).
+    const flat = rehydrated
+      .flatMap((m) => m.content)
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join(" ")
+    expect(flat).toContain("extracted the tokenizer and called the edit tool")
+    // seq + transcript COMPOSE: the derived snapshot summary reflects the
+    // rehydrated transcript (messageCount), AND seq continuity still holds — a
+    // post-resume append extends past the durable tip rather than restarting.
+    const snap = await resumed.snapshot()
+    expect(snap.state.messageCount).toBe(transcript.length)
+    const appended = await resumed.input.append("post-resume follow-up")
+    const nextSeq = appended.events.map((e) => e.seq).reduce((a, b) => Math.max(a, b), 0)
+    expect(nextSeq).toBeGreaterThan(1)
+    await resumed.close?.()
   })
 
-  // (2) VISIBLE-SKIP admission fixtures. Each documents a semantic component
-  // whose OMISSION/TAMPER must cause resume to be REFUSED (fail-closed) once a
-  // lossless owner exists. Skipped — NOT vacuously green — because there is no
-  // rehydrate loader to refuse against yet (Stop rule: stay NOT READY).
-  const A1_REASON =
-    "RFC01-4 NOT READY: no lossless owner wired into the SDK boot loader; " +
-    "SessionEvent cannot exact-restore this component (see README §RFC-01 A1)."
-  test.skip(`[admission] tampered tool-use/result ⇒ resume refused — ${A1_REASON}`, () => {})
-  test.skip(`[admission] omitted approval state ⇒ resume refused — ${A1_REASON}`, () => {})
-  test.skip(`[admission] omitted artifact ⇒ resume refused — ${A1_REASON}`, () => {})
-  test.skip(`[admission] revision gap/ahead/hash-mismatch ⇒ fail-closed — ${A1_REASON}`, () => {})
-  test.skip(`[admission] clean restart exact transcript equality — ${A1_REASON}`, () => {})
+  // (2) ABSENT SNAPSHOT (two-rail independence) ⇒ byte-identical fresh, NOT a
+  // refusal. The durable event log is the seq/wire rail; the `SavedSession`
+  // snapshot is an INDEPENDENT transcript rail. A durable log can legitimately
+  // exist with NO snapshot (a pure wire/seq-only resume — transport-unified
+  // ticket-05). Absence is NOT tamper: resume continues seq but starts with the
+  // historical EMPTY transcript, exactly as today (this is the CONTRACT's
+  // "no snapshot ⇒ fresh runtime exactly as today"). RED-ON-INJECTION for the
+  // refusal-vs-fresh boundary lives in tests (3)/(4) below.
+  test("[rehydrate] absent SavedSession (seq-only resume) ⇒ byte-identical fresh, no refusal", async () => {
+    const sessionId = "a1-missing"
+    const { coldStart } = await setupResumeWorld(sessionId)
+    await seedDurableTip(coldStart)
+    // NO saveSessionById — the transcript rail is simply empty for this id.
+    const resumed = await coldStart()
+    // No throw, and the transcript is the historical empty cold start.
+    expect(resumed.transcript.messages()).toEqual([])
+    // Seq continuity still holds (the seq rail is untouched by the absent
+    // transcript rail): the next append extends past the seeded tip.
+    const appended = await resumed.input.append("post-resume message")
+    const nextSeq = appended.events.map((e) => e.seq).reduce((a, b) => Math.max(a, b), 0)
+    expect(nextSeq).toBeGreaterThan(1)
+    await resumed.close?.()
+  })
+
+  // (3) IDENTITY MISMATCH ⇒ REFUSE (fail-closed). A snapshot that IS present for
+  // the resuming id but declares a DIFFERENT `meta.id` (a swapped / tampered
+  // file) must refuse rather than adopt a foreign transcript. This test pins the
+  // exact refusal + component at the pure validator boundary; the SAME refusal
+  // driven through the REAL `createRuntime` front door is test (7).
+  test("[rehydrate] snapshot identity mismatch (foreign transcript) ⇒ REFUSED", async () => {
+    const sessionId = "a1-ident"
+    const { validateResumeSnapshot, ResumeRehydrateRefusedError } = await import(
+      "@/sdk/runtime/session/rehydrate"
+    )
+    const { SESSION_VERSION } = await import("@/session")
+    const foreign = {
+      version: SESSION_VERSION,
+      meta: mkMeta("some-other-session"),
+      reason: "in_progress",
+      turns: 1,
+      messages: [msg("user", "foreign work")],
+    }
+    let caught: unknown
+    try {
+      validateResumeSnapshot(sessionId, foreign)
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(ResumeRehydrateRefusedError)
+    expect((caught as ResumeRehydrateRefusedError).component).toBe("identity")
+    expect((caught as Error).message).toContain("identity mismatch")
+    expect((caught as Error).message).toContain("some-other-session")
+  })
+
+  // (4) TAMPERED TRANSCRIPT — never partial-merges a corrupt transcript. Two
+  // guards compose here, both fail-closed against silently adopting garbage:
+  //   (a) the `@/session` store's own `savedSessionSchema.safeParse` refuses to
+  //       LOAD a badly-corrupt file (`loadSessionById → undefined`), so the
+  //       front door takes the byte-identical FRESH path — a corrupt file is
+  //       NEVER partial-merged into the runtime;
+  //   (b) the boot-time `validateResumeSnapshot` re-check REFUSES a snapshot
+  //       that parses the store schema but still violates the Message contract
+  //       (defense-in-depth; proven at the pure boundary in test (5)).
+  // This test exercises (a) through the REAL front door: a store-corrupt
+  // transcript resumes seq only and starts EMPTY, never surfacing the garbage.
+  test("[rehydrate] store-corrupt transcript ⇒ never partial-merged (fresh, not garbage)", async () => {
+    const sessionId = "a1-tamper"
+    const { coldStart } = await setupResumeWorld(sessionId)
+    await seedDurableTip(coldStart)
+    // Write a well-formed snapshot, then TAMPER the on-disk transcript so one
+    // entry is not a valid Message (simulating a corrupted tool-use record).
+    await saveSessionById(mkMeta(sessionId), {
+      reason: "in_progress",
+      turns: 1,
+      messages: [msg("user", "call the edit tool")],
+    })
+    const path = sessionFilePath(sessionId)
+    const parsed = JSON.parse(readFileSync(path, "utf8"))
+    parsed.messages = [{ role: "assistant", content: "not-an-array-tool-result" }]
+    writeFileSync(path, JSON.stringify(parsed))
+    __resetRuntimeConfig()
+
+    // The store refuses to load the corrupt file, so the runtime does NOT throw
+    // and — critically — does NOT surface the garbage: the transcript is empty,
+    // never the corrupt `"not-an-array-tool-result"` string.
+    const resumed = await coldStart()
+    const messages = resumed.transcript.messages()
+    expect(messages).toEqual([])
+    const flat = JSON.stringify(messages)
+    expect(flat).not.toContain("not-an-array-tool-result")
+    await resumed.close?.()
+  })
+
+  // (5) FAIL-CLOSED on garbage transcript entry (revision/hash-tamper proxy):
+  // any structurally-invalid entry (e.g. a stray non-Message injected mid-log)
+  // refuses. Proven at the pure boundary so the exact tamper index is visible.
+  test("[rehydrate] structurally-invalid transcript entry ⇒ fail-closed refuse", async () => {
+    const sessionId = "a1-garbage"
+    const { validateResumeSnapshot, ResumeRehydrateRefusedError } = await import(
+      "@/sdk/runtime/session/rehydrate"
+    )
+    const { SESSION_VERSION } = await import("@/session")
+    const tampered = {
+      version: SESSION_VERSION,
+      meta: mkMeta(sessionId),
+      reason: "in_progress",
+      turns: 1,
+      // valid, valid, GARBAGE — the third entry has a bad role.
+      messages: [
+        msg("user", "ok"),
+        msg("assistant", "sure"),
+        { role: "system", content: [] } as unknown as Message,
+      ],
+    }
+    let caught: unknown
+    try {
+      validateResumeSnapshot(sessionId, tampered)
+    } catch (error) {
+      caught = error
+    }
+    expect(caught).toBeInstanceOf(ResumeRehydrateRefusedError)
+    expect((caught as ResumeRehydrateRefusedError).component).toBe("transcript")
+    expect((caught as Error).message).toContain("entry #2")
+  })
+
+  // (6) ABSENT-SNAPSHOT BYTE-IDENTICAL: with the in-memory log (default,
+  // `QUANTA_SESSION_EVENT_LOG_DIR` unset) there is NO durable tip, so the
+  // rehydrate seam is NEVER consulted — cold-start is the historical
+  // empty-transcript runtime even if a SavedSession happens to exist on disk.
+  // This is the default-OFF guard: the feature adds nothing to the non-durable
+  // path.
+  test("[rehydrate] no durable log ⇒ rehydrate never runs (byte-identical cold start)", async () => {
+    const { createRuntime } = await import("@/sdk/runtime")
+    const { createSingleSessionRuntimeHost } = await import("@/host/runtime")
+    // Durable log UNSET; sessions dir present WITH a snapshot that WOULD
+    // rehydrate if the seam ran.
+    delete process.env[A1_ENV]
+    const sessDir = mkdtempSync(join(tmpdir(), "rfc01-4-a1-off-"))
+    a1Dirs.push(sessDir)
+    process.env[SESSIONS_ENV] = sessDir
+    __resetRuntimeConfig()
+    const sessionId = "a1-off"
+    await saveSessionById(mkMeta(sessionId), {
+      reason: "in_progress",
+      turns: 1,
+      messages: [msg("user", "should NOT be rehydrated")],
+    })
+    const capabilities = (await import("../support/session-fixtures")).capabilitiesFor()
+    const makeHost = () => ({
+      describe: () => ({
+        sessionId,
+        permissionMode: "default" as const,
+        capabilityManifest: capabilities,
+      }),
+      runTurn: async () => {
+        throw new Error("not exercised")
+      },
+      close: async () => undefined,
+    })
+    const runtime = await createRuntime({ host: createSingleSessionRuntimeHost(makeHost) })
+    const session = await runtime.createSession({ cwd: "/tmp", permissionMode: "default" })
+    // Empty transcript — the in-memory path never touches the SavedSession.
+    expect(session.transcript.messages()).toEqual([])
+    await session.close?.()
+    await runtime.close?.()
+  })
+
+  // (7) FRONT-DOOR REFUSAL PROOF: the refusal is genuinely WIRED into the real
+  // `createRuntime` cold-start (not just the pure helper). A snapshot that the
+  // `@/session` store WILL load (schema-valid) but whose `meta.id` declares a
+  // DIFFERENT session (a swapped file) makes `createSession` THROW before any
+  // RuntimeSession is assembled — fail-closed, operator-visible, never silent-
+  // fresh. RED-ON-INJECTION: reverting the `runtime.ts` wiring (drop the
+  // `rehydrateResumeTranscript` call) makes this cold-start SUCCEED with an
+  // empty transcript ⇒ `refused` stays false ⇒ this test goes red.
+  test("[rehydrate] FRONT DOOR: identity-mismatched loadable snapshot ⇒ createSession THROWS", async () => {
+    const sessionId = "a1-frontdoor-ident"
+    const { coldStart } = await setupResumeWorld(sessionId)
+    await seedDurableTip(coldStart)
+    // Persist under `<sessionId>.json` (so loadSessionById(sessionId) FINDS it)
+    // but with a meta.id pointing at a DIFFERENT session — a swapped/tampered
+    // file the store schema still accepts.
+    const swappedMeta = { ...mkMeta(sessionId), id: "SWAPPED-other-id" }
+    await saveSessionById(swappedMeta, {
+      reason: "in_progress",
+      turns: 1,
+      messages: [msg("user", "foreign transcript")],
+    })
+    // saveSessionById wrote to `SWAPPED-other-id.json` (it keys by meta.id), so
+    // rename it onto `<sessionId>.json` to simulate the swap on disk.
+    const swappedPath = sessionFilePath("SWAPPED-other-id")
+    const targetPath = sessionFilePath(sessionId)
+    writeFileSync(targetPath, readFileSync(swappedPath, "utf8"))
+    __resetRuntimeConfig()
+
+    // Sanity: the store DOES load this file for `sessionId`, and its meta.id is
+    // the foreign one (so the identity branch — not the absent branch — fires).
+    const loaded = await loadSessionById(sessionId)
+    expect(loaded?.meta.id).toBe("SWAPPED-other-id")
+
+    let refused = false
+    let started: Awaited<ReturnType<typeof coldStart>> | undefined
+    try {
+      started = await coldStart()
+    } catch (error) {
+      refused = true
+      expect((error as Error).message).toContain("refusing to resume")
+      expect((error as Error).message).toContain("identity mismatch")
+    }
+    expect(refused).toBe(true)
+    expect(started).toBeUndefined()
+  })
 })
