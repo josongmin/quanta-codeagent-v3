@@ -13,6 +13,7 @@ export {
   bgCompactionEnabled,
   isApproachingLimit,
   meetsPersistThreshold,
+  stepHeadroomLatch,
 } from "./background"
 export {
   BG_COMPACTION_ENV,
@@ -20,6 +21,8 @@ export {
   type CancelToken,
   type Clock,
   type DiscardReason,
+  type HeadroomCrossing,
+  type HeadroomLatchState,
   type ReconcileOutcome,
   type SpeculativeSummarizeFn,
   type SummarizeError,

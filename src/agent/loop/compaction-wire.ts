@@ -1,7 +1,7 @@
 import { join } from "node:path"
 import type { Message, SystemPromptInput } from "@/llm"
 import type { CompactionEventVariant } from "@/memory/typed-event"
-import { errMessage, logger, runtimeConfig } from "@/shared"
+import { errMessage, gateOnStrict, logger, runtimeConfig } from "@/shared"
 import {
   type BgSummaryPayload,
   compactIfNeeded,
@@ -13,6 +13,11 @@ import {
   UNPRODUCTIVE_PROACTIVE_REASONS,
 } from "../compaction"
 import type { BackgroundSummarizationController } from "../compaction/index"
+// RFC-01 A7 — the pure headroom latch + its state type live in the compaction
+// leaf (`./compaction/index`); the wire owns only the per-session latch box +
+// gate read. Imported from the deep path because the `../compaction.ts` facade
+// forwards a curated subset and does not re-export the A7 surface.
+import { type HeadroomLatchState, stepHeadroomLatch } from "../compaction/index"
 import type { BreakerVerdict, CompactionBreaker } from "../compaction-breaker"
 import { appendSummary, type ConversationSummaryArchive } from "../conversation-summary-archive"
 import { buildPostCompactEmit, buildPreCompactHook } from "../loop-helpers"
@@ -57,6 +62,20 @@ const DEFAULT_MICROCOMPACT_INTERVAL_MS = 30_000
  *  state; keyed by session so concurrent runs don't share a clock). */
 const lastMicrocompactAt = new Map<string, number>()
 
+/* ------------------------------------------------------------------ */
+/* RFC-01 A7 — context-headroom advisory (aug-02 absorption).          */
+/*                                                                      */
+/* The strict-"1" gate that opts a deployment into the advisory. Read   */
+/* via `gateOnStrict(process.env, ...)` at the wire (the composition-   */
+/* adjacent seam) — the PURE latch (`stepHeadroomLatch`) stays env-free */
+/* in `@/agent/compaction`. Unset ⇒ never emitted ⇒ byte-identical.     */
+/* ------------------------------------------------------------------ */
+export const CONTEXT_HEADROOM_ADVISORY_ENV = "QUANTA_CONTEXT_HEADROOM_ADVISORY"
+
+/** Per-session edge-latch for the headroom advisory (keyed by session so
+ *  concurrent runs don't share the arm/disarm state). Starts armed lazily. */
+const headroomLatches = new Map<string, HeadroomLatchState>()
+
 /**
  * Drop a session's microcompact-cadence entry. Called from `finishAgentSession`
  * on session end so this module `Map` does not accumulate ONE entry per session
@@ -67,6 +86,48 @@ const lastMicrocompactAt = new Map<string, number>()
  */
 export const forgetMicrocompactSession = (sessionId: string | undefined): void => {
   lastMicrocompactAt.delete(sessionId ?? "")
+  // RFC-01 A7 — drop the headroom latch on the same session-end boundary so it
+  // does not leak one entry per session in a long-lived daemon.
+  headroomLatches.delete(sessionId ?? "")
+}
+
+/**
+ * RFC-01 A7 — emit the edge-latched context-headroom advisory. PURE
+ * observability: reuses the EXISTING `usedTokens`/`limitTokens`/threshold the
+ * compaction path already computed (no new estimator), latches per session, and
+ * emits at most once per upward crossing (re-arms only after usage drops back
+ * below the threshold). NEVER triggers compaction or stops the loop. Gated
+ * default-OFF; unset ⇒ no emit, no latch touch, byte-identical.
+ */
+const emitContextHeadroomAdvisory = (
+  config: AgentConfig,
+  usedTokens: number,
+  limitTokens: number,
+  thresholdTokens: number,
+): void => {
+  if (!gateOnStrict(process.env, CONTEXT_HEADROOM_ADVISORY_ENV)) return
+  if (config.stream === undefined) return
+  const key = config.sessionId ?? ""
+  let latch = headroomLatches.get(key)
+  if (latch === undefined) {
+    latch = { armed: true }
+    headroomLatches.set(key, latch)
+  }
+  // Re-arm boundary == the crossed threshold: a drop back below it re-arms the
+  // next crossing. `stepHeadroomLatch` owns the pure arm/disarm transition.
+  const crossing = stepHeadroomLatch(
+    latch,
+    { usedTokens, limitTokens },
+    thresholdTokens,
+    thresholdTokens,
+  )
+  if (!crossing.crossed) return
+  config.stream.emit({
+    type: "context_headroom_crossed",
+    usedTokens: crossing.usedTokens,
+    limitTokens: crossing.limitTokens,
+    thresholdTokens: crossing.thresholdTokens,
+  })
 }
 
 /**
@@ -619,6 +680,12 @@ export const maybeCompact = async (args: MaybeCompactArgs): Promise<BreakerVerdi
     compaction.thresholdTokens,
     resolveWindowModel(config.llm, activeModel),
   )
+  // RFC-01 A7 — edge-latched context-headroom advisory. Reuses the SAME
+  // `before` footprint + `bgLimitTokens` threshold the compaction path already
+  // resolved (no new estimator/knob). Pure observability: emitting it never
+  // changes whether/how we compact below — the reactive/proactive paths still
+  // own that decision. Gated default-OFF (byte-identical when unset).
+  emitContextHeadroomAdvisory(config, before, bgLimitTokens, bgLimitTokens)
   const borrowed =
     bgController !== undefined
       ? await bgController.reconcileAtTurnBoundary({

@@ -13,6 +13,18 @@ import {
 } from "./jsonl-recorder-event-data"
 import type { DegradedRecord } from "./tee"
 
+/** Transient, NON-accounting advisory event types the recorder DROPS (the
+ *  cost/token totals are recorded via the `usage`/`llm_usage` line). Every
+ *  entry is also excluded from `RecordedEventType` below so KIND_MAP / dataOf
+ *  never see them. A typed predicate (below) narrows `event` by EXCLUDING these
+ *  from the `RecordedEvent` union while collapsing the skip into ONE branch —
+ *  so `emit`'s cognitive complexity does not grow as advisories are added. */
+type NonAccountingAdvisoryType = "budget_breach" | "context_headroom_crossed"
+const isNonAccountingAdvisory = (
+  event: AgentEvent,
+): event is Extract<AgentEvent, { type: NonAccountingAdvisoryType }> =>
+  event.type === "budget_breach" || event.type === "context_headroom_crossed"
+
 export interface JsonlRecorderOpts {
   ctx?: RunContext
   /** eval/strict mode: serialize/write failure rethrows. Default `false`. */
@@ -216,12 +228,15 @@ export class JsonlRecorder implements StreamPort {
     // its actions, not the streamed reasoning summary. Kept out of
     // `RecordedEventType` below so KIND_MAP / dataOf never see it.
     if (event.type === "assistant_thinking") return
-    // ALBB-21 — `budget_breach` is a transient, NON-accounting advisory (a
-    // soft/hard cost-cap crossing banner), the SAME class as `ratelimit_snapshot`
-    // / `output_progress`: it carries no durable trajectory value (the cost totals
-    // ARE recorded via the `usage`/`llm_usage` line), so the recorder SKIPS it —
-    // kept out of `RecordedEventType` below so KIND_MAP / dataOf never see it.
-    if (event.type === "budget_breach") return
+    // ALBB-21 `budget_breach` + RFC-01 A7 `context_headroom_crossed` are
+    // transient, NON-accounting advisories (cost-cap / context-headroom
+    // banners), the SAME class as `ratelimit_snapshot` / `output_progress`: the
+    // cost/token totals ARE recorded via the `usage`/`llm_usage` line, so the
+    // recorder SKIPS them — both kept out of `RecordedEventType` below so
+    // KIND_MAP / dataOf never see them. ONE typed-predicate branch (narrows the
+    // remaining `event` to the recorded union) so this method's complexity is
+    // flat as advisories are added.
+    if (isNonAccountingAdvisory(event)) return
     // Multi-agent-panel SUBSTRATE — subagent lifecycle events are transient,
     // render-only UI signals (the SAME class as `item_*` / `budget_breach`): the
     // durable subagent trajectory rides the ADR-0133 hooks + the parent `agent`
@@ -502,6 +517,11 @@ type RecordedEventType = Exclude<
   // `emit` guard below drops them.
   | "subagent_spawn"
   | "subagent_status"
+  // RFC-01 A7 — `context_headroom_crossed` is a transient advisory (the SAME
+  // class as `budget_breach` / `ratelimit_snapshot`): the token totals ARE
+  // recorded via `usage`/`llm_usage`, so this notice carries no separate
+  // durable payload (skipped in `emit` above).
+  | "context_headroom_crossed"
 >
 type RecordedEvent = Extract<AgentEvent, { type: RecordedEventType }>
 

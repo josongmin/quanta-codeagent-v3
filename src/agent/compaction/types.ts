@@ -66,6 +66,37 @@ export interface UsageSnapshot {
   limitTokens: number
 }
 
+/* ------------------------------------------------------------------ */
+/* RFC-01 A7 — context-headroom advisory (aug-02 absorption).          */
+/*                                                                      */
+/* An EDGE-LATCHED advisory: emit ONCE when the live footprint first    */
+/* crosses the (existing compaction) threshold, and re-arm only after   */
+/* it falls back below the reset boundary. Pure derivation off the      */
+/* EXISTING `UsageSnapshot`/threshold — NO new token estimator, NO new  */
+/* limit knob, NO rollout hard cap or stop reason. Observability only:  */
+/* the consumer MUST NOT drive loop-stop/compaction from this event.    */
+/* ------------------------------------------------------------------ */
+
+/** Mutable, per-session latch state for the headroom advisory. `armed:true`
+ *  means "eligible to emit on the next upward crossing". Starts armed. The
+ *  latch flips to `false` on emit and back to `true` only when usage drops
+ *  below the reset boundary — so oscillation at the threshold cannot spam the
+ *  event. Pure data; the wire owns one box per session. */
+export interface HeadroomLatchState {
+  armed: boolean
+}
+
+/** Result of one {@link stepHeadroomLatch} evaluation. `crossed:true` iff this
+ *  step is the edge where the advisory should be emitted (armed AND at/above
+ *  threshold). Carries the exact numbers the event forwards — no derived,
+ *  high-cardinality fields. */
+export interface HeadroomCrossing {
+  readonly crossed: boolean
+  readonly usedTokens: number
+  readonly limitTokens: number
+  readonly thresholdTokens: number
+}
+
 /**
  * REQUIRED persist-threshold config — no magic numbers. A completed background
  * summary is only INSTALLED at the turn boundary when BOTH headroom conditions

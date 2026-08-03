@@ -138,6 +138,9 @@ export class ItemStreamProjector {
       case "progress_update":
       case "ratelimit_snapshot":
       case "budget_breach":
+      // RFC-01 A7 — render-only advisory (same class as budget_breach); no
+      // per-item projection.
+      case "context_headroom_crossed":
         return []
       default: {
         // Exhaustiveness pin (runtime-safe: no throw in the hot stream path).

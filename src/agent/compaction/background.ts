@@ -35,6 +35,8 @@ import {
   type CancelToken,
   type Clock,
   type DiscardReason,
+  type HeadroomCrossing,
+  type HeadroomLatchState,
   type ReconcileOutcome,
   type SpeculativeSummarizeFn,
   type SummarizeError,
@@ -79,6 +81,46 @@ export const meetsPersistThreshold = (
   const freed = Math.max(usedTokens - resultingTokens, 0)
   const freedPercent = limitTokens > 0 ? freed / limitTokens : 0
   return freed >= cfg.persistUnusedTokens && freedPercent >= cfg.persistUnusedPercent
+}
+
+/**
+ * RFC-01 A7 — pure, edge-latched context-headroom step. Mutates the injected
+ * {@link HeadroomLatchState} box and returns whether THIS step is the emit edge.
+ *
+ * Semantics (crossing-once, hysteresis on the reset boundary):
+ *   - `armed && used >= thresholdTokens` ⇒ EMIT edge (`crossed:true`) and
+ *     disarm (a subsequent still-above step does NOT re-emit).
+ *   - `used < resetThresholdTokens` ⇒ re-arm (the next upward crossing may
+ *     emit again). `resetThresholdTokens` is caller-supplied (the wire passes
+ *     the same threshold, so re-arm requires dropping back below it) — NOT a
+ *     new estimator or knob.
+ *   - Degenerate `limitTokens <= 0` (no window) ⇒ never crosses (parity with
+ *     `isApproachingLimit`).
+ *
+ * PURE except for the explicit latch mutation the caller owns; deterministic.
+ * The event this feeds is OBSERVABILITY ONLY — it never gates loop-stop or
+ * compaction.
+ */
+export const stepHeadroomLatch = (
+  latch: HeadroomLatchState,
+  usage: UsageSnapshot,
+  thresholdTokens: number,
+  resetThresholdTokens: number,
+): HeadroomCrossing => {
+  const base = {
+    usedTokens: usage.usedTokens,
+    limitTokens: usage.limitTokens,
+    thresholdTokens,
+  }
+  // Re-arm first: a drop below the reset boundary makes the next crossing
+  // eligible. Guards the "reset → above ⇒ second emit" edge.
+  if (usage.usedTokens < resetThresholdTokens) latch.armed = true
+  if (usage.limitTokens <= 0 || thresholdTokens <= 0) return { crossed: false, ...base }
+  if (latch.armed && usage.usedTokens >= thresholdTokens) {
+    latch.armed = false
+    return { crossed: true, ...base }
+  }
+  return { crossed: false, ...base }
 }
 
 /** A minimal cancel token (no AbortController dependency — env-free slice). */

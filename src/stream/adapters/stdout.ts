@@ -232,6 +232,13 @@ export class StdoutStream implements StreamPort {
         // notice, the same class as the `usage`/`ratelimit_snapshot` readouts.
         this.write(renderBudgetBreach(event))
         break
+      case "context_headroom_crossed":
+        // RFC-01 A7 — advisory context-headroom banner. RENDER-ONLY and NON-
+        // MUTATING: the same passive-notice class as `budget_breach`; printing
+        // it never triggers compaction or stops the loop (that stays with the
+        // existing reactive/proactive compaction paths).
+        this.write(renderContextHeadroom(event))
+        break
       case "done":
         this.write(`${DIM}— done (${event.reason}, ${event.turns} turns) —${RESET}\n`)
         break
@@ -455,6 +462,14 @@ const renderCoordinationEvent = (event: CoordinationEvent): string => {
  *  `ledgerHardBreachCondition`'s job at the turn epilogue). */
 const renderBudgetBreach = (event: Extract<AgentEvent, { type: "budget_breach" }>): string =>
   `${DIM}⚠ budget ${event.severity} cap crossed (${event.scope}): $${event.observed.toFixed(2)} > $${event.limit.toFixed(2)}${RESET}\n`
+
+/** RFC-01 A7 — advisory context-headroom banner. One dim line: used-vs-limit +
+ *  the crossed threshold. NON-MUTATING by contract — this render never triggers
+ *  compaction or stops the loop (observability only). */
+const renderContextHeadroom = (
+  event: Extract<AgentEvent, { type: "context_headroom_crossed" }>,
+): string =>
+  `${DIM}⚠ context headroom low: ${formatTokenCount(event.usedTokens)} / ${formatTokenCount(event.limitTokens)} tokens (threshold ${formatTokenCount(event.thresholdTokens)})${RESET}\n`
 
 /** ADR-0512 P3 — the interactive escalation APPROVAL card. YELLOW (an ask, not
  *  a red error). Shows which tool + its risk (read-only vs mutating) + WHY it is

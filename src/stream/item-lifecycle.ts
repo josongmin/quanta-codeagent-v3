@@ -100,6 +100,9 @@ export class ItemLifecycleTracker {
       case "progress_update":
       case "ratelimit_snapshot":
       case "budget_breach":
+      // RFC-01 A7 — render-only advisory (same class as budget_breach); the
+      // item-lifecycle projector passes it through untouched.
+      case "context_headroom_crossed":
         return []
       default: {
         // Exhaustiveness pin (runtime-safe: no throw).

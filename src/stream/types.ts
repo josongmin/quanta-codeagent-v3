@@ -162,6 +162,7 @@ export const AGENT_EVENT_TYPES = [
   "progress_update",
   "ratelimit_snapshot",
   "budget_breach",
+  "context_headroom_crossed",
   "done",
 ] as const satisfies readonly AgentEvent["type"][]
 
@@ -688,6 +689,24 @@ export type AgentEvent =
       scope: string
       observed: number
       limit: number
+    }
+  // RFC-01 A7 (aug-02 absorption) — context-headroom advisory. Emitted ONCE
+  // (edge-latched) when the live transcript footprint first crosses the
+  // existing compaction threshold, and re-armed only after it falls back below
+  // the reset boundary. PURE OBSERVABILITY: the loop never inspects it (no
+  // control authority — it does NOT trigger compaction or stop the loop; that
+  // stays with the existing reactive/proactive compaction paths). Carries ONLY
+  // the three existing numbers (`usedTokens`, `limitTokens`, `thresholdTokens`)
+  // — stable, low-cardinality, no derived fields. Same render-only advisory
+  // class as `budget_breach` / `ratelimit_snapshot`: the recorder SKIPS it,
+  // the stdout adapter renders a one-line banner, NullStream swallows it.
+  // Default-OFF: emitted ONLY when `QUANTA_CONTEXT_HEADROOM_ADVISORY` is on ⇒
+  // byte-identical when unset.
+  | {
+      type: "context_headroom_crossed"
+      usedTokens: number
+      limitTokens: number
+      thresholdTokens: number
     }
   | { type: "done"; reason: string; turns: number }
 
