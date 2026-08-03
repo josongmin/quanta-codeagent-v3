@@ -96,7 +96,13 @@ export type {
   SkillSource,
   SkillSourceInputs,
 } from "./registry"
-export { buildSkillRegistry, defaultSkillSources } from "./registry"
+export {
+  buildSkillRegistry,
+  buildSkillSnapshot,
+  defaultSkillSources,
+  type SkillSnapshot,
+  type SkillSnapshotInputs,
+} from "./registry"
 // jun-6 — agent-callable skill-authoring tool (scaffold + validate + install).
 export {
   createSkillCreatorTool,

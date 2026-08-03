@@ -19,11 +19,10 @@ import { FsJailError, resolveJailed } from "@/storage"
 import type { Tool } from "@/tool"
 import type { Skill } from "../../skill"
 import {
+  buildSkillSnapshot,
   createSkillCreatorTool,
   createSkillTool,
   createToolSearchTool,
-  discoverSkills,
-  discoverSystemSkills,
   type SkillWriterPort,
   skillEffortOverride,
   skillModelOverride,
@@ -95,21 +94,15 @@ export const buildSkillBlock = async (config: AgentConfig): Promise<SkillBlock |
   if (!config.skills) return undefined
 
   const dir = config.skills.dir
-  // `dir` OPTIONAL (ADR-0045 follow-up): when omitted, only bundled system
-  // skills load. `discoverSkills` is only called when a user dir is given.
-  const userSkills = dir !== undefined ? await discoverSkills(dir) : []
-  // Bundled system skills (ADR-0045) — version-pinned, ship with the framework.
-  // Merged into the discoverable set so the model can invoke disciplines like
-  // `progress-audit` regardless of whether the user populated their own skills
-  // dir. System skills WIN on a name collision so a user-supplied skill cannot
-  // impersonate / weaken a system one (the `byName` second-pass overrides).
-  const systemSkills = await discoverSystemSkills()
-  const byName = new Map<string, Skill>()
-  for (const s of userSkills) byName.set(s.name, s)
-  for (const s of systemSkills) byName.set(s.name, s)
-  const skills = [...byName.values()].sort((a, b) =>
-    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
-  )
+  // RFC03-0 — canonical discovery+precedence authority. The prompt block, the
+  // `Skill` tool inventory, and the CLI `/skills` list all derive from the SAME
+  // `buildSkillSnapshot` so they cannot disagree on the collision winner or the
+  // ordering. `dir` OPTIONAL (ADR-0045): omitted ⇒ only bundled system skills.
+  // Precedence (ADR-0134): user WINS over system on a name collision — the
+  // canonical decision (§0134 "system: 사용자 disable 가능"). "System cannot be
+  // shadowed" belongs to the proposal/import admission layer, not read-time.
+  const snapshot = await buildSkillSnapshot(dir !== undefined ? { userDir: dir } : {})
+  const skills = [...snapshot.skills]
   const tools: Tool[] = [
     // `createSkillTool` ALWAYS receives the full discovered list — a user can
     // still invoke any skill by name. The `paths:` filter below only narrows
