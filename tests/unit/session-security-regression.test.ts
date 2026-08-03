@@ -215,15 +215,17 @@ describe("HIGH-2/HIGH-3 - worktree-fork sanitizes branch + ref args", () => {
   )
 
   test.skipIf(!HAS_GIT)(
-    "removeWorktree on a missing path returns true (idempotency regression)",
+    "removeWorktree on a missing path is idempotent (RFC06-1: porcelain ABSENCE, not stderr guess)",
     async () => {
       const repo = await makeRepo()
       cleanups.push(repo)
-      // Never created - but the caller invariant ("dir is gone") is already
-      // satisfied. The fix in worktree-fork.ts intercepts the ENOENT-shaped
-      // stderr and reports success.
-      const ok = await removeWorktree(`${repo}/.quanta/worktrees/never-existed`, repo)
-      expect(ok).toBe(true)
+      // Never created — the caller invariant ("dir is gone") is already
+      // satisfied. RFC06-1 hardening: idempotency is judged by porcelain
+      // ABSENCE (the exact path is not in `git worktree list --porcelain`), NOT
+      // by intercepting an ENOENT-shaped stderr substring. The typed outcome is
+      // `absent` (a reached-end-state, distinct from a real `removed`).
+      const outcome = await removeWorktree(`${repo}/.quanta/worktrees/never-existed`, repo)
+      expect(outcome.kind).toBe("absent")
     },
     30_000,
   )

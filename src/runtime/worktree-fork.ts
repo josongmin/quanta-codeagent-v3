@@ -1,5 +1,7 @@
+import { realpath } from "node:fs/promises"
 import { runShell } from "./shell"
 import { isGitRepo, runWorktreeAddWithRetry } from "./worktree"
+import { findByExactPath, inspectWorktrees, type WorktreeInspection } from "./worktree-inspect"
 
 /** A persistent (not auto-removed) git worktree spun up for top-level
  *  conversation fork. Unlike {@link withWorktree}, this does NOT clean up on
@@ -123,22 +125,167 @@ export const createPersistentWorktree = async (
   return { worktreePath, branch }
 }
 
-/** Force-remove a persistent worktree. Returns `true` when the worktree
- *  directory ends up gone — that includes the idempotent case where the
- *  worktree was already removed (`git worktree remove --force` exits non-zero
- *  on a missing worktree, but the caller's invariant — "this path no longer
- *  has a registered worktree" — is satisfied). Branch deletion is best-effort
- *  and does NOT affect the return value. Never throws. */
+/** RFC-06 §RFC06-1 — typed outcome of a hardened worktree removal. Callers
+ *  branch on this instead of a bare boolean so a REFUSAL (dirty/locked) is
+ *  distinct from IDEMPOTENT-ABSENCE and from a real REMOVE. `branchDeleted`
+ *  reports the separate post-remove branch-delete step; it is never the reason
+ *  a removal is called successful. */
+export type RemoveOutcome =
+  /** The exact-registered worktree was cleanly removed (non-force). */
+  | { readonly kind: "removed"; readonly branchDeleted: boolean }
+  /** No worktree was registered at the exact path — the desired end state
+   *  ("this path no longer has a registered worktree") is ALREADY satisfied.
+   *  Idempotency is judged by porcelain ABSENCE, never by a stderr substring. */
+  | { readonly kind: "absent"; readonly branchDeleted: boolean }
+  /** Removal was REFUSED because the worktree is not safely removable
+   *  (dirty / locked). NOT assumed removed — the caller reports/quarantines. */
+  | { readonly kind: "refused"; readonly reason: RemoveRefusalReason }
+  /** Git inspection or the remove command itself errored. Report-only —
+   *  the target state is UNKNOWN and must never be assumed removed. */
+  | { readonly kind: "error"; readonly error: string }
+
+export type RemoveRefusalReason = "dirty" | "locked" | "remove_failed"
+
+/**
+ * Match a target path against the porcelain registry accounting for symlinked
+ * path roots. Git reports the REALPATH of a worktree (on macOS `/tmp` →
+ * `/private/tmp`), while the caller's persisted `path` may carry the symlink
+ * form (whatever `repoRoot` string was passed at create time). We resolve the
+ * target's realpath (best-effort — a removed dir has none) and try BOTH the
+ * realpath and the raw string against each registered path (itself also
+ * realpath-resolved defensively). This is NOT path INFERENCE — it is exact
+ * identity under filesystem canonicalization; no substring/prefix/name guess.
+ */
+const findRegisteredMatch = async (
+  worktrees: readonly WorktreeInspection[],
+  targetPath: string,
+): Promise<WorktreeInspection | undefined> => {
+  // Fast path: verbatim match (covers the common non-symlinked case).
+  const exact = findByExactPath(worktrees, targetPath)
+  if (exact !== undefined) return exact
+  const targetReal = await realpath(targetPath).catch(() => undefined)
+  const candidates = new Set<string>([targetPath])
+  if (targetReal !== undefined) candidates.add(targetReal)
+  for (const w of worktrees) {
+    if (candidates.has(w.path)) return w
+    const wReal = await realpath(w.path).catch(() => undefined)
+    if (wReal !== undefined && candidates.has(wReal)) return w
+  }
+  return undefined
+}
+
+/** `git status --porcelain` inside the worktree — non-empty ⇒ dirty
+ *  (uncommitted/untracked). Returns `undefined` when git itself errored so the
+ *  caller can fail closed rather than treat an error as "clean". */
+const worktreeIsDirty = async (worktreePath: string): Promise<boolean | undefined> => {
+  const st = await runShell("git status --porcelain", { cwd: worktreePath }).catch(() => undefined)
+  if (st === undefined || st.exitCode !== 0) return undefined
+  return st.stdout.trim().length > 0
+}
+
+/**
+ * RFC-06 §RFC06-1 — HARDENED worktree removal. Replaces the prior
+ * unconditional-`--force` + stderr-substring-idempotency path.
+ *
+ * Contract:
+ *   1. Read the live porcelain registry and match the EXACT `worktreePath`
+ *      (verbatim, no substring/prefix/branch-name inference). Not registered ⇒
+ *      `absent` (idempotent success by porcelain ABSENCE, not a stderr guess).
+ *   2. A `locked` worktree is REFUSED (git refuses prune/remove without force,
+ *      and this path never forces) — surfaced as `refused:"locked"`.
+ *   3. A DIRTY worktree (uncommitted/untracked) is REFUSED — `refused:"dirty"`.
+ *      A git-status error also fails closed (`refused:"dirty"` is NOT assumed;
+ *      we return `error`).
+ *   4. Otherwise a DEFAULT (non-force) `git worktree remove` runs. A non-zero
+ *      exit is `refused:"remove_failed"` — NEVER coerced to success.
+ *   5. Branch deletion is a SEPARATE typed step run ONLY after a successful
+ *      remove, against the caller's persisted exact branch. Its failure does
+ *      not flip the removal outcome (best-effort), but is reported via
+ *      `branchDeleted`.
+ *
+ * Never throws. `opts.branch` is the persisted exact branch (authority), not a
+ * `fork-<segment>` guess.
+ */
 export const removeWorktree = async (
+  worktreePath: string,
+  repoRoot: string,
+  opts?: { branch?: string },
+): Promise<RemoveOutcome> => {
+  const inspected = await inspectWorktrees(repoRoot)
+  if (!inspected.ok) return { kind: "error", error: inspected.error }
+
+  const match = await findRegisteredMatch(inspected.worktrees, worktreePath)
+  const deleteBranch = async (): Promise<boolean> => {
+    if (opts?.branch === undefined || opts.branch === "") return false
+    try {
+      const branch = safeBranch(opts.branch)
+      // `--` separator means even an unexpected leading-`-` slip cannot be
+      // parsed as a CLI flag by `git branch`.
+      const del = await git(repoRoot, `branch -D -- "${branch}"`)
+      return del.exitCode === 0
+    } catch {
+      // best-effort; branch may already be gone, still referenced, or the
+      // input failed sanitization — none of those flip the removal outcome.
+      return false
+    }
+  }
+
+  // (1) Not registered ⇒ idempotent absence. Still attempt the persisted
+  // branch delete so a half-torn-down (dir gone, branch left) state converges.
+  if (match === undefined) {
+    const branchDeleted = await deleteBranch()
+    return { kind: "absent", branchDeleted }
+  }
+
+  // (2) Locked ⇒ refuse (never force).
+  if (match.locked) return { kind: "refused", reason: "locked" }
+
+  // (3) Dirty ⇒ refuse; git-status error ⇒ fail closed (report error).
+  const dirty = await worktreeIsDirty(worktreePath)
+  if (dirty === undefined) {
+    return { kind: "error", error: "git status failed in worktree (clean state unknown)" }
+  }
+  if (dirty) return { kind: "refused", reason: "dirty" }
+
+  // (4) DEFAULT (non-force) remove. Non-zero exit ⇒ refused, never coerced.
+  const rm = await git(repoRoot, `worktree remove -- "${worktreePath}"`)
+  if (rm.exitCode !== 0) return { kind: "refused", reason: "remove_failed" }
+
+  // (5) Separate branch-delete step, only after a successful remove.
+  const branchDeleted = await deleteBranch()
+  return { kind: "removed", branchDeleted }
+}
+
+/** `true` iff a {@link RemoveOutcome} reached the desired end state — the
+ *  worktree is no longer registered (either just removed or already absent).
+ *  A `refused`/`error` outcome is NOT success. Convenience for callers whose
+ *  only invariant is "the path is gone" (e.g. create-failure rollback). */
+export const removalReachedAbsence = (outcome: RemoveOutcome): boolean =>
+  outcome.kind === "removed" || outcome.kind === "absent"
+
+/**
+ * FORCE-remove a THROWAWAY worktree — the eval/agent-tool lifecycle owner
+ * (`@/tool/worktree`, `@/agent/shadow-verify-adapters/scratch-worktree`). This
+ * is deliberately DESTRUCTIVE (`git worktree remove --force`): those callers
+ * own a deterministic per-slot path, run their OWN dirty-guard, and INTEND to
+ * discard a dirty eval tree (they even capture the discarded-file list first).
+ *
+ * This is NOT the user-session path — {@link removeWorktree} is the hardened
+ * non-force, porcelain-exact, persisted-ownership remover. The RFC-06 single-
+ * owner matrix keeps these two lifecycles distinct: user GC must NEVER reuse
+ * this force cleanup, and this throwaway path must NEVER gain persisted-
+ * ownership authority. Returns `true` when the directory ends up gone
+ * (including the idempotent already-gone case). Never throws. */
+export const forceRemoveWorktree = async (
   worktreePath: string,
   repoRoot: string,
   opts?: { branch?: string },
 ): Promise<boolean> => {
   const rm = await git(repoRoot, `worktree remove --force -- "${worktreePath}"`)
-  // Idempotent success: if the worktree directory is already gone (ENOENT in
-  // git's error), treat the remove as a no-op success — the desired state has
-  // been reached. Detect via stderr signal since `git worktree remove` does
-  // not expose a typed exit code for this case.
+  // Idempotent success: if the worktree directory is already gone treat the
+  // remove as a no-op success — the desired state has been reached. Detect via
+  // stderr signal since `git worktree remove` does not expose a typed exit code
+  // for this case.
   let ok = rm.exitCode === 0
   if (!ok) {
     const err = `${rm.stderr}\n${rm.stdout}`.toLowerCase()
@@ -154,13 +301,10 @@ export const removeWorktree = async (
   if (opts?.branch !== undefined && opts.branch !== "") {
     try {
       const branch = safeBranch(opts.branch)
-      // `--` separator means even an unexpected leading-`-` slip cannot be
-      // parsed as a CLI flag by `git branch`.
       await git(repoRoot, `branch -D -- "${branch}"`)
     } catch {
-      // best-effort; branch may already be gone, still referenced, or the
-      // input failed sanitization — none of those should fail the worktree
-      // removal contract (the dir going away is what callers depend on).
+      // best-effort; branch may already be gone, still referenced, or the input
+      // failed sanitization — none of those should fail the removal contract.
     }
   }
   return ok

@@ -19,6 +19,7 @@ import {
 import { rollbackCheckpointRecordSchema, rollbackOperationRecordSchema } from "./rollback-record"
 import type { SessionRootProvider } from "./root-port"
 import { type SavedSession, type SavePayload, SESSION_VERSION, type SessionMeta } from "./types"
+import { workspaceOwnershipSchema } from "./workspace-ownership"
 
 /** Resolve `<root>/<id>.json` honoring an optional provider. When no
  *  provider is passed, the resolved path is byte-identical to
@@ -225,6 +226,15 @@ const sessionMetaSchema = z.object({
       interruptedAt: z.number().finite(),
     })
     .optional(),
+  // RFC-06 §RFC06-0 (aug-02): persisted WorkspaceOwnership. OPTIONAL — absent
+  // on legacy/non-worktree sessions ⇒ the non-strict schema validates and
+  // serialization is byte-identical. `recordVersion` is a literal and `state`
+  // is a closed enum, so an UNKNOWN version/state fail-closes the WHOLE load
+  // (never partially applied) — same fail-closed migration contract as the
+  // rollback records below. MUST be mirrored here: zod strips unknown keys on
+  // safeParse, so omitting it would silently LOSE the ownership record on every
+  // load (a restart-durability bug; see the LOSSLESS note above messageSchema).
+  workspaceOwnership: workspaceOwnershipSchema.optional(),
 })
 const savedSessionSchema = z.object({
   version: z.literal(SESSION_VERSION),

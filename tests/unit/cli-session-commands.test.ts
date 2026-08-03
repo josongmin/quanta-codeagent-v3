@@ -575,11 +575,13 @@ describe("runSessionCommand", () => {
     expect(ids).not.toContain("del-arc")
   })
 
-  // HIGH-6 — `session delete` of a worktree-backed fork removes the worktree
-  // AND the local branch before deleting the session record. This is the
-  // strongest end-to-end proof that the cleanup wiring in cmdDelete actually
-  // calls removeWorktree with the correct (repoRoot, branch) derived from the
-  // session's cwd path layout.
+  // RFC-06 §RFC06-1 — `session delete` of a worktree-backed fork removes the
+  // worktree AND the local branch before deleting the session record. This is
+  // the strongest end-to-end proof that cmdDelete calls the hardened
+  // removeWorktree with the EXACT (repoRoot, path, branch) read from the
+  // PERSISTED `workspaceOwnership` authority — NOT the removed `deriveWorktreeInfo`
+  // cwd-path heuristic. (The fork path persists the ownership record; delete
+  // consumes it.)
   test.skipIf(!HAS_GIT)(
     "delete cleans the worktree + branch when the session lives in a fork-worktree",
     async () => {
@@ -596,6 +598,12 @@ describe("runSessionCommand", () => {
       const fork = await loadSessionById(forkId)
       const wtPath = fork?.meta.cwd ?? ""
       expect(existsSync(wtPath)).toBe(true)
+      // RFC-06 §RFC06-1: the fork PERSISTED the WorkspaceOwnership authority
+      // that delete/GC will consume — proves the delete cleanup below is driven
+      // by the durable record, not the removed cwd-path heuristic.
+      expect(fork?.meta.workspaceOwnership).toBeDefined()
+      expect(fork?.meta.workspaceOwnership?.path).toBe(wtPath)
+      expect(fork?.meta.workspaceOwnership?.state).toBe("ready")
 
       // Now delete the fork with --force; the worktree + branch must vanish.
       const cDel = captureDeps()
@@ -611,4 +619,121 @@ describe("runSessionCommand", () => {
     },
     30_000,
   )
+
+  // RFC-06 §RFC06-3 — explicit operator GC front door. Fork a worktree (which
+  // persists ownership), then `worktree-gc --repo <repo>` dry-runs (eligible,
+  // nothing removed) and `--apply` removes it via the hardened non-force path.
+  test.skipIf(!HAS_GIT)(
+    "worktree-gc dry-run classifies owned worktrees; --apply removes eligible",
+    async () => {
+      const repo = await makeRepo()
+      cleanups.push(repo)
+      await saveSessionById(mkMeta({ id: "gc-src", title: "GcSrc", cwd: repo }), mkPayload())
+      const cFork = captureDeps()
+      expect(await runSessionCommand(["fork", "gc-src", "--worktree"], cFork.deps)).toBe(0)
+      const wtPath = cFork.out.match(/worktree: (\S+) /)?.[1] ?? ""
+      expect(existsSync(wtPath)).toBe(true)
+
+      // Dry-run: the owned worktree is eligible; nothing is removed.
+      const cDry = captureDeps()
+      const dryCode = await runSessionCommand(["worktree-gc", "--repo", repo], cDry.deps)
+      expect(dryCode).toBe(0)
+      expect(cDry.out).toContain("[eligible]")
+      expect(cDry.out).toContain(wtPath)
+      expect(cDry.out).toContain("Re-run with --apply")
+      expect(existsSync(wtPath)).toBe(true) // dry-run removed NOTHING
+
+      // Apply: the eligible worktree is removed via the hardened remover.
+      const cApply = captureDeps()
+      const applyCode = await runSessionCommand(
+        ["worktree-gc", "--repo", repo, "--apply"],
+        cApply.deps,
+      )
+      expect(applyCode).toBe(0)
+      expect(cApply.out).toContain(`removed: ${wtPath}`)
+      expect(existsSync(wtPath)).toBe(false)
+    },
+    30_000,
+  )
+
+  // RFC-06 §RFC06-3 — TOCTOU: a worktree eligible at dry-run that turns DIRTY
+  // before --apply must be SKIPPED (the fresh recheck refuses it), never
+  // force-removed.
+  test.skipIf(!HAS_GIT)(
+    "worktree-gc --apply SKIPS a target that turned dirty since dry-run (TOCTOU)",
+    async () => {
+      const repo = await makeRepo()
+      cleanups.push(repo)
+      await saveSessionById(mkMeta({ id: "gc-dirty", title: "GcDirty", cwd: repo }), mkPayload())
+      const cFork = captureDeps()
+      expect(await runSessionCommand(["fork", "gc-dirty", "--worktree"], cFork.deps)).toBe(0)
+      const wtPath = cFork.out.match(/worktree: (\S+) /)?.[1] ?? ""
+      expect(existsSync(wtPath)).toBe(true)
+
+      // Dirty it AFTER the fork (simulating drift between a dry-run and apply).
+      await writeFile(join(wtPath, "scratch.txt"), "uncommitted\n")
+
+      const cApply = captureDeps()
+      const code = await runSessionCommand(["worktree-gc", "--repo", repo, "--apply"], cApply.deps)
+      expect(code).toBe(0)
+      // The dirty tree is classified dirty (not eligible) ⇒ preserved on disk.
+      expect(existsSync(wtPath)).toBe(true)
+      expect(existsSync(join(wtPath, "scratch.txt"))).toBe(true)
+      expect(cApply.out).toContain("[dirty]")
+      expect(cApply.out).toContain("removed 0/0 eligible")
+    },
+    30_000,
+  )
+
+  // RFC-06 §RFC06-3 — a legacy `.claude/worktrees/agent-*` tree with NO
+  // persisted ownership is NEVER a GC candidate (provenance gate).
+  test.skipIf(!HAS_GIT)(
+    "worktree-gc ignores an unowned (legacy) worktree — no persisted ownership",
+    async () => {
+      const repo = await makeRepo()
+      cleanups.push(repo)
+      // Create a worktree that NO session owns (simulating a legacy agent tree).
+      const legacy = join(repo, ".claude", "worktrees", "agent-legacy")
+      await runShell(`git worktree add --no-track -B worktree-agent-legacy -- "${legacy}" HEAD`, {
+        cwd: repo,
+      })
+      expect(existsSync(legacy)).toBe(true)
+
+      const cGc = captureDeps()
+      const code = await runSessionCommand(["worktree-gc", "--repo", repo, "--apply"], cGc.deps)
+      expect(code).toBe(0)
+      // No persisted ownership points at it ⇒ it is not even a candidate.
+      expect(cGc.out).toContain("0 owned worktree(s)")
+      expect(cGc.out).not.toContain(legacy)
+      expect(existsSync(legacy)).toBe(true) // untouched
+    },
+    30_000,
+  )
+
+  // RFC-06 §RFC06-1 (R1 audit fix) — a LEGACY fork session (cwd inside
+  // .quanta/worktrees but NO persisted ownership) is NOT auto-removed on delete
+  // (the deriveWorktreeInfo heuristic was deleted). Instead a report-only
+  // salvage NOTICE is emitted — no silent leak, no inference-driven mutation.
+  test("delete of a legacy worktree session (no ownership) emits a report-only notice, no removal", async () => {
+    const legacyCwd = "/some/repo/.quanta/worktrees/legacy-uuid"
+    await saveSessionById(mkMeta({ id: "legacy-1", cwd: legacyCwd }), mkPayload())
+    const c = captureDeps()
+    const code = await runSessionCommand(["delete", "legacy-1", "--force"], c.deps)
+    expect(code).toBe(0)
+    expect(c.err).toContain("notice:")
+    expect(c.err).toContain(legacyCwd)
+    expect(c.err).toContain("no persisted ownership")
+    // No removal claim — the notice is report-only.
+    expect(c.out).not.toContain("removed worktree")
+  })
+
+  // A plain (non-worktree) session delete emits NO worktree notice (the marker
+  // gate is anti-vacuous — it only fires for a worktree-looking cwd).
+  test("delete of a normal session emits no worktree notice", async () => {
+    await saveSessionById(mkMeta({ id: "plain-1", cwd: "/home/u/project" }), mkPayload())
+    const c = captureDeps()
+    expect(await runSessionCommand(["delete", "plain-1", "--force"], c.deps)).toBe(0)
+    expect(c.err).not.toContain("notice:")
+    expect(c.err).not.toContain("worktree")
+  })
 })

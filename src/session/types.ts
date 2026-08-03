@@ -72,6 +72,83 @@ export interface SessionMeta {
   /* clean turn completion. See `src/session/crash-resume.ts`.          */
   /* ----------------------------------------------------------------- */
   interruptedTurn?: PersistedInterruptedTurn
+  /* ----------------------------------------------------------------- */
+  /* RFC-06 (aug-02 absorption) — persisted WorkspaceOwnership.         */
+  /* The AUTHORITY for a user-session's isolated git worktree: which     */
+  /* ownership id minted it, where it lives, which branch/base it forked */
+  /* from, and its closed lifecycle state. This RIDES the existing       */
+  /* atomic `SavedSession` snapshot (same file, same encoder) — there is */
+  /* NO new binding/lease/TTL store and NO reaper. OPTIONAL: absent on   */
+  /* every legacy transcript AND on non-worktree sessions ⇒ the          */
+  /* (non-strict) `sessionMetaSchema` still validates and JSON.stringify */
+  /* drops the absent field, so a session that never owned a worktree    */
+  /* serializes byte-identically. path/branch are DISPLAY/convention —   */
+  /* the `ownershipId` + persisted `path`/`branch` are the mutation      */
+  /* target authority; NO cwd/path/branch-name inference reconstructs    */
+  /* this. See docs/plans/aug-02-absorption/rfc-06-worktree-review-ux.md */
+  /* §RFC06-0.                                                           */
+  /* ----------------------------------------------------------------- */
+  workspaceOwnership?: WorkspaceOwnership
+}
+
+/** RFC-06 §RFC06-0 — closed lifecycle of a persisted workspace worktree.
+ *  `creating` is the durable INTENT written BEFORE the `git worktree add`
+ *  effect; `ready`/`active` are published AFTER the effect succeeds;
+ *  `closing`→`removed` is the teardown path; `failed`/`quarantined` are
+ *  terminal error states. A restart that finds a `creating` record with no
+ *  further transition surfaces it as operator-visible recovery — it is NEVER
+ *  assumed ready and NEVER blind-adopted. An unknown wire value fail-closes
+ *  the whole snapshot load (see `store.ts`). */
+export type WorkspaceOwnershipState =
+  | "creating"
+  | "ready"
+  | "active"
+  | "closing"
+  | "removed"
+  | "failed"
+  | "quarantined"
+
+/** Current wire version for a persisted {@link WorkspaceOwnership} record.
+ *  Bumped only on a shape change; the loader fail-closes on any other value
+ *  so a forward-incompatible record can never be half-read (mirrors
+ *  {@link ROLLBACK_RECORD_VERSION}). */
+export const WORKSPACE_OWNERSHIP_VERSION = 1 as const
+
+/** RFC-06 §RFC06-0 — the persisted authority for a user-session's isolated
+ *  worktree. `ownershipId` is the explicit owner identity minted at create
+ *  intent (NOT derived from a PID/path/branch name). `repoRoot`/`path`/`branch`
+ *  are the exact mutation target — the hardened `removeWorktree` matches the
+ *  porcelain-registered path against THIS `path` verbatim, never an inferred
+ *  one. `baseSha` records the fork base so base-drift is detectable. `state`
+ *  walks the closed lifecycle above. */
+export interface WorkspaceOwnership {
+  readonly recordVersion: typeof WORKSPACE_OWNERSHIP_VERSION
+  /** Explicit owner identity minted at create intent. Authority — never
+   *  derived from PID/path/branch name. */
+  readonly ownershipId: string
+  /** The thread that owns this worktree (create-intent origin). */
+  readonly ownerThreadId: string
+  /** Absolute repo root the worktree was added from (git dir owner). */
+  readonly repoRoot: string
+  /** Stable repo identity (e.g. origin url or repoRoot) for cross-session
+   *  disambiguation. Convention only — not a mutation target. */
+  readonly repoId: string
+  /** Absolute worktree path. The EXACT mutation target: remove matches this
+   *  against the porcelain-registered path verbatim. */
+  readonly path: string
+  /** Exact branch the worktree checked out. Branch deletion targets THIS
+   *  verbatim after a successful remove — never a `fork-<segment>` guess. */
+  readonly branch: string
+  /** Fork base commit sha (base-drift detection). */
+  readonly baseSha: string
+  /** Closed lifecycle state — see {@link WorkspaceOwnershipState}. */
+  readonly state: WorkspaceOwnershipState
+  /** Epoch-ms the create intent was recorded (injected clock). */
+  readonly createdAt: number
+  /** Epoch-ms of the latest state transition (injected clock). */
+  readonly updatedAt: number
+  /** Typed error code on `failed`/`quarantined`. Absent otherwise. */
+  readonly lastErrorCode?: string
 }
 
 /** §13.2 — the persisted crash-resume marker stored on {@link SessionMeta}.

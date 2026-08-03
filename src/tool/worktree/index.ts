@@ -23,8 +23,8 @@
 import { z } from "zod"
 import {
   createPersistentWorktree,
+  forceRemoveWorktree,
   isGitRepo,
-  removeWorktree,
   runShell,
   WorktreeForkError,
 } from "@/runtime"
@@ -115,7 +115,7 @@ const FIXED_WORKTREE_BRANCH = `fork-${WORKTREE_ID}`
  *  path. */
 const reconcileLeftoverWorktree = async (repoRoot: string): Promise<readonly string[]> => {
   const discarded = await uncommittedList(fixedWorktreePath(repoRoot))
-  await removeWorktree(fixedWorktreePath(repoRoot), repoRoot, {
+  await forceRemoveWorktree(fixedWorktreePath(repoRoot), repoRoot, {
     branch: FIXED_WORKTREE_BRANCH,
   })
   await runShell("git worktree prune", { cwd: repoRoot })
@@ -288,15 +288,16 @@ export const enterWorktreeTool: Tool<EnterInput> = {
 }
 
 /** Injectable dependencies for {@link makeExitWorktreeTool}. The default is the
- *  real `@/runtime` `removeWorktree`; tests inject a stub that returns `false`
- *  to exercise the cleanup-FAILURE branch deterministically (a genuine
- *  `git worktree remove` failure is hard to force, and "already gone" is treated
- *  as success by the CORE). */
+ *  real `@/runtime` `forceRemoveWorktree` (the THROWAWAY/eval lifecycle remover —
+ *  NOT the hardened user-session `removeWorktree`); tests inject a stub that
+ *  returns `false` to exercise the cleanup-FAILURE branch deterministically (a
+ *  genuine `git worktree remove` failure is hard to force, and "already gone" is
+ *  treated as success by the CORE). */
 export interface ExitWorktreeDeps {
-  readonly removeWorktree: typeof removeWorktree
+  readonly removeWorktree: typeof forceRemoveWorktree
 }
 
-const DEFAULT_EXIT_DEPS: ExitWorktreeDeps = { removeWorktree }
+const DEFAULT_EXIT_DEPS: ExitWorktreeDeps = { removeWorktree: forceRemoveWorktree }
 
 /** The dirty-exit guard (CC force:true mirror): when a throwaway worktree has
  *  uncommitted changes and `force` is not set, refuse to discard and LIST the

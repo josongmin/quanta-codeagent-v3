@@ -144,6 +144,9 @@ export const runSessionMain = async (): Promise<number> => {
       return ans.trim().toLowerCase() === "y"
     },
     importHandler: createCliImportHandler(),
+    // RFC-06 §RFC06-3 — the `worktree-gc` subcommand operates on the CWD repo
+    // by default; the runner slice never reads `process.cwd()` itself.
+    cwd: process.cwd(),
     ...(listEnv !== undefined ? { listEnv } : {}),
   })
   rl.close()

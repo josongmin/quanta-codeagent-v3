@@ -1,5 +1,11 @@
 import type { Message } from "@/llm"
-import { createPersistentWorktree, isGitRepo, removeWorktree, WorktreeForkError } from "@/runtime"
+import {
+  createPersistentWorktree,
+  isGitRepo,
+  removeWorktree,
+  runShell,
+  WorktreeForkError,
+} from "@/runtime"
 import {
   archivedFilePath,
   archiveSession,
@@ -7,11 +13,16 @@ import {
   forkSession,
   listSessions,
   loadSessionById,
+  makeWorkspaceCreateIntent,
   renameSession,
   rewindToMessage,
   SessionIdError,
+  type SessionMeta,
+  saveSessionById,
   sessionFilePath,
+  transitionWorkspaceState,
   unarchiveSession,
+  type WorkspaceOwnership,
 } from "@/session"
 import { errMessage } from "@/shared"
 import {
@@ -20,6 +31,13 @@ import {
   renderSessionList,
   type SessionListOptions,
 } from "./list-tui"
+import {
+  applyWorktreeGc,
+  collectOwnedWorktrees,
+  type GcCandidate,
+  type GcPlan,
+  planWorktreeGc,
+} from "./worktree-gc"
 
 /**
  * `quanta session …` subcommand dispatcher.
@@ -75,6 +93,10 @@ export interface SessionCommandDeps {
    *  dispatcher falls back to safe defaults (plain format, cap=10) — so
    *  callers that never set this keep the byte-identical legacy output. */
   listEnv?: SessionListEnv
+  /** RFC-06 §RFC06-3 — the repo root the `worktree-gc` subcommand operates on
+   *  (the surface injects `process.cwd()`; the runner slice never reads it
+   *  directly). Absent ⇒ `worktree-gc` requires an explicit `--repo <path>`. */
+  cwd?: string
 }
 
 /** Render a single message's content as a single line of joined text. */
@@ -112,6 +134,7 @@ const usage = (): string =>
     "  path <id>                           print absolute file path",
     "  import <provider>                   import sessions from an external agent",
     "                                       (provider: claude_code | cursor | aider)",
+    "  worktree-gc [--repo <path>] [--apply]  dry-run / apply owned-worktree GC",
     "",
   ].join("\n")
 
@@ -487,38 +510,75 @@ const cmdFork = async (args: string[], deps: SessionCommandDeps): Promise<number
       ...(titleOpt !== undefined ? { title: titleOpt } : {}),
     }
     const minted = await forkSession(id, forkOpts)
+    // RFC-06 §RFC06-1 — persist the WorkspaceOwnership authority on the forked
+    // session so a later `delete`/GC targets the EXACT persisted path/branch
+    // instead of inferring them from the cwd. The fork effect already
+    // succeeded, so we publish a `ready` record (intent→effect→ready collapsed
+    // for the non-current-thread fork path; the full crash-matrix transaction
+    // is RFC06-2's current-thread transition). `baseSha` is the source's
+    // captured git sha when available (base-drift detection); absent ⇒ empty
+    // marker (still a valid record — the schema requires min(1), so fall back
+    // to "HEAD" convention when unknown).
+    await publishForkWorkspaceOwnership(minted, {
+      ownerThreadId: minted,
+      repoRoot: sourceCwd,
+      repoId: source.meta.gitOriginUrl ?? sourceCwd,
+      path: wt.worktreePath,
+      branch: wt.branch,
+      baseSha: source.meta.gitSha ?? "HEAD",
+    })
     deps.out(`forked ${id} → ${minted}\n`)
     deps.out(`worktree: ${wt.worktreePath} (branch: ${wt.branch})\n`)
     return 0
   } catch (e) {
     // Rollback: the session was never persisted but the worktree IS on disk.
+    // The just-created worktree is clean + owned, so the hardened non-force
+    // remove reaches absence; we only need it gone (branch delete is folded in).
     await removeWorktree(wt.worktreePath, sourceCwd, { branch: wt.branch }).catch(() => undefined)
     deps.err(errLine("fork", `failed to save forked session: ${errMessage(e)}`))
     return 1
   }
 }
 
-/** HIGH-6 helper: when a session's cwd lives under
- *  `<repoRoot>/.quanta/worktrees/<safeId>`, derive the repoRoot and branch
- *  (`fork-<safeId>`) so `delete` can call `removeWorktree`. Returns
- *  `undefined` when the cwd does NOT look like a fork-worktree path so the
- *  caller can skip cleanup. */
-const deriveWorktreeInfo = (
-  cwd: string,
-): { repoRoot: string; worktreePath: string; branch: string } | undefined => {
-  // Look for `/.quanta/worktrees/<segment>` ANYWHERE in the path (works for
-  // both `/abs/repo/.quanta/worktrees/safeId` and similar variants). The
-  // segment is whatever follows the marker — we reconstruct the branch as
-  // `fork-<segment>` to match createPersistentWorktree's branch naming.
-  const marker = "/.quanta/worktrees/"
-  const idx = cwd.lastIndexOf(marker)
-  if (idx < 0) return undefined
-  const repoRoot = cwd.slice(0, idx)
-  const remainder = cwd.slice(idx + marker.length)
-  // The worktree path layout is one segment deep; refuse anything nested or
-  // empty so we don't pass a malformed cwd through to `git`.
-  if (remainder.length === 0 || remainder.includes("/")) return undefined
-  return { repoRoot, worktreePath: cwd, branch: `fork-${remainder}` }
+/** RFC-06 §RFC06-1 — fold a `ready` WorkspaceOwnership record onto an
+ *  already-persisted session's meta and re-save through the EXISTING atomic
+ *  store (no new writer). Mints the `creating` intent then transitions to
+ *  `ready` (the fork effect already ran) so the persisted state is a valid
+ *  lifecycle position. Best-effort: a save failure is surfaced by the caller's
+ *  try/catch, never silently swallowed. */
+const publishForkWorkspaceOwnership = async (
+  sessionId: string,
+  facts: {
+    ownerThreadId: string
+    repoRoot: string
+    repoId: string
+    path: string
+    branch: string
+    baseSha: string
+  },
+): Promise<void> => {
+  const saved = await loadSessionById(sessionId)
+  if (saved === undefined) return
+  const now = Date.now()
+  const intent = makeWorkspaceCreateIntent({
+    ownershipId: crypto.randomUUID(),
+    ...facts,
+    now,
+  })
+  const ready = transitionWorkspaceState(intent, "ready", now)
+  const ownership = ready.ok ? ready.record : intent
+  const nextMeta: SessionMeta = { ...saved.meta, workspaceOwnership: ownership }
+  await saveSessionById(nextMeta, {
+    reason: saved.reason,
+    turns: saved.turns,
+    messages: saved.messages,
+    ...(saved.rollbackCheckpoints !== undefined
+      ? { rollbackCheckpoints: saved.rollbackCheckpoints }
+      : {}),
+    ...(saved.rollbackOperations !== undefined
+      ? { rollbackOperations: saved.rollbackOperations }
+      : {}),
+  })
 }
 
 const cmdRewind = async (args: string[], deps: SessionCommandDeps): Promise<number> => {
@@ -573,32 +633,71 @@ const cmdDelete = async (args: string[], deps: SessionCommandDeps): Promise<numb
       return 0
     }
   }
-  // HIGH-6: when a session was created via `fork --worktree`, its meta.cwd
-  // points inside `<repoRoot>/.quanta/worktrees/<safeId>`. Tear down the
-  // worktree + branch BEFORE removing the session file (failure is logged but
-  // does NOT abort the delete — the session record is what users see). The
-  // branch is derived from the path segment, matching the layout fixed by
-  // createPersistentWorktree so we don't need a new SessionMeta field.
-  const wtInfo = deriveWorktreeInfo(existing.meta.cwd)
-  if (wtInfo) {
-    try {
-      const ok = await removeWorktree(wtInfo.worktreePath, wtInfo.repoRoot, {
-        branch: wtInfo.branch,
-      })
-      if (ok) {
-        deps.out(`removed worktree: ${wtInfo.worktreePath}\n`)
-      } else {
-        deps.err(
-          `warning: worktree cleanup failed (path may already be gone): ${wtInfo.worktreePath}\n`,
-        )
-      }
-    } catch (e) {
-      deps.err(`warning: worktree cleanup failed: ${errMessage(e)}\n`)
-    }
-  }
+  // RFC-06 §RFC06-1: when a session PERSISTED a WorkspaceOwnership record, tear
+  // down the EXACT persisted worktree + branch BEFORE removing the session file.
+  // The target is read from the durable ownership authority — NOT inferred from
+  // the cwd path/branch name (the `deriveWorktreeInfo` heuristic was removed).
+  // The hardened `removeWorktree` is non-force + porcelain-exact: a dirty/locked
+  // worktree is REFUSED (report-only, never force-deleted) and the session file
+  // is still removed (the record is what users see). A LEGACY fork (created
+  // before RFC06-0 persisted ownership) has no record but its cwd may sit in a
+  // `.quanta/worktrees/` dir — we do NOT infer a removal target from the path
+  // (the `deriveWorktreeInfo` heuristic was deleted; inference must never drive
+  // a mutation). Instead a REPORT-ONLY salvage notice is emitted so the operator
+  // can clean it up explicitly — no silent leak, no force delete.
+  await cleanupOwnedWorktreeOnDelete(existing.meta.workspaceOwnership, existing.meta.cwd, deps)
   await deleteSession(id)
   deps.out(`deleted ${id}\n`)
   return 0
+}
+
+/** Marker of a quanta fork-worktree cwd — used ONLY to decide whether to emit a
+ *  report-only salvage NOTICE for a legacy (ownership-less) session, never as a
+ *  removal target. */
+const WORKTREE_CWD_MARKER = "/.quanta/worktrees/"
+
+/** RFC-06 §RFC06-1 — teardown the EXACT persisted worktree on session delete.
+ *  Report-only: dirty/locked refusals and git errors are surfaced as warnings
+ *  and NEVER escalated to a force delete. When there is no persisted ownership
+ *  record but the cwd looks like a legacy fork-worktree, emit a salvage NOTICE
+ *  (report-only — no path/branch inference drives any git mutation). */
+const cleanupOwnedWorktreeOnDelete = async (
+  ownership: WorkspaceOwnership | undefined,
+  cwd: string,
+  deps: SessionCommandDeps,
+): Promise<void> => {
+  if (ownership === undefined) {
+    if (cwd.includes(WORKTREE_CWD_MARKER)) {
+      deps.err(
+        `notice: session cwd looks like a worktree (${cwd}) but has no persisted ownership ` +
+          "(legacy fork) — not auto-removed; clean it up with `git worktree remove` if unused.\n",
+      )
+    }
+    return
+  }
+  try {
+    const outcome = await removeWorktree(ownership.path, ownership.repoRoot, {
+      branch: ownership.branch,
+    })
+    switch (outcome.kind) {
+      case "removed":
+        deps.out(`removed worktree: ${ownership.path}\n`)
+        break
+      case "absent":
+        deps.out(`worktree already gone: ${ownership.path}\n`)
+        break
+      case "refused":
+        deps.err(
+          `warning: worktree NOT removed (${outcome.reason}) — left in place: ${ownership.path}\n`,
+        )
+        break
+      case "error":
+        deps.err(`warning: worktree cleanup error (${outcome.error}): ${ownership.path}\n`)
+        break
+    }
+  } catch (e) {
+    deps.err(`warning: worktree cleanup failed: ${errMessage(e)}\n`)
+  }
 }
 
 const cmdPath = async (args: string[], deps: SessionCommandDeps): Promise<number> => {
@@ -633,6 +732,87 @@ const cmdImport = async (args: string[], deps: SessionCommandDeps): Promise<numb
     return 1
   }
   return deps.importHandler(args, deps)
+}
+
+/** RFC-06 §RFC06-3 — dirty probe: `git status --porcelain` inside a worktree.
+ *  Non-empty ⇒ dirty. `undefined` on a git error (⇒ the planner fails closed to
+ *  `dirty`, never treats an unknown state as clean). */
+const gcDirtyProbe = async (worktreePath: string): Promise<boolean | undefined> => {
+  const st = await runShell("git status --porcelain", { cwd: worktreePath }).catch(() => undefined)
+  if (st === undefined || st.exitCode !== 0) return undefined
+  return st.stdout.trim().length > 0
+}
+
+/** Render one GC candidate as a report line. */
+const gcLine = (c: GcCandidate): string =>
+  `  [${c.verdict}] ${c.ownership.path} (branch ${c.ownership.branch}, session ${c.sessionId}) — ${c.reason}\n`
+
+/** Run the GC `--apply` phase: remove eligible targets (TOCTOU-rechecked inside
+ *  `applyWorktreeGc`) and report per-target outcomes. Extracted from
+ *  `cmdWorktreeGc` to keep its cognitive complexity under the biome ceiling. */
+const runGcApply = async (
+  plan: GcPlan,
+  eligible: readonly GcCandidate[],
+  deps: SessionCommandDeps,
+): Promise<void> => {
+  const results = await applyWorktreeGc(plan, gcDirtyProbe)
+  let removedCount = 0
+  for (const r of results) {
+    if (r.action === "removed") {
+      removedCount += 1
+      deps.out(`removed: ${r.path} (${r.reason})\n`)
+    } else if (eligible.some((e) => e.ownership.path === r.path)) {
+      // Only report skips for targets that WERE eligible at dry-run (a TOCTOU
+      // drift); non-eligible verdicts were already reported above.
+      deps.err(`skipped: ${r.path} — ${r.reason}\n`)
+    }
+  }
+  deps.out(`worktree-gc: removed ${removedCount}/${eligible.length} eligible.\n`)
+}
+
+/**
+ * RFC-06 §RFC06-3 — explicit operator worktree GC. `worktree-gc [--repo <path>]`
+ * prints a dry-run classification of PERSISTED-OWNED worktrees; `--apply`
+ * additionally removes ONLY `eligible` targets after a TOCTOU recheck through
+ * the hardened non-force remover. NO daemon/reaper/force. Legacy
+ * `.claude/worktrees/agent-*` trees have no persisted ownership ⇒ they are
+ * never candidates.
+ */
+const cmdWorktreeGc = async (args: string[], deps: SessionCommandDeps): Promise<number> => {
+  const unknown = checkUnknownArgs(args, 0, ["--apply"], ["--repo"])
+  if (unknown !== undefined) {
+    deps.err(errLine("worktree-gc", `unexpected argument: ${unknown}`))
+    return 1
+  }
+  const repoRoot = readValueFlag(args, "--repo") ?? deps.cwd
+  if (repoRoot === undefined || repoRoot === "") {
+    deps.err(errLine("worktree-gc", "no repo root (pass --repo <path>)"))
+    return 1
+  }
+  const apply = hasFlag(args, "--apply")
+
+  const ids = (await listSessions({ includeArchived: true })).map((m) => m.id)
+  const owned = await collectOwnedWorktrees(ids, repoRoot)
+  const planned = await planWorktreeGc(owned, repoRoot, gcDirtyProbe)
+  if (!planned.ok) {
+    deps.err(errLine("worktree-gc", `inspection failed: ${planned.error}`))
+    return 1
+  }
+  const { candidates } = planned.plan
+  const eligible = candidates.filter((c) => c.verdict === "eligible")
+
+  deps.out(`worktree-gc: ${candidates.length} owned worktree(s) in ${repoRoot}\n`)
+  for (const c of candidates) deps.out(gcLine(c))
+  if (candidates.length === 0) deps.out("  (none owned by a persisted session)\n")
+
+  if (!apply) {
+    deps.out(`\n${eligible.length} eligible for removal. Re-run with --apply to remove.\n`)
+    return 0
+  }
+
+  // --apply: remove only eligible targets, with a fresh TOCTOU recheck each.
+  await runGcApply(planned.plan, eligible, deps)
+  return 0
 }
 
 /** Entry point for the `session` subcommand dispatcher.
@@ -679,6 +859,8 @@ export const runSessionCommand = async (
         return await cmdPath(rest, deps)
       case "import":
         return await cmdImport(rest, deps)
+      case "worktree-gc":
+        return await cmdWorktreeGc(rest, deps)
       default:
         deps.err(`session: unknown subcommand: ${sub}\n`)
         deps.out(usage())

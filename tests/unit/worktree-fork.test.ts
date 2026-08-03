@@ -6,9 +6,16 @@ import { join } from "node:path"
 import { runShell } from "../../src/runtime"
 import {
   createPersistentWorktree,
+  forceRemoveWorktree,
+  removalReachedAbsence,
   removeWorktree,
   WorktreeForkError,
 } from "../../src/runtime/worktree-fork"
+import {
+  findByExactPath,
+  inspectWorktrees,
+  parseWorktreePorcelain,
+} from "../../src/runtime/worktree-inspect"
 
 const gitAvailable = async (): Promise<boolean> => {
   try {
@@ -114,8 +121,8 @@ describe("createPersistentWorktree / removeWorktree", () => {
       cleanups.push(repo)
 
       const wt = await createPersistentWorktree("rm1", repo)
-      const ok = await removeWorktree(wt.worktreePath, repo, { branch: wt.branch })
-      expect(ok).toBe(true)
+      const outcome = await removeWorktree(wt.worktreePath, repo, { branch: wt.branch })
+      expect(outcome.kind).toBe("removed")
       expect(existsSync(wt.worktreePath)).toBe(false)
 
       const list = await runShell("git worktree list", { cwd: repo })
@@ -140,10 +147,13 @@ describe("createPersistentWorktree / removeWorktree", () => {
 
       const wt = await createPersistentWorktree("rm2", repo)
       const first = await removeWorktree(wt.worktreePath, repo, { branch: wt.branch })
-      expect(first).toBe(true)
+      expect(first.kind).toBe("removed")
 
+      // Second remove: the exact path is no longer registered ⇒ porcelain
+      // ABSENCE (idempotent success), NOT a stderr-substring guess.
       const second = await removeWorktree(wt.worktreePath, repo, { branch: wt.branch })
-      expect(second).toBe(true)
+      expect(second.kind).toBe("absent")
+      expect(removalReachedAbsence(second)).toBe(true)
     },
     GIT_TEST_TIMEOUT,
   )
@@ -172,6 +182,188 @@ describe("createPersistentWorktree / removeWorktree", () => {
       expect(existsSync(wt.worktreePath)).toBe(true)
       // Confirm no stray `rm` artifact was executed at repo root.
       expect(existsSync(`${repo}/README.md`)).toBe(true)
+    },
+    GIT_TEST_TIMEOUT,
+  )
+})
+
+/* RFC-06 §RFC06-1 — porcelain parser (pure, no git subprocess). */
+describe("parseWorktreePorcelain", () => {
+  test("parses a multi-worktree registry with branch/detached/locked/bare", () => {
+    const stdout = [
+      "worktree /repo",
+      "HEAD aaaa",
+      "branch refs/heads/main",
+      "bare",
+      "",
+      "worktree /repo/.quanta/worktrees/wt1",
+      "HEAD bbbb",
+      "branch refs/heads/fork-wt1",
+      "",
+      "worktree /repo/.claude/worktrees/agent-x",
+      "HEAD cccc",
+      "detached",
+      "locked pid 1234 crashed",
+      "",
+    ].join("\n")
+    const parsed = parseWorktreePorcelain(stdout)
+    expect(parsed.length).toBe(3)
+
+    expect(parsed[0]?.path).toBe("/repo")
+    expect(parsed[0]?.branch).toBe("main")
+    expect(parsed[0]?.bare).toBe(true)
+    expect(parsed[0]?.detached).toBe(false)
+
+    expect(parsed[1]?.path).toBe("/repo/.quanta/worktrees/wt1")
+    expect(parsed[1]?.branch).toBe("fork-wt1") // refs/heads/ stripped
+    expect(parsed[1]?.locked).toBe(false)
+
+    expect(parsed[2]?.detached).toBe(true)
+    expect(parsed[2]?.branch).toBeUndefined() // detached ⇒ no branch
+    expect(parsed[2]?.locked).toBe(true)
+    expect(parsed[2]?.lockedReason).toBe("pid 1234 crashed")
+  })
+
+  test("handles a `locked` marker with no reason (empty reason, still locked)", () => {
+    const parsed = parseWorktreePorcelain("worktree /w\nHEAD ff\nbranch refs/heads/b\nlocked\n")
+    expect(parsed[0]?.locked).toBe(true)
+    expect(parsed[0]?.lockedReason).toBe("")
+  })
+
+  test("parses a `prunable` worktree", () => {
+    const parsed = parseWorktreePorcelain(
+      "worktree /gone\nHEAD ff\nbranch refs/heads/b\nprunable gitdir file points to non-existent location\n",
+    )
+    expect(parsed[0]?.prunable).toBe(true)
+  })
+
+  test("blank / malformed input yields []", () => {
+    expect(parseWorktreePorcelain("").length).toBe(0)
+    expect(parseWorktreePorcelain("\n\n\n").length).toBe(0)
+    // a group with no `worktree` header is skipped
+    expect(parseWorktreePorcelain("HEAD ff\nbranch refs/heads/b\n").length).toBe(0)
+  })
+
+  test("an unknown label cannot upgrade a worktree (ignored)", () => {
+    const parsed = parseWorktreePorcelain(
+      "worktree /w\nHEAD ff\nbranch refs/heads/b\nnonsense-label value\n",
+    )
+    expect(parsed.length).toBe(1)
+    expect(parsed[0]?.locked).toBe(false)
+    expect(parsed[0]?.prunable).toBe(false)
+  })
+
+  test("findByExactPath requires a VERBATIM match (no substring/prefix)", () => {
+    const wts = parseWorktreePorcelain(
+      "worktree /repo/.quanta/worktrees/wt1\nHEAD ff\nbranch refs/heads/b\n",
+    )
+    expect(findByExactPath(wts, "/repo/.quanta/worktrees/wt1")).toBeDefined()
+    // a prefix must NOT match — no path inference.
+    expect(findByExactPath(wts, "/repo/.quanta/worktrees")).toBeUndefined()
+    expect(findByExactPath(wts, "/repo/.quanta/worktrees/wt1/sub")).toBeUndefined()
+  })
+})
+
+/* RFC-06 §RFC06-1 — hardened removeWorktree crash/dirty/locked/unowned matrix
+ * against a REAL git repo. Proves: non-force default, porcelain-exact target,
+ * refuse-not-force on dirty/locked, idempotent absence, and inspectWorktrees. */
+describe("hardened removeWorktree (non-force, porcelain-exact)", () => {
+  const cleanups: string[] = []
+  afterEach(() => {
+    while (cleanups.length > 0) {
+      const dir = cleanups.pop()
+      if (dir) rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test.skipIf(!HAS_GIT)(
+    "REFUSES a DIRTY worktree (non-force) — never discards uncommitted work",
+    async () => {
+      const repo = await makeRepo()
+      cleanups.push(repo)
+      const wt = await createPersistentWorktree("dirty1", repo)
+      // Make the worktree dirty (untracked file).
+      await writeFile(join(wt.worktreePath, "scratch.txt"), "uncommitted\n")
+
+      const outcome = await removeWorktree(wt.worktreePath, repo, { branch: wt.branch })
+      expect(outcome.kind).toBe("refused")
+      if (outcome.kind === "refused") expect(outcome.reason).toBe("dirty")
+      // The worktree + its uncommitted file MUST still be on disk (not forced).
+      expect(existsSync(wt.worktreePath)).toBe(true)
+      expect(existsSync(join(wt.worktreePath, "scratch.txt"))).toBe(true)
+      // Confirm it is still registered (realpath-normalized: macOS /tmp →
+      // /private/tmp, so match by basename against the porcelain registry).
+      const inspected = await inspectWorktrees(repo)
+      expect(inspected.ok).toBe(true)
+      if (inspected.ok) {
+        const stillThere = inspected.worktrees.some((w) => w.path.endsWith("/dirty1"))
+        expect(stillThere).toBe(true)
+      }
+    },
+    GIT_TEST_TIMEOUT,
+  )
+
+  test.skipIf(!HAS_GIT)(
+    "REFUSES a LOCKED worktree (never force) — report, do not delete",
+    async () => {
+      const repo = await makeRepo()
+      cleanups.push(repo)
+      const wt = await createPersistentWorktree("locked1", repo)
+      await runShell(`git worktree lock -- "${wt.worktreePath}"`, { cwd: repo })
+
+      const outcome = await removeWorktree(wt.worktreePath, repo, { branch: wt.branch })
+      expect(outcome.kind).toBe("refused")
+      if (outcome.kind === "refused") expect(outcome.reason).toBe("locked")
+      expect(existsSync(wt.worktreePath)).toBe(true)
+    },
+    GIT_TEST_TIMEOUT,
+  )
+
+  test.skipIf(!HAS_GIT)(
+    "an UNOWNED path (never registered) resolves to absent, deletes nothing",
+    async () => {
+      const repo = await makeRepo()
+      cleanups.push(repo)
+      // A path that was never a worktree.
+      const bogus = `${repo}/.quanta/worktrees/never-existed`
+      const outcome = await removeWorktree(bogus, repo, { branch: "fork-never" })
+      expect(outcome.kind).toBe("absent")
+      expect(removalReachedAbsence(outcome)).toBe(true)
+    },
+    GIT_TEST_TIMEOUT,
+  )
+
+  test.skipIf(!HAS_GIT)(
+    "clean owned worktree: removed + branch deleted as a SEPARATE step",
+    async () => {
+      const repo = await makeRepo()
+      cleanups.push(repo)
+      const wt = await createPersistentWorktree("clean1", repo)
+
+      const outcome = await removeWorktree(wt.worktreePath, repo, { branch: wt.branch })
+      expect(outcome.kind).toBe("removed")
+      if (outcome.kind === "removed") expect(outcome.branchDeleted).toBe(true)
+      expect(existsSync(wt.worktreePath)).toBe(false)
+      const branches = await runShell("git branch --list", { cwd: repo })
+      expect(branches.stdout).not.toContain("fork-clean1")
+    },
+    GIT_TEST_TIMEOUT,
+  )
+
+  test.skipIf(!HAS_GIT)(
+    "forceRemoveWorktree (throwaway owner) DOES discard a dirty tree — distinct lifecycle",
+    async () => {
+      // Proves the two removers are genuinely different: the throwaway force
+      // path discards dirty work (its callers intend that), while the hardened
+      // user-session remove above REFUSES the same dirty state.
+      const repo = await makeRepo()
+      cleanups.push(repo)
+      const wt = await createPersistentWorktree("force-dirty", repo)
+      await writeFile(join(wt.worktreePath, "scratch.txt"), "uncommitted\n")
+
+      const ok = await forceRemoveWorktree(wt.worktreePath, repo, { branch: wt.branch })
+      expect(ok).toBe(true)
+      expect(existsSync(wt.worktreePath)).toBe(false)
     },
     GIT_TEST_TIMEOUT,
   )

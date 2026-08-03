@@ -17,8 +17,8 @@
 import { randomUUID } from "node:crypto"
 import {
   createPersistentWorktree,
+  forceRemoveWorktree,
   type PersistentWorktree,
-  removeWorktree,
 } from "@/runtime/worktree-fork"
 import { throwIfAborted } from "@/shared"
 import type { ShadowScratchPort } from "../shadow-verify"
@@ -48,10 +48,12 @@ export const createScratchWorktreePort = (repoRoot: string): ShadowScratchPort =
     const id = `shadow-verify-${randomUUID()}`
     const wt: PersistentWorktree = await createPersistentWorktree(id, repoRoot)
     const dispose = async (): Promise<void> => {
-      // Best-effort: removeWorktree returns false on failure but never throws;
-      // a leftover worktree is recoverable via `git worktree prune` and the
-      // runner swallows dispose failures regardless (wave-1 contract).
-      await removeWorktree(wt.worktreePath, repoRoot, { branch: wt.branch })
+      // Best-effort: forceRemoveWorktree returns false on failure but never
+      // throws; a leftover worktree is recoverable via `git worktree prune` and
+      // the runner swallows dispose failures regardless (wave-1 contract). This
+      // is the THROWAWAY eval remover (force), NOT the hardened user-session
+      // `removeWorktree` — a scratch verify tree is meant to be discarded.
+      await forceRemoveWorktree(wt.worktreePath, repoRoot, { branch: wt.branch })
     }
     return { handle: wt.worktreePath, dispose }
   },
