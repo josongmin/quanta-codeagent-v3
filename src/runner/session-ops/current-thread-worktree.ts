@@ -29,6 +29,7 @@
  */
 
 import { realpath } from "node:fs/promises"
+import { type ActivityStore, worktreeOpenActivity, worktreeSettleActivity } from "@/activity"
 import {
   createPersistentWorktree,
   findByExactPath,
@@ -49,6 +50,62 @@ import {
 
 /** Injectable clock — epoch-ms — so the transaction is deterministic in tests. */
 export type Clock = () => number
+
+/**
+ * RFC02-5 / RFC06-2 — optional observability sink for the transition.
+ *
+ * When a caller (the CLI/SDK front door) supplies an {@link ActivityStore} the
+ * transition emits a single operation-correlated node onto the spine: `running`
+ * at the intent-persist boundary (BEFORE the git effect) then a single terminal
+ * (`done` on ready / `failed` on git error) AFTER the effect settles. The
+ * operationId is the caller's `ownershipId` — the SAME correlation the persisted
+ * ownership authority carries — so the activity row stitches to the durable
+ * record without a second store.
+ *
+ * OPTIONAL by design: a caller that omits it (every existing caller + the
+ * library/test path) emits NO activity, so the transaction is byte-identical to
+ * its pre-RFC02-5 behavior (the store is never touched). `turnId`/`runId` are
+ * optional correlation the front door threads when it holds them.
+ */
+export interface TransitionActivity {
+  readonly store: ActivityStore
+  readonly turnId?: string
+  readonly runId?: string
+}
+
+/** RFC02-5 — emit the correlated `running` OPEN (self-gated: a `undefined`
+ *  sink is a no-op so the transaction stays byte-identical). Extracted so the
+ *  transition transaction's cognitive complexity stays under the ceiling. */
+const emitActivityOpen = (
+  activity: TransitionActivity | undefined,
+  req: TransitionRequest,
+  branch: string,
+  startedAt: number,
+): void => {
+  if (activity === undefined) return
+  activity.store.emit(
+    worktreeOpenActivity({
+      operationId: req.ownershipId,
+      threadId: req.ownerThreadId,
+      label: `worktree: ${branch}`,
+      startedAt,
+      ...(activity.turnId !== undefined ? { turnId: activity.turnId } : {}),
+      ...(activity.runId !== undefined ? { runId: activity.runId } : {}),
+    }),
+  )
+}
+
+/** RFC02-5 — emit the single terminal transition (self-gated no-op when the
+ *  sink is absent). Called only AFTER the effect settles (never before). */
+const emitActivitySettle = (
+  activity: TransitionActivity | undefined,
+  operationId: string,
+  kind: "ready" | "failed",
+  at: number,
+): void => {
+  if (activity === undefined) return
+  activity.store.emit(worktreeSettleActivity(operationId, kind, at))
+}
 
 /** Match a target path against the porcelain registry accounting for symlinked
  *  roots (macOS `/tmp` → `/private/tmp`). Tries verbatim first, then realpath
@@ -143,6 +200,7 @@ const persistOwnership = async (
 export const transitionThreadToWorktree = async (
   req: TransitionRequest,
   clock: Clock,
+  activity?: TransitionActivity,
 ): Promise<TransitionResult> => {
   const saved = await loadSessionById(req.sessionId)
   if (saved === undefined)
@@ -183,6 +241,12 @@ export const transitionThreadToWorktree = async (
   })
   await persistOwnership(saved, intent)
 
+  // RFC02-5 — the operation is now ORDERED (intent durable). Emit the correlated
+  // `running` node BEFORE the git effect so the state is observable the instant
+  // it starts — never success-before-effect (the terminal comes only after the
+  // effect settles below). Gate-OFF (no `activity`) ⇒ nothing is emitted.
+  emitActivityOpen(activity, req, intent.branch, now)
+
   // (2) The git effect — the KEPT create owner.
   let created: { worktreePath: string; branch: string }
   try {
@@ -194,11 +258,15 @@ export const transitionThreadToWorktree = async (
   } catch (e) {
     // (4) git failed ⇒ transition creating → failed and clean the SAFE target
     // (the exact provisional path — the create owner may have left a partial).
-    const failedT = transitionWorkspaceState(intent, "failed", clock(), ERR_GIT)
+    const failAt = clock()
+    const failedT = transitionWorkspaceState(intent, "failed", failAt, ERR_GIT)
     if (failedT.ok) await persistOwnership(saved, failedT.record)
     await removeWorktree(provisionalPath, req.repoRoot, { branch: intent.branch }).catch(
       () => undefined,
     )
+    // RFC02-5 — the effect FAILED; emit the single terminal `failed` transition
+    // (after the effect settled, never before).
+    emitActivitySettle(activity, req.ownershipId, "failed", failAt)
     const detail = e instanceof WorktreeForkError ? (e.detail ?? e.message) : String(e)
     return { kind: "failed", errorCode: ERR_GIT, detail }
   }
@@ -210,7 +278,8 @@ export const transitionThreadToWorktree = async (
     path: created.worktreePath,
     branch: created.branch,
   }
-  const readyT = transitionWorkspaceState(exact, "ready", clock())
+  const readyAt = clock()
+  const readyT = transitionWorkspaceState(exact, "ready", readyAt)
   if (!readyT.ok) {
     // Should never happen (creating→ready is valid), but fail closed.
     return { kind: "failed", errorCode: "invalid_transition", detail: readyT.reason }
@@ -219,6 +288,9 @@ export const transitionThreadToWorktree = async (
   // freshest snapshot (still the same session).
   const fresh = (await loadSessionById(req.sessionId)) ?? saved
   await persistOwnership(fresh, readyT.record, created.worktreePath)
+  // RFC02-5 — the effect landed AND the record published; emit the single
+  // terminal `done` transition (after the publish boundary — never before).
+  emitActivitySettle(activity, req.ownershipId, "ready", readyAt)
   return { kind: "ready", nextCwd: created.worktreePath, ownership: readyT.record }
 }
 
