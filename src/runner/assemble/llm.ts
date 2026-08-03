@@ -1,4 +1,5 @@
 import { createAutoClassifierPort, RetryingLLM } from "@/agent"
+import type { EndpointSecretRef, OpenAIEndpointOptions } from "@/config"
 import {
   type CreateLLMOptions,
   type CreateMulticloudOptions,
@@ -21,10 +22,16 @@ import {
   withLiveUsage,
   withStreamProgressTrace,
 } from "@/llm"
+import {
+  buildEndpointFetch,
+  type EndpointFetch,
+  type ResolvedEndpoint,
+} from "@/llm/endpoint-transport"
 import type { StructuredLogger } from "@/observability"
 import type { PermissionContext, PermissionMode } from "@/permission"
 import { runShell } from "@/runtime"
 import { runtimeConfig } from "@/shared"
+import type { HostResolver } from "@/shared/net/ssrf"
 import type { AgentEvent, ModelRouteReason } from "@/stream"
 
 /**
@@ -415,6 +422,15 @@ export interface MainLlmAssembleInput {
     CreateMulticloudOptions,
     "auth" | "bedrockClientFactory" | "vertexClientFactory"
   >
+  /** RFC05-2 — a SELECTED configured OpenAI endpoint (from
+   *  {@link resolveConfiguredEndpoint}). When present, the LEGACY branch routes
+   *  through the OpenAI-wire adapter with the endpoint's `baseUrl` + explicit
+   *  `surface` + guarded `fetchImpl` (composed by {@link composeEndpointCreateLLMOptions})
+   *  instead of the default vendor path. The surface resolves the endpoint's
+   *  symbolic secret refs and passes it here. ABSENT ⇒ byte-identical vendor path
+   *  (the four providers + their adapter ctor args are untouched). The multicloud
+   *  branch ignores it (Anthropic-grammar transports are a separate axis). */
+  endpoint?: ResolvedEndpoint
 }
 
 /** Build the MAIN agent LLM, routing to the multicloud + H7 path when a cloud
@@ -428,6 +444,16 @@ export interface MainLlmAssembleInput {
  *  multicloud factory pick the transport-appropriate default slug. */
 export const buildMainLLMCore = (input: MainLlmAssembleInput): LLMPort => {
   if (input.selection.kind === "legacy") {
+    // RFC05-2 — a SELECTED configured OpenAI endpoint routes the legacy branch
+    // through the OpenAI-wire adapter with the endpoint's baseUrl + explicit
+    // surface + guarded fetch. ABSENT ⇒ byte-identical vendor path below.
+    if (input.endpoint !== undefined) {
+      const opts = composeEndpointCreateLLMOptions({
+        endpoint: input.endpoint,
+        model: input.model,
+      })
+      return createLLM("openai", opts, input.env)
+    }
     return buildLLMCore({ provider: input.provider, model: input.model, env: input.env })
   }
   return buildMulticloudLLMCore({
@@ -450,6 +476,162 @@ export const parseFallbackModels = (raw: string | undefined): string[] => {
     .split(",")
     .map((s) => s.trim())
     .filter((s) => s.length > 0 && s !== "1")
+}
+
+// ───────────── RFC05-2 (D1 follower) — configured-endpoint SELECTION ─────────
+//
+// The `@/runner` composition adapter that turns a CONFIGURED named OpenAI
+// endpoint profile (`OpenAIEndpointOptions`, from central config, RFC05-0) into
+// a resolved endpoint contract and COMPOSES it into `createLLM`. This is the
+// deferred selection hunk of RFC05-2: RFC05-core already shipped the resolved
+// data-plane (`buildEndpointFetch`, `ResolvedEndpoint`) + the Chat/Responses
+// `fetchImpl?` seam; here we SELECT a named profile, materialize its symbolic
+// secret refs to concrete VALUES (host composition — never on a config record),
+// and hand `createLLM` the `baseURL` + explicit `surface` + guarded `fetchImpl`.
+//
+// SEPARATION (README shared-write-set rule): this is a DISTINCT dep from the
+// RFC02-3 route-transition observation below — the two share NO argument type
+// (selection takes {name,endpoints,secrets}; route observation takes a
+// `FallbackTransition`) and neither wraps the other. NO retry/fallback
+// controller is added, NO provider/endpoint registry, NO URL-shape wire
+// inference (the profile's EXPLICIT `wireApi` drives the surface).
+//
+// DEFAULT-OFF BYTE-IDENTITY: an absent / unknown configured name ⇒
+// {@link resolveConfiguredEndpoint} returns `undefined` ⇒
+// {@link composeEndpointCreateLLMOptions} adds NO `baseURL`/`surface`/`fetchImpl`
+// ⇒ the composed options are byte-identical to today's legacy `{ model }` shape
+// and `createLLM` constructs the adapter exactly as before (default global fetch
+// + api-key). The route-transition callback is untouched on this path.
+
+/** Inputs to {@link resolveConfiguredEndpoint}. `secrets` is the host-resolved
+ *  map from the fixed {@link EndpointSecretRef} allowlist to concrete VALUES —
+ *  the surface resolves these from its secret store; they never live on a config
+ *  record. A ref declared by the profile but ABSENT here fails closed. */
+export interface ResolveConfiguredEndpointInput {
+  /** The configured endpoint name to select (e.g. `QUANTA_LLM_ENDPOINT`).
+   *  Empty / undefined / not-in-map ⇒ no selection (gate-OFF). */
+  name: string | undefined
+  /** The trust-gated named endpoint profiles from resolved central config
+   *  (`ResolvedSettings.openaiEndpoints`). */
+  endpoints: Readonly<Record<string, OpenAIEndpointOptions>>
+  /** Host-resolved symbolic-ref → concrete secret VALUE map. A ref the profile
+   *  references but that is absent here ⇒ fail-closed (no endpoint). */
+  secrets: Readonly<Partial<Record<EndpointSecretRef, string>>>
+}
+
+/** SELECT a configured named endpoint and materialize its symbolic secret refs
+ *  into a {@link ResolvedEndpoint} (concrete header VALUES). Returns `undefined`
+ *  when the name is absent/unknown OR a referenced secret cannot be resolved
+ *  (fail-closed — never a silent unauthenticated stream). PURE: no env / clock
+ *  reads; the caller injects `endpoints` (trust-gated) and `secrets` (resolved).
+ *
+ *  `authRef` ⇒ `Authorization: Bearer <value>`; each `headerRefs[name]` ⇒ that
+ *  header set to the resolved value. Static `query` is carried through
+ *  verbatim (non-secret). This is the ONLY place the symbolic refs become
+ *  concrete VALUES — they leave here only on the outgoing request (via the
+ *  guarded fetch) and never onto a diagnostic (see `redactEndpointForDiagnostics`). */
+export const resolveConfiguredEndpoint = (
+  input: ResolveConfiguredEndpointInput,
+): ResolvedEndpoint | undefined => {
+  const { name, endpoints, secrets } = input
+  if (name === undefined || name === "") return undefined
+  const profile = endpoints[name]
+  if (profile === undefined) return undefined
+
+  const headers: Record<string, string> = {}
+  // authRef ⇒ Bearer auth header. Fail closed if the ref is unresolved.
+  if (profile.authRef !== undefined) {
+    const value = secrets[profile.authRef]
+    if (value === undefined) return undefined
+    headers.authorization = `Bearer ${value}`
+  }
+  // headerRefs ⇒ each maps a header name to a symbolic ref; fail closed on any
+  // unresolved ref (never emit a partially-authed request silently).
+  for (const [headerName, ref] of Object.entries(profile.headerRefs ?? {})) {
+    const value = secrets[ref]
+    if (value === undefined) return undefined
+    headers[headerName] = value
+  }
+
+  return {
+    id: name,
+    baseUrl: profile.baseUrl,
+    wireApi: profile.wireApi,
+    model: profile.model,
+    // `EndpointNetworkPolicy` and the ssrf `NetworkPolicy` are the SAME closed
+    // union today; assign WITHOUT a cast so a future divergence between the two
+    // vocabularies is a compile error here (drift guard), not a silent widening.
+    networkPolicy: profile.networkPolicy,
+    headers,
+    query: { ...(profile.query ?? {}) },
+  }
+}
+
+/** Inputs to {@link composeEndpointCreateLLMOptions}. `endpoint` is the SELECTED
+ *  resolved endpoint (or `undefined` for the gate-OFF legacy path). `fetchInner`
+ *  / `resolveHost` are test-only DI seams forwarded to {@link buildEndpointFetch}
+ *  (production omits ⇒ the guard wraps the global `fetch` + node DNS). */
+export interface ComposeEndpointOptionsInput {
+  /** The selected endpoint, or `undefined` ⇒ byte-identical legacy options. */
+  endpoint: ResolvedEndpoint | undefined
+  /** Caller model id (CLI `QUANTA_MODEL`). Non-empty wins; empty ⇒ the
+   *  endpoint's declared model is used. On the legacy path it is passed through. */
+  model: string
+  /** TEST SEAM — inner fetcher the guarded fetch wraps. Production omits. */
+  fetchInner?: typeof fetch
+  /** TEST SEAM — DNS resolver forwarded to the guard. Production omits. */
+  resolveHost?: HostResolver
+}
+
+/** COMPOSE the selected endpoint into a {@link CreateLLMOptions} fragment: the
+ *  `baseURL`, the EXPLICIT `surface` (from the profile's `wireApi` — never a
+ *  base-URL inference), and the guarded `fetchImpl`. When `endpoint` is
+ *  `undefined` the result is byte-identical to the legacy `{ model }` shape (no
+ *  `baseURL`/`surface`/`fetchImpl` key), so `createLLM` constructs the adapter
+ *  exactly as before. This is the composition front door — the caller spreads
+ *  the result into `createLLM(provider, { apiKey?, ...opts }, env)`. */
+export const composeEndpointCreateLLMOptions = (
+  input: ComposeEndpointOptionsInput,
+): CreateLLMOptions => {
+  const { endpoint, model } = input
+  if (endpoint === undefined) return { model }
+  const fetchImpl: EndpointFetch = buildEndpointFetch(endpoint, {
+    ...(input.fetchInner !== undefined ? { inner: input.fetchInner } : {}),
+    ...(input.resolveHost !== undefined ? { resolveHost: input.resolveHost } : {}),
+  })
+  return {
+    // Caller model wins when non-empty; else the profile's declared model (a
+    // custom endpoint has no port-level default).
+    model: model.length > 0 ? model : endpoint.model,
+    baseURL: endpoint.baseUrl,
+    // EXPLICIT wire — a chat-only custom endpoint never silently gets `responses`
+    // (audit A4). Map the closed `wireApi` union to the factory's surface union.
+    surface: endpoint.wireApi === "responses" ? "responses" : "chat-completions",
+    // `createLLM("openai", …)` requires an SDK apiKey EVEN THOUGH the guarded
+    // fetch already carries the resolved auth header. Feed the SAME resolved
+    // token so the SDK's own `Authorization: Bearer <key>` matches (and the
+    // guarded fetch's header-merge is a no-op — it only sets headers not already
+    // present). A no-auth loopback preset (D2) has no token, so a fixed
+    // NON-SECRET sentinel satisfies the SDK ctor; the local server ignores it
+    // (RFC05-3 local no-auth contract). This is NOT read from a config record —
+    // the token is the host-resolved value on the in-memory endpoint only. */
+    apiKey: bearerTokenOf(endpoint.headers.authorization) ?? ENDPOINT_NO_AUTH_SENTINEL,
+    fetchImpl,
+  }
+}
+
+/** Fixed NON-SECRET placeholder the SDK client accepts for a no-auth (loopback)
+ *  endpoint. Never a real credential — the local server ignores it. Kept as a
+ *  named constant so it is greppable and obviously not a secret. */
+const ENDPOINT_NO_AUTH_SENTINEL = "sk-local-no-auth"
+
+/** Extract the raw token from an `Authorization: Bearer <token>` header value,
+ *  or `undefined` when the header is absent / not a Bearer scheme. Used to feed
+ *  the SDK client the SAME resolved key that the guarded fetch carries. */
+const bearerTokenOf = (authorization: string | undefined): string | undefined => {
+  if (authorization === undefined) return undefined
+  const prefix = "Bearer "
+  return authorization.startsWith(prefix) ? authorization.slice(prefix.length) : undefined
 }
 
 // ─────────────── RFC02-3 (A8) — FALLBACK route-transition OBSERVATION ────────
