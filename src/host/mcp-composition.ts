@@ -39,6 +39,7 @@ import {
   McpClient,
   type McpClientTransport,
   type McpOAuthProviderPort,
+  type McpResourceObserver,
   type McpServerConfig,
   type RootsProviderPort,
   type SamplingHandlerPort,
@@ -100,6 +101,7 @@ const mcpSupervisorDepsFor = (
   transportFor: ((config: McpServerConfig) => McpClientTransport) | undefined,
   oauthProvider: McpOAuthProviderPort | undefined,
   proxyEnv: ProxyEnvInput | undefined,
+  resourceObserver: McpResourceObserver | undefined,
 ) => {
   return (_config: McpServerConfig): SupervisorDeps => ({
     factory: (c): SupervisableMcpClient => {
@@ -112,7 +114,10 @@ const mcpSupervisorDepsFor = (
       // H3 (jun-10) — `proxyEnv` rides the same helper so a RECONNECTED MCP server
       // child re-injects the session egress proxy (the bypass cannot reopen on a
       // restart). Absent ⇒ no keys (byte-identical).
-      applyMcpClientWiring(clientOpts, wiring, oauthProvider, proxyEnv)
+      // RFC04-2/3 — the reload observer rides the same helper so a RECONNECTED
+      // client re-subscribes its `tools/list_changed` to the SAME controller.
+      // Absent ⇒ no observer (byte-identical).
+      applyMcpClientWiring(clientOpts, wiring, oauthProvider, proxyEnv, resourceObserver)
       return new McpClient(c, clientOpts)
     },
     policy: DEFAULT_BACKOFF_POLICY,
@@ -671,6 +676,12 @@ export const buildMcpLoadOpts = (
      *  server down AND emit an operator notice. Absent ⇒ neither callback is
      *  wired (byte-identical load). */
     readonly mcpHealth?: McpHealthHolder
+    /** RFC04-2/3 (hot-reload) — the capability-gated reload observer, present
+     *  ONLY when `QUANTA_MCP_HOT_RELOAD` is on (the composition root gates it).
+     *  Threaded into BOTH the supervisor factory AND the single-client opt so
+     *  every live server's `tools/list_changed` reaches the SAME `requestReload`.
+     *  Absent ⇒ neither path wires an observer (byte-identical load). */
+    readonly resourceObserver?: McpResourceObserver
   },
 ): Parameters<typeof loadMcpTools>[2] => ({
   // WS-G (UUX-6-22) — route the ALBB-09 load-error sink + the new exit sink
@@ -714,10 +725,16 @@ export const buildMcpLoadOpts = (
           args.opts.mcpTransportFor,
           args.oauthProvider,
           args.opts.proxyEnv,
+          args.resourceObserver,
         ),
       }
     : {}),
   ...(args.inboundWiring !== undefined ? { samplingWiring: args.inboundWiring } : {}),
+  // RFC04-2/3 (hot-reload) — the single-client path reads `resourceObserver`
+  // off the opts bag (the supervised path baked it into the factory above). ONE
+  // shared instance so ANY server's list-change orders the SAME relist. Present
+  // only when `QUANTA_MCP_HOT_RELOAD` is on; absent ⇒ slot omitted (byte-identical).
+  ...(args.resourceObserver !== undefined ? { resourceObserver: args.resourceObserver } : {}),
   ...(args.opts.mcpTransportFor !== undefined ? { transportFor: args.opts.mcpTransportFor } : {}),
   ...(args.oauthProvider !== undefined ? { oauthProvider: args.oauthProvider } : {}),
   // H3 (jun-10 session-scoped egress) — the session proxy env (opened once at

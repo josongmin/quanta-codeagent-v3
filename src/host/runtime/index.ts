@@ -94,6 +94,13 @@ export {
   type SamplingHandlerDeps,
   type SamplingWiring,
 } from "./mcp-sampling-handler"
+export {
+  createMcpToolReloadController,
+  type McpReloadDiagnostics,
+  type McpToolReloadController,
+  type RebuildSnapshotPort,
+  type SnapshotPublisher,
+} from "./mcp-tool-reload"
 export type { OperatorReviewAdapter } from "./operator-review"
 export { createInMemorySessionPersistence, createSessionPersistence } from "./persistence"
 export { hasExecutableTools } from "./tool-executor"
