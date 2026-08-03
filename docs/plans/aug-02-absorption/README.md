@@ -2,11 +2,11 @@
 
 원천 감사: [../../analysis/aug-02-competitor-corpus-refresh-audit.md](../../analysis/aug-02-competitor-corpus-refresh-audit.md).
 
-**Audit basis:** `main@0a00ced392102073fe35eccd202bca92cabd71dc`, 2026-08-03 KST. 구현은 아직 시작하지 않았다. 이 디렉터리의 RFC들은 현재 untracked 문서이며, 아래 판정이 각 RFC의 과거 초안 문구와 충돌하면 **이 README와 각 문서의 current-HEAD correction이 우선**한다.
+**Code-audit basis:** `main@0a00ced392102073fe35eccd202bca92cabd71dc`, 2026-08-03 KST. 최초 RFC-01~08 문서군은 `main@0922d737f431ace0d6f2d6505c40351976718981`에 게시됐다. 구현은 아직 시작하지 않았다. 아래 판정이 각 RFC의 과거 초안 문구와 충돌하면 **이 README와 각 문서의 current-HEAD correction이 우선**한다.
 
 ## 결론
 
-초기 요약의 큰 방향(대부분 substrate가 있고 실제 delta는 작다)은 맞지만, owner와 안전계약을 재감사하자 6개 RFC 모두 보정이 필요했다.
+초기 요약의 큰 방향(대부분 substrate가 있고 실제 delta는 작다)은 맞지만, owner와 안전계약을 재감사하자 RFC-01~08과 detail-only residue 회계가 모두 보정됐다.
 
 | RFC | current-HEAD 판정 | 실제 delta | 노력/상태 |
 |---|---|---|---|
@@ -18,12 +18,13 @@
 | [06 Worktree & Review UX](rfc-06-worktree-review-ux.md) | user-facing `session fork --worktree`와 CLI/web/SDK hunk apply가 이미 있음. 새 in-memory binding/reaper와 naive inverse revert는 잘못된 owner/unsafe. | current-thread 전환 + persisted ownership/lifecycle · explicit operator GC · anchored comments + CAS undo journal · live objective usage producer · mention composition/lineage | B3 L(full) · B5 M-L · A4.3 M · B4 M-L |
 | [07 Claude 오케스트레이션](rfc-07-claude-orchestration.md) | **Workflow 엔진 이미 있음**(`src/workflow/index.ts` agent/parallel/pipeline/phase/fanout export, gated `QUANTA_WORKFLOW`). Task-DAG·mailbox `to:id`·fork·named-registry·lineage gate·codemode-REPL 다 LIVE. dontAsk=`acceptEdits`/`auto`가 이미 사이 티어. | 얇은 delta 3: existing `TaskRegistry`/target policy를 재사용하는 named-`to:` resolver · `BashBgRegistry` drain observer 기반 line-stream watch(measure-first) · `assignee/dependencies`의 owner/blockedBy/blocks read projection. 나머지 DROP | D1-resolver S/READY · D2-watch MED/NOT READY · D3-projection S/READY |
 | [08 UX polish & deferred](rfc-08-ux-polish-deferred.md) | keybindings·Ultra=`ReasoningEffort:"max"`·codemode per-cell cap·MCP version SSOT·OS-keyring은 이미 있음. palette/shortcut-editor 등 renderer는 이 repo 밖이다. | **BUILD 1개**: 기존 `EffortStore`를 직접 쓰는 bindable `effort-cycle` action. PARK 7 · DROP 8. 새 cycle store/default chord 금지. | BUILD-1 S · 나머지 PARK/DROP |
+| [09 Residual gaps](rfc-09-residual-gaps.md) | coverage critic의 detail-only residue를 live code로 재검증. LSP callable/MCP surface와 `fork_turns`+delegation policy는 이미 live. in-process hook append도 live. | command-hook stdout→existing untrusted prompt-hook bridge · review finding의 model-visible verdict/category/short summary. owner 없는 outcome/last-turn scope는 PARK. | A2 S/READY · A4 S/READY · 나머지 DROP/PARK |
 
-## 커버리지 회계 (전 후보 RFC 편입 완료)
+## 커버리지 회계 (정직한 정정)
 
-감사문서 전 후보(A1–A10·B1–B8·C1–C7·D1–D3 + Workflow/REPL) → RFC-01~08에 100% 편입. **결론 강화**: grounding-first가 audit "gap"의 대다수를 already-built로 판정 — RFC-07의 Workflow(구조적 최대 gap이라던 것)마저 `src/workflow/index.ts`로 shipped. 실 신규작업 총합은 소수의 얇은 delta + owner/safety 재설계에 국한. 08 tier는 BUILD 1개(effort 핫키) 외 전부 PARK(out-of-repo renderer)/DROP(이미 있음).
+감사문서의 lettered 후보(A1–A10·B1–B8·C1–C7·D1–D3 + Workflow/REPL)는 RFC-01~08, detail 파일에만 있던 residue는 RFC-09에서 모두 `BUILD`/`MEASURE`/`PARK`/`DROP`으로 disposition했다. 이는 **100% 구현 약속이 아니라 100% 회계**다. `_coverage-critic.md`는 누락을 찾은 adversarial input이며, live-code 반증과 최종 scope는 RFC-09가 우선한다. grounding-first 결과 RFC-07 Workflow와 RFC-09의 LSP 도구/`fork_turns`도 shipped였고, 신규 BUILD은 owner와 소비자가 확인된 얇은 delta만 남는다.
 
-## RFC-01~08 current owner surfaces와 다음 RED
+## RFC-01~09 current owner surfaces와 다음 RED
 
 | RFC | owner surfaces | implementation admission RED |
 |---|---|---|
@@ -35,6 +36,7 @@
 | 06 | `src/session/types.ts`, `src/runtime/worktree-fork.ts`, `src/runner/session-ops/index.ts`, `src/runner/hunk-apply.ts`, objective/mention composition | restart-preserved explicit ownership; current forced/string-heuristic remove RED; dirty/unowned no-delete; disk-drift CAS undo; live 429/usage; mention list/lookup parity |
 | 07 | `TaskRegistry` + spawn-owner ledger + `subagent-delivery/target-resolver.ts`; `Plan`/`assignee`/`dependencies`; `BashBgRegistry` drain + reactor bridge | named unique/ambiguous/foreign-lineage delivery; owner/blockedBy/blocks deterministic projection; D2는 measured consumer 전 NOT READY |
 | 08 | `EffortStore`; slash model wire `current/effortSupport`; keybinding loader/`KEY_ACTIONS`; raw-line-reader dispatch | configured chord → same effort cell → next LLM request; live model switch support; non-reasoning fixpoint; unconfigured callback count 0 |
+| 09 | `src/agent/command-hooks/{runner,types,install}.ts`; existing `HookPromptInject` fold; `src/tool/git/review-diff.ts` | command stdout append stays user-side/untrusted and approval-gated; old hook/review shapes byte-identical; verdict/category visible through real parser+renderer |
 
 ### 구현 packet dependency map
 
@@ -48,6 +50,7 @@
 | 06 | `RFC06-0` ownership → `RFC06-1` git hardening → `RFC06-2` transition / `RFC06-3` GC; `RFC06-4` receipt; `RFC06-5` objective; `RFC06-6` mentions | `RFC06-6`은 RFC03-0, activity는 RFC02 contract 의존 |
 | 07 | `RFC07-3` task projection + `RFC07-1` named resolver는 독립; `RFC07-2M` measurement → conditional `RFC07-2B` | D1은 existing target/lineage authority 재사용; D2는 consumer/latency admission 없으면 PARK, build는 RFC02 bg-owner 뒤 |
 | 08 | `RFC08-1` bindable effort action 단일 packet | RFC07과 독립; existing `EffortStore`/model wire/keybinding path 외 authority 생성 금지 |
+| 09 | `RFC09-1` command-hook append bridge · `RFC09-2` review finding consumed fields | 서로 file-disjoint; existing prompt-hook/reviewer parser를 확장하며 새 inject/review/scope authority 금지 |
 
 ### RFC-07/08 immediate structural action list
 
@@ -280,4 +283,4 @@ Immediate checklist:
 - RFC-05/06 focused rails: **165 pass / 0 fail** (OpenAI routing, multicloud reachability, session worktree fork/delete, CLI/web/SDK hunk apply, objective, deep hunk rails).
 - RFC-07/08 substrate recheck: **227 pass / 0 fail** across Workflow real-loop/gate/tool/engine, subagent delivery controller + real-loop modes, plan DAG/mutations/tools, keybindings, mode-cycle, and model-effort clamp rails. 이 receipt는 existing substrate를 증명하며 D1/D3/BUILD-1 구현 완료를 뜻하지 않는다.
 - RFC-01/02는 read-only owner/caller audit만 수행했으며 fresh test receipt는 아직 없다.
-- Git: `main`은 `origin/main`보다 4 commits ahead. 이 문서군과 원천 감사 문서는 untracked이며, 구현/commit/publication 완료를 의미하지 않는다.
+- Git: 원천 감사와 RFC-01~08 baseline은 `main@0922d737f431ace0d6f2d6505c40351976718981`에 local commit됐다. RFC-09 residue correction도 문서 publication일 뿐이며, 구현 완료나 remote publication을 뜻하지 않는다.

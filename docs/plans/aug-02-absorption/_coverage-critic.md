@@ -1,5 +1,7 @@
 # Coverage-Critic — did the 8 RFCs miss any absorbable competitor feature?
 
+> **Status: adversarial input, not final scope authority.** This document records the pre-rebuttal attack on RFC-01~08. [RFC-09](rfc-09-residual-gaps.md) re-greps the live tree, refutes the false LSP/`fork_turns`/in-process-hook premises, and owns the final residue disposition. Do not convert this document's `UNCOVERED` labels directly into build tickets.
+
 **Role:** adversarial completeness critic. Goal: find absorbable competitor features that fell through the cracks and are NOT covered by any of `rfc-0{1..8}`. Skeptical of the "100% coverage" claim in `README.md` §커버리지 회계.
 
 **Method:** built a complete candidate inventory from ALL audit+analysis files (`_audit-codex-{userfacing,engine,subsystems,codemode,integration}.md`, `_audit-claude-code-full.md`, `_analysis-codex-5973.md`, `_analysis-claude-code-2.1.220.md`, `_analysis-codex-cli-ide.md`), mapped each to an RFC by *reading the RFC* (not trusting the ID), then bucketed every UNCOVERED item as (a) genuinely-absorbable-and-missing-an-RFC, (b) confirmed non-absorbable, or (c) confirmed already-built (grep `src/` file:line). Also sanity-checked HIGH-stakes DROP/already-built verdicts by grep.
