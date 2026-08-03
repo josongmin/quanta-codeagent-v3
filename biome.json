@@ -1161,6 +1161,7 @@
         "!tests/unit/mcp-roots-supervised-wire-e2e-hellgate.test.ts",
         "!tests/unit/h7-transport-e2e-hellgate.test.ts",
         "!tests/unit/ai-title-byok-reachability-hellgate.test.ts",
+        "!tests/unit/cli-configured-endpoint-live-surface-hellgate.test.ts",
         "!tests/integration/session-ux-e2e.test.ts",
         "!tests/integration/session-chaos-and-attack.test.ts",
         "!tests/integration/session-stress-and-concurrent.test.ts",

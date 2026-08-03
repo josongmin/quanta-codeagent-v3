@@ -63,6 +63,8 @@ const RULES: readonly Rule[] = [
         "unified agent CLI entry — same bootstrap posture as apps/cli/index.ts: loadEnvFiles() runs before the API-key reads in buildLLM/resolveProvider (provider selection is a launch-time decision, not a feature read).",
       "apps/cli/internal.ts":
         "CLI feature-flag bootstrap — threads typed values via AgentConfig; downstream modules never read env directly. TODO(S5): migrate to runtimeConfig progressively.",
+      "apps/cli/configured-endpoint-wire.ts":
+        "RFC05 wireE CLI llm-build delegate — two launch-time reads at the composition root: the SELECTOR `QUANTA_LLM_ENDPOINT` (a registered string knob) and the SECRET `QUANTA_ENDPOINT_API_KEY` (owned at the auth call site, a knob-registry secret EXCEPTION — same class as the vendor OPENAI_API_KEY read). Both are resolved to concrete values threaded downstream into `resolveConfiguredEndpoint`; the secret rides only the guarded outgoing request, never a module-level read / a log / a config record. Same CLI-bootstrap surface-parse posture as apps/cli/internal.ts.",
       "apps/cli/config-migration-notice.ts":
         "Injection-first by design (the file is explicitly env-free/homedir-free — every path injected): `process.env` is ONLY the default for the injected `env` param so the CLI entry works without threading, while tests inject a fake env. The action flag is read off that injected param, not a module-level process.env — same CLI-bootstrap posture as apps/cli/internal.ts. TODO(S5): migrate the flag to runtimeConfig progressively.",
       "apps/cli/ask-user-wire.ts":

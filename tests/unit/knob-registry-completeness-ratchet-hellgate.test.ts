@@ -131,6 +131,10 @@ const EXCEPTIONS: ReadonlyMap<string, string> = new Map<string, string>([
   ["QUANTA_QDRANT_API_KEY", "secret: Qdrant vector-DB credential (search-index-backend)"],
   ["QUANTA_CHATGPT_AUTH_SOURCE", "secret: ChatGPT token-store preference (@/auth/chatgpt-oauth)"],
   [
+    "QUANTA_ENDPOINT_API_KEY",
+    "secret: configured-endpoint API key (RFC05) — the host-resolved value for an openaiEndpoints authRef, owned at the CLI llm-build composition root (apps/cli/internal.ts), never a /config knob (a `/config set` of an endpoint credential would be a scope hazard). Same class as QUANTA_WEB_AUTH_TOKEN; the SELECTOR QUANTA_LLM_ENDPOINT is the registered knob.",
+  ],
+  [
     "QUANTA_SIDE_AGENT_LLM_REPLAY",
     "test-only: side-agent hermetic forked-child LLM replay seam (worker-charter-runner), not a user knob",
   ],
