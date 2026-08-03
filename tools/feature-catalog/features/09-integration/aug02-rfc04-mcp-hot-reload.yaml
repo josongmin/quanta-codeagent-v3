@@ -1,0 +1,42 @@
+id: aug02-rfc04-mcp-hot-reload
+title: RFC04 — MCP hot-reload (capability observer + controller + LIVE feeder)
+section: 9
+subsystem: MCP hot-reload (aug-02 RFC04-1/2/3 + live feeder)
+order: 561
+maturity: L3
+status: new
+ui_surfaces: [cli]
+monitoring: partial
+modes: [interactive, headless]
+configurable: integrated
+owners: ["@songmin"]
+labels: ["rfc:aug02-04", "surface:cli", "gate:default-off"]
+config_refs:
+  env: ["QUANTA_MCP_HOT_RELOAD"]
+purpose: |
+  RFC-04 MCP hot-reload, gated behind QUANTA_MCP_HOT_RELOAD (default OFF ⇒
+  observer never constructed, client path byte-identical): (A1) the capability
+  observer treats an MCP `tools/list_changed` notification as an invalidation
+  signal; (2/3) the reload CONTROLLER performs single-flight relist with
+  last-known-good fallback + compare-and-publish (a new tool generation is
+  published only when it differs and only at a safe turn boundary); the LIVE
+  FEEDER wires the composition root so onReloadSource actually reaches the
+  controller. When OFF the feeder slot is omitted entirely.
+evidence:
+  code:
+    - src/mcp/client/capabilities-gate.ts
+    - src/host/runtime/mcp-tool-reload.ts
+    - src/host/mcp-composition.ts
+    - src/agent/mcp-bridge.ts
+  adrs: ["docs/plans/aug-02-absorption/rfc-04-approval-policy.md"]
+  tests:
+    integration:
+      - tests/integration/mcp-tools-listchanged-capability-gate.test.ts
+      - tests/integration/mcp-tool-hot-reload-hellgate.test.ts
+      - tests/integration/mcp-tool-hot-reload-live-feeder-e2e.test.ts
+      - tests/integration/mcp-tool-hot-reload-frontdoor-e2e.test.ts
+knobs:
+  - name: QUANTA_MCP_HOT_RELOAD
+    where: runtime-config
+    default: false
+    purpose: gate the MCP reload observer/controller/feeder (OFF ⇒ observer never constructed)
