@@ -14,6 +14,10 @@ import type { PendingApprovalView } from "@/protocol/session"
 import { type ActionDiff, computeActionDiff } from "@/runner/action-diff"
 import { splitHunks } from "@/runner/diff-ops"
 import { applyHunkSelection } from "@/runner/hunk-apply"
+import {
+  applyHunkSelectionWithReceipt,
+  type HunkMutationJournalStore,
+} from "@/runner/hunk-mutation-journal"
 import { runtimeConfig } from "@/shared"
 import {
   actionKeyOf,
@@ -42,6 +46,11 @@ export interface ApprovalProtocolDeps {
   readonly sessionGrants: Set<string>
   readonly sessionPrefixGrants: Set<string>
   readonly onConfirm: NonNullable<AgentConfig["onConfirm"]>
+  /** RFC06-4 (B5) — durable CAS undo journal store for the web/SDK per-hunk
+   *  apply. Present only when the host wires it AND `hunkMutationReceipt` is on;
+   *  absent ⇒ the apply stays a direct `applyHunkSelection` call
+   *  (byte-identical). */
+  readonly mutationJournal?: HunkMutationJournalStore
 }
 
 /** True iff `actionKey` rides a standing grant — an EXACT session grant for
@@ -125,6 +134,45 @@ const captureHunkBaseline = async (
   return diff
 }
 
+/** Apply the accepted subset through the single hunk-mutation owner. RFC06-4:
+ *  when `hunkMutationReceipt` is on AND a durable journal store is wired, the
+ *  apply is wrapped so it persists a CAS undo receipt — the SAME
+ *  `applyHunkSelection` engine is called exactly once inside the wrapper. Gate
+ *  OFF or no store ⇒ the identical direct `applyHunkSelection` call as before
+ *  (byte-identical web/SDK behaviour). The returned shape is projected back onto
+ *  the engine's own result so `applyHunkSubset` is unchanged. */
+const applyAcceptedSubset = async (
+  deps: ApprovalProtocolDeps,
+  path: string,
+  diff: ActionDiff,
+  sel: readonly string[],
+): Promise<
+  | { readonly status: "applied" }
+  | { readonly status: "stale"; readonly reason: string }
+  | { readonly status: "error"; readonly reason: string }
+> => {
+  if (runtimeConfig().hunkMutationReceipt && deps.mutationJournal !== undefined) {
+    const out = await applyHunkSelectionWithReceipt(
+      {
+        operationId: crypto.randomUUID(),
+        path,
+        before: diff.before,
+        after: diff.after,
+        selectedHunkIds: sel,
+      },
+      { store: deps.mutationJournal },
+    )
+    return out.status === "applied" ? { status: "applied" } : out
+  }
+  const res = await applyHunkSelection({
+    path,
+    before: diff.before,
+    after: diff.after,
+    selectedHunkIds: sel,
+  })
+  return res.status === "applied" ? { status: "applied" } : res
+}
+
 /** Apply the operator's accepted hunk subset against the REQUEST-time baseline
  *  (`@/runner/hunk-apply`: atomic, mode-preserving, staleness-guarded — file
  *  drift since the preview ⇒ no write). Returns the `steer` for a
@@ -145,12 +193,7 @@ const applyHunkSubset = async (
       steer: `Operator rejected all ${ids.length} proposed hunks; no changes were applied.`,
     }
   }
-  const res = await applyHunkSelection({
-    path: resolveHunkPath(deps, diff.path),
-    before: diff.before,
-    after: diff.after,
-    selectedHunkIds: sel,
-  })
+  const res = await applyAcceptedSubset(deps, resolveHunkPath(deps, diff.path), diff, sel)
   if (res.status === "applied") {
     return {
       steer: `Operator accepted ${sel.length}/${ids.length} hunks (${sel.join(", ")}) and rejected ${rejected.join(", ")}. The file now reflects ONLY the accepted hunks — do not re-apply the rejected ones.`,

@@ -309,6 +309,14 @@ const parseToolSurfaceSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> =>
     // confirm prompt, no partial apply; whole-call approve/deny only (byte-
     // identical). See `@/runner/hunk-apply` for the apply executor.
     hunkApproval: gateOn(env, "QUANTA_HUNK_APPROVAL"),
+    // RFC06-4 (B5) — opt-in (`gateOn` vocab; #24). Default false ⇒ per-hunk
+    // apply does NOT persist a durable mutation receipt / CAS undo journal
+    // (the apply itself is byte-identical; no receipt is written, undo is
+    // unavailable). ON ⇒ each per-hunk apply is wrapped by
+    // `@/runner/hunk-mutation-journal` so the mutation is undoable via a
+    // content-verified CAS journal. Independent of `hunkApproval` (that gates
+    // the [h]unk verb; this gates the receipt/undo durability).
+    hunkMutationReceipt: gateOn(env, "QUANTA_HUNK_MUTATION_RECEIPT"),
     // sandbox-escalation (RFC jun-6) — opt-in (`gateOn` vocab; #24). Default false ⇒
     // classifySandboxDenial is never consulted, no denialReason is ever set, no
     // escalation prompt, no post-denial record (a sandboxed nonzero exit is

@@ -404,6 +404,15 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  on overlapping/offset hunks, so this starts opt-in (unlike the default-ON
    *  `QUANTA_DIFF_PREVIEW`). */
   readonly hunkApproval: boolean
+  /** RFC06-4 (B5) — durable mutation receipt + CAS undo journal for per-hunk
+   *  apply (`QUANTA_HUNK_MUTATION_RECEIPT`). Opt-in (`gateOn` vocab (#24)).
+   *  Default false ⇒ the per-hunk apply is byte-identical (no receipt persisted,
+   *  no undo journal). When ON, every per-hunk apply goes through
+   *  `@/runner/hunk-mutation-journal#applyHunkSelectionWithReceipt`, recording an
+   *  intent→effect→terminal receipt with before/after/expected-current hashes so
+   *  the mutation is undoable via a content-verified CAS revert (fail-closed on
+   *  disk drift). Independent of `hunkApproval`. */
+  readonly hunkMutationReceipt: boolean
   /** sandbox-escalation (RFC jun-6) — OS-sandbox block → user-gated
    *  escalation-retry loop (`QUANTA_SANDBOX_ESCALATION`). Opt-in
    *  (the `gateOn` truthy vocab (#24)). Default false ⇒ the platform result-mapping points NEVER
