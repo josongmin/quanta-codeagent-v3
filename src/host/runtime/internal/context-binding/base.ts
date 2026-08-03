@@ -3,7 +3,6 @@ import { wireOptionalAgentPorts } from "@/agent/optional-ports"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
 import type { Message } from "@/llm"
 import type { CapabilityManifest } from "@/protocol/session"
-import { getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import { wireInteractiveKnobs } from "@/runner/assemble"
 import type {
   IdentityModeSessionState,
@@ -11,6 +10,7 @@ import type {
 } from "@/runner/assemble/session-state"
 import { buildSharedExecutionPlaneRuntimeAugments } from "@/runner/session-execution-plane"
 import { buildSessionMemoryAutoWires } from "@/runner/session-memory-auto"
+import { getBashBgRegistry } from "@/runtime/bash-bg-registry"
 import type { RuntimeAgentTurnAssembler, RuntimeAgentTurnDeps } from "@/sdk/runtime/base"
 import { fullFidelityEnabled, itemStreamEnabled } from "@/shared"
 import { automationUpdateTool, ToolRegistry } from "@/tool"
@@ -351,6 +351,13 @@ const buildBootstrapBaseShape = (
     // the slot value onto the bash/edit edit-fence. Absent ⇒ omitted (default-OFF).
     ...whenDefined("activeWorktreeSlot", args.overlay?.activeWorktreeSlot),
     ...whenDefined("sessionConfigPort", args.boot.sessionConfigPort),
+    // RFC04-2/3 (MCP tool hot-reload) — lift the turn capability snapshot ref onto
+    // the base ONLY when the bootstrap built the feeder (`QUANTA_MCP_HOT_RELOAD`
+    // on + eligible reload sources). session-bootstrap then reads `current()` at
+    // the turn boundary so a reload published between turns surfaces at the next
+    // turn. Absent ⇒ slot omitted ⇒ the loop builds the snapshot from `registry`
+    // exactly as today (byte-identical default-OFF).
+    ...whenDefined("registrySnapshotRef", args.boot.registrySnapshotRef),
     // jun-6 (RFC jun-6-ai-session-title) — spread the AI titler ONLY when the
     // surface built it (knob on + cheap model). Absent ⇒ slot omitted ⇒ the
     // loop's first-turn title branch is dead (byte-identical default-OFF).

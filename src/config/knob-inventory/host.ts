@@ -414,6 +414,16 @@ export const HOST: readonly KnobInventoryEntry[] = [
     readSite: "host/mcp-composition.ts",
   },
   {
+    envKey: "QUANTA_MCP_HOT_RELOAD",
+    kind: "bool",
+    default: false,
+    group: "mcp",
+    home: "runtime-config",
+    describe:
+      "MCP tool hot-reload (RFC04-2/3) — a NON-supervised server's tools/list_changed republishes the turn capability snapshot at the NEXT turn boundary (single-flight+dirty, last-known-good on malformed relist, no mid-turn swap). Default-OFF ⇒ no observer/controller/ref, session builds the snapshot from the registry as today (byte-identical).",
+    readSite: "host/mcp-composition.ts",
+  },
+  {
     envKey: "QUANTA_RETRIEVAL_HYBRID",
     kind: "bool",
     default: false,

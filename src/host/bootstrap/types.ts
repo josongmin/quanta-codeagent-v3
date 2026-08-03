@@ -8,7 +8,13 @@
  * back the CLI today and a Web/Tauri surface tomorrow without a fork.
  */
 
-import type { AgentConfig, BriefStore, EffortStore, PersonaKind } from "@/agent"
+import type {
+  AgentConfig,
+  BriefStore,
+  EffortStore,
+  McpReloadableSource,
+  PersonaKind,
+} from "@/agent"
 import type { FocusChainPort } from "@/agent/focus-chain"
 import type { FollowUpQueue } from "@/agent/follow-up-queue"
 import type { PlanStore } from "@/agent/plan/state"
@@ -31,6 +37,7 @@ import type { ShellExecObserver, Tool } from "@/tool"
 import type { McpResourceCaptureHolder } from "@/tool/mcp_resources/capture"
 import type { ReviewerRunner } from "@/tool/types"
 import type { McpHealthHolder } from "../mcp-health"
+import type { McpToolReloadController } from "../runtime/mcp-tool-reload"
 
 /** Closed enum of bootstrap failure kinds. The single source of truth used by
  *  `SessionBootstrapError.kind` and surface-side error handlers. */
@@ -98,6 +105,14 @@ export interface BootstrapFeatures {
   readonly astGrepTools: Tool[]
   readonly mcpResourceCapture?: McpResourceCaptureHolder
   readonly mcpHealth?: McpHealthHolder
+  /** RFC04-2/3 (hot-reload) — the per-(non-supervised)-server reload sources the
+   *  load collected, present ONLY when `QUANTA_MCP_HOT_RELOAD` is on. The
+   *  bootstrap feeds them into the reload controller's all-source relist. */
+  readonly mcpReloadSources?: McpReloadableSource[]
+  /** RFC04-2/3 (hot-reload) — late-bind the built controller into the observer
+   *  wired at load time. Called ONCE by the bootstrap after the registry exists.
+   *  Present iff {@link mcpReloadSources} is (same gate). */
+  readonly bindMcpReloadController?: (controller: McpToolReloadController) => void
 }
 
 /** Per-surface MCP pill descriptor — the host only forwards rows from
@@ -565,4 +580,13 @@ export interface SessionBootstrapResult {
    *  CLI surface can build the assessor servicer without re-importing the
    *  reviewer-subagent module (ADR-0299 §3). */
   readonly createSubagentBackedGuardianAssess: CreateGuardianAssessFactory
+  /** RFC04-2/3 (MCP tool hot-reload) — the atomically-swappable turn capability
+   *  snapshot pointer, present ONLY when `QUANTA_MCP_HOT_RELOAD` is on AND the
+   *  load produced eligible (non-supervised) reload sources. `context-binding`
+   *  spreads it onto `AgentConfig.registrySnapshotRef`; `session-bootstrap` reads
+   *  `current()` at the turn boundary so a reload the controller published
+   *  between turns surfaces at the NEXT turn. Seeded from `tooling.registry`, so
+   *  turn-0 is byte-identical to the no-ref path. Absent (default) ⇒ omitted ⇒
+   *  the loop builds the snapshot from `registry` exactly as today. */
+  readonly registrySnapshotRef?: AgentConfig["registrySnapshotRef"]
 }

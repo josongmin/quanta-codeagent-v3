@@ -20,6 +20,7 @@ import type { SessionForker } from "../fork-session"
 import type { ShadowVerifyPort } from "../shadow-verify"
 import type { BackgroundSubagentScheduler } from "../subagent-background"
 import type { MailboxPort } from "../subagent-mailbox"
+import type { TurnRegistrySnapshotRef } from "../turn-registry-snapshot"
 
 export interface WireSlotsRuntimeConfig {
   /**
@@ -493,4 +494,23 @@ export interface WireSlotsRuntimeConfig {
    * (default-OFF). Duck-typed via the `@/tool/_shared/write-budget`
    * `SessionWriteBudget` so `@/tool` stays a leaf. */
   writeBudget?: import("@/tool/_shared/write-budget").SessionWriteBudget
+  /**
+   * RFC04-2/3 (MCP tool hot-reload) — OPTIONAL atomically-swappable capability
+   * snapshot pointer. When present, `session-bootstrap` reads
+   * `registrySnapshotRef.current()` at the turn boundary INSTEAD of building a
+   * fresh snapshot from `registry` — so a reload the host published between
+   * turns (via the {@link import("./turn-registry-snapshot").TurnRegistrySnapshotRef}'s
+   * hidden `publish` handle, held ONLY by the host reload controller) is picked
+   * up at the NEXT turn. The pinned generation is read ONCE per turn boundary
+   * (no mid-turn re-query); a turn that already pinned `current()` keeps its
+   * generation across a publish.
+   *
+   * The ref is SEEDED from the SAME `registry` (via `buildTurnRegistrySnapshot`)
+   * so the FIRST turn's snapshot is byte-identical to the no-ref path. Absent
+   * (default / `QUANTA_MCP_HOT_RELOAD` off / no MCP servers) ⇒ session-bootstrap
+   * falls back to `buildTurnRegistrySnapshot(registry)` exactly as today ⇒ no
+   * controller, no observer sink, no ref, byte-identical. `registry` stays the
+   * required dispatch authority; this slot never replaces it.
+   */
+  registrySnapshotRef?: TurnRegistrySnapshotRef
 }

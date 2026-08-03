@@ -63,6 +63,8 @@ const RULES: readonly Rule[] = [
         "unified agent CLI entry — same bootstrap posture as apps/cli/index.ts: loadEnvFiles() runs before the API-key reads in buildLLM/resolveProvider (provider selection is a launch-time decision, not a feature read).",
       "apps/cli/internal.ts":
         "CLI feature-flag bootstrap — threads typed values via AgentConfig; downstream modules never read env directly. TODO(S5): migrate to runtimeConfig progressively.",
+      "apps/cli/auto-title-wire.ts":
+        "God-code split of apps/cli/internal.ts (internal.ts crossed the 1000-line god-MODULE ceiling) — the AI-session titler (`buildAutoTitlePort`) moved here VERBATIM, re-exported from ../internal so importers keep resolving from ./internal. Its ONLY `process.env` is the launch-time `env: process.env` handed to the proven `buildSummarizerLlmCore` (identical to `buildSummarizerLlm`); downstream receives resolved values. Same CLI-bootstrap posture as apps/cli/internal.ts.",
       "apps/cli/configured-endpoint-wire.ts":
         "RFC05 wireE CLI llm-build delegate — two launch-time reads at the composition root: the SELECTOR `QUANTA_LLM_ENDPOINT` (a registered string knob) and the SECRET `QUANTA_ENDPOINT_API_KEY` (owned at the auth call site, a knob-registry secret EXCEPTION — same class as the vendor OPENAI_API_KEY read). Both are resolved to concrete values threaded downstream into `resolveConfiguredEndpoint`; the secret rides only the guarded outgoing request, never a module-level read / a log / a config record. Same CLI-bootstrap surface-parse posture as apps/cli/internal.ts.",
       "apps/cli/config-migration-notice.ts":

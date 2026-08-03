@@ -33,6 +33,7 @@ import {
   type IdentityMode,
   isIdentityMode,
 } from "@/agent/identity"
+import { relistMcpTools } from "@/agent/mcp-reload-source"
 import {
   buildSystemPromptForMode,
   defaultModeVariantRegistry,
@@ -46,7 +47,13 @@ import {
   isToolProfileName,
   type ToolProfileName,
 } from "@/agent/tool-profile"
+import {
+  buildTurnRegistrySnapshot,
+  createTurnRegistrySnapshotRef,
+  type TurnRegistrySnapshot,
+} from "@/agent/turn-registry-snapshot"
 import { type CapabilityDescriptor, runCapabilityProbe, type Surface } from "@/capability"
+import { createMcpToolReloadController } from "@/host/runtime/mcp-tool-reload"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import { StructuredLogger } from "@/observability"
 import type { PermissionContext } from "@/permission"
@@ -578,10 +585,62 @@ const resolveSessionResume = async (
   return { cwd, idMeta, history, sessionId }
 }
 
+/** RFC04-2/3 (MCP tool hot-reload) — assemble the LIVE feeder when the load
+ *  produced reload sources (gated on `QUANTA_MCP_HOT_RELOAD`, so the fields are
+ *  present only then). Returns the `TurnRegistrySnapshotRef` (⇒
+ *  `AgentConfig.registrySnapshotRef`) or `undefined` (⇒ session-bootstrap builds
+ *  from `registry`, byte-identical). Wiring, in order:
+ *   1. SEED the atomic snapshot pointer from the connect-time `tooling.registry`
+ *      (turn-0 is byte-identical to `buildTurnRegistrySnapshot(registry)`).
+ *   2. Build the {@link RebuildSnapshotPort}: relist ALL collected sources →
+ *      `tooling.rebuildRegistryWithMcpTools` (the SAME assembly connect used) →
+ *      one fresh snapshot. Rejects on any relist failure ⇒ the controller
+ *      retains last-known-good (transactional, no partial/empty publish).
+ *   3. `createMcpToolReloadController` over the publisher + rebuild port.
+ *   4. LATE-BIND the controller into the load-time observer so a live
+ *      `tools/list_changed` fires `requestReload`.
+ *  Requires `tooling.rebuildRegistryWithMcpTools` (the CLI sets `exposeRebuild`
+ *  under the SAME gate); absent ⇒ no feeder (defensive — treated as OFF). */
+const buildMcpHotReloadFeeder = (
+  features: BootstrapFeatures,
+  tooling: ReturnType<SessionBootstrapDeps["buildTooling"]>,
+  slog: StructuredLogger,
+): AgentConfig["registrySnapshotRef"] | undefined => {
+  const sources = features.mcpReloadSources
+  const bind = features.bindMcpReloadController
+  const rebuildRegistry = tooling.rebuildRegistryWithMcpTools
+  // All three are present together under the gate; any absent ⇒ OFF (no feeder).
+  if (
+    sources === undefined ||
+    sources.length === 0 ||
+    bind === undefined ||
+    rebuildRegistry === undefined
+  ) {
+    return undefined
+  }
+  // 1. Seed from the connect-time registry (turn-0 byte-identical).
+  const { ref, publish } = createTurnRegistrySnapshotRef(
+    buildTurnRegistrySnapshot(tooling.registry),
+  )
+  // 2. Rebuild port: relist all sources → SAME assembly → snapshot. A relist
+  //    rejection propagates so the controller retains last-known-good.
+  const rebuild = async (): Promise<TurnRegistrySnapshot> =>
+    buildTurnRegistrySnapshot(rebuildRegistry(await relistMcpTools(sources)))
+  // 3. Controller over the publisher + rebuild port (single-flight+dirty, LKG,
+  //    compare-and-publish — the host application service owns WHEN, never HOW).
+  const controller = createMcpToolReloadController({ current: ref.current, publish }, rebuild)
+  // 4. Late-bind the controller into the observer wired at load time.
+  bind(controller)
+  slog.info("mcp.hot_reload.on", { sources: sources.length })
+  return ref
+}
+
 /** Build the lifecycle bundle, optional budget meter, per-run tooling registry,
  *  and MCP surface descriptor; wire MCP pills when servers are present. Verbatim
  *  relocation of the inline lifecycle/tooling/MCP cluster — same construction
- *  order and the same `lifecyclePills.update` mutation. */
+ *  order and the same `lifecyclePills.update` mutation. RFC04-2/3 additionally
+ *  builds the hot-reload feeder (⇒ `registrySnapshotRef`) when the load produced
+ *  reload sources; gate off ⇒ `undefined` (byte-identical). */
 const buildToolingBundle = (
   deps: SessionBootstrapDeps,
   runtime: SessionRuntimeConfigShape,
@@ -602,6 +661,7 @@ const buildToolingBundle = (
   readonly budgetMeter: BudgetMeter | undefined
   readonly tooling: ReturnType<SessionBootstrapDeps["buildTooling"]>
   readonly mcpSurface: ReturnType<SessionBootstrapDeps["buildMcpSurfaceInfo"]>
+  readonly registrySnapshotRef: AgentConfig["registrySnapshotRef"] | undefined
 } => {
   const {
     pills: lifecyclePills,
@@ -657,6 +717,12 @@ const buildToolingBundle = (
     configPath: runtime.mcpConfigPath,
   })
 
+  // RFC04-2/3 (hot-reload) — build the LIVE feeder AFTER the registry exists
+  // (the reload observer→controller edge is late-bound). Gate off / no eligible
+  // source ⇒ `undefined` ⇒ no ref reaches the config ⇒ session-bootstrap builds
+  // the snapshot from `registry` as today (byte-identical).
+  const registrySnapshotRef = buildMcpHotReloadFeeder(features, tooling, slog)
+
   if (features.mcpClients.length > 0) {
     lifecyclePills.update({
       mcp: { servers: [...deps.deriveMcpPillServers(features.mcpTools)] },
@@ -670,6 +736,7 @@ const buildToolingBundle = (
     budgetMeter,
     tooling,
     mcpSurface,
+    registrySnapshotRef,
   }
 }
 
@@ -702,6 +769,7 @@ const assembleBootstrapResult = async (
       budgetMeter,
       tooling,
       mcpSurface,
+      registrySnapshotRef,
     } = buildToolingBundle(deps, runtime, featureCfg, slog, features)
 
     const { stream, run } = deps.buildStreaming(runtime.observeDir, slog)
@@ -813,6 +881,10 @@ const assembleBootstrapResult = async (
       materializeReviewerAgent: deps.materializeReviewerAgent,
       createSubagentBackedGuardianReview: deps.createSubagentBackedGuardianReview,
       createSubagentBackedGuardianAssess: deps.createSubagentBackedGuardianAssess,
+      // RFC04-2/3 (hot-reload) — carry the snapshot ref (present iff the feeder
+      // was built). Spread conditionally so the default-OFF path never puts a
+      // literal `undefined` on the result (exactOptionalPropertyTypes).
+      ...(registrySnapshotRef !== undefined ? { registrySnapshotRef } : {}),
     }
   }
 }

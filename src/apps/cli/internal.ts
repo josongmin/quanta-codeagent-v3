@@ -38,9 +38,7 @@ import {
   selectLlmTransport,
 } from "@/runner/assemble"
 import type { Tooling } from "@/runner/assemble/tooling"
-import { type AutoTitlePort, createAutoTitlePort } from "@/runner/session-ops/auto-title"
 import { resolveSandboxProfileFromEnv } from "@/runtime"
-import { loadSessionById, renameSession } from "@/session"
 import { gateOn, logger, type RunContext, runtimeConfig } from "@/shared"
 import type { AssistantTextPainter, StreamPort } from "@/stream"
 import {
@@ -75,7 +73,11 @@ import {
   type LoadFeaturesOpts,
   loadMcpToolsOrEmpty,
   mcpAutoRestartEnabled,
+  mcpHotReloadEnabled,
+  mcpHotReloadFeatureFields,
+  mcpHotReloadLoadOpts,
   readMcpConfig,
+  resolveMcpHotReload,
   resolveMcpInboundWiring,
   resolveMcpLaunchPolicy,
   resolveMcpOAuthProvider,
@@ -463,60 +465,11 @@ export const buildSummarizerLlm = (
     env: process.env,
   })
 
-/** jun-6 (RFC jun-6-ai-session-title) — TRUE iff a title is still the
- *  auto/placeholder value (safe to overwrite). A fresh id-mode session is
- *  seeded with `defaultUntitled(now)` (`"Untitled YYYY-MM-DD HH:mm"`); an empty
- *  title is also a placeholder. Anything else ⇒ a human (or a prior auto-title)
- *  named it ⇒ the titler MUST yield (don't-clobber). Mirrors the leaf's
- *  injected-predicate contract so the leaf never encodes the seeded-title shape. */
-const isAutoTitlePlaceholder = (title: string): boolean =>
-  title === "" || title.startsWith("Untitled")
-
-/** jun-6 (RFC jun-6-ai-session-title) — build the fire-and-forget AI session
- *  titler at the CLI composition root, MIRRORING the `QUANTA_COMPACT_MODEL`
- *  second-LLM construction (`buildSummarizerLlm`): a CHEAP `LLMPort` is built
- *  synchronously from `QUANTA_SESSION_TITLE_MODEL` and injected into
- *  `createAutoTitlePort` alongside the real `renameSession` writer +
- *  `loadSessionById` title-reader + placeholder predicate + clock.
- *
- *  DEFAULT-OFF BYTE-IDENTITY (RFC §1.2): returns `undefined` unless
- *  `runtimeConfig().sessionAutoTitle` is on AND `sessionTitleModel` resolves a
- *  cheap port. Absent ⇒ no `AgentConfig.autoTitlePort` ⇒ the loop's first-turn
- *  title branch is dead ⇒ no extra LLM call, no title write (byte-identical).
- *  The cheap port NEVER falls back to the expensive main model — an armed
- *  `sessionAutoTitle` with no `sessionTitleModel` stays inert (the cost gate).
- *
- *  `seamLlm` is a TEST seam (mirrors `buildSummarizerLlm`/`buildLLM` DI): a
- *  reachability test injects a fake cheap LLM so the titler runs without a real
- *  provider key. Production omits it ⇒ the cheap port is built from env via the
- *  proven `buildSummarizerLlmCore` (retry-wrapped, same as the main stack). */
-export const buildAutoTitlePort = (
-  mainProvider: Provider,
-  signal: AbortSignal,
-  seamLlm?: LLMPort,
-): AutoTitlePort | undefined => {
-  const cfg = runtimeConfig()
-  if (!cfg.sessionAutoTitle) return undefined
-  const llm =
-    seamLlm ??
-    buildSummarizerLlmCore({
-      mainProvider,
-      signal,
-      model: cfg.sessionTitleModel,
-      env: process.env,
-    })
-  // No cheap model ⇒ inert (NEVER the expensive main model). Both the knob AND
-  // the model must be present (advertise-iff-able), exactly like the compaction
-  // summarizer's `QUANTA_COMPACT_MODEL` gate.
-  if (llm === undefined) return undefined
-  return createAutoTitlePort({
-    llm,
-    rename: (id, title) => renameSession(id, title),
-    currentTitle: async (id) => (await loadSessionById(id))?.meta.title,
-    isPlaceholder: isAutoTitlePlaceholder,
-    clock: () => Date.now(),
-  })
-}
+// jun-6 (RFC jun-6-ai-session-title) — the AI-session titler assembly
+// (`buildAutoTitlePort` + its placeholder predicate) moved to `./auto-title-wire`
+// (god-code split; internal.ts was over the 1000-line ceiling). Re-exported below
+// verbatim so every existing `./internal` importer keeps resolving it unchanged.
+export { buildAutoTitlePort } from "./auto-title-wire"
 
 /** jun-6 (RFC jun-6-byok-apikey-helper) — async BYOK variant of {@link buildLLM}
  *  for the LEGACY vendor key path (anthropic/openai). The legacy LLM-build seam
@@ -641,12 +594,17 @@ export const loadFeatures = async (
   // lifecycle pill re-reads it per flush (surface-mints→down-thread, mirrors
   // mcpResourceCapture). No servers ⇒ undefined ⇒ callbacks not wired.
   const mcpHealth = mcpConfigs.length > 0 ? createMcpHealthHolder() : undefined
+  // RFC04-2/3 (hot-reload) — reload observer + source collector, present ONLY
+  // under `QUANTA_MCP_HOT_RELOAD` + configured non-supervised servers (see
+  // resolveMcpHotReload). Gate off ⇒ `undefined` ⇒ byte-identical.
+  const hotReload = resolveMcpHotReload({ configCount: mcpConfigs.length, autoRestart })
   const mcpLoadOpts = buildMcpLoadOpts(slog, {
     autoRestart,
     inboundWiring,
     oauthProvider,
     opts,
     ...(mcpHealth !== undefined ? { mcpHealth } : {}),
+    ...mcpHotReloadLoadOpts(hotReload),
   })
   const {
     tools: mcpBridgedTools,
@@ -728,6 +686,10 @@ export const loadFeatures = async (
     // WS-G (UUX-6-22) — forward the SAME health registry the load callbacks
     // write into so the lifecycle pill overlays live server status per flush.
     ...(mcpHealth !== undefined ? { mcpHealth } : {}),
+    // RFC04-2/3 (hot-reload) — forward the collected reload sources + controller
+    // late-binder so the composition root builds the controller over the SAME
+    // sources the load emitted. Absent ⇒ omitted (byte-identical).
+    ...mcpHotReloadFeatureFields(hotReload),
   }
 }
 
@@ -950,6 +912,11 @@ export const buildTooling = (
     // store up on `Tooling.projectsKbStore`. Omitted when the gate is off
     // (byte-identical default-OFF menu).
     ...(projectsKbSlot !== undefined ? { projectsKb: projectsKbSlot } : {}),
+    // RFC04-2/3 (hot-reload) — expose the registry-rebuild closure ONLY when
+    // `QUANTA_MCP_HOT_RELOAD` is on, so the composition root can build the reload
+    // controller's rebuild port (relist → this SAME assembly → snapshot). Gate
+    // off ⇒ omitted ⇒ no closure captured (byte-identical).
+    ...(mcpHotReloadEnabled() ? { exposeRebuild: true } : {}),
   })
 }
 

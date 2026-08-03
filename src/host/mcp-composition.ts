@@ -1,7 +1,7 @@
 import { spawn as spawnChild } from "node:child_process"
 import { chmod, mkdir, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises"
 import { join as joinPath } from "node:path"
-import type { ElicitationPrompterFactory, SamplingWiringInput } from "@/agent"
+import type { ElicitationPrompterFactory, McpReloadableSource, SamplingWiringInput } from "@/agent"
 import { applyMcpClientWiring, loadMcpTools, type McpStoppable } from "@/agent"
 import {
   createCliOAuthCallback,
@@ -28,6 +28,7 @@ import {
   buildSamplingWiring,
   type McpBrowserFlowResult,
   type McpOAuthDeps,
+  type McpToolReloadController,
   pickMcpNegotiator,
   resolveMcpOAuthKeyringOption,
 } from "@/host/runtime"
@@ -76,6 +77,18 @@ import type { McpHealthHolder } from "./mcp-health"
  *  stability reset, storm cap → DEGRADED). */
 export const mcpAutoRestartEnabled = (): boolean =>
   parseEnvFlag(process.env.QUANTA_MCP_AUTORESTART, false)
+
+/** RFC04-2/3 — MCP tool hot-reload gate. Default-OFF: when unset (the default),
+ *  `loadFeatures` wires NO reload observer + collects NO reload sources, the CLI
+ *  `buildTooling` sets no `exposeRebuild`, and the composition root builds no
+ *  controller / snapshot ref — so `session-bootstrap` rebuilds the turn snapshot
+ *  from `cfg.registry` exactly as today (byte-identical). `QUANTA_MCP_HOT_RELOAD=1`
+ *  activates the LIVE feeder: a non-supervised server's `tools/list_changed`
+ *  republishes the turn capability snapshot at the NEXT turn boundary. Read here
+ *  (composition root) via `parseEnvFlag` — NOT through `runtimeConfigFromEnv` —
+ *  mirroring `QUANTA_MCP_AUTORESTART`; declared in `@/config/knob-inventory`. */
+export const mcpHotReloadEnabled = (): boolean =>
+  parseEnvFlag(process.env.QUANTA_MCP_HOT_RELOAD, false)
 
 /** Build the injected {@link SupervisorDeps} for one MCP server. The real
  *  clock/timer/RNG are injected ONLY here, at the composition root — the
@@ -545,6 +558,19 @@ export interface Features {
    *  pill re-derives per flush with the down overlay. Absent ⇒ no MCP servers
    *  configured (pill boot behavior byte-identical). */
   mcpHealth?: McpHealthHolder
+  /** RFC04-2/3 (hot-reload) — the per-(non-supervised)-server reload sources the
+   *  `onReloadSource` sink collected during `loadMcpTools`, present ONLY when
+   *  `QUANTA_MCP_HOT_RELOAD` is on. The composition root feeds these into the
+   *  reload controller's ALL-SOURCE relist. Absent ⇒ gate off / no eligible
+   *  server ⇒ no controller (byte-identical). */
+  mcpReloadSources?: McpReloadableSource[]
+  /** RFC04-2/3 (hot-reload) — late-bind the reload controller into the observer
+   *  wired at load time (the observer→controller edge is chicken-and-egg: the
+   *  observer must exist BEFORE `loadMcpTools`, the controller AFTER the registry
+   *  is built). The composition root calls this ONCE with the built controller so
+   *  a live `tools/list_changed` reaches `requestReload`. Present iff
+   *  {@link mcpReloadSources} is (same gate); absent ⇒ byte-identical. */
+  bindMcpReloadController?: (controller: McpToolReloadController) => void
 }
 
 /** B1 (jun-04) — the stable elicitation-lease context id the inbound-sampling
@@ -659,6 +685,88 @@ export const resolveMcpInboundWiring = (
   }
 }
 
+/** RFC04-2/3 (hot-reload) — the observer + source-collector + controller late-
+ *  binder the composition root wires when `QUANTA_MCP_HOT_RELOAD` is on. The
+ *  observer→controller edge is chicken-and-egg (observer BEFORE `loadMcpTools`,
+ *  controller AFTER the registry is built), so the observer calls through a
+ *  late-bound `controller` cell set by {@link bindController}. Until bound (i.e.
+ *  a `tools/list_changed` that races the controller build) the notification is a
+ *  no-op — safe, never a mid-turn swap. */
+export interface McpHotReloadWiring {
+  /** Passed to `loadMcpTools` as `resourceObserver`: a delivered
+   *  `tools_list_changed` (already capability-gated by the client) fires the
+   *  bound controller's `requestReload`. Total + no-throw (observer contract). */
+  readonly observer: McpResourceObserver
+  /** Passed to the bridge as `onReloadSource`: collects one source per
+   *  successfully-loaded single-client server. */
+  readonly onReloadSource: (source: McpReloadableSource) => void
+  /** The collected sources (populated during `loadMcpTools`). */
+  readonly sources: McpReloadableSource[]
+  /** Late-bind the built controller so the observer can fire it. */
+  readonly bindController: (controller: McpToolReloadController) => void
+}
+
+/** Build the {@link McpHotReloadWiring} — a fresh observer/collector/binder set,
+ *  gated by the caller (`loadFeatures` only calls this when
+ *  `mcpHotReloadEnabled()` AND at least one server is configured). Pure, no env
+ *  read, no side effects beyond allocating the closures. */
+export const buildMcpHotReloadWiring = (): McpHotReloadWiring => {
+  const sources: McpReloadableSource[] = []
+  let controller: McpToolReloadController | undefined
+  const observer: McpResourceObserver = {
+    onNotification: (event) => {
+      // ONLY a tool-list change relists; resource/prompt changes do not affect
+      // the tool registry. The controller coalesces bursts (single-flight+dirty)
+      // and retains LKG on a failed relist — this observer just orders the work.
+      if (event.kind === "tools_list_changed" && controller !== undefined) {
+        // Fire-and-forget: the observer is total + no-throw; the controller's
+        // own `requestReload` never rejects (a failed rebuild retains LKG).
+        void controller.requestReload()
+      }
+    },
+  }
+  return {
+    observer,
+    onReloadSource: (source) => sources.push(source),
+    sources,
+    bindController: (c) => {
+      controller = c
+    },
+  }
+}
+
+/** RFC04-2/3 (hot-reload) — resolve the {@link McpHotReloadWiring} for a load, or
+ *  `undefined` when the feeder is OFF. Gated on ALL of: `QUANTA_MCP_HOT_RELOAD`
+ *  on, at least one server configured, AND the NON-supervised (single-client)
+ *  path (the bridge emits reload sources only there — auto-restart sessions do
+ *  NOT participate; hot-reload covers non-supervised servers only). Any gate
+ *  false ⇒ `undefined` ⇒ no observer/collector wired (byte-identical). */
+export const resolveMcpHotReload = (args: {
+  readonly configCount: number
+  readonly autoRestart: boolean
+}): McpHotReloadWiring | undefined =>
+  mcpHotReloadEnabled() && args.configCount > 0 && !args.autoRestart
+    ? buildMcpHotReloadWiring()
+    : undefined
+
+/** RFC04-2/3 (hot-reload) — the load-opts hot-reload slice (observer + source
+ *  collector) for {@link buildMcpLoadOpts}. Absent wiring ⇒ `{}` (byte-identical). */
+export const mcpHotReloadLoadOpts = (
+  hotReload: McpHotReloadWiring | undefined,
+): Pick<Parameters<typeof buildMcpLoadOpts>[1], "resourceObserver" | "onReloadSource"> =>
+  hotReload !== undefined
+    ? { resourceObserver: hotReload.observer, onReloadSource: hotReload.onReloadSource }
+    : {}
+
+/** RFC04-2/3 (hot-reload) — the {@link Features} hot-reload slice (collected
+ *  sources + controller late-binder). Absent wiring ⇒ `{}` (byte-identical). */
+export const mcpHotReloadFeatureFields = (
+  hotReload: McpHotReloadWiring | undefined,
+): Pick<Features, "mcpReloadSources" | "bindMcpReloadController"> =>
+  hotReload !== undefined
+    ? { mcpReloadSources: hotReload.sources, bindMcpReloadController: hotReload.bindController }
+    : {}
+
 /** Assemble the optional `loadMcpTools` opts bag from the resolved feature
  *  gates. Extracted from {@link loadFeatures} so the spread branches do not push
  *  that function over biome's cognitive-complexity cap. Every field is
@@ -682,6 +790,12 @@ export const buildMcpLoadOpts = (
      *  every live server's `tools/list_changed` reaches the SAME `requestReload`.
      *  Absent ⇒ neither path wires an observer (byte-identical load). */
     readonly resourceObserver?: McpResourceObserver
+    /** RFC04-2/3 (hot-reload) — the per-(non-supervised)-server reload-source
+     *  collector, present ONLY when `QUANTA_MCP_HOT_RELOAD` is on. The bridge
+     *  invokes it once per successfully-loaded single-client server with a live
+     *  {@link McpReloadableSource}. Absent ⇒ the bridge never calls it
+     *  (byte-identical load). */
+    readonly onReloadSource?: (source: McpReloadableSource) => void
   },
 ): Parameters<typeof loadMcpTools>[2] => ({
   // WS-G (UUX-6-22) — route the ALBB-09 load-error sink + the new exit sink
@@ -735,6 +849,10 @@ export const buildMcpLoadOpts = (
   // shared instance so ANY server's list-change orders the SAME relist. Present
   // only when `QUANTA_MCP_HOT_RELOAD` is on; absent ⇒ slot omitted (byte-identical).
   ...(args.resourceObserver !== undefined ? { resourceObserver: args.resourceObserver } : {}),
+  // RFC04-2/3 (hot-reload) — the single-client path emits one reload source per
+  // successfully-loaded server through this sink. Present only when the gate is
+  // on (supervised servers are skipped by the bridge); absent ⇒ byte-identical.
+  ...(args.onReloadSource !== undefined ? { onReloadSource: args.onReloadSource } : {}),
   ...(args.opts.mcpTransportFor !== undefined ? { transportFor: args.opts.mcpTransportFor } : {}),
   ...(args.oauthProvider !== undefined ? { oauthProvider: args.oauthProvider } : {}),
   // H3 (jun-10 session-scoped egress) — the session proxy env (opened once at

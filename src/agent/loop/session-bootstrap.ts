@@ -232,7 +232,16 @@ export const createRunAgentContext = async (config: AgentConfig): Promise<RunAge
   // provably the same generation. Byte-identical: `snapshot.specs` is exactly
   // `cfg.registry.specs()` — the prior expression — just routed through the
   // record that carries the generation id for the reload publish (RFC04-3).
-  const registrySnapshot = buildTurnRegistrySnapshot(cfg.registry)
+  //
+  // RFC04-2/3 (hot-reload) — when the host wired a `registrySnapshotRef` (gated
+  // on `QUANTA_MCP_HOT_RELOAD`), READ the current published generation at this
+  // turn boundary instead of building one, so a reload published between turns
+  // is picked up NOW. Read ONCE (no mid-turn re-query); a turn that pins this
+  // reference keeps it across any later publish. Absent ref (the default) ⇒
+  // `buildTurnRegistrySnapshot(cfg.registry)` exactly as before (byte-identical;
+  // the ref is seeded from the SAME registry so even turn-0 matches).
+  const registrySnapshot =
+    cfg.registrySnapshotRef?.current() ?? buildTurnRegistrySnapshot(cfg.registry)
 
   const session: TurnSession = {
     config: cfg,

@@ -54,6 +54,15 @@ export interface Tooling {
    *  both consumers — the surface-mints→down-thread contract). Absent ⇒ the tool
    *  was not registered ⇒ `/kb` stays "not wired" (byte-identical default-OFF). */
   projectsKbStore?: ProjectsKbStore
+  /** RFC04-2/3 (MCP tool hot-reload) — re-run THIS SAME assembly with a fresh
+   *  `mcpTools` array, holding EVERY other input (builtin/memory/lsp/git/extra
+   *  tools + origin map + config) constant. The reload controller's rebuild port
+   *  calls this to produce the new `ToolRegistry` from an all-source relist —
+   *  guaranteeing connect and reload can never diverge in tool-name / collision /
+   *  origin / trust logic (there is NO reload-only assembly). Present ONLY when
+   *  the surface set `input.exposeRebuild` (i.e. `QUANTA_MCP_HOT_RELOAD` on);
+   *  absent ⇒ no closure captured, byte-identical default-OFF. */
+  rebuildRegistryWithMcpTools?: (mcpTools: Tool[]) => ToolRegistry
 }
 
 /** Inputs to {@link buildToolingCore}. The surface resolves each field via
@@ -137,6 +146,12 @@ export interface ToolingAssembleInput {
    *  is set. Absent ⇒ the provider arm is never armed (byte-identical to the
    *  cost-only guard); the memory slice never imports the budget module. */
   providerRateLimitRemainingPercent?: (() => number | undefined) | undefined
+  /** RFC04-2/3 (MCP tool hot-reload) — when true, {@link buildToolingCore}
+   *  captures the assembly inputs and returns a {@link Tooling.rebuildRegistryWithMcpTools}
+   *  closure so the host reload controller can rebuild the registry from an
+   *  all-source relist. The SURFACE owns the env read (`QUANTA_MCP_HOT_RELOAD`);
+   *  absent/false ⇒ no closure captured (byte-identical default-OFF). */
+  exposeRebuild?: boolean | undefined
 }
 
 /** Assemble the tool registry and aggregate the per-run config dependencies.
@@ -278,37 +293,47 @@ export const buildToolingCore = (input: ToolingAssembleInput): Tooling => {
           ),
         })
       : []
-  // Origin map tags only the non-builtin source arrays (mcp / lsp / git).
-  // base + memory + subagent tools are `builtin` by the registry default — they
-  // are deliberately not listed, so the map is empty when no opt-in group is
-  // supplied and the origin surface is byte-identical to the legacy registry.
-  const originMap = buildOriginMap([
-    [input.mcpTools, "mcp"],
-    [input.lspTools, "lsp"],
-    [input.lspNavTools, "lsp"],
-    [input.gitToolList, "git"],
-  ])
-  const registry = new ToolRegistry(
-    // ADR-0268 metric egress: wrap each tool with a per-call counter+duration
-    // instrument WHEN OTLP export is live (process-default metric sink set);
-    // byte-identical (verbatim tools) otherwise. `instrumentTool` spreads the
-    // tool so names are preserved — `originMap` (keyed by name) still matches.
-    instrumentToolsForExport([
-      ...buildDefaultTools(buildDefaultToolPorts(input)),
-      ...input.mcpTools,
-      ...memTools,
-      ...input.lspTools,
-      ...input.lspNavTools,
-      ...input.gitToolList,
-      ...(input.extraTools ?? []),
-    ]),
-    originMap,
-  )
+  // Build a registry from a GIVEN mcpTools array, holding every other input
+  // constant. Factored so RFC04 hot-reload's rebuild re-runs the IDENTICAL
+  // assembly (origin map + instrument + merge order) with only `mcpTools`
+  // swapped — connect and reload can never diverge in name/origin/collision.
+  const buildRegistryFor = (mcpTools: Tool[]): ToolRegistry => {
+    // Origin map tags only the non-builtin source arrays (mcp / lsp / git).
+    // base + memory + subagent tools are `builtin` by the registry default — they
+    // are deliberately not listed, so the map is empty when no opt-in group is
+    // supplied and the origin surface is byte-identical to the legacy registry.
+    const originMap = buildOriginMap([
+      [mcpTools, "mcp"],
+      [input.lspTools, "lsp"],
+      [input.lspNavTools, "lsp"],
+      [input.gitToolList, "git"],
+    ])
+    return new ToolRegistry(
+      // ADR-0268 metric egress: wrap each tool with a per-call counter+duration
+      // instrument WHEN OTLP export is live (process-default metric sink set);
+      // byte-identical (verbatim tools) otherwise. `instrumentTool` spreads the
+      // tool so names are preserved — `originMap` (keyed by name) still matches.
+      instrumentToolsForExport([
+        ...buildDefaultTools(buildDefaultToolPorts(input)),
+        ...mcpTools,
+        ...memTools,
+        ...input.lspTools,
+        ...input.lspNavTools,
+        ...input.gitToolList,
+        ...(input.extraTools ?? []),
+      ]),
+      originMap,
+    )
+  }
+  const registry = buildRegistryFor(input.mcpTools)
   return {
     store: input.store,
     embedder: input.embedder,
     sessionId: input.sessionId,
     registry,
+    // RFC04-2/3 — expose the rebuild closure ONLY when the surface opted in
+    // (`QUANTA_MCP_HOT_RELOAD`); absent ⇒ field omitted (byte-identical).
+    ...(input.exposeRebuild === true ? { rebuildRegistryWithMcpTools: buildRegistryFor } : {}),
     // A3 (jul-04) — `buildSearchSlots` now also carries `projectsKbStore` (the SAME
     // store the `projects_kb` tool was registered over) so the surface wires `/kb`
     // over the exact instance the tool writes into (one store, both consumers).
