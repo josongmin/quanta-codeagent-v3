@@ -189,6 +189,112 @@ export const classifyHost = (hostname: string): string | null => {
 /** Back-compat alias: the legacy `ssrfDeny(hostname)` signature. */
 export const ssrfDeny = classifyHost
 
+// ──────────────────── RFC05-1 typed network admission ───────────────────────
+//
+// The legacy `classifyHost` returns a deny REASON string (or null). RFC05-1
+// evolves the SAME structural classifier into a typed IP CLASS + a policy-based
+// admission the LLM transport reuses. There is exactly ONE classifier — the
+// typed layer is derived from the existing `classifyV4`/`classifyV6` verdict, so
+// a form the deny-reason path catches is caught here too (no second parser).
+
+/** Structural network class of a host. `name` = a DNS name (needs resolution).
+ *  `public` = a public IP literal. The rest are the deny classes. */
+export type IpClass =
+  | "public"
+  | "loopback"
+  | "private"
+  | "link_local"
+  | "multicast"
+  | "unspecified"
+  | "name"
+
+/** Endpoint network-admission policy (mirrors the config
+ *  `EndpointNetworkPolicy` vocabulary — kept as a local string union so the net
+ *  slice has no `@/config` import). `public_https` ⇒ HTTPS + public-resolved
+ *  only; `loopback_local` ⇒ HTTP/HTTPS + loopback-resolved only. */
+export type NetworkPolicy = "public_https" | "loopback_local"
+
+/** Map a v4 deny-reason (from {@link classifyV4}) to its typed class. A `null`
+ *  reason means the v4 literal is PUBLIC. */
+const v4ReasonToClass = (reason: string | null): IpClass => {
+  if (reason === null) return "public"
+  if (reason.startsWith("loopback")) return "loopback"
+  if (reason.startsWith("link-local")) return "link_local"
+  if (reason.startsWith("unspecified")) return "unspecified"
+  // private (10/8, 172.16/12, 192.168/16) + CGNAT (100.64/10) are treated as
+  // private for admission (v1 refuses both for both policies).
+  return "private"
+}
+
+/** Map a v6 deny-reason (from {@link classifyV6}, which may carry an embedded-v4
+ *  wrapper label) to its typed class. A `null` reason means PUBLIC. */
+const v6ReasonToClass = (reason: string | null): IpClass => {
+  if (reason === null) return "public"
+  if (reason.includes("loopback")) return "loopback"
+  if (reason.includes("link-local")) return "link_local"
+  if (reason.includes("unspecified")) return "unspecified"
+  // ULA (fc00::/7), site-local (fec0::/10), IPv4-mapped/compat/NAT64/6to4 wrappers
+  // carrying a private v4 — all admission-private.
+  return "private"
+}
+
+/**
+ * Classify a host's structural network class (RFC05-1). Pure + synchronous.
+ * Returns `"name"` for a DNS name (the caller resolves it and re-classifies
+ * each address). Multicast is detected structurally (224/4, ff00::/8); every
+ * other non-public literal maps through the SAME reason path the deny-string
+ * classifier uses, so the two layers can never disagree.
+ */
+export const classifyIpClass = (hostname: string): IpClass => {
+  const bare = normalizeHost(hostname)
+  if (bare === "localhost" || bare.endsWith(".localhost")) return "loopback"
+  if (bare.includes(":")) {
+    const hx = expandV6(bare)
+    if (hx === null) return "name" // not a valid v6 literal ⇒ treat as a name
+    if ((hx[0] ?? 0) >= 0xff00) return "multicast" // ff00::/8
+    return v6ReasonToClass(classifyV6(bare))
+  }
+  const v4 = parseV4Octets(bare)
+  if (v4 === null) return "name"
+  if ((v4[0] ?? 0) >= 224 && (v4[0] ?? 0) <= 239) return "multicast" // 224.0.0.0/4
+  return v4ReasonToClass(classifyV4(v4))
+}
+
+/**
+ * Admit (or refuse) a fully-formed endpoint URL under a {@link NetworkPolicy}.
+ * Returns `null` when admitted, or a typed deny REASON string otherwise. Pure —
+ * the DNS-resolved re-check for a NAME host is done by {@link fetchWithSsrfGuard}
+ * (this function classifies the URL's literal/scheme only).
+ *
+ *   - `public_https`   : scheme MUST be https AND the host class MUST be public
+ *                        (a `name` is provisionally admitted here — the guard's
+ *                        resolve step re-classifies every A/AAAA address).
+ *   - `loopback_local` : scheme http OR https AND the host class MUST be
+ *                        loopback (a `name` like `localhost` classifies to
+ *                        loopback above; any other name is refused since a
+ *                        non-loopback name has no place in a local preset).
+ *
+ * v1 refuses arbitrary private LAN for BOTH policies (RFC-05 stop rule).
+ */
+export const admitEndpointUrl = (url: URL, policy: NetworkPolicy): string | null => {
+  const cls = classifyIpClass(url.hostname)
+  if (policy === "loopback_local") {
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return `loopback_local: non-http(s) scheme rejected (${url.protocol})`
+    }
+    if (cls !== "loopback") {
+      return `loopback_local: host ${url.hostname} is ${cls}, only loopback is allowed`
+    }
+    return null
+  }
+  // public_https
+  if (url.protocol !== "https:") {
+    return `public_https: non-https scheme rejected (${url.protocol})`
+  }
+  if (cls === "public" || cls === "name") return null
+  return `public_https: host ${url.hostname} is ${cls}, only a public address is allowed`
+}
+
 /** Max redirect hops we follow before giving up — matches the WHATWG fetch
  *  default of 20 only loosely; 5 is the common "enough for legit CDNs, short
  *  enough to bound a redirect-loop attack" ceiling. */
@@ -220,28 +326,45 @@ const defaultResolveHost: HostResolver = async (hostname) => {
   return records.map((r) => r.address)
 }
 
-/** Validate a single (post-redirect) URL: https-only + structural SSRF deny +
- *  (for DNS names) resolved-IP check. Throws {@link SsrfGuardError} on rejection.
- *  Shared by the initial fetch and every redirect hop so a 30x to an internal
- *  address cannot bypass the pre-flight host check (the original SSRF-redirect
- *  bypass). Async because the DNS-rebinding layer resolves the name. */
-const assertUrlSafe = async (url: URL, resolveHost: HostResolver): Promise<void> => {
-  // http→https downgrade and all non-https schemes (file:, data:, gopher:, …)
-  // are rejected — a redirect must not escape TLS.
-  if (url.protocol !== "https:") {
-    throw new SsrfGuardError(
-      `redirect to non-https URL rejected (got ${url.protocol})`,
-      url.hostname,
-      "non_https_redirect",
-    )
+/** Does a RESOLVED address satisfy the policy? `public_https` requires a public
+ *  address; `loopback_local` requires a loopback address. Returns a deny reason
+ *  or null. Used for the DNS-rebinding re-check of every A/AAAA record. */
+const resolvedAddrDeny = (addr: string, policy: NetworkPolicy): string | null => {
+  const cls = classifyIpClass(addr)
+  if (policy === "loopback_local") {
+    return cls === "loopback" ? null : `resolves to ${addr} — ${cls}, not loopback`
   }
-  const deny = classifyHost(url.hostname)
+  return cls === "public" ? null : `resolves to ${addr} — ${cls}, not public`
+}
+
+/** Validate a single (post-redirect) URL under a {@link NetworkPolicy}: scheme +
+ *  structural SSRF class + (for DNS names) resolved-IP re-check. Throws
+ *  {@link SsrfGuardError} on rejection. Shared by the initial fetch and every
+ *  redirect hop so a 30x to a disallowed address cannot bypass the pre-flight
+ *  check (the original SSRF-redirect bypass). Async because the DNS-rebinding
+ *  layer resolves the name.
+ *
+ *  DEFAULT `public_https` reproduces the pre-RFC05 behavior byte-for-byte
+ *  (https-only + private/loopback/link-local deny) for every existing caller. */
+const assertUrlSafe = async (
+  url: URL,
+  resolveHost: HostResolver,
+  policy: NetworkPolicy = "public_https",
+): Promise<void> => {
+  // Scheme + literal-host class admission for the policy (http→https downgrade,
+  // file:/data:/gopher:, and private/loopback/metadata literals are rejected
+  // per policy — public_https reproduces the historical https-only deny).
+  const deny = admitEndpointUrl(url, policy)
   if (deny !== null) {
-    throw new SsrfGuardError(`SSRF denied: ${url.hostname} — ${deny}`, url.hostname, deny)
+    // Preserve the historical reason code for the non-https case so existing
+    // callers/tests that branch on `reason` stay stable.
+    const reason =
+      url.protocol !== "https:" && policy === "public_https" ? "non_https_redirect" : deny
+    throw new SsrfGuardError(`SSRF denied: ${url.hostname} — ${deny}`, url.hostname, reason)
   }
-  // DNS-rebinding layer: a public NAME (not an IP literal — those are already
-  // verdicted above) is resolved and EVERY returned address is structurally
-  // re-checked. This catches the realistic attack — an attacker pointing their
+  // DNS-rebinding layer: a NAME (not an IP literal — those are already verdicted
+  // above) is resolved and EVERY returned address is re-checked AGAINST THE
+  // POLICY. This catches the realistic attack — an attacker pointing their
   // domain's A/AAAA record straight at 169.254.169.254 / 127.0.0.1 / RFC1918 —
   // which the hostname check alone cannot see. (A full TOCTOU rebind that flips
   // the record between this resolve and fetch's own connect still needs IP
@@ -257,10 +380,10 @@ const assertUrlSafe = async (url: URL, resolveHost: HostResolver): Promise<void>
     return
   }
   for (const addr of addresses) {
-    const ipDeny = classifyHost(addr)
+    const ipDeny = resolvedAddrDeny(addr, policy)
     if (ipDeny !== null) {
       throw new SsrfGuardError(
-        `SSRF denied: ${url.hostname} resolves to ${addr} — ${ipDeny}`,
+        `SSRF denied: ${url.hostname} ${ipDeny}`,
         url.hostname,
         `dns_rebind_${ipDeny}`,
       )
@@ -296,11 +419,16 @@ export const fetchWithSsrfGuard = async (
   fetcher: typeof fetch,
   initialUrl: string,
   init: RequestInit & { signal: AbortSignal },
-  opts: { resolveHost?: HostResolver } = {},
+  opts: { resolveHost?: HostResolver; networkPolicy?: NetworkPolicy } = {},
 ): Promise<Response> => {
   const resolveHost = opts.resolveHost ?? defaultResolveHost
+  // DEFAULT `public_https` — every existing caller (web_fetch, read_image_url,
+  // network-proxy) keeps the historical https-only + private-deny behavior
+  // byte-for-byte. Only an explicit `loopback_local` (the local-OSS endpoint
+  // preset) admits http-to-loopback.
+  const policy = opts.networkPolicy ?? "public_https"
   let current = new URL(initialUrl)
-  await assertUrlSafe(current, resolveHost)
+  await assertUrlSafe(current, resolveHost, policy)
   for (let hop = 0; hop <= SSRF_MAX_REDIRECTS; hop++) {
     const res = await fetcher(current.toString(), { ...init, redirect: "manual" })
     // 3xx with a Location is a redirect under redirect:"manual" — re-guard.
@@ -330,7 +458,7 @@ export const fetchWithSsrfGuard = async (
         "malformed_location",
       )
     }
-    await assertUrlSafe(next, resolveHost)
+    await assertUrlSafe(next, resolveHost, policy)
     current = next
   }
   // Unreachable: the loop either returns a non-redirect response or throws on

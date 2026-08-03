@@ -93,13 +93,66 @@ export interface McpSettings {
   readonly allowManagedMcpServersOnly?: boolean
 }
 
+/** OpenAI-compatible endpoint wire surface. Closed union — a value outside it
+ *  makes the whole endpoint fail-closed at parse (never a silent wrong grammar
+ *  on the wire). Mirrors {@link CreateLLMOptions.surface} minus the `auto`
+ *  inference: a declarative endpoint always states its wire EXPLICITLY. */
+export type EndpointWireApi = "chat" | "responses"
+
+/** Network admission class an endpoint is pinned to (RFC05-1 vocabulary).
+ *  `public_https` ⇒ HTTPS to a public-resolved address only; `loopback_local`
+ *  ⇒ HTTP/HTTPS to a loopback-resolved address only (the local-OSS profile).
+ *  Closed union — an out-of-set value drops the endpoint. */
+export type EndpointNetworkPolicy = "public_https" | "loopback_local"
+
+/** Fixed allowlist of symbolic references an endpoint may use for its auth key
+ *  / header values. This is NOT an arbitrary env-var name: it is a SYMBOLIC
+ *  ref the host maps to a concrete secret at composition time. Keeping it a
+ *  closed set is the load-bearing anti-exfil guard — a hostile repo endpoint
+ *  cannot reference `ANTHROPIC_API_KEY` / `AWS_*` / any other process env to
+ *  harvest a cross-provider credential (RFC-05 D1 trust; audit A1). */
+export const ENDPOINT_SECRET_REFS = ["endpoint_api_key"] as const
+export type EndpointSecretRef = (typeof ENDPOINT_SECRET_REFS)[number]
+
+/** One named OpenAI-compatible endpoint profile (RFC-05 D1). The CONTROL-plane
+ *  record: it carries only DECLARATIVE data + restricted symbolic references —
+ *  NEVER a resolved secret value (those live only in host composition, never in
+ *  a config record / receipt / hash material). `authRef`/`headerRefs` reference
+ *  the fixed {@link ENDPOINT_SECRET_REFS} allowlist; an arbitrary env name or a
+ *  static header carrying a secret-looking value is rejected at parse. */
+export interface OpenAIEndpointOptions {
+  /** REQUIRED endpoint base URL. Untrusted input — admitted only through the
+   *  trust gate + RFC05-1 network policy (SSRF/scheme/redirect classified). */
+  readonly baseUrl: string
+  /** Explicit wire surface — no base-URL inference (audit A4). */
+  readonly wireApi: EndpointWireApi
+  /** REQUIRED model id (no port-level default — factory rationale). */
+  readonly model: string
+  /** Network admission class this endpoint is pinned to (RFC05-1). */
+  readonly networkPolicy: EndpointNetworkPolicy
+  /** Optional symbolic ref for the endpoint's own API key. Must be in
+   *  {@link ENDPOINT_SECRET_REFS}. Absent ⇒ no-auth (loopback presets). */
+  readonly authRef?: EndpointSecretRef
+  /** Optional header-name → symbolic-ref map. Every value must be in
+   *  {@link ENDPOINT_SECRET_REFS} — never a raw value, never a cross-provider
+   *  env name. */
+  readonly headerRefs?: Readonly<Record<string, EndpointSecretRef>>
+  /** Optional static NON-secret query params (e.g. api-version). */
+  readonly query?: Readonly<Record<string, string>>
+}
+
 /** The SECURITY-load-bearing band of a layer (§4.c). For a repo layer, its
- *  LOOSENING parts (permission `allow`/`ask`, `hooks`, `mcp`) are dropped when
- *  the project is untrusted; its TIGHTENING parts (permission `deny`) survive. */
+ *  LOOSENING parts (permission `allow`/`ask`, `hooks`, `mcp`, `openaiEndpoints`)
+ *  are dropped when the project is untrusted; its TIGHTENING parts (permission
+ *  `deny`) survive. */
 export interface LayerSecurity {
   readonly permissions?: PermissionSettings
   readonly hooks?: HooksSettings
   readonly mcp?: McpSettings
+  /** Named OpenAI-compatible endpoint profiles (RFC-05 D1). LOOSENING — a repo
+   *  layer's endpoints are dropped when the project is untrusted (they redirect
+   *  the LLM transport, a capability grant). */
+  readonly openaiEndpoints?: Readonly<Record<string, OpenAIEndpointOptions>>
 }
 
 /** The BENIGN band of a layer (§4.c) — grants no capability. */
@@ -134,6 +187,10 @@ export interface ResolvedSettings {
   readonly mcpDeniedServers: readonly string[]
   /** Benign merged model id, if any layer set one. */
   readonly model: string | undefined
+  /** Resolved named OpenAI endpoint profiles after precedence + trust gate
+   *  (id-keyed deterministic replace; untrusted repo endpoints dropped).
+   *  RFC-05 D1. Empty map when no layer set one (byte-identical nothing). */
+  readonly openaiEndpoints: Readonly<Record<string, OpenAIEndpointOptions>>
   /** Provenance: which repo layers had capability grants DROPPED for untrust
    *  (parity with `tengu_settings_*_untrusted_source_ignored`). Empty when the
    *  project is trusted or no repo layer carried a grant. Categorical only —
@@ -149,5 +206,6 @@ export const EMPTY_RESOLVED: ResolvedSettings = {
   mcpEnabledServers: [],
   mcpDeniedServers: [],
   model: undefined,
+  openaiEndpoints: {},
   droppedForUntrust: [],
 }

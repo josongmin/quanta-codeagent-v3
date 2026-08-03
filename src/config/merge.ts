@@ -22,7 +22,13 @@
  *      over `allow` in the resolved set (defense-in-depth).
  */
 
-import type { HookGroupSetting, ResolvedSettings, SettingsLayer, SettingsLayerName } from "./types"
+import type {
+  HookGroupSetting,
+  OpenAIEndpointOptions,
+  ResolvedSettings,
+  SettingsLayer,
+  SettingsLayerName,
+} from "./types"
 import { LAYER_PRECEDENCE, REPO_LAYERS } from "./types"
 
 /** De-dup a list preserving first-seen order. */
@@ -70,6 +76,10 @@ export const mergeSettings = (
   const hooks: Record<string, HookGroupSetting[]> = Object.create(null)
   const mcpEnabled: string[] = []
   const mcpDenied: string[] = []
+  // Id-keyed endpoint map. Iterating low→high means a higher-precedence layer's
+  // same-id endpoint OVERWRITES the lower one (deterministic replace, §4.a) —
+  // NOT a field union. NULL-PROTO so an id of `__proto__` stays a safe own-key.
+  const openaiEndpoints: Record<string, OpenAIEndpointOptions> = Object.create(null)
   let model: string | undefined
   const droppedForUntrust: SettingsLayerName[] = []
 
@@ -160,6 +170,19 @@ export const mergeSettings = (
       mcpDenied.push(...sec.mcp.deniedServers)
     }
 
+    // ── openaiEndpoints — LOOSENING (redirects the LLM transport / references a
+    //    credential). Dropped for an untrusted repo layer; id-keyed replace so a
+    //    higher-precedence layer's same id wins. No managed-only lockdown flag
+    //    exists for endpoints (none defined in the schema), so `managedX` gating
+    //    does not apply here. ──
+    const eps = sec.openaiEndpoints
+    if (eps !== undefined && Object.keys(eps).length > 0) {
+      if (dropLoosening) droppedHere = true
+      else {
+        for (const [id, ep] of Object.entries(eps)) openaiEndpoints[id] = ep
+      }
+    }
+
     if (droppedHere) droppedForUntrust.push(layerName)
   }
 
@@ -178,6 +201,7 @@ export const mergeSettings = (
     mcpEnabledServers: mcpEnabledFinal,
     mcpDeniedServers: uniq(mcpDenied),
     model,
+    openaiEndpoints,
     droppedForUntrust,
   }
 }

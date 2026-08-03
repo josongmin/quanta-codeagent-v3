@@ -34,15 +34,25 @@ export {
   TrustStore,
 } from "./trust-store"
 export type {
+  EndpointNetworkPolicy,
+  EndpointSecretRef,
+  EndpointWireApi,
   HookGroupSetting,
   LayerBenign,
   LayerSecurity,
+  OpenAIEndpointOptions,
   PermissionSettings,
   ResolvedSettings,
   SettingsLayer,
   SettingsLayerName,
 } from "./types"
-export { EMPTY_RESOLVED, LAYER_PRECEDENCE, MACHINE_OWNED_LAYERS, REPO_LAYERS } from "./types"
+export {
+  EMPTY_RESOLVED,
+  ENDPOINT_SECRET_REFS,
+  LAYER_PRECEDENCE,
+  MACHINE_OWNED_LAYERS,
+  REPO_LAYERS,
+} from "./types"
 
 /** The four discovery filenames (Claude-shape JSON — §9 Q1 decided JSON). */
 export const PROJECT_SETTINGS_FILE = "settings.json"
