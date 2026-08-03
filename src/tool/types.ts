@@ -129,6 +129,15 @@ export interface ToolContext {
    *  Absent ⇒ `"parent"` falls back to the depth-derived parent label
    *  (byte-identical legacy). Duck-typed so `@/tool` never imports `@/agent`. */
   parentAgentLabel?: string
+  /** RFC02-0 — STABLE session/thread owner identity for background shells. The
+   *  bash tool stamps this onto every background shell it detaches into the
+   *  `BashBgRegistry` so a cross-session surface cannot kill another session's
+   *  shell (only `killOwned(id, ownerId)` succeeds). Provided by the dispatch
+   *  seam from `AgentConfig.sessionId`; NEVER derived from a shell id / PID /
+   *  cwd. Absent (legacy caller / no session id) ⇒ the shell is unowned
+   *  (listable but not owner-killable) — byte-identical for every caller that
+   *  does not set a session id. Duck-typed so `@/tool` never imports `@/agent`. */
+  ownerId?: string
   /** Session-scoped WorkingState handle (Codex memory L3 absorption). Optional
    *  and duck-typed so the `@/tool` slice never imports `@/agent`: the agent
    *  loop builds the concrete instance when `AgentConfig.workingState` is set,
@@ -530,6 +539,9 @@ export type ShellToolContext = CoreToolContext &
     // the stale-read guard). Kept here so `bash` narrows to this view exactly.
     | "agentLabel"
     | "readFileState"
+    // RFC02-0 — the stable session owner stamped onto detached background
+    // shells so kill is owner-scoped (see `ToolContext.ownerId`).
+    | "ownerId"
   >
 
 /** File-mutating tools (`write`/`edit`/`apply_patch`/`scripted_replace`/notebook). */

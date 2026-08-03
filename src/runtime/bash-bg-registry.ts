@@ -79,6 +79,11 @@ export type BgShellStatus = "running" | "completed" | "killed" | "aborted"
  *  the by-value snapshot shape ({@link BgShellSnapshot}) to consumers. */
 export interface BgShellHandle {
   readonly id: string
+  /** RFC02-0 — the caller-provided STABLE owner identity (session/thread) that
+   *  gates cross-session kill. Provided at `register`/`adopt` time by the
+   *  composition; NEVER derived from the id/PID/cwd. Absent = a legacy/unowned
+   *  entry: visible to an operator list but not killable through `killOwned`. */
+  readonly ownerId?: string
   readonly command: string
   readonly cwd: string
   readonly startedAt: number
@@ -103,6 +108,10 @@ export interface BgShellHandle {
  *  cannot mutate registry-owned buffers. */
 export interface BgShellSnapshot {
   readonly id: string
+  /** RFC02-0 — mirror of {@link BgShellHandle.ownerId}. Absent for
+   *  legacy/unowned entries (an operator list renders these as `owner:unknown`;
+   *  the owner-scoped kill path refuses them). */
+  readonly ownerId?: string
   readonly command: string
   readonly cwd: string
   readonly startedAt: number
@@ -111,6 +120,16 @@ export interface BgShellSnapshot {
   readonly stderr: string
   readonly exitCode: number | null
 }
+
+/** RFC02-0 — typed outcome of {@link BashBgRegistry.killOwned}. On success the
+ *  reaped snapshot; on refusal a CLOSED reason union (never a boolean) so every
+ *  surface renders a specific message and a new arm is a compile error. */
+export type OwnedKillResult =
+  | { readonly ok: true; readonly snapshot: BgShellSnapshot }
+  | {
+      readonly ok: false
+      readonly reason: "not_found" | "ambiguous" | "not_owned"
+    }
 
 /** The minimal `Bun.Subprocess`-like slice the registry needs. Kept structural
  *  so the spawner adapter can be a test fake without dragging the full Bun
@@ -155,7 +174,13 @@ export interface BashBgRegistry {
    *  expected to start draining (drain is owned by THIS module — the caller
    *  only spawns). `signal`, when aborted, marks the handle `"aborted"` and
    *  kills the child. */
-  register(args: { command: string; cwd: string; signal?: AbortSignal }): Promise<BgShellHandle>
+  register(args: {
+    command: string
+    cwd: string
+    signal?: AbortSignal
+    /** RFC02-0 — optional STABLE owner identity from the composition. */
+    ownerId?: string
+  }): Promise<BgShellHandle>
   /** ADR-0296 auto-background — ADOPT a child already spawned + drained by
    *  `runShell` (foreground path that hit its deadline). Unlike {@link register}
    *  (which spawns afresh, bypassing the foreground sandbox/env/wrap pipeline),
@@ -176,6 +201,12 @@ export interface BashBgRegistry {
     readonly stderr: BoundedBuffer
     readonly exited: Promise<number>
     readonly drainsDone: Promise<void>
+    /** RFC02-0 — optional STABLE owner identity from the composition. */
+    readonly ownerId?: string
+    /** RFC02-0 (test seam) — supply a deterministic id instead of a random
+     *  UUID. Production callers omit this; only tests that need to assert
+     *  prefix resolution pass an explicit id. */
+    readonly id?: string
   }): Promise<{ id: string; snapshot: BgShellSnapshot }>
   /** Lookup a snapshot by id. Returns `null` when the id is unknown / evicted. */
   get(id: string): BgShellSnapshot | null
@@ -188,8 +219,24 @@ export interface BashBgRegistry {
     opts?: { regex?: RegExp; timeoutMs?: number; signal?: AbortSignal },
   ): Promise<{ snapshot: BgShellSnapshot; matched: boolean; timedOut: boolean } | null>
   /** SIGTERM the shell (escalating to SIGKILL after the grace window). Returns
-   *  the final snapshot once the child has been reaped. `null` for unknown id. */
+   *  the final snapshot once the child has been reaped. `null` for unknown id.
+   *
+   *  UNSCOPED — this is HOST-SHUTDOWN / operator-tree machinery and MUST NOT be
+   *  reached from a model-facing or cross-session surface. Owner-scoped surfaces
+   *  use {@link killOwned}. */
   kill(id: string): Promise<BgShellSnapshot | null>
+  /** RFC02-0 — bounded, owner-scoped snapshot list. Returns ONLY the shells
+   *  whose `ownerId` deep-equals `ownerId`, in insertion order. Never leaks
+   *  another owner's shells and never legacy/unowned entries (those have no
+   *  owner to match). Pure read; no side effects. */
+  listOwned(ownerId: string): readonly BgShellSnapshot[]
+  /** RFC02-0 — the ONLY kill path a model tool / cross-session surface may use.
+   *  Resolves `idOrPrefix` to EXACTLY one shell that (a) is owned by `ownerId`
+   *  and (b) matches by exact id OR unique prefix. Refuses (typed reason, no
+   *  kill) on: unknown id, an ambiguous prefix, or a shell owned by someone else
+   *  / unowned. On success SIGTERMs (escalating) and returns the reaped
+   *  snapshot. */
+  killOwned(idOrPrefix: string, ownerId: string): Promise<OwnedKillResult>
   /** Evict + kill every registered shell. Called on session shutdown to avoid
    *  orphan processes outliving the agent. Idempotent. */
   killAll(): Promise<void>
@@ -325,6 +372,30 @@ const wireAbortSignal = (
   return { onAbort }
 }
 
+/** RFC02-0 — resolve `idOrPrefix` against the OWNER-FILTERED candidate ids to
+ *  EXACTLY one id, or a typed refusal. Pure (no registry access) so the
+ *  exact-vs-unique-prefix policy is one testable seam:
+ *   - an EXACT id match wins outright (even if it is also a prefix of another);
+ *   - otherwise a prefix that matches EXACTLY ONE candidate resolves;
+ *   - zero matches ⇒ `not_found`; two-or-more prefix matches ⇒ `ambiguous`.
+ *  The candidate set is already owner-scoped, so `not_found` also covers a
+ *  known-but-foreign/unowned id (the caller maps that to `not_owned`). */
+export const resolveOwnedShellId = (
+  idOrPrefix: string,
+  ownedIds: readonly string[],
+):
+  | { readonly ok: true; readonly id: string }
+  | { readonly ok: false; readonly reason: "not_found" | "ambiguous" } => {
+  if (ownedIds.includes(idOrPrefix)) return { ok: true, id: idOrPrefix }
+  const matches = ownedIds.filter((id) => id.startsWith(idOrPrefix))
+  if (matches.length === 0) return { ok: false, reason: "not_found" }
+  if (matches.length > 1) return { ok: false, reason: "ambiguous" }
+  // length === 1 — `matches[0]` is defined; the non-null assertion is safe.
+  const only = matches[0]
+  if (only === undefined) return { ok: false, reason: "not_found" }
+  return { ok: true, id: only }
+}
+
 /** Build a fresh registry. The module-level singleton calls this with defaults;
  *  tests call it directly to get an isolated instance. */
 export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgRegistry => {
@@ -355,7 +426,7 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
     onChunk: (text: string) => void,
   ): Promise<void> => drainReadableStream(stream, onChunk)
 
-  const register: BashBgRegistry["register"] = async ({ command, cwd, signal }) => {
+  const register: BashBgRegistry["register"] = async ({ command, cwd, signal, ownerId }) => {
     if (entries.size >= maxEntries) {
       await evictOldest()
     }
@@ -368,6 +439,7 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
     })
     const handle: BgShellHandle = {
       id,
+      ...(ownerId !== undefined ? { ownerId } : {}),
       command,
       cwd,
       startedAt: Date.now(),
@@ -417,6 +489,7 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
 
   const snapshot = (h: BgShellHandle): BgShellSnapshot => ({
     id: h.id,
+    ...(h.ownerId !== undefined ? { ownerId: h.ownerId } : {}),
     command: h.command,
     cwd: h.cwd,
     startedAt: h.startedAt,
@@ -434,7 +507,10 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
     if (entries.size >= maxEntries) {
       await evictOldest()
     }
-    const id = crypto.randomUUID()
+    // RFC02-0 — production callers omit `id` (random UUID); a test seam may
+    // supply a deterministic id to exercise prefix resolution. Never derive an
+    // owner from it.
+    const id = args.id ?? crypto.randomUUID()
     let exitedResolve!: () => void
     const exited = new Promise<void>((res) => {
       exitedResolve = res
@@ -445,6 +521,7 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
     // terminal lifecycle from here.
     const handle: BgShellHandle = {
       id,
+      ...(args.ownerId !== undefined ? { ownerId: args.ownerId } : {}),
       command: args.command,
       cwd: args.cwd,
       startedAt: Date.now(),
@@ -547,6 +624,44 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
     return snapshot(h)
   }
 
+  const listOwned: BashBgRegistry["listOwned"] = (ownerId) => {
+    const out: BgShellSnapshot[] = []
+    // Map iteration = insertion order ⇒ stable, deterministic list.
+    for (const h of entries.values()) {
+      if (h.ownerId === ownerId) out.push(snapshot(h))
+    }
+    return out
+  }
+
+  const killOwned: BashBgRegistry["killOwned"] = async (idOrPrefix, ownerId) => {
+    // Candidate universe is OWNER-FILTERED first — a foreign or unowned id is
+    // simply not a candidate, so it can never be resolved (and never killed).
+    const ownedIds: string[] = []
+    for (const h of entries.values()) {
+      if (h.ownerId === ownerId) ownedIds.push(h.id)
+    }
+    const resolved = resolveOwnedShellId(idOrPrefix, ownedIds)
+    if (!resolved.ok) {
+      // `not_found` here means: not among THIS owner's shells. If the id exists
+      // but belongs to another owner (or is unowned), report `not_owned` so the
+      // refusal is precise (and does not confirm/deny a foreign id's content).
+      if (resolved.reason === "not_found" && entries.has(idOrPrefix)) {
+        return { ok: false, reason: "not_owned" }
+      }
+      return { ok: false, reason: resolved.reason }
+    }
+    const h = entries.get(resolved.id)
+    if (h === undefined) return { ok: false, reason: "not_found" }
+    if (h.status === "running") {
+      h.status = "killed"
+      h.kill()
+    }
+    await h.exited.catch(() => {
+      /* already terminal */
+    })
+    return { ok: true, snapshot: snapshot(h) }
+  }
+
   const killAll: BashBgRegistry["killAll"] = async () => {
     const ids = [...entries.keys()]
     for (const id of ids) {
@@ -573,6 +688,8 @@ export const createBashBgRegistry = (config: BashBgRegistryConfig = {}): BashBgR
     get,
     awaitHandle,
     kill,
+    listOwned,
+    killOwned,
     killAll,
     size: () => entries.size,
     oldestId: () => {
