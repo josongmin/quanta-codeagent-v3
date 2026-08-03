@@ -73,6 +73,11 @@ const nodeLine = (snapshot: ActivitySnapshot, id: string, depth: number): string
   const glyph = GLYPH[n.status] ?? "?"
   let line = `${indent}${glyph} ${n.label}`
   if (n.tokens > 0) line += `  ${fmtTokens(n.tokens)} tok`
+  // RFC02-5 — a correlated long-running operation shows its stable operation id
+  // inline so a surface can stitch this row's running→done|failed to the run/
+  // thread/turn that ordered it. Low-cardinality (an id, never free text). Only
+  // correlated nodes carry this, so ordinary rows stay byte-identical.
+  if (n.correlation !== undefined) line += `  · op:${n.correlation.operationId}`
   // Only the node that is ITSELF blocked carries the why-stuck annotation; a
   // container shows the 🛑 glyph (the branch is blocked) but not a redundant
   // "blocked" label — the real reason lives on the leaf below it.

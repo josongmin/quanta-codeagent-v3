@@ -84,10 +84,12 @@ const link = (state: ActivityState, parentId: string | null, id: string): void =
 const openNode = (state: ActivityState, init: NodeInit): void => {
   const existing = state.nodes.get(init.id)
   if (existing !== undefined) {
-    // Idempotent re-open. Identity (id/kind/PARENT) + lifecycle + counters are
-    // IMMUTABLE after open — re-parenting a live node is rejected by design (a
-    // producer that re-emits on reconnect must keep the same parent). Only the
-    // presentational `label`/`meta` refresh. Pass `meta: {}` to clear.
+    // Idempotent re-open. Identity (id/kind/PARENT/correlation) + lifecycle +
+    // counters are IMMUTABLE after open — re-parenting a live node is rejected by
+    // design (a producer that re-emits on reconnect must keep the same parent),
+    // and the RFC02-5 correlation is identity (the operation the node projects)
+    // so a re-open never rewrites it. Only the presentational `label`/`meta`
+    // refresh. Pass `meta: {}` to clear.
     state.nodes.set(init.id, {
       ...existing,
       label: init.label,
@@ -104,6 +106,7 @@ const openNode = (state: ActivityState, init: NodeInit): void => {
     tokens: 0,
     toolCalls: 0,
     ...(init.at !== undefined ? { startedAt: init.at } : {}),
+    ...(init.correlation !== undefined ? { correlation: init.correlation } : {}),
     ...(init.meta !== undefined ? { meta: init.meta } : {}),
   })
   link(state, init.parentId, init.id)
