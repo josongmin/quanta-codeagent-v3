@@ -2,11 +2,12 @@ import { isAbsolute, resolve } from "node:path"
 import type { ConfirmDecision } from "@/agent"
 import type { ToolAction } from "@/permission"
 import { splitHunks } from "@/runner/diff-ops"
-import { applyHunkSelection } from "@/runner/hunk-apply"
+import { applyHunkSelection, type HunkApplyResult } from "@/runner/hunk-apply"
+import { applyHunkSelectionWithReceipt } from "@/runner/hunk-mutation-journal"
 import { runtimeConfig } from "@/shared"
 import { type ActionDiff, computeActionDiff } from "../diff-preview"
-import { parseHunkSelection, renderHunkChoices, shapePartialDecision } from "./hunk-select"
 import type { CliHitlDeps } from "./cli-approval-prompt"
+import { parseHunkSelection, renderHunkChoices, shapePartialDecision } from "./hunk-select"
 
 export const maybeHunkOption = async (
   deps: Pick<CliHitlDeps, "cwd">,
@@ -49,13 +50,46 @@ export const runHunkSelect = async (
     return false
   }
   const path = isAbsolute(diff.path) ? diff.path : resolve(deps.cwd, diff.path)
-  const result = await applyHunkSelection({
+  const result = await applyAccepted(deps, path, diff, selected)
+  if (result.status === "applied") deps.rejectCounter.recordAccept()
+  else deps.rejectCounter.recordDeny()
+  return shapePartialDecision(result, selected, ids, diff.path)
+}
+
+/** Apply the accepted subset through the single hunk-mutation owner. When
+ *  RFC06-4's `hunkMutationReceipt` gate is ON and a durable journal store is
+ *  wired into composition, the apply is wrapped so it persists a CAS undo
+ *  receipt (`@/runner/hunk-mutation-journal`) — the SAME `applyHunkSelection`
+ *  engine is called exactly once inside the wrapper. Gate OFF or no store ⇒ the
+ *  identical direct `applyHunkSelection` call as before (byte-identical). */
+const applyAccepted = async (
+  deps: CliHitlDeps,
+  path: string,
+  diff: ActionDiff,
+  selected: readonly string[],
+): Promise<HunkApplyResult> => {
+  if (runtimeConfig().hunkMutationReceipt && deps.mutationJournal !== undefined) {
+    const out = await applyHunkSelectionWithReceipt(
+      {
+        operationId: crypto.randomUUID(),
+        path,
+        before: diff.before,
+        after: diff.after,
+        selectedHunkIds: selected,
+      },
+      { store: deps.mutationJournal },
+    )
+    // Project the receipt wrapper's result back onto the engine's own result
+    // shape so `shapePartialDecision` (and the reject counter) are unchanged.
+    if (out.status === "applied") {
+      return { status: "applied", appliedHunkIds: out.receipt.appliedHunks, content: out.content }
+    }
+    return out
+  }
+  return applyHunkSelection({
     path,
     before: diff.before,
     after: diff.after,
     selectedHunkIds: selected,
   })
-  if (result.status === "applied") deps.rejectCounter.recordAccept()
-  else deps.rejectCounter.recordDeny()
-  return shapePartialDecision(result, selected, ids, diff.path)
 }

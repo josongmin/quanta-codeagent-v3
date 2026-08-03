@@ -89,6 +89,27 @@ export interface ReviewFinding {
   category?: string
   /** One-line reviewer summary of the finding (RFC09-2). */
   shortSummary?: string
+  /** RFC06-4 (B5) — OPTIONAL anchor binding this finding to a REAL hunk of the
+   *  diff the reviewer saw. Validated by `@/tool/git/review-anchor`; an anchor
+   *  whose `hunkId`/hashes don't match the diff is marked non-actionable rather
+   *  than trusted. Absent ⇒ the old blob-comment shape, byte-identical. */
+  anchor?: ReviewCommentAnchor
+}
+
+/** RFC06-4 (B5) — a validated anchor for an inline review comment. Bound to a
+ *  `(path, hunkId)` of a specific `(beforeHash, afterHash)` diff so the comment
+ *  cannot silently re-target a diff the reviewer never saw. Consumed by the
+ *  hunk-mutation receipt path; NOT a second finding schema. */
+export interface ReviewCommentAnchor {
+  readonly path: string
+  /** 1-based line the comment addresses (within the anchored hunk's new side). */
+  readonly line: number
+  /** Hunk id (`h1`, `h2`, …) from `splitHunks(before, after)` on the SAME diff. */
+  readonly hunkId: string
+  /** sha256 of the diff's `before` content — pins the anchor to that snapshot. */
+  readonly beforeHash: string
+  /** sha256 of the diff's `after` content. */
+  readonly afterHash: string
 }
 
 export interface ReviewReport {

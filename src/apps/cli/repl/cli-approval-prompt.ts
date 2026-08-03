@@ -1,16 +1,13 @@
-import { type ConfirmDecision } from "@/agent"
-import type { PendingApprovalView } from "@/protocol/session"
-import type { ApprovalDecisionResult } from "@/runner/orchestrate"
-import {
-  prefixGrantLabel,
-  type ToolAction,
-  type TrustScopeRegistry,
-} from "@/permission"
+import type { ConfirmDecision } from "@/agent"
 import type { BootstrapIdleMonitor, BootstrapRejectCounter } from "@/host/bootstrap"
+import { prefixGrantLabel, type ToolAction, type TrustScopeRegistry } from "@/permission"
+import type { PendingApprovalView } from "@/protocol/session"
+import type { HunkMutationJournalStore } from "@/runner/hunk-mutation-journal"
+import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import { type ActionDiff, diffPreviewEnabled, renderActionDiff } from "../diff-preview"
 import { preflightApplyWarning, preflightCheckEnabled } from "../preflight"
-import type { MidTurnApprovalChannel } from "./mid-turn-approval-channel"
 import { maybeHunkOption, runHunkSelect } from "./cli-hunk-select-flow"
+import type { MidTurnApprovalChannel } from "./mid-turn-approval-channel"
 
 export interface CliHitlDeps {
   readonly idleMonitor: BootstrapIdleMonitor
@@ -18,6 +15,10 @@ export interface CliHitlDeps {
   readonly channel: MidTurnApprovalChannel
   readonly cwd: string
   readonly trustScope?: { registry: TrustScopeRegistry; projectKey: string }
+  /** RFC06-4 (B5) — durable CAS undo journal store. Present only when the host
+   *  composition wires it AND `hunkMutationReceipt` is on; absent ⇒ per-hunk
+   *  apply stays a direct `applyHunkSelection` call (byte-identical). */
+  readonly mutationJournal?: HunkMutationJournalStore
 }
 
 interface EscalationScopeView {
