@@ -63,14 +63,12 @@ const DEFAULT_MICROCOMPACT_INTERVAL_MS = 30_000
 const lastMicrocompactAt = new Map<string, number>()
 
 /* ------------------------------------------------------------------ */
-/* RFC-01 A7 — context-headroom advisory (aug-02 absorption).          */
-/*                                                                      */
-/* The strict-"1" gate that opts a deployment into the advisory. Read   */
-/* via `gateOnStrict(process.env, ...)` at the wire (the composition-   */
-/* adjacent seam) — the PURE latch (`stepHeadroomLatch`) stays env-free */
-/* in `@/agent/compaction`. Unset ⇒ never emitted ⇒ byte-identical.     */
-/* ------------------------------------------------------------------ */
-export const CONTEXT_HEADROOM_ADVISORY_ENV = "QUANTA_CONTEXT_HEADROOM_ADVISORY"
+/* RFC-01 A7 — context-headroom advisory (aug-02 absorption). The strict-"1"    */
+/* opt-in gate (`QUANTA_CONTEXT_HEADROOM_ADVISORY`) is owned by @/shared         */
+/* runtimeConfig (`contextHeadroomAdvisory`); the @/agent wire only READS that   */
+/* resolved boolean — it never touches process.env. The PURE latch              */
+/* (`stepHeadroomLatch`) stays env-free in `@/agent/compaction`. Unset ⇒ never   */
+/* emitted ⇒ byte-identical.                                                     */
 
 /** Per-session edge-latch for the headroom advisory (keyed by session so
  *  concurrent runs don't share the arm/disarm state). Starts armed lazily. */
@@ -104,9 +102,10 @@ const emitContextHeadroomAdvisory = (
   usedTokens: number,
   limitTokens: number,
   thresholdTokens: number,
-  env: Record<string, string | undefined> = process.env,
 ): void => {
-  if (!gateOnStrict(env, CONTEXT_HEADROOM_ADVISORY_ENV)) return
+  // Gate resolved in @/shared (runtimeConfig owns the process.env read); the
+  // @/agent slice never touches process.env directly. Strict `=== "1"` opt-in.
+  if (!runtimeConfig().contextHeadroomAdvisory) return
   if (config.stream === undefined) return
   const key = config.sessionId ?? ""
   let latch = headroomLatches.get(key)

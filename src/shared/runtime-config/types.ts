@@ -26,6 +26,11 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  `bgCompactionEnabled` slice gate). Default false ⇒ the loop's existing
    *  synchronous proactive/reactive compaction paths are byte-identical. */
   readonly bgCompaction: boolean
+  /** RFC-01 A7 context-headroom advisory (`QUANTA_CONTEXT_HEADROOM_ADVISORY`).
+   *  Strict `=== "1"` opt-in. Default false ⇒ the compaction wire emits no
+   *  `context_headroom_crossed` event and never touches the latch — byte-identical.
+   *  Owned here so the @/agent slice reads a resolved boolean, not process.env. */
+  readonly contextHeadroomAdvisory: boolean
   /** RFC jun-6-microcompaction — tier-1 tool-result eviction gate
    *  (`QUANTA_MICROCOMPACT`). Opt-in: `true` ONLY when the value is
    *  exactly `"1"`. Default false ⇒ `maybeCompact` never constructs the

@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
 import { type HeadroomLatchState, stepHeadroomLatch } from "@/agent/compaction/index"
 import { maybeCompact } from "@/agent/loop/compaction-wire"
+import { __resetRuntimeConfig } from "@/shared"
 import type { LLMPort, Message, StreamEvent, StreamInput } from "@/llm"
 import type { AgentEvent } from "@/stream"
 
@@ -161,10 +162,12 @@ describe("context-headroom advisory — REAL maybeCompact wire (RFC01-1)", () =>
       if (!(key in envSnapshot)) delete process.env[key]
     }
     Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
   })
 
   test("gate ON ⇒ exactly one headroom event carrying used/limit/threshold", async () => {
     process.env.QUANTA_CONTEXT_HEADROOM_ADVISORY = "1"
+    __resetRuntimeConfig()
     const cap: AgentEvent[] = []
     const cfg = cfgWith(cap, "sess-on")
     const wm = fakeWm(overThreshold())
@@ -183,6 +186,7 @@ describe("context-headroom advisory — REAL maybeCompact wire (RFC01-1)", () =>
 
   test("second turn still above ⇒ no re-emit (edge-latched across turns)", async () => {
     process.env.QUANTA_CONTEXT_HEADROOM_ADVISORY = "1"
+    __resetRuntimeConfig()
     const cap: AgentEvent[] = []
     const cfg = cfgWith(cap, "sess-latch")
     // Same session across two calls: after the first compaction the wm shrinks,
@@ -195,6 +199,7 @@ describe("context-headroom advisory — REAL maybeCompact wire (RFC01-1)", () =>
 
   test("gate OFF ⇒ ZERO headroom events (byte-identical default-OFF)", async () => {
     delete process.env.QUANTA_CONTEXT_HEADROOM_ADVISORY
+    __resetRuntimeConfig()
     const cap: AgentEvent[] = []
     const cfg = cfgWith(cap, "sess-off")
     await runWire(cfg, fakeWm(overThreshold()), 1)

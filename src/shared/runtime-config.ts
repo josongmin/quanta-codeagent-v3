@@ -120,6 +120,9 @@ const parseCompactionSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // slice gate; `parseBool` also accepts true/on but the slice gate is the
     // SSOT, so keep it strict here too).
     bgCompaction: gateOnStrict(env, "QUANTA_BG_COMPACTION"),
+    // RFC-01 A7 — context-headroom advisory: strict `=== "1"` opt-in. Owned here
+    // so the @/agent compaction wire reads a resolved boolean (never process.env).
+    contextHeadroomAdvisory: gateOnStrict(env, "QUANTA_CONTEXT_HEADROOM_ADVISORY"),
     // ADR-0296 auto-background — default bash `timeout_behavior` + detach
     // deadline. Default `background` (ships ON, Claude-Code-style): a command
     // past its deadline DETACHES into the bg-registry instead of being killed.

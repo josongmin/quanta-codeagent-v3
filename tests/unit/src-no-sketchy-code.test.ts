@@ -67,8 +67,6 @@ const RULES: readonly Rule[] = [
         "Injection-first by design (the file is explicitly env-free/homedir-free — every path injected): `process.env` is ONLY the default for the injected `env` param so the CLI entry works without threading, while tests inject a fake env. The action flag is read off that injected param, not a module-level process.env — same CLI-bootstrap posture as apps/cli/internal.ts. TODO(S5): migrate the flag to runtimeConfig progressively.",
       "apps/cli/ask-user-wire.ts":
         "Injection-first: `process.env` is ONLY the default for the injected `env` param (tests pass a fake env); the gate is read off that param via `gateOn(env, ...)`, never a module-level process.env. Same DI-boundary posture as config-migration-notice.ts.",
-      "agent/loop/compaction-wire.ts":
-        "Injection-first (RFC01 A7 advisory): `process.env` is ONLY the default for the injected `env` param of `emitContextHeadroomAdvisory`; the strict-1 opt-in gate is read off that param via `gateOnStrict(env, ...)`, never a module-level process.env. The env-direct wire read (not runtimeConfig) is deliberate so the advisory gate can be toggled per-call in tests without a runtime-config reset. Same DI-boundary posture as config-migration-notice.ts.",
       "apps/cli/fetch-rules-wire.ts":
         "Injection-first: `process.env` is ONLY the default for the injected `env` param (tests pass a fake env); the gate is read off that param via `gateOn(env, ...)`, never a module-level process.env. Same DI-boundary posture as config-migration-notice.ts.",
       "apps/bench/index.ts": "bench CLI has its own dotenv shim; same bootstrap posture as the CLI",
