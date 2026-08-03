@@ -37,6 +37,7 @@ import {
   removeWorktree,
   WorktreeForkError,
   type WorktreeInspection,
+  worktreeTargetIdentity,
 } from "@/runtime"
 import {
   loadSessionById,
@@ -223,19 +224,29 @@ export const transitionThreadToWorktree = async (
   // slugifies it). We persist the intent with the SAME path the create owner
   // will produce so the record is the exact mutation target from step 1.
   const now = clock()
-  // (1) Persist the `creating` INTENT before any git effect. We do not yet know
-  // the final path/branch the create owner mints, so we record a provisional
-  // intent, then re-persist the exact path/branch after the effect. The
-  // provisional path is the convention path; the authority is refreshed at
-  // publish. baseSha is recorded up-front (drift detection).
-  const provisionalPath = `${req.repoRoot}/.quanta/worktrees/${req.ownershipId}`
+  // (1) Persist the `creating` INTENT before any git effect. The intent records
+  // the EXACT sanitized `{ path, branch }` that `createPersistentWorktree` will
+  // mint (shared `worktreeTargetIdentity` SSOT) — NOT a raw provisional. This is
+  // load-bearing: if we crash between the git effect and the ready-publish, the
+  // durable `creating` record already points at the real target, so
+  // `reconcileCreatingWorktree` matches the live registry and promotes it
+  // (never mis-declares a live worktree `failed`). baseSha is recorded up-front
+  // (drift detection). Resolve BEFORE persisting so an empty/invalid branch
+  // fails with no orphan record.
+  let target: { readonly worktreePath: string; readonly branch: string }
+  try {
+    target = worktreeTargetIdentity(req.ownershipId, req.repoRoot, req.branch)
+  } catch (e) {
+    const detail = e instanceof WorktreeForkError ? (e.detail ?? e.message) : String(e)
+    return { kind: "failed", errorCode: ERR_GIT, detail }
+  }
   const intent = makeWorkspaceCreateIntent({
     ownershipId: req.ownershipId,
     ownerThreadId: req.ownerThreadId,
     repoRoot: req.repoRoot,
     repoId: req.repoId,
-    path: provisionalPath,
-    branch: req.branch ?? `fork-${req.ownershipId}`,
+    path: target.worktreePath,
+    branch: target.branch,
     baseSha: req.baseSha,
     now,
   })
@@ -261,7 +272,9 @@ export const transitionThreadToWorktree = async (
     const failAt = clock()
     const failedT = transitionWorkspaceState(intent, "failed", failAt, ERR_GIT)
     if (failedT.ok) await persistOwnership(saved, failedT.record)
-    await removeWorktree(provisionalPath, req.repoRoot, { branch: intent.branch }).catch(
+    // Clean the SAFE target (the exact sanitized path the create owner used —
+    // the create owner may have left a partial).
+    await removeWorktree(target.worktreePath, req.repoRoot, { branch: intent.branch }).catch(
       () => undefined,
     )
     // RFC02-5 — the effect FAILED; emit the single terminal `failed` transition
@@ -334,8 +347,21 @@ export const reconcileCreatingWorktree = async (
     )
     return { kind: "quarantine", ownership: q.ok ? q.record : ownership }
   }
-  const registered = await findRegisteredExact(inspected.worktrees, ownership.path)
-  if (registered !== undefined && registered.branch === ownership.branch) {
+  // Match by the path DERIVED from the (unique) ownershipId — the deterministic
+  // `.quanta/worktrees/<safeId(ownershipId)>` the create owner actually mints —
+  // NOT the persisted `ownership.path`. This is robust to a legacy/pre-fix
+  // `creating` record that stored a raw (un-sanitized) provisional path/branch:
+  // the derived slug path uniquely identifies OUR worktree, so branch-string
+  // drift can never orphan a successfully-created worktree. (New records already
+  // persist the exact sanitized target; this closes the door for old ones too.)
+  const expectedPath = worktreeTargetIdentity(
+    ownership.ownershipId,
+    ownership.repoRoot,
+  ).worktreePath
+  const registered =
+    (await findRegisteredExact(inspected.worktrees, expectedPath)) ??
+    (await findRegisteredExact(inspected.worktrees, ownership.path))
+  if (registered !== undefined) {
     const r = transitionWorkspaceState(ownership, "ready", clock())
     return { kind: "promote_ready", ownership: r.ok ? r.record : ownership }
   }

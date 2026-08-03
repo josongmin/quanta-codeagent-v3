@@ -74,6 +74,30 @@ const safeRef = (s: string): string => {
   return s
 }
 
+/** RFC-06 §RFC06-2 — the EXACT `{ worktreePath, branch }` that
+ *  {@link createPersistentWorktree} will mint for an ownership id + optional
+ *  branch override. Pure + idempotent (safeId/safeBranch are stable under
+ *  re-application). The ThreadRollback current-thread transition persists THIS
+ *  (the real, sanitized mutation target) as the `creating` intent — so a crash
+ *  between the git effect and the ready-publish cannot leave the durable record
+ *  pointing at an un-sanitized provisional path/branch that
+ *  `reconcileCreatingWorktree` would mis-match against the live registry and
+ *  wrongly declare `failed` (orphaning a successfully-created worktree).
+ *  Throws {@link WorktreeForkError} when the branch is empty after sanitization
+ *  (a deliberate-branch-name violation) — resolve BEFORE persisting any intent. */
+export const worktreeTargetIdentity = (
+  id: string,
+  repoRoot: string,
+  branch?: string,
+): { readonly slug: string; readonly worktreePath: string; readonly branch: string } => {
+  const slug = safeId(id)
+  return {
+    slug,
+    worktreePath: `${repoRoot}/.quanta/worktrees/${slug}`,
+    branch: safeBranch(branch ?? `fork-${slug}`),
+  }
+}
+
 /** Create a persistent worktree at `<repoRoot>/.quanta/worktrees/<safeId>`
  *  on branch `fork-<safeId>` (overridable via `opts.branch`). Base ref
  *  defaults to `HEAD`; pass `opts.baseRef` to fork from a different commit.
@@ -94,14 +118,14 @@ export const createPersistentWorktree = async (
     throw new WorktreeForkError(`Not a git repository (or git unavailable): ${repoRoot}`)
   }
 
-  const slug = safeId(id)
-  // Override-or-default — but always re-sanitize so a malicious branch name
-  // (e.g. `; rm -rf /`) can't escape the `git` arg string we build below.
-  // Branches use the stricter `safeBranch`; refs use the more-permissive
-  // `safeRef` so `origin/main`, `HEAD~3`, commit shas, etc. survive intact.
-  const branch = safeBranch(opts?.branch ?? `fork-${slug}`)
+  // Single source of the sanitized target identity (shared with the intent
+  // record the ThreadRollback transition persists — no raw/sanitized drift).
+  // Override-or-default is always re-sanitized so a malicious branch name
+  // (e.g. `; rm -rf /`) can't escape the `git` arg string we build below;
+  // refs use the more-permissive `safeRef` so `origin/main`, `HEAD~3`, commit
+  // shas, etc. survive intact.
+  const { slug, worktreePath, branch } = worktreeTargetIdentity(id, repoRoot, opts?.branch)
   const baseRef = safeRef(opts?.baseRef ?? "HEAD")
-  const worktreePath = `${repoRoot}/.quanta/worktrees/${slug}`
 
   // `-B` already delimits the branch arg; quoting + `--` after it gives belt-
   // and-braces protection in case a sanitized token still resembles a flag.

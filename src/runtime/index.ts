@@ -82,6 +82,7 @@ export {
   forceRemoveWorktree,
   removalReachedAbsence,
   removeWorktree,
+  worktreeTargetIdentity,
   WorktreeForkError,
 } from "./worktree-fork"
 // RFC-06 §RFC06-1 — typed porcelain worktree inspector (read adapter only; no
