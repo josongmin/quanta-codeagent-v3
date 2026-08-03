@@ -19,8 +19,12 @@
 | [07 Claude 오케스트레이션](rfc-07-claude-orchestration.md) | **Workflow 엔진 이미 있음**(`src/workflow/index.ts` agent/parallel/pipeline/phase/fanout export, gated `QUANTA_WORKFLOW`). Task-DAG·mailbox `to:id`·fork·named-registry·lineage gate·codemode-REPL 다 LIVE. dontAsk=`acceptEdits`/`auto`가 이미 사이 티어. | 얇은 delta 3: existing `TaskRegistry`/target policy를 재사용하는 named-`to:` resolver · `BashBgRegistry` drain observer 기반 line-stream watch(measure-first) · `assignee/dependencies`의 owner/blockedBy/blocks read projection. 나머지 DROP | D1-resolver S/READY · D2-watch MED/NOT READY · D3-projection S/READY |
 | [08 UX polish & deferred](rfc-08-ux-polish-deferred.md) | keybindings·Ultra=`ReasoningEffort:"max"`·codemode per-cell cap·MCP version SSOT·OS-keyring은 이미 있음. palette/shortcut-editor 등 renderer는 이 repo 밖이다. | **BUILD 1개**: 기존 `EffortStore`를 직접 쓰는 bindable `effort-cycle` action. PARK 7 · DROP 8. 새 cycle store/default chord 금지. | BUILD-1 S · 나머지 PARK/DROP |
 | [09 Residual gaps](rfc-09-residual-gaps.md) | coverage critic의 detail-only residue를 live code로 재검증. LSP callable/MCP surface와 `fork_turns`+delegation policy는 이미 live. in-process hook append도 live. | command-hook stdout→existing untrusted prompt-hook bridge · review finding의 model-visible verdict/category/short summary. owner 없는 outcome/last-turn scope는 PARK. | A2 S/READY · A4 S/READY · 나머지 DROP/PARK |
+| [10 Second-order sweep](rfc-10-second-order-sweep.md) | **DRY 선언(defended).** raw corpus(bin strings·366 protocol types·387 SDK 필드·i18n)서 audit에 안 잡힌 ~34 blind-spot 토큰 채굴 → 100% already-built(shell_snapshot·async-tool ADR-0287·NotebookeEdit·memory_tool·review three-dot 등) 또는 non-absorbable(117+ GUI client-RPC/sandbox/connector). | **신규 gap 0.** `dangerouslyDisableSandbox`는 quanta의 의도적 안전 divergence(Open-Q, 흡수 아님). | BUILD 0 |
 
 ## 커버리지 회계 (정직한 정정)
+
+**수렴(loop-until-dry):** 4차 sweep 모두 완료 — (1) lettered audit→RFC-01~08, (2) coverage-gap→RFC-07/08, (3) coverage-critic→RFC-09, (4) raw-corpus 2nd-order→RFC-10=**DRY**. 각 sweep이 "gap"의 ~75%를 already-built로 붕괴시켰고, 마지막 raw-corpus sweep은 100% 붕괴 → **더 팔 게 없다.** wrong-DROP 누적 0(전 스팟체크 실재 확인).
+
 
 감사문서의 lettered 후보(A1–A10·B1–B8·C1–C7·D1–D3 + Workflow/REPL)는 RFC-01~08, detail 파일에만 있던 residue는 RFC-09에서 모두 `BUILD`/`MEASURE`/`PARK`/`DROP`으로 disposition했다. 이는 **100% 구현 약속이 아니라 100% 회계**다. `_coverage-critic.md`는 누락을 찾은 adversarial input이며, live-code 반증과 최종 scope는 RFC-09가 우선한다. grounding-first 결과 RFC-07 Workflow와 RFC-09의 LSP 도구/`fork_turns`도 shipped였고, 신규 BUILD은 owner와 소비자가 확인된 얇은 delta만 남는다.
 
