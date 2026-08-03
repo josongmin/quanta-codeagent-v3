@@ -7,25 +7,34 @@
  * `SkillProposalArtifactPort` / approval machine itself — it declares a
  * structural {@link SkillStagePort} and lets the host inject one. THIS file is
  * that host adapter: it composes the REAL `createSkillProposalArtifactPort`
- * (RFC03-2/3 CAS staging/promote, backed by `@/storage` sha256 + realpath-jail +
- * atomic write) with the REAL `createApprovalStateMachine`, mirroring the
- * in-agent `tier1/skill.ts#buildProposalStagePort` composition and the
- * `external-config-migration-skills-memory-frontdoor` proof.
+ * (RFC03-2/3) with the REAL `createApprovalStateMachine`, mirroring the in-agent
+ * `tier1/skill.ts#buildProposalStagePort` composition and the
+ * `external-config-migration-skills-memory-frontdoor` proof. The artifact port's
+ * CAS `promote` (the only step that touches disk) writes via `@/storage`
+ * sha256 + realpath-jail + atomic write; the pre-promote `staging` (`put`) uses
+ * the artifact port's DEFAULT store — an in-process map, NOT disk.
  *
- * Behavior: an imported `.claude/skills/*​/SKILL.md` bytes are `put` into the CAS
- * store and an approval is opened bound to the EXACT artifact hash. NO live-dir
- * write happens here — promotion into `~/.quanta/skills` runs ONLY on an operator
- * approve (via the artifact port's CAS `promote`). Absent this port the migration
- * slice fails CLOSED (imported skills are NOT written anywhere) — so wiring it is
- * what turns a startup skill import from a silent drop into a staged proposal.
+ * Behavior: an imported `.claude/skills/*​/SKILL.md`'s bytes are `put` into the
+ * (in-process) staging store and an approval is opened bound to the EXACT
+ * artifact hash. NO live-dir write happens here — promotion into `~/.quanta/skills`
+ * runs ONLY on an operator approve (the artifact port's CAS `promote`). Absent
+ * this port the migration slice fails CLOSED (imported skills are NOT written
+ * anywhere) — so wiring it turns a startup skill import from a silent drop into
+ * a staged, review-bound proposal.
  *
- * NOTE (render surface): the approval this opens lives in a fresh in-process
- * approval machine created per import run. There is no startup approval-render
- * surface consuming it yet, so the staged proposal persists as a content-
- * addressed CAS artifact (durable, inert) while its approval binding is
- * in-memory. That is the deliberate fail-safe boundary — bytes are staged and
- * reviewable, never live-written without approval; surfacing the pending
- * approval to the operator at startup is a separate render decision (see handoff).
+ * ⚠️ SCOPE — promote actuator DEFERRED (hellaudit A2, explicit follow-up, NOT a
+ * silent dead-seam): the approval this opens carries `resumeStep:
+ * "promote-skill-proposal"`, but there is currently NO production consumer that,
+ * on approve, re-verifies + calls the artifact port's `promote`. `resumeStep` is
+ * a label, not a dispatched action, and this staging store + approval machine are
+ * fresh PER import run (both discarded when the run ends — the staged bytes are
+ * NOT durable). So on this path a skill is staged + a review is opened but cannot
+ * yet be promoted live. This is fail-SAFE (never an unapproved write) but the
+ * import→approve→promote loop is OPEN. Closing it is a security-sensitive design
+ * decision — a resume-dispatch (`resumeStep` → actuator) that re-verifies the
+ * bound hash + CAS-promotes, driven by a chosen review surface (startup notice
+ * vs. an interactive `skills review` command). Tracked in the RFC03 catalog as an
+ * explicit follow-up; do NOT claim durable persistence or a working promote here.
  */
 
 import { createHash } from "node:crypto"

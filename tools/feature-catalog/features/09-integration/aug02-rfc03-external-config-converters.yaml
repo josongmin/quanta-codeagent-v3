@@ -18,6 +18,15 @@ purpose: |
   path surfaces a migration notice and routes discovered skills into the
   approval-bound stage seam (same gate as RFC03-2/3 promote). Additive: no
   import runs without the user passing the staged approval.
+  DEFERRED (hellaudit A2 — explicit follow-up, NOT a silent dead-seam): the
+  approve->CAS-promote ACTUATOR is not yet wired. The staged approval carries
+  resumeStep "promote-skill-proposal" but no production consumer dispatches it to
+  the artifact port's promote, and the staging store + approval machine are fresh
+  per import run (staged bytes are NOT durable). So a skill is staged +
+  review-bound but not yet promotable live. Fail-SAFE (never an unapproved write).
+  Closing the loop is a security-sensitive design choice: a resumeStep->actuator
+  resume-dispatch that re-verifies the bound hash + CAS-promotes, driven by a
+  chosen review surface (startup notice vs. an interactive `skills review`).
 evidence:
   code:
     - src/migration/external-config/convert.ts
@@ -31,3 +40,4 @@ evidence:
       - tests/unit/external-config-migration-skills-memory-hellgate.test.ts
       - tests/unit/external-config-migration-skills-memory-frontdoor.test.ts
       - tests/unit/config-migration-import-skill-stage-frontdoor.test.ts
+      - tests/unit/rfc03-import-stage-failsafe-boundary.test.ts

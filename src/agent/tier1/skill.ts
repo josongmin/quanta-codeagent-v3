@@ -109,7 +109,11 @@ const buildProposalStagePort = (
     stage: async (args) => {
       await artifact.put(args.bytes)
       // Bind an approval to EXACTLY these bytes. status/settle semantics are
-      // unchanged; the host's approve handler re-verifies + CAS-promotes.
+      // unchanged. ⚠️ hellaudit A2: `resumeStep` is a LABEL, not a dispatched
+      // action — no production consumer re-verifies + CAS-promotes on approve
+      // yet, so the proposal is staged + review-bound but not yet promotable
+      // live. Fail-SAFE (never an unapproved write); the approve→promote actuator
+      // is an explicit RFC03 follow-up (a resumeStep→actuator resume-dispatch).
       approval?.request({
         threadId,
         kind: "permission",
