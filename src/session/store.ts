@@ -16,6 +16,7 @@ import {
   sessionsRoot,
   sessionsRootAsync,
 } from "./paths"
+import { rollbackCheckpointRecordSchema, rollbackOperationRecordSchema } from "./rollback-record"
 import type { SessionRootProvider } from "./root-port"
 import { type SavedSession, type SavePayload, SESSION_VERSION, type SessionMeta } from "./types"
 
@@ -231,6 +232,15 @@ const savedSessionSchema = z.object({
   reason: z.string(),
   turns: z.number().int().nonnegative(),
   messages: z.array(messageSchema),
+  // RFC-01 A2 (aug-02) — durable rollback records. BOTH optional: a legacy
+  // snapshot (minted before these fields) validates and the loader defaults
+  // the absent collection to `[]` (see `readSavedSession`). The element
+  // schemas pin `recordVersion` to a literal and the operation `state` to a
+  // closed enum, so an UNKNOWN version/state fail-closes the WHOLE load (the
+  // file is refused, never partially applied) — the fail-closed migration
+  // contract in rfc-01-persistence-resume.md §RFC01-0.
+  rollbackCheckpoints: z.array(rollbackCheckpointRecordSchema).optional(),
+  rollbackOperations: z.array(rollbackOperationRecordSchema).optional(),
 })
 
 /** First message element that fails the S19 schema: its array index plus a
@@ -352,6 +362,20 @@ export const saveSessionById = async (
     reason: payload.reason,
     turns: payload.turns,
     messages: payload.messages,
+    // RFC-01 A2 — persist durable rollback records through the SAME atomic
+    // snapshot + canonical encoder. Conditional spread (never `field:
+    // undefined`) so a payload that omits them serializes BYTE-IDENTICALLY to
+    // the pre-RFC on-disk shape (the fields are simply absent). Callers that
+    // mutate rollback state (the `@/agent` coordinator) read the full snapshot,
+    // fold a record, and re-save the whole payload — mirroring how `messages`
+    // is a full-snapshot field, so a plain transcript save never has to know
+    // about rollback records to avoid dropping them.
+    ...(payload.rollbackCheckpoints !== undefined
+      ? { rollbackCheckpoints: payload.rollbackCheckpoints }
+      : {}),
+    ...(payload.rollbackOperations !== undefined
+      ? { rollbackOperations: payload.rollbackOperations }
+      : {}),
   }
   await writeSessionFile(path, JSON.stringify(saved))
   await commitMetaAfterSnapshot(touched, provider)

@@ -133,6 +133,20 @@ export type {
   RewindResult,
 } from "./rewind"
 export { forkSessionAtMessage, resolveMessageIdPrefix, rewindSession } from "./rewind"
+// RFC-01 A2 (aug-02) — durable ThreadRollback record helpers (pure; ride the
+// existing atomic snapshot). No new store/writer/hash/ODB.
+export {
+  appendRollbackIntent,
+  appendRollbackTerminal,
+  isTerminalRollbackState,
+  latestOperation,
+  pendingOperationIds,
+  resolveCheckpointForTurn,
+  rollbackCheckpointRecordSchema,
+  rollbackOperationRecordSchema,
+  rollbackOperationStateSchema,
+  upsertRollbackCheckpoint,
+} from "./rollback-record"
 export type { SessionRootProvider } from "./root-port"
 export { defaultSessionRootProvider, staticSessionRootProvider } from "./root-port"
 export {
@@ -160,8 +174,11 @@ export type {
 export { buildRecoveryGuidance, checkSessionStoreHealth } from "./store-health"
 export type {
   PersistedInterruptedTurn,
+  RollbackCheckpointRecord,
+  RollbackOperationRecord,
+  RollbackOperationState,
   SavedSession,
   SavePayload,
   SessionMeta,
 } from "./types"
-export { SESSION_VERSION } from "./types"
+export { ROLLBACK_RECORD_VERSION, SESSION_VERSION } from "./types"

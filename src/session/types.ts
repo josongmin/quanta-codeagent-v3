@@ -90,16 +90,105 @@ export interface PersistedInterruptedTurn {
   interruptedAt: number
 }
 
+/* ------------------------------------------------------------------ */
+/* RFC-01 A2 — durable ThreadRollback records (aug-02 absorption).      */
+/*                                                                      */
+/* These ride the EXISTING `SavedSession` atomic snapshot (same file,   */
+/* same canonical encoder) — there is NO new store, writer, hash        */
+/* helper, or ODB. The `@/session` slice owns the durable record shape  */
+/* and its atomic I/O; the working-tree effect is owned by              */
+/* `ThreeWayRestorePort`; the application service that orders them lives */
+/* in `@/agent` (`thread-rollback`). See                                */
+/* docs/plans/aug-02-absorption/rfc-01-persistence-resume.md.           */
+/*                                                                      */
+/* Schema evolution rule: BOTH collections are OPTIONAL. A legacy       */
+/* snapshot minted before this field reads back as an EMPTY collection  */
+/* (the loader defaults absent → `[]`), and a session that never rolled */
+/* back serializes byte-identically (JSON.stringify drops the absent    */
+/* fields). Each record carries its own `recordVersion` so a future     */
+/* shape bump migrates forward; an UNKNOWN `recordVersion` or an        */
+/* UNKNOWN operation `state` is fail-closed at load (the whole snapshot  */
+/* is refused, never partially applied).                                */
+/* ------------------------------------------------------------------ */
+
+/** Current wire version for a single durable rollback record (checkpoint or
+ *  operation). Bumped only on a shape change; the loader fail-closes on any
+ *  other value so a forward-incompatible record can never be half-read. */
+export const ROLLBACK_RECORD_VERSION = 1 as const
+
+/** Closed lifecycle state of ONE rollback operation. `requested` is the
+ *  durable intent written BEFORE the working-tree effect; `rolled_back` /
+ *  `rollback_failed` are the terminal receipts written AFTER the effect (or
+ *  its failure). No success state is ever written before the effect runs.
+ *  A restart that finds a `requested` operation with no terminal record
+ *  surfaces it as operator-visible recovery — it is NEVER assumed to have
+ *  succeeded and is NEVER blind-retried. */
+export type RollbackOperationState = "requested" | "rolled_back" | "rollback_failed"
+
+/** A durable checkpoint MAPPING: which ShadowOdb ref/SHA a rollback target
+ *  turn/message resolves to, plus the file hashes expected at that boundary.
+ *  This is the ONLY persisted `messageId/turnId → ShadowOdb SHA` mapping —
+ *  the effect side (`ThreeWayRestorePort`) never invents a target from a
+ *  branch/path/PID name. `expectedFileHashes` lets the effect fail closed
+ *  when the tree drifted from the recorded boundary. */
+export interface RollbackCheckpointRecord {
+  readonly recordVersion: typeof ROLLBACK_RECORD_VERSION
+  /** Turn boundary this checkpoint anchors (stable turn id). */
+  readonly turnId: string
+  /** Transcript message id the checkpoint is keyed to (rewind target). */
+  readonly messageId: string
+  /** Content-addressed ShadowOdb ref/SHA captured at the boundary. The
+   *  effect resolves THIS verbatim — no ordinal/branch/path guessing. */
+  readonly checkpointSha: string
+  /** Path → content-hash the tree is expected to carry at this boundary.
+   *  Empty object means "no files tracked at capture" (still a valid,
+   *  non-lossy record). Absent path ⇒ never widen the restore silently. */
+  readonly expectedFileHashes: Readonly<Record<string, string>>
+}
+
+/** A durable rollback OPERATION receipt. `state` walks the closed lifecycle
+ *  above; `operationId` is the idempotency key (a duplicate submit resolves
+ *  to the existing terminal receipt, never a second effect). `errorCode` is
+ *  present only on `rollback_failed`. */
+export interface RollbackOperationRecord {
+  readonly recordVersion: typeof ROLLBACK_RECORD_VERSION
+  /** Idempotency key. Two records may share an id (intent + terminal) — the
+   *  latest-by-`requestedAt`/terminal wins; see `rollback-record.ts`. */
+  readonly operationId: string
+  /** The turn this operation rolls back TO (matches a checkpoint's turnId). */
+  readonly targetTurnId: string
+  /** Closed lifecycle state — see {@link RollbackOperationState}. */
+  readonly state: RollbackOperationState
+  /** Epoch-ms the intent was recorded (injected clock at the coordinator). */
+  readonly requestedAt: number
+  /** Epoch-ms the terminal receipt was recorded. Absent while `requested`. */
+  readonly terminalAt?: number
+  /** Typed failure code on `rollback_failed`. Absent otherwise. */
+  readonly errorCode?: string
+}
+
 export interface SavedSession {
   version: typeof SESSION_VERSION
   meta: SessionMeta
   reason: string
   turns: number
   messages: Message[]
+  /** RFC-01 A2 — durable checkpoint mappings. Absent on legacy snapshots
+   *  and on sessions that never captured a rollback checkpoint (⇒ the
+   *  loader defaults to `[]`, and serialization is byte-identical). */
+  rollbackCheckpoints?: RollbackCheckpointRecord[]
+  /** RFC-01 A2 — durable rollback-operation receipts (intent + terminal).
+   *  Absent on legacy snapshots and on sessions that never rolled back. */
+  rollbackOperations?: RollbackOperationRecord[]
 }
 
 export interface SavePayload {
   reason: string
   turns: number
   messages: Message[]
+  /** RFC-01 A2 — optional durable rollback records to persist alongside the
+   *  transcript. Absent ⇒ the existing on-disk records are preserved
+   *  as-is (a normal transcript save never drops rollback state). */
+  rollbackCheckpoints?: RollbackCheckpointRecord[]
+  rollbackOperations?: RollbackOperationRecord[]
 }

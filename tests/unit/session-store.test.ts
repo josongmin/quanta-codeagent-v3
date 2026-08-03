@@ -5,13 +5,21 @@ import { join } from "node:path"
 import type { Message } from "@/llm"
 import {
   appendEnvelope,
+  appendRollbackIntent,
+  appendRollbackTerminal,
   archivedFilePath,
   archiveSession,
   deleteSession,
   forkSession,
+  latestOperation,
   listSessions,
   loadSessionById,
+  pendingOperationIds,
+  ROLLBACK_RECORD_VERSION,
+  type RollbackCheckpointRecord,
+  type RollbackOperationRecord,
   renameSession,
+  resolveCheckpointForTurn,
   rewindToMessage,
   type SavePayload,
   SESSION_ENVELOPE_VERSION,
@@ -21,6 +29,7 @@ import {
   sessionFilePath,
   staticSessionRootProvider,
   unarchiveSession,
+  upsertRollbackCheckpoint,
 } from "@/session"
 import { __resetRuntimeConfig } from "@/shared"
 
@@ -541,5 +550,226 @@ describe("session store — git/provider regressions", () => {
       "m0",
       "m1",
     ])
+  })
+})
+
+/* ------------------------------------------------------------------ */
+/* RFC-01 A2 (aug-02) — durable ThreadRollback records                 */
+/* ------------------------------------------------------------------ */
+
+describe("session store — durable rollback records (RFC01-0)", () => {
+  let dir: string
+  let envSnapshot: NodeJS.ProcessEnv
+
+  beforeEach(() => {
+    envSnapshot = { ...process.env }
+    dir = mkdtempSync(join(tmpdir(), "session-rollback-"))
+    process.env.QUANTA_SESSIONS_DIR = dir
+    __resetRuntimeConfig()
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    for (const key of Object.keys(process.env)) {
+      if (!(key in envSnapshot)) delete process.env[key]
+    }
+    Object.assign(process.env, envSnapshot)
+    __resetRuntimeConfig()
+  })
+
+  const checkpoint = (over: Partial<RollbackCheckpointRecord> = {}): RollbackCheckpointRecord => ({
+    recordVersion: ROLLBACK_RECORD_VERSION,
+    turnId: over.turnId ?? "t1",
+    messageId: over.messageId ?? "m1",
+    checkpointSha: over.checkpointSha ?? "a".repeat(40),
+    expectedFileHashes: over.expectedFileHashes ?? { "src/a.ts": "h1", "src/b.ts": "h2" },
+  })
+
+  // RED (restart round-trip): persist an intent + checkpoint, DROP the runtime
+  // (a fresh loadSessionById is a cold read from disk — no in-memory state), and
+  // assert the pending operation + checkpoint identity round-trip EXACTLY. Before
+  // the schema/save wiring, the fields are stripped on load → this is RED.
+  test("intent + checkpoint survive a process-drop reload (exact identity)", async () => {
+    const meta = mkMeta({ id: "rb-1" })
+    const cp = checkpoint()
+    await saveSessionById(meta, {
+      ...mkPayload(),
+      rollbackCheckpoints: [cp],
+      rollbackOperations: appendRollbackIntent([], {
+        operationId: "op-1",
+        targetTurnId: "t1",
+        requestedAt: 5_000,
+      }) as RollbackOperationRecord[],
+    })
+
+    // Cold reload — simulates a fresh process reading the durable snapshot.
+    const reloaded = await loadSessionById("rb-1")
+    expect(reloaded).toBeDefined()
+    if (reloaded === undefined) return
+
+    // Checkpoint identity is exact (SHA + expected hashes + keys).
+    expect(reloaded.rollbackCheckpoints).toEqual([cp])
+    // The operation is still `requested` — a pending op is operator-visible,
+    // NEVER assumed successful on restart.
+    expect(reloaded.rollbackOperations).toEqual([
+      {
+        recordVersion: ROLLBACK_RECORD_VERSION,
+        operationId: "op-1",
+        targetTurnId: "t1",
+        state: "requested",
+        requestedAt: 5_000,
+      },
+    ])
+    expect(pendingOperationIds(reloaded.rollbackOperations ?? [])).toEqual(["op-1"])
+  })
+
+  // Terminal receipt round-trips and the op is no longer pending.
+  test("terminal receipt round-trips; op no longer pending", async () => {
+    const meta = mkMeta({ id: "rb-2" })
+    const withIntent = appendRollbackIntent([], {
+      operationId: "op-2",
+      targetTurnId: "t1",
+      requestedAt: 1_000,
+    })
+    const terminal = appendRollbackTerminal(withIntent, {
+      operationId: "op-2",
+      state: "rolled_back",
+      terminalAt: 2_000,
+    })
+    await saveSessionById(meta, {
+      ...mkPayload(),
+      rollbackOperations: terminal as RollbackOperationRecord[],
+    })
+    const reloaded = await loadSessionById("rb-2")
+    const ops = reloaded?.rollbackOperations ?? []
+    // Append-only: BOTH the requested intent and the terminal receipt persist.
+    expect(ops.length).toBe(2)
+    expect(latestOperation(ops, "op-2")?.state).toBe("rolled_back")
+    expect(latestOperation(ops, "op-2")?.terminalAt).toBe(2_000)
+    expect(pendingOperationIds(ops)).toEqual([])
+  })
+
+  // Old snapshots (no rollback fields) load fine and re-serialize byte-identically.
+  test("legacy snapshot (no rollback fields) loads and re-saves byte-identically", async () => {
+    const meta = mkMeta({ id: "rb-legacy" })
+    await saveSessionById(meta, mkPayload())
+    const path = sessionFilePath("rb-legacy")
+    const raw1 = await Bun.file(path).text()
+    expect(raw1.includes("rollbackCheckpoints")).toBe(false)
+    expect(raw1.includes("rollbackOperations")).toBe(false)
+
+    const reloaded = await loadSessionById("rb-legacy")
+    expect(reloaded?.rollbackCheckpoints).toBeUndefined()
+    expect(reloaded?.rollbackOperations).toBeUndefined()
+
+    // Re-save the reloaded payload (no rollback fields) — the on-disk shape must
+    // stay byte-identical (no injected empty arrays).
+    await saveSessionById(reloaded?.meta ?? meta, {
+      reason: reloaded?.reason ?? "completed",
+      turns: reloaded?.turns ?? 1,
+      messages: reloaded?.messages ?? [],
+    })
+    const raw2 = await Bun.file(path).text()
+    expect(raw2.includes("rollbackCheckpoints")).toBe(false)
+    expect(raw2.includes("rollbackOperations")).toBe(false)
+  })
+
+  // Duplicate operationId is idempotent — re-recording an intent is a no-op.
+  test("duplicate operationId intent is idempotent (no second record)", () => {
+    const once = appendRollbackIntent([], {
+      operationId: "op-dup",
+      targetTurnId: "t1",
+      requestedAt: 1_000,
+    })
+    const twice = appendRollbackIntent(once, {
+      operationId: "op-dup",
+      targetTurnId: "t1",
+      requestedAt: 9_999,
+    })
+    expect(twice).toBe(once) // same reference — no append
+    expect(twice.length).toBe(1)
+    expect(twice[0]?.requestedAt).toBe(1_000) // first intent wins
+  })
+
+  // A terminal receipt for an UNKNOWN op is refused (no fabricated success).
+  test("terminal for unknown operationId is a no-op (no success-before-intent)", () => {
+    const result = appendRollbackTerminal([], {
+      operationId: "ghost",
+      state: "rolled_back",
+      terminalAt: 1,
+    })
+    expect(result).toEqual([])
+  })
+
+  // A second terminal for an already-terminal op is ignored (first terminal wins).
+  test("second terminal is idempotent (first terminal wins)", () => {
+    const intent = appendRollbackIntent([], {
+      operationId: "op-t",
+      targetTurnId: "t1",
+      requestedAt: 1,
+    })
+    const first = appendRollbackTerminal(intent, {
+      operationId: "op-t",
+      state: "rolled_back",
+      terminalAt: 2,
+    })
+    const second = appendRollbackTerminal(first, {
+      operationId: "op-t",
+      state: "rollback_failed",
+      terminalAt: 3,
+      errorCode: "conflict",
+    })
+    expect(second).toBe(first) // no append
+    expect(latestOperation(second, "op-t")?.state).toBe("rolled_back")
+  })
+
+  // Checkpoint upsert + resolve: same boundary replaces; missing turn ⇒ undefined
+  // (the coordinator fail-closes → NO mutation on a missing/moved mapping).
+  test("checkpoint upsert replaces same boundary; missing turn resolves undefined", () => {
+    const cp1 = checkpoint({ turnId: "t1", messageId: "m1", checkpointSha: "a".repeat(40) })
+    const cp2 = checkpoint({ turnId: "t1", messageId: "m1", checkpointSha: "b".repeat(40) })
+    const after = upsertRollbackCheckpoint([cp1], cp2)
+    expect(after.length).toBe(1)
+    expect(resolveCheckpointForTurn(after, "t1")?.checkpointSha).toBe("b".repeat(40))
+    // A moved/missing target turn ⇒ no mapping ⇒ fail-closed at the effect site.
+    expect(resolveCheckpointForTurn(after, "t-nope")).toBeUndefined()
+  })
+
+  // Fail-closed migration: an UNKNOWN operation state on disk refuses the WHOLE
+  // load (never partially applied).
+  test("unknown operation state on disk fails the load closed", async () => {
+    const meta = mkMeta({ id: "rb-bad" })
+    await saveSessionById(meta, mkPayload())
+    const path = sessionFilePath("rb-bad")
+    const raw = JSON.parse(await Bun.file(path).text())
+    raw.rollbackOperations = [
+      {
+        recordVersion: ROLLBACK_RECORD_VERSION,
+        operationId: "op-x",
+        targetTurnId: "t1",
+        state: "teleported", // not in the closed lifecycle enum
+        requestedAt: 1,
+      },
+    ]
+    writeFileSync(path, JSON.stringify(raw))
+    expect(await loadSessionById("rb-bad")).toBeUndefined()
+  })
+
+  // Fail-closed migration: an UNKNOWN recordVersion refuses the load.
+  test("unknown recordVersion on disk fails the load closed", async () => {
+    const meta = mkMeta({ id: "rb-ver" })
+    await saveSessionById(meta, mkPayload())
+    const path = sessionFilePath("rb-ver")
+    const raw = JSON.parse(await Bun.file(path).text())
+    raw.rollbackCheckpoints = [
+      {
+        recordVersion: 999,
+        turnId: "t1",
+        messageId: "m1",
+        checkpointSha: "a".repeat(40),
+        expectedFileHashes: {},
+      },
+    ]
+    writeFileSync(path, JSON.stringify(raw))
+    expect(await loadSessionById("rb-ver")).toBeUndefined()
   })
 })
