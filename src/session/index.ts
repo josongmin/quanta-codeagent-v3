@@ -180,5 +180,18 @@ export type {
   SavedSession,
   SavePayload,
   SessionMeta,
+  WorkspaceOwnership,
+  WorkspaceOwnershipState,
 } from "./types"
-export { ROLLBACK_RECORD_VERSION, SESSION_VERSION } from "./types"
+export { ROLLBACK_RECORD_VERSION, SESSION_VERSION, WORKSPACE_OWNERSHIP_VERSION } from "./types"
+// RFC-06 §RFC06-0 (aug-02) — persisted WorkspaceOwnership helpers (pure; ride
+// the existing atomic snapshot). No new binding/lease/TTL store, no reaper.
+export type { WorkspaceCreateIntent, WorkspaceTransitionResult } from "./workspace-ownership"
+export {
+  isTerminalWorkspaceState,
+  isValidWorkspaceTransition,
+  makeWorkspaceCreateIntent,
+  transitionWorkspaceState,
+  workspaceOwnershipSchema,
+  workspaceOwnershipStateSchema,
+} from "./workspace-ownership"
