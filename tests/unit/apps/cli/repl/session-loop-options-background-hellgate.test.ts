@@ -53,6 +53,12 @@ const makeFakes = (backgroundPortal: ReturnType<typeof createBackgroundTurnPorta
     inboundMode: { current: "queue" as const },
     runtimeFacadeCompose: {},
     playbookSeam: undefined,
+    // `slashCtx` is a REQUIRED Wires field (surface-compose/types.ts). The lax
+    // `as unknown` cast let this fake omit it while nothing read it — but RFC-08
+    // (session-loop-options.ts) now projects `wires.slashCtx.effort` onto the
+    // effort-cycle wire. Absent effort slot ⇒ buildEffortCycleWire returns
+    // undefined ⇒ inert, so the backgroundPortal assertions below are unaffected.
+    slashCtx: { effort: undefined },
     ...(backgroundPortal !== undefined ? { backgroundPortal } : {}),
   } as unknown as Deps["wires"]
   const rfc09 = {} as unknown as Deps["rfc09"]
