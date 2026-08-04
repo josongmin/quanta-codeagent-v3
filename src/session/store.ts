@@ -381,11 +381,34 @@ const readExistingRollback = async (
   }
 }
 
-export const saveSessionById = async (
+// RFC-01 A2 — per-session save serialization. `saveSessionById` is now a
+// read-modify-write (rollback-ledger preserve), so two concurrent savers for the
+// SAME session (e.g. the `@/agent` coordinator folding a rollback record while a
+// crash-resume `markSessionInterrupted` fire-and-forgets an omitting save on a
+// tool boundary) could interleave read→write and clobber the just-folded ledger
+// (R3-A TOCTOU). Serialize the whole read→write per id so it is atomic. Different
+// sessions still run in parallel; the chain drops when it drains (no per-id leak).
+const saveSessionQueues = new Map<string, Promise<void>>()
+const withSessionSaveLock = <T>(id: string, fn: () => Promise<T>): Promise<T> => {
+  const prev = saveSessionQueues.get(id) ?? Promise.resolve()
+  const run = prev.then(fn)
+  const tail = run.then(
+    () => undefined,
+    () => undefined, // the chain must survive a rejected save (caller sees the reject)
+  )
+  saveSessionQueues.set(id, tail)
+  void tail.then(() => {
+    if (saveSessionQueues.get(id) === tail) saveSessionQueues.delete(id)
+  })
+  return run
+}
+
+export const saveSessionById = (
   meta: SessionMeta,
   payload: SavePayload,
   provider?: SessionRootProvider,
-): Promise<void> => {
+): Promise<void> =>
+  withSessionSaveLock(meta.id, async () => {
   const touched: SessionMeta = { ...meta, lastTouched: Date.now() }
   const path = touched.archived
     ? await resolveArchivedFilePath(touched.id, provider)
@@ -417,9 +440,9 @@ export const saveSessionById = async (
     ...(rollbackCheckpoints !== undefined ? { rollbackCheckpoints } : {}),
     ...(rollbackOperations !== undefined ? { rollbackOperations } : {}),
   }
-  await writeSessionFile(path, JSON.stringify(saved))
-  await commitMetaAfterSnapshot(touched, provider)
-}
+    await writeSessionFile(path, JSON.stringify(saved))
+    await commitMetaAfterSnapshot(touched, provider)
+  })
 
 /** Reconcile the lightweight index with a session's on-disk meta. The per-id
  *  JSON file is the source of truth (it is written FIRST in every mutator);
