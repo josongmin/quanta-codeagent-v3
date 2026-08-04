@@ -193,6 +193,17 @@ export const buildDefaultSessionIo = (): SessionIoState => ({
         reason: session.reason,
         turns: session.turns,
         messages: session.messages,
+        // RFC-01 A2 — this write REPLACES the target with the handed session, so
+        // thread its durable rollback ledger EXPLICITLY (the payload-wins path).
+        // Without this, importing a session that carries rollback records would
+        // write it with an empty ledger to a fresh id (store preserve-on-omit
+        // only guards the auto-save/crash-resume callers, which have none in-hand).
+        ...(session.rollbackCheckpoints !== undefined
+          ? { rollbackCheckpoints: session.rollbackCheckpoints }
+          : {}),
+        ...(session.rollbackOperations !== undefined
+          ? { rollbackOperations: session.rollbackOperations }
+          : {}),
       })
     } catch (e) {
       // Rethrow so the slash surfaces the error message — this matches the

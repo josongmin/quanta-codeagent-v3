@@ -139,6 +139,11 @@ const summarizeImport = (writtenTypes: readonly MigrationItemType[]): string | u
 export const runConfigMigrationImport = async (
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
+  // Injected home dir (test seam) — production resolves `os.homedir()`. NOTE:
+  // `os.homedir()` ignores `process.env.HOME` under Bun, so a test that only
+  // sets HOME could NOT observe the real staging dir (a vacuous fail-safe rail);
+  // this param lets a test drive the SAME dir the wire actually stages into.
+  homeDir: string = homedir(),
 ): Promise<string | undefined> => {
   let migrateConfig: boolean
   try {
@@ -149,7 +154,7 @@ export const runConfigMigrationImport = async (
   // The persist is a SEPARATE confirmed opt-in beyond the feature gate.
   if (!migrateConfig || !gateOn(env, "QUANTA_MIGRATE_CONFIG_IMPORT")) return undefined
   try {
-    const home = homedir()
+    const home = homeDir
     // RFC03-4 wire — compose the REAL imported-skill staging port (CAS artifact
     // + approval machine) + the pinned system-skill name set so a startup skill
     // import STAGES through approval instead of failing closed (silent drop).

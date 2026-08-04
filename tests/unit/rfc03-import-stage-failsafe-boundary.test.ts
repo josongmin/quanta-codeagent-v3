@@ -84,9 +84,13 @@ describe("DEAD SEAM — RFC03-4 promote side is unreachable after the real impor
   test("after runConfigMigrationImport, the staged skill is (a) never live and (b) leaves NO on-disk artifact to promote", async () => {
     await write(join(project, ".claude", "skills", "imported-helper", "SKILL.md"), SKILL)
 
-    // Drive the REAL startup import entry (both gates on, HOME → temp home) —
-    // exactly what repl.ts:342 calls.
-    const notice = await runConfigMigrationImport(project)
+    // Drive the REAL startup import entry (both gates on). The injected `homeDir`
+    // (3rd arg, prod defaults to os.homedir()) makes the wire stage into the SAME
+    // temp dir this test inspects — os.homedir() ignores process.env.HOME under
+    // Bun, so without this the boundary assertion below would be VACUOUS (it would
+    // inspect a temp dir the wire never touched). Now an unapproved live-write
+    // would land in `importSkillsDir(home)` and fail assertion (a).
+    const notice = await runConfigMigrationImport(project, process.env, home)
 
     // The import reports the skill as "staged" (persistSkills succeeded).
     expect(notice ?? "").toContain("skills")

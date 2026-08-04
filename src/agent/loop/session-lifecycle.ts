@@ -86,6 +86,12 @@ export const disposeSessionResources = async (args: {
     if (args.guard.disposed) return
     args.guard.disposed = true
   }
+  // Drop the session-keyed compaction/headroom-latch module maps on EVERY
+  // teardown, not just the clean-finish path (persistSessionSnapshots) — a
+  // session that dies mid-turn (throw) reaches only disposeSessionResources, so
+  // without this the RFC01-A7 headroom latch + microcompact-clock entries would
+  // leak one per crashed session. Idempotent (safe to also run on the clean path).
+  forgetMicrocompactSession(args.cfg.sessionId)
   try {
     await args.features.cleanup?.()
   } catch (e) {
