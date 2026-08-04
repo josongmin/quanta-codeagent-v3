@@ -24,9 +24,32 @@
  * so this adapter is the ONE place the two vocabularies meet.
  */
 
+import type { AgentRole } from "@/subagent/role"
 import type { AutomationEnginePort, InboxItem, ScheduleInput } from "./automation-engine/port"
 import { computeNextFire } from "./next-fire"
 import { parseRRule, serializeRRule } from "./rrule-parser"
+
+/** RFC11-2 — the closed agent-role token set the scheduler accepts as a binding.
+ *  These are the EXACT values of the EXISTING `@/subagent/role` `AgentRole`
+ *  registry (`import type` keeps the pure-leaf slice free of a value edge into
+ *  `@/subagent`; the `rfc11-2` drift-guard test imports the real `AGENT_ROLES`
+ *  and asserts this stays byte-equal, so a registry change fails the build).
+ *  A binding outside this set is refused at `create` — never persisted. */
+const KNOWN_AGENT_ROLES: ReadonlyArray<AgentRole> = Object.freeze(["explorer", "worker", "none"])
+
+/** `true` iff `role` is a member of the reused agent-role registry. */
+const isKnownAgentRole = (role: string): role is AgentRole =>
+  (KNOWN_AGENT_ROLES as ReadonlyArray<string>).includes(role)
+
+/** RFC11-2 — the OPTIONAL role + git-base bindings a `create` may carry (Codex
+ *  5973 `ScheduledTaskSchedule{agent_role, baseBranch}`). Both absent ⇒ a
+ *  byte-identical pre-RFC11-2 schedule. */
+export interface CronBindOpts {
+  /** Agent-role the fired run adopts (validated against the reused registry). */
+  readonly agentRole?: AgentRole
+  /** Git base branch the fired run forks from (RFC-06 `createPersistentWorktree`). */
+  readonly baseBranch?: string
+}
 
 /** A scheduled automation row the slash renders (canonical RRULE string). */
 export interface CronRow {
@@ -35,6 +58,10 @@ export interface CronRow {
   readonly rule: string
   readonly nextRunAt: number
   readonly prompt: string
+  /** RFC11-2 — the bound agent-role, when the schedule carries one. */
+  readonly agentRole?: string
+  /** RFC11-2 — the bound git base-branch, when the schedule carries one. */
+  readonly baseBranch?: string
 }
 
 /** A notification-inbox row the slash renders. */
@@ -57,7 +84,14 @@ export type CronCreateResult =
  *  assignable at the surface. */
 export interface CronSlashState {
   readonly list: () => Promise<readonly CronRow[]>
-  readonly create: (title: string, rule: string, prompt: string) => Promise<CronCreateResult>
+  readonly create: (
+    title: string,
+    rule: string,
+    prompt: string,
+    /** RFC11-2 — OPTIONAL role + git-base bindings. Absent ⇒ byte-identical to
+     *  the pre-RFC11-2 3-arg create. */
+    bind?: CronBindOpts,
+  ) => Promise<CronCreateResult>
   readonly inbox: () => Promise<readonly CronInboxRow[]>
 }
 
@@ -94,12 +128,27 @@ export const createCronSlashAdapter = (deps: CronSlashAdapterDeps): CronSlashSta
       rule: serializeRRule(a.rule),
       nextRunAt: a.nextRunAt,
       prompt: a.prompt,
+      ...(a.agentRole !== undefined ? { agentRole: a.agentRole } : {}),
+      ...(a.baseBranch !== undefined ? { baseBranch: a.baseBranch } : {}),
     }))
   }
 
-  const create = async (title: string, rule: string, prompt: string): Promise<CronCreateResult> => {
+  const create = async (
+    title: string,
+    rule: string,
+    prompt: string,
+    bind?: CronBindOpts,
+  ): Promise<CronCreateResult> => {
     const trimmedTitle = title.trim()
     if (trimmedTitle.length === 0) return { ok: false, message: "title is required" }
+    // RFC11-2 — validate the OPTIONAL agent-role binding against the REUSED
+    // registry BEFORE any RRULE work so an unknown role is refused (typed,
+    // never persisted) rather than silently dropped. An absent binding skips
+    // this entirely (byte-identical). `baseBranch` is a free-form git ref —
+    // sanitized/validated by the RFC-06 worktree owner at fire time.
+    if (bind?.agentRole !== undefined && !isKnownAgentRole(bind.agentRole)) {
+      return { ok: false, message: `unknown agent_role '${bind.agentRole}'` }
+    }
     // PARSE the RRULE — an invalid rule yields a typed refusal, never a throw.
     const parsed = parseRRule(rule)
     if (!parsed.ok) {
@@ -122,6 +171,11 @@ export const createCronSlashAdapter = (deps: CronSlashAdapterDeps): CronSlashSta
       prompt,
       nextRunAt: first,
       createdAt,
+      // RFC11-2 — thread the OPTIONAL role/base bindings onto the engine input.
+      // exactOptional: keys are OMITTED when absent so a bindless schedule is a
+      // byte-identical row.
+      ...(bind?.agentRole !== undefined ? { agentRole: bind.agentRole } : {}),
+      ...(bind?.baseBranch !== undefined ? { baseBranch: bind.baseBranch } : {}),
     }
     const res = await deps.engine.schedule(input)
     if (!res.ok) return { ok: false, message: `${res.code}: ${res.message}` }
@@ -133,6 +187,8 @@ export const createCronSlashAdapter = (deps: CronSlashAdapterDeps): CronSlashSta
         rule: serializeRRule(res.value.rule),
         nextRunAt: res.value.nextRunAt,
         prompt: res.value.prompt,
+        ...(res.value.agentRole !== undefined ? { agentRole: res.value.agentRole } : {}),
+        ...(res.value.baseBranch !== undefined ? { baseBranch: res.value.baseBranch } : {}),
       },
     }
   }

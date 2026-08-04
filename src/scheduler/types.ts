@@ -252,6 +252,18 @@ export interface AgentLoopPort {
     opts?: {
       signal?: AbortSignal
       modelOverride?: string
+      /** RFC11-2 — the agent-role the fired run ADOPTS (Codex 5973 `agent_role`;
+       *  the EXISTING `@/subagent/role` registry token). When present the host
+       *  runs the enqueued prompt under that role's system prompt + tool policy.
+       *  Absent ⇒ the host default identity (byte-identical to the pre-RFC11-2
+       *  fire). Typed as a bare `string` to keep this pure-leaf port free of a
+       *  cross-slice import; the scheduler validated membership at `create`. */
+      agentRole?: string
+      /** RFC11-2 — the git base-branch the fired run's worktree was FORKED from
+       *  (RFC-06 `createPersistentWorktree`). Advisory context for the host;
+       *  the actual fork already happened in the scheduler handler. Absent ⇒ a
+       *  detached fire on the host cwd. */
+      baseBranch?: string
       /** H8 — heartbeat routing. When present, the host enqueues onto THIS
        *  existing thread (instead of a fresh one) and re-applies
        *  {@link inheritedPolicy}. Absent ⇒ fresh thread-detached fire (cron). */

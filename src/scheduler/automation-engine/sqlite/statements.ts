@@ -10,12 +10,12 @@ import type { Database, Statement } from "bun:sqlite"
 export const INSERT_SQL = `
     INSERT INTO automations
       (id, title, rule_json, prompt, next_run_at, last_run_at, status,
-       last_error, created_at, fire_count, model, model_fallbacks, kind,
-       target_thread_id, inherited_policy)
+       last_error, created_at, fire_count, model, model_fallbacks, agent_role,
+       base_branch, kind, target_thread_id, inherited_policy)
     VALUES
       ($id, $title, $rule, $prompt, $next_run_at, NULL, 'scheduled',
-       NULL, $created_at, 0, $model, $model_fallbacks, $kind,
-       $target_thread_id, $inherited_policy)
+       NULL, $created_at, 0, $model, $model_fallbacks, $agent_role,
+       $base_branch, $kind, $target_thread_id, $inherited_policy)
   `
 
 export const EXISTS_SQL = "SELECT 1 AS n FROM automations WHERE id = ?"

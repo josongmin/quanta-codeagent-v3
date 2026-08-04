@@ -92,6 +92,19 @@ export interface EngineAutomation {
   /** B2 — ordered fallback probe list (Codex `automations.model_fallbacks`).
    *  KEY OMITTED when absent. */
   readonly modelFallbacks?: ReadonlyArray<string>
+  /** RFC11-2 — per-task agent-role binding (Codex 5973 `agent_role`). The token
+   *  is the EXISTING `@/subagent/role` `AgentRole` enum (`explorer`/`worker`/
+   *  `none`); the engine stores + returns it verbatim (no policy logic here —
+   *  the loop adopts the role at fire time). Typed as a bare `string` at the
+   *  engine seam to keep this pure-leaf module free of a cross-slice import; the
+   *  scheduler `create` boundary validates membership. KEY OMITTED when absent
+   *  (byte-identical to a role-less row). */
+  readonly agentRole?: string
+  /** RFC11-2 — per-task git base-branch binding (Codex 5973 `baseBranch`). At
+   *  fire time the run FORKS from this base via the EXISTING RFC-06
+   *  `createPersistentWorktree` owner. KEY OMITTED when absent (a detached fire
+   *  on the host cwd — byte-identical to the pre-RFC11-2 row). */
+  readonly baseBranch?: string
   /** H8 — thread-bound automations retain the routing contract in the
    * production engine. Omitted means a detached cron fire. */
   readonly kind?: "heartbeat"
@@ -112,6 +125,11 @@ export interface ScheduleInput {
   readonly model?: string
   /** B2 — OPTIONAL ordered fallback probe list. Absent ⇒ omitted. */
   readonly modelFallbacks?: ReadonlyArray<string>
+  /** RFC11-2 — OPTIONAL agent-role binding (validated at the `create` boundary
+   *  against the `@/subagent/role` registry). Absent ⇒ omitted. */
+  readonly agentRole?: string
+  /** RFC11-2 — OPTIONAL git base-branch binding. Absent ⇒ omitted. */
+  readonly baseBranch?: string
   /** H8 — a heartbeat needs both routing fields; the engine validates this
    * before persistence and rejects a second live heartbeat for the thread. */
   readonly kind?: "heartbeat"

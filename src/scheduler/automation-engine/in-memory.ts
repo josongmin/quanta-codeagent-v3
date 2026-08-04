@@ -85,6 +85,8 @@ export const inMemoryAutomationEngine = (
     claimedAt?: number
     model?: string
     modelFallbacks?: ReadonlyArray<string>
+    agentRole?: string
+    baseBranch?: string
     kind?: "heartbeat"
     targetThreadId?: string
     inheritedPolicy?: EngineAutomation["inheritedPolicy"]
@@ -101,14 +103,21 @@ export const inMemoryAutomationEngine = (
     } as const
     return {
       ...base,
-      ...(over.lastRunAt !== undefined ? { lastRunAt: over.lastRunAt } : {}),
-      ...(over.lastError !== undefined ? { lastError: over.lastError } : {}),
-      ...(over.claimToken !== undefined ? { claimToken: over.claimToken } : {}),
-      ...(over.claimedAt !== undefined ? { claimedAt: over.claimedAt } : {}),
-      ...(over.model !== undefined ? { model: over.model } : {}),
-      ...(over.modelFallbacks !== undefined ? { modelFallbacks: over.modelFallbacks } : {}),
-      ...(over.kind !== undefined ? { kind: over.kind } : {}),
-      ...(over.targetThreadId !== undefined ? { targetThreadId: over.targetThreadId } : {}),
+      ...pickDefined({
+        lastRunAt: over.lastRunAt,
+        lastError: over.lastError,
+        claimToken: over.claimToken,
+        claimedAt: over.claimedAt,
+        model: over.model,
+        modelFallbacks: over.modelFallbacks,
+        agentRole: over.agentRole,
+        baseBranch: over.baseBranch,
+        kind: over.kind,
+        targetThreadId: over.targetThreadId,
+      }),
+      // `inheritedPolicy` is spread separately: it needs a defensive freeze AND
+      // its exact non-`undefined` type is lost through the generic pick under
+      // exactOptionalPropertyTypes.
       ...(over.inheritedPolicy !== undefined
         ? { inheritedPolicy: Object.freeze({ ...over.inheritedPolicy }) }
         : {}),
@@ -164,6 +173,8 @@ export const inMemoryAutomationEngine = (
       // them across the fire so a fired/retrying row keeps its routing config.
       ...(existing.model !== undefined ? { model: existing.model } : {}),
       ...(existing.modelFallbacks !== undefined ? { modelFallbacks: existing.modelFallbacks } : {}),
+      ...(existing.agentRole !== undefined ? { agentRole: existing.agentRole } : {}),
+      ...(existing.baseBranch !== undefined ? { baseBranch: existing.baseBranch } : {}),
       ...(existing.kind !== undefined ? { kind: existing.kind } : {}),
       ...(existing.targetThreadId !== undefined ? { targetThreadId: existing.targetThreadId } : {}),
       ...(existing.inheritedPolicy !== undefined
@@ -200,6 +211,8 @@ export const inMemoryAutomationEngine = (
         fireCount: 0,
         ...(input.model !== undefined ? { model: input.model } : {}),
         ...(input.modelFallbacks !== undefined ? { modelFallbacks: input.modelFallbacks } : {}),
+        ...(input.agentRole !== undefined ? { agentRole: input.agentRole } : {}),
+        ...(input.baseBranch !== undefined ? { baseBranch: input.baseBranch } : {}),
         ...(input.kind !== undefined ? { kind: input.kind } : {}),
         ...(input.targetThreadId !== undefined ? { targetThreadId: input.targetThreadId } : {}),
         ...(input.inheritedPolicy !== undefined ? { inheritedPolicy: input.inheritedPolicy } : {}),
@@ -287,6 +300,8 @@ export const inMemoryAutomationEngine = (
         ...(best.lastError !== undefined ? { lastError: best.lastError } : {}),
         ...(best.model !== undefined ? { model: best.model } : {}),
         ...(best.modelFallbacks !== undefined ? { modelFallbacks: best.modelFallbacks } : {}),
+        ...(best.agentRole !== undefined ? { agentRole: best.agentRole } : {}),
+        ...(best.baseBranch !== undefined ? { baseBranch: best.baseBranch } : {}),
         ...(best.kind !== undefined ? { kind: best.kind } : {}),
         ...(best.targetThreadId !== undefined ? { targetThreadId: best.targetThreadId } : {}),
         ...(best.inheritedPolicy !== undefined ? { inheritedPolicy: best.inheritedPolicy } : {}),
@@ -335,6 +350,19 @@ export const inMemoryAutomationEngine = (
 // ──────────────────────────────────────────────────────────────────────────────
 // helpers
 // ──────────────────────────────────────────────────────────────────────────────
+
+/** exactOptional helper: return a shallow object carrying ONLY the keys whose
+ *  value is not `undefined` (an absent optional stays OMITTED, never
+ *  `undefined`-set). Pure; preserves value identity. Keeps the row builders flat
+ *  as the optional-field surface grows. */
+const pickDefined = <T extends Record<string, unknown>>(o: T): Partial<T> => {
+  const out: Record<string, unknown> = {}
+  for (const k of Object.keys(o)) {
+    const v = o[k]
+    if (v !== undefined) out[k] = v
+  }
+  return out as Partial<T>
+}
 
 const sortByDueThenId = (rows: EngineAutomation[]): void => {
   rows.sort((a, b) => {
