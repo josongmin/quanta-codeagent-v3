@@ -18,8 +18,16 @@ purpose: |
   saga replays the mapping to rewind the thread with a CLI `/rewind` wire. The
   three layers compose so a crashed/killed session can be rolled back to a
   named tool boundary rather than only to the last full compaction. Always-on
-  additive record capture (no gate) — the records are written on the existing
-  save path and consumed by the rewind saga.
+  additive record capture (no gate) — the records are written (and now PRESERVED
+  across omitting saves, R2-C fix) on the existing save path.
+  SCOPE (hellaudit R2-B — A2 records + A3 checkpoint mapping are LIVE on the save
+  path; the A4 effect saga + CLI /rewind consumer is DEFERRED, NOT silently live):
+  executeRollback/resumePendingRollback + buildRollbackEffectPort (the real
+  ShadowOdb-backed restore) have no production caller — the actual `/rewind`
+  command still degrades to "file restore not yet wired". Closing it (construct the
+  effect port + call executeRollback from /rewind) is security-sensitive — it
+  replays a DESTRUCTIVE working-tree restore — deferred pending greenlight.
+  Explicit follow-up.
 evidence:
   code:
     - src/session/rollback-record.ts

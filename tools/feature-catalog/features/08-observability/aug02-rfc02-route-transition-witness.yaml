@@ -18,6 +18,14 @@ purpose: |
   reason, so the timeline can attribute every model change to its cause instead
   of silently swapping. Caller-owned (each transition site emits its own
   witness) rather than a global interceptor — additive, no route behavior change.
+  SCOPE (hellaudit R2-B — seam proven, composition-root feeder DEFERRED, NOT a
+  silent dead-seam): the three transition PRODUCERS + the model_route_changed
+  AgentEvent + its exhaustive projection are built and owner-local proven, BUT no
+  production composition root supplies the sink yet (FallbackLLM is built without
+  onTransition; scheduler/retry-with never assign onModelReroute), and the RFC's
+  QUANTA_MODEL_REROUTE_EVENT gate does not yet exist — so no witness emits in
+  production yet. Safe to wire (pure observability): add the gate + supply the sink
+  at the three roots. Explicit follow-up.
 evidence:
   code:
     - src/llm/fallback.ts

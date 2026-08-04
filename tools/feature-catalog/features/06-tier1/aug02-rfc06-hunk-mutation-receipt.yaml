@@ -22,6 +22,15 @@ purpose: |
   if the on-disk content has since changed. Default OFF ⇒ per-hunk apply is
   byte-identical (no receipt, no journal). Read via
   runtimeConfig().hunkMutationReceipt (discoverable in /config).
+  SCOPE (hellaudit R2-B — journal engine + CAS drift-refusing revert proven, but
+  the composition-root feeder is DEFERRED, NOT a silent dead-seam): the receipt
+  wrap fires only when the knob is on AND a `mutationJournal` store is injected,
+  but no production root constructs makeDurableJournalStore / assigns
+  deps.mutationJournal, and undoHunkMutation (the revert) has no production caller
+  (no `hunk undo` surface). So even with the knob ON, no receipt is written and undo
+  is uncallable in production today. Closing it (wire the journal store under the
+  knob + an operator undo surface) is a security-sensitive design choice — undo
+  writes files — deferred pending a chosen surface. Explicit follow-up.
 evidence:
   code:
     - src/runner/hunk-mutation-journal.ts

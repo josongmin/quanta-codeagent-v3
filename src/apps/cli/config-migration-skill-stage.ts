@@ -96,8 +96,9 @@ export const composeImportSkillStage = (
       // Stage the exact imported bytes into the CAS store (content-addressed,
       // inert until promoted). NO live write.
       await artifact.put(args.bytes)
-      // Bind an approval to EXACTLY these bytes — the operator approve handler
-      // re-verifies + CAS-promotes at `args.targetPath`.
+      // Bind a review-approval to EXACTLY these bytes. ⚠️ hellaudit A2: the
+      // approve→CAS-promote ACTUATOR is deferred (no production consumer of the
+      // resumeStep dispatches to promote yet) — see the top-of-file SCOPE note.
       approval.request({
         threadId: IMPORT_THREAD_ID,
         kind: "permission",

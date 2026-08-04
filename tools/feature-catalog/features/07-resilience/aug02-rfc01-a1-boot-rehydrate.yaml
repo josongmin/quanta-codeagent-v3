@@ -14,7 +14,9 @@ labels: ["rfc:aug02-01", "surface:sdk"]
 purpose: |
   RFC-01 A1 boot-rehydrate: on SDK runtime cold start, a persisted SavedSession
   snapshot is injected into the rehydrate path so a fresh runtime resumes the
-  prior thread state (history + rollback records) instead of starting empty.
+  prior transcript HISTORY (messages) instead of starting empty. (hellaudit R2-B:
+  only the transcript is rehydrated into runtime state — the durable rollback
+  ledger is preserved on disk but not re-hydrated into the live runtime.)
   Additive on the SDK runtime session factory; when no snapshot is present the
   cold-start path is byte-identical to a brand-new session. Pairs with the
   crash-resume hellgate that proves a killed session rehydrates on next boot.
