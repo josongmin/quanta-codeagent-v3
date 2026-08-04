@@ -160,6 +160,28 @@ export interface SubagentRequest {
   mode?: string
 }
 
+/**
+ * RFC11-1 — usage breakdown PROJECTED (not stored) from the `usage` AgentEvents
+ * the child run emitted onto its stream over the run. Mirrors the claude-code
+ * `AgentOutput.usage{...}` corpus shape. All fields are cumulative token sums
+ * across the run. OMITTED entirely when the run emitted no usage events
+ * (byte-identical for callers that ignore it); individual optional fields are
+ * OMITTED when the provider never reported that bucket.
+ */
+export interface SubagentUsageBreakdown {
+  /** Sum of `usage.inputTokens` across the run. */
+  readonly inputTokens: number
+  /** Sum of `usage.outputTokens` across the run. */
+  readonly outputTokens: number
+  /** Sum of `usage.reasoningTokens` — only when at least one usage event carried
+   *  the OpenAI-Responses reasoning split. Omitted otherwise. */
+  readonly reasoningTokens?: number
+  /** Sum of `usage.cacheReadTokens` — only when any event reported it. */
+  readonly cacheReadTokens?: number
+  /** Sum of `usage.cacheCreationTokens` — only when any event reported it. */
+  readonly cacheCreationTokens?: number
+}
+
 export interface SubagentResult {
   ok: boolean
   /** Final assistant text the child produced (the answer to summarize). */
@@ -168,6 +190,36 @@ export interface SubagentResult {
   turns: number
   /** Optional raw transcript for callers that want the full trace. */
   messages?: unknown[]
+  /**
+   * RFC11-1 — corpus-parity observability signals, ADDITIVELY PROJECTED from
+   * signals that ALREADY EXIST elsewhere over the subagent run (no new store /
+   * meter / bus). Every field is OMITTED when its source produced nothing, so a
+   * gate-OFF / signal-absent run is byte-identical to the pre-RFC11-1 result.
+   *
+   * `frameCount` — alias for {@link turns} (claude-code `AgentOutput.frameCount`
+   *   parity). Always projectable; present whenever the run produced a result.
+   * `modelsUsed` — DISTINCT model set PROJECTED from the RFC-02-3
+   *   `model_route_changed` events emitted over the run, unioned with the child's
+   *   resolved model. NOT a stored array (the RFC-02 single-owner matrix forbids a
+   *   `modelsUsed` store — the caller projects, exactly like RFC-02-3). Omitted
+   *   when the resolved model is unknown AND no route event fired.
+   * `worktreeBranch` — the throwaway worktree branch the child ran on (RFC-06
+   *   owned-worktree analogue), from the `withWorktree` run info. Absent when the
+   *   child did not run in an owned worktree.
+   * `totalToolUseCount` — count of `tool_call` AgentEvents the run emitted.
+   *   Omitted when the run dispatched no tools.
+   * `totalTokens` — `usage.inputTokens + usage.outputTokens` summed across the
+   *   run. Omitted when no usage event fired.
+   * `totalDurationMs` — wall-clock ms the runner measured around the child run.
+   * `usage` — the per-bucket breakdown (see {@link SubagentUsageBreakdown}).
+   */
+  frameCount?: number
+  modelsUsed?: readonly string[]
+  worktreeBranch?: string
+  totalToolUseCount?: number
+  totalTokens?: number
+  totalDurationMs?: number
+  usage?: SubagentUsageBreakdown
 }
 
 /**

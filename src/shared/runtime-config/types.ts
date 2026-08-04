@@ -280,6 +280,17 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  only; it does NOT invoke the permission decider, and the broker's
    *  leader-authored-response-only widen (no-self-grant) is preserved. */
   readonly teamPeerMsg: boolean
+  /** RFC11-1 — corpus-parity subagent observability projection
+   *  (`QUANTA_SUBAGENT_OBS`). Opt-in (`gateOn` vocab; #24). Default false ⇒ the
+   *  subagent runner does NOT tap the child stream and projects NOTHING onto the
+   *  `SubagentResult` / `TaskRecord.result` (byte-identical to the pre-RFC11-1
+   *  result JSON). When ON, the runner wraps the child stream with a pass-through
+   *  tap (event stream still byte-identical) and PROJECTS — never stores —
+   *  `{frameCount, modelsUsed?, worktreeBranch?, totalToolUseCount?, totalTokens?,
+   *  totalDurationMs, usage?}` from signals that already exist (RFC-02-3
+   *  `model_route_changed` events, the always-on `usage`/`tool_call` events, the
+   *  RFC-06 worktree branch, `turns`). NO new store / meter / bus. */
+  readonly subagentObs: boolean
   /** C1 — Canvas / artifact persistence store (`QUANTA_ARTIFACT_STORE`). Strict
    *  opt-in (`gateOn` vocab; #24). Default false ⇒ no registry, the artifact tools are NOT
    *  registered (byte-identical). When ON, the composition root mints ONE

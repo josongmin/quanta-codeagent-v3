@@ -238,6 +238,10 @@ const parseCapabilitySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // decorator (raw global mailbox), no team registry / team_* tools. Builds ON
     // the existing QUANTA_TEAM_* peer mailbox + wake-idle.
     teamPeerMsg: gateOn(env, "QUANTA_TEAM_PEER_MSG"),
+    // RFC11-1 — subagent observability projection. Opt-in (`gateOn` vocab; #24).
+    // Default false ⇒ no stream tap, nothing projected onto the result
+    // (byte-identical result / TaskRecord JSON).
+    subagentObs: gateOn(env, "QUANTA_SUBAGENT_OBS"),
     // C1 — opt-in (`gateOn` vocab; #24). Default false ⇒ no artifact registry / tools
     // (byte-identical).
     artifactStore: gateOn(env, "QUANTA_ARTIFACT_STORE"),
