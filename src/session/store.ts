@@ -490,7 +490,39 @@ export const loadSessionById = async (
   return archived
 }
 
-export const archiveSession = async (id: string, provider?: SessionRootProvider): Promise<void> => {
+/** RFC-01 A2 (R4) — ATOMIC read-modify-write of a session under the per-session
+ *  save lock. `mutate` receives the FRESHLY-loaded snapshot (re-read INSIDE the
+ *  lock, so it observes any concurrent rename/fold that already committed) and
+ *  returns the next snapshot; the write happens under the same lock hold. This is
+ *  how independent field-mutators (the `@/agent` rollback coordinator advancing
+ *  `rollbackOperations`, the detached auto-titler changing `meta.title`) avoid
+ *  clobbering EACH OTHER's field: whoever runs second re-reads the first's write
+ *  and carries it forward via the full-snapshot spread. Returns false when the
+ *  session is absent. Do NOT call `saveSessionById` from inside `mutate` — the
+ *  lock is not re-entrant. */
+export const updateSessionAtomic = (
+  id: string,
+  mutate: (s: SavedSession) => SavedSession,
+  provider?: SessionRootProvider,
+): Promise<boolean> =>
+  withSessionSaveLock(id, async () => {
+    const existing = await loadSessionById(id, provider)
+    if (existing === undefined) return false
+    const next = mutate(existing)
+    const touchedMeta: SessionMeta = { ...next.meta, lastTouched: Date.now() }
+    const path = touchedMeta.archived
+      ? await resolveArchivedFilePath(id, provider)
+      : await resolveSessionFilePath(id, provider)
+    await writeSessionFile(path, JSON.stringify({ ...next, meta: touchedMeta }))
+    await commitMetaAfterSnapshot(touchedMeta, provider)
+    return true
+  })
+
+export const archiveSession = (id: string, provider?: SessionRootProvider): Promise<void> =>
+  // Under the per-session save lock (R4): this load→modify→write must not
+  // interleave with a coordinator rollback fold (saveSessionById), or the
+  // full-snapshot rewrite would clobber a record folded in the load→write gap.
+  withSessionSaveLock(id, async () => {
   const activePath = await resolveSessionFilePath(id, provider)
   const archivedPath = await resolveArchivedFilePath(id, provider)
   // Idempotency: if it's already archived (active file gone, archived present
@@ -514,12 +546,13 @@ export const archiveSession = async (id: string, provider?: SessionRootProvider)
   await writeSessionFile(archivedPath, JSON.stringify(updated))
   await removeFileIfExists(activePath)
   await commitMetaAfterSnapshot(nextMeta, provider)
-}
+  })
 
-export const unarchiveSession = async (
+export const unarchiveSession = (
   id: string,
   provider?: SessionRootProvider,
-): Promise<void> => {
+): Promise<void> =>
+  withSessionSaveLock(id, async () => {
   const activePath = await resolveSessionFilePath(id, provider)
   const archivedPath = await resolveArchivedFilePath(id, provider)
   const archivedExists = await fileExists(archivedPath)
@@ -541,13 +574,14 @@ export const unarchiveSession = async (
   await writeSessionFile(activePath, JSON.stringify(updated))
   await removeFileIfExists(archivedPath)
   await commitMetaAfterSnapshot(nextMeta, provider)
-}
+  })
 
-export const renameSession = async (
+export const renameSession = (
   id: string,
   title: string,
   provider?: SessionRootProvider,
-): Promise<void> => {
+): Promise<void> =>
+  withSessionSaveLock(id, async () => {
   const existing = await loadSessionById(id, provider)
   if (existing === undefined) return
   const nextMeta: SessionMeta = { ...existing.meta, title, lastTouched: Date.now() }
@@ -557,7 +591,7 @@ export const renameSession = async (
   const updated: SavedSession = { ...existing, meta: nextMeta }
   await writeSessionFile(path, JSON.stringify(updated))
   await commitMetaAfterSnapshot(nextMeta, provider)
-}
+  })
 
 export const forkSession = async (
   id: string,
@@ -674,11 +708,14 @@ export const assignMessageIds = (
  * current snapshot. (Phase-A scope; envelope truncation can be layered as
  * a follow-up if a concrete need surfaces.)
  */
-export const rewindToMessage = async (
+export const rewindToMessage = (
   sessionId: string,
   msgId: string,
   provider?: SessionRootProvider,
-): Promise<{ removed: number }> => {
+): Promise<{ removed: number }> =>
+  // Per-session save lock (R4): serialize this load→modify→write with the
+  // coordinator's rollback fold so a concurrent fold is not clobbered.
+  withSessionSaveLock(sessionId, async () => {
   const existing = await loadSessionById(sessionId, provider)
   if (existing === undefined) return { removed: 0 }
   if (existing.messages.length === 0) return { removed: 0 }
@@ -709,4 +746,4 @@ export const rewindToMessage = async (
   await writeSessionFile(path, JSON.stringify(updated))
   await commitMetaAfterSnapshot(nextMeta, provider)
   return { removed }
-}
+  })

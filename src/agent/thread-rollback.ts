@@ -36,7 +36,7 @@ import {
   loadSessionById,
   type RollbackCheckpointRecord,
   type RollbackOperationRecord,
-  saveSessionById,
+  updateSessionAtomic,
 } from "@/session"
 import { resolveRollbackTarget } from "./thread-rollback-checkpoint"
 
@@ -310,20 +310,18 @@ export const createSavedSessionRollbackStore = (): RollbackRecordStore => ({
     }
   },
   async saveOperations(sessionId, operations) {
-    const saved = await loadSessionById(sessionId)
-    if (saved === undefined) {
+    // ATOMIC read-modify-write under the per-session save lock (R4): re-read the
+    // freshest snapshot INSIDE the lock and advance ONLY `rollbackOperations`,
+    // carrying every other field (meta.title, messages, checkpoints) forward via
+    // the full-snapshot spread. This is why a concurrent detached auto-titler
+    // rename cannot clobber the fold (and vice-versa) — whoever runs second sees
+    // the first's committed write.
+    const ok = await updateSessionAtomic(sessionId, (saved) => ({
+      ...saved,
+      rollbackOperations: [...operations],
+    }))
+    if (!ok) {
       throw new Error(`thread-rollback: session not found on save: ${sessionId}`)
     }
-    await saveSessionById(saved.meta, {
-      reason: saved.reason,
-      turns: saved.turns,
-      messages: saved.messages,
-      // Preserve the checkpoint mapping unchanged; only the operation
-      // collection advances on a rollback.
-      ...(saved.rollbackCheckpoints !== undefined
-        ? { rollbackCheckpoints: saved.rollbackCheckpoints }
-        : {}),
-      rollbackOperations: [...operations],
-    })
   },
 })

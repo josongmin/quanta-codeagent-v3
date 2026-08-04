@@ -162,6 +162,7 @@ export {
   sessionEnvelopePath,
   sessionEnvelopePathAsync,
   unarchiveSession,
+  updateSessionAtomic,
 } from "./store"
 // §13.1 (jun-08): store-level aggregate corruption detection + operator
 // recovery guidance (diagnostic; never on the hot path).
