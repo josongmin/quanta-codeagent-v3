@@ -47,6 +47,8 @@ interface AutomationRow {
   claimed_at: number | null
   model: string | null
   model_fallbacks: string | null
+  agent_role: string | null
+  base_branch: string | null
   kind: string | null
   target_thread_id: string | null
   inherited_policy: string | null
@@ -153,6 +155,8 @@ const rowToEngineAutomation = (row: AutomationRow): EngineAutomation | undefined
     ...(row.claimed_at !== null ? { claimedAt: row.claimed_at } : {}),
     ...(row.model !== null ? { model: row.model } : {}),
     ...(modelFallbacks !== undefined ? { modelFallbacks } : {}),
+    ...(row.agent_role !== null ? { agentRole: row.agent_role } : {}),
+    ...(row.base_branch !== null ? { baseBranch: row.base_branch } : {}),
     ...(row.kind === "heartbeat" ? { kind: "heartbeat" as const } : {}),
     ...(row.target_thread_id !== null ? { targetThreadId: row.target_thread_id } : {}),
     ...(inheritedPolicy !== undefined ? { inheritedPolicy } : {}),
@@ -219,6 +223,8 @@ export const schedule = (
       $model: input.model ?? null,
       $model_fallbacks:
         input.modelFallbacks !== undefined ? JSON.stringify(input.modelFallbacks) : null,
+      $agent_role: input.agentRole ?? null,
+      $base_branch: input.baseBranch ?? null,
       $kind: input.kind ?? null,
       $target_thread_id: input.targetThreadId ?? null,
       $inherited_policy:

@@ -40,6 +40,19 @@ import {
 import { chooseModel, rerouteResultToRouteEvent } from "./model-reroute"
 import type { AgentLoopPort, ModelAvailabilityPort } from "./types"
 
+/** RFC11-2 — the thin fork seam the fire path drives to fork a bound base
+ *  branch. STRUCTURALLY identical to RFC-06 `createPersistentWorktree`
+ *  (`@/runtime/worktree-fork`) so the composition root passes that EXACT owner
+ *  (the SAME persistent-worktree caller the interactive session-fork uses) with
+ *  no adapter — this slice adds NO new git/worktree caller. Kept as a local
+ *  structural port (not a value import) so the pure-leaf scheduler slice holds
+ *  no runtime edge into `@/runtime`. */
+export type WorktreeForkPort = (
+  id: string,
+  repoRoot: string,
+  opts?: { branch?: string; baseRef?: string },
+) => Promise<{ worktreePath: string; branch: string }>
+
 /** ENV gate — strict `"on"` enables the wire. Absent / any other value
  *  ⇒ `null` slot (default-OFF). Mirrors {@link SCHEDULER_ENV_FLAG}'s
  *  intentional-only-canonical-value posture. */
@@ -108,6 +121,18 @@ export interface AssembleAutomationDeps {
    *  `errored` by `tickScheduler`) rather than silently running on the wrong
    *  model. */
   readonly modelAvailability?: ModelAvailabilityPort
+  /** RFC11-2 — OPTIONAL persistent-worktree fork owner (RFC-06
+   *  `createPersistentWorktree`). When wired AND a fired task carries a
+   *  `baseBranch`, the handler forks a worktree from that base (via
+   *  {@link worktreeRepoRoot}) BEFORE enqueuing the prompt — the SAME owner the
+   *  interactive session-fork path uses. ABSENT ⇒ no fork is attempted even for
+   *  a base-bound task (the composition root that wants forking injects the
+   *  owner); a bindless task never reaches this path (byte-identical). */
+  readonly worktreeFork?: WorktreeForkPort
+  /** RFC11-2 — repo root the {@link worktreeFork} forks under. REQUIRED for a
+   *  base-branch fork to happen; absent ⇒ the fork is skipped (the fire still
+   *  succeeds detached). */
+  readonly worktreeRepoRoot?: string
   /** Optional clock injection. Default `Date.now`. */
   readonly now?: () => number
   /** Optional stderr writer (test injection). Default `process.stderr.write`.
@@ -181,6 +206,16 @@ export const assembleAutomation = (
       ...(deps.onModelReroute !== undefined ? { onModelReroute: deps.onModelReroute } : {}),
       now: deps.now ?? Date.now,
     })
+    // RFC11-2 — fork the bound git base branch via the REUSED RFC-06 owner
+    // BEFORE enqueue. Only entered when the task carries a `baseBranch` AND the
+    // fork owner + repo root are wired; otherwise skipped entirely (a bindless
+    // task never reaches this — byte-identical). A fork throw surfaces as the
+    // ticker's `errored` outcome (we don't swallow), so a failed base fork does
+    // not silently fire on the wrong tree.
+    await forkBaseBranch(a, {
+      ...(deps.worktreeFork !== undefined ? { worktreeFork: deps.worktreeFork } : {}),
+      ...(deps.worktreeRepoRoot !== undefined ? { worktreeRepoRoot: deps.worktreeRepoRoot } : {}),
+    })
     const heartbeat =
       a.kind === "heartbeat" && a.targetThreadId !== undefined && a.inheritedPolicy !== undefined
         ? { targetThreadId: a.targetThreadId, inheritedPolicy: a.inheritedPolicy }
@@ -188,6 +223,10 @@ export const assembleAutomation = (
     const dispatchOpts = {
       ...heartbeat,
       ...(override !== undefined ? { modelOverride: override } : {}),
+      // RFC11-2 — the fired run ADOPTS the bound role + carries the base it was
+      // forked from. Omitted when unbound (byte-identical dispatch).
+      ...(a.agentRole !== undefined ? { agentRole: a.agentRole } : {}),
+      ...(a.baseBranch !== undefined ? { baseBranch: a.baseBranch } : {}),
     }
     await deps.agentLoop.enqueueUserMessage(
       a.prompt,
@@ -287,6 +326,30 @@ const resolveFireModel = async (
     if (ev !== null) route.onModelReroute(ev)
   }
   return chosen.chosen
+}
+
+/**
+ * RFC11-2 — fork the automation's bound git base branch (if any) via the REUSED
+ * RFC-06 `createPersistentWorktree` owner.
+ *
+ *   - No `baseBranch` on the row ⇒ NO-OP (the base-fork path is never entered;
+ *     a bindless fire is byte-identical to the pre-RFC11-2 handler).
+ *   - `baseBranch` present but the fork owner / repo root NOT wired ⇒ NO-OP
+ *     (the composition root that wants forking injects the owner; a host that
+ *     doesn't wire it still fires, detached — no crash).
+ *   - `baseBranch` present AND wired ⇒ fork a persistent worktree from that base
+ *     (`opts.baseRef = a.baseBranch`) under the automation's id, the SAME owner
+ *     the interactive session-fork path uses. A fork throw PROPAGATES (⇒ the
+ *     ticker records `errored`) — the fire never silently runs on the wrong
+ *     tree.
+ */
+const forkBaseBranch = async (
+  a: EngineAutomation,
+  deps: { readonly worktreeFork?: WorktreeForkPort; readonly worktreeRepoRoot?: string },
+): Promise<void> => {
+  if (a.baseBranch === undefined) return
+  if (deps.worktreeFork === undefined || deps.worktreeRepoRoot === undefined) return
+  await deps.worktreeFork(a.id, deps.worktreeRepoRoot, { baseRef: a.baseBranch })
 }
 
 /** Default durable-engine factory: open (creating the parent dir) the on-disk

@@ -69,6 +69,8 @@ export const ensureAutomationEngineSchema = (db: Database): void => {
       claimed_at      INTEGER,
       model           TEXT,
       model_fallbacks TEXT,
+      agent_role      TEXT,
+      base_branch     TEXT,
       kind            TEXT,
       target_thread_id TEXT,
       inherited_policy TEXT
@@ -84,6 +86,10 @@ export const ensureAutomationEngineSchema = (db: Database): void => {
   // array string; NULL ⇒ key omitted on read.
   ensureColumn(db, "automations", "model", "TEXT")
   ensureColumn(db, "automations", "model_fallbacks", "TEXT")
+  // RFC11-2 — additive migration for the per-task role + git-base columns
+  // (Codex 5973 `agent_role` / `baseBranch`). NULL ⇒ key omitted on read.
+  ensureColumn(db, "automations", "agent_role", "TEXT")
+  ensureColumn(db, "automations", "base_branch", "TEXT")
   ensureColumn(db, "automations", "kind", "TEXT")
   ensureColumn(db, "automations", "target_thread_id", "TEXT")
   ensureColumn(db, "automations", "inherited_policy", "TEXT")
