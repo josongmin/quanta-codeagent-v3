@@ -434,6 +434,14 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     describe: "Subagent interrupted-handle auto-resume sweep gate (ADR-0159 Phase 2).",
   },
   {
+    envKey: "QUANTA_SUBAGENT_OBS",
+    kind: "bool",
+    default: false,
+    group: "subagent",
+    describe:
+      "Corpus-parity subagent observability projection (RFC11-1): projects frameCount/modelsUsed/worktreeBranch/token+tool+duration totals onto the subagent result. Default-OFF ⇒ byte-identical result.",
+  },
+  {
     envKey: "QUANTA_SUBAGENT_QUEUE",
     kind: "bool",
     default: false,

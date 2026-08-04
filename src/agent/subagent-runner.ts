@@ -73,7 +73,8 @@
 
 import type { Message } from "@/llm"
 import { isGitRepo, withWorktree } from "@/runtime"
-import { SubagentTurnGate } from "@/subagent"
+import { runtimeConfig } from "@/shared"
+import type { SubagentTurnGate } from "@/subagent"
 import type { SubagentRequest, SubagentResult, SubagentRunner } from "../subagent/types"
 import { runAgent } from "./loop"
 import { canExposeSpawnTools, childDepthOf, effectiveCap, SpawnLineageError } from "./spawn-depth"
@@ -82,14 +83,21 @@ import { buildChildConfig } from "./subagent-runner-child-config"
 import {
   allocateChildMailboxIds,
   buildSubagentRunId,
+  type ChildMailboxIds,
   childIdentityState,
   recordChildNickname,
-  type ChildMailboxIds,
 } from "./subagent-runner-identity"
 import { ensureLineageTask, installSubagentEmitter } from "./subagent-runner-lineage"
-import type { ToolNamespaceStrategy } from "./subagent-tool-namespace"
+import {
+  newSubagentObsAccumulator,
+  projectSubagentObs,
+  type SubagentObsAccumulator,
+  tappedStream,
+} from "./subagent-runner-obs-projection"
+import { resolveChildLlm } from "./subagent-runner-overrides"
 import { maybeRegisterChildTeam, maybeUnregisterChildTeam } from "./subagent-runner-team"
 import { type ChildControlWiring, registerChildWaker } from "./subagent-runner-waker"
+import type { ToolNamespaceStrategy } from "./subagent-tool-namespace"
 import type { AgentConfig, AgentOutcome } from "./types"
 
 export { UnknownSubagentModelError } from "./subagent-runner-overrides"
@@ -173,6 +181,17 @@ interface ChildExecution {
   spawnedAsTaskId: string | undefined
   run: typeof runAgent
   withWorktree: typeof withWorktree
+  /** RFC11-1 — pass-through obs accumulator. Present ONLY when the projection
+   *  gate is ON; absent ⇒ the child stream is untouched (byte-identical). */
+  obsAcc: SubagentObsAccumulator | undefined
+}
+
+/** The runner's internal per-run execution outcome: the mapped slice result
+ *  plus the owned-worktree branch the child ran on (RFC11-1 projection input).
+ *  `worktreeBranch` is `undefined` on the non-isolated path. */
+interface ChildExecutionOutcome {
+  readonly result: SubagentResult
+  readonly worktreeBranch: string | undefined
 }
 
 /** Run the child once, selecting the worktree wrapper only after admission. */
@@ -189,9 +208,10 @@ const executeChild = async ({
   spawnedAsTaskId,
   run,
   withWorktree: wt,
-}: ChildExecution): Promise<SubagentResult> => {
-  const configAt = (cwd: string): AgentConfig =>
-    buildChildConfig(
+  obsAcc,
+}: ChildExecution): Promise<ChildExecutionOutcome> => {
+  const configAt = (cwd: string): AgentConfig => {
+    const config = buildChildConfig(
       parent,
       req,
       cwd,
@@ -202,11 +222,20 @@ const executeChild = async ({
       undefined, // childRuntime — use the default `runtimeConfig()`
       control,
     )
-  if (!isolate) return toResult(await run(configAt(requestedCwd)))
+    // RFC11-1 — when the projection is ON, wrap the child stream with a PASS-
+    // THROUGH tap so the runner can PROJECT the child run's own events. The
+    // forwarded event stream is byte-identical; the tap only observes.
+    return obsAcc === undefined
+      ? config
+      : { ...config, stream: tappedStream(config.stream, obsAcc) }
+  }
+  if (!isolate) {
+    return { result: toResult(await run(configAt(requestedCwd))), worktreeBranch: undefined }
+  }
   const outcome = await wt(subagentId, requestedCwd, async (worktreePath) =>
     run(configAt(worktreePath)),
   )
-  return toResult(outcome.value)
+  return { result: toResult(outcome.value), worktreeBranch: outcome.info.branch }
 }
 
 type ChildDepthAdmission = { readonly childDepth: number } | { readonly denied: SubagentResult }
@@ -253,6 +282,82 @@ const admitChildDepth = (parent: AgentConfig, maxDepth: number): ChildDepthAdmis
     decision: "admitted",
   })
   return { childDepth }
+}
+
+/** RFC11-1 — apply the corpus-parity observability projection ADDITIVELY onto
+ *  the mapped child result. `obsAcc === undefined` (gate OFF) ⇒ the result is
+ *  returned UNTOUCHED (byte-identical). Otherwise the projected fields
+ *  (`frameCount`/`modelsUsed?`/`worktreeBranch?`/`totalToolUseCount?`/
+ *  `totalTokens?`/`totalDurationMs`/`usage?`) are spread on. Projects from
+ *  signals that already exist — the tap accumulator (RFC-02-3 route + always-on
+ *  usage/tool events), the child's resolved model, the RFC-06 worktree branch,
+ *  and a wall-clock delta. NO store, NO meter, NO bus. */
+const applyObsProjection = (
+  result: SubagentResult,
+  ctx: {
+    obsAcc: SubagentObsAccumulator | undefined
+    parent: AgentConfig
+    req: SubagentRequest
+    worktreeBranch: string | undefined
+    durationMs: number
+  },
+): SubagentResult => {
+  if (ctx.obsAcc === undefined) return result
+  return {
+    ...result,
+    ...projectSubagentObs({
+      turns: result.turns,
+      resolvedModel: resolveChildLlm(ctx.parent, ctx.req).model,
+      worktreeBranch: ctx.worktreeBranch,
+      durationMs: ctx.durationMs,
+      acc: ctx.obsAcc,
+    }),
+  }
+}
+
+/** Assemble the caller-facing child result from the raw execution outcome:
+ *  (1) RFC11-1 obs projection (gate-OFF ⇒ untouched), then (2) the jul-7 F5
+ *  isolation-honesty prefix when `worktree` was requested but not achievable.
+ *  Extracted from the runner closure to keep it below the god-function cap. */
+const finalizeChildResult = (
+  raw: SubagentResult,
+  ctx: {
+    obsAcc: SubagentObsAccumulator | undefined
+    parent: AgentConfig
+    req: SubagentRequest
+    worktreeBranch: string | undefined
+    durationMs: number
+    wantsWorktree: boolean
+    isolate: boolean
+  },
+): SubagentResult => {
+  const projected = applyObsProjection(raw, ctx)
+  // UX honesty (jul-7 audit F5): `isolation:"worktree"` was REQUESTED but could
+  // not be honored (the workspace is not a git repo) — the child ran in the
+  // SHARED parent working directory with NO write isolation. Surface it instead
+  // of the prior SILENT fallback: a caller relying on isolation must know.
+  if (!(ctx.wantsWorktree && !ctx.isolate)) return projected
+  return {
+    ...projected,
+    finalText: `⚠️ isolation:"worktree" requested but NOT achieved — this workspace is not a git repository, so the subagent ran in the SHARED parent working directory (no write isolation). Its file changes affect the parent tree.\n\n${projected.finalText}`,
+  }
+}
+
+/** RFC jun-6 (DELTA #2) + §20.3 — register the spawned child into the parent's
+ *  team (siblings share a team bus + cross-team deny; no-op when `teamPeerMsg`
+ *  is off or the parent is un-teamed) AND record its display nickname in the
+ *  host `subagentAgentMeta` side-table (no-op without meta / taskId). Both are
+ *  byte-identical default-OFF. Extracted from the runner closure to keep it
+ *  below the god-function cap. `childDepth` is the D3 derived depth (not the
+ *  forgeable `req.depth`) for the `list_agents` metadata. */
+const registerChildSideTables = (
+  parent: AgentConfig,
+  req: SubagentRequest,
+  agentId: string,
+  childDepth: number,
+): void => {
+  maybeRegisterChildTeam(parent, agentId)
+  recordChildNickname(parent.subagentAgentMeta, req.taskId, agentId, childDepth, req.agentType)
 }
 
 /**
@@ -338,23 +443,9 @@ export const createSubagentRunner = (
       return { ok: false, finalText: startAbort, turns: 0 }
     }
 
-    // RFC jun-6 (DELTA #2) — register the spawned child into the PARENT's team
-    // (if the parent belongs to one) so siblings share a team bus + the
-    // cross-team deny applies. No-op when `teamPeerMsg` is off (no registry) or
-    // the parent is un-teamed (byte-identical default-OFF).
-    maybeRegisterChildTeam(parent, mailboxIds.agentId)
-
-    // §20.3 — record this child's display nickname in the host's AgentMeta
-    // side-table (keyed by the registry task id). Deterministically seeded from
-    // the STABLE mailbox id so `list_agents` shows a friendly maestro name.
-    // No-op without `subagentAgentMeta` or a `taskId` (byte-identical).
-    recordChildNickname(
-      parent.subagentAgentMeta,
-      req.taskId,
-      mailboxIds.agentId,
-      childDepth, // D3 — derived depth, not forgeable req.depth (list_agents metadata)
-      req.agentType,
-    )
+    // RFC jun-6 (DELTA #2) + §20.3 — team-register the child + record its
+    // display nickname in the host side-tables (both no-op OFF, byte-identical).
+    registerChildSideTables(parent, req, mailboxIds.agentId, childDepth)
 
     // ADR-0437 follow-up — mint a per-child turn gate + register a waker into
     // the host's shared `TurnWakeRegistry` under the SAME registry task id
@@ -365,8 +456,13 @@ export const createSubagentRunner = (
     const wakerWiring = registerChildWaker(parent, req.taskId, mailboxIds.agentId)
     const turnGate = wakerWiring?.gate
 
+    // RFC11-1 — obs accumulator + start clock ONLY when the gate is ON (else
+    // stream untouched, nothing projected; see `finalizeChildResult`).
+    const obsAcc = runtimeConfig().subagentObs ? newSubagentObsAccumulator() : undefined
+    const obsStartedAt = obsAcc !== undefined ? now() : 0
+
     try {
-      const rawChildResult = await executeChild({
+      const { result: rawChildResult, worktreeBranch } = await executeChild({
         parent,
         req,
         subagentId,
@@ -379,19 +475,21 @@ export const createSubagentRunner = (
         spawnedAsTaskId,
         run,
         withWorktree: wt,
+        obsAcc,
       })
 
-      // UX honesty (jul-7 audit F5): `isolation:"worktree"` was REQUESTED but could not be
-      // honored — the workspace is not a git repo — so the child ran in the SHARED parent
-      // working directory with NO write isolation. Surface it to the caller instead of the
-      // prior SILENT fallback: a caller relying on isolation must know it did not happen.
-      const childResult: SubagentResult =
-        wantsWorktree && !isolate
-          ? {
-              ...rawChildResult,
-              finalText: `⚠️ isolation:"worktree" requested but NOT achieved — this workspace is not a git repository, so the subagent ran in the SHARED parent working directory (no write isolation). Its file changes affect the parent tree.\n\n${rawChildResult.finalText}`,
-            }
-          : rawChildResult
+      // RFC11-1 + jul-7 F5 — assemble the caller-facing result (obs projection,
+      // then isolation-honesty prefix); gate-OFF ⇒ byte-identical.
+      const durationMs = obsAcc !== undefined ? now() - obsStartedAt : 0
+      const childResult = finalizeChildResult(rawChildResult, {
+        obsAcc,
+        parent,
+        req,
+        worktreeBranch,
+        durationMs,
+        wantsWorktree,
+        isolate,
+      })
 
       // ADR-0133 — fire `subagent_stop` after the child completes (any reason).
       await emitSubagentStopHook(parent, { subagentId, result: childResult })
