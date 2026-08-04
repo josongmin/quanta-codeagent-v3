@@ -369,8 +369,7 @@ const readExistingRollback = async (
     const out: Pick<SavedSession, "rollbackCheckpoints" | "rollbackOperations"> = {}
     if (Array.isArray(parsed.rollbackCheckpoints))
       out.rollbackCheckpoints = parsed.rollbackCheckpoints
-    if (Array.isArray(parsed.rollbackOperations))
-      out.rollbackOperations = parsed.rollbackOperations
+    if (Array.isArray(parsed.rollbackOperations)) out.rollbackOperations = parsed.rollbackOperations
     return out
   } catch (e) {
     // Corrupt/unreadable existing file ⇒ nothing to preserve. Attributed (not a
@@ -409,37 +408,59 @@ export const saveSessionById = (
   provider?: SessionRootProvider,
 ): Promise<void> =>
   withSessionSaveLock(meta.id, async () => {
-  const touched: SessionMeta = { ...meta, lastTouched: Date.now() }
-  const path = touched.archived
-    ? await resolveArchivedFilePath(touched.id, provider)
-    : await resolveSessionFilePath(touched.id, provider)
-  // RFC-01 A2 — the rollback ledger is PERSISTED ACROSS SAVES, not a per-payload
-  // field. `messages` is threaded by every caller, but rollback records are only
-  // known to the `@/agent` coordinator; a plain transcript save (per-turn
-  // auto-save, crash-resume markers) omits them. PRESERVE whatever is already on
-  // disk when the payload omits a field — the coordinator's explicit fold still
-  // wins when it DOES provide them. Closes a data-loss class (a re-submitted
-  // rollback would otherwise re-run the destructive restore; pending-intent
-  // recovery markers would vanish).
-  const preserved =
-    payload.rollbackCheckpoints === undefined || payload.rollbackOperations === undefined
-      ? await readExistingRollback(path)
-      : {}
-  const rollbackCheckpoints = payload.rollbackCheckpoints ?? preserved.rollbackCheckpoints
-  const rollbackOperations = payload.rollbackOperations ?? preserved.rollbackOperations
-  const saved: SavedSession = {
-    version: SESSION_VERSION,
-    meta: touched,
-    reason: payload.reason,
-    turns: payload.turns,
-    messages: payload.messages,
-    // Conditional spread (never `field: undefined`) so a session with NO rollback
-    // ledger (legacy / never rolled back) still serializes BYTE-IDENTICALLY to the
-    // pre-RFC on-disk shape. `rollbackCheckpoints`/`rollbackOperations` are the
-    // payload's when provided, else the preserved on-disk values (see above).
-    ...(rollbackCheckpoints !== undefined ? { rollbackCheckpoints } : {}),
-    ...(rollbackOperations !== undefined ? { rollbackOperations } : {}),
-  }
+    // R6 (final adversarial audit) — the caller's `meta.archived` can be STALE:
+    // another surface may have archived (or unarchived) this session mid-turn, and
+    // the per-turn auto-save reuses a long-lived `idMeta` snapshot that is never
+    // re-synced from disk. Select the write path from DISK REALITY, not the
+    // possibly-stale meta: write where the file actually is, and reconcile
+    // `meta.archived` to match. This stops an omitting save from (a) RESURRECTING an
+    // archived session onto the active path and (b) reading the now-empty active
+    // file for the rollback-preserve below (silently dropping the ledger). NOTE:
+    // within one process this composes with the save lock; ACROSS processes (two
+    // `quanta` procs on one QUANTA_SESSIONS_DIR) it narrows but cannot fully close
+    // the check→write window — a pre-existing store limitation that needs OS
+    // file-locking, out of scope here.
+    const activePath = await resolveSessionFilePath(meta.id, provider)
+    const archivedPath = await resolveArchivedFilePath(meta.id, provider)
+    const path = (await fileExists(activePath))
+      ? activePath
+      : (await fileExists(archivedPath))
+        ? archivedPath
+        : meta.archived
+          ? archivedPath
+          : activePath
+    const touched: SessionMeta = {
+      ...meta,
+      archived: path === archivedPath,
+      lastTouched: Date.now(),
+    }
+    // RFC-01 A2 — the rollback ledger is PERSISTED ACROSS SAVES, not a per-payload
+    // field. `messages` is threaded by every caller, but rollback records are only
+    // known to the `@/agent` coordinator; a plain transcript save (per-turn
+    // auto-save, crash-resume markers) omits them. PRESERVE whatever is already on
+    // disk when the payload omits a field — the coordinator's explicit fold still
+    // wins when it DOES provide them. Closes a data-loss class (a re-submitted
+    // rollback would otherwise re-run the destructive restore; pending-intent
+    // recovery markers would vanish).
+    const preserved =
+      payload.rollbackCheckpoints === undefined || payload.rollbackOperations === undefined
+        ? await readExistingRollback(path)
+        : {}
+    const rollbackCheckpoints = payload.rollbackCheckpoints ?? preserved.rollbackCheckpoints
+    const rollbackOperations = payload.rollbackOperations ?? preserved.rollbackOperations
+    const saved: SavedSession = {
+      version: SESSION_VERSION,
+      meta: touched,
+      reason: payload.reason,
+      turns: payload.turns,
+      messages: payload.messages,
+      // Conditional spread (never `field: undefined`) so a session with NO rollback
+      // ledger (legacy / never rolled back) still serializes BYTE-IDENTICALLY to the
+      // pre-RFC on-disk shape. `rollbackCheckpoints`/`rollbackOperations` are the
+      // payload's when provided, else the preserved on-disk values (see above).
+      ...(rollbackCheckpoints !== undefined ? { rollbackCheckpoints } : {}),
+      ...(rollbackOperations !== undefined ? { rollbackOperations } : {}),
+    }
     await writeSessionFile(path, JSON.stringify(saved))
     await commitMetaAfterSnapshot(touched, provider)
   })
@@ -494,10 +515,12 @@ export const loadSessionById = async (
  *  save lock. `mutate` receives the FRESHLY-loaded snapshot (re-read INSIDE the
  *  lock, so it observes any concurrent rename/fold that already committed) and
  *  returns the next snapshot; the write happens under the same lock hold. This is
- *  how independent field-mutators (the `@/agent` rollback coordinator advancing
- *  `rollbackOperations`, the detached auto-titler changing `meta.title`) avoid
- *  clobbering EACH OTHER's field: whoever runs second re-reads the first's write
- *  and carries it forward via the full-snapshot spread. Returns false when the
+ *  how independent field-mutators avoid clobbering EACH OTHER's field: the
+ *  `@/agent` rollback coordinator advances `rollbackOperations` HERE, while
+ *  `renameSession` (meta.title, reached by the detached auto-titler) and
+ *  `rewindToMessage` (messages) take the SAME `withSessionSaveLock` — whoever runs
+ *  second re-reads the first's committed write and carries it forward via the
+ *  full-snapshot spread. Returns false when the
  *  session is absent. Do NOT call `saveSessionById` from inside `mutate` — the
  *  lock is not re-entrant. */
 export const updateSessionAtomic = (
@@ -523,57 +546,54 @@ export const archiveSession = (id: string, provider?: SessionRootProvider): Prom
   // interleave with a coordinator rollback fold (saveSessionById), or the
   // full-snapshot rewrite would clobber a record folded in the load→write gap.
   withSessionSaveLock(id, async () => {
-  const activePath = await resolveSessionFilePath(id, provider)
-  const archivedPath = await resolveArchivedFilePath(id, provider)
-  // Idempotency: if it's already archived (active file gone, archived present
-  // — or simply already-marked), do nothing.
-  const activeExists = await fileExists(activePath)
-  if (!activeExists) {
-    // Could be already-archived: ensure the meta reflects archived=true.
-    const existing = await readSavedSession(archivedPath)
-    if (existing === undefined) return // truly missing — no-op
-    if (existing.meta.archived) return
+    const activePath = await resolveSessionFilePath(id, provider)
+    const archivedPath = await resolveArchivedFilePath(id, provider)
+    // Idempotency: if it's already archived (active file gone, archived present
+    // — or simply already-marked), do nothing.
+    const activeExists = await fileExists(activePath)
+    if (!activeExists) {
+      // Could be already-archived: ensure the meta reflects archived=true.
+      const existing = await readSavedSession(archivedPath)
+      if (existing === undefined) return // truly missing — no-op
+      if (existing.meta.archived) return
+      const nextMeta: SessionMeta = { ...existing.meta, archived: true, lastTouched: Date.now() }
+      const updated: SavedSession = { ...existing, meta: nextMeta }
+      await writeSessionFile(archivedPath, JSON.stringify(updated))
+      await commitMetaAfterSnapshot(nextMeta, provider)
+      return
+    }
+    const existing = await readSavedSession(activePath)
+    if (existing === undefined) return
     const nextMeta: SessionMeta = { ...existing.meta, archived: true, lastTouched: Date.now() }
     const updated: SavedSession = { ...existing, meta: nextMeta }
     await writeSessionFile(archivedPath, JSON.stringify(updated))
+    await removeFileIfExists(activePath)
     await commitMetaAfterSnapshot(nextMeta, provider)
-    return
-  }
-  const existing = await readSavedSession(activePath)
-  if (existing === undefined) return
-  const nextMeta: SessionMeta = { ...existing.meta, archived: true, lastTouched: Date.now() }
-  const updated: SavedSession = { ...existing, meta: nextMeta }
-  await writeSessionFile(archivedPath, JSON.stringify(updated))
-  await removeFileIfExists(activePath)
-  await commitMetaAfterSnapshot(nextMeta, provider)
   })
 
-export const unarchiveSession = (
-  id: string,
-  provider?: SessionRootProvider,
-): Promise<void> =>
+export const unarchiveSession = (id: string, provider?: SessionRootProvider): Promise<void> =>
   withSessionSaveLock(id, async () => {
-  const activePath = await resolveSessionFilePath(id, provider)
-  const archivedPath = await resolveArchivedFilePath(id, provider)
-  const archivedExists = await fileExists(archivedPath)
-  if (!archivedExists) {
-    // Possibly already active — reconcile the flag if needed.
-    const existing = await readSavedSession(activePath)
+    const activePath = await resolveSessionFilePath(id, provider)
+    const archivedPath = await resolveArchivedFilePath(id, provider)
+    const archivedExists = await fileExists(archivedPath)
+    if (!archivedExists) {
+      // Possibly already active — reconcile the flag if needed.
+      const existing = await readSavedSession(activePath)
+      if (existing === undefined) return
+      if (!existing.meta.archived) return
+      const nextMeta: SessionMeta = { ...existing.meta, archived: false, lastTouched: Date.now() }
+      const updated: SavedSession = { ...existing, meta: nextMeta }
+      await writeSessionFile(activePath, JSON.stringify(updated))
+      await commitMetaAfterSnapshot(nextMeta, provider)
+      return
+    }
+    const existing = await readSavedSession(archivedPath)
     if (existing === undefined) return
-    if (!existing.meta.archived) return
     const nextMeta: SessionMeta = { ...existing.meta, archived: false, lastTouched: Date.now() }
     const updated: SavedSession = { ...existing, meta: nextMeta }
     await writeSessionFile(activePath, JSON.stringify(updated))
+    await removeFileIfExists(archivedPath)
     await commitMetaAfterSnapshot(nextMeta, provider)
-    return
-  }
-  const existing = await readSavedSession(archivedPath)
-  if (existing === undefined) return
-  const nextMeta: SessionMeta = { ...existing.meta, archived: false, lastTouched: Date.now() }
-  const updated: SavedSession = { ...existing, meta: nextMeta }
-  await writeSessionFile(activePath, JSON.stringify(updated))
-  await removeFileIfExists(archivedPath)
-  await commitMetaAfterSnapshot(nextMeta, provider)
   })
 
 export const renameSession = (
@@ -582,15 +602,15 @@ export const renameSession = (
   provider?: SessionRootProvider,
 ): Promise<void> =>
   withSessionSaveLock(id, async () => {
-  const existing = await loadSessionById(id, provider)
-  if (existing === undefined) return
-  const nextMeta: SessionMeta = { ...existing.meta, title, lastTouched: Date.now() }
-  const path = nextMeta.archived
-    ? await resolveArchivedFilePath(id, provider)
-    : await resolveSessionFilePath(id, provider)
-  const updated: SavedSession = { ...existing, meta: nextMeta }
-  await writeSessionFile(path, JSON.stringify(updated))
-  await commitMetaAfterSnapshot(nextMeta, provider)
+    const existing = await loadSessionById(id, provider)
+    if (existing === undefined) return
+    const nextMeta: SessionMeta = { ...existing.meta, title, lastTouched: Date.now() }
+    const path = nextMeta.archived
+      ? await resolveArchivedFilePath(id, provider)
+      : await resolveSessionFilePath(id, provider)
+    const updated: SavedSession = { ...existing, meta: nextMeta }
+    await writeSessionFile(path, JSON.stringify(updated))
+    await commitMetaAfterSnapshot(nextMeta, provider)
   })
 
 export const forkSession = async (
@@ -716,34 +736,34 @@ export const rewindToMessage = (
   // Per-session save lock (R4): serialize this load→modify→write with the
   // coordinator's rollback fold so a concurrent fold is not clobbered.
   withSessionSaveLock(sessionId, async () => {
-  const existing = await loadSessionById(sessionId, provider)
-  if (existing === undefined) return { removed: 0 }
-  if (existing.messages.length === 0) return { removed: 0 }
-  const idx = existing.messages.findIndex((m) => m.id === msgId)
-  if (idx < 0) return { removed: 0 }
-  const removed = existing.messages.length - (idx + 1)
-  if (removed === 0) return { removed: 0 }
-  const truncated = existing.messages.slice(0, idx + 1)
-  // B4 follow-up (jun-04): truncating at `idx+1` can SPLIT a `tool_use`↔
-  // `tool_result` pair — if the message at `idx` is an assistant turn whose
-  // `tool_result` lived in a now-removed later message, the persisted file
-  // would carry a dangling `tool_use` → an Anthropic/OpenAI 400 on the next
-  // send. Reconcile so the ON-DISK snapshot is already model-valid (defense in
-  // depth: the resume-read path cleans on the way out too, but repairing here
-  // means the stored file is valid the instant rewind writes it — and the
-  // truncation point is EXACTLY where pairs get split). Byte-identical when
-  // there is nothing to reconcile (same array reference returned).
-  const reconciled = reconcileMessages(truncated)
-  const nextMeta: SessionMeta = { ...existing.meta, lastTouched: Date.now() }
-  const updated: SavedSession = {
-    ...existing,
-    meta: nextMeta,
-    messages: reconciled,
-  }
-  const path = nextMeta.archived
-    ? await resolveArchivedFilePath(sessionId, provider)
-    : await resolveSessionFilePath(sessionId, provider)
-  await writeSessionFile(path, JSON.stringify(updated))
-  await commitMetaAfterSnapshot(nextMeta, provider)
-  return { removed }
+    const existing = await loadSessionById(sessionId, provider)
+    if (existing === undefined) return { removed: 0 }
+    if (existing.messages.length === 0) return { removed: 0 }
+    const idx = existing.messages.findIndex((m) => m.id === msgId)
+    if (idx < 0) return { removed: 0 }
+    const removed = existing.messages.length - (idx + 1)
+    if (removed === 0) return { removed: 0 }
+    const truncated = existing.messages.slice(0, idx + 1)
+    // B4 follow-up (jun-04): truncating at `idx+1` can SPLIT a `tool_use`↔
+    // `tool_result` pair — if the message at `idx` is an assistant turn whose
+    // `tool_result` lived in a now-removed later message, the persisted file
+    // would carry a dangling `tool_use` → an Anthropic/OpenAI 400 on the next
+    // send. Reconcile so the ON-DISK snapshot is already model-valid (defense in
+    // depth: the resume-read path cleans on the way out too, but repairing here
+    // means the stored file is valid the instant rewind writes it — and the
+    // truncation point is EXACTLY where pairs get split). Byte-identical when
+    // there is nothing to reconcile (same array reference returned).
+    const reconciled = reconcileMessages(truncated)
+    const nextMeta: SessionMeta = { ...existing.meta, lastTouched: Date.now() }
+    const updated: SavedSession = {
+      ...existing,
+      meta: nextMeta,
+      messages: reconciled,
+    }
+    const path = nextMeta.archived
+      ? await resolveArchivedFilePath(sessionId, provider)
+      : await resolveSessionFilePath(sessionId, provider)
+    await writeSessionFile(path, JSON.stringify(updated))
+    await commitMetaAfterSnapshot(nextMeta, provider)
+    return { removed }
   })

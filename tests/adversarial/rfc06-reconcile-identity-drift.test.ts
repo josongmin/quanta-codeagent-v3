@@ -7,21 +7,21 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { createMcpToolReloadController } from "@/host/runtime/mcp-tool-reload"
-import type { TurnRegistrySnapshot } from "@/agent/turn-registry-snapshot"
 import {
   executeRollback,
-  resumePendingRollback,
   type RollbackEffectPort,
-  type RollbackRecords,
   type RollbackRecordStore,
+  type RollbackRecords,
+  resumePendingRollback,
 } from "@/agent/thread-rollback"
-import { ROLLBACK_RECORD_VERSION, type RollbackOperationRecord } from "@/session"
+import type { TurnRegistrySnapshot } from "@/agent/turn-registry-snapshot"
+import { createMcpToolReloadController } from "@/host/runtime/mcp-tool-reload"
 import {
-  validateResumeSnapshot,
   ResumeRehydrateRefusedError,
+  validateResumeSnapshot,
 } from "@/sdk/runtime/session/rehydrate"
 import type { SavedSession } from "@/session"
+import { ROLLBACK_RECORD_VERSION, type RollbackOperationRecord } from "@/session"
 
 /* ------------------------------------------------------------------ */
 /* RFC04 reload controller — coalescing / lost-update / LKG            */
@@ -194,27 +194,9 @@ describe("RFC01 ThreadRollback — crash/idempotency invariants", () => {
       checkpoints: [checkpoint("t1")],
       operations: [],
     })
-    let effectCalls = 0
-    const throwingEffect: RollbackEffectPort = {
-      async restoreToCheckpoint() {
-        effectCalls++
-        throw new Error("crash: process died during restore")
-      },
-    }
-    // First run: intent persists, effect throws → coordinator catches and writes
-    // a rollback_failed terminal (its documented no-throw contract). To model a
-    // TRUE crash (no terminal written), we intercept: use an effect that hangs by
-    // returning a never-settling promise is unrealistic in a unit test, so instead
-    // we simulate the crash as "intent persisted, terminal never written" by
-    // driving executeRollback with an effect that returns ok:false is NOT a crash.
-    // Real crash model: persist intent, then STOP. We do that by loading the store
-    // after ONLY the intent write. So: run executeRollback but make saveOperations
-    // for the terminal a no-op-after-first to freeze state at the intent.
-    void throwingEffect
-    void effectCalls
-
-    // Precise crash model: a store whose SECOND save (the terminal) throws (disk
-    // gone) — leaving exactly the intent durable.
+    // Crash model: a store whose SECOND save (the terminal) throws (disk gone) —
+    // leaving exactly the intent durable, so restart sees a pending intent and
+    // must NOT blind-retry the destructive restore.
     let saves = 0
     let frozen: RollbackOperationRecord[] = []
     const crashStore: RollbackRecordStore = {
@@ -434,9 +416,9 @@ describe("RFC01-4 rehydrate — fail-closed vs fresh boundaries", () => {
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join as pathJoin } from "node:path"
-import { createPersistentWorktree } from "@/runtime"
 import { reconcileCreatingWorktree } from "@/runner/session-ops/current-thread-worktree"
-import { WORKSPACE_OWNERSHIP_VERSION, type SessionMeta } from "@/session"
+import { createPersistentWorktree } from "@/runtime"
+import { type SessionMeta, WORKSPACE_OWNERSHIP_VERSION } from "@/session"
 
 const sh = async (cwd: string, cmd: string): Promise<void> => {
   const p = Bun.spawn(["bash", "-lc", cmd], { cwd, stdout: "pipe", stderr: "pipe" })
