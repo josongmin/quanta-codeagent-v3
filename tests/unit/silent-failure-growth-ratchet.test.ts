@@ -151,7 +151,14 @@ const SRC = join(__dirname, "..", "..", "src")
 // default; none strand caller-needed work. Moving target while observation+bench work
 // is mid-commit; red-on-injection teeth still trip on the NEXT unjustified swallow.
 // Ceiling 1103 → 1154.
-const BARE_CATCH_BASELINE = 1154
+// Re-measured 2026-08-04 (aug-02 absorption RFC-01~09): +1 bare catch, AUDITED
+// legit fail-closed default — `runner/hunk-mutation-journal.ts` undo reads the
+// target file and, if it is UNREADABLE since apply, returns `{status:"stale"}`
+// (refuses the revert — a SAFE default, never a stranded work path), same class
+// as the shell.ts askConsent `} catch { return false }` precedent above. (The
+// store.ts rollback-preserve read is ATTRIBUTED via logger.warn, not counted.)
+// Ceiling 1154 → 1155.
+const BARE_CATCH_BASELINE = 1155
 // Re-measured 2026-06-25 (repo-cache GC + committed in-flight bench work): the
 // `reapStaleMirrorTemps` `stat(p).catch(() => null)` not-found PROBE (handled via
 // `if (st !== null …)`, a vanished orphan tmp is simply skipped) plus one further
@@ -166,7 +173,14 @@ const BARE_CATCH_BASELINE = 1154
 // absent); runner/batch/eval/repo-regression-discovery-adapter.ts (regression-probe
 // misses); apps/cli/attach + apps/bench/remote/single-box-guard (best-effort). Each
 // null is consumed as "signal absent", never a stranded work path. Ceiling 145 → 165.
-const NULLISH_PROMISE_SWALLOW_BASELINE = 165
+// Re-measured 2026-08-04 (aug-02 absorption RFC-06 worktree hardening): +6, AUDITED
+// all handled-undefined PROBES, not swallowed work: `runtime/worktree-fork.ts` +
+// `worktree-inspect.ts` — `realpath(path).catch(() => undefined)` (canonicalize a
+// path that may not exist → treated as unresolvable) and `runShell("git status
+// --porcelain").catch(() => undefined)` (git-status probe → undefined ⇒ fail-CLOSED
+// "treat as dirty", never a stranded path). Each undefined is consumed as "signal
+// absent". Ceiling 165 → 171.
+const NULLISH_PROMISE_SWALLOW_BASELINE = 171
 
 /**
  * Forms C–F: ceiling baselines (one-directional `<=`) re-measured 2026-06-10 on

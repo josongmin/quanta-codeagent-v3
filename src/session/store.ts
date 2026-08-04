@@ -372,7 +372,11 @@ const readExistingRollback = async (
     if (Array.isArray(parsed.rollbackOperations))
       out.rollbackOperations = parsed.rollbackOperations
     return out
-  } catch {
+  } catch (e) {
+    // Corrupt/unreadable existing file ⇒ nothing to preserve. Attributed (not a
+    // silent swallow): the same save then OVERWRITES it, so the ledger is not
+    // strandable here — but a corrupt session file is worth surfacing.
+    logger.warn("session: rollback-preserve read failed", { path, error: errMessage(e) })
     return {}
   }
 }
