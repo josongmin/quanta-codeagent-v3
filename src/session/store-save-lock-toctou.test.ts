@@ -186,7 +186,6 @@ test("store per-session save lock: a coordinator fold is NOT clobbered by a conc
   // loses op-2 (finalIds === ["op-1"]) — proven by R3-A's characterization; the
   // lock flips it to the correct ["op-1","op-2"] (red-on-injection: remove the
   // withSessionSaveLock wrapper in store.ts and this assertion goes red).
-  console.error("ORDER:", JSON.stringify(order))
   expect(barrierHitOnce.value).toBe(true)
   expect(order).toContain("omitting-read-parked")
   expect(finalIds).toEqual(["op-1", "op-2"])
