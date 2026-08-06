@@ -81,7 +81,7 @@ import { runSkillsRender } from "./render-helpers"
 
 const skillsCmd: SlashCommand = {
   name: "/skills",
-  describe: "List discovered skills (name + description + paths)",
+  describe: "List discovered skills; `/skills review` to approve staged imports",
   run: (args, ctx) => runSkillsRender("/skills", args, ctx, "skills:"),
 }
 

@@ -35,6 +35,14 @@ export interface SlashContext {
   /** Re-discover skills from disk on demand so `/skills` and `/reload-skills`
    *  can render the inventory without importing `@/skill` types. */
   readonly skills?: (() => Promise<SkillRow[]>) | undefined
+  /** RFC03-def `/skills review` — the review/approve surface for staged imported
+   *  skill proposals (from a gated startup config-migration IMPORT). The SAME
+   *  approval machine + artifact port + staging store the import staged into:
+   *  `list()` shows PENDING proposals, `approve(id)` drives the hash-verified CAS
+   *  promote (the ONLY live-dir write path), `deny(id)` drops. Present iff a skill
+   *  was staged this run; absent ⇒ `/skills review` prints "no staged skill
+   *  proposals" + exit 0 (default-OFF byte-identical — no import ⇒ no slot). */
+  readonly skillReview?: import("./config-migration-skill-stage").ImportSkillReview | undefined
   /** Claude A9 `/side <q>` isolated agent loop. */
   readonly side?: SideCmdSlashState | undefined
   /** Sticky cumulative cost dashboard render seam. */

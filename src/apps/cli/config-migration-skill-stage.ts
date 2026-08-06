@@ -22,19 +22,24 @@
  * anywhere) — so wiring it turns a startup skill import from a silent drop into
  * a staged, review-bound proposal.
  *
- * ⚠️ SCOPE — promote actuator DEFERRED (hellaudit A2, explicit follow-up, NOT a
- * silent dead-seam): the approval this opens carries `resumeStep:
- * "promote-skill-proposal"`, but there is currently NO production consumer that,
- * on approve, re-verifies + calls the artifact port's `promote`. `resumeStep` is
- * a label, not a dispatched action, and this staging store + approval machine are
- * fresh PER import run (both discarded when the run ends — the staged bytes are
- * NOT durable). So on this path a skill is staged + a review is opened but cannot
- * yet be promoted live. This is fail-SAFE (never an unapproved write) but the
- * import→approve→promote loop is OPEN. Closing it is a security-sensitive design
- * decision — a resume-dispatch (`resumeStep` → actuator) that re-verifies the
- * bound hash + CAS-promotes, driven by a chosen review surface (startup notice
- * vs. an interactive `skills review` command). Tracked in the RFC03 catalog as an
- * explicit follow-up; do NOT claim durable persistence or a working promote here.
+ * PROMOTE ACTUATOR (RFC03-def, this file) — the import→approve→promote loop is
+ * now CLOSED via {@link buildImportSkillReview}. {@link composeImportSkillStage}
+ * returns a `review` surface bound to the SAME approval machine + artifact port +
+ * staging store the stage populated. `review.list()` enumerates the PENDING
+ * staged proposals; `review.approve(id)` settles the approval AND drives the
+ * EXISTING CAS `promote` (hash-verified, realpath-jailed, fail-closed);
+ * `review.deny(id)` settles `deny` and NEVER writes. Security posture unchanged:
+ * NO live-dir write happens at stage time or on `list()`; the ONLY write path is
+ * an explicit operator `approve`, and it re-verifies the bound artifact hash
+ * (`promote` refuses `hash_mismatch` on a tampered staged artifact) before the
+ * atomic write. The approval is bound by artifact HASH, never a tool-name string.
+ *
+ * ⚠️ DURABILITY (unchanged, by design): the staging store + approval machine are
+ * still fresh PER import run (production omits the `staging` arg ⇒ an in-memory
+ * Map). The review surface consumes them WITHIN the same process lifetime; a
+ * skill not reviewed before the process exits is simply re-staged on the next
+ * gated import. This is fail-SAFE (never an unapproved write). On-disk durable
+ * staging is a separate follow-up; do NOT claim it here.
  */
 
 import { createHash } from "node:crypto"
@@ -45,7 +50,13 @@ import {
 } from "@/agent/approval-state-machine"
 import type { SkillStagePort } from "@/migration/external-config"
 import { errMessage } from "@/shared"
-import { createSkillProposalArtifactPort, type PromoteStorageIo, type StagingStore } from "@/skill"
+import {
+  ABSENT_PREIMAGE,
+  createSkillProposalArtifactPort,
+  type PromoteResult,
+  type PromoteStorageIo,
+  type StagingStore,
+} from "@/skill"
 import {
   FsJailError,
   resolveJailed,
@@ -71,41 +82,211 @@ const HOST_PROMOTE_STORAGE_IO: PromoteStorageIo = {
  *  filter only — the approval is bound by artifact hash, not this id). */
 const IMPORT_THREAD_ID = "config-migration-import"
 
+/** The step label the import approval carries. A review surface consumes it as
+ *  the guard that an approval is a promotable staged-skill proposal (never
+ *  promotes an approval that is not this exact step). */
+export const PROMOTE_IMPORTED_SKILL_STEP = "promote-imported-skill"
+
+/** A single PENDING staged-skill proposal, as the review surface surfaces it.
+ *  Carries the approval `id` (the review key), the skill `name`, the relative
+ *  `targetPath` the CAS promote would write, and the bound `artifactHash` (the
+ *  hash `promote` re-verifies — the binding is by content, not a tool name). */
+export interface StagedSkillProposal {
+  readonly id: string
+  readonly name: string
+  readonly targetPath: string
+  readonly artifactHash: string
+}
+
+/** Outcome of a `review.approve(id)` — the promote result on success, or a
+ *  typed refusal reason on any fail-closed miss (unknown/denied approval, no
+ *  staged artifact, hash mismatch, jail escape, preimage drift, write error). */
+export type SkillReviewApproveResult =
+  | { readonly ok: true; readonly path: string; readonly name: string }
+  | { readonly ok: false; readonly reason: string; readonly detail: string }
+
+/** Outcome of a `review.deny(id)` — always drops (never writes). */
+export type SkillReviewDenyResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly reason: string }
+
+/**
+ * The review/approve surface for staged imported-skill proposals. Bound to the
+ * SAME approval machine + artifact port + staging store the stage populated.
+ *
+ *   - `list()`    — the PENDING staged proposals (settled ones drop out). Pure
+ *                   read; NEVER touches disk.
+ *   - `approve(id)` — settle the approval `approve` AND drive the EXISTING CAS
+ *                   `promote` (hash-verified, jailed, atomic). The ONLY write
+ *                   path. Fail-closed: a non-pending / unknown / non-import
+ *                   approval, or a promote precondition miss, returns a typed
+ *                   refusal and writes NOTHING.
+ *   - `deny(id)`  — settle `deny`; NEVER promotes.
+ */
+export interface ImportSkillReview {
+  list(): readonly StagedSkillProposal[]
+  approve(id: string): Promise<SkillReviewApproveResult>
+  deny(id: string): SkillReviewDenyResult
+}
+
+/** Per-approval promote metadata captured at stage time (the approval record
+ *  itself carries only the hash — the review needs the target path too). */
+interface StagedMeta {
+  readonly name: string
+  readonly targetPath: string
+  readonly artifactHash: string
+}
+
+/**
+ * Build the review/approve surface over an approval machine + the artifact port
+ * that shares the SAME staging store the proposals were `put` into. `metaById`
+ * maps an approval id → the promote metadata captured at stage time.
+ *
+ * The standalone factory is exported so a review can be reconstructed over an
+ * approval machine + staging store (e.g. a surface that holds them separately);
+ * it re-derives the metadata from the machine's pending records. When a shared
+ * `metaById` is passed (the composer path) that authoritative map is used.
+ */
+export const buildImportSkillReview = (
+  approval: ApprovalStateMachinePort,
+  skillsDir: string,
+  staging: StagingStore,
+  metaById?: ReadonlyMap<string, StagedMeta>,
+): ImportSkillReview => {
+  const artifact = createSkillProposalArtifactPort(skillsDir, HOST_PROMOTE_STORAGE_IO, staging)
+
+  /** Resolve the promote metadata for a pending import approval, or undefined
+   *  when the id is not a promotable staged-skill proposal. */
+  const metaFor = (id: string): StagedMeta | undefined => {
+    const fromMap = metaById?.get(id)
+    if (fromMap !== undefined) return fromMap
+    // Fallback: reconstruct from the approval record. The target path is parsed
+    // from the `proposedAction` ("write <targetPath>") the stage stamped.
+    const req = approval.get(id)
+    if (req === undefined || req === null) return undefined
+    if (req.resumeStep !== PROMOTE_IMPORTED_SKILL_STEP) return undefined
+    if (req.artifactHash === undefined) return undefined
+    const targetPath = req.proposedAction.startsWith("write ")
+      ? req.proposedAction.slice("write ".length)
+      : ""
+    if (targetPath === "") return undefined
+    const name = targetPath.split("/")[0] ?? ""
+    return { name, targetPath, artifactHash: req.artifactHash }
+  }
+
+  const toReason = (r: PromoteResult): string => (r.ok ? "ok" : r.reason)
+
+  return {
+    list(): readonly StagedSkillProposal[] {
+      // Only PENDING import-skill approvals with a resolvable staged artifact.
+      const out: StagedSkillProposal[] = []
+      for (const req of approval.pending()) {
+        if (req.resumeStep !== PROMOTE_IMPORTED_SKILL_STEP) continue
+        const meta = metaFor(req.id)
+        if (meta === undefined) continue
+        out.push({
+          id: req.id,
+          name: meta.name,
+          targetPath: meta.targetPath,
+          artifactHash: meta.artifactHash,
+        })
+      }
+      return out
+    },
+
+    async approve(id: string): Promise<SkillReviewApproveResult> {
+      // Refuse anything that is not a PENDING import-skill proposal — a denied /
+      // already-settled / unknown / foreign approval never promotes.
+      const req = approval.get(id)
+      if (req === null || req.status !== "pending") {
+        return { ok: false, reason: "not_pending", detail: `approval ${id} is not pending` }
+      }
+      const meta = metaFor(id)
+      if (meta === undefined) {
+        return { ok: false, reason: "unknown_proposal", detail: `no staged proposal for ${id}` }
+      }
+      // Settle FIRST so a re-approve after this cannot double-fire; the promote
+      // is the actuator bound to the just-approved decision.
+      const settled = approval.settle(id, "approve")
+      if (settled === null || settled.decision !== "approve") {
+        return { ok: false, reason: "settle_failed", detail: `could not approve ${id}` }
+      }
+      // The EXISTING CAS promote — hash re-verify + realpath jail + atomic write.
+      // A `new` imported skill's target does not exist ⇒ ABSENT_PREIMAGE.
+      const result = await artifact.promote({
+        hash: meta.artifactHash,
+        targetPath: meta.targetPath,
+        expectedPreimageHash: ABSENT_PREIMAGE,
+      })
+      if (!result.ok) return { ok: false, reason: toReason(result), detail: result.detail }
+      return { ok: true, path: result.path, name: meta.name }
+    },
+
+    deny(id: string): SkillReviewDenyResult {
+      const req = approval.get(id)
+      if (req === null || req.status !== "pending") {
+        return { ok: false, reason: "not_pending" }
+      }
+      // Settle `deny` — NO promote path is reachable from here.
+      const settled = approval.settle(id, "deny")
+      if (settled === null || settled.decision !== "deny") {
+        return { ok: false, reason: "settle_failed" }
+      }
+      return { ok: true }
+    },
+  }
+}
+
 /** Compose the REAL imported-skill staging port + the approval machine that
- *  carries its pending approvals. Returns both so the caller can (later) surface
- *  the pending proposals; today the machine is consumed only for the binding.
+ *  carries its pending approvals + the review/approve surface bound to BOTH (and
+ *  to the artifact port's staging store). The `review` closes the
+ *  import→approve→promote loop: `stage` populates it, an operator consumes it.
  *
  *  `skillsDir` is the live user skills directory — the CAS jail root the promote
- *  would write into on approve (canonically `<homeDir>/.quanta/skills`).
+ *  writes into on approve (canonically `<homeDir>/.quanta/skills`).
  *
  *  `staging` is a TEST SEAM (mirrors the artifact port's own optional staging
  *  store): a test passes a shared `Map` so it can promote the staged bytes with
  *  a sibling port over the SAME store. Production OMITS it ⇒ a fresh in-memory
- *  store per import run (byte-identical). */
+ *  store per import run (byte-identical). Either way, the returned `review` is
+ *  bound to the SAME store the stage `put`s into. */
 export const composeImportSkillStage = (
   skillsDir: string,
   staging?: StagingStore,
-): { readonly stage: SkillStagePort; readonly approval: ApprovalStateMachinePort } => {
-  const artifact =
-    staging !== undefined
-      ? createSkillProposalArtifactPort(skillsDir, HOST_PROMOTE_STORAGE_IO, staging)
-      : createSkillProposalArtifactPort(skillsDir, HOST_PROMOTE_STORAGE_IO)
+): {
+  readonly stage: SkillStagePort
+  readonly approval: ApprovalStateMachinePort
+  readonly review: ImportSkillReview
+} => {
+  // Own the staging store explicitly so the review promotes from the SAME store
+  // the stage put into (production: a fresh per-run Map; test: the shared arg).
+  const store: StagingStore = staging ?? new Map()
+  const artifact = createSkillProposalArtifactPort(skillsDir, HOST_PROMOTE_STORAGE_IO, store)
   const approval = createApprovalStateMachine()
+  const metaById = new Map<string, StagedMeta>()
   const stage: SkillStagePort = {
     stage: async (args) => {
       // Stage the exact imported bytes into the CAS store (content-addressed,
       // inert until promoted). NO live write.
       await artifact.put(args.bytes)
-      // Bind a review-approval to EXACTLY these bytes. ⚠️ hellaudit A2: the
-      // approve→CAS-promote ACTUATOR is deferred (no production consumer of the
-      // resumeStep dispatches to promote yet) — see the top-of-file SCOPE note.
-      approval.request({
+      // Bind a review-approval to EXACTLY these bytes. The approve→CAS-promote
+      // ACTUATOR is `buildImportSkillReview` below (the review surface returned
+      // from this composer) — an approve re-verifies this hash + promotes.
+      const req = approval.request({
         threadId: IMPORT_THREAD_ID,
         kind: "permission",
         reason: `Install imported skill "${args.name}" (${args.kind})`,
         proposedAction: `write ${args.targetPath}`,
-        resumeStep: "promote-imported-skill",
+        resumeStep: PROMOTE_IMPORTED_SKILL_STEP,
         artifactRef: args.artifactHash,
+        artifactHash: args.artifactHash,
+      })
+      // Capture the promote metadata keyed by the minted approval id so the
+      // review can resolve the target path (the approval record carries only the
+      // hash) without re-parsing.
+      metaById.set(req.id, {
+        name: args.name,
+        targetPath: args.targetPath,
         artifactHash: args.artifactHash,
       })
       // proposalId is the content hash (deterministic, mirrors the front-door
@@ -114,7 +295,8 @@ export const composeImportSkillStage = (
       return { proposalId }
     },
   }
-  return { stage, approval }
+  const review = buildImportSkillReview(approval, skillsDir, store, metaById)
+  return { stage, approval, review }
 }
 
 /** The canonical live user skills directory (CAS jail root) under a home dir. */

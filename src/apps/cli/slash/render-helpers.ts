@@ -61,18 +61,115 @@ export const renderSkills = (
   for (const r of rows) ctx.out(renderSkillRow(r))
 }
 
+/**
+ * RFC03-def — `/skills review` sub-command body: list PENDING staged imported
+ * skill proposals, or approve/deny one by id. The review surface (`ctx.skillReview`)
+ * is bound to the SAME approval machine + artifact port + staging store a gated
+ * startup config-migration IMPORT staged into.
+ *
+ *   /skills review              — list PENDING staged proposals
+ *   /skills review approve <id> — hash-verified CAS promote (writes live SKILL.md)
+ *   /skills review deny <id>    — drop (no live write)
+ *
+ * Security: approve is the ONLY live-dir write path; it runs the existing CAS
+ * `promote` (hash re-verify + realpath jail + atomic), fail-closed on any miss.
+ * Absent the surface (no import staged this run) ⇒ "no staged skill proposals"
+ * + exit 0 (default-OFF byte-identical). NEVER promotes on a bare `review`.
+ */
+/** The review surface shape `/skills review` consumes (narrowed from ctx). */
+type SkillReviewSurface = NonNullable<SlashContext["skillReview"]>
+
+/** `/skills review` (no id) — list PENDING staged proposals. */
+const listStagedProposals = (name: string, ctx: SlashContext, review: SkillReviewSurface): 0 => {
+  const pending = review.list()
+  if (pending.length === 0) {
+    ctx.out(`${name} review: no pending staged skill proposals\n`)
+    return 0
+  }
+  ctx.out(`${name} review: ${pending.length} pending:\n`)
+  for (const p of pending) {
+    ctx.out(`  ${p.id}  ${p.name}  → ${p.targetPath}  [${p.artifactHash.slice(0, 12)}…]\n`)
+  }
+  ctx.out(`Use "${name} review approve <id>" or "${name} review deny <id>".\n`)
+  return 0
+}
+
+/** `/skills review approve <id>` — hash-verified CAS promote (the ONLY write). */
+const approveProposal = async (
+  name: string,
+  ctx: SlashContext,
+  review: SkillReviewSurface,
+  id: string,
+): Promise<number> => {
+  const res = await review.approve(id)
+  if (res.ok) {
+    ctx.out(`${name} review: approved "${res.name}" — promoted to ${res.path}\n`)
+    return 0
+  }
+  ctx.err(`${name} review: approve refused (${res.reason}): ${res.detail}\n`)
+  return 1
+}
+
+/** `/skills review deny <id>` — drop (no live write). */
+const denyProposal = (
+  name: string,
+  ctx: SlashContext,
+  review: SkillReviewSurface,
+  id: string,
+): number => {
+  const res = review.deny(id)
+  if (res.ok) {
+    ctx.out(`${name} review: denied ${id} — dropped (no live write)\n`)
+    return 0
+  }
+  ctx.err(`${name} review: deny refused (${res.reason})\n`)
+  return 1
+}
+
+const runSkillsReview = async (
+  name: string,
+  args: readonly string[],
+  ctx: SlashContext,
+): Promise<number> => {
+  const review = ctx.skillReview
+  if (review === undefined) {
+    ctx.out(`${name} review: no staged skill proposals\n`)
+    return 0
+  }
+  const sub = args[1]
+  if (sub === undefined) return listStagedProposals(name, ctx, review)
+  if (sub !== "approve" && sub !== "deny") {
+    ctx.err(`${name} review: unknown sub-command "${sub}" (expected approve|deny)\n`)
+    return 1
+  }
+  const id = args[2]
+  if (id === undefined || args.length > 3) {
+    ctx.err(`${name} review: "${sub}" needs exactly one <id>\n`)
+    return 1
+  }
+  return sub === "approve"
+    ? approveProposal(name, ctx, review, id)
+    : denyProposal(name, ctx, review, id)
+}
+
 /** Shared run-body for `/skills` and `/reload-skills`. Both commands take
- *  ZERO arguments (parity with Codex `forceReloadSkills`); extras error out
- *  for consistency with the rest of the BUILTINS (`/color foo bar` errors).
- *  Non-Error rejections from `ctx.skills()` are coerced via `String(e)` so the
- *  surfaced message never reads "undefined" (truly defensive, not just typed
- *  defensive). The two commands differ ONLY in the rendered prefix. */
+ *  ZERO positional arguments for the inventory render (parity with Codex
+ *  `forceReloadSkills`); extras error out. `/skills review …` is a distinct
+ *  sub-command routed FIRST (RFC03-def staged-proposal review/approve).
+ *  Non-Error rejections from `ctx.skills()` are coerced via `errMessage` so the
+ *  surfaced message never reads "undefined". The two commands differ ONLY in the
+ *  rendered prefix. */
 export const runSkillsRender = async (
   name: string,
   args: readonly string[],
   ctx: SlashContext,
   prefix: string,
 ): Promise<number> => {
+  // RFC03-def — `/skills review …` staged-proposal review/approve sub-command.
+  // Only on the `/skills` command (not `/reload-skills`).
+  if (name === "/skills" && args[0] === "review") {
+    return runSkillsReview(name, args, ctx)
+  }
   if (args.length > 0) {
     ctx.err(`${name}: takes no arguments; got ${args.length}\n`)
     return 1

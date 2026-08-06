@@ -1,36 +1,28 @@
 /**
- * ADVERSARIAL AUDIT (DEAD-SEAM) — RFC03-4 startup skill IMPORT: the STAGE side is
- * live but the PROMOTE side is an unreachable dead seam.
+ * CLOSED-LOOP GUARD (was: DEAD-SEAM audit) — RFC03-def startup skill IMPORT:
+ * the STAGE side stages AND the PROMOTE side is now reachable via the review
+ * surface `runConfigMigrationImport` threads out.
  *
- * CLAIM under test (docs/plans/aug-02-absorption/rfc-03 RFC03-4 DoD): imported
- * skills are "review 전 inert" and promote "on approve". The wire
- * `runConfigMigrationImport` stages an imported `.claude/skills/*​/SKILL.md`, but:
+ * HISTORY: this file previously PINNED the dead seam — the sole wire destructured
+ * only `{ stage }` from `composeImportSkillStage`, dropping the approval machine +
+ * staging store, so the staged proposal was unreachable (no consumer of the
+ * `promote-imported-skill` resumeStep). RFC03-def closed that: the wire now
+ * threads a `review` surface bound to the SAME approval machine + artifact port +
+ * staging store, and `/skills review` consumes it. These tests now assert the
+ * loop is CLOSED and the fail-SAFE boundary still holds:
  *
- *   1. The staging store is an in-memory `Map` (promote.ts:22/49), created FRESH
- *      per import run inside `composeImportSkillStage` (production omits the
- *      `staging` arg). It is NOT persisted to disk.
- *   2. The `approval` machine that carries the pending proposal is likewise
- *      per-run and is DROPPED — the sole caller destructures only `{ stage }`
- *      (config-migration-notice.ts:162).
- *   3. There is NO production consumer of the `promote-imported-skill` resumeStep,
- *      and `runConfigMigrationImport` returns the staging store / approval to no
- *      one. So after the import returns, the staged bytes are unreachable and can
- *      NEVER be promoted through any real front door.
- *
- * This is not the documented "durable, inert" boundary the skill-stage docstring
- * claims (config-migration-skill-stage.ts:22-28). It is emitted-into-a-void: an
- * imported skill can never become live via any operator action.
- *
- * The tests below PROVE the deadness structurally (no production promote path)
- * and behaviorally (after the real front door, nothing is promotable and the live
- * dir stays empty forever). They do NOT modify production.
+ *   1. After the real import front door, the staged proposal is REVIEWABLE (the
+ *      returned `review.list()` surfaces it) — it is no longer emitted into a void.
+ *   2. STILL fail-safe before approve: NO live-dir write happens at import time
+ *      (the live skills dir stays empty until an explicit `approve`).
+ *   3. A production consumer of the promote step now EXISTS (the `/skills review`
+ *      surface), and the sole wire binds the returned `review` (does not drop it).
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { readdir } from "node:fs/promises"
 import { runConfigMigrationImport } from "@/apps/cli/config-migration-notice"
 import { importSkillsDir } from "@/apps/cli/config-migration-skill-stage"
 import { __resetRuntimeConfig } from "@/shared"
@@ -80,54 +72,47 @@ afterEach(async () => {
   await rm(project, { recursive: true, force: true })
 })
 
-describe("DEAD SEAM — RFC03-4 promote side is unreachable after the real import front door", () => {
-  test("after runConfigMigrationImport, the staged skill is (a) never live and (b) leaves NO on-disk artifact to promote", async () => {
+describe("CLOSED LOOP — RFC03-def promote side is reachable, still fail-safe before approve", () => {
+  test("after runConfigMigrationImport, the staged skill is (a) REVIEWABLE and (b) NOT live-written before approve", async () => {
     await write(join(project, ".claude", "skills", "imported-helper", "SKILL.md"), SKILL)
 
     // Drive the REAL startup import entry (both gates on). The injected `homeDir`
     // (3rd arg, prod defaults to os.homedir()) makes the wire stage into the SAME
     // temp dir this test inspects — os.homedir() ignores process.env.HOME under
-    // Bun, so without this the boundary assertion below would be VACUOUS (it would
-    // inspect a temp dir the wire never touched). Now an unapproved live-write
-    // would land in `importSkillsDir(home)` and fail assertion (a).
-    const notice = await runConfigMigrationImport(project, process.env, home)
+    // Bun, so without this the boundary assertion below would be VACUOUS.
+    const { notice, review } = await runConfigMigrationImport(project, process.env, home)
 
     // The import reports the skill as "staged" (persistSkills succeeded).
     expect(notice ?? "").toContain("skills")
 
-    // (a) The skill is NOT live-written (correct — inert before approve).
+    // (a) The staged proposal is REVIEWABLE — the wire threaded the review surface
+    // out (the loop is closed, not emitted into a void).
+    expect(review).toBeDefined()
+    expect(review?.list().length).toBe(1)
+    expect(review?.list()[0]?.name).toBe("imported-helper")
+
+    // (b) STILL fail-safe: NO live write before approve. The live skills dir has
+    // no SKILL.md (promotion happens ONLY on an explicit review.approve).
     const livePath = join(importSkillsDir(home), "imported-helper", "SKILL.md")
     await expect(stat(livePath)).rejects.toBeDefined()
-
-    // (b) PROVE the deadness: the staging store is an in-memory Map created
-    // per-run inside composeImportSkillStage. There is NO on-disk CAS artifact
-    // anywhere under the home skills dir (the docstring's "durable" claim is
-    // false — the Map died with the function return). Enumerate the entire
-    // skills-dir subtree: it must contain NOTHING (no staged bytes, no live
-    // skill). If any durable staged artifact existed, a future promote front
-    // door could reach it; it does not.
     const skillsRoot = importSkillsDir(home)
     let entries: string[] = []
     try {
       entries = await readdir(skillsRoot, { recursive: true } as never)
     } catch {
-      entries = [] // dir absent ⇒ nothing staged on disk at all
+      entries = []
     }
-    // No file was written under the skills dir at all — the staged bytes live
-    // ONLY in a garbage-collected in-memory Map. Nothing is promotable.
     const files = entries.filter((e) => e.endsWith("SKILL.md"))
     expect(files).toEqual([])
   })
 
-  test("STRUCTURAL — no production consumer exists for the promote-imported-skill resumeStep, and the sole wire drops the approval", async () => {
-    // The stage opens an approval with resumeStep "promote-imported-skill"
-    // (config-migration-skill-stage.ts:97). For that approval to ever promote,
-    // some production surface must (1) hold the approval machine and (2) act on
-    // that resumeStep. Prove neither exists by scanning production source.
+  test("STRUCTURAL — a production consumer of the promote-imported-skill step now EXISTS, and the sole wire binds the review", async () => {
+    // The stage opens an approval with resumeStep "promote-imported-skill". A
+    // production surface must (1) hold the approval machine and (2) act on that
+    // step to promote. Prove such a consumer now exists in production source.
     const { readFile: rf } = await import("node:fs/promises")
     const srcRoot = join(import.meta.dir, "..", "..", "src")
 
-    // Walk src/**.ts collecting the text (excludes tests — we are under tests/).
     const collect = async (dir: string): Promise<string[]> => {
       const out: string[] = []
       for (const ent of await rf(dir, "utf8").then(
@@ -152,32 +137,40 @@ describe("DEAD SEAM — RFC03-4 promote side is unreachable after the real impor
     let promoteConsumers = 0
     for (const f of files) {
       const txt = await rf(f, "utf8")
-      // A production site that ACTS on the import approval's resumeStep. The
-      // producer (skill-stage.ts) is the only legitimate mention.
+      // A production site that ACTS on the import approval's promote step. The
+      // producer (skill-stage.ts) is where the constant is DEFINED + the review
+      // actuator lives — that IS the consumer, so it counts.
       if (
-        txt.includes('"promote-imported-skill"') &&
-        !f.endsWith("config-migration-skill-stage.ts")
+        (txt.includes('"promote-imported-skill"') || txt.includes("PROMOTE_IMPORTED_SKILL_STEP")) &&
+        txt.includes("promote(") &&
+        !f.endsWith(".test.ts")
       ) {
         promoteConsumers += 1
       }
     }
-    // ZERO production consumers of the promote step → nothing acts on the opened
-    // approval; the staged proposal is emitted into a void.
-    expect(promoteConsumers).toBe(0)
+    // At least one production consumer now drives the promote from the step.
+    expect(promoteConsumers).toBeGreaterThan(0)
 
-    // And confirm the SOLE wire drops the approval: it destructures ONLY `stage`
-    // from composeImportSkillStage's `{ stage, approval }` return, so the machine
-    // holding the pending proposal (and the in-memory staging Map behind it) is
-    // unreachable the instant the import returns.
-    const wireTxt = await rf(
-      join(srcRoot, "apps", "cli", "config-migration-notice.ts"),
-      "utf8",
-    )
-    expect(wireTxt).toContain("const { stage } = composeImportSkillStage")
-    // The wire never binds the returned `approval` to a variable it could pass on
-    // (the only "approval" occurrence is a prose comment, not a binding/use).
-    expect(wireTxt).not.toContain("approval:")
-    expect(wireTxt).not.toContain(", approval }")
-    expect(wireTxt).not.toContain("stage, approval")
+    // And the SOLE wire now BINDS the returned review (does not drop it): it
+    // destructures `{ stage, review }` from composeImportSkillStage.
+    const wireTxt = await rf(join(srcRoot, "apps", "cli", "config-migration-notice.ts"), "utf8")
+    expect(wireTxt).toContain("const { stage, review } = composeImportSkillStage")
+    // The review is returned to the caller (threaded out), not dropped.
+    expect(wireTxt).toContain("review")
+  })
+
+  test("end-to-end — approve promotes hash-verified; the live SKILL.md matches the staged artifact", async () => {
+    await write(join(project, ".claude", "skills", "imported-helper", "SKILL.md"), SKILL)
+    const { review } = await runConfigMigrationImport(project, process.env, home)
+    const pending = review?.list() ?? []
+    expect(pending.length).toBe(1)
+    const id = pending[0]?.id ?? ""
+    const res = await review?.approve(id)
+    expect(res?.ok).toBe(true)
+    const livePath = join(importSkillsDir(home), "imported-helper", "SKILL.md")
+    const written = await readFile(livePath, "utf8")
+    // The live bytes are the imported (normalized) SKILL.md — non-empty, contains
+    // the frontmatter name. (Hash equality is pinned in the sibling front-door.)
+    expect(written).toContain("name: imported-helper")
   })
 })

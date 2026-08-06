@@ -106,6 +106,11 @@ type SurfaceDispatchArgs = {
    *  absent ⇒ slot omitted ⇒ `/presets` prints "not wired" (default-OFF
    *  byte-identical). */
   readonly presets?: SlashContext["presets"]
+  /** RFC03-def `/skills review` — the review/approve surface for staged imported
+   *  skills. Present iff a gated startup config-migration IMPORT staged one;
+   *  absent ⇒ slot omitted ⇒ `/skills review` prints "no staged skill proposals"
+   *  (default-OFF byte-identical — no import ⇒ no slot). */
+  readonly skillReview?: SlashContext["skillReview"]
 }
 
 const optionalSlashSlot = <K extends keyof SlashContext>(
@@ -142,6 +147,7 @@ const buildLiveSlashContext = (args: SurfaceDispatchArgs): SlashContext => {
     ...optionalSlashSlot("permissionInspect", args.permissionInspect),
     ...optionalSlashSlot("goal", args.goal),
     ...optionalSlashSlot("presets", args.presets),
+    ...optionalSlashSlot("skillReview", args.skillReview),
   }
 }
 

@@ -2,6 +2,7 @@ import {
   type ConversationCheckpointStore,
   defaultConversationCheckpointStore,
 } from "@/agent/conversation-checkpoint"
+import type { ImportSkillReview } from "../../config-migration-skill-stage"
 import type { SessionSetupResult } from "../session-setup"
 import type { buildReplSlashCtx } from "../slash-surface"
 import { buildSurfaceCoreState } from "./core-state"
@@ -17,14 +18,22 @@ export const composeSurfaceWires = (
   setup: SessionSetupResult,
   state: SurfaceState,
   env: NodeJS.ProcessEnv,
-  opts?: { readonly convStore?: ConversationCheckpointStore },
+  opts?: {
+    readonly convStore?: ConversationCheckpointStore
+    /** RFC03-def — the review/approve surface for staged imported skills, if a
+     *  gated startup config-migration IMPORT staged one. Threaded into the slash
+     *  ctx so `/skills review` consumes it. Absent ⇒ slot omitted (default-OFF). */
+    readonly skillReview?: ImportSkillReview
+  },
 ): ReplSurfaceWires => {
   const convStore = opts?.convStore ?? defaultConversationCheckpointStore()
   const core = buildSurfaceCoreState(setup, env, convStore)
   const runtimeFacadeCompose = buildRuntimeFacadeCompose(setup, env, core)
   const mutable = buildMutableSurfaceWires(setup, state, env, convStore, core)
   const slashCtx = buildSurfaceSlashContext(setup, state, convStore, core, mutable)
-  const dispatch = buildSurfaceDispatchWire(setup, state, env, slashCtx, core, mutable)
+  const dispatch = buildSurfaceDispatchWire(setup, state, env, slashCtx, core, mutable, {
+    ...(opts?.skillReview === undefined ? {} : { skillReview: opts.skillReview }),
+  })
 
   return {
     slashCtx,

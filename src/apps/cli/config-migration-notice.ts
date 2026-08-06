@@ -25,7 +25,11 @@ import {
 } from "@/migration/external-config"
 import { gateOn, runtimeConfig } from "@/shared"
 import { discoverSystemSkills } from "@/skill"
-import { composeImportSkillStage, importSkillsDir } from "./config-migration-skill-stage"
+import {
+  composeImportSkillStage,
+  type ImportSkillReview,
+  importSkillsDir,
+} from "./config-migration-skill-stage"
 
 /** Order item types appear in the notice (stable, deterministic). */
 const TYPE_ORDER: readonly MigrationItemType[] = [
@@ -133,9 +137,28 @@ const summarizeImport = (writtenTypes: readonly MigrationItemType[]): string | u
  * Gated by BOTH `QUANTA_MIGRATE_CONFIG=1` (the feature) AND a CONFIRMED step
  * `QUANTA_MIGRATE_CONFIG_IMPORT=1` (the user opting in to actually write). With
  * either unset ⇒ no detect, no persist, byte-identical (default-OFF). NEVER
- * throws — an import must not derail startup. Returns a one-line stderr notice
- * describing what was written, or undefined when nothing was imported.
+ * throws — an import must not derail startup.
+ *
+ * Returns `{ notice, review }`:
+ *   - `notice` — a one-line stderr summary of what was STAGED, or undefined when
+ *     nothing was imported.
+ *   - `review` — the review/approve surface bound to the SAME approval machine +
+ *     artifact port + staging store the import staged into. Present iff a skill
+ *     was actually staged (`review.list()` non-empty). The operator surface
+ *     (`/skills review`) consumes it to approve→promote (hash-verified) or
+ *     deny→drop. Absent (undefined) when no skill staged ⇒ nothing to review.
+ *
+ * The staging store + approval machine live for THIS process (production omits a
+ * durable store); a proposal not reviewed before exit is simply re-staged on the
+ * next gated import. NO live-dir write happens except on an explicit approve.
  */
+export interface ConfigMigrationImportResult {
+  readonly notice?: string
+  /** The review surface bound to the staged proposals — present iff a skill was
+   *  staged this run. */
+  readonly review?: ImportSkillReview
+}
+
 export const runConfigMigrationImport = async (
   cwd: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -144,27 +167,27 @@ export const runConfigMigrationImport = async (
   // sets HOME could NOT observe the real staging dir (a vacuous fail-safe rail);
   // this param lets a test drive the SAME dir the wire actually stages into.
   homeDir: string = homedir(),
-): Promise<string | undefined> => {
+): Promise<ConfigMigrationImportResult> => {
   let migrateConfig: boolean
   try {
     migrateConfig = runtimeConfig().migrateConfig
   } catch {
-    return undefined
+    return {}
   }
   // The persist is a SEPARATE confirmed opt-in beyond the feature gate.
-  if (!migrateConfig || !gateOn(env, "QUANTA_MIGRATE_CONFIG_IMPORT")) return undefined
+  if (!migrateConfig || !gateOn(env, "QUANTA_MIGRATE_CONFIG_IMPORT")) return {}
   try {
     const home = homeDir
-    // RFC03-4 wire — compose the REAL imported-skill staging port (CAS artifact
-    // + approval machine) + the pinned system-skill name set so a startup skill
-    // import STAGES through approval instead of failing closed (silent drop).
-    // The staging port's CAS jail root is the live `<home>/.quanta/skills` dir;
-    // an imported skill that would SHADOW a system skill is refused at convert
-    // time using the discovered system names. `discoverSystemSkills` is a cheap
-    // read of the bundled dir (no user IO); an empty set is safe (nothing to
-    // shadow). Composing the port is what makes the proven staging seam live —
-    // absent it, `importExternalConfig` leaves imported skills unwritten.
-    const { stage } = composeImportSkillStage(importSkillsDir(home))
+    // RFC03-def wire — compose the REAL imported-skill staging port (CAS artifact
+    // + approval machine) + the review/approve surface + the pinned system-skill
+    // name set so a startup skill import STAGES through approval instead of
+    // failing closed (silent drop). The staging port's CAS jail root is the live
+    // `<home>/.quanta/skills` dir; an imported skill that would SHADOW a system
+    // skill is refused at convert time using the discovered system names.
+    // `discoverSystemSkills` is a cheap read of the bundled dir (no user IO); an
+    // empty set is safe (nothing to shadow). We THREAD the `review` surface out
+    // so the operator can approve→promote (the loop is closed, not dark).
+    const { stage, review } = composeImportSkillStage(importSkillsDir(home))
     const systemSkillNames = new Set((await discoverSystemSkills()).map((s) => s.name))
     const result = await importExternalConfig({
       enabled: true,
@@ -173,26 +196,40 @@ export const runConfigMigrationImport = async (
       skillStage: stage,
       systemSkillNames,
     })
-    if (!result.ran || result.throttled || !result.persisted) return undefined
+    if (!result.ran || result.throttled || !result.persisted) return {}
     const writtenTypes = new Set<MigrationItemType>()
     for (const c of result.converted) {
       if (c.ok) writtenTypes.add(c.type)
     }
-    return summarizeImport([...writtenTypes])
+    const notice = summarizeImport([...writtenTypes])
+    // Only surface the review when a skill actually staged (pending non-empty) —
+    // otherwise there is nothing to review (byte-identical to before for a
+    // non-skill import).
+    const staged = review.list().length > 0
+    return {
+      ...(notice !== undefined ? { notice } : {}),
+      ...(staged ? { review } : {}),
+    }
   } catch {
-    return undefined
+    return {}
   }
 }
 
 /**
  * Fire-and-forget the CONFIRMED import + write a one-line notice to stderr.
  * Swallows everything. Default-OFF: with `QUANTA_MIGRATE_CONFIG_IMPORT` unset
- * this is a no-op (no detect, no disk touch).
+ * this is a no-op (no detect, no disk touch) and returns `undefined`.
+ *
+ * Returns the review/approve surface (bound to the staged proposals) when a
+ * skill was staged this run, so the REPL surface can thread it into the slash
+ * ctx (`/skills review`). `undefined` when nothing staged ⇒ `/skills review`
+ * prints "not wired" (byte-identical default-OFF).
  */
 export const emitConfigMigrationImport = async (
   cwd: string,
   err: (s: string) => void = (s) => process.stderr.write(s),
-): Promise<void> => {
-  const notice = await runConfigMigrationImport(cwd)
+): Promise<ImportSkillReview | undefined> => {
+  const { notice, review } = await runConfigMigrationImport(cwd)
   if (notice !== undefined) err(notice)
+  return review
 }
