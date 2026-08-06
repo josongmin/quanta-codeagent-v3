@@ -76,6 +76,14 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     describe: "Untrusted-source envelope gate.",
   },
   {
+    envKey: "QUANTA_MODEL_REROUTE_EVENT",
+    kind: "bool",
+    default: false,
+    group: "tool",
+    describe:
+      "Wire a production sink so a real FallbackLLM provider swap emits a model_route_changed AgentEvent on the live stream.",
+  },
+  {
     envKey: "QUANTA_EDIT_REPAIR_LOOP",
     kind: "bool",
     default: false,

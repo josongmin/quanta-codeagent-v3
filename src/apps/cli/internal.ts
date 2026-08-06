@@ -40,7 +40,7 @@ import {
 import type { Tooling } from "@/runner/assemble/tooling"
 import { resolveSandboxProfileFromEnv } from "@/runtime"
 import { gateOn, logger, type RunContext, runtimeConfig } from "@/shared"
-import type { AssistantTextPainter, StreamPort } from "@/stream"
+import type { AgentEvent, AssistantTextPainter, StreamPort } from "@/stream"
 import {
   astGrepTool,
   createMcpResourceCaptureHolder,
@@ -748,6 +748,11 @@ export const composeLLM = (
   mode: PermissionMode,
   permission: PermissionContext,
   slog: StructuredLogger,
+  /** RFC02-3 (A8) — PRODUCTION route sink. Threaded onto `composeLLMCore` so a
+   *  real `FallbackLLM` provider swap projects a `model_route_changed` AgentEvent
+   *  onto the live stream. Wired ONLY under `QUANTA_MODEL_REROUTE_EVENT` (the host
+   *  passes `undefined` otherwise ⇒ byte-identical, no `onTransition`). */
+  routeEventSink?: (ev: AgentEvent) => void,
 ): LLMPort =>
   composeLLMCore({
     retryingLLM,
@@ -758,6 +763,7 @@ export const composeLLM = (
     slog,
     fallbackModelIds: fallbackModels(),
     env: process.env,
+    ...(routeEventSink !== undefined ? { routeEventSink } : {}),
     // Live "· N tokens" counter rides the SAME gate as the spinner indicator
     // (interactive TTY + `QUANTA_SPINNER` not disabled). Non-TTY / piped /
     // `QUANTA_SPINNER=0` ⇒ byte-identical no-progress stream.

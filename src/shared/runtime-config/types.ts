@@ -54,6 +54,12 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  `untrustedEnvelopeEnabled` slice gate). Default false ⇒ tool-result text
    *  is NOT wrapped at the dispatch seam (byte-identical). */
   readonly untrustedEnvelope: boolean
+  /** RFC02-3 (A8) model-route event gate (`QUANTA_MODEL_REROUTE_EVENT`). Strict
+   *  opt-in (`=== "1"`). When true, the host bootstrap wires a PRODUCTION sink so
+   *  a real `FallbackLLM` provider swap projects a `model_route_changed`
+   *  AgentEvent onto the live session stream. Default false ⇒ NO sink is attached
+   *  (no controller, no event) ⇒ byte-identical. */
+  readonly modelRerouteEvent: boolean
   /** ADR-0472 edit-repair-loop gate (`QUANTA_EDIT_REPAIR_LOOP`). Strict opt-in
    *  (`=== "1"`). Default false ⇒ the dispatch seam attaches no lint-delta to
    *  edit results (byte-identical). */

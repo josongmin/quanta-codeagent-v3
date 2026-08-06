@@ -127,6 +127,22 @@ export interface ComposeLlmInput {
    *  decorator). Structural typing — a `MetricsRegistry` from
    *  `@/observability/metrics` satisfies the shape without coupling. */
   fallbackMetrics?: FallbackMetricSink
+  /** RFC02-3 (A8) — PRODUCTION model-route sink. When present, the composed
+   *  `FallbackLLM`'s `onTransition` seam is wired to project each provider swap
+   *  as a `model_route_changed` AgentEvent (via {@link fallbackTransitionToRouteEvent})
+   *  onto this caller sink — the live `config.stream` in production. Consulted
+   *  ONLY on the fallback branch (`fallbackModelIds.length > 0`): with no fallback
+   *  there is no `FallbackLLM` and nothing to observe. Default-OFF: absent ⇒ NO
+   *  `onTransition` wired ⇒ byte-identical (the swap decision fires no side
+   *  channel). This adds NO wrapper / retry / nesting to the LLM stack — it is a
+   *  pure observation callback fired outside the `yield*` (README shared-write-set
+   *  rule: route observation stays a distinct dep from the endpoint-selection
+   *  stack). The clock for the event `at` is injected so the mapper stays pure. */
+  routeEventSink?: (ev: AgentEvent) => void
+  /** RFC02-3 (A8) — injected clock for the route event's `at` timestamp. Absent
+   *  ⇒ `Date.now` (the composition root owns wall-clock policy). Only consulted
+   *  when {@link routeEventSink} is wired. */
+  routeEventNow?: () => number
   /** Default-OFF live output-token meter (the rising "· N tokens" spinner
    *  counter). When `true`, the composed stack is wrapped OUTERMOST with
    *  {@link withLiveUsage} so it observes the fully-normalized event stream
@@ -154,10 +170,30 @@ export const composeLLMCore = (input: ComposeLlmInput): LLMPort => {
           signal: input.signal,
         }),
     )
+    // RFC02-3 (A8) — the PRODUCTION route sink. When the caller wired a
+    // `routeEventSink`, project each swap `FallbackTransition` onto it as a
+    // `model_route_changed` AgentEvent via the proven adapter. `FallbackLLM`
+    // swallows any throw from this callback (observability cannot break the
+    // stream), so a misbehaving sink is isolated. Absent ⇒ no `onTransition`
+    // key ⇒ byte-identical to the pre-wire FallbackLLM.
+    const routeSink = input.routeEventSink
+    const routeNow = input.routeEventNow ?? Date.now
+    const onTransition =
+      routeSink !== undefined
+        ? (t: FallbackTransition): void => {
+            routeSink(
+              fallbackTransitionToRouteEvent(t, {
+                at: routeNow(),
+                ...(input.provider !== undefined ? { provider: input.provider } : {}),
+              }),
+            )
+          }
+        : undefined
     finalLLM = new FallbackLLM({
       providers: [input.retryingLLM, ...fallbackStacks],
       signal: input.signal,
       ...(input.fallbackMetrics !== undefined ? { metrics: input.fallbackMetrics } : {}),
+      ...(onTransition !== undefined ? { onTransition } : {}),
     })
     input.slog.debug("llm.fallback.on", { models: input.fallbackModelIds })
   }

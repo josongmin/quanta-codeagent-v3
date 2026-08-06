@@ -31,7 +31,7 @@ import type {
 } from "@/runner/assemble"
 import type { ResolveResumeInput, ResumeResolution } from "@/runner/orchestrate"
 import type { ProxyEnvInput } from "@/runtime/network-proxy"
-import type { StreamPort } from "@/stream"
+import type { AgentEvent, StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
 import type { ShellExecObserver, Tool } from "@/tool"
 import type { McpResourceCaptureHolder } from "@/tool/mcp_resources/capture"
@@ -196,6 +196,14 @@ export type BuildLlmFactory = (
   permission: PermissionContext,
   signal: AbortSignal,
   slog: StructuredLogger,
+  /** RFC02-3 (A8) — PRODUCTION model-route sink. When wired (ONLY under
+   *  `QUANTA_MODEL_REROUTE_EVENT`), the surface threads it into `composeLLMCore`
+   *  so a real `FallbackLLM` provider swap projects a `model_route_changed`
+   *  AgentEvent onto it. The host passes a LATE-BOUND forwarder whose target is
+   *  set to the live `stream.emit` AFTER `buildStreaming` (the LLM stack is built
+   *  BEFORE the stream exists). Absent ⇒ no sink reaches `FallbackLLM` ⇒
+   *  byte-identical (no controller, no event). */
+  routeEventSink?: (ev: AgentEvent) => void,
 ) => LLMPort | Promise<LLMPort>
 
 /** jun-6 (RFC jun-6-ai-session-title) — build the fire-and-forget AI session

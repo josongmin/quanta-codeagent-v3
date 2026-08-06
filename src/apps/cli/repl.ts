@@ -187,10 +187,14 @@ const cliBuildLlm: Parameters<typeof setupSession>[0]["buildLlm"] = async (
   permission,
   signal,
   slog,
+  routeEventSink,
 ) => {
   const llm = await buildLLMWithByok(provider, model)
   const retryingLLM = new RetryingLLM({ inner: llm, signal })
-  return composeLLM(retryingLLM, provider, signal, mode, permission, slog)
+  // RFC02-3 (A8) — forward the host's PRODUCTION route sink (present ONLY under
+  // QUANTA_MODEL_REROUTE_EVENT) into the composed stack so a real FallbackLLM swap
+  // emits `model_route_changed` on the live stream. Absent ⇒ byte-identical.
+  return composeLLM(retryingLLM, provider, signal, mode, permission, slog, routeEventSink)
 }
 
 /** ADR-0299 — per-turn shell-event observer composer (CLI seam). */
