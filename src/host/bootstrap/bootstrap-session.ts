@@ -70,6 +70,7 @@ import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { isPathLikeToken } from "@/runner/orchestrate"
 import { openSessionEgressProxy } from "@/runtime/network-proxy"
 import { errMessage, gateOn, type Logger, logger, runtimeConfigFromEnv } from "@/shared"
+import type { AgentEvent, StreamPort } from "@/stream"
 import {
   type BootstrapFeatures,
   type SessionBootstrapDeps,
@@ -97,6 +98,48 @@ export const parseOperatorCostDials = (env: NodeJS.ProcessEnv): BudgetDials => {
     ...(maxCostUsd !== undefined ? { maxCostUsd } : {}),
     ...(maxCostPerTurnUsd !== undefined ? { maxCostPerTurnUsd } : {}),
   }
+}
+
+/** RFC02-3 (A8) — build the PRODUCTION route sink forwarder + its late-bind
+ *  hook, gated by `QUANTA_MODEL_REROUTE_EVENT`. The LLM stack is built BEFORE the
+ *  stream exists, so we hand `deps.buildLlm` a forwarder that closes over a
+ *  mutable target (a single deferred pointer — NOT a bus/store: it holds ZERO
+ *  events, only the eventual `emit`). `bindRouteEventTarget` sets that target to
+ *  the live `stream.emit` once `buildStreaming` has run. A transition that fires
+ *  before the bind (there is none — the first turn streams after bootstrap
+ *  completes) is dropped by the no-op default target. Gate OFF ⇒ returns
+ *  `undefined` for BOTH ⇒ no sink reaches `FallbackLLM` (byte-identical). */
+export const buildRouteEventForwarder = (
+  env: NodeJS.ProcessEnv,
+): {
+  readonly sink: ((ev: AgentEvent) => void) | undefined
+  readonly bind: ((emit: (ev: AgentEvent) => void) => void) | undefined
+} => {
+  if (!runtimeConfigFromEnv(env).modelRerouteEvent) return { sink: undefined, bind: undefined }
+  // Deferred target — defaults to a no-op until the stream is bound. `FallbackLLM`
+  // swallows any throw from the sink, so a bind-time race can never break a stream.
+  let target: (ev: AgentEvent) => void = () => {}
+  return {
+    sink: (ev: AgentEvent): void => {
+      target(ev)
+    },
+    bind: (emit: (ev: AgentEvent) => void): void => {
+      target = emit
+    },
+  }
+}
+
+/** RFC02-3 (A8) — bind the deferred route sink forwarder to the live stream's
+ *  `emit` once the stream exists. No-op when the forwarder was not built (gate
+ *  OFF ⇒ `bind` is undefined ⇒ byte-identical). The `stream.emit` is wrapped in a
+ *  stable arrow so the sink closure survives across turns. */
+const bindRouteSinkToStream = (
+  bind: ((emit: (ev: AgentEvent) => void) => void) | undefined,
+  stream: StreamPort,
+): void => {
+  bind?.((ev) => {
+    stream.emit(ev)
+  })
 }
 
 const failSessionBootstrap = (
@@ -409,6 +452,12 @@ interface PreparedSessionRuntime {
   readonly autoTitlePort: ReturnType<SessionBootstrapDeps["buildAutoTitlePort"]>
   readonly sessionProxy: Awaited<ReturnType<typeof openSessionEgressProxy>>
   readonly features: BootstrapFeatures
+  /** RFC02-3 (A8) — late-bind hook for the PRODUCTION route sink. Present ONLY
+   *  when `QUANTA_MODEL_REROUTE_EVENT` is on: the forwarder passed to
+   *  `deps.buildLlm` at LLM-build time (before the stream exists) has its target
+   *  set to the live `stream.emit` here by `assembleBootstrapResult`. Absent ⇒
+   *  no sink was wired (byte-identical). */
+  readonly bindRouteEventTarget?: (emit: (ev: AgentEvent) => void) => void
 }
 
 /** Build {@link PreparedSessionRuntime} — the verbatim pre-feature prologue of
@@ -453,6 +502,12 @@ const prepareSessionRuntime = async (
   // `/brief` slash + a `set_brief` control-op mutate the SAME cell; the loop
   // reads it per turn via `AgentConfig.sessionBrief`.
   const briefStore = createBriefStore(parseBoolKnob(runtime.env.QUANTA_BRIEF))
+  // RFC02-3 (A8) — build the PRODUCTION route sink forwarder (gated). Passed to
+  // `deps.buildLlm` so a real `FallbackLLM` swap projects `model_route_changed`;
+  // its target is late-bound to the live stream in `assembleBootstrapResult`.
+  // Gate OFF ⇒ `sink` is undefined ⇒ `buildLlm` wires no `onTransition`
+  // (byte-identical).
+  const routeForwarder = buildRouteEventForwarder(runtime.env)
   let finalLLM: LLMPort
   try {
     finalLLM = await deps.buildLlm(
@@ -462,6 +517,7 @@ const prepareSessionRuntime = async (
       permission,
       abort.signal,
       slog,
+      routeForwarder.sink,
     )
   } catch (e) {
     return failSessionBootstrap("llm_build_failed", errMessage(e), e)
@@ -515,6 +571,7 @@ const prepareSessionRuntime = async (
     autoTitlePort,
     sessionProxy,
     features,
+    ...(routeForwarder.bind !== undefined ? { bindRouteEventTarget: routeForwarder.bind } : {}),
   }
 }
 
@@ -759,6 +816,7 @@ const assembleBootstrapResult = async (
     autoTitlePort,
     sessionProxy,
     features,
+    bindRouteEventTarget,
   } = prepared
   {
     const {
@@ -773,6 +831,9 @@ const assembleBootstrapResult = async (
     } = buildToolingBundle(deps, runtime, featureCfg, slog, features)
 
     const { stream, run } = deps.buildStreaming(runtime.observeDir, slog)
+    // RFC02-3 (A8) — bind the route sink forwarder to the now-live stream (no-op
+    // when the gate is OFF ⇒ `bindRouteEventTarget` is undefined, byte-identical).
+    bindRouteSinkToStream(bindRouteEventTarget, stream)
     const pendingImages = loadSeedImages(runtime, deps.loadImageBlock)
 
     const { cwd, idMeta, history, sessionId } = await resolveSessionResume(

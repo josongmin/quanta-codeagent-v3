@@ -154,6 +154,10 @@ const parseCompactionSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // ADR-0471 — strict `=== "1"` opt-in (matches the `untrustedEnvelopeEnabled`
     // slice gate, which is the SSOT). Default false ⇒ dispatch wraps nothing.
     untrustedEnvelope: gateOnStrict(env, "QUANTA_UNTRUSTED_ENVELOPE"),
+    // RFC02-3 (A8) — strict `=== "1"` opt-in. Default false ⇒ the host bootstrap
+    // attaches NO route sink (no forwarder, no `model_route_changed` event) so a
+    // real FallbackLLM swap is byte-identical to today.
+    modelRerouteEvent: gateOnStrict(env, "QUANTA_MODEL_REROUTE_EVENT"),
     // ADR-0472 — strict `=== "1"` opt-in (matches the `editRepairLoopEnabled`
     // slice gate, the SSOT). Default false ⇒ no lint-delta attached.
     editRepairLoop: gateOnStrict(env, "QUANTA_EDIT_REPAIR_LOOP"),
