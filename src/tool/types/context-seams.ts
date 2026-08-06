@@ -343,6 +343,13 @@ export type PlanMutationResult =
  *  `ProjectedPlanTask`. */
 export interface ProjectedPlanTaskView {
   readonly id: string
+  /** RFC12-1 — the todo's display title (mirrors `ProjectedPlanTask.title`), so
+   *  a graph render can label the node. Display-only; never write vocabulary. */
+  readonly title: string
+  /** RFC12-1 — the todo's lifecycle status (mirrors `ProjectedPlanTask.status`),
+   *  so a graph render can class the node. Restated as the closed 5-literal union
+   *  (slice fence: `@/tool` must not import `@/agent/plan`). */
+  readonly status: "pending" | "in_progress" | "completed" | "cancelled" | "blocked"
   readonly owner?: string
   readonly blockedBy: readonly string[]
   readonly blocks: readonly string[]

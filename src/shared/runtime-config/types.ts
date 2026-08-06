@@ -298,6 +298,15 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  `DefaultToolPorts.artifactRegistry` (the generation tools register their
    *  outputs; the model lists/inspects/destroys via `artifact_*`). */
   readonly artifactStore: boolean
+  /** RFC12-1 — plan dependency-graph (DAG) visualization (`QUANTA_PLAN_GRAPH`).
+   *  Opt-in (`gateOn` vocab). Default false ⇒ `current_plan` ignores `view:"graph"`
+   *  (emits the byte-identical text render) and the web PlanPanel renders NO graph
+   *  toggle (flat list only). When ON, `current_plan view:"graph"` emits a fenced
+   *  ```mermaid ``` block (the existing `rich-markers` renderer draws it) and the
+   *  web PlanPanel shows a list⇄graph toggle that renders the projected mermaid via
+   *  the existing lazy `MermaidDiagram`. Reuses the RFC07-3 `task-projection` edges
+   *  + the existing mermaid renderer — no new protocol kind, no new store. */
+  readonly planGraph: boolean
   /** ADR-0503 P3 — master gate for the cross-surface capability-exposure layer
    *  (`@/capability`, `QUANTA_CAPABILITY_LAYER`). Strict opt-in (`=== "1"`).
    *  Default false ⇒ `resolveExposure` is NOT wired into any live surface gate;

@@ -5,8 +5,9 @@
  * existing `PlanToolContext.planMutator.current()` path to the model so CAS
  * retries can fetch the latest `expected_version` without mutating.
  */
-import { errMessage } from "@/shared"
+import { errMessage, runtimeConfig } from "@/shared"
 import type { PlanReadonlyView, PlanToolContext, Tool, ToolEvent } from "../types"
+import { type MermaidPlanNode, planToMermaid } from "./plan-to-mermaid"
 import { type CurrentPlanInput, currentPlanSchema } from "./schemas"
 
 const renderTaskLine = (t: PlanReadonlyView["tasks"][number]): string => {
@@ -15,6 +16,21 @@ const renderTaskLine = (t: PlanReadonlyView["tasks"][number]): string => {
   parts.push(`blockedBy=[${t.blockedBy.join(", ")}]`)
   parts.push(`blocks=[${t.blocks.join(", ")}]`)
   return parts.join(" ")
+}
+
+/** RFC12-1 — render the plan's DAG as a fenced ```mermaid``` block the existing
+ *  `rich-markers` renderer detects. Reuses the RFC07-3 `blockedBy` edges (via
+ *  `PlanReadonlyView.tasks`) + the `plan-to-mermaid` projector — no new store /
+ *  protocol kind. Emitted ONLY when the caller passes `view:"graph"` AND the
+ *  `QUANTA_PLAN_GRAPH` gate is on (else the text render is used, byte-identical). */
+const renderPlanGraph = (plan: PlanReadonlyView): string => {
+  const nodes: readonly MermaidPlanNode[] = plan.tasks.map((t) => ({
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    blockedBy: t.blockedBy,
+  }))
+  return `\`\`\`mermaid\n${planToMermaid(nodes)}\n\`\`\``
 }
 
 const renderPlanView = (plan: PlanReadonlyView): string => {
@@ -42,7 +58,7 @@ export const currentPlanTool = (): Tool<CurrentPlanInput> => ({
   inputSchema: currentPlanSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  async *execute(_input: CurrentPlanInput, ctx: PlanToolContext): AsyncIterable<ToolEvent> {
+  async *execute(input: CurrentPlanInput, ctx: PlanToolContext): AsyncIterable<ToolEvent> {
     const mutator = ctx.planMutator
     if (mutator === undefined) {
       yield {
@@ -69,11 +85,21 @@ export const currentPlanTool = (): Tool<CurrentPlanInput> => ({
       }
       return
     }
+    // RFC12-1 — graph render is DOUBLE-gated: the caller must ask (`view:"graph"`)
+    // AND the QUANTA_PLAN_GRAPH knob must be on. Unset knob ⇒ `view:"graph"` falls
+    // through to the byte-identical text render (no fence). `plan === null` always
+    // renders the plain "No active plan." line (nothing to graph).
+    const wantGraph = input.view === "graph" && runtimeConfig().planGraph && plan !== null
     yield {
       type: "result",
       result: {
         ok: true,
-        output: plan === null ? "No active plan." : renderPlanView(plan),
+        output:
+          plan === null
+            ? "No active plan."
+            : wantGraph
+              ? renderPlanGraph(plan)
+              : renderPlanView(plan),
       },
     }
   },

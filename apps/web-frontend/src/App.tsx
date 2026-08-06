@@ -930,6 +930,12 @@ export const App = (): JSX.Element => {
   const canRestartDaemon = readTauriInvoke() !== undefined
   const resolvedModel =
     modelSlug ?? (import.meta.env.VITE_QUANTA_MODEL as string | undefined) ?? "gpt-5"
+  // RFC12-1 — the daemon injects `VITE_QUANTA_PLAN_GRAPH` (mirrors the
+  // `QUANTA_PLAN_GRAPH` runtime knob) so the PlanPanel offers the list⇄graph
+  // toggle. Unset/anything-but-truthy ⇒ flat list only (byte-identical panel).
+  const planGraphEnabled =
+    (import.meta.env.VITE_QUANTA_PLAN_GRAPH as string | undefined) === "1" ||
+    (import.meta.env.VITE_QUANTA_PLAN_GRAPH as string | undefined) === "true"
 
   const observabilitySource = useMemo<ObservabilitySource>(
     () => ({
@@ -1170,7 +1176,7 @@ export const App = (): JSX.Element => {
                 data-testid="agent-state-column"
                 className="flex w-72 flex-shrink-0 flex-col gap-3 overflow-y-auto border-l border-line-subtle bg-surface-raised px-3 py-4"
               >
-                <PlanPanel plan={agentState.plan} />
+                <PlanPanel plan={agentState.plan} graphEnabled={planGraphEnabled} />
                 <AgentStatePanel state={agentState} onAnswer={onPlanInputAnswer} />
                 <SubAgentsPanel state={subagents} />
               </aside>

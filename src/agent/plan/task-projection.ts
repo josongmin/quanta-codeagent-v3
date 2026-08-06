@@ -19,7 +19,7 @@
  * when `assignee` is absent, matching the render contract.
  */
 
-import type { Plan, TodoItem } from "./types"
+import type { Plan, TodoItem, TodoStatus } from "./types"
 
 /**
  * One projected task row. `owner` is optional (omitted when the canonical
@@ -29,6 +29,13 @@ import type { Plan, TodoItem } from "./types"
  */
 export interface ProjectedPlanTask {
   readonly id: string
+  /** RFC12-1 — the todo's display title (`content`), carried so a graph render
+   *  (`plan-to-mermaid`) can label the node without a second projection pass.
+   *  A pure display field; never a write vocabulary / control-flow input. */
+  readonly title: string
+  /** RFC12-1 — the todo's lifecycle status, carried so a graph render can class
+   *  the node (pending/in_progress/completed/cancelled/blocked). Display-only. */
+  readonly status: TodoStatus
   readonly owner?: string
   readonly blockedBy: readonly string[]
   readonly blocks: readonly string[]
@@ -65,6 +72,8 @@ export const projectPlanTasks = (plan: Plan): readonly ProjectedPlanTask[] => {
   return ordered.map(
     (t): ProjectedPlanTask => ({
       id: t.id,
+      title: t.content,
+      status: t.status,
       ...(t.assignee !== undefined ? { owner: t.assignee } : {}),
       // `blockedBy` is the canonical inbound edge, verbatim — the DAG validator
       // already rejects dangling/self/cycle deps at mutation time, so no filter.
