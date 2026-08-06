@@ -193,6 +193,9 @@ export {
   isValidWorkspaceTransition,
   makeWorkspaceCreateIntent,
   transitionWorkspaceState,
+  WORKTREE_CWD_PIN_GATE,
   workspaceOwnershipSchema,
   workspaceOwnershipStateSchema,
+  worktreeCwdPinEnabled,
+  worktreeCwdPinTarget,
 } from "./workspace-ownership"

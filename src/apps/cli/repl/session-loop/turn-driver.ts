@@ -62,6 +62,20 @@ export const makeRunSessionTurn = (deps: {
       // (surfaceState.sessionId is seeded from setup.sessionId and only ever
       // reassigned by the switch closure).
       ...(surfaceState.sessionId !== undefined ? { sessionId: surfaceState.sessionId } : {}),
+      // RFC-06 §RFC06-2 — the turn-boundary cwd-pin port. This CLI surface IS an
+      // allowed `process.*` reader, so it threads the real chdir/getcwd pair
+      // (the `@/runner` slice is process-pure). The follower SELF-GATES on
+      // `QUANTA_WORKTREE_CWD_PIN` (default-OFF) inside `driveSessionTurn`: gate
+      // off ⇒ nothing is loaded and no chdir happens ⇒ byte-identical. Passing
+      // the port is always safe (it is never consumed unless the gate is on AND
+      // the session owns a `ready`/`active` worktree).
+      cwdPin: {
+        cwd: () => process.cwd(),
+        chdir: (t) => {
+          process.chdir(t)
+          return process.cwd()
+        },
+      },
       // host concern — absent cycle ⇒ no hook ⇒ byte-identical.
       ...(modeCycle !== undefined
         ? {

@@ -44,3 +44,8 @@ export type {
   SessionTurnResult,
 } from "./session-turn-driver"
 export { runSessionTurn as driveSessionTurn } from "./session-turn-driver"
+export {
+  pinTurnBoundaryCwd,
+  type WorktreeCwdPinArgs,
+  type WorktreeCwdPort,
+} from "./worktree-cwd-pin-wire"
