@@ -51,6 +51,7 @@ import {
   type SymbolLookupSemanticPort,
   type SymbolResolverPriority,
 } from "@/agent/mention-injection"
+import type { NamedAgentResolver } from "@/agent/named-agent-registry"
 import {
   type CompositeResolverDeps,
   createCompositeMentionResolver,
@@ -58,7 +59,11 @@ import {
   type FolderResolverOptions,
   type GitContextProvider,
   type GitResolverOptions,
+  type McpResolverOptions,
+  type McpServerListingPort,
   type SkillRegistryReadOnly,
+  type ThreadResolverOptions,
+  type ThreadSummaryPort,
 } from "@/agent/plugin-app-resolver"
 import type { PluginRegistryPort } from "@/agent/plugin-discovery"
 import { gateOn, parseEnvFlag } from "@/shared"
@@ -93,6 +98,18 @@ export interface BuildDefaultMentionResolverOptions {
    *  `DEFAULT_APP_CATALOG`. Omit ⇒ `@@app` resolves null. Only flows to the
    *  composite when `QUANTA_MENTION_APP_PLUGIN` is ON (see `appDep`). */
   readonly apps?: AppCatalogPort
+  /** RFC-12-2 — injected MCP-server listing port for `@mcp:`. Backed by the
+   *  host's live loaded-tools set (server → `Tool[]`). Omit ⇒ `@mcp:` resolves
+   *  null. Gated on `QUANTA_MENTION_MCP` (default-ON kill-switch). */
+  readonly mcpListing?: McpServerListingPort
+  /** RFC-12-2 — injected named-agent registry for `@subagent:` (the same
+   *  read-only port the subagent runner consults). Omit ⇒ `@subagent:` resolves
+   *  null. Gated on `QUANTA_MENTION_SUBAGENT`. */
+  readonly subagents?: NamedAgentResolver
+  /** RFC-12-2 — injected prior-thread summary port for `@thread:`. Backed by
+   *  the live session store (`listSessions` / `SessionMeta`). Omit ⇒ `@thread:`
+   *  resolves null. Gated on `QUANTA_MENTION_THREAD`. */
+  readonly threadSummary?: ThreadSummaryPort
 }
 
 /** A knob is ON unless explicitly disabled. Delegates to the canonical
@@ -209,6 +226,33 @@ const gitDep = (opts: BuildDefaultMentionResolverOptions): GitResolverOptions | 
   }
 }
 
+/** RFC-12-2 — build the `@mcp:` deps slot when the knob is ON AND a listing
+ *  port is injected. No port ⇒ undefined (graceful omit). */
+const mcpDep = (opts: BuildDefaultMentionResolverOptions): McpResolverOptions | undefined => {
+  if (!isOn(opts.env, "QUANTA_MENTION_MCP")) return undefined
+  if (opts.mcpListing === undefined) return undefined
+  const maxTools = parsePositiveNumber(opts.env.QUANTA_MENTION_MCP_MAX_TOOLS)
+  return {
+    listing: opts.mcpListing,
+    ...(maxTools !== undefined ? { maxTools } : {}),
+  }
+}
+
+/** RFC-12-2 — build the `@subagent:` registry slot when the knob is ON AND a
+ *  named-agent registry is injected. No registry ⇒ undefined (graceful omit). */
+const subagentDep = (opts: BuildDefaultMentionResolverOptions): NamedAgentResolver | undefined => {
+  if (!isOn(opts.env, "QUANTA_MENTION_SUBAGENT")) return undefined
+  return opts.subagents
+}
+
+/** RFC-12-2 — build the `@thread:` deps slot when the knob is ON AND a summary
+ *  port is injected. No port ⇒ undefined (graceful omit). */
+const threadDep = (opts: BuildDefaultMentionResolverOptions): ThreadResolverOptions | undefined => {
+  if (!isOn(opts.env, "QUANTA_MENTION_THREAD")) return undefined
+  if (opts.threadSummary === undefined) return undefined
+  return { summary: opts.threadSummary }
+}
+
 /**
  * Build the default composite {@link MentionResolverPort} for a surface.
  *
@@ -226,6 +270,9 @@ export const buildDefaultMentionResolver = (
   const git = gitDep(opts)
   const plugins = pluginDep(opts)
   const apps = appDep(opts)
+  const mcp = mcpDep(opts)
+  const subagents = subagentDep(opts)
+  const threads = threadDep(opts)
   return createCompositeMentionResolver({
     ...(files !== undefined ? { files } : {}),
     ...(symbol !== undefined ? { symbol } : {}),
@@ -234,5 +281,8 @@ export const buildDefaultMentionResolver = (
     ...(git !== undefined ? { git } : {}),
     ...(plugins !== undefined ? { plugins } : {}),
     ...(apps !== undefined ? { apps } : {}),
+    ...(mcp !== undefined ? { mcp } : {}),
+    ...(subagents !== undefined ? { subagents } : {}),
+    ...(threads !== undefined ? { threads } : {}),
   })
 }

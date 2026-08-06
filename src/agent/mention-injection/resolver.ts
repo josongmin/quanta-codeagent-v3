@@ -73,6 +73,18 @@ export interface MentionResolverPort {
    *  (`status` / `diff` / `log`); returns a compressed git body. Omit ⇒
    *  `git` mentions resolve to `null`. */
   resolveGit?(target: string): Promise<MentionResolverResult | null>
+  /** RFC-12-2 — MCP server resolver. `target` is the server name; returns a
+   *  bounded listing of the server's exposed tools as bodyText. Omit ⇒ `mcp`
+   *  mentions resolve to `null` (byte-identical to the pre-RFC-12-2 path). */
+  resolveMcp?(target: string): Promise<MentionResolverResult | null>
+  /** RFC-12-2 — named-agent (subagent) resolver. `target` is the agent-type /
+   *  handle; returns the role's handle + description (first line of its system
+   *  prompt). Omit ⇒ `subagent` mentions resolve to `null`. */
+  resolveSubagent?(target: string): Promise<MentionResolverResult | null>
+  /** RFC-12-2 — prior-thread resolver. `target` is the session id; returns a
+   *  compact summary (title + provenance) of that prior session. Omit ⇒
+   *  `thread` mentions resolve to `null`. */
+  resolveThread?(target: string): Promise<MentionResolverResult | null>
 }
 
 /**
@@ -145,7 +157,8 @@ const safeCall = async (
 }
 
 /** Pick the kind-specific resolver method. Exhaustive over the closed
- *  `MentionKind` enum (7 kinds: ADR-0418's 5 + §10.3's folder + git). */
+ *  `MentionKind` enum (10 kinds: ADR-0418's 5 + §10.3's folder + git +
+ *  RFC-12-2's mcp + subagent + thread). */
 const pickResolver = (
   resolver: MentionResolverPort,
   kind: MentionKind,
@@ -165,6 +178,12 @@ const pickResolver = (
       return resolver.resolveFolder?.bind(resolver)
     case "git":
       return resolver.resolveGit?.bind(resolver)
+    case "mcp":
+      return resolver.resolveMcp?.bind(resolver)
+    case "subagent":
+      return resolver.resolveSubagent?.bind(resolver)
+    case "thread":
+      return resolver.resolveThread?.bind(resolver)
   }
 }
 

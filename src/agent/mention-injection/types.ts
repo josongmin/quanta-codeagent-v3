@@ -53,12 +53,35 @@
  * - `git` — git context provider (§10.3, the reserved literal `@git`, or
  *   `@git:status` / `@git:diff` / `@git:log`). Cursor `@git` parity — injects
  *   a compressed status / diff / recent-log body.
+ * - `mcp` — MCP server (RFC-12-2, matches `@mcp:<name>`). Codex
+ *   `atMentionList.mcpServers` parity — injects the named server's tool list.
+ * - `subagent` — named-agent role/handle (RFC-12-2, matches `@subagent:<name>`).
+ *   Codex `atMentionList.{liveAgents,customAgents}` parity — injects the
+ *   registered role's handle + role description (first line of its system
+ *   prompt) from the repo-controlled named-agent registry.
+ * - `thread` — a prior session/thread (RFC-12-2, matches `@thread:<id>`).
+ *   Injects a compact summary (title + provenance) of a prior session from the
+ *   session store index.
  *
  * **Extending requires a new ADR.** The 5-kind enum was fixed by ADR-0418;
  * §10.3 (jun-08 longtail) SUPERSEDES that limit, widening the closed set to
- * SEVEN kinds. Further kinds must explicitly supersede §10.3.
+ * SEVEN kinds; RFC-12-2 SUPERSEDES §10.3, widening the closed set to TEN kinds
+ * (`+ mcp + subagent + thread`). Further kinds must explicitly supersede
+ * RFC-12-2. Each of the three RFC-12-2 kinds is OPTIONAL on the resolver port
+ * (a resolver that omits its method resolves that kind to `null` —
+ * byte-identical to the pre-RFC-12-2 path).
  */
-export type MentionKind = "skill" | "plugin" | "app" | "file" | "symbol" | "folder" | "git"
+export type MentionKind =
+  | "skill"
+  | "plugin"
+  | "app"
+  | "file"
+  | "symbol"
+  | "folder"
+  | "git"
+  | "mcp"
+  | "subagent"
+  | "thread"
 
 /**
  * A single parsed mention. {@link span} carries the half-open

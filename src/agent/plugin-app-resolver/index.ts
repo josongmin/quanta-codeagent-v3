@@ -42,8 +42,22 @@ export {
   type GitResolverOptions,
   type GitSubcommand,
 } from "./git-resolver"
+export {
+  createMcpResolver,
+  DEFAULT_MCP_MAX_TOOLS,
+  type McpResolverOptions,
+  type McpServerListingPort,
+  type McpToolInfo,
+} from "./mcp-resolver"
 export { createPluginResolver } from "./plugin-resolver"
 export { createSkillResolver } from "./skill-resolver"
+export { createSubagentResolver } from "./subagent-resolver"
+export {
+  createThreadResolver,
+  type ThreadResolverOptions,
+  type ThreadSummary,
+  type ThreadSummaryPort,
+} from "./thread-resolver"
 export type {
   LocalAppActivationEvent,
   LocalPluginActivationEvent,

@@ -30,13 +30,17 @@
 
 import type { AppCatalogPort } from "@/agent/app-catalog"
 import type { MentionResolverPort, MentionResolverResult } from "@/agent/mention-injection"
+import type { NamedAgentResolver } from "@/agent/named-agent-registry"
 import type { PluginRegistryPort } from "@/agent/plugin-discovery"
 import { createAppResolver } from "./app-resolver"
 import { createFileResolver, type FileResolverOptions } from "./file-resolver"
 import { createFolderResolver, type FolderResolverOptions } from "./folder-resolver"
 import { createGitResolver, type GitResolverOptions } from "./git-resolver"
+import { createMcpResolver, type McpResolverOptions } from "./mcp-resolver"
 import { createPluginResolver } from "./plugin-resolver"
 import { createSkillResolver } from "./skill-resolver"
+import { createSubagentResolver } from "./subagent-resolver"
+import { createThreadResolver, type ThreadResolverOptions } from "./thread-resolver"
 import type { SkillRegistryReadOnly } from "./types"
 
 /**
@@ -66,6 +70,18 @@ export interface CompositeResolverDeps {
    *  Omit ⇒ the port has NO `resolveGit` and every `@git` mention resolves
    *  to `null`. */
   readonly git?: GitResolverOptions
+  /** RFC-12-2 — MCP-server resolver options (injected listing port + tool cap).
+   *  Omit ⇒ the port has NO `resolveMcp` and every `@mcp:` mention resolves to
+   *  `null` (byte-identical to the pre-RFC-12-2 composite). */
+  readonly mcp?: McpResolverOptions
+  /** RFC-12-2 — named-agent (subagent) registry for `@subagent:`. Omit ⇒ the
+   *  port has NO `resolveSubagent` and every `@subagent:` mention resolves to
+   *  `null`. */
+  readonly subagents?: NamedAgentResolver
+  /** RFC-12-2 — prior-thread resolver options (injected summary port). Omit ⇒
+   *  the port has NO `resolveThread` and every `@thread:` mention resolves to
+   *  `null`. */
+  readonly threads?: ThreadResolverOptions
 }
 
 /**
@@ -101,6 +117,19 @@ export const createCompositeMentionResolver = (
   }
   if (deps.git !== undefined) {
     base.resolveGit = createGitResolver(deps.git)
+  }
+  // RFC-12-2 — mcp / subagent / thread, attached only when their dep is
+  // supplied so the pre-RFC-12-2 port shape (no `resolveMcp` /
+  // `resolveSubagent` / `resolveThread` key) is preserved when the caller opts
+  // out (byte-identical default-OFF).
+  if (deps.mcp !== undefined) {
+    base.resolveMcp = createMcpResolver(deps.mcp)
+  }
+  if (deps.subagents !== undefined) {
+    base.resolveSubagent = createSubagentResolver(deps.subagents)
+  }
+  if (deps.threads !== undefined) {
+    base.resolveThread = createThreadResolver(deps.threads)
   }
   return base
 }

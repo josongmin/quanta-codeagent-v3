@@ -17,7 +17,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { SymbolHit, SymbolLookupLspPort } from "@/agent/mention-injection"
+import { parseMentions, type SymbolHit, type SymbolLookupLspPort } from "@/agent/mention-injection"
 import { matchTier, rankByTier } from "../fuzzy"
 import { createCompositeAtProvider } from "../provider"
 import { createRecursiveFileLister } from "../recursive-file-list"
@@ -396,6 +396,97 @@ describe("createCompositeAtProvider — kind inference + lists (§7-15)", () => 
       expect(out.find((c) => c.kind === "file")?.label).toBe("README.md")
     } finally {
       rmSync(up, { recursive: true, force: true })
+    }
+  })
+
+  // ── RFC-12-2: mcp / subagent / thread listers ────────────────────────
+  test("D11 — listMcpServers surfaces @mcp:<name> candidates", async () => {
+    const p = createCompositeAtProvider({
+      fileRoot: root,
+      listMcpServers: () => [{ name: "github", description: "GitHub MCP\nmore" }],
+    })
+    const c = (await p.list("git")).find((x) => x.kind === "mcp")
+    expect(c?.insertText).toBe("@mcp:github")
+    expect(c?.label).toBe("github")
+    expect(c?.detail).toBe("GitHub MCP")
+  })
+
+  test("D12 — listSubagents surfaces @subagent:<name> candidates", async () => {
+    const p = createCompositeAtProvider({
+      fileRoot: root,
+      listSubagents: () => [{ name: "explorer", description: "Read-only explorer" }],
+    })
+    const c = (await p.list("expl")).find((x) => x.kind === "subagent")
+    expect(c?.insertText).toBe("@subagent:explorer")
+  })
+
+  test("D13 — listThreads inserts the opaque id but LABELS the human title", async () => {
+    const p = createCompositeAtProvider({
+      fileRoot: root,
+      // name = title (searchable/displayed), insertName = id (resolver payload).
+      listThreads: () => [{ name: "fix the parser", description: "/repo", insertName: "abc-1" }],
+    })
+    const c = (await p.list("fix")).find((x) => x.kind === "thread")
+    expect(c?.label).toBe("fix the parser")
+    expect(c?.insertText).toBe("@thread:abc-1")
+  })
+
+  test("D14 — RED-ON-INJECTION: drop a lister ⇒ ONLY its kind vanishes", async () => {
+    // subagent + thread present, mcp ABSENT ⇒ no mcp rows, others survive.
+    const p = createCompositeAtProvider({
+      fileRoot: root,
+      listSubagents: () => [{ name: "xray", description: "x" }],
+      listThreads: () => [{ name: "xylo", description: "y", insertName: "id-x" }],
+    })
+    const out = await p.list("x")
+    expect(out.some((c) => c.kind === "mcp")).toBe(false) // dropped lister ⇒ kind gone
+    expect(out.some((c) => c.kind === "subagent")).toBe(true) // paired control
+    expect(out.some((c) => c.kind === "thread")).toBe(true)
+  })
+
+  test("D15 — absent RFC-12-2 listers ⇒ those kinds contribute 0 (byte-identical)", async () => {
+    const p = createCompositeAtProvider({ fileRoot: root })
+    const out = await p.list("zzz-no-such")
+    expect(
+      out.filter((c) => c.kind === "mcp" || c.kind === "subagent" || c.kind === "thread"),
+    ).toEqual([])
+  })
+
+  test("D16 — a throwing RFC-12-2 lister degrades to [] and does NOT wipe others", async () => {
+    const p = createCompositeAtProvider({
+      fileRoot: root,
+      listMcpServers: () => {
+        throw new Error("boom-sync")
+      },
+      listSubagents: () => [{ name: "alp-agent", description: "z" }],
+    })
+    const out = await p.list("alp")
+    expect(out.some((c) => c.kind === "mcp")).toBe(false) // isolated failure
+    expect(out.some((c) => c.kind === "subagent")).toBe(true) // survived
+    expect(out.some((c) => c.kind === "file")).toBe(true) // files survived too
+  })
+
+  test("D17 — ROUND-TRIP: each RFC-12-2 candidate's insertText re-parses to its kind+target", async () => {
+    // The full accept→submit loop (RFC §4.6): what the dropdown splices into the
+    // buffer MUST re-classify under `parseMentions` to the SAME kind+target the
+    // `@thread:`/`@mcp:`/`@subagent:` resolver then looks up — otherwise the
+    // surfaced candidate is dead on accept. `thread` is the sharp case: the
+    // inserted payload is the opaque id (`insertName`), NOT the human label.
+    const p = createCompositeAtProvider({
+      fileRoot: root,
+      listMcpServers: () => [{ name: "github", description: "x" }],
+      listSubagents: () => [{ name: "explorer", description: "x" }],
+      listThreads: () => [{ name: "prior title", description: "x", insertName: "9f8e-1" }],
+    })
+    for (const [q, kind, target] of [
+      ["git", "mcp", "github"],
+      ["expl", "subagent", "explorer"],
+      ["prior", "thread", "9f8e-1"],
+    ] as const) {
+      const c = (await p.list(q)).find((x) => x.kind === kind)
+      expect(c).toBeDefined()
+      const parsed = parseMentions(`please ${c?.insertText} now`)
+      expect(parsed[0]).toMatchObject({ kind, target })
     }
   })
 })
