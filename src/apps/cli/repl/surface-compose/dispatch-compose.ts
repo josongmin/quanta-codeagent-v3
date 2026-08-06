@@ -41,6 +41,7 @@ export const buildSurfaceDispatchWire = (
   slashCtx: Parameters<typeof buildSurfaceDispatch>[0]["slashCtx"],
   core: SurfaceCoreState,
   mutable: MutableSurfaceWires,
+  opts?: { readonly skillReview?: Parameters<typeof buildSurfaceDispatch>[0]["skillReview"] },
 ) => {
   const convCheckpointSlot: ConvCheckpointSlashState | undefined =
     mutable.convCheckpointWire === null
@@ -93,6 +94,7 @@ export const buildSurfaceDispatchWire = (
     ...mutable.modelWire,
     automation: mutable.automationSlash,
     ...(permissionInspect === undefined ? {} : { permissionInspect }),
+    ...(opts?.skillReview === undefined ? {} : { skillReview: opts.skillReview }),
   })
   return { dispatchSlash, convCheckpointSlot }
 }

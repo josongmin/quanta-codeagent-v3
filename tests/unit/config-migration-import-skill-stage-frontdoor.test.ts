@@ -87,7 +87,7 @@ describe("front door — runConfigMigrationImport STAGES an imported skill (not 
     await write(join(project, ".claude", "skills", "imported-helper", "SKILL.md"), SKILL)
 
     // Drive the REAL startup import entry (both gates on, HOME → temp home).
-    const notice = await runConfigMigrationImport(project)
+    const { notice } = await runConfigMigrationImport(project)
 
     // The import ran and persisted (STAGED) — the summary mentions the skills
     // item. RED-ON-INJECTION: with the `skillStage` wire removed the skill fails

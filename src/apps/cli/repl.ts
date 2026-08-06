@@ -342,8 +342,11 @@ export const runRepl = async (): Promise<void> => {
     // (settings.json permissions/hooks, .mcp.json, .quanta/agents, AGENTS.md,
     // .quanta/rules), records `imported` (so re-runs are no-ops), and surfaces a
     // one-line stderr summary. Either knob unset ⇒ no detect / no persist /
-    // byte-identical. No-throw.
-    await emitConfigMigrationImport(setup.cwd)
+    // byte-identical. No-throw. RFC03-def — capture the review/approve surface
+    // for any staged imported skill so `/skills review` can consume it (bound to
+    // the SAME approval machine + artifact port + staging store the import staged
+    // into). `undefined` when nothing staged ⇒ the slot is omitted (default-OFF).
+    const skillReview = await emitConfigMigrationImport(setup.cwd)
     // ADR-0299 — surface composition wire. Builds the slash ctx PLUS the
     // wire bundle (conv-checkpoint, playbook-trigger seam, composer +
     // textInbox handles). Each upstream knob (env / CLI flag) gates the
@@ -351,7 +354,10 @@ export const runRepl = async (): Promise<void> => {
     // legacy when no opt-in is present (RFC §1.2). The bundled
     // `dispatchSlash` closure routes through the FULL augmented
     // SlashContext (legacy + ADR-0291 + ADR-0292 + ADR-0294 slots).
-    const wires = composeSurfaceWires(setup, surfaceState, process.env, { convStore })
+    const wires = composeSurfaceWires(setup, surfaceState, process.env, {
+      convStore,
+      ...(skillReview === undefined ? {} : { skillReview }),
+    })
     // RFC-09 (A+B) / ADR-0444+0445 — notify port + pre-compaction warning
     // (factory owns env/TTY reads; all fields undefined ⇒ default-OFF).
     const rfc09 = buildNotifyAndContextWarning({
