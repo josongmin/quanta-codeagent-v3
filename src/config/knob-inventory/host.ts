@@ -108,6 +108,26 @@ export const HOST: readonly KnobInventoryEntry[] = [
     readSite: "apps/cli/slash/registry-surface.ts",
   },
   {
+    envKey: "QUANTA_REWIND_GIT",
+    kind: "bool",
+    default: false,
+    group: "host-gate",
+    home: "runtime-config",
+    describe:
+      "/rewind --restore-files routes through the durable ThreadRollback coordinator (RFC01-A4; opt-in, fail-closed on missing/moved-SHA/conflict). Unset ⇒ prior safe-degrade.",
+    readSite: "apps/cli/repl/surface-compose/slash-context-compose.ts",
+  },
+  {
+    envKey: "QUANTA_WORKTREE_CWD_PIN",
+    kind: "bool",
+    default: false,
+    group: "host-gate",
+    home: "runtime-config",
+    describe:
+      "Turn-boundary cwd pin — after a current-thread→worktree transition, pin the working cwd to the owned worktree at the NEXT turn boundary (RFC06-2; opt-in, never mid-turn). Unset ⇒ cwd unchanged.",
+    readSite: "session/workspace-ownership.ts",
+  },
+  {
     envKey: "QUANTA_COMMAND_HOOKS",
     kind: "bool",
     default: false,
