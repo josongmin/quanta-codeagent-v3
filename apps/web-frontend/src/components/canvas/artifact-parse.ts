@@ -210,3 +210,127 @@ export const parseNotebook = (text: string): readonly NotebookCell[] | null => {
   if (!Array.isArray(cells)) return null
   return cells.map(normalizeCell).filter((c): c is NotebookCell => c !== null)
 }
+
+/* ------------------------------ Chart ------------------------------ */
+
+/**
+ * RFC-12 (deferred) SURFACE C — a parsed chart spec (bar / line / pie),
+ * discriminated by `type`. The agent emits a `chart` artifact whose bytes are
+ * JSON of this shape; `parseChart` normalizes it into props for
+ * `ChartPrimitives`. Returns `null` for non-JSON / an unknown `type` / a spec
+ * missing its required arrays (⇒ the caller degrades to the base download
+ * card). Never throws.
+ */
+export type ChartSpec =
+  | {
+      readonly type: "bar"
+      readonly categories: readonly string[]
+      readonly series: readonly {
+        readonly name: string
+        readonly data: readonly number[]
+        readonly tone?: string
+      }[]
+      readonly stacked?: boolean
+      readonly valueSuffix?: string
+    }
+  | {
+      readonly type: "line"
+      readonly categories: readonly string[]
+      readonly series: readonly {
+        readonly name: string
+        readonly data: readonly number[]
+        readonly tone?: string
+      }[]
+      readonly fill?: boolean
+      readonly valueSuffix?: string
+    }
+  | {
+      readonly type: "pie"
+      readonly data: readonly {
+        readonly label: string
+        readonly value: number
+        readonly tone?: string
+      }[]
+      readonly donut?: boolean
+    }
+
+const TONES = new Set(["success", "danger", "warning", "info", "neutral"])
+const asTone = (v: unknown): string | undefined =>
+  typeof v === "string" && TONES.has(v) ? v : undefined
+
+const asSeries = (raw: unknown): { name: string; data: number[]; tone?: string }[] | null => {
+  if (!Array.isArray(raw)) return null
+  const out: { name: string; data: number[]; tone?: string }[] = []
+  for (const s of raw) {
+    if (s === null || typeof s !== "object") continue
+    const o = s as Record<string, unknown>
+    if (!Array.isArray(o.data)) continue
+    const data = o.data.map((v) => (typeof v === "number" ? v : Number.NaN))
+    const tone = asTone(o.tone)
+    out.push({
+      name: typeof o.name === "string" ? o.name : "",
+      data,
+      ...(tone !== undefined ? { tone } : {}),
+    })
+  }
+  return out
+}
+
+/** Parse a bar|line spec (they share `categories`+`series`). Returns null when
+ *  the required arrays are missing / empty. */
+const parseAxisChart = (o: Record<string, unknown>, type: "bar" | "line"): ChartSpec | null => {
+  if (!Array.isArray(o.categories)) return null
+  const series = asSeries(o.series)
+  if (series === null || series.length === 0) return null
+  const categories = o.categories.map((c) => (typeof c === "string" ? c : String(c)))
+  if (type === "bar") {
+    return {
+      type: "bar",
+      categories,
+      series,
+      ...(typeof o.stacked === "boolean" ? { stacked: o.stacked } : {}),
+      ...(typeof o.valueSuffix === "string" ? { valueSuffix: o.valueSuffix } : {}),
+    }
+  }
+  return {
+    type: "line",
+    categories,
+    series,
+    ...(typeof o.fill === "boolean" ? { fill: o.fill } : {}),
+    ...(typeof o.valueSuffix === "string" ? { valueSuffix: o.valueSuffix } : {}),
+  }
+}
+
+/** Parse a pie spec. Returns null when `data` is missing / has no valued point. */
+const parsePieChart = (o: Record<string, unknown>): ChartSpec | null => {
+  if (!Array.isArray(o.data)) return null
+  const data: { label: string; value: number; tone?: string }[] = []
+  for (const p of o.data) {
+    if (p === null || typeof p !== "object") continue
+    const po = p as Record<string, unknown>
+    if (typeof po.value !== "number") continue
+    const tone = asTone(po.tone)
+    data.push({
+      label: typeof po.label === "string" ? po.label : "",
+      value: po.value,
+      ...(tone !== undefined ? { tone } : {}),
+    })
+  }
+  if (data.length === 0) return null
+  return { type: "pie", data, ...(typeof o.donut === "boolean" ? { donut: o.donut } : {}) }
+}
+
+export const parseChart = (text: string): ChartSpec | null => {
+  let doc: unknown
+  try {
+    doc = JSON.parse(text)
+  } catch {
+    return null
+  }
+  if (doc === null || typeof doc !== "object") return null
+  const o = doc as Record<string, unknown>
+  const type = o.type
+  if (type === "bar" || type === "line") return parseAxisChart(o, type)
+  if (type === "pie") return parsePieChart(o)
+  return null
+}

@@ -57,6 +57,23 @@ const LazyPdfPreview = lazy(async () => {
   const m = await import("./PdfPreview")
   return { default: m.PdfPreview }
 })
+/* RFC-12 (deferred) SURFACE C — LAZY chart renderer. `ChartArtifact` +
+ * `ChartPrimitives` stay behind this async boundary; fetched only when a
+ * `chart` artifact renders under the gate. */
+const LazyChartArtifact = lazy(async () => {
+  const m = await import("./ChartArtifact")
+  return { default: m.ChartArtifact }
+})
+
+/** RFC-12 (deferred) SURFACE C — the chart-artifact render gate. Mirrors a
+ *  daemon `QUANTA_CHART` knob (injected as `VITE_QUANTA_CHART`). DEFAULT-OFF:
+ *  unset ⇒ a `chart` artifact routes to the base download card (byte-identical
+ *  to the pre-RFC-12 strip, where `chart` fell through to `null`). ON ⇒ the
+ *  chart renders inline via `LazyChartArtifact`. */
+export const chartEnabled = (): boolean => {
+  const v = import.meta.env.VITE_QUANTA_CHART as string | undefined
+  return v === "1" || v === "true"
+}
 
 /** DOM-cap for the CSV grid — a huge sheet stays bounded; the overflow is
  *  reported as a "+N more rows" footer rather than rendering thousands of rows. */
@@ -107,9 +124,13 @@ export const artifactKindHue = (kind: string): PaletteColor => {
  *  unit-tested directly. Routing keys off the declared `artifactKind` first,
  *  falling back to the MIME type so a mislabeled kind with a known mime still
  *  renders richly. `null` ⇒ the plain card (image thumbnail / download). */
-export type InlineRenderer = "csv" | "notebook" | "mermaid" | "pdf" | null
+export type InlineRenderer = "csv" | "notebook" | "mermaid" | "pdf" | "chart" | null
 
-export const pickInlineRenderer = (msg: ArtifactReadyMessage): InlineRenderer => {
+/** Route a frame to its inline viewer. `chartOn` (RFC-12 SURFACE C gate,
+ *  default false) enables the `chart` route; when OFF a `chart` artifact falls
+ *  through to `null` (the base download card — byte-identical to pre-RFC-12).
+ *  Pure — the gate is passed in so this stays unit-testable both ways. */
+export const pickInlineRenderer = (msg: ArtifactReadyMessage, chartOn = false): InlineRenderer => {
   const kind = msg.artifactKind
   const mime = msg.mimeType
   if (kind === "image" || mime.startsWith("image/")) return null
@@ -117,6 +138,7 @@ export const pickInlineRenderer = (msg: ArtifactReadyMessage): InlineRenderer =>
   if (kind === "notebook" || /ipynb/i.test(mime)) return "notebook"
   if (kind === "mermaid" || /mermaid/i.test(mime)) return "mermaid"
   if (kind === "pdf" || mime === "application/pdf") return "pdf"
+  if (chartOn && (kind === "chart" || /vnd\.quanta\.chart|chart\+json/i.test(mime))) return "chart"
   return null
 }
 
@@ -356,7 +378,7 @@ const InlineViewer = ({
   url: string
   fetchText: FetchText
 }): JSX.Element | null => {
-  switch (pickInlineRenderer(msg)) {
+  switch (pickInlineRenderer(msg, chartEnabled())) {
     case "csv":
       return <CsvInline url={url} fetchText={fetchText} />
     case "notebook":
@@ -371,6 +393,12 @@ const InlineViewer = ({
       return (
         <Suspense fallback={<LoadingNote />}>
           <LazyPdfPreview url={url} />
+        </Suspense>
+      )
+    case "chart":
+      return (
+        <Suspense fallback={<LoadingNote />}>
+          <LazyChartArtifact url={url} fetchText={fetchText} />
         </Suspense>
       )
     default:
