@@ -245,6 +245,11 @@ const parseCapabilitySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // C1 — opt-in (`gateOn` vocab; #24). Default false ⇒ no artifact registry / tools
     // (byte-identical).
     artifactStore: gateOn(env, "QUANTA_ARTIFACT_STORE"),
+    // RFC12-1 — plan DAG visualization. Opt-in (`gateOn` vocab; #24). Default false
+    // ⇒ `current_plan view:"graph"` is ignored (byte-identical text render) and the
+    // web PlanPanel renders no graph toggle (flat list only). Reuses the existing
+    // mermaid renderer + RFC07-3 edges — no new protocol kind / store.
+    planGraph: gateOn(env, "QUANTA_PLAN_GRAPH"),
     // ADR-0503 P3 — capability-layer master gate. STRICT `=== "1"` opt-in (arming
     // a cross-cutting layer is deliberate). Default false ⇒ resolveExposure is
     // unused, each surface keeps its legacy gate (byte-identical degrade).

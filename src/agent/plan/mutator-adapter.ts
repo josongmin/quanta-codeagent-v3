@@ -186,6 +186,10 @@ export const planStoreToMutator = (store: PlanStore): PlanMutator => ({
       // the canonical plan. No stored reverse edge, no second owner field.
       tasks: projectPlanTasks(p).map((t) => ({
         id: t.id,
+        // RFC12-1 — title + status carried through so the graph render
+        // (plan-to-mermaid) can label + class each node.
+        title: t.title,
+        status: t.status,
         ...(t.owner !== undefined ? { owner: t.owner } : {}),
         blockedBy: t.blockedBy,
         blocks: t.blocks,

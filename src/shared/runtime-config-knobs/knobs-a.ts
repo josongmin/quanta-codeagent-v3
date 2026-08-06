@@ -118,6 +118,14 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     describe: "Canvas artifact persistence store.",
   },
   {
+    envKey: "QUANTA_PLAN_GRAPH",
+    kind: "bool",
+    default: false,
+    group: "tool",
+    describe:
+      "Plan dependency-graph (DAG) visualization (RFC12-1): current_plan view:graph emits a fenced mermaid block and the web PlanPanel gains a list⇄graph toggle. Reuses the RFC07-3 dependency edges + the existing mermaid renderer. Default OFF ⇒ flat list + byte-identical text.",
+  },
+  {
     // ADR-0503 P3 master gate for the cross-surface capability-exposure layer
     // (@/capability). Strict opt-in; default-OFF ⇒ resolveExposure is unused and
     // each surface keeps its legacy per-surface gate (byte-identical degrade).

@@ -6,7 +6,13 @@
 
 import { z } from "zod"
 
-export const currentPlanSchema = z.object({})
+export const currentPlanSchema = z.object({
+  // RFC12-1 — optional render selector. `"graph"` requests a mermaid DAG
+  // (fenced ```mermaid block) instead of the default text render; only honored
+  // when the QUANTA_PLAN_GRAPH knob is ON (else the text render is emitted,
+  // byte-identical). Absent / `"text"` ⇒ the legacy text render.
+  view: z.enum(["text", "graph"]).optional().describe("Render as text (default) or a graph DAG."),
+})
 
 const statusSchema = z
   .enum(["pending", "in_progress", "completed", "cancelled", "blocked"])

@@ -337,6 +337,11 @@ export interface AgentStateTodo {
   readonly id: string
   readonly title: string
   readonly status: AgentStateTodoStatus
+  /** RFC12-1 — the DAG blocked-by edges (todo ids this one waits on), mirroring
+   *  the OPTIONAL `TodoReadonlyMirror.dependencies` upstream. Absent ⇒ the legacy
+   *  3-field shape (byte-stable); present ⇒ the PlanPanel graph toggle can draw
+   *  the dependency arrows. Never used for control flow — a pure render input. */
+  readonly dependencies?: readonly string[]
 }
 
 /** A read-only plan snapshot (mirrors `AgentStatePlan` upstream). */
