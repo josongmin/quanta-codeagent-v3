@@ -1,4 +1,8 @@
 import type { AgentMode, EffortLevel } from "@/agent"
+import {
+  buildMentionProviderListers,
+  type MentionLiveSources,
+} from "@/host/runtime/internal/mention-source-deps"
 import { buildMentionSymbolDeps } from "@/host/runtime/internal/mention-symbol-deps"
 import type { ModelEffortSupport } from "@/llm/provider-metadata"
 import { gateOn, runtimeConfig } from "@/shared"
@@ -129,12 +133,25 @@ const buildEffortCycle = (
  *  port the agent loop's `@symbol` resolver uses (`buildMentionSymbolDeps`),
  *  so an installed language server lights both surfaces with one wire. Absent
  *  knob ⇒ `undefined` ⇒ `readLine` byte-identical. */
-const buildAtProvider = (cwd: string, env: NodeJS.ProcessEnv): AtCandidateProvider | undefined => {
+const buildAtProvider = async (
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  // RFC-12-2 WIRING — the CLI's LIVE mention sources (mcp snapshot + named-agent
+  // registry + session thunk). Absent ⇒ the mcp/subagent/thread listers are
+  // omitted ⇒ zero candidates for those kinds (byte-identical). The `@`-surface
+  // as a whole still rides `QUANTA_AT_AUTOCOMPLETE` (the early return below).
+  mentionSources?: MentionLiveSources,
+): Promise<AtCandidateProvider | undefined> => {
   if (!atAutocompleteEnabled(env)) return undefined
   const symbolDeps = buildMentionSymbolDeps(cwd, env)
+  // RFC-12-2 — the per-kind listers gate on `QUANTA_MENTION_{MCP,SUBAGENT,THREAD}`
+  // inside the builder (provider parity with the resolver's downstream gate).
+  const mentionListers =
+    mentionSources !== undefined ? await buildMentionProviderListers(mentionSources, env) : {}
   return createCompositeAtProvider({
     fileRoot: cwd,
     ...(symbolDeps.lsp !== undefined ? { symbolLookup: symbolDeps.lsp } : {}),
+    ...mentionListers,
   })
 }
 
@@ -159,6 +176,11 @@ export const buildPromptUx = async (
   // RFC-08 BUILD-1 — the live effort-cycle owner wire (slash `effort` + `model`).
   // Absent ⇒ no `onCycleEffort` ⇒ a bound `effort-cycle` chord is inert.
   effortCycle?: EffortCycleWire,
+  // RFC-12-2 WIRING — the CLI's LIVE mention sources (mcp snapshot + named-agent
+  // registry + session thunk) for the `@mcp:` / `@subagent:` / `@thread:`
+  // autocomplete listers. Absent ⇒ those kinds contribute zero candidates
+  // (byte-identical). Rides `QUANTA_AT_AUTOCOMPLETE` + the per-kind knobs.
+  mentionSources?: MentionLiveSources,
 ): Promise<PromptUxOpts> => {
   const { history, multiline } = featureCfg
   const promptHistoryOpts: Parameters<typeof createPromptHistory>[0] = {
@@ -166,7 +188,7 @@ export const buildPromptUx = async (
     ...(history.filePath !== undefined ? { filePath: history.filePath } : {}),
   }
   const promptHistory = history.enabled ? createPromptHistory(promptHistoryOpts) : undefined
-  const atProvider = buildAtProvider(cwd, env)
+  const atProvider = await buildAtProvider(cwd, env, mentionSources)
   // RFC-11 — external editor (A) + keybindings (B). Both default-OFF; each
   // gated on its own env knob, read off the injected `env` (no `process.*`).
   const openEditor = externalEditorEnabled(env)

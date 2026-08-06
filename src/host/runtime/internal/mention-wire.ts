@@ -29,18 +29,46 @@ import type { AgentConfig } from "@/agent"
 import { installCodexR2Wires } from "@/agent/codex-r2-wire-install"
 import { buildDefaultMentionResolver } from "@/agent/mention-runner"
 import { buildAppPluginMentionDeps } from "./mention-app-plugin-deps"
+import { buildMentionResolverOwners, type MentionLiveSources } from "./mention-source-deps"
 import { buildMentionSymbolDeps } from "./mention-symbol-deps"
 
-/** Install the mention-injector on a host-runtime AgentConfig. Returns the
- *  same (mutated) config for fluent use at the call site. */
-export const installCliMentionInjector = (cfg: AgentConfig): AgentConfig => {
+/**
+ * Install the mention-injector on a host-runtime AgentConfig. Returns the
+ * same (mutated) config for fluent use at the call site.
+ *
+ * RFC-12-2 WIRING — the three new mention kinds ride the composition root's
+ * LIVE owners:
+ *   - `@subagent:` — the config's ALREADY-WIRED `namedAgentResolver`
+ *     (`loadNamedAgents(cwd)`; the same repo-controlled registry the subagent
+ *     runner consults — RFC-07 foreign-lineage-safe). Present iff the surface
+ *     loaded a non-empty `.quanta/agents`.
+ *   - `@mcp:` / `@thread:` — the MCP-server snapshot (`loadMcpTools` result) and
+ *     the session-list thunk (`listSessions`), threaded on the host-only
+ *     {@link MentionLiveSources} bundle (stripped from the base before it becomes
+ *     an AgentConfig — see `context-binding/base.ts`).
+ *
+ * Absent owner ⇒ that kind resolves null (byte-identical). The per-kind
+ * `QUANTA_MENTION_{MCP,SUBAGENT,THREAD}` kill-switches are honoured downstream
+ * by `buildDefaultMentionResolver`.
+ */
+export const installCliMentionInjector = (
+  cfg: AgentConfig,
+  sources?: MentionLiveSources,
+): AgentConfig => {
   if (cfg.mentionInjector !== undefined) return cfg
   try {
+    // Subagents ride the config's live named-agent resolver; mcp + threads ride
+    // the injected host-only sources bundle. An absent owner ⇒ that kind dark.
+    const ownerSources: MentionLiveSources = {
+      ...sources,
+      ...(cfg.namedAgentResolver !== undefined ? { subagents: cfg.namedAgentResolver } : {}),
+    }
     const mentionResolver = buildDefaultMentionResolver({
       cwd: cfg.cwd,
       env: process.env,
       ...buildMentionSymbolDeps(cfg.cwd, process.env),
       ...buildAppPluginMentionDeps(cfg.cwd, process.env),
+      ...buildMentionResolverOwners(ownerSources),
     })
     installCodexR2Wires(cfg, {
       mentionResolver,

@@ -17,6 +17,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { AgentConfig } from "@/agent"
+import { NamedAgentRegistry } from "@/agent/named-agent-registry"
+import type { MentionLiveSources } from "../mention-source-deps"
 import { installCliMentionInjector } from "../mention-wire"
 
 const SYMBOL = "QUANTA_MENTION_SYMBOL"
@@ -113,5 +115,114 @@ describe("installCliMentionInjector — ADR-0422 hellgate", () => {
     const cfg = installCliMentionInjector(makeCfg(dir, "s1"))
     // biome-ignore lint/suspicious/noExplicitAny: deliberate hostile cast
     expect(await cfg.mentionInjector?.(null as any)).toEqual([])
+  })
+})
+
+// -------- RFC-12-2 WIRING front door: mcp / subagent / thread ---------------
+//
+// Drives the REAL production seam — `installCliMentionInjector(cfg, sources)` —
+// end to end: the injected owners (mcp snapshot + session thunk) + the config's
+// `namedAgentResolver` make `@mcp:` / `@subagent:` / `@thread:` inject the right
+// context through `cfg.mentionInjector`. Pins gate-off byte-identical + no
+// foreign-lineage leak + red-on-injection (drop one owner ⇒ its kind dark).
+
+const MCP = "QUANTA_MENTION_MCP"
+const SUBAGENT = "QUANTA_MENTION_SUBAGENT"
+const THREAD = "QUANTA_MENTION_THREAD"
+
+const cfgWithSubagents = (cwd: string): AgentConfig =>
+  ({
+    cwd,
+    namedAgentResolver: new NamedAgentRegistry([
+      {
+        agentType: "explorer",
+        system: "Read-only explorer role\nnext line",
+        sourcePath: "/repo/.quanta/agents/explorer.md",
+      },
+    ]),
+  }) as unknown as AgentConfig
+
+const liveSources = (): MentionLiveSources => ({
+  mcpServers: [{ name: "github", tools: [{ name: "create_pr", description: "Open a PR" }] }],
+  sessions: async () => [{ id: "abc-1", title: "Prior thread", cwd: "/w", gitBranch: "feat/x" }],
+})
+
+describe("installCliMentionInjector — RFC-12-2 wiring front door", () => {
+  const KNOBS = [FILE, SYMBOL, SKILL, MCP, SUBAGENT, THREAD]
+  let dir: string
+  const saved: Record<string, string | undefined> = {}
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "mention-wire-rfc122-"))
+    for (const k of KNOBS) saved[k] = process.env[k]
+    // Keep file/symbol/skill OFF so the assertions isolate the 3 new kinds.
+    process.env[FILE] = "off"
+    process.env[SYMBOL] = "off"
+    process.env[SKILL] = "off"
+    delete process.env[MCP]
+    delete process.env[SUBAGENT]
+    delete process.env[THREAD]
+  })
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+    for (const k of KNOBS) {
+      if (saved[k] === undefined) delete process.env[k]
+      else process.env[k] = saved[k]
+    }
+  })
+
+  test("G1 — all owners wired ⇒ mcp/subagent/thread all inject context", async () => {
+    const cfg = installCliMentionInjector(cfgWithSubagents(dir), liveSources())
+    const out = JSON.stringify(
+      await cfg.mentionInjector?.("@mcp:github @subagent:explorer @thread:abc-1"),
+    )
+    expect(out).toContain("mcp: github")
+    expect(out).toContain("create_pr")
+    expect(out).toContain("subagent: explorer")
+    expect(out).toContain("thread: Prior thread")
+  })
+
+  test("G2 — RED: NO sources + no namedAgentResolver ⇒ all three dark (byte-identical)", async () => {
+    const cfg = installCliMentionInjector(makeCfg(dir, "s1"))
+    expect(await cfg.mentionInjector?.("@mcp:github @subagent:explorer @thread:abc-1")).toEqual([])
+  })
+
+  test("G3 — subagent rides cfg.namedAgentResolver even with NO sources bundle", async () => {
+    const cfg = installCliMentionInjector(cfgWithSubagents(dir))
+    const out = JSON.stringify(await cfg.mentionInjector?.("@subagent:explorer @mcp:github"))
+    expect(out).toContain("subagent: explorer")
+    // mcp is dark (no source bundle)
+    expect(out).not.toContain("mcp: github")
+  })
+
+  test("G4 — red-on-injection: drop the MCP source ⇒ ONLY mcp dark", async () => {
+    const src: MentionLiveSources = {
+      sessions: async () => [{ id: "abc-1", title: "Prior thread" }],
+    }
+    const cfg = installCliMentionInjector(cfgWithSubagents(dir), src)
+    const out = JSON.stringify(
+      await cfg.mentionInjector?.("@mcp:github @subagent:explorer @thread:abc-1"),
+    )
+    expect(out).not.toContain("mcp: github")
+    expect(out).toContain("subagent: explorer")
+    expect(out).toContain("thread: Prior thread")
+  })
+
+  test("G5 — kill-switch: QUANTA_MENTION_SUBAGENT=off ⇒ subagent dark, others live", async () => {
+    process.env[SUBAGENT] = "off"
+    const cfg = installCliMentionInjector(cfgWithSubagents(dir), liveSources())
+    const out = JSON.stringify(
+      await cfg.mentionInjector?.("@mcp:github @subagent:explorer @thread:abc-1"),
+    )
+    expect(out).not.toContain("subagent: explorer")
+    expect(out).toContain("mcp: github")
+    expect(out).toContain("thread: Prior thread")
+  })
+
+  test("G6 — foreign-lineage: @subagent: can only surface a role THIS registry declares", async () => {
+    // The registry holds ONLY `explorer`; a request for a role it never declared
+    // (a would-be cross-task child handle) resolves to nothing — no leak.
+    const cfg = installCliMentionInjector(cfgWithSubagents(dir), liveSources())
+    const out = JSON.stringify(await cfg.mentionInjector?.("@subagent:other-tasks-child"))
+    expect(out === "[]" || out === undefined).toBe(true)
   })
 })

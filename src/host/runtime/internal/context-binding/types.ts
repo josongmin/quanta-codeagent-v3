@@ -14,6 +14,7 @@ import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "@/sdk/ru
 import type { SessionMeta } from "@/session"
 import type { ArtifactPreviewResolver } from "../../artifact-preview-resolver"
 import type { RuntimeHost } from "../../types"
+import type { MentionLiveSources } from "../mention-source-deps"
 
 export type RuntimeBase = RuntimeAgentConfigBase & {
   approvalProtocol?: RuntimeApprovalProtocolConfig
@@ -86,6 +87,15 @@ export type RuntimeBase = RuntimeAgentConfigBase & {
    *  compose-key parity + doc. Absent ⇒ `wireOptionalAgentPorts` defaults the
    *  SSOT resolver (caller-fallback verbatim), byte-identical. */
   roleModelResolver?: AgentConfig["roleModelResolver"]
+  /** RFC-12-2 WIRING — the host-only LIVE sources for the `@mcp:` / `@thread:`
+   *  mention kinds (the MCP-server snapshot from `loadMcpTools` + the
+   *  `listSessions` thunk). Carried on the base by the CLI comp-root
+   *  (`composeCliRuntimeContext`), consumed by `installCliMentionInjector`, and
+   *  STRIPPED before the base becomes an `AgentConfig` (host-only, like
+   *  `artifactRegistry`). `@subagent:` is NOT here — it rides the config's own
+   *  `namedAgentResolver`. Absent ⇒ `@mcp:` / `@thread:` resolve null
+   *  (byte-identical default-OFF). */
+  mentionOwnerSources?: MentionLiveSources
 }
 
 export interface RuntimeConfirmSlot {
@@ -297,6 +307,12 @@ export type RuntimeBootstrapOverlay = {
    *  `AssembleRequestPartial`. Absent ⇒ slot omitted (default-OFF,
    *  byte-identical: no named agent ever resolves). */
   readonly namedAgentResolver?: AgentConfig["namedAgentResolver"]
+  /** RFC-12-2 WIRING — host-only LIVE sources for the `@mcp:` / `@thread:`
+   *  mention kinds (MCP snapshot + `listSessions` thunk). When set, the base
+   *  carries `mentionOwnerSources` so `installCliMentionInjector` wires the two
+   *  kinds live (`@subagent:` rides `namedAgentResolver`). Absent ⇒ slot omitted
+   *  ⇒ both resolve null (byte-identical default). */
+  readonly mentionOwnerSources?: MentionLiveSources
   /** ticket-11 (P8 git-worktree agent tools) — session-scoped active-worktree
    *  slot. When set (the comp-root mints ONE per session behind
    *  `QUANTA_WORKTREE_TOOL`), the base carries `activeWorktreeSlot` so features.ts
