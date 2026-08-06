@@ -47,8 +47,10 @@ import { MAX_PDF_BYTES, PDF_MEDIA_TYPE, sniffPdfMagic } from "@/tool/document"
 // `loadSingle`) keeps this import cycle-safe; the edge is whitelisted (RFC04).
 import {
   disambiguateMcpToolNames,
+  emitReloadSource,
   type McpReloadableSource,
   reloadableSingleClientSource,
+  reloadableSupervisedSource,
 } from "./mcp-reload-source"
 
 /**
@@ -769,14 +771,14 @@ export interface LoadMcpToolsOpts {
    *  `QUANTA_MCP_HOT_RELOAD`. */
   resourceObserver?: McpResourceObserver
   /** RFC04-2/3 (hot-reload) — OPTIONAL reload-source sink invoked ONCE per
-   *  SUCCESSFULLY-loaded server on the SINGLE-CLIENT path with a
-   *  {@link McpReloadableSource} over the live client + connect-time `bindOpts`
-   *  (a relist re-runs the SAME connect bind — no reload-only converter/collision/
-   *  trust). The composition root (gated on `QUANTA_MCP_HOT_RELOAD`) collects these
-   *  for the controller's all-source relist. SUPERVISED (auto-restart) servers are
-   *  DELIBERATELY skipped — a single-client relister cannot accept a supervisor —
-   *  so hot-reload covers NON-SUPERVISED servers only. Absent (default) ⇒ never
-   *  invoked ⇒ byte-identical. Best-effort; must not throw. */
+   *  SUCCESSFULLY-loaded server on BOTH paths with a {@link McpReloadableSource}:
+   *  single-client ⇒ `reloadableSingleClientSource` (live client); supervised ⇒
+   *  `reloadableSupervisedSource` (the supervisor's stable handle, relisting via
+   *  `sup.listTools()` ⇒ current live client ⇒ survives auto-restart). Both re-run
+   *  the SAME connect-time `bindOpts` (no reload-only converter/collision/trust); the
+   *  composition root (gated on `QUANTA_MCP_HOT_RELOAD`) collects them for the
+   *  controller's all-source relist, so an auto-restart server's `tools/list_changed`
+   *  hot-reloads too. Absent ⇒ never invoked ⇒ byte-identical. Best-effort. */
   onReloadSource?: (source: McpReloadableSource) => void
 }
 
@@ -848,6 +850,7 @@ const loadSupervised = async (
   deps: SupervisorDeps,
   annotationsHonored: boolean | undefined,
   onServerLoadError: ((info: { server: string; error: unknown }) => void) | undefined,
+  onReloadSource: ((source: McpReloadableSource) => void) | undefined,
 ): Promise<{ tools: Tool[]; client: McpStoppable; resources?: ResourcesCapableClient } | null> => {
   const sup = await McpReconnectSupervisor.create(config, deps)
   const bindOpts = bindOptsFor(config, annotationsHonored)
@@ -869,6 +872,10 @@ const loadSupervised = async (
     // field, zero new tools). Read per-call inside the supervisor so a restart
     // that changes capability re-evaluates.
     const resources = sup.serverSupportsResources() || sup.serverSupportsPrompts() ? sup : undefined
+    // RFC04 supervised extension — reload SOURCE over the SUPERVISOR's stable
+    // handle (`sup.listTools()` ⇒ current live client ⇒ survives auto-restart).
+    const supSource = reloadableSupervisedSource(sup, config.name, bindOpts)
+    emitReloadSource(onReloadSource, config.name, supSource)
     return { tools, client: sup, ...(resources !== undefined ? { resources } : {}) }
   } catch (e) {
     logger.warn(`mcp: skipping server "${config.name}": ${errMessage(e)}`)
@@ -917,17 +924,10 @@ const loadSingle = async (
     // ADR-0431 — default-OFF MCP tasks surface: wired iff the server advertised
     // the `tasks/*` capability. No advertisement ⇒ no tools.
     tools.push(...tasksToolsFor(client))
-    // RFC04-2/3 (hot-reload) — expose this loaded server as a reload SOURCE over
-    // the live client + connect-time `bindOpts` (a relist re-runs the SAME bind).
-    // Only threaded when `QUANTA_MCP_HOT_RELOAD` is gated on (absent ⇒ never
-    // called ⇒ byte-identical); NOT emitted on the supervised path. Best-effort.
-    if (onReloadSource !== undefined) {
-      try {
-        onReloadSource(reloadableSingleClientSource(client, config.name, bindOpts))
-      } catch (e) {
-        logger.warn(`mcp: onReloadSource sink threw for "${config.name}": ${errMessage(e)}`)
-      }
-    }
+    // RFC04-2/3 (hot-reload) — reload SOURCE over the live client + connect-time
+    // `bindOpts` (relist re-runs the SAME bind). Gated on `QUANTA_MCP_HOT_RELOAD`.
+    const singleSource = reloadableSingleClientSource(client, config.name, bindOpts)
+    emitReloadSource(onReloadSource, config.name, singleSource)
     // N3 — surface the CONCRETE client (which exposes the resources/prompts
     // methods, unlike the `McpStoppable` narrowing) so `loadMcpTools` can build
     // the aggregate `ResourcesHandle`. The `McpClient` structurally satisfies
@@ -963,6 +963,7 @@ export const loadMcpTools = async (
             supervisorDepsFor(config),
             opts?.annotationsHonored,
             opts?.onServerLoadError,
+            opts?.onReloadSource,
           )
         : await loadSingle(
             config,

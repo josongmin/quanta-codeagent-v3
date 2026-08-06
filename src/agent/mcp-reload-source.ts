@@ -9,10 +9,16 @@
  * assembly — there is NO reload-only converter/collision/trust path.
  */
 
-import type { McpClient } from "@/mcp"
-import { logger } from "@/shared"
+import type { McpClient, McpReconnectSupervisor } from "@/mcp"
+import { errMessage, logger } from "@/shared"
 import type { Tool } from "@/tool"
-import { type McpToolBindOpts, mcpToolToTool, tasksToolsFor } from "./mcp-bridge"
+import {
+  type McpToolBindOpts,
+  mcpToolToTool,
+  mcpToolToToolSupervised,
+  supervisedTasksToolsFor,
+  tasksToolsFor,
+} from "./mcp-bridge"
 
 /** F1 — the registry is a name-keyed Map with last-write-wins, and
  *  {@link mcpToolName} sanitizes free-form server/tool names through
@@ -61,6 +67,25 @@ export const disambiguateMcpToolNames = (
   return { tools: out, collisions }
 }
 
+/** RFC04-2/3 (hot-reload) — best-effort invoke of the optional reload-source sink
+ *  with the {@link McpReloadableSource} the caller built. Wrapped so a hostile
+ *  sink can never escape the load's success path. Absent ⇒ no-op (byte-identical).
+ *  Shared by BOTH `loadMcpTools` load paths (single-client + supervised) so the
+ *  emit goes through ONE point. Lives with the relist assembly (not the bridge)
+ *  so the bridge stays under the god-module ratchet. */
+export const emitReloadSource = (
+  onReloadSource: ((source: McpReloadableSource) => void) | undefined,
+  server: string,
+  source: McpReloadableSource,
+): void => {
+  if (onReloadSource === undefined) return
+  try {
+    onReloadSource(source)
+  } catch (e) {
+    logger.warn(`mcp: onReloadSource sink threw for "${server}": ${errMessage(e)}`)
+  }
+}
+
 /** One reloadable MCP source: a live server whose tool list can be RE-listed and
  *  RE-bridged without re-spawning the process. `relist` re-runs the SAME
  *  connect-time bind over the SAME live client. It MUST reject on any relist
@@ -86,6 +111,30 @@ export const reloadableSingleClientSource = (
     const defs = await client.listTools()
     const tools = defs.map((def) => mcpToolToTool(client, def, serverName, bindOpts))
     tools.push(...tasksToolsFor(client))
+    return tools
+  },
+})
+
+/** Build a reloadable source over an auto-restart `McpReconnectSupervisor`
+ *  (RFC04 supervised extension). Mirrors {@link reloadableSingleClientSource},
+ *  but binds to the SUPERVISOR's STABLE handle instead of a concrete (mortal)
+ *  `McpClient`: `sup.listTools()` forwards to the CURRENT live client (as
+ *  `supervisedTasksToolsFor` does for `tasks/*`), so a relist always re-lists the
+ *  live server — even if auto-restart swapped the underlying client since the
+ *  source was created. Each relisted def is re-bridged with
+ *  {@link mcpToolToToolSupervised} (routing through the supervisor, restart-safe)
+ *  under the SAME connect-time `bindOpts`, and the supervised `tasks/*` surface
+ *  is re-derived per relist. Rejects on any `listTools` failure so the reload
+ *  controller retains last-known-good (never a partial/empty publish). */
+export const reloadableSupervisedSource = (
+  sup: McpReconnectSupervisor,
+  serverName: string,
+  bindOpts: McpToolBindOpts,
+): McpReloadableSource => ({
+  relist: async () => {
+    const defs = await sup.listTools()
+    const tools = defs.map((def) => mcpToolToToolSupervised(sup, def, serverName, bindOpts))
+    tools.push(...supervisedTasksToolsFor(sup))
     return tools
   },
 })

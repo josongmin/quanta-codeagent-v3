@@ -236,6 +236,7 @@ export {
   type McpReloadableSource,
   relistMcpTools,
   reloadableSingleClientSource,
+  reloadableSupervisedSource,
 } from "./mcp-reload-source"
 export {
   type PersistDeps,
