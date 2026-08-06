@@ -8,6 +8,7 @@ import {
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
+import type { MentionLiveSources } from "@/host/runtime/internal/mention-source-deps"
 import { wireSecurityRailsForOverlay } from "@/host/runtime/security-rails-wire"
 import type { ResponsesContinuationStore } from "@/llm"
 import {
@@ -22,14 +23,13 @@ import type { PendingApprovalView } from "@/protocol/session"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
+import { listSessions, type SessionMeta } from "@/session"
 import { gateOn, runtimeConfigFromEnv } from "@/shared"
 import { decisionEmitterFromStream, type StreamPort } from "@/stream"
 import type { WorktreeSlotHandle } from "@/tool"
 import { buildShellSnapshotConfig, buildSummarizerLlm } from "../internal"
-import {
-  buildAdmissibility,
-  ladderAutoReviewEnabled,
-} from "./cli-admissibility-compose"
+import type { McpServerInfo, McpSurfaceInfo } from "../mcp-cmd"
+import { buildAdmissibility, ladderAutoReviewEnabled } from "./cli-admissibility-compose"
 import {
   askLine,
   buildBackgroundConsentPort,
@@ -75,6 +75,41 @@ const buildSessionMemoryAutoSummarizer = (
   boot: SessionBootstrapResult,
 ): ReturnType<typeof buildSummarizerLlm> => buildSummarizerLlm(boot.provider, boot.abort.signal)
 
+/** RFC-12-2 WIRING — project the CLI's ALREADY-LIVE sources onto the host-only
+ *  {@link MentionLiveSources} bundle for the `@mcp:` / `@thread:` mention kinds
+ *  (`@subagent:` rides `namedAgentResolver`, threaded separately). NO new
+ *  store/registry — owner reuse:
+ *    - MCP: `boot.mcpSurface` (the `/mcp` `McpSurfaceInfo` the bootstrap built
+ *      from `loadMcpTools` — server name → its bridged tools). Narrowed from the
+ *      host-opaque `BootstrapMcpSurface` here (mirrors `mcpSurface` in
+ *      session-setup). Absent / empty ⇒ `@mcp:` dark.
+ *    - Thread: `listSessions` (the live session index). Absent / load-fault ⇒
+ *      `@thread:` dark (the thunk is NO-THROW inside the wire).
+ *  Returns `undefined` when NEITHER source is present so the overlay slot is
+ *  omitted (byte-identical default). */
+const buildMentionOwnerSources = (boot: SessionBootstrapResult): MentionLiveSources | undefined => {
+  const surface = boot.mcpSurface as McpSurfaceInfo | undefined
+  const mcpServers = surface?.servers
+    ?.filter((s: McpServerInfo) => s.status === "connected")
+    .map((s: McpServerInfo) => ({ name: s.name, tools: s.tools }))
+  const hasMcp = mcpServers !== undefined && mcpServers.length > 0
+  // The session-list thunk projects `SessionMeta` → the resolver/provider's
+  // `ThreadSummary` shape (a structural subset). Always available (the session
+  // index is a durable store); a load fault degrades to zero threads in the wire.
+  const sessions = async () =>
+    (await listSessions()).map((m: SessionMeta) => ({
+      id: m.id,
+      title: m.title,
+      cwd: m.cwd,
+      ...(m.gitBranch !== undefined ? { gitBranch: m.gitBranch } : {}),
+      ...(m.threadSource !== undefined ? { threadSource: m.threadSource } : {}),
+    }))
+  return {
+    ...(hasMcp ? { mcpServers } : {}),
+    sessions,
+  }
+}
+
 const buildBootstrapContextArgs = (args: {
   readonly boot: SessionBootstrapResult
   readonly turnStream: StreamPort
@@ -98,6 +133,11 @@ const buildBootstrapContextArgs = (args: {
    *  Threaded onto the overlay so the per-turn AgentConfig carries it. Absent ⇒
    *  no `.quanta/agents` (or load fault) ⇒ overlay slot omitted (byte-identical). */
   readonly namedAgentResolver?: NamedAgentResolver
+  /** RFC-12-2 WIRING — host-only mention owner sources for `@mcp:` / `@thread:`
+   *  (built by {@link buildMentionOwnerSources} from `boot.mcpSurface` +
+   *  `listSessions`). Threaded onto the overlay so the base carries it to
+   *  `installCliMentionInjector`. Absent ⇒ overlay slot omitted (byte-identical). */
+  readonly mentionOwnerSources?: MentionLiveSources
   /** ticket-11 (P8 worktree) — session-scoped active-worktree slot, minted at the
    *  comp-root ONLY when `QUANTA_WORKTREE_TOOL` is on. Threaded onto the overlay so
    *  the per-turn AgentConfig carries it; features.ts registers the worktree tools
@@ -130,6 +170,7 @@ const buildBootstrapContextArgs = (args: {
     autoReview,
     env,
     namedAgentResolver,
+    mentionOwnerSources,
     activeWorktreeSlot,
     trustScope,
     writeBudget,
@@ -184,6 +225,10 @@ const buildBootstrapContextArgs = (args: {
       // a non-empty `.quanta/agents` registry. Absent ⇒ slot omitted ⇒ the
       // per-turn AgentConfig has no resolver (default-OFF byte-identical).
       ...(namedAgentResolver !== undefined ? { namedAgentResolver } : {}),
+      // RFC-12-2 WIRING — overlay the host-only mention sources (mcp snapshot +
+      // session thunk) so the per-turn AgentConfig's `installCliMentionInjector`
+      // wires `@mcp:` / `@thread:` live. Absent ⇒ slot omitted ⇒ both dark.
+      ...(mentionOwnerSources !== undefined ? { mentionOwnerSources } : {}),
       // ticket-11 (P8 worktree) — overlay the session-scoped slot when
       // QUANTA_WORKTREE_TOOL minted one. Absent ⇒ slot omitted ⇒ worktree tools
       // unregistered + bash/edit cwd byte-identical (default-OFF).
@@ -242,28 +287,32 @@ const wireSecurityOverlay = (deps: {
   return writeBudget
 }
 
+/** #20 (durable prefix grants) — hydrate the PERSISTENT trust-scope registry
+ *  ONLY when `QUANTA_TRUST_SCOPE` is on (opt-in; NOT seeded default-ON like the
+ *  other CLI gates — durable cross-session grants are a deliberate operator
+ *  choice). Hydrated once (async comp-root) so the gate sees prior-session grants
+ *  on turn 1. `boot.cwd` is the SESSION-RESOLVED jail root, used as BOTH the
+ *  projectRoot (overlay file location) and the projectKey (grant lookup key) so
+ *  mint + consult agree. Gate off ⇒ `undefined` ⇒ no [P] verb + the gate skips
+ *  trust-scope (default-OFF, byte-identical). Extracted from
+ *  {@link composeCliRuntimeContext} (god-fn ratchet) — pure code motion. */
+const hydrateTrustScope = async (
+  cwd: string,
+  env: Readonly<Record<string, string | undefined>>,
+): Promise<{ registry: TrustScopeRegistry; projectKey: string } | undefined> => {
+  if (!gateOn(env, "QUANTA_TRUST_SCOPE")) return undefined
+  const registry = createPersistentTrustScopeRegistry({ projectRoot: cwd })
+  await registry.hydrate()
+  return { registry, projectKey: cwd }
+}
+
 export const composeCliRuntimeContext = async (
   args: ComposeCliRuntimeContextArgs,
 ): Promise<CliRuntimeContextBindings> => {
   const { boot, turnStream, loadPermissionStore, sandboxProfile } = args
   // S2 — the FIFO ask-queue channel (mid-turn approval + cross-layer publish).
   const midTurnApprovalChannel = wireAskQueue()
-  // #20 (durable prefix grants) — wire the PERSISTENT trust-scope registry ONLY
-  // when `QUANTA_TRUST_SCOPE` is on (opt-in; NOT seeded default-ON like the other
-  // CLI gates — durable cross-session grants are a deliberate operator choice).
-  // Hydrated once here (async comp-root) so the gate sees prior-session grants on
-  // turn 1. `boot.cwd` is the SESSION-RESOLVED jail root, used as BOTH the
-  // projectRoot (overlay file location) and the projectKey (grant lookup key) so
-  // mint + consult agree. Absent ⇒ undefined ⇒ no [P] verb + gate skips trust-
-  // scope (default-OFF, byte-identical).
-  const trustScopeEnv = args.envSource ?? process.env
-  const trustScope = gateOn(trustScopeEnv, "QUANTA_TRUST_SCOPE")
-    ? await (async (): Promise<{ registry: TrustScopeRegistry; projectKey: string }> => {
-        const registry = createPersistentTrustScopeRegistry({ projectRoot: boot.cwd })
-        await registry.hydrate()
-        return { registry, projectKey: boot.cwd }
-      })()
-    : undefined
+  const trustScope = await hydrateTrustScope(boot.cwd, args.envSource ?? process.env)
   const surfaceOnConfirm = buildCliOnConfirm({
     idleMonitor: boot.idleMonitor,
     rejectCounter: boot.rejectCounter,
@@ -337,6 +386,10 @@ export const composeCliRuntimeContext = async (
   const namedAgents = await loadNamedAgents(boot.cwd).catch(() => undefined)
   const namedAgentResolver =
     namedAgents !== undefined && namedAgents.size > 0 ? namedAgents : undefined
+  // RFC-12-2 WIRING — build the host-only mention sources for `@mcp:` / `@thread:`
+  // from the CLI's already-live MCP surface + session index (see
+  // {@link buildMentionOwnerSources}). `@subagent:` rides `namedAgentResolver`.
+  const mentionOwnerSources = buildMentionOwnerSources(boot)
   // ticket-11 (P8 worktree) — mint the session-scoped active-worktree slot ONLY
   // when `QUANTA_WORKTREE_TOOL` is on (see {@link mintActiveWorktreeSlot} in
   // `@/agent`). Gate off ⇒ undefined ⇒ worktree tools unregistered + bash/edit
@@ -358,6 +411,7 @@ export const composeCliRuntimeContext = async (
       autoReview,
       env: args.envSource ?? process.env,
       ...(namedAgentResolver !== undefined ? { namedAgentResolver } : {}),
+      ...(mentionOwnerSources !== undefined ? { mentionOwnerSources } : {}),
       ...(activeWorktreeSlot !== undefined ? { activeWorktreeSlot } : {}),
       ...(trustScope !== undefined ? { trustScope } : {}), // #20 durable
       ...(securityWriteBudget !== undefined ? { writeBudget: securityWriteBudget } : {}),

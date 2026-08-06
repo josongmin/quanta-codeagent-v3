@@ -141,6 +141,10 @@ const buildTurnAssemblerDeps = (args: {
     // jul-16 GAP-3 — capability-manifest concern only (the transport stamp);
     // never a per-turn agent field (mirrors the W1-B strip above).
     sessionTransport: _sessionTransport,
+    // RFC-12-2 WIRING — host-only mention owner sources (mcp snapshot + session
+    // thunk) consumed by `installCliMentionInjector`; never a per-turn agent
+    // field (mirrors the A2 strip).
+    mentionOwnerSources: _mentionOwnerSources,
     systemSource,
     messages: _baseMessages,
     signal: _baseSignal,
@@ -176,6 +180,9 @@ export const buildAgentConfigFromBase = (args: {
           signal: args.signal,
         }),
       ),
+      // RFC-12-2 WIRING — thread the host-only mcp/thread sources to the mention
+      // wire (stripped from the assembler deps above). Absent ⇒ both dark.
+      args.base.mentionOwnerSources,
     )
   }
 
@@ -189,6 +196,9 @@ export const buildAgentConfigFromBase = (args: {
     serverAutoContinues: _serverAutoContinues,
     // jul-16 GAP-3 — manifest-only transport stamp, stripped (see buildTurnAssemblerDeps).
     sessionTransport: _sessionTransport,
+    // RFC-12-2 WIRING — host-only mention sources, consumed below then stripped
+    // from the AgentConfig (mirrors the A2 strip).
+    mentionOwnerSources,
     systemSource,
     toolProfileState,
     identityModeState,
@@ -198,16 +208,19 @@ export const buildAgentConfigFromBase = (args: {
     ...rest
   } = args.base
 
-  return installCliMentionInjector({
-    // jun-26 SE-audit: no cast — TS checks the literal against the return type so
-    // a RuntimeBase↔AgentConfig drift fails to compile instead of slipping through.
-    ...rest,
-    messages: [...args.messages],
-    system: systemSource?.get() ?? system,
-    signal: args.signal ?? args.base.signal,
-    ...toToolProfileConfig(toolProfileState),
-    ...toIdentityModeConfig(identityModeState),
-  })
+  return installCliMentionInjector(
+    {
+      // jun-26 SE-audit: no cast — TS checks the literal against the return type so
+      // a RuntimeBase↔AgentConfig drift fails to compile instead of slipping through.
+      ...rest,
+      messages: [...args.messages],
+      system: systemSource?.get() ?? system,
+      signal: args.signal ?? args.base.signal,
+      ...toToolProfileConfig(toolProfileState),
+      ...toIdentityModeConfig(identityModeState),
+    },
+    mentionOwnerSources,
+  )
 }
 
 export const buildAgentConfigFromBaseInput = (args: {
@@ -346,6 +359,11 @@ const buildBootstrapBaseShape = (
     // F2 (round-2) — lift the host-wired named-agent resolver onto the base so
     // the per-turn `assembleAgentConfig` spread carries it to the SubagentRunner.
     ...whenDefined("namedAgentResolver", args.overlay?.namedAgentResolver),
+    // RFC-12-2 WIRING — lift the host-only mention owner sources (mcp snapshot +
+    // session thunk) onto the base so `installCliMentionInjector` wires `@mcp:` /
+    // `@thread:` live. Stripped before the base becomes an AgentConfig. Absent ⇒
+    // omitted ⇒ both kinds dark (byte-identical).
+    ...whenDefined("mentionOwnerSources", args.overlay?.mentionOwnerSources),
     // ticket-11 (P8) — lift the session-scoped active-worktree slot onto the base
     // so features.ts registers the worktree tools and the dispatch seam projects
     // the slot value onto the bash/edit edit-fence. Absent ⇒ omitted (default-OFF).

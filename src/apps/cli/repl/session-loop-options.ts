@@ -8,7 +8,12 @@
  * entry routing; the per-turn loop wiring lives here.
  */
 
+import { loadNamedAgents } from "@/agent"
+import type { MentionLiveSources } from "@/host/runtime/internal/mention-source-deps"
 import { resolveModelEffortSupport } from "@/llm/provider-metadata"
+import { listSessions, type SessionMeta } from "@/session"
+import { atAutocompleteEnabled } from "../at-autocomplete"
+import type { McpServerInfo } from "../mcp-cmd"
 import type { CliFeatureConfig } from "./cli-feature-config"
 import type { buildNotifyAndContextWarning } from "./factories"
 import type { runSessionLoop } from "./session-loop"
@@ -45,14 +50,60 @@ const buildReplPromptUx = (
   // effort slot ⇒ no effort-cycle wire ⇒ a bound chord is inert. NOT a new store.
   effortSlot?: NonNullable<Wires["slashCtx"]>["effort"],
 ): ReturnType<typeof buildPromptUx> =>
-  buildPromptUx(
-    featureCfg,
-    setup.cwd,
-    env,
-    (m) => setup.pills.update({ mode: m }),
-    modeCycleStore,
-    buildEffortCycleWire(setup.liveModelSource, effortSlot),
+  buildProviderMentionSources(setup, env).then((mentionSources) =>
+    buildPromptUx(
+      featureCfg,
+      setup.cwd,
+      env,
+      (m) => setup.pills.update({ mode: m }),
+      modeCycleStore,
+      buildEffortCycleWire(setup.liveModelSource, effortSlot),
+      // RFC-12-2 WIRING — the live sources for the `@`-autocomplete mcp/subagent/
+      // thread listers. The MCP snapshot comes from the SAME `/mcp` surface the
+      // resolver path uses; the named-agent registry is loaded from `setup.cwd`
+      // (the session-resolved jail root — fail-open, same loader as
+      // `composeCliRuntimeContext`); threads come from `listSessions`.
+      mentionSources,
+    ),
   )
+
+/** RFC-12-2 WIRING — build the autocomplete provider's LIVE mention sources from
+ *  the settled `setup` bundle. MCP: the connected servers of `setup.mcpSurface`
+ *  (server name → bridged tools). Subagent: `loadNamedAgents(setup.cwd)` (the
+ *  repo-controlled registry — RFC-07 foreign-lineage-safe; fail-open to no
+ *  subagent candidates). Thread: `listSessions` projected to the thread summary
+ *  shape. Every source is OPTIONAL / NO-THROW ⇒ an absent source darkens ONLY
+ *  its kind (byte-identical).
+ *
+ *  GATE-OFF BYTE-IDENTICAL: when `QUANTA_AT_AUTOCOMPLETE` is off there is no
+ *  provider at all (`buildAtProvider` early-returns undefined), so this skips
+ *  the `loadNamedAgents` fs scan + `listSessions` index read entirely — no new
+ *  IO on the gate-off path (returns `{}`). */
+const buildProviderMentionSources = async (
+  setup: Setup,
+  env: NodeJS.ProcessEnv,
+): Promise<MentionLiveSources | undefined> => {
+  if (!atAutocompleteEnabled(env)) return undefined
+  const mcpServers = setup.mcpSurface?.servers
+    ?.filter((s: McpServerInfo) => s.status === "connected")
+    .map((s: McpServerInfo) => ({ name: s.name, tools: s.tools }))
+  const hasMcp = mcpServers !== undefined && mcpServers.length > 0
+  // Fail-open: a load fault ⇒ undefined ⇒ no subagent candidates (the provider
+  // omits the lister). Same loader the resolver path uses.
+  const subagents = await loadNamedAgents(setup.cwd).catch(() => undefined)
+  return {
+    ...(hasMcp ? { mcpServers } : {}),
+    ...(subagents !== undefined ? { subagents } : {}),
+    sessions: async () =>
+      (await listSessions()).map((m: SessionMeta) => ({
+        id: m.id,
+        title: m.title,
+        cwd: m.cwd,
+        ...(m.gitBranch !== undefined ? { gitBranch: m.gitBranch } : {}),
+        ...(m.threadSource !== undefined ? { threadSource: m.threadSource } : {}),
+      })),
+  }
+}
 
 /** RFC-08 BUILD-1 — project the live slash `effort` wire + the live model source
  *  onto the effort-cycle owner contract. Reuses the EXISTING `EffortStore`-backed
