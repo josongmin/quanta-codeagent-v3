@@ -58,6 +58,7 @@ const DiffPanelInner = ({
           {...(diff.path !== undefined ? { path: diff.path } : {})}
           {...(diff.language !== undefined ? { language: diff.language } : {})}
           {...(diff.truncated === true ? { truncated: true, moreLines: diff.moreLines ?? 0 } : {})}
+          {...(diff.anchors !== undefined ? { comments: diff.anchors } : {})}
           className="px-1 py-1"
         />
       )}
