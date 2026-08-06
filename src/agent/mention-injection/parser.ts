@@ -10,6 +10,19 @@
  *   `@FooBar` / `@MyClass.method` → MentionKind = "symbol" (ADR-0418)
  *   `@dir/` (trailing slash)      → MentionKind = "folder" (§10.3)
  *   `@git` / `@git:diff`          → MentionKind = "git"    (§10.3)
+ *   `@mcp:<name>`                 → MentionKind = "mcp"      (RFC-12-2)
+ *   `@subagent:<name>`            → MentionKind = "subagent" (RFC-12-2)
+ *   `@thread:<id>`                → MentionKind = "thread"   (RFC-12-2)
+ *
+ * RFC-12-2 cascade additions (deterministic, matched by their OWN regex
+ * alternative BEFORE the generic `@`-cascade, exactly like `@git`): the three
+ * `@<literal>:<payload>` forms REQUIRE the `:<payload>` suffix. A BARE `@mcp` /
+ * `@subagent` / `@thread` (no colon + payload) is NOT one of these kinds — it
+ * falls through to the generic cascade and reads as a `skill` (so an `mcp`-named
+ * skill stays reachable by bare `@mcp`, unlike `@git` which reserves the bare
+ * literal). Payload alphabet is `[A-Za-z0-9_-]` (kebab server/agent names +
+ * hex-and-dash UUID thread ids); a right-boundary lookahead stops the payload
+ * at the first char that would continue that alphabet.
  *
  * §10.3 cascade additions (deterministic, FIRST match wins):
  *   - `@git` / `@git:(status|diff|log)` is matched by its OWN regex
@@ -85,6 +98,10 @@ const MAX_KEBAB_LEN = 64
 const MAX_FILE_LEN = 512
 /** Max symbol length (post-sigil) for `symbol`. */
 const MAX_SYMBOL_LEN = 128
+/** Max payload length for RFC-12-2 `@mcp:` / `@subagent:` names + `@thread:`
+ *  ids. 128 covers a `crypto.randomUUID()` (36) thread id with headroom and
+ *  any realistic kebab server / agent name. */
+const MAX_RFC12_PAYLOAD_LEN = 128
 
 /**
  * Master regex. Each alternative captures the FULL match via named groups:
@@ -100,7 +117,7 @@ const MAX_SYMBOL_LEN = 128
  * payload regex; right-boundary is enforced per-kind in `classifyAtPayload`.
  */
 const MENTION_RE =
-  /(?<app>@@(?<appName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<plugin>plugin:\/\/(?<pluginName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<git>@git(?::(?<gitSub>status|diff|log))?)(?![A-Za-z0-9_:./~-])|(?<at>@(?<atPayload>[A-Za-z_./~][A-Za-z0-9_./~-]*))/g
+  /(?<app>@@(?<appName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<plugin>plugin:\/\/(?<pluginName>[a-z][a-z0-9-]*))(?![a-z0-9-])|(?<git>@git(?::(?<gitSub>status|diff|log))?)(?![A-Za-z0-9_:./~-])|(?<mcp>@mcp:(?<mcpName>[A-Za-z0-9_-]+))(?![A-Za-z0-9_-])|(?<subagent>@subagent:(?<subagentName>[A-Za-z0-9_-]+))(?![A-Za-z0-9_-])|(?<thread>@thread:(?<threadId>[A-Za-z0-9_-]+))(?![A-Za-z0-9_-])|(?<at>@(?<atPayload>[A-Za-z_./~][A-Za-z0-9_./~-]*))/g
 
 /** Pure kebab identifier check for skill / app / plugin. */
 const KEBAB_RE = /^[a-z][a-z0-9-]*$/
@@ -229,6 +246,21 @@ const kebabMention = (
   return { kind, target, span: { start, end: start + raw.length }, raw }
 }
 
+/** RFC-12-2 — build a {@link ParsedMention} for a `@<literal>:<payload>` kind
+ *  (mcp / subagent / thread). The regex already enforced the payload alphabet
+ *  + right-boundary, so the only remaining gate is the length cap. Returns null
+ *  when the payload blows {@link MAX_RFC12_PAYLOAD_LEN}. The span uses the raw
+ *  match verbatim (the payload was matched exactly, never over-captured). */
+const literalMention = (
+  kind: "mcp" | "subagent" | "thread",
+  target: string,
+  start: number,
+  raw: string,
+): ParsedMention | null => {
+  if (target.length === 0 || target.length > MAX_RFC12_PAYLOAD_LEN) return null
+  return { kind, target, span: { start, end: start + raw.length }, raw }
+}
+
 /** Classify the captured `@<rest>` payload + project it into a
  *  {@link ParsedMention}. The `raw` is RECONSTRUCTED from the narrowed
  *  target (`@${target}`) so an over-captured payload does not inflate the
@@ -243,6 +275,28 @@ const atMention = (payload: string, start: number): ParsedMention | null => {
     span: { start, end: start + raw.length },
     raw,
   }
+}
+
+/** RFC-12-2 — dispatch the three `@<literal>:<payload>` alternatives (mcp /
+ *  subagent / thread) from the regex groups. Extracted from `validateMatch` so
+ *  that hot classifier stays under the cognitive-complexity ratchet. Returns
+ *  the projected mention, or `null` when NONE of the three groups matched (the
+ *  caller then falls through to the generic `@`-cascade). */
+const literalDispatch = (
+  groups: Record<string, string | undefined>,
+  start: number,
+  raw: string,
+): ParsedMention | null => {
+  if (groups.mcp !== undefined && groups.mcpName !== undefined) {
+    return literalMention("mcp", groups.mcpName, start, raw)
+  }
+  if (groups.subagent !== undefined && groups.subagentName !== undefined) {
+    return literalMention("subagent", groups.subagentName, start, raw)
+  }
+  if (groups.thread !== undefined && groups.threadId !== undefined) {
+    return literalMention("thread", groups.threadId, start, raw)
+  }
+  return null
 }
 
 /**
@@ -271,6 +325,12 @@ const validateMatch = (m: RegExpMatchArray, text: string): ParsedMention | null 
     const sub = groups.gitSub ?? "status"
     return { kind: "git", target: sub, span: { start, end: start + m[0].length }, raw: m[0] }
   }
+  // RFC-12-2 — the three `@<literal>:<payload>` kinds, matched BEFORE the
+  // generic `@` cascade so a `mcp`/`subagent`/`thread`-named skill is only
+  // reachable by the BARE form (no `:payload`). The regex already enforced the
+  // payload alphabet + right-boundary; here we length-cap and project.
+  const literal = literalDispatch(groups, start, m[0])
+  if (literal !== null) return literal
   if (groups.at !== undefined && groups.atPayload !== undefined) {
     return atMention(groups.atPayload, start)
   }

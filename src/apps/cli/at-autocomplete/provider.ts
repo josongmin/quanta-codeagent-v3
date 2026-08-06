@@ -31,6 +31,13 @@ import { createSymbolLister, type SymbolListerOptions } from "./symbol-list"
 export interface NamedEntry {
   readonly name: string
   readonly description: string
+  /** RFC-12-2 — OPTIONAL override for the payload spliced AFTER the kind sigil.
+   *  When present the candidate's `insertText` uses `<sigil><insertName>` while
+   *  the dropdown `label` stays `name`. Used by the thread lister so the user
+   *  sees/ranks by the human title (`name`) but the inserted mention carries the
+   *  opaque session id (`insertName`) the `@thread:` resolver looks up. Absent ⇒
+   *  `name` doubles as the payload (skill / plugin / app / mcp / subagent). */
+  readonly insertName?: string
 }
 
 /** Dependencies for {@link createCompositeAtProvider}. */
@@ -47,6 +54,15 @@ export interface CompositeAtProviderDeps {
   readonly listPlugins?: () => readonly NamedEntry[]
   /** OPTIONAL app catalog list callback. Absent ⇒ no app candidates. */
   readonly listApps?: () => readonly NamedEntry[]
+  /** RFC-12-2 — OPTIONAL MCP-server list callback (server name → `@mcp:<name>`).
+   *  Absent ⇒ no mcp candidates (byte-identical). */
+  readonly listMcpServers?: () => readonly NamedEntry[]
+  /** RFC-12-2 — OPTIONAL named-agent (subagent) list callback
+   *  (`@subagent:<name>`). Absent ⇒ no subagent candidates. */
+  readonly listSubagents?: () => readonly NamedEntry[]
+  /** RFC-12-2 — OPTIONAL prior-thread list callback (session id → `@thread:<id>`,
+   *  label = title). Absent ⇒ no thread candidates. */
+  readonly listThreads?: () => readonly NamedEntry[]
   /** Per-kind candidate cap for the kebab kinds (skill/plugin/app) + symbols.
    *  Default 8 (= `MAX_VISIBLE_CANDIDATES`). */
   readonly maxPerKind?: number
@@ -65,28 +81,43 @@ const firstLineOf = (description: string): string => {
   return (nl < 0 ? description : description.slice(0, nl)).trim()
 }
 
+/** The insertion sigil for each kebab-listed kind. `skill` ⇒ `@name`, `plugin`
+ *  ⇒ `plugin://name`, `app` ⇒ `@@name`, and the RFC-12-2 colon-literals ⇒
+ *  `@<literal>:<name>` (so submit-time `parseMentions` re-classifies them into
+ *  the dedicated mcp / subagent / thread alternatives). */
+const KEBAB_SIGIL: Record<"skill" | "plugin" | "app" | "mcp" | "subagent" | "thread", string> = {
+  skill: "@",
+  plugin: "plugin://",
+  app: "@@",
+  mcp: "@mcp:",
+  subagent: "@subagent:",
+  thread: "@thread:",
+}
+
 /** Rank a kebab registry's entries against the query and project them into
- *  candidates for the given kind (`skill` ⇒ `@name`, `plugin` ⇒
- *  `plugin://name`, `app` ⇒ `@@name`). */
+ *  candidates for the given kind. `label` stays the bare name (the dropdown
+ *  display); `insertText` carries the kind's sigil so submit-time re-parse
+ *  round-trips (RFC §4.6). */
 const listKebab = (
   entries: readonly NamedEntry[],
   query: string,
-  kind: "skill" | "plugin" | "app",
+  kind: "skill" | "plugin" | "app" | "mcp" | "subagent" | "thread",
   max: number,
 ): readonly AtCandidate[] => {
   const ranked = rankByTier(
     entries.map((e) => e.name),
     query,
   )
-  const sigil = kind === "plugin" ? "plugin://" : kind === "app" ? "@@" : "@"
+  const sigil = KEBAB_SIGIL[kind]
   const out: AtCandidate[] = []
   for (const r of ranked) {
     if (out.length >= max) break
     const entry = entries[r.index]
     if (entry === undefined) continue
+    const payload = entry.insertName !== undefined ? entry.insertName : entry.name
     out.push({
       kind,
-      insertText: `${sigil}${entry.name}`,
+      insertText: `${sigil}${payload}`,
       label: entry.name,
       detail: firstLineOf(entry.description),
       score: r.tier,
@@ -154,7 +185,7 @@ export const createCompositeAtProvider = (deps: CompositeAtProviderDeps): AtCand
       // callbacks run SYNCHRONOUSLY, so a throw there (or inside `listKebab`)
       // must NOT reject the whole batch and wipe the file candidates. `safe`
       // keeps each kind's failure isolated (NO-THROW contract, RFC §6.1).
-      const [files, skills, plugins, apps] = await Promise.all([
+      const [files, skills, plugins, apps, mcp, subagents, threads] = await Promise.all([
         safe(() => fileLister(query, signal)),
         safe(async () =>
           deps.listSkills ? listKebab(deps.listSkills(), query, "skill", max) : [],
@@ -163,13 +194,25 @@ export const createCompositeAtProvider = (deps: CompositeAtProviderDeps): AtCand
           deps.listPlugins ? listKebab(deps.listPlugins(), query, "plugin", max) : [],
         ),
         safe(async () => (deps.listApps ? listKebab(deps.listApps(), query, "app", max) : [])),
+        // RFC-12-2 — each new lister is INDEPENDENTLY `safe`-wrapped so a throw
+        // in one owner (MCP registry / named-agent registry / session store)
+        // cannot wipe the other kinds' candidates (NO-THROW §6.1).
+        safe(async () =>
+          deps.listMcpServers ? listKebab(deps.listMcpServers(), query, "mcp", max) : [],
+        ),
+        safe(async () =>
+          deps.listSubagents ? listKebab(deps.listSubagents(), query, "subagent", max) : [],
+        ),
+        safe(async () =>
+          deps.listThreads ? listKebab(deps.listThreads(), query, "thread", max) : [],
+        ),
       ])
       // Files FIRST so the dropdown's primary purpose (`@path`) is never
       // starved out of the visible window by many matching skills/plugins
       // (the prior `[...skills, ...files]` order buried files past the cap).
       // Concatenation (not round-robin) keeps each kind's rows grouped under a
       // single section header instead of spamming a header per row.
-      return [...files, ...skills, ...plugins, ...apps]
+      return [...files, ...skills, ...plugins, ...apps, ...mcp, ...subagents, ...threads]
     },
   }
 }

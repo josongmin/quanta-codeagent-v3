@@ -1,3 +1,4 @@
+import { MENTION } from "./mention"
 import type { KnobInventoryEntry } from "./types"
 
 export const EXTRA: readonly KnobInventoryEntry[] = [
@@ -137,83 +138,10 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     describe: "Memory recall routing weighting (cwd/task-group meta; set =1 to enable).",
     readSite: "runner/assemble/memory-factory.ts",
   },
-  // @-mention resolver caps — all default-ON; numeric caps optional
-  {
-    envKey: "QUANTA_MENTION_FILE_MAX_BYTES",
-    kind: "int",
-    default: undefined,
-    group: "host-gate",
-    home: "runtime-config",
-    describe: "@file mention byte cap.",
-    readSite: "agent/mention-runner/default-resolver.ts",
-  },
-  {
-    envKey: "QUANTA_MENTION_FILE_TAIL_RATIO",
-    kind: "float",
-    default: undefined,
-    group: "host-gate",
-    home: "runtime-config",
-    describe: "@file mention head/tail ratio.",
-    readSite: "agent/mention-runner/default-resolver.ts",
-  },
-  {
-    envKey: "QUANTA_MENTION_SYMBOL_RESOLVER",
-    kind: "enum",
-    default: undefined,
-    group: "host-gate",
-    home: "runtime-config",
-    describe: "@symbol mention resolver backend.",
-    readSite: "agent/mention-runner/default-resolver.ts",
-  },
-  {
-    envKey: "QUANTA_MENTION_SYMBOL_TIMEOUT_MS",
-    kind: "int",
-    default: undefined,
-    group: "host-gate",
-    home: "runtime-config",
-    describe: "@symbol resolver timeout (ms).",
-    readSite: "agent/mention-runner/default-resolver.ts",
-  },
-  // §10.3 — @folder + @git mention kinds (Cursor parity). Gates default-ON
-  // (=off opts out per kind); numeric caps optional. Graceful-omit semantics:
-  // a kind whose dep (cwd / git provider) is absent resolves to null even when
-  // the gate is on — byte-identical to the pre-§10.3 path.
-  {
-    envKey: "QUANTA_MENTION_FOLDER",
-    kind: "bool",
-    default: true,
-    group: "host-gate",
-    home: "runtime-config",
-    describe: "@folder mention directory-listing resolver (default ON; =off to disable).",
-    readSite: "agent/mention-runner/default-resolver.ts",
-  },
-  {
-    envKey: "QUANTA_MENTION_FOLDER_MAX_ENTRIES",
-    kind: "int",
-    default: undefined,
-    group: "host-gate",
-    home: "runtime-config",
-    describe: "@folder mention listing entry cap.",
-    readSite: "agent/mention-runner/default-resolver.ts",
-  },
-  {
-    envKey: "QUANTA_MENTION_GIT",
-    kind: "bool",
-    default: true,
-    group: "host-gate",
-    home: "runtime-config",
-    describe: "@git mention git-context resolver (default ON; =off to disable).",
-    readSite: "agent/mention-runner/default-resolver.ts",
-  },
-  {
-    envKey: "QUANTA_MENTION_GIT_MAX_BYTES",
-    kind: "int",
-    default: undefined,
-    group: "host-gate",
-    home: "runtime-config",
-    describe: "@git mention body byte cap.",
-    readSite: "agent/mention-runner/default-resolver.ts",
-  },
+  // @-mention resolver knobs (file/symbol caps + §10.3 folder/git + RFC-12-2
+  // mcp/subagent/thread) live in the cohesive `./mention` module (extracted to
+  // keep this flat inventory under the god-MODULE ratchet); spread in here.
+  ...MENTION,
   // bench / swebench harness
   {
     envKey: "QUANTA_LSP_TOOLS",
