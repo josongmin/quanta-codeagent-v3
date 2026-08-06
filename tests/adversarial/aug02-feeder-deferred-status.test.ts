@@ -13,13 +13,13 @@
  *       assertions below FLIPPED from "no caller" to "WIRED" per this file's own
  *       contract; they RED again if the wiring regresses.
  *
- *   (2) RFC01 durable ThreadRollback saga — the catalog claims "the ThreadRollback
- *       effect saga replays the mapping to rewind the thread with a CLI `/rewind`
- *       wire ... consumed by the rewind saga". REALITY: `executeRollback` /
- *       `resumePendingRollback` have NO production caller, and `buildRollbackEffectPort`
- *       (the real ShadowOdb-backed effect adapter) is never invoked in production.
- *       The CLI `/rewind` path (`rewindSession`) still degrades file restore to
- *       "working tree unchanged (file restore not yet wired)".
+ *   (2) RFC01 durable ThreadRollback saga — PARTIALLY CLOSED by RFC-def
+ *       Surface B (`/rewind --restore-files`). The CLI now routes the file
+ *       restore through `executeRollback` + `buildRollbackEffectPort` via
+ *       `rewind-restore-coordinator-wire.ts` (the two caller assertions FLIPPED
+ *       to WIRED). Still deferred: `resumePendingRollback` (no `/rewind`
+ *       recovery verb yet) and the transcript-owner `rewind.ts` safe-degrade for
+ *       the no-coordinator path — both remain honest FINDINGS below.
  *
  * These are caller-grep proofs over the REAL src tree: a failing assertion means
  * a production caller was ADDED (the seam got wired — delete the corresponding
@@ -84,32 +84,39 @@ describe("R2B → WIRED — RFC06-4 hunk-mutation CAS undo journal (RFC-def Surf
   })
 })
 
-describe("R2B dead-seam sweep — RFC01 durable ThreadRollback saga", () => {
-  test("FINDING: executeRollback has no production caller (tests-only)", () => {
+describe("R2B → WIRED — RFC01 durable ThreadRollback saga (RFC-def Surface B)", () => {
+  // RFC-def Surface B (`/rewind --restore-files`) CLOSED the RFC01 dead seam: the
+  // CLI composition root now builds a coordinator adapter
+  // (`rewind-restore-coordinator-wire.ts`) that calls `executeRollback` with the
+  // ShadowOdb-backed `buildRollbackEffectPort`. Per this file's contract, the two
+  // caller-grep assertions FLIP to LIVE-wiring checks (RED if the wiring
+  // regresses). `resumePendingRollback` stays a deferred seam (no `/rewind`
+  // recovery verb yet) and the transcript-owner `rewind.ts` STILL safe-degrades
+  // when no coordinator is injected — both remain honest FINDINGS below.
+
+  test("WIRED: executeRollback has a production caller (the restore coordinator wire)", () => {
     const callers = filesContaining(/\bexecuteRollback\s*\(/, ["thread-rollback.ts"])
-    expect(callers).toEqual([])
+    expect(callers.some((f) => f.includes("rewind-restore-coordinator-wire.ts"))).toBe(true)
   })
 
-  test("FINDING: resumePendingRollback has no production caller (tests-only)", () => {
+  test("FINDING: resumePendingRollback has no production caller (recovery verb deferred)", () => {
     const callers = filesContaining(/\bresumePendingRollback\s*\(/, ["thread-rollback.ts"])
     expect(callers).toEqual([])
   })
 
-  test("FINDING: buildRollbackEffectPort (real ShadowOdb effect adapter) is never invoked", () => {
-    // It is DEFINED in per-tool-checkpoint-wire.ts; assert it is never CALLED
-    // (an invocation would be `buildRollbackEffectPort(`).
+  test("WIRED: buildRollbackEffectPort (real ShadowOdb effect adapter) IS invoked", () => {
     const callers = filesContaining(/\bbuildRollbackEffectPort\s*\(/, [
       "per-tool-checkpoint-wire.ts",
     ])
-    expect(callers).toEqual([])
+    expect(callers.some((f) => f.includes("rewind-restore-coordinator-wire.ts"))).toBe(true)
   })
 
-  test("FINDING: the CLI `/rewind` path still degrades file restore (saga not wired in)", () => {
-    // The transcript-owner rewind (the actual CLI `/rewind` effect) still prints
-    // the "file restore not yet wired" degrade note — the saga did NOT replace it.
+  test("FINDING: the transcript-owner `rewind.ts` STILL safe-degrades (coordinator is a separate wire)", () => {
+    // Surface B routes the FILE restore through the coordinator at the CLI dispatch
+    // layer; the `@/session` transcript owner keeps its safe-degrade for the
+    // no-coordinator path — it never imports/calls the coordinator.
     const rewind = readFileSync(join(SRC, "session", "rewind.ts"), "utf8")
     expect(rewind).toContain("file restore not yet wired")
-    // And it does NOT import/call the coordinator.
     expect(rewind).not.toMatch(/\bexecuteRollback\b/)
     expect(rewind).not.toMatch(/\bresumePendingRollback\b/)
   })
