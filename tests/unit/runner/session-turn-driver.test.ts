@@ -7,10 +7,20 @@
  * rests on: append signature, the approval-resolution loop, both verbatim error
  * strings, and the normalized result shape.
  */
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { AgentOutcome } from "@/agent"
-import { driveSessionTurn } from "@/runner/orchestrate"
+import { driveSessionTurn, type WorktreeCwdPort } from "@/runner/orchestrate"
 import type { RuntimeSession, SessionDispatchResult } from "@/sdk/runtime"
+import {
+  makeWorkspaceCreateIntent,
+  type SessionMeta,
+  saveSessionById,
+  transitionWorkspaceState,
+} from "@/session"
+import { __resetRuntimeConfig } from "@/shared"
 
 const OUTCOME: AgentOutcome = { reason: "completed" } as AgentOutcome
 
@@ -156,5 +166,172 @@ describe("driveSessionTurn — behavioral contract", () => {
       turnSignal: new AbortController().signal,
     })
     expect(rec.appends[0]?.opts).toEqual({ images: [img] })
+  })
+})
+
+/* RFC-06 §RFC06-2 — FRONT-DOOR proof: a REAL `driveSessionTurn` (the SSOT turn
+ * chokepoint every surface funnels through) pins the working cwd to a session's
+ * owned worktree AT the next turn boundary, driven off the PERSISTED
+ * `workspaceOwnership` a prior transition wrote — and a turn in flight is NEVER
+ * disturbed (the chdir lands strictly BEFORE `input.append`, once). */
+describe("driveSessionTurn — RFC06-2 worktree cwd pin (front door)", () => {
+  const PIN = "QUANTA_WORKTREE_CWD_PIN"
+  const REPO = "/repo/root"
+  const WT = "/repo/root/.quanta/worktrees/wt-42"
+  let sessionsDir: string
+
+  beforeEach(() => {
+    sessionsDir = mkdtempSync(join(tmpdir(), "std-wcp-"))
+    process.env.QUANTA_SESSIONS_DIR = sessionsDir
+    __resetRuntimeConfig()
+    delete process.env[PIN]
+  })
+  afterEach(() => {
+    rmSync(sessionsDir, { recursive: true, force: true })
+    delete process.env.QUANTA_SESSIONS_DIR
+    delete process.env[PIN]
+    __resetRuntimeConfig()
+  })
+
+  /** Persist a session whose thread already owns a `ready` worktree (the state a
+   *  completed `transitionThreadToWorktree` leaves behind). */
+  const persistReadyOwnership = async (id: string): Promise<void> => {
+    const intent = makeWorkspaceCreateIntent({
+      ownershipId: "own-42",
+      ownerThreadId: id,
+      repoRoot: REPO,
+      repoId: REPO,
+      path: WT,
+      branch: "fork-42",
+      baseSha: "HEAD",
+      now: 1,
+    })
+    const ready = transitionWorkspaceState(intent, "ready", 2)
+    if (!ready.ok) throw new Error("ready transition failed")
+    const meta: SessionMeta = {
+      id,
+      title: "t",
+      cwd: REPO,
+      createdAt: 1,
+      lastTouched: 1,
+      archived: false,
+      workspaceOwnership: ready.record,
+    }
+    await saveSessionById(meta, { reason: "t", turns: 0, messages: [] })
+  }
+
+  /** A recording session that logs an `append`/`turn.run` timeline AND lets a
+   *  chdir port record ITS timeline, so we can prove ordering across both. */
+  const timelineSession = (timeline: string[]): RuntimeSession =>
+    ({
+      input: {
+        append: async () => {
+          timeline.push("append")
+        },
+      },
+      turn: {
+        run: async () => {
+          timeline.push("turn.run")
+          return turnPayload()
+        },
+      },
+      approval: { respond: async () => undefined },
+    }) as unknown as RuntimeSession
+
+  const recordingPort = (
+    timeline: string[],
+    startAt = REPO,
+  ): WorktreeCwdPort & { here: string } => {
+    const state = { here: startAt }
+    return {
+      get here() {
+        return state.here
+      },
+      cwd: () => state.here,
+      chdir: (t: string) => {
+        timeline.push(`chdir:${t}`)
+        state.here = t
+        return t
+      },
+    }
+  }
+
+  test("gate ON + persisted `ready` ownership ⇒ next turn runs with cwd = the owned worktree", async () => {
+    await persistReadyOwnership("s1")
+    process.env[PIN] = "1"
+    const timeline: string[] = []
+    const port = recordingPort(timeline)
+    await driveSessionTurn({
+      env: { ...process.env },
+      session: timelineSession(timeline),
+      resolveApproval: async () => "approve",
+      text: "go",
+      turnSignal: new AbortController().signal,
+      sessionId: "s1",
+      cwdPin: port,
+    })
+    // The cwd is now the owned worktree, and the swap landed at the boundary —
+    // strictly BEFORE the turn's first append and turn.run (mid-turn untouched).
+    expect(port.here).toBe(WT)
+    expect(timeline).toEqual([`chdir:${WT}`, "append", "turn.run"])
+  })
+
+  test("mid-turn is NOT disturbed: chdir fires exactly ONCE, before the body", async () => {
+    await persistReadyOwnership("s1")
+    process.env[PIN] = "1"
+    const timeline: string[] = []
+    const port = recordingPort(timeline)
+    await driveSessionTurn({
+      env: { ...process.env },
+      // Two-round turn (approval then completion): the pin must NOT re-fire on
+      // the internal approval re-run — it is a turn-BOUNDARY op, not per-round.
+      session: (() => {
+        const rec: Recorder = { appends: [], responds: [] }
+        const s = fakeSession([turnPayload({ approvalId: "ap1", reason: "x" }), turnPayload()], rec)
+        return s
+      })(),
+      resolveApproval: async () => "approve",
+      text: "go",
+      turnSignal: new AbortController().signal,
+      sessionId: "s1",
+      cwdPin: port,
+    })
+    // Exactly one chdir for the whole turn (both internal rounds), at the top.
+    expect(timeline).toEqual([`chdir:${WT}`])
+  })
+
+  test("gate OFF ⇒ NO chdir, cwd unchanged (turn loop byte-identical)", async () => {
+    await persistReadyOwnership("s1")
+    // gate unset (default-OFF)
+    const timeline: string[] = []
+    const port = recordingPort(timeline)
+    const rec: Recorder = { appends: [], responds: [] }
+    await driveSessionTurn({
+      env: { ...process.env },
+      session: fakeSession([turnPayload()], rec),
+      resolveApproval: async () => "approve",
+      text: "go",
+      turnSignal: new AbortController().signal,
+      sessionId: "s1",
+      cwdPin: port,
+    })
+    expect(timeline).toEqual([])
+    expect(port.here).toBe(REPO)
+  })
+
+  test("no cwdPin port ⇒ turn runs unchanged (the pre-follower path)", async () => {
+    await persistReadyOwnership("s1")
+    process.env[PIN] = "1" // even armed: absent port ⇒ no consumer.
+    const rec: Recorder = { appends: [], responds: [] }
+    const result = await driveSessionTurn({
+      env: { ...process.env },
+      session: fakeSession([turnPayload()], rec),
+      resolveApproval: async () => "approve",
+      text: "go",
+      turnSignal: new AbortController().signal,
+      sessionId: "s1",
+    })
+    expect(result.outcomeReason).toBe("completed")
+    expect(rec.appends).toHaveLength(1)
   })
 })

@@ -22,6 +22,7 @@
  */
 
 import { z } from "zod"
+import { gateOn } from "@/shared"
 import {
   WORKSPACE_OWNERSHIP_VERSION,
   type WorkspaceOwnership,
@@ -64,6 +65,38 @@ const ALLOWED_TRANSITIONS: Readonly<
 /** `true` iff `state` is terminal (no outgoing transition). */
 export const isTerminalWorkspaceState = (state: WorkspaceOwnershipState): boolean =>
   ALLOWED_TRANSITIONS[state].length === 0
+
+/* ------------------------------------------------------------------ */
+/* RFC06-2 turn-boundary cwd pin (gate + pure predicate)               */
+/* ------------------------------------------------------------------ */
+
+/** Env-gate for the RFC06-2 turn-boundary cwd pin. Default-OFF opt-in: when
+ *  absent NOTHING consumes `nextCwd`/`workspaceOwnership.path` at a turn
+ *  boundary, so the turn loop is byte-identical (the pre-follower state). */
+export const WORKTREE_CWD_PIN_GATE = "QUANTA_WORKTREE_CWD_PIN"
+
+/** True iff the turn-boundary cwd pin is armed (default-OFF via the `@/shared`
+ *  gate SSOT). `env` is INJECTED — the `@/session` slice is env-pure (a
+ *  `process.env` literal is forbidden here), so the read is threaded from the
+ *  composition root; ABSENT env ⇒ OFF (a caller that never threads env can never
+ *  accidentally arm the pin — fail-safe, matches default-OFF). */
+export const worktreeCwdPinEnabled = (env?: Record<string, string | undefined>): boolean =>
+  env !== undefined && gateOn(env, WORKTREE_CWD_PIN_GATE)
+
+/** The cwd a turn-boundary follower should pin FOR, given a session's persisted
+ *  ownership — or `undefined` when nothing should be pinned. PURE: no I/O, no
+ *  clock, no `process.*`. Returns the owned worktree `path` ONLY when the record
+ *  is a LIVE usable worktree (`ready`/`active`) — never `creating` (intent, no
+ *  effect yet) and never a terminal/torn-down record (`closing`/`removed`/
+ *  `failed`/`quarantined`), where the path may be gone. The caller (a turn-loop
+ *  follower) does the actual chdir at the NEXT turn boundary, never mid-turn. */
+export const worktreeCwdPinTarget = (
+  ownership: WorkspaceOwnership | undefined,
+): string | undefined => {
+  if (ownership === undefined) return undefined
+  if (ownership.state !== "ready" && ownership.state !== "active") return undefined
+  return ownership.path
+}
 
 /** `true` iff `from → to` is a permitted lifecycle transition. A same-state
  *  self-transition is NOT allowed (repeated transitions are rejected — the

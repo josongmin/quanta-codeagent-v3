@@ -23,6 +23,7 @@ import type { ImageBlock, Message } from "@/llm"
 import type { RuntimeSession, SessionDispatchResult } from "@/sdk/runtime"
 import { type ApprovalDecisionResult, normalizeApprovalDecision } from "./approval-decision"
 import { attachCrashResumePartial, withCrashResumeMarker } from "./crash-resume-wire"
+import { pinTurnBoundaryCwd, type WorktreeCwdPort } from "./worktree-cwd-pin-wire"
 
 /** The SDK turn payload (the non-undefined `turn` of a dispatch result). */
 type SessionTurnPayload = NonNullable<SessionDispatchResult["turn"]>
@@ -76,6 +77,14 @@ export interface RunSessionTurnArgs {
    *  `src/session/crash-resume.ts`). Surfaces that never set `sessionId` (the
    *  ephemeral/escalation paths) still thread it so the gate is deterministic. */
   readonly env: Record<string, string | undefined>
+  /** RFC-06 §RFC06-2 — the injected working-directory port for the turn-boundary
+   *  cwd pin follower. When present AND `QUANTA_WORKTREE_CWD_PIN` is on AND a
+   *  durable `sessionId` is known, the working cwd is pinned to the session's
+   *  owned (`ready`/`active`) worktree AT this turn boundary (BEFORE the body
+   *  runs — never mid-turn). Absent (the `@/runner` slice is process-pure; the
+   *  composition root threads it) OR gate off ⇒ byte-identical no-op: nothing is
+   *  loaded and no chdir happens. */
+  readonly cwdPin?: WorktreeCwdPort
 }
 
 const requireTurnPayload = (result: SessionDispatchResult): SessionTurnPayload => {
@@ -133,6 +142,17 @@ const resolvePendingApproval = async (
 export const runSessionTurn = async (args: RunSessionTurnArgs): Promise<SessionTurnResult> => {
   const { session, resolveApproval, text, images, turnSignal, beforeTurn, sessionId, env } = args
   const body = async (): Promise<SessionTurnResult> => {
+    // RFC-06 §RFC06-2 — turn-boundary cwd pin FOLLOWER. Runs HERE, at the very
+    // top of the turn body (BEFORE any input.append / model call), so a
+    // current-thread→worktree transition that published a `ready` ownership on a
+    // PRIOR turn takes effect AT this next turn boundary — never mid-turn (once
+    // the append below runs the cwd is not touched again). Gate-gated + only
+    // when a durable `sessionId` AND an injected `cwdPin` port are present ⇒
+    // byte-identical no-op otherwise (nothing is loaded, no chdir). Best-effort
+    // (never throws): a follower must not break a turn.
+    if (sessionId !== undefined && args.cwdPin !== undefined) {
+      await pinTurnBoundaryCwd({ sessionId, env, port: args.cwdPin })
+    }
     beforeTurn?.()
     const imgs = images ?? []
     await session.input.append(text, imgs.length > 0 ? { images: imgs } : undefined, {
