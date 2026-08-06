@@ -102,11 +102,17 @@ export interface ApprovalScopeContext {
   readonly risk: "read-only" | "mutating"
 }
 
+export interface ApprovalActor {
+  readonly workerId: string
+  readonly scope?: string
+}
+
 export interface PendingApprovalView {
   readonly approvalId: string
   readonly reason: string
   readonly requestedAt: string
   readonly scopeContext?: ApprovalScopeContext
+  readonly actor?: ApprovalActor
 }
 
 export interface SessionTokenUsageView {

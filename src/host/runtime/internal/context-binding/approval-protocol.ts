@@ -21,6 +21,7 @@ import {
 import { runtimeConfig } from "@/shared"
 import {
   actionKeyOf,
+  escalationActorFields,
   escalationScopeFields,
   type PendingRuntimeApprovalRecord,
   type RuntimeApprovalLease,
@@ -296,6 +297,10 @@ export const runOnConfirm = async (
     // approval so the web/IDE surface renders the rich card. Omitted for a
     // normal confirm ⇒ byte-identical.
     ...escalationScopeFields(action),
+    // RFC12-4 — carry the asking SUBAGENT's identity (if any) so the web/IDE
+    // card names WHO is asking (CLI parity). Omitted for a main-agent confirm ⇒
+    // byte-identical.
+    ...escalationActorFields(action),
   }
   // T05 — capture the request-time per-hunk baseline for the deferred (web/SDK)
   // path ONLY. Gated (`QUANTA_HUNK_APPROVAL`) + best-effort: off ⇒ undefined ⇒

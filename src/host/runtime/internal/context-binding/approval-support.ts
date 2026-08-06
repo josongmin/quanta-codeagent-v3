@@ -145,6 +145,27 @@ export const escalationScopeFields = (
   }
 }
 
+/** RFC12-4 — when a confirm is a TEAM-BROKER escalation (`action.teamEscalation`
+ *  set by `buildLeaderDecide`), project the asking worker's identity onto the
+ *  approval's `actor` so the web/IDE card names WHO is asking (parity with the
+ *  CLI card, which reads the SAME `teamEscalation` off the action). A normal
+ *  confirm (main agent) has no `teamEscalation` ⇒ this returns `{}` ⇒ the field
+ *  is omitted ⇒ the minted approval is byte-identical to every main-agent
+ *  approval. `scope` is forwarded only when the escalation carried one. */
+export const escalationActorFields = (
+  action: ToolAction,
+): Pick<PendingApprovalView, "actor"> => {
+  const team = action.teamEscalation
+  if (team === undefined) return {}
+  const scope = team.scope
+  return {
+    actor: {
+      workerId: team.workerId,
+      ...(scope !== undefined && scope.length > 0 ? { scope } : {}),
+    },
+  }
+}
+
 export const approvalPlaceholderOutcome = (messages: readonly Message[]): AgentOutcome => ({
   // ALBB-18 — the turn is PAUSED awaiting a HITL approval decision (returned
   // WITH an `approvalRequest`, matching scheduler status `"awaiting_approval"`),

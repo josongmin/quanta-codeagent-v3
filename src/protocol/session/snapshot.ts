@@ -33,6 +33,23 @@ export interface ApprovalScopeContext {
   readonly risk: "read-only" | "mutating"
 }
 
+/** RFC12-4 (UUX-6-12 web parity) — the SUBAGENT that raised a TEAM-BROKER
+ *  escalation, mirrored from the confirm action's `teamEscalation` (the same
+ *  payload the CLI card reads to render `Subagent '<workerId>' asks to run …`).
+ *  Present ONLY when a WORKER subagent's soft-denied tool escalated to the
+ *  leader's HITL authority; absent ⇒ the approval was raised by the main agent
+ *  ⇒ the web card renders NO actor label (byte-identical). The card names WHO is
+ *  asking so the operator answers an informed prompt, not a bare `Allow <tool>?`. */
+export interface ApprovalActor {
+  /** The asking worker subagent's stable mailbox id (e.g. `reviewer-agent`) —
+   *  the actor label's headline. Mirrors `ToolAction.teamEscalation.workerId`. */
+  readonly workerId: string
+  /** The scope the worker requested (its role/lane on the ask). Mirrors
+   *  `ToolAction.teamEscalation.scope`; optional so a bare worker id still names
+   *  the actor. */
+  readonly scope?: string
+}
+
 export interface PendingApprovalView {
   readonly approvalId: string
   readonly reason: string
@@ -40,6 +57,9 @@ export interface PendingApprovalView {
   /** ADR-0512 P3 — present ONLY on a skill-scope escalation approval. Absent ⇒
    *  normal approval (byte-identical). See {@link ApprovalScopeContext}. */
   readonly scopeContext?: ApprovalScopeContext
+  /** RFC12-4 — present ONLY on a TEAM-BROKER (subagent) escalation approval.
+   *  Absent ⇒ main-agent approval (byte-identical). See {@link ApprovalActor}. */
+  readonly actor?: ApprovalActor
 }
 
 /**

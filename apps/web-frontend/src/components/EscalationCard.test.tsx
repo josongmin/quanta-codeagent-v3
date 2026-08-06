@@ -57,6 +57,96 @@ describe("EscalationCard", () => {
     expect(markup).not.toContain("src/foo.ts:42")
   })
 
+  // RFC12-4 (UUX-6-12 web parity) — a TEAM-BROKER escalation carries `actor`
+  // (the asking subagent's workerId, mirrored from the CLI's `teamEscalation`).
+  // The card must NAME who is asking (the CLI already renders
+  // `Subagent '<workerId>' asks to run …`); a main-agent approval (no `actor`)
+  // renders NO actor label — byte-identical to today.
+  describe("RFC12-4 — subagent (actor) attribution", () => {
+    it("names the asking subagent on a RICH escalation carrying actor", () => {
+      const markup = renderToStaticMarkup(
+        <EscalationCard
+          approval={{ ...richApproval, actor: { workerId: "reviewer-agent", scope: "edit" } }}
+          onDecision={() => undefined}
+        />,
+      )
+      // The subagent's workerId is surfaced (WHO is asking) — comes from the
+      // real `actor.workerId` prop, not a hardcode.
+      expect(markup).toContain("reviewer-agent")
+      // Semantic actor marker for the surface (a11y hook), not just the raw id.
+      expect(markup).toContain("subagent")
+    })
+
+    it("names the asking subagent on a PLAIN approval carrying actor (no scopeContext)", () => {
+      // A team-broker escalation is typically a PLAIN leader confirm (no
+      // skill-scope chrome). The actor label must still appear.
+      const markup = renderToStaticMarkup(
+        <EscalationCard
+          approval={{
+            approvalId: "appr-team-1",
+            reason: "shell command approval",
+            actor: { workerId: "fixer-agent", scope: "shell" },
+          }}
+          onDecision={() => undefined}
+        />,
+      )
+      expect(markup).toContain("shell command approval")
+      expect(markup).toContain("fixer-agent")
+      expect(markup).toContain("subagent")
+    })
+
+    it("distinct actor values render (anti-vacuum: the label tracks the prop)", () => {
+      const a = renderToStaticMarkup(
+        <EscalationCard
+          approval={{ approvalId: "x", reason: "r", actor: { workerId: "alpha-agent" } }}
+          onDecision={() => undefined}
+        />,
+      )
+      const b = renderToStaticMarkup(
+        <EscalationCard
+          approval={{ approvalId: "x", reason: "r", actor: { workerId: "omega-agent" } }}
+          onDecision={() => undefined}
+        />,
+      )
+      expect(a).toContain("alpha-agent")
+      expect(a).not.toContain("omega-agent")
+      expect(b).toContain("omega-agent")
+      expect(b).not.toContain("alpha-agent")
+    })
+
+    it("red-on-injection: dropping the actor prop ⇒ NO actor label (main-agent byte-identical)", () => {
+      const withActor = renderToStaticMarkup(
+        <EscalationCard
+          approval={{ ...richApproval, actor: { workerId: "reviewer-agent" } }}
+          onDecision={() => undefined}
+        />,
+      )
+      const withoutActor = renderToStaticMarkup(
+        <EscalationCard approval={richApproval} onDecision={() => undefined} />,
+      )
+      expect(withActor).toContain("reviewer-agent")
+      // Drop the prop ⇒ label gone AND no residual actor chrome.
+      expect(withoutActor).not.toContain("reviewer-agent")
+      expect(withoutActor).not.toContain("subagent")
+      // Byte-identical to today's rich card (no actor) — the actor thread is
+      // purely additive.
+      const baselineRich = renderToStaticMarkup(
+        <EscalationCard approval={richApproval} onDecision={() => undefined} />,
+      )
+      expect(withoutActor).toBe(baselineRich)
+    })
+
+    it("main-agent PLAIN approval (no actor) is byte-identical to today", () => {
+      const plain = renderToStaticMarkup(
+        <EscalationCard
+          approval={{ approvalId: "appr-3", reason: "shell command approval" }}
+          onDecision={() => undefined}
+        />,
+      )
+      expect(plain).not.toContain("subagent")
+    })
+  })
+
   it("renders a PLAIN approval (no scopeContext) without the rich card chrome", () => {
     const markup = renderToStaticMarkup(
       <EscalationCard

@@ -15,7 +15,7 @@
  */
 
 import { memo, useRef, useState } from "react"
-import type { ApprovalScopeContext } from "../types/protocol"
+import type { ApprovalActor, ApprovalScopeContext } from "../types/protocol"
 
 /** The minimal approval shape the card consumes — a subset of
  *  `PendingApprovalView` (the `requestedAt` field is irrelevant to rendering). */
@@ -24,6 +24,10 @@ export interface EscalationApproval {
   readonly reason: string
   /** Present ⇒ the rich escalation card; absent ⇒ the plain approve/deny row. */
   readonly scopeContext?: ApprovalScopeContext
+  /** RFC12-4 — present ⇒ a TEAM-BROKER (subagent) escalation; the card names the
+   *  asking worker (parity with the CLI's `Subagent '<workerId>' asks …`).
+   *  Absent ⇒ a main-agent approval ⇒ NO actor label (byte-identical). */
+  readonly actor?: ApprovalActor
 }
 
 /** The session protocol decision sent back via `approval.respond`. ADR-0512 P3
@@ -136,8 +140,40 @@ const RiskBadge = ({ risk }: { risk: ApprovalScopeContext["risk"] }): JSX.Elemen
   )
 }
 
+/** RFC12-4 — the "which subagent is asking" attribution, shown on BOTH the plain
+ *  and rich cards when the approval was raised by a TEAM-BROKER worker (parity
+ *  with the CLI's `Subagent '<workerId>' asks to run …`). Absent `actor` ⇒ this
+ *  renders nothing ⇒ the card is byte-identical to a main-agent approval. The
+ *  workerId comes straight off `approval.actor` (the daemon-projected
+ *  `teamEscalation.workerId`), never hardcoded. */
+const ActorBadge = ({ actor }: { actor: ApprovalActor | undefined }): JSX.Element | null => {
+  if (actor === undefined) return null
+  return (
+    <div
+      data-testid="approval-actor"
+      className="mt-1 flex items-center gap-1.5 text-[11px] text-ink-secondary"
+    >
+      <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium tracking-wide text-accent">
+        subagent
+      </span>
+      <span>
+        <code className="font-mono text-ink">{actor.workerId}</code>
+        {actor.scope !== undefined && actor.scope.length > 0 ? (
+          <span className="text-ink-tertiary">
+            {" "}
+            asks to {actor.scope}
+          </span>
+        ) : (
+          <span className="text-ink-tertiary"> is asking</span>
+        )}
+      </span>
+    </div>
+  )
+}
+
 /** The plain approve/deny affordance for a NON-escalation approval. No
- *  skill-scope chrome — keeps the surface byte-identical to pre-ADR-0512. */
+ *  skill-scope chrome — keeps the surface byte-identical to pre-ADR-0512 (RFC12-4
+ *  actor badge renders only when a subagent raised the ask). */
 const PlainApproval = memo(
   ({ approval, onDecision }: EscalationCardProps): JSX.Element => (
     <section
@@ -145,6 +181,7 @@ const PlainApproval = memo(
       data-testid="approval-plain"
     >
       <div className="text-xs font-medium text-ink">{approval.reason}</div>
+      <ActorBadge actor={approval.actor} />
       <div className="mt-2 flex gap-2">
         <button
           type="button"
@@ -212,6 +249,7 @@ const EscalationCardImpl = ({
           스킬 '{scope.activeSkill}' 범위 밖 도구 요청
         </span>
       </header>
+      <ActorBadge actor={approval.actor} />
       <dl className="mt-2 space-y-1 text-[11px]">
         <div className="flex items-center gap-2">
           <dt className="w-10 shrink-0 text-ink-tertiary">도구</dt>
