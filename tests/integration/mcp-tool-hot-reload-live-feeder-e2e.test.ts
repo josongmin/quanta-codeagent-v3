@@ -292,16 +292,18 @@ describe("RFC04-2/3 MCP hot-reload LIVE feeder e2e", () => {
     }
   })
 
-  it("GATE-ON resolver builds wiring; auto-restart path opts OUT (non-supervised only)", () => {
+  it("GATE-ON resolver builds wiring on BOTH paths; only the gate + server-count gate it", () => {
     const prev = process.env.QUANTA_MCP_HOT_RELOAD
     process.env.QUANTA_MCP_HOT_RELOAD = "1"
     try {
       // On + configured + non-supervised ⇒ wiring built.
       expect(resolveMcpHotReload({ configCount: 1, autoRestart: false })).toBeDefined()
-      // On + auto-restart ⇒ opts OUT (supervised servers cannot relist single-client).
-      expect(resolveMcpHotReload({ configCount: 1, autoRestart: true })).toBeUndefined()
-      // On + no servers ⇒ nothing to reload.
+      // On + auto-restart ⇒ NOW ALSO built (RFC04 supervised extension: the
+      // bridge emits `reloadableSupervisedSource` over the supervisor handle).
+      expect(resolveMcpHotReload({ configCount: 1, autoRestart: true })).toBeDefined()
+      // On + no servers ⇒ nothing to reload (either path).
       expect(resolveMcpHotReload({ configCount: 0, autoRestart: false })).toBeUndefined()
+      expect(resolveMcpHotReload({ configCount: 0, autoRestart: true })).toBeUndefined()
     } finally {
       if (prev === undefined) delete process.env.QUANTA_MCP_HOT_RELOAD
       else process.env.QUANTA_MCP_HOT_RELOAD = prev

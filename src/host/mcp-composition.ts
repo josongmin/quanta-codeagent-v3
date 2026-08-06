@@ -736,18 +736,20 @@ export const buildMcpHotReloadWiring = (): McpHotReloadWiring => {
 }
 
 /** RFC04-2/3 (hot-reload) — resolve the {@link McpHotReloadWiring} for a load, or
- *  `undefined` when the feeder is OFF. Gated on ALL of: `QUANTA_MCP_HOT_RELOAD`
- *  on, at least one server configured, AND the NON-supervised (single-client)
- *  path (the bridge emits reload sources only there — auto-restart sessions do
- *  NOT participate; hot-reload covers non-supervised servers only). Any gate
- *  false ⇒ `undefined` ⇒ no observer/collector wired (byte-identical). */
+ *  `undefined` when the feeder is OFF. Gated on: `QUANTA_MCP_HOT_RELOAD` on AND
+ *  at least one server configured. Covers BOTH paths: the single-client path
+ *  emits `reloadableSingleClientSource`, and the SUPERVISED (auto-restart) path
+ *  emits `reloadableSupervisedSource` over the supervisor's stable handle (RFC04
+ *  supervised extension) — so a `tools/list_changed` from an auto-restart server
+ *  hot-reloads too. `args.autoRestart` no longer gates it out (it is retained so
+ *  callers keep passing the session posture, and for the observability of the
+ *  decision). Any gate false ⇒ `undefined` ⇒ no observer/collector wired
+ *  (byte-identical). */
 export const resolveMcpHotReload = (args: {
   readonly configCount: number
   readonly autoRestart: boolean
 }): McpHotReloadWiring | undefined =>
-  mcpHotReloadEnabled() && args.configCount > 0 && !args.autoRestart
-    ? buildMcpHotReloadWiring()
-    : undefined
+  mcpHotReloadEnabled() && args.configCount > 0 ? buildMcpHotReloadWiring() : undefined
 
 /** RFC04-2/3 (hot-reload) — the load-opts hot-reload slice (observer + source
  *  collector) for {@link buildMcpLoadOpts}. Absent wiring ⇒ `{}` (byte-identical). */
@@ -849,9 +851,11 @@ export const buildMcpLoadOpts = (
   // shared instance so ANY server's list-change orders the SAME relist. Present
   // only when `QUANTA_MCP_HOT_RELOAD` is on; absent ⇒ slot omitted (byte-identical).
   ...(args.resourceObserver !== undefined ? { resourceObserver: args.resourceObserver } : {}),
-  // RFC04-2/3 (hot-reload) — the single-client path emits one reload source per
-  // successfully-loaded server through this sink. Present only when the gate is
-  // on (supervised servers are skipped by the bridge); absent ⇒ byte-identical.
+  // RFC04-2/3 (hot-reload) — BOTH paths emit one reload source per successfully-
+  // loaded server through this sink (single-client over the live client; the
+  // supervised path over the supervisor's stable handle — `loadMcpTools` forwards
+  // it to `loadSupervised`). Present only when the gate is on; absent ⇒
+  // byte-identical.
   ...(args.onReloadSource !== undefined ? { onReloadSource: args.onReloadSource } : {}),
   ...(args.opts.mcpTransportFor !== undefined ? { transportFor: args.opts.mcpTransportFor } : {}),
   ...(args.oauthProvider !== undefined ? { oauthProvider: args.oauthProvider } : {}),
