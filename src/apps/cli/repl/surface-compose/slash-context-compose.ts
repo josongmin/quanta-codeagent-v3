@@ -108,6 +108,10 @@ export const buildSurfaceSlashContext = (
     },
     composerHandle: mutable.composerHandle,
     conversationStore: convStore,
+    // RFC-def `/undo` — thread the SAME durable journal store the HITL prompt
+    // persists applies into (built ONLY under QUANTA_HUNK_UNDO=1). Absent ⇒ slot
+    // omitted, `/undo` prints "not wired" (byte-identical).
+    ...(setup.hunkUndoStore !== undefined ? { hunkUndoStore: setup.hunkUndoStore } : {}),
     ...runtimeOptionalSlots(setup, core),
     textInbox: mutable.textInbox,
     contextUsage: () => core.contextUsageHolder.view(),

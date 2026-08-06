@@ -68,7 +68,13 @@ const applyAccepted = async (
   diff: ActionDiff,
   selected: readonly string[],
 ): Promise<HunkApplyResult> => {
-  if (runtimeConfig().hunkMutationReceipt && deps.mutationJournal !== undefined) {
+  // Persist a durable receipt when a journal store is wired AND either the
+  // receipt gate OR the `/undo` gate is on. `mutationJournal` is only ever wired
+  // under `QUANTA_HUNK_UNDO=1` (see runtime-context-compose), so the `hunkUndo`
+  // arm makes `/undo` self-sufficient: enabling undo alone records applies (a
+  // journal with no persisted applies would be a silent dead surface).
+  const cfg = runtimeConfig()
+  if ((cfg.hunkMutationReceipt || cfg.hunkUndo) && deps.mutationJournal !== undefined) {
     const out = await applyHunkSelectionWithReceipt(
       {
         operationId: crypto.randomUUID(),

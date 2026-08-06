@@ -40,6 +40,14 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
       "Durable hunk-mutation receipt + CAS undo journal (RFC-06 B5): per-hunk apply persists an intent/effect/terminal receipt so it is undoable with content-verified (drift-refusing) revert. Default OFF ⇒ apply is byte-identical, no receipt.",
   },
   {
+    envKey: "QUANTA_HUNK_UNDO",
+    kind: "bool",
+    default: false,
+    group: "diff",
+    describe:
+      "`/undo` hunk-revert surface (RFC-def restore): registers the `/undo` slash command over the durable hunk-mutation journal so an operator can list recent per-hunk applies and revert the selected one via the existing content-verified (drift-refusing) journal revert. DESTRUCTIVE — explicit selection + confirm required; fail-closed on CAS drift. Default OFF ⇒ no `/undo` command, no journal store wired (byte-identical).",
+  },
+  {
     envKey: "QUANTA_MICROCOMPACT",
     kind: "bool",
     default: false,

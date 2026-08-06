@@ -152,7 +152,10 @@ const applyAcceptedSubset = async (
   | { readonly status: "stale"; readonly reason: string }
   | { readonly status: "error"; readonly reason: string }
 > => {
-  if (runtimeConfig().hunkMutationReceipt && deps.mutationJournal !== undefined) {
+  // Persist when a store is wired AND either the receipt gate OR the `/undo`
+  // gate is on (parity with the CLI hunk-select flow — `/undo` self-sufficiency).
+  const cfg = runtimeConfig()
+  if ((cfg.hunkMutationReceipt || cfg.hunkUndo) && deps.mutationJournal !== undefined) {
     const out = await applyHunkSelectionWithReceipt(
       {
         operationId: crypto.randomUUID(),

@@ -54,8 +54,15 @@ const setReceiptGate = (on: boolean): void => {
   __resetRuntimeConfig()
 }
 
+const setUndoGate = (on: boolean): void => {
+  if (on) process.env.QUANTA_HUNK_UNDO = "1"
+  else delete process.env.QUANTA_HUNK_UNDO
+  __resetRuntimeConfig()
+}
+
 afterEach(() => {
   delete process.env.QUANTA_HUNK_MUTATION_RECEIPT
+  delete process.env.QUANTA_HUNK_UNDO
   __resetRuntimeConfig()
 })
 
@@ -109,17 +116,37 @@ describe("RFC06-4 front-door — CLI runHunkSelect emits a durable CAS undo rece
     expect(readFileSync(path, "utf8")).toBe(drifted)
   })
 
-  it("gate OFF ⇒ NO receipt persisted (byte-identical apply)", async () => {
+  it("both gates OFF ⇒ NO receipt persisted (byte-identical apply)", async () => {
     const dir = fresh()
     const path = join(dir, "f.txt")
     writeFileSync(path, B)
     setReceiptGate(false)
+    setUndoGate(false)
     const store = makeDurableJournalStore(join(dir, "journal"))
     await runHunkSelect(makeDeps(dir, store), { path, before: B, after: A }, ["h1", "h2"], askH1)
     // The apply still happened (only h1).
     expect(readFileSync(path, "utf8")).toBe(AFTER_H1)
     // But NO receipt file exists — the journal dir was never written.
     expect(receiptCount(join(dir, "journal"))).toBe(0)
+  })
+
+  it("QUANTA_HUNK_UNDO=1 alone ⇒ applies persist (so /undo is self-sufficient)", async () => {
+    // The `/undo` gate makes the receipt path fire even without the receipt
+    // gate — a journal with no persisted applies would be a silent dead surface.
+    const dir = fresh()
+    const path = join(dir, "f.txt")
+    writeFileSync(path, B)
+    setReceiptGate(false)
+    setUndoGate(true)
+    const store = makeDurableJournalStore(join(dir, "journal"))
+    await runHunkSelect(makeDeps(dir, store), { path, before: B, after: A }, ["h1", "h2"], askH1)
+    expect(readFileSync(path, "utf8")).toBe(AFTER_H1)
+    // A receipt WAS persisted under the undo gate alone.
+    expect(receiptCount(join(dir, "journal"))).toBe(1)
+    const opId = onlyReceiptId(join(dir, "journal"))
+    const undo = await undoHunkMutation(opId, { store })
+    expect(undo.status).toBe("reverted")
+    expect(readFileSync(path, "utf8")).toBe(B)
   })
 })
 

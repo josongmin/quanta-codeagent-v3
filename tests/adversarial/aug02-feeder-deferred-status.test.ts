@@ -5,15 +5,13 @@
  * two OTHER dead-seams whose catalog `purpose` claims a working production effect
  * that never occurs in production:
  *
- *   (1) RFC06-4 hunk-mutation receipt / CAS undo journal — the catalog claims
- *       "each per-hunk apply persists an intent/effect/terminal receipt into a
- *       CAS undo journal so the apply is undoable via a content-VERIFIED revert".
- *       REALITY: no production composition root ever constructs a journal store
- *       (`makeDurableJournalStore` / `makeInMemoryJournalStore`) nor sets
- *       `deps.mutationJournal`, so the receipt-wrap gate
- *       `hunkMutationReceipt && deps.mutationJournal !== undefined` is ALWAYS
- *       false in production — even with QUANTA_HUNK_MUTATION_RECEIPT=1. And
- *       `undoHunkMutation` has NO production caller at all.
+ *   (1) RFC06-4 hunk-mutation receipt / CAS undo journal — WAS a dead seam;
+ *       CLOSED by RFC-def Surface A (`/undo`). The CLI composition root now
+ *       constructs a durable journal store under `QUANTA_HUNK_UNDO`, sets
+ *       `mutationJournal:` on the HITL prompt, and `/undo` reverts through
+ *       `undoHunkMutation` (content-verified, drift-refusing). The three
+ *       assertions below FLIPPED from "no caller" to "WIRED" per this file's own
+ *       contract; they RED again if the wiring regresses.
  *
  *   (2) RFC01 durable ThreadRollback saga — the catalog claims "the ThreadRollback
  *       effect saga replays the mapping to rewind the thread with a CLI `/rewind`
@@ -57,29 +55,32 @@ const filesContaining = (needle: RegExp, excludeSubstr: string[] = []): string[]
     return needle.test(readFileSync(f, "utf8"))
   })
 
-describe("R2B dead-seam sweep — RFC06-4 hunk-mutation CAS undo journal", () => {
-  test("FINDING: no production code assigns `mutationJournal:` (the dep the receipt-wrap requires)", () => {
-    // The receipt path only runs when `deps.mutationJournal !== undefined`.
-    // Grep for an ASSIGNMENT `mutationJournal:` (object-literal / property set)
-    // anywhere in production src. If this is empty, the wrap is unreachable in
-    // production regardless of the QUANTA_HUNK_MUTATION_RECEIPT knob.
+describe("R2B → WIRED — RFC06-4 hunk-mutation CAS undo journal (RFC-def Surface A)", () => {
+  // These three assertions were dead-seam FINDINGS (the seam existed but had no
+  // production caller). RFC-def Surface A (`/undo`) CLOSED the gap: the CLI
+  // composition root now builds a durable journal store under `QUANTA_HUNK_UNDO`,
+  // threads it as `mutationJournal:` into the HITL prompt, and the `/undo` slash
+  // command reverts through `undoHunkMutation`. Per this file's own contract
+  // ("a failing assertion means a production caller was ADDED — delete/flip it"),
+  // these are now LIVE-wiring assertions: they RED again if the wiring regresses.
+
+  test("WIRED: production code assigns `mutationJournal:` (the receipt-wrap dep)", () => {
     const setters = filesContaining(/\bmutationJournal:\s/, [])
-    // Consumers only DECLARE `mutationJournal?:` (type) and READ
-    // `deps.mutationJournal` — none SET it. Assert zero production setters.
-    expect(setters).toEqual([])
+    // The CLI runtime-context compose sets it from the durable store (gated).
+    expect(setters.some((f) => f.includes("runtime-context-compose.ts"))).toBe(true)
   })
 
-  test("FINDING: journal store factories are never constructed in production", () => {
+  test("WIRED: the durable journal store factory is constructed in production", () => {
     const constructors = filesContaining(
-      /\b(makeDurableJournalStore|makeInMemoryJournalStore)\s*\(/,
+      /\bmakeDurableJournalStore\s*\(/,
       ["hunk-mutation-journal.ts"], // exclude the definition file
     )
-    expect(constructors).toEqual([])
+    expect(constructors.some((f) => f.includes("runtime-context-compose.ts"))).toBe(true)
   })
 
-  test("FINDING: undoHunkMutation (the 'undoable via content-verified revert') has no production caller", () => {
+  test("WIRED: undoHunkMutation has a production caller (the `/undo` surface)", () => {
     const callers = filesContaining(/\bundoHunkMutation\s*\(/, ["hunk-mutation-journal.ts"])
-    expect(callers).toEqual([])
+    expect(callers.some((f) => f.includes("undo-cmd.ts"))).toBe(true)
   })
 })
 

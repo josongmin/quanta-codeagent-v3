@@ -438,6 +438,15 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  the mutation is undoable via a content-verified CAS revert (fail-closed on
    *  disk drift). Independent of `hunkApproval`. */
   readonly hunkMutationReceipt: boolean
+  /** RFC-def restore surface — `/undo` hunk-revert command (`QUANTA_HUNK_UNDO`).
+   *  Opt-in (`gateOn` vocab (#24)). Default false ⇒ the `/undo` slash command is
+   *  NOT registered (byte-identical: no undo surface exists) and the CLI wires no
+   *  durable journal store. When ON, per-hunk applies persist to a durable
+   *  `@/runner/hunk-mutation-journal` store AND `/undo` lists recent apply
+   *  receipts + reverts the selected one through the EXISTING journal revert
+   *  (`undoHunkMutation`), which fail-closes on CAS drift (refuses, never blind-
+   *  overwrites). DESTRUCTIVE ⇒ requires explicit selection + confirm. */
+  readonly hunkUndo: boolean
   /** sandbox-escalation (RFC jun-6) — OS-sandbox block → user-gated
    *  escalation-retry loop (`QUANTA_SANDBOX_ESCALATION`). Opt-in
    *  (the `gateOn` truthy vocab (#24)). Default false ⇒ the platform result-mapping points NEVER

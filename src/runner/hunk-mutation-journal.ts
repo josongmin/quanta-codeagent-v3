@@ -21,9 +21,9 @@
  * content-hash convention).
  */
 
-import { mkdir, readFile } from "node:fs/promises"
+import { mkdir, readdir, readFile } from "node:fs/promises"
 import { join } from "node:path"
-import { errMessage } from "@/shared"
+import { byteCompare, errMessage } from "@/shared"
 import { sha256Hex, writeFileAtomic } from "@/storage"
 import { splitHunks } from "./diff-ops"
 import { applyHunkSelection } from "./hunk-apply"
@@ -54,12 +54,20 @@ export interface HunkMutationReceipt {
   readonly updatedAt: string
 }
 
-/** Durable store for mutation receipts. Kept minimal (put/load) so no second
- *  journal/ODB abstraction is introduced — the durable impl delegates bytes to
- *  the existing atomic writer. */
+/** Durable store for mutation receipts. Kept minimal (put/load/list) so no
+ *  second journal/ODB abstraction is introduced — the durable impl delegates
+ *  bytes to the existing atomic writer, and `list` is a pure enumeration over
+ *  the SAME persisted receipts (it opens no new store). */
 export interface HunkMutationJournalStore {
   put(receipt: HunkMutationReceipt): Promise<void>
   load(operationId: string): Promise<HunkMutationReceipt | null>
+  /** Enumerate persisted receipts NEWEST-FIRST (by `updatedAt`, then
+   *  `createdAt`). Consumed by the `/undo` surface to list recent hunk
+   *  applies so an operator can pick one to revert. This is a READ-ONLY
+   *  projection over the already-durable receipts — it never mutates, and it
+   *  is the ONLY enumeration seam (no second index/ODB). A store that cannot
+   *  enumerate (none of ours) may omit it; callers treat absence as "empty". */
+  list?(): Promise<readonly HunkMutationReceipt[]>
 }
 
 export interface HunkMutationJournalDeps {
@@ -205,8 +213,22 @@ export const makeInMemoryJournalStore = (): HunkMutationJournalStore => {
     async load(operationId) {
       return map.get(operationId) ?? null
     },
+    async list() {
+      return sortReceiptsNewestFirst([...map.values()])
+    },
   }
 }
+
+/** Newest-first ordering by `updatedAt` (the last state transition), falling
+ *  back to `createdAt`. Pure; copies the input. The `/undo` surface relies on
+ *  this order so "the last apply" is the first row. */
+const sortReceiptsNewestFirst = (
+  receipts: readonly HunkMutationReceipt[],
+): readonly HunkMutationReceipt[] =>
+  [...receipts].sort((a, b) => {
+    const byUpdated = byteCompare(b.updatedAt, a.updatedAt)
+    return byUpdated !== 0 ? byUpdated : byteCompare(b.createdAt, a.createdAt)
+  })
 
 // ── Durable store (reuses the existing atomic writer — NO new ODB) ────────────
 
@@ -236,5 +258,27 @@ export const makeDurableJournalStore = (dir: string): HunkMutationJournalStore =
       void errMessage(e)
       return null
     }
+  },
+  async list() {
+    let names: string[]
+    try {
+      names = await readdir(dir)
+    } catch {
+      // No journal dir yet ⇒ no receipts. Never fabricate.
+      return []
+    }
+    const receipts: HunkMutationReceipt[] = []
+    for (const name of names) {
+      if (!name.endsWith(".json")) continue
+      try {
+        const raw = await readFile(join(dir, name), "utf8")
+        // A malformed/partial file is skipped (fail-closed: it never appears as
+        // an undoable candidate) rather than aborting the whole enumeration.
+        receipts.push(JSON.parse(raw) as HunkMutationReceipt)
+      } catch (e) {
+        void errMessage(e)
+      }
+    }
+    return sortReceiptsNewestFirst(receipts)
   },
 })

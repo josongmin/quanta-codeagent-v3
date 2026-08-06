@@ -219,6 +219,11 @@ export interface SessionSetupResult {
    *  the load failed ⇒ the slot is omitted and the inspector renders its
    *  stateless view (the gate has no store either — no lie). */
   readonly permissionStore: PermissionStore | undefined
+  /** RFC-def `/undo` — the durable hunk-mutation journal store (built ONLY under
+   *  `QUANTA_HUNK_UNDO=1`). Same instance the HITL prompt persists applies into;
+   *  forwarded so the surface composer wires the `/undo` slash context. Absent ⇒
+   *  no `/undo` slot (byte-identical). */
+  readonly hunkUndoStore: import("@/runner/hunk-mutation-journal").HunkMutationJournalStore | undefined
   readonly costPanel: CostPanel | undefined
   readonly branchProgress: BranchProgressTracker | undefined
   readonly planStore: PlanStore | undefined
@@ -345,7 +350,7 @@ export const setupSession = async (
     { observeUsage: contextUsageHolder.observeUsage },
   )
 
-  const { approvalPrompt, midTurnApprovalChannel, runtimeContext, permissionStore } =
+  const { approvalPrompt, midTurnApprovalChannel, runtimeContext, permissionStore, hunkUndoStore } =
     await composeCliRuntimeContext({
       boot,
       turnStream,
@@ -486,6 +491,7 @@ export const setupSession = async (
     midTurnApprovalChannel,
     runtimeContext,
     permissionStore,
+    hunkUndoStore,
     costPanel: boot.costPanel as CostPanel | undefined,
     branchProgress: boot.branchProgress as BranchProgressTracker | undefined,
     planStore: boot.planStore,
