@@ -127,6 +127,9 @@ export type ReplSlashCtx = Partial<{
    *  `restoreFiles/Task/Both` arms may return typed not-yet-wired
    *  outcomes when the host omits the real ports. */
   perToolCheckpoint: PerToolCheckpointSlashState
+  /** RFC-def `/undo` — the durable hunk-mutation journal store wire (built
+   *  ONLY under `QUANTA_HUNK_UNDO=1`). Absent ⇒ `/undo` prints "not wired". */
+  hunkUndo: import("../undo-cmd").HunkUndoSlashState
   /** ADR-0291 — `/profile` tool-profile wire. Adapter over
    *  `AgentConfig.toolProfile.resolver` + `defaultName`. */
   profile: {
@@ -309,6 +312,13 @@ export interface BuildReplSlashCtxArgs {
    *  tag prefixes against the registry. */
   perToolRegistry?: GranularRegistry | undefined
   perToolRestorePort?: ThreeWayRestorePort | undefined
+  /** RFC-def `/undo` — the durable hunk-mutation journal store. Threaded ONLY
+   *  when `QUANTA_HUNK_UNDO=1` (the composition root built the store); absent ⇒
+   *  the `hunkUndo` ctx slot is omitted and `/undo` prints "not wired"
+   *  (default-OFF byte-identical). */
+  hunkUndoStore?:
+    | import("@/runner/hunk-mutation-journal").HunkMutationJournalStore
+    | undefined
   /** UUX-6-03 — the ONE live-history swap seam for `/rewind-tool`'s task
    *  leg (same closure `/rewind-conv` + `/rewind` swap through). Absent ⇒
    *  the command keeps its prior print-only behavior. */
@@ -363,6 +373,7 @@ interface NewSlotAdapters {
   readonly stickyModel: ReturnType<typeof buildStickyModelAdapter> | undefined
   readonly focusChain: ReturnType<typeof buildFocusChainAdapter> | undefined
   readonly textInbox: TextInbox | undefined
+  readonly hunkUndo: import("../undo-cmd").HunkUndoSlashState | undefined
 }
 
 /** Build the fork-session adapter when wired; otherwise undefined. */
@@ -477,6 +488,11 @@ const buildNewSlotAdapters = (args: BuildReplSlashCtxArgs): NewSlotAdapters => (
         ? buildFocusChainAdapter(args.focusChainTracker)
         : undefined,
   textInbox: args.textInbox,
+  // RFC-def `/undo` — presence-gated: the slot exists ONLY when the composition
+  // root built the durable journal store (⇒ `QUANTA_HUNK_UNDO=1`). Absent ⇒
+  // `/undo` prints "not wired" (byte-identical). The store is the SAME instance
+  // the HITL prompt persists applies into, so `/undo` lists exactly what landed.
+  hunkUndo: args.hunkUndoStore !== undefined ? { store: args.hunkUndoStore } : undefined,
 })
 
 /** Spread the ADR-0291 adapter fields into the surface ctx. Pure / 1:1
@@ -492,6 +508,7 @@ const spreadNewSlots = (s: NewSlotAdapters): Partial<ReplSlashCtx> => ({
   ...(s.stickyModel !== undefined ? { stickyModel: s.stickyModel } : {}),
   ...(s.focusChain !== undefined ? { focusChain: s.focusChain } : {}),
   ...(s.textInbox !== undefined ? { textInbox: s.textInbox } : {}),
+  ...(s.hunkUndo !== undefined ? { hunkUndo: s.hunkUndo } : {}),
 })
 
 /** Project a `@/subagent` TaskRecord into the surface's structural
@@ -723,6 +740,7 @@ const projectAdr0291Slots = (s: ReplSlashCtx): Record<string, unknown> => ({
   ...(s.stickyModel !== undefined ? { stickyModel: s.stickyModel } : {}),
   ...(s.focusChain !== undefined ? { focusChain: s.focusChain } : {}),
   ...(s.textInbox !== undefined ? { textInbox: s.textInbox } : {}),
+  ...(s.hunkUndo !== undefined ? { hunkUndo: s.hunkUndo } : {}),
 })
 
 /** Map the surface-owned {@link ReplSlashCtx} into the contract shape that

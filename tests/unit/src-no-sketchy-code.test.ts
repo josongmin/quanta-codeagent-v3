@@ -225,6 +225,8 @@ const RULES: readonly Rule[] = [
       "apps/cli/repl/session-runtime-config.ts":
         "REPL session-runtime-config composition root — same posture as repl.ts.",
       "apps/cli/rewind-cmd.ts": "CLI sub-command entry — same DI fallback posture as login-cmd.ts.",
+      "apps/cli/undo-cmd.ts":
+        "CLI slash-command load-time register gate (`isHunkUndoEnabled`) — `envSource ?? process.env` DI fallback, identical posture to `isRewindEnabled` in rewind-cmd.ts. The validated read is `runtimeConfig().hunkUndo`; this module-load gate mirrors the same truthy vocab so the register decision and the store-wire decision agree.",
       "apps/cli/rewind-git.ts":
         "CLI rewind-git composition root — env DI fallback per CLI posture.",
       "apps/cli/sandbox-wire.ts":

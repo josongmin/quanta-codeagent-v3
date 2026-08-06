@@ -80,7 +80,44 @@ export interface RewindSlashState {
    *  Absent (non-REPL / legacy surface) ⇒ `/fork` keeps its prior
    *  mint-and-stay behavior byte-identical. */
   readonly switchSession?: (sessionId: string) => Promise<SessionSwitchReceipt>
+  /** RFC-def Surface B / RFC01-3 — the durable ThreadRollback coordinator port
+   *  for `--restore-files`. When present, a confirmed `/rewind <id>
+   *  --restore-files` routes the FILE restore through the coordinator
+   *  (`persist requested → ThreeWayRestorePort restore → durable receipt`)
+   *  instead of the safe-degrade. Fail-closed: a missing checkpoint mapping /
+   *  moved SHA / conflict ⇒ the coordinator writes a `rollback_failed` receipt
+   *  and returns a refusal — the command exits 1 with an operator-visible note
+   *  and does NOT truncate the transcript (no partial). Absent ⇒ `--restore-
+   *  files` keeps its prior `rewindSession` safe-degrade byte-identical.
+   *
+   *  Typed structurally (no `@/agent` import) so the CLI slice stays at the top
+   *  of the DAG; the composition root adapts the real coordinator into it. */
+  readonly restoreFilesCoordinator?: RestoreFilesCoordinatorPort
 }
+
+/** Structural port over the RFC01-3 ThreadRollback coordinator, kept free of
+ *  `@/agent` types so `src/apps/cli/**` doesn't widen its slice fence. The
+ *  composition root wraps `executeRollback` (with the SavedSession record store
+ *  + the ShadowOdb-backed `RollbackEffectPort`) into this one method. */
+export interface RestoreFilesCoordinatorPort {
+  /** Order a durable file restore to the checkpoint mapped for `targetId`.
+   *  `operationId` is the idempotency key. Returns a CLOSED outcome:
+   *    - `restored`  — files restored + durable receipt written (proceed to
+   *                    transcript truncation).
+   *    - `refused`   — fail-closed (missing mapping / moved SHA / conflict /
+   *                    pending-recovery). `reason` is operator-visible; NOTHING
+   *                    was mutated and the transcript MUST NOT be truncated. */
+  restoreToMessage(req: {
+    readonly sessionId: string
+    readonly operationId: string
+    readonly targetId: string
+  }): Promise<RestoreFilesOutcome>
+}
+
+/** Closed outcome of {@link RestoreFilesCoordinatorPort.restoreToMessage}. */
+export type RestoreFilesOutcome =
+  | { readonly kind: "restored" }
+  | { readonly kind: "refused"; readonly reason: string }
 
 declare module "./slash-commands" {
   interface SlashContext {
@@ -481,7 +518,33 @@ const rewindCmdImpl: SlashCommand = {
       return 0
     }
 
-    const gitAuth = authorizeGitPort(parsed.restoreFiles, envSource, state.git)
+    // RFC-def Surface B — when `--restore-files` is requested AND the durable
+    // ThreadRollback coordinator is wired, route the FILE restore through it
+    // FIRST (persist requested → restore → receipt). Fail-closed: a refusal
+    // (missing mapping / moved SHA / conflict) exits 1 and does NOT truncate the
+    // transcript (no partial). On success the files are already restored, so the
+    // subsequent `rewindSession` only truncates the transcript.
+    let restoreHandledByCoordinator = false
+    if (parsed.restoreFiles && state.restoreFilesCoordinator !== undefined) {
+      const outcome = await state.restoreFilesCoordinator.restoreToMessage({
+        sessionId: state.sessionId,
+        operationId: `rewind-${target.fullId}`,
+        targetId: target.fullId,
+      })
+      if (outcome.kind === "refused") {
+        ctx.err(
+          `/rewind: --restore-files refused — ${outcome.reason} (working tree + transcript left unchanged; no partial restore)\n`,
+        )
+        return 1
+      }
+      restoreHandledByCoordinator = true
+    }
+
+    // The git-port safe-degrade path applies ONLY when the coordinator did NOT
+    // handle the restore (absent coordinator ⇒ prior byte-identical behavior).
+    const gitAuth = restoreHandledByCoordinator
+      ? ({ ok: true, port: undefined } as const)
+      : authorizeGitPort(parsed.restoreFiles, envSource, state.git)
     if (!gitAuth.ok) {
       ctx.err(gitAuth.err)
       return 1
@@ -490,7 +553,9 @@ const rewindCmdImpl: SlashCommand = {
     const rewindOpts: Parameters<typeof rewindSession>[0] = {
       sessionId: state.sessionId,
       messageId: target.fullId,
-      restoreFiles: parsed.restoreFiles,
+      // Coordinator already restored the tree ⇒ the transcript-owner must NOT
+      // also attempt (its own safe-degrade); it only truncates.
+      restoreFiles: parsed.restoreFiles && !restoreHandledByCoordinator,
       ...(gitAuth.port !== undefined ? { git: gitAuth.port } : {}),
     }
     const result = await rewindSession(rewindOpts)

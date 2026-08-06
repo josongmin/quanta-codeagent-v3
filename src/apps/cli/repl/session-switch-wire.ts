@@ -18,7 +18,7 @@
  */
 
 import type { Message } from "@/llm"
-import type { RewindSlashState } from "../rewind-cmd"
+import type { RestoreFilesCoordinatorPort, RewindSlashState } from "../rewind-cmd"
 import type { SessionSwitchReceipt } from "./session-loop/session-switch"
 
 export interface SessionSwitchWire {
@@ -39,10 +39,14 @@ export const overlayRewindState = (
   base: RewindSlashState,
   replaceMessages: (msgs: ReadonlyArray<Message>) => Promise<void>,
   wire: SessionSwitchWire,
+  restoreFilesCoordinator?: RestoreFilesCoordinatorPort,
 ): RewindSlashState => ({
   ...base,
   replaceMessages,
   switchSession: wire.switchSession,
+  // RFC-def Surface B — thread the durable restore coordinator (gated). Absent ⇒
+  // `--restore-files` keeps its safe-degrade byte-identical.
+  ...(restoreFilesCoordinator !== undefined ? { restoreFilesCoordinator } : {}),
   get sessionId() {
     return wire.sessionId()
   },

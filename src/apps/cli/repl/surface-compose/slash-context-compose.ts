@@ -1,4 +1,7 @@
 import { EFFORT_LEVELS, effortToTokenBudget } from "@/agent"
+import { gateOn } from "@/shared"
+import type { RestoreFilesCoordinatorPort } from "../../rewind-cmd"
+import { buildRewindRestoreCoordinator } from "../rewind-restore-coordinator-wire"
 import type { SessionSetupResult } from "../session-setup"
 import { overlayRewindState } from "../session-switch-wire"
 import { buildSkillsCallback } from "../skills-surface"
@@ -7,6 +10,24 @@ import type { SurfaceCoreState } from "./core-state"
 import type { MutableSurfaceWires } from "./mutable-wires"
 import type { SurfaceState } from "./turn-sinks"
 import { buildReplaySlashState } from "./wire-builders"
+
+/** Build the RFC-def Surface B restore coordinator when `QUANTA_REWIND_GIT=1`
+ *  (the existing extra-destructive gate for `--restore-files`). Reuses the
+ *  ShadowOdb-backed restore triple from the per-tool-checkpoint wire when
+ *  present; otherwise the coordinator fail-closes at the missing-checkpoint
+ *  mapping (no tree mutation). Absent gate ⇒ `undefined` ⇒ `--restore-files`
+ *  keeps its safe-degrade byte-identical. */
+const maybeRestoreCoordinator = (
+  core: SurfaceCoreState,
+  env: NodeJS.ProcessEnv,
+): RestoreFilesCoordinatorPort | undefined => {
+  if (!gateOn(env, "QUANTA_REWIND_GIT")) return undefined
+  return buildRewindRestoreCoordinator({
+    ...(core.perToolCkpt !== undefined
+      ? { perTool: { registry: core.perToolCkpt.registry, restore: core.perToolCkpt.restore } }
+      : {}),
+  })
+}
 
 type SlashCtxInput = Parameters<typeof buildReplSlashCtx>[0]
 
@@ -64,6 +85,7 @@ export const buildSurfaceSlashContext = (
   convStore: Parameters<typeof buildReplSlashCtx>[0]["conversationStore"],
   core: SurfaceCoreState,
   mutable: MutableSurfaceWires,
+  env: NodeJS.ProcessEnv,
 ): ReturnType<typeof buildReplSlashCtx> =>
   buildReplSlashCtx({
     skillsCb: buildSkillsCallback(setup.skillsConfig, setup.pills),
@@ -73,7 +95,12 @@ export const buildSurfaceSlashContext = (
     rewindState:
       state.rewindState === undefined || mutable.sessionSwitchWire === undefined
         ? undefined
-        : overlayRewindState(state.rewindState, mutable.liveHistorySwap, mutable.sessionSwitchWire),
+        : overlayRewindState(
+            state.rewindState,
+            mutable.liveHistorySwap,
+            mutable.sessionSwitchWire,
+            maybeRestoreCoordinator(core, env),
+          ),
     mcpSurface: setup.mcpSurface,
     costPanel: setup.costPanel,
     planStore: setup.planStore,
@@ -108,6 +135,10 @@ export const buildSurfaceSlashContext = (
     },
     composerHandle: mutable.composerHandle,
     conversationStore: convStore,
+    // RFC-def `/undo` — thread the SAME durable journal store the HITL prompt
+    // persists applies into (built ONLY under QUANTA_HUNK_UNDO=1). Absent ⇒ slot
+    // omitted, `/undo` prints "not wired" (byte-identical).
+    ...(setup.hunkUndoStore !== undefined ? { hunkUndoStore: setup.hunkUndoStore } : {}),
     ...runtimeOptionalSlots(setup, core),
     textInbox: mutable.textInbox,
     contextUsage: () => core.contextUsageHolder.view(),

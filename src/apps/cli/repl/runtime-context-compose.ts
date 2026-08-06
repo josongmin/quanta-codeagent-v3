@@ -5,6 +5,7 @@ import {
   mintActiveWorktreeSlot,
   type NamedAgentResolver,
 } from "@/agent"
+import { join } from "node:path"
 import type { ConversationCheckpointStore } from "@/agent/conversation-checkpoint"
 import { createClassifierBackedAutoReview } from "@/agent/reviewer-port"
 import type { SessionBootstrapResult } from "@/host/bootstrap"
@@ -19,7 +20,12 @@ import {
   type TrustScopeRegistry,
 } from "@/permission"
 import type { PendingApprovalView } from "@/protocol/session"
+import {
+  type HunkMutationJournalStore,
+  makeDurableJournalStore,
+} from "@/runner/hunk-mutation-journal"
 import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
+import { sessionsRoot } from "@/session"
 import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import { composeRuntimeBootstrapContext, type RuntimeContext } from "@/sdk/runtime"
 import { gateOn, runtimeConfigFromEnv } from "@/shared"
@@ -65,6 +71,24 @@ export interface CliRuntimeContextBindings {
    *  can report the grants that actually gate this session. `undefined`
    *  when the load failed (the gate then has no store either). */
   readonly permissionStore: PermissionStore | undefined
+  /** RFC-def `/undo` — the durable hunk-mutation journal store, built ONLY when
+   *  `QUANTA_HUNK_UNDO=1` (DESTRUCTIVE ⇒ default OFF). The SAME instance is
+   *  threaded into the HITL approval prompt (so per-hunk applies persist a CAS
+   *  undo receipt) AND surfaced to the `/undo` slash context (so it lists +
+   *  reverts through the EXISTING journal). Absent ⇒ no durable store, no `/undo`
+   *  slot, per-hunk apply byte-identical. */
+  readonly hunkUndoStore: HunkMutationJournalStore | undefined
+}
+
+/** Build the durable hunk-mutation journal store when `QUANTA_HUNK_UNDO=1`.
+ *  Reuses the EXISTING `makeDurableJournalStore` (atomic-writer-backed, no new
+ *  ODB) under `<sessionsRoot>/hunk-journal`. Default OFF ⇒ `undefined` (no store
+ *  wired anywhere; byte-identical). */
+const buildHunkUndoStore = (
+  env: Readonly<Record<string, string | undefined>>,
+): HunkMutationJournalStore | undefined => {
+  if (!runtimeConfigFromEnv(env).hunkUndo) return undefined
+  return makeDurableJournalStore(join(sessionsRoot(), "hunk-journal"))
 }
 
 interface RuntimeConfirmSlot {
@@ -378,20 +402,37 @@ export const composeCliRuntimeContext = async (
       logWarn: (msg: string) => process.stderr.write(`[memory-auto] ${msg}\n`),
     },
   })
+  // RFC-def `/undo` — the durable journal store (gated). Threaded into the HITL
+  // prompt so per-hunk applies persist a CAS undo receipt, and surfaced in the
+  // bindings so the `/undo` slash context reverts through the SAME store.
+  const hunkUndoStore = buildHunkUndoStore(args.envSource ?? process.env)
   return {
-    approvalPrompt: buildCliApprovalPrompt({
-      idleMonitor: boot.idleMonitor,
-      rejectCounter: boot.rejectCounter,
-      channel: midTurnApprovalChannel,
-      cwd: boot.cwd, // session-resolved cwd for preflight/hunk reads in the shared prompt helpers
-    }),
+    approvalPrompt: buildApprovalPrompt(boot, midTurnApprovalChannel, hunkUndoStore),
     midTurnApprovalChannel,
     runtimeContext,
     // UUX-4-04 — surfaced for the `/permission` inspector (same instance the
     // admissibility gate received above).
     permissionStore,
+    hunkUndoStore,
   }
 }
+
+/** Build the CLI HITL approval prompt, threading the (gated) durable journal
+ *  store as `mutationJournal` so per-hunk applies persist a CAS undo receipt.
+ *  Extracted so `composeCliRuntimeContext` stays under the god-function ceiling.
+ *  Absent store ⇒ the `mutationJournal` field is omitted (byte-identical). */
+const buildApprovalPrompt = (
+  boot: SessionBootstrapResult,
+  channel: MidTurnApprovalChannel,
+  hunkUndoStore: HunkMutationJournalStore | undefined,
+): ReturnType<typeof buildCliApprovalPrompt> =>
+  buildCliApprovalPrompt({
+    idleMonitor: boot.idleMonitor,
+    rejectCounter: boot.rejectCounter,
+    channel,
+    cwd: boot.cwd, // session-resolved cwd for preflight/hunk reads in the shared prompt helpers
+    ...(hunkUndoStore !== undefined ? { mutationJournal: hunkUndoStore } : {}),
+  })
 
 /** Test seam — never import in production. Exposes the HITL prompt builders so
  *  the e2e suite can drive the REAL CLI confirm/approval wording + verb routing

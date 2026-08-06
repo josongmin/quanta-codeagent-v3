@@ -23,7 +23,7 @@ export const composeSurfaceWires = (
   const core = buildSurfaceCoreState(setup, env, convStore)
   const runtimeFacadeCompose = buildRuntimeFacadeCompose(setup, env, core)
   const mutable = buildMutableSurfaceWires(setup, state, env, convStore, core)
-  const slashCtx = buildSurfaceSlashContext(setup, state, convStore, core, mutable)
+  const slashCtx = buildSurfaceSlashContext(setup, state, convStore, core, mutable, env)
   const dispatch = buildSurfaceDispatchWire(setup, state, env, slashCtx, core, mutable)
 
   return {

@@ -333,6 +333,10 @@ const parseToolSurfaceSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> =>
     // content-verified CAS journal. Independent of `hunkApproval` (that gates
     // the [h]unk verb; this gates the receipt/undo durability).
     hunkMutationReceipt: gateOn(env, "QUANTA_HUNK_MUTATION_RECEIPT"),
+    // RFC-def restore surface — opt-in (`gateOn` vocab; #24). Default false ⇒
+    // `/undo` unregistered + no durable journal store (byte-identical). See
+    // `hunkUndo` in `runtime-config/types.ts` for the ON behaviour.
+    hunkUndo: gateOn(env, "QUANTA_HUNK_UNDO"),
     // sandbox-escalation (RFC jun-6) — opt-in (`gateOn` vocab; #24). Default false ⇒
     // classifySandboxDenial is never consulted, no denialReason is ever set, no
     // escalation prompt, no post-denial record (a sandboxed nonzero exit is

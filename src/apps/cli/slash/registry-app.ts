@@ -27,6 +27,7 @@ import { isRewindEnabled, rewindCommands } from "../rewind-cmd"
 import { rewindConvCmd } from "../rewind-conv-cmd"
 import { rewindToolCmd } from "../rewind-tool-cmd"
 import { sessionRegistryCmd } from "../session-registry-cmd"
+import { isHunkUndoEnabled, undoCmd } from "../undo-cmd"
 import { capabilitiesCmd, capsAliasCmd } from "../slash-commands-capabilities"
 import { knobsCmd } from "../slash-commands-knobs"
 import type { SlashCommand } from "../slash-contract"
@@ -40,6 +41,13 @@ const REWIND_COMMANDS: readonly SlashCommand[] = isRewindEnabled() ? rewindComma
 // `/memory` — env-gated the same way: `QUANTA_MEMORY_SLASH=0` removes it
 // from the registry at load time. Default `"1"` (registered).
 const MEMORY_COMMANDS: readonly SlashCommand[] = isMemorySlashEnabled() ? [memoryCmd] : []
+
+// `/undo` (RFC-def hunk-revert) — DESTRUCTIVE ⇒ default OFF. Registered only
+// when `QUANTA_HUNK_UNDO=1`; absent ⇒ the command is not in the registry at all
+// (byte-identical, no undo surface). Even registered it is inert (`not wired`)
+// unless the composition root injects a `HunkUndoSlashState`, which happens
+// under the SAME gate.
+const UNDO_COMMANDS: readonly SlashCommand[] = isHunkUndoEnabled() ? [undoCmd] : []
 
 // `/dream` (H16 cross-session auto-dream) — env-gated: `QUANTA_DREAM_SLASH=0`
 // removes it at load time. Default `"1"` (registered). The command itself is
@@ -57,6 +65,7 @@ export const APP_SLASH_COMMANDS: readonly SlashCommand[] = [
   ...REWIND_COMMANDS,
   rewindToolCmd,
   ...MEMORY_COMMANDS,
+  ...UNDO_COMMANDS,
   ...DREAM_COMMANDS,
   rewindConvCmd,
   knobsCmd,
