@@ -300,7 +300,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     group: "bench",
     home: "bench",
     describe: "Bench eval: retain last verified-green tentative patch unless explicitly disabled.",
-    readSite: "apps/bench/eval/driver.ts",
+    readSite: "apps/bench/eval/driver/agent-phase.ts",
   },
   {
     envKey: "QUANTA_BENCH_FAMILY_COVERAGE",
@@ -310,7 +310,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench eval (T1, jun-24): clean-mode family-coverage veto (hard:familyCoverageMissing). Default OFF; opt-in via QUANTA_BENCH_FAMILY_COVERAGE (reverted as net-negative producer-consumer over-demand).",
-    readSite: "apps/bench/eval/driver.ts",
+    readSite: "apps/bench/eval/driver/selection.ts",
   },
   {
     envKey: "QUANTA_BENCH_FAMILY_COVERAGE_COEDIT",
@@ -330,7 +330,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Bench eval (jun-25): CORRECTED non-empty fallback. When no winner exists, submit the rock-solid-subset candidate (applies clean / no regression / no static-sanity break, barred only by a self-oracle MWE/repro false-negative) instead of empty — weakly dominates on binary SWE-bench scoring. Default OFF; opt-in via QUANTA_BENCH_NONEMPTY_FALLBACK.",
-    readSite: "apps/bench/eval/driver.ts",
+    readSite: "apps/bench/eval/driver/selection.ts",
   },
   {
     envKey: "QUANTA_BENCH_TOKEN_BUDGET_DIR",
@@ -411,7 +411,7 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     home: "bench",
     describe:
       "Opt-in GenAI content capture on the chat span: emit the pinned structured `gen_ai.input.messages`/`gen_ai.output.messages` + `gen_ai.system_instructions` attrs and the prompt/completion previews, ALL redacted. Mirrors OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT. Default-OFF ⇒ no content emitted, byte-identical; the cassette (Plane A) stays unredacted and untouched.",
-    readSite: "agent/loop-helpers.ts",
+    readSite: "agent/span-content-redact.ts",
   },
   {
     envKey: "QUANTA_BENCH_WAIT_FOR_IDLE",

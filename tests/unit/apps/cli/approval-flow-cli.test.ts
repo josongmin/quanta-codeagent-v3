@@ -241,7 +241,13 @@ describe("T5 approval flow cli", () => {
   })
 
   test("CLI source routes approval requests through approval.respond and rerun", () => {
-    const sessionLoop = read("src/apps/cli/repl/session-loop.ts")
+    // Refactor b17ce99aa split the session-loop into `session-loop/` lane
+    // helpers. The per-turn adapter over `driveSessionTurn` now lives in the
+    // turn-driver helper; the operator resolver (`setup.approvalPrompt`) is
+    // handed in from the bootstrap helper. Assert the routing survives in the
+    // helpers that now own it.
+    const turnDriver = read("src/apps/cli/repl/session-loop/turn-driver.ts")
+    const bootstrap = read("src/apps/cli/repl/session-loop/bootstrap.ts")
     const sdkTypes = read("src/sdk/runtime/types.ts")
     // ADR-0303 — the approval-resolution loop was hoisted OUT of the surface
     // into the shared runner-owned driver. The CLI now ROUTES through it: each
@@ -250,8 +256,8 @@ describe("T5 approval flow cli", () => {
     // live in the driver — assert there, not in the surface.
     const driver = read("src/runner/orchestrate/session-turn-driver.ts")
 
-    expect(sessionLoop).toContain("driveSessionTurn")
-    expect(sessionLoop).toContain("setup.approvalPrompt")
+    expect(turnDriver).toContain("driveSessionTurn")
+    expect(bootstrap).toContain("setup.approvalPrompt")
     expect(driver).toContain("session.approval.respond")
     // ADR-0512 P3 — the deny-throw is now escalation-AWARE: a NORMAL approval
     // deny still aborts the turn, but an ESCALATION deny (the approval carries

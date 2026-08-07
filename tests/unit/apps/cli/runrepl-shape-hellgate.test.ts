@@ -66,12 +66,21 @@ describe("runRepl shape contract", () => {
     expect(replSrc).toMatch(/from "\.\/repl\/session-loop"/)
   })
 
-  test("session-loop.ts references turn-runner.ts", () => {
-    const loopSrc = readFileSync(
-      resolve(__dirname, "../../../../src/apps/cli/repl/session-loop.ts"),
+  test("session-loop lane helpers reference turn-runner.ts", () => {
+    // Refactor b17ce99aa split runSessionLoop into `session-loop/` lane
+    // helpers. `session-loop.ts` is now a thin entrypoint; the per-turn
+    // `runOneTurn` wiring lives in the branch helpers, which still import it
+    // from `../turn-runner`. Assert the invariant survives transitively.
+    const oneShot = readFileSync(
+      resolve(__dirname, "../../../../src/apps/cli/repl/session-loop/one-shot-branch.ts"),
       "utf8",
     )
-    expect(loopSrc).toMatch(/from "\.\/turn-runner"/)
+    const interactive = readFileSync(
+      resolve(__dirname, "../../../../src/apps/cli/repl/session-loop/interactive-loop.ts"),
+      "utf8",
+    )
+    expect(oneShot).toMatch(/from "\.\.\/turn-runner"/)
+    expect(interactive).toMatch(/from "\.\.\/turn-runner"/)
   })
 
   test("turn-runner.ts references turn-cancel-install.ts", () => {

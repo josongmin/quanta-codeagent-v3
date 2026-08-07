@@ -8,41 +8,28 @@
  *   - resolve() over an empty input set produces an empty map.
  *   - apply() over an empty value map returns the same cfg reference.
  *   - resolving with unrelated env keys never adds anything to the output.
- *   - the side-effect bundle import (registering 12 knobs) does not alter
- *     a baseline AgentConfig until resolve+apply is called with real input.
+ *   - the side-effect barrel import (registering the full knob registry) does
+ *     not alter a baseline AgentConfig until resolve+apply is called with real
+ *     input.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test"
 import type { AgentConfig } from "@/agent"
-import {
-  allKnobs,
-  applyKnobs,
-  asAnyKnob,
-  knobsForSurface,
-  registerKnob,
-  resolveKnobs,
-} from "@/runner/knobs"
-import { advisorKnob } from "@/runner/knobs/knobs/advisor"
+import { allKnobs, applyKnobs, knobsForSurface, resolveKnobs } from "@/runner/knobs"
 
-// Import the side-effect bundle ONCE so the registry is fully populated. This
-// matches the production assembly path. Side-effects register once per process
-// (cached); after a sibling suite's `__resetRegistry()` a cached re-import does
-// NOT re-fire registerKnob, so we ALSO re-register from the imported object,
-// guarded by presence so we never collide.
+// Import the side-effect BARREL ONCE so the registry is fully populated. This
+// matches the production assembly path.
+//
+// jun-26 knob-config-systems-inventory unification: the per-knob files that
+// used to self-register (`import "@/runner/knobs/knobs/lsp"` etc.) were folded
+// into a schema-derived CENTRAL registrar (`registerBenchKnobs()`), fired ONLY
+// by the `./knobs` barrel. Importing individual bench-knob modules no longer
+// populates the registry — the ONE entry point is the barrel, which every
+// surface that calls `resolveKnobs`/`knobsForSurface` MUST import first (see
+// the `./knobs/index.ts` docstring). The `beforeAll` importing 13 individual
+// modules was STALE after that split (only `advisor`/`persona` still
+// self-register; the other 11 are schema-backed).
 beforeAll(async () => {
-  await import("@/runner/knobs/knobs/advisor")
-  await import("@/runner/knobs/knobs/branch-search")
-  await import("@/runner/knobs/knobs/closeout-guard")
-  await import("@/runner/knobs/knobs/hooks")
-  await import("@/runner/knobs/knobs/issue-hint")
-  await import("@/runner/knobs/knobs/localize-phase")
-  await import("@/runner/knobs/knobs/lsp")
-  await import("@/runner/knobs/knobs/must-pass")
-  await import("@/runner/knobs/knobs/persona")
-  await import("@/runner/knobs/knobs/repro-test")
-  await import("@/runner/knobs/knobs/skills")
-  await import("@/runner/knobs/knobs/subagent")
-  await import("@/runner/knobs/knobs/working-state")
-  if (!allKnobs().has(advisorKnob.id)) registerKnob(asAnyKnob(advisorKnob))
+  await import("@/runner/knobs/knobs")
 })
 
 afterAll(() => {
@@ -51,7 +38,7 @@ afterAll(() => {
 })
 
 describe("hellgate / byte-identical — empty environment", () => {
-  test("resolve() with empty inputs over 12-knob registry → empty value map", () => {
+  test("resolve() with empty inputs over full registry → empty value map", () => {
     // Cleanly DROP all unrelated env keys (we only pass an empty bag).
     const knobs = knobsForSurface("bench")
     expect(knobs.size).toBeGreaterThanOrEqual(1)

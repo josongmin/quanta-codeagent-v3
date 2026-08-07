@@ -190,7 +190,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     group: "observability",
     home: "runtime-config",
     describe: "Hook-bus + observability wiring.",
-    readSite: "host/runtime/agent-arg-builder.ts",
+    readSite: "host/runtime/agent-arg-builder/observability-wire.ts",
   },
   {
     envKey: "QUANTA_OBJECTIVE_TOOLS",

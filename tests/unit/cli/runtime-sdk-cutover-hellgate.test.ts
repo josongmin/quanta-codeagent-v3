@@ -77,19 +77,33 @@ describe("CLI runtime SDK cutover source gates", () => {
   })
 
   test("session-loop consumes sdk runtime, not runner interactive primitives", () => {
-    const src = readSource("src/apps/cli/repl/session-loop.ts")
-    expect(src).toContain('from "@/sdk/runtime"')
+    // Refactor b17ce99aa split the session-loop into `session-loop/` lane
+    // helpers. The sdk-runtime consumption (RuntimeSession / RuntimeContext)
+    // now lives in the turn-driver helper; the entrypoint re-exports it. Assert
+    // the SDK-runtime import survives in the helper that actually consumes it,
+    // and that the forbidden runner interactive primitives are absent across the
+    // WHOLE lane (entrypoint + every helper file), not just the entrypoint.
+    const turnDriver = readSource("src/apps/cli/repl/session-loop/turn-driver.ts")
+    expect(turnDriver).toContain('from "@/sdk/runtime"')
+
+    const laneDir = join(REPO_ROOT, "src/apps/cli/repl/session-loop")
+    const laneSources = [
+      readSource("src/apps/cli/repl/session-loop.ts"),
+      ...walkTs(laneDir).map((f) => readFileSync(f, "utf8")),
+    ]
     // import-fences (@/sdk/runtime/bridge, @/sdk/runtime/compat, @/runner) migrated
-    // to biome noRestrictedImports (file-specific override for session-loop.ts).
-    expect(src).not.toContain("runInteractive(")
-    expect(src).not.toContain("runOnce(")
-    expect(src).not.toContain("RuntimeSessionInternal")
-    expect(src).not.toContain("__unsafePeekExecutionView")
-    expect(src).not.toContain("__unsafeReplaceMessages")
-    expect(src).not.toContain("createLegacyRunnerSessionHost(")
-    expect(src).not.toContain("peekMessages(")
-    expect(src).not.toContain("peekLastOutcome(")
-    expect(src).not.toContain("replaceMessages(")
+    // to biome noRestrictedImports (file-specific overrides for the lane).
+    for (const src of laneSources) {
+      expect(src).not.toContain("runInteractive(")
+      expect(src).not.toContain("runOnce(")
+      expect(src).not.toContain("RuntimeSessionInternal")
+      expect(src).not.toContain("__unsafePeekExecutionView")
+      expect(src).not.toContain("__unsafeReplaceMessages")
+      expect(src).not.toContain("createLegacyRunnerSessionHost(")
+      expect(src).not.toContain("peekMessages(")
+      expect(src).not.toContain("peekLastOutcome(")
+      expect(src).not.toContain("replaceMessages(")
+    }
   })
 
   test("prompt pipeline and external queue stop importing runner PromptSource types", () => {

@@ -121,7 +121,10 @@ describe("ADR-0306 — slash registry split hellgate (CLI-03)", () => {
     expect(src).toMatch(/export const describeSlashCommand =/)
     expect(src).toMatch(/export const slashCompleter =/)
     expect(src).toMatch(/export const runSlashCommand =/)
-    expect(src).toMatch(/export \{ isSlashCommand \}/)
+    // `isSlashCommand` is re-exported; it may share the `export { … }` block
+    // with sibling re-exports (e.g. `radarCmd`), so match membership, not a
+    // sole-member block.
+    expect(src).toMatch(/export \{[^}]*\bisSlashCommand\b[^}]*\}/)
     // BUILTINS continues to ship as a `readonly SlashCommand[]`.
     expect(src).toMatch(/export const BUILTINS:\s*readonly SlashCommand\[\]/)
     // Type re-exports — `declare module "./slash-commands"` extensions in
