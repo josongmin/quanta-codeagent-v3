@@ -45,6 +45,7 @@ import {
   continuationCommandIdForApproval,
   SessionProtocolError,
 } from "@/protocol/session"
+import { errMessage } from "@/shared"
 import type {
   SessionTransportClient,
   SessionTransportClientRejection,
@@ -508,7 +509,7 @@ export const createTurnEndCorrelator = (
         kind: "error",
         error: new SessionTurnCorrelationLostError(
           "continuation_failed",
-          error instanceof Error ? error.message : String(error),
+          errMessage(error),
         ),
       })
     },

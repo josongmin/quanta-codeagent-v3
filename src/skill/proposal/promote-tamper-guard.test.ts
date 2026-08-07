@@ -8,6 +8,7 @@ import { mkdtemp, readFile, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
+import { errMessage } from "@/shared"
 import {
   FsJailError,
   resolveJailed,
@@ -23,7 +24,7 @@ const IO: PromoteStorageIo = {
   writeFileAtomic: (abs, c) => writeFileAtomic(abs, c),
   readFile: (abs) => readFile(abs, "utf8"),
   isJailError: (e) => e instanceof FsJailError,
-  errMessage: (e) => String(e),
+  errMessage,
 }
 
 describe("ADVERSARIAL RFC03 CAS promote", () => {

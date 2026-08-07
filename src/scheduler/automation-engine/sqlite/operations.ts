@@ -231,7 +231,7 @@ export const schedule = (
         input.inheritedPolicy !== undefined ? JSON.stringify(input.inheritedPolicy) : null,
     })
   } catch (e) {
-    if (input.kind === "heartbeat" && String(e).includes("idx_automations_live_heartbeat_thread")) {
+    if (input.kind === "heartbeat" && errMessage(e).includes("idx_automations_live_heartbeat_thread")) {
       return Promise.resolve({
         ok: false,
         code: "heartbeat-thread-occupied",

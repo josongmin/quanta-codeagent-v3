@@ -12,6 +12,7 @@ import { defaultRoleModelResolver, type RoleModelResolver } from "@/llm/role-mod
 import { projectAgentEventToAgentStateObservation } from "@/protocol/agent-state"
 import {
   emitOperatorNotice,
+  errMessage,
   gateOn,
   gateOnStrict,
   itemStreamEnabled,
@@ -840,7 +841,7 @@ export const wireSteerPlane = <T extends OptionalPortBase>(base: T): T => {
       }
     },
     onReceiptError: (error) =>
-      logger.warn("subagent steer receipt sink failed", { error: String(error) }),
+      logger.warn("subagent steer receipt sink failed", { error: errMessage(error) }),
   })
   return { ...base, subagent: { ...sub, steerPlane: { retention, finalization } } } as T
 }

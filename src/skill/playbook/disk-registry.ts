@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs"
 import { isAbsolute, relative, resolve, sep } from "node:path"
+import { errMessage } from "@/shared"
 import { parseFrontmatter } from "../frontmatter"
 import type { PlaybookRegistration, PlaybookRegistry } from "./auto-dispatch"
 import { parsePlaybookFrontmatter } from "./frontmatter-parser"
@@ -68,7 +69,7 @@ const canonicalRoot = (
   } catch (error) {
     return {
       ok: false,
-      issue: issue("io-error", absolute, error instanceof Error ? error.message : String(error)),
+      issue: issue("io-error", absolute, errMessage(error)),
     }
   }
 }
@@ -85,7 +86,7 @@ const loadRegistration = (
   } catch (error) {
     return {
       ok: false,
-      issue: issue("read-error", path, error instanceof Error ? error.message : String(error)),
+      issue: issue("read-error", path, errMessage(error)),
     }
   }
   if (!isConfined(root, canonical)) {
@@ -104,7 +105,7 @@ const loadRegistration = (
   } catch (error) {
     return {
       ok: false,
-      issue: issue("read-error", path, error instanceof Error ? error.message : String(error)),
+      issue: issue("read-error", path, errMessage(error)),
     }
   }
 
@@ -114,7 +115,7 @@ const loadRegistration = (
   } catch (error) {
     return {
       ok: false,
-      issue: issue("read-error", path, error instanceof Error ? error.message : String(error)),
+      issue: issue("read-error", path, errMessage(error)),
     }
   }
 
@@ -153,7 +154,7 @@ const scan = (
     return {
       ok: false,
       issues: [
-        issue("io-error", rootResult.root, error instanceof Error ? error.message : String(error)),
+        issue("io-error", rootResult.root, errMessage(error)),
       ],
     }
   }
@@ -202,7 +203,7 @@ export const createDiskPlaybookRegistry = (root: string): DiskPlaybookRegistry =
       last = {
         ok: false,
         issues: [
-          issue("io-error", resolve(root), error instanceof Error ? error.message : String(error)),
+          issue("io-error", resolve(root), errMessage(error)),
         ],
       }
       return last

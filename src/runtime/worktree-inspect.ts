@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 import { runShell } from "./shell"
 import type { ShellResult } from "./types"
 
@@ -193,7 +194,7 @@ export const inspectWorktrees = async (
   try {
     r = await git(repoRoot, "worktree list --porcelain")
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    return { ok: false, error: errMessage(e) }
   }
   if (r.exitCode !== 0) {
     return { ok: false, error: r.stderr.trim() || r.stdout.trim() || "git worktree list failed" }

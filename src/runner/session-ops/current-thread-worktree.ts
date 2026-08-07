@@ -48,6 +48,7 @@ import {
   transitionWorkspaceState,
   type WorkspaceOwnership,
 } from "@/session"
+import { errMessage } from "@/shared"
 
 /** Injectable clock — epoch-ms — so the transaction is deterministic in tests. */
 export type Clock = () => number
@@ -237,7 +238,7 @@ export const transitionThreadToWorktree = async (
   try {
     target = worktreeTargetIdentity(req.ownershipId, req.repoRoot, req.branch)
   } catch (e) {
-    const detail = e instanceof WorktreeForkError ? (e.detail ?? e.message) : String(e)
+    const detail = e instanceof WorktreeForkError ? (e.detail ?? e.message) : errMessage(e)
     return { kind: "failed", errorCode: ERR_GIT, detail }
   }
   const intent = makeWorkspaceCreateIntent({
@@ -280,7 +281,7 @@ export const transitionThreadToWorktree = async (
     // RFC02-5 — the effect FAILED; emit the single terminal `failed` transition
     // (after the effect settled, never before).
     emitActivitySettle(activity, req.ownershipId, "failed", failAt)
-    const detail = e instanceof WorktreeForkError ? (e.detail ?? e.message) : String(e)
+    const detail = e instanceof WorktreeForkError ? (e.detail ?? e.message) : errMessage(e)
     return { kind: "failed", errorCode: ERR_GIT, detail }
   }
 

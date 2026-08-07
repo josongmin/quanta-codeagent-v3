@@ -1,3 +1,4 @@
+import { errMessage } from "@/shared"
 import { encodeSessionTransportMessage, resolveInboundSessionTransportFrame } from "../codec"
 import type { SessionTransport, SessionTransportHandler } from "../types"
 import { createSessionTransportCloseSignal } from "./close-signal"
@@ -131,7 +132,7 @@ export const createSessionStdioTransport = (
         // A throwing writer is a dead peer (EPIPE-class). Tear down and notify
         // the liveness channel, then rethrow so the caller-visible rejection
         // behavior is exactly what it was pre-S4.
-        const detail = error instanceof Error ? error.message : String(error)
+        const detail = errMessage(error)
         teardown(`writer_error (${detail})`)
         throw error
       }
