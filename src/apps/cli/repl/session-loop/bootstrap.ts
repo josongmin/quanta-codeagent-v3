@@ -3,6 +3,7 @@ import type { Message } from "@/llm"
 import { createCronSlashAdapter } from "@/scheduler"
 import { assembleAutomation } from "@/scheduler/runtime-wire"
 import { errMessage, runtimeConfig } from "@/shared"
+import type { AgentEvent } from "@/stream"
 import { ExternalPromptQueue } from "../external-prompt-queue"
 import { createHeartbeatBinder, heartbeatEnqueueHandler } from "../heartbeat-binder"
 import { type MidTurnCaptureHandle, maybeCreateMidTurnCaptureWire } from "../mid-turn-capture-wire"
@@ -106,6 +107,21 @@ const buildPromptPlumbing = (deps: RunSessionLoopDeps, state: LoopStateHolder) =
   return { externalPromptQueue, enqueueWithHeartbeat, withInTurnCapture }
 }
 
+/** RFC02-3 (A8, feeder) — the deps handed to `assembleAutomation` when the REPL
+ *  mints its OWN engine. `onModelReroute` is attached ONLY when the host
+ *  forwarded a gated route-event sink (`setup.routeEventSink`), so a scheduler
+ *  fire whose preferred model is DOWN projects `model_route_changed` onto the
+ *  SAME live stream the provider-fallback path uses. Sink ABSENT (gate off) ⇒
+ *  the slot is omitted ⇒ the reroute is byte-identical to today (no observation).
+ *  Extracted so the sink-attach wire is FRONT-DOOR testable. */
+export const buildAutomationRerouteDeps = (input: {
+  readonly enqueueUserMessage: ReturnType<typeof heartbeatEnqueueHandler>
+  readonly routeEventSink?: ((ev: AgentEvent) => void) | undefined
+}): Parameters<typeof assembleAutomation>[1] => ({
+  agentLoop: { enqueueUserMessage: input.enqueueUserMessage },
+  ...(input.routeEventSink !== undefined ? { onModelReroute: input.routeEventSink } : {}),
+})
+
 /** Phase 2 — automation engine + runtime compose. Mints the `/cron` engine
  *  (LATE-BINDING the slash slot the instant it exists), strips the bootstrap
  *  ticker so the REPL stays the SINGLE interval owner (ALBB-14), and folds the
@@ -122,11 +138,10 @@ const buildAutomationCompose = (
     runtimeContext.automationEngine() ??
     assembleAutomation(
       { get: (name) => process.env[name] },
-      {
-        agentLoop: {
-          enqueueUserMessage: enqueueWithHeartbeat,
-        },
-      },
+      buildAutomationRerouteDeps({
+        enqueueUserMessage: enqueueWithHeartbeat,
+        ...(setup.routeEventSink !== undefined ? { routeEventSink: setup.routeEventSink } : {}),
+      }),
     ) ??
     undefined
   // B2 (jul-04 CLI-surfacing) `/cron` — LATE-BIND the automation slash slot the

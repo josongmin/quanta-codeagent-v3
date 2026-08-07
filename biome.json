@@ -1137,6 +1137,7 @@
         "!tests/unit/mcp-cmd.test.ts",
         "!tests/unit/mcp-surface-wire.test.ts",
         "!tests/unit/cli-retry-with.test.ts",
+        "!tests/unit/model-route-feeder-wire-hellgate.test.ts",
         "!tests/unit/cli-rewind-slash-hellgate.test.ts",
         "!tests/unit/conv-checkpoint-auto-record-hellgate.test.ts",
         "!tests/unit/per-tool-checkpoint-hellgate.test.ts",
