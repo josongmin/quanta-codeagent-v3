@@ -23,6 +23,8 @@
 
 /* ------------------------------ CSV ------------------------------ */
 
+import type { ChartTone } from "./ChartPrimitives"
+
 export interface CsvTable {
   readonly header: readonly string[]
   readonly rows: readonly (readonly string[])[]
@@ -228,7 +230,7 @@ export type ChartSpec =
       readonly series: readonly {
         readonly name: string
         readonly data: readonly number[]
-        readonly tone?: string
+        readonly tone?: ChartTone
       }[]
       readonly stacked?: boolean
       readonly valueSuffix?: string
@@ -239,7 +241,7 @@ export type ChartSpec =
       readonly series: readonly {
         readonly name: string
         readonly data: readonly number[]
-        readonly tone?: string
+        readonly tone?: ChartTone
       }[]
       readonly fill?: boolean
       readonly valueSuffix?: string
@@ -249,18 +251,18 @@ export type ChartSpec =
       readonly data: readonly {
         readonly label: string
         readonly value: number
-        readonly tone?: string
+        readonly tone?: ChartTone
       }[]
       readonly donut?: boolean
     }
 
 const TONES = new Set(["success", "danger", "warning", "info", "neutral"])
-const asTone = (v: unknown): string | undefined =>
-  typeof v === "string" && TONES.has(v) ? v : undefined
+const asTone = (v: unknown): ChartTone | undefined =>
+  typeof v === "string" && TONES.has(v) ? (v as ChartTone) : undefined
 
-const asSeries = (raw: unknown): { name: string; data: number[]; tone?: string }[] | null => {
+const asSeries = (raw: unknown): { name: string; data: number[]; tone?: ChartTone }[] | null => {
   if (!Array.isArray(raw)) return null
-  const out: { name: string; data: number[]; tone?: string }[] = []
+  const out: { name: string; data: number[]; tone?: ChartTone }[] = []
   for (const s of raw) {
     if (s === null || typeof s !== "object") continue
     const o = s as Record<string, unknown>
@@ -304,7 +306,7 @@ const parseAxisChart = (o: Record<string, unknown>, type: "bar" | "line"): Chart
 /** Parse a pie spec. Returns null when `data` is missing / has no valued point. */
 const parsePieChart = (o: Record<string, unknown>): ChartSpec | null => {
   if (!Array.isArray(o.data)) return null
-  const data: { label: string; value: number; tone?: string }[] = []
+  const data: { label: string; value: number; tone?: ChartTone }[] = []
   for (const p of o.data) {
     if (p === null || typeof p !== "object") continue
     const po = p as Record<string, unknown>

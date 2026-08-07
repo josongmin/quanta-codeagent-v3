@@ -292,7 +292,7 @@ export interface ToolDiffMessage {
   /** RFC-12 (deferred) SURFACE B — anchored review comments to overlay on the
    *  diff. ADDITIVE + OPTIONAL: absent (a daemon that never serializes it) ⇒ the
    *  DiffPanel/DiffView render is byte-identical to the pre-RFC-12 diff. */
-  readonly anchors?: readonly DiffAnchorComment[]
+  readonly anchors?: readonly DiffAnchorComment[] | undefined
 }
 
 /** The latest per-category segmented context usage (mirrors the CLI

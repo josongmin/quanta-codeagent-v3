@@ -55,7 +55,7 @@ export interface DiffViewProps {
    *  undefined ⇒ NO overlay rows are emitted (byte-identical to the pre-RFC-12
    *  inline render). Each comment renders as an inline note row directly beneath
    *  its anchored line, carrying verdict + category + summary. */
-  readonly comments?: readonly DiffAnchorComment[]
+  readonly comments?: readonly DiffAnchorComment[] | undefined
   readonly className?: string
 }
 
