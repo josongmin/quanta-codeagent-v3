@@ -53,6 +53,10 @@ import {
   type TurnRegistrySnapshot,
 } from "@/agent/turn-registry-snapshot"
 import { type CapabilityDescriptor, runCapabilityProbe, type Surface } from "@/capability"
+import {
+  bindRouteSinkToStream,
+  buildRouteEventForwarder,
+} from "@/host/bootstrap/route-event-forwarder"
 import { createMcpToolReloadController } from "@/host/runtime/mcp-tool-reload"
 import type { ImageBlock, LLMPort, Message } from "@/llm"
 import { StructuredLogger } from "@/observability"
@@ -70,7 +74,7 @@ import { resolveNetworkProxyFromEnv } from "@/runner/knobs/knobs/network-proxy"
 import { isPathLikeToken } from "@/runner/orchestrate"
 import { openSessionEgressProxy } from "@/runtime/network-proxy"
 import { errMessage, gateOn, type Logger, logger, runtimeConfigFromEnv } from "@/shared"
-import type { AgentEvent, StreamPort } from "@/stream"
+import type { AgentEvent } from "@/stream"
 import {
   type BootstrapFeatures,
   type SessionBootstrapDeps,
@@ -80,6 +84,11 @@ import {
   type SessionFeatureConfig,
   type SessionRuntimeConfigShape,
 } from "./types"
+
+// RFC02-3 (A8) — the route-event forwarder cluster now lives in a sibling module
+// (SRP + god-module budget). Re-exported so the existing `@/host/bootstrap/
+// bootstrap-session#buildRouteEventForwarder` import site stays valid.
+export { buildRouteEventForwarder }
 
 /** Operator cost-cap dials from env (`QUANTA_MAX_COST_USD` /
  *  `QUANTA_MAX_COST_PER_TURN_USD`): a positive USD amount, fractional allowed,
@@ -98,48 +107,6 @@ export const parseOperatorCostDials = (env: NodeJS.ProcessEnv): BudgetDials => {
     ...(maxCostUsd !== undefined ? { maxCostUsd } : {}),
     ...(maxCostPerTurnUsd !== undefined ? { maxCostPerTurnUsd } : {}),
   }
-}
-
-/** RFC02-3 (A8) — build the PRODUCTION route sink forwarder + its late-bind
- *  hook, gated by `QUANTA_MODEL_REROUTE_EVENT`. The LLM stack is built BEFORE the
- *  stream exists, so we hand `deps.buildLlm` a forwarder that closes over a
- *  mutable target (a single deferred pointer — NOT a bus/store: it holds ZERO
- *  events, only the eventual `emit`). `bindRouteEventTarget` sets that target to
- *  the live `stream.emit` once `buildStreaming` has run. A transition that fires
- *  before the bind (there is none — the first turn streams after bootstrap
- *  completes) is dropped by the no-op default target. Gate OFF ⇒ returns
- *  `undefined` for BOTH ⇒ no sink reaches `FallbackLLM` (byte-identical). */
-export const buildRouteEventForwarder = (
-  env: NodeJS.ProcessEnv,
-): {
-  readonly sink: ((ev: AgentEvent) => void) | undefined
-  readonly bind: ((emit: (ev: AgentEvent) => void) => void) | undefined
-} => {
-  if (!runtimeConfigFromEnv(env).modelRerouteEvent) return { sink: undefined, bind: undefined }
-  // Deferred target — defaults to a no-op until the stream is bound. `FallbackLLM`
-  // swallows any throw from the sink, so a bind-time race can never break a stream.
-  let target: (ev: AgentEvent) => void = () => {}
-  return {
-    sink: (ev: AgentEvent): void => {
-      target(ev)
-    },
-    bind: (emit: (ev: AgentEvent) => void): void => {
-      target = emit
-    },
-  }
-}
-
-/** RFC02-3 (A8) — bind the deferred route sink forwarder to the live stream's
- *  `emit` once the stream exists. No-op when the forwarder was not built (gate
- *  OFF ⇒ `bind` is undefined ⇒ byte-identical). The `stream.emit` is wrapped in a
- *  stable arrow so the sink closure survives across turns. */
-const bindRouteSinkToStream = (
-  bind: ((emit: (ev: AgentEvent) => void) => void) | undefined,
-  stream: StreamPort,
-): void => {
-  bind?.((ev) => {
-    stream.emit(ev)
-  })
 }
 
 const failSessionBootstrap = (
@@ -458,6 +425,11 @@ interface PreparedSessionRuntime {
    *  set to the live `stream.emit` here by `assembleBootstrapResult`. Absent ⇒
    *  no sink was wired (byte-identical). */
   readonly bindRouteEventTarget?: (emit: (ev: AgentEvent) => void) => void
+  /** RFC02-3 (A8, feeder) — the SAME gated forwarder `sink` handed to
+   *  `deps.buildLlm`; carried through so the result exposes it to the
+   *  `/retry-with` + scheduler-reroute attach sites (see `SessionBootstrapResult`
+   *  field doc). Present ONLY when the gate is on (absent ⇒ byte-identical). */
+  readonly routeEventSink?: (ev: AgentEvent) => void
 }
 
 /** Build {@link PreparedSessionRuntime} — the verbatim pre-feature prologue of
@@ -572,6 +544,7 @@ const prepareSessionRuntime = async (
     sessionProxy,
     features,
     ...(routeForwarder.bind !== undefined ? { bindRouteEventTarget: routeForwarder.bind } : {}),
+    ...(routeForwarder.sink !== undefined ? { routeEventSink: routeForwarder.sink } : {}),
   }
 }
 
@@ -797,6 +770,31 @@ const buildToolingBundle = (
   }
 }
 
+/** `session_config` tool seam — built ONCE from the same mutable cells the
+ *  surface uses, so a `set_effort` tool-op and an operator `/effort` slash mutate
+ *  the SAME store while authority-bearing posture cells stay read-only. Duck-typed
+ *  (mirror of `SessionConfigSeam` in `@/tool/types`) to keep the file slice-fenced.
+ *  Extracted from `assembleBootstrapResult` (SRP + god-fn budget); closures capture
+ *  the SAME live cells ⇒ byte-identical. */
+const buildSessionConfigPort = (cells: {
+  readonly effortStore: ReturnType<typeof createEffortStore>
+  readonly permissionModeState: ReturnType<typeof createPermissionModeSessionState>
+  readonly identityModeState: IdentityModeSessionState
+  readonly toolProfileState: ToolProfileSessionState
+  readonly model: string
+  readonly provider: SessionRuntimeConfigShape["provider"]
+}): SessionBootstrapResult["sessionConfigPort"] => ({
+  readEffort: () => cells.effortStore.get(),
+  writeEffort: (next) => {
+    cells.effortStore.set(next)
+  },
+  readPermissionMode: () => cells.permissionModeState.get(),
+  readIdentityMode: () => cells.identityModeState.get(),
+  readToolProfile: () => cells.toolProfileState.get(),
+  readModel: () => cells.model,
+  readProvider: () => cells.provider,
+})
+
 const assembleBootstrapResult = async (
   deps: SessionBootstrapDeps,
   runtime: SessionRuntimeConfigShape,
@@ -817,6 +815,7 @@ const assembleBootstrapResult = async (
     sessionProxy,
     features,
     bindRouteEventTarget,
+    routeEventSink,
   } = prepared
   {
     const {
@@ -858,25 +857,14 @@ const assembleBootstrapResult = async (
     const costPanel = deps.buildCostPanelOrUndefined(featureCfg, runtime.model)
     const branchProgress = deps.buildBranchProgressOrUndefined(featureCfg)
     const planStore = deps.buildPlanStoreOrUndefined(featureCfg)
-    // `session_config` tool seam — built ONCE at bootstrap from the same
-    // mutable cells the rest of the surface uses (effortStore +
-    // permissionModeState + identityModeState + toolProfileState), so a
-    // `set_effort` via the tool and an operator `/effort` slash mutate the
-    // SAME store while the authority-bearing posture cells remain visible
-    // read-only. The seam is duck-typed (structural mirror of
-    // `SessionConfigSeam` declared in `@/tool/types`) so this file stays
-    // slice-fenced.
-    const sessionConfigPort: SessionBootstrapResult["sessionConfigPort"] = {
-      readEffort: () => effortStore.get(),
-      writeEffort: (next) => {
-        effortStore.set(next)
-      },
-      readPermissionMode: () => permissionModeState.get(),
-      readIdentityMode: () => identityModeState.get(),
-      readToolProfile: () => toolProfileState.get(),
-      readModel: () => runtime.model,
-      readProvider: () => runtime.provider,
-    }
+    const sessionConfigPort = buildSessionConfigPort({
+      effortStore,
+      permissionModeState,
+      identityModeState,
+      toolProfileState,
+      model: runtime.model,
+      provider: runtime.provider,
+    })
     const shutdownMcp = async (): Promise<void> => {
       await stopMcpClients(features.mcpClients)
       // H3 (jun-10) — close the session egress proxy on the SAME teardown hook
@@ -946,6 +934,9 @@ const assembleBootstrapResult = async (
       // was built). Spread conditionally so the default-OFF path never puts a
       // literal `undefined` on the result (exactOptionalPropertyTypes).
       ...(registrySnapshotRef !== undefined ? { registrySnapshotRef } : {}),
+      // RFC02-3 (A8, feeder) — expose the gated forwarder sink for the retry +
+      // scheduler reroute attach sites (conditional spread ⇒ OFF byte-identical).
+      ...(routeEventSink !== undefined ? { routeEventSink } : {}),
     }
   }
 }

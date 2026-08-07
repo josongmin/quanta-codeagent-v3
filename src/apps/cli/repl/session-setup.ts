@@ -14,7 +14,7 @@ import type { ApprovalDecisionResult } from "@/runner/orchestrate"
 import type { RuntimeContext } from "@/sdk/runtime"
 import { gateOn, runtimeConfig } from "@/shared"
 import { clearFsJailDecisionSink, setFsJailDecisionSink } from "@/storage"
-import type { StreamPort } from "@/stream"
+import type { AgentEvent, StreamPort } from "@/stream"
 import type { TaskRegistry } from "@/subagent"
 import type { BranchProgressTracker } from "../branch-search-progress"
 import type { CostPanel } from "../cost-panel"
@@ -223,11 +223,20 @@ export interface SessionSetupResult {
    *  `QUANTA_HUNK_UNDO=1`). Same instance the HITL prompt persists applies into;
    *  forwarded so the surface composer wires the `/undo` slash context. Absent ⇒
    *  no `/undo` slot (byte-identical). */
-  readonly hunkUndoStore: import("@/runner/hunk-mutation-journal").HunkMutationJournalStore | undefined
+  readonly hunkUndoStore:
+    | import("@/runner/hunk-mutation-journal").HunkMutationJournalStore
+    | undefined
   readonly costPanel: CostPanel | undefined
   readonly branchProgress: BranchProgressTracker | undefined
   readonly planStore: PlanStore | undefined
   readonly abort: AbortController
+  /** RFC02-3 (A8, feeder) — the gated route-event forwarder sink (bound to the
+   *  live stream) forwarded from `boot.routeEventSink`. The surface composer
+   *  attaches it to the `/retry-with` state's `onModelReroute` AND the scheduler
+   *  reroute compose's `onModelReroute`, so operator-retry + scheduler reroute
+   *  transitions reach the SAME `AgentEvent` stream as provider-fallback. Absent
+   *  when `QUANTA_MODEL_REROUTE_EVENT` is off ⇒ no sink attached (byte-identical). */
+  readonly routeEventSink?: ((ev: AgentEvent) => void) | undefined
   readonly pills: ReturnType<typeof createStatusPills>
   readonly argPrompt: string | undefined
   /** ADR-0297 fence — the host (`repl.ts`) may not read `process` directly;
@@ -496,6 +505,10 @@ export const setupSession = async (
     branchProgress: boot.branchProgress as BranchProgressTracker | undefined,
     planStore: boot.planStore,
     abort: boot.abort,
+    // RFC02-3 (A8, feeder) — forward the gated route-event forwarder sink so the
+    // surface composer attaches it to the `/retry-with` state + scheduler reroute
+    // `onModelReroute` slots. Absent (gate off) ⇒ slot omitted ⇒ byte-identical.
+    ...(boot.routeEventSink !== undefined ? { routeEventSink: boot.routeEventSink } : {}),
     pills,
     argPrompt: boot.argPrompt,
     stderrIsTTY: process.stderr.isTTY,

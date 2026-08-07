@@ -1,6 +1,9 @@
+import type { Message, ModelCandidate, StreamEvent, StreamInput } from "@/llm"
+import type { AgentEvent } from "@/stream"
 import type { DreamSlashState } from "../../dream-cmd"
 import type { MemorySlashState } from "../../memory-cmd"
 import type { PermissionInspectSlashState } from "../../permission-explain"
+import type { RetryWithSessionState } from "../../retry-with"
 import type { ConvCheckpointSlashState } from "../../rewind-conv-cmd"
 import type { SessionSetupResult } from "../session-setup"
 import type { SurfaceCoreState } from "./core-state"
@@ -34,6 +37,35 @@ const dreamSlot = (setup: SessionSetupResult): DreamSlashState | undefined => {
   return trigger === undefined ? undefined : { trigger }
 }
 
+/** RFC02-3 (A8, feeder) — build the live `/retry-with` session state, attaching
+ *  the gated route-event sink to `onModelReroute` when (and only when) the host
+ *  forwarded one. Returns `undefined` when retry is disabled OR no turn has
+ *  streamed yet (⇒ the `/retry-with` slot is omitted). Extracted as a pure
+ *  helper so the sink-attach wire is FRONT-DOOR testable without assembling the
+ *  full surface. Sink ABSENT (gate off) ⇒ `onModelReroute` omitted ⇒ the swap
+ *  is byte-identical to today (no route observation). */
+export const buildRetryState = (input: {
+  readonly streamInput: StreamInput | undefined
+  readonly retryEnabled: boolean
+  readonly candidates: readonly ModelCandidate[]
+  readonly currentModelId: string
+  readonly messages: Message[]
+  readonly signal: AbortSignal
+  readonly onEvent: (ev: StreamEvent) => void
+  readonly routeEventSink?: ((ev: AgentEvent) => void) | undefined
+}): RetryWithSessionState | undefined => {
+  if (!input.retryEnabled || input.streamInput === undefined) return undefined
+  return {
+    candidates: input.candidates,
+    currentModelId: input.currentModelId,
+    messages: input.messages,
+    streamInput: input.streamInput,
+    signal: input.signal,
+    onEvent: input.onEvent,
+    ...(input.routeEventSink !== undefined ? { onModelReroute: input.routeEventSink } : {}),
+  }
+}
+
 export const buildSurfaceDispatchWire = (
   setup: SessionSetupResult,
   state: SurfaceState,
@@ -54,18 +86,20 @@ export const buildSurfaceDispatchWire = (
   const permissionInspect = permissionInspectSlot(setup)
   const memory = memorySlot(setup)
   const dream = dreamSlot(setup)
-  const retry = () => {
-    const streamInput = core.lastStreamInput()
-    if (!core.retryEnabled || streamInput === undefined) return undefined
-    return {
+  const retry = () =>
+    buildRetryState({
+      streamInput: core.lastStreamInput(),
+      retryEnabled: core.retryEnabled,
       candidates: core.retryCandidates,
       currentModelId: setup.model,
       messages: [...state.history],
-      streamInput,
       signal: setup.abort.signal,
       onEvent: renderRetryEvent,
-    }
-  }
+      // RFC02-3 (A8, feeder) — attach the gated forwarder sink so an operator
+      // `/retry-with` model swap projects `model_route_changed` onto the SAME
+      // live stream the provider-fallback path uses. Absent (gate off) ⇒ omitted.
+      ...(setup.routeEventSink !== undefined ? { routeEventSink: setup.routeEventSink } : {}),
+    })
 
   const dispatchSlash = buildSurfaceDispatch({
     sessionCwd: setup.cwd,

@@ -597,4 +597,11 @@ export interface SessionBootstrapResult {
    *  turn-0 is byte-identical to the no-ref path. Absent (default) ⇒ omitted ⇒
    *  the loop builds the snapshot from `registry` exactly as today. */
   readonly registrySnapshotRef?: AgentConfig["registrySnapshotRef"]
+  /** RFC02-3 (A8, feeder) — the SAME gated route-event forwarder `sink` handed to
+   *  `buildLlm` for the provider-fallback path (bound to the live `stream.emit`).
+   *  Exposed so the `/retry-with` state factory AND the scheduler reroute compose
+   *  attach it to their `onModelReroute` slots — closing the feeder gap where only
+   *  provider-fallback transitions reached the stream. Present ONLY when
+   *  `QUANTA_MODEL_REROUTE_EVENT` is on; absent ⇒ no sink attached (byte-identical). */
+  readonly routeEventSink?: (ev: AgentEvent) => void
 }
