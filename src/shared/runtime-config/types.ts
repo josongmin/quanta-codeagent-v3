@@ -689,6 +689,15 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  When ON (and a granular checkpoint registry is wired) the turn-runner feeds
    *  a durable `message → shadow SHA` record so a later restore can resolve. */
   readonly rewindCapture: boolean
+  /** RFC-13 HOP-2 — durable message-id assignment at the per-turn persist
+   *  boundary (`QUANTA_MESSAGE_IDS`). Default false ⇒ `persistTurn` assigns NO
+   *  ids ⇒ the saved transcript is byte-identical (id-less) and `/rewind`
+   *  (message table / `--restore-files`) + the F3 checkpoint-capture feeder
+   *  fail-close as today. When ON (or `rewindCapture` is ON — F3 is inert
+   *  without ids), each id-LESS message is minted a stable, deterministic id
+   *  BEFORE the save + checkpoint hook. Idempotent: a message that already has
+   *  an id KEEPS it across resume/resave (never re-minted). */
+  readonly messageIds: boolean
   /** D3 (jun-7-naive-impl-hardening) — PTY env-inherit ESCAPE HATCH
    *  (`QUANTA_PTY_INHERIT_ENV`). Default false ⇒ the PTY child's env is SCRUBBED
    *  through the same `scrubEnv`/`applyLocalEnv` chokepoint as `runShell`

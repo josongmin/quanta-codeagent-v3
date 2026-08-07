@@ -151,6 +151,9 @@ describe("RFC01-A2 turn-wire — gate-OFF byte-identical + zero capture", () => 
     expect(spy.listCalls()).toBe(0)
     const reloaded = await loadSessionById(id)
     expect(reloaded?.rollbackCheckpoints ?? []).toEqual([])
+    // RFC-13 HOP-2 drift anchor: gate OFF ⇒ NO message ids assigned ⇒ the saved
+    // transcript is byte-identical (id-less) ⇒ /rewind fail-closes as today.
+    for (const m of reloaded?.messages ?? []) expect(m.id).toBeUndefined()
   })
 
   test("GATE-ON but NO registry ⇒ still zero capture (hook not even built)", async () => {
@@ -189,11 +192,41 @@ describe("RFC01-A2 turn-wire — gate-OFF byte-identical + zero capture", () => 
       idMeta: mkMeta(id, dir),
     })
 
-    // The hook ran ⇒ the SHA source was consulted at least once. (Whether a
-    // durable record is written depends on the transcript having message ids —
-    // the id-less live transcript safely yields `no-message-id`; the durable
-    // capture path is proved by the feeder-unit front-door hellgate.)
+    // The hook ran ⇒ the SHA source was consulted at least once. (RFC-13 HOP-2:
+    // with the capture gate ON, `persistTurn` now ALSO assigns message ids, so
+    // the transcript is addressable and the durable capture path fires — see the
+    // dedicated front-door proof below.)
     expect(spy.listCalls()).toBeGreaterThan(0)
+  })
+
+  test("RFC-13 HOP-2 FRONT-DOOR: capture gate ⇒ ids assigned ⇒ F3 writes a durable rollbackCheckpoint (was inert)", async () => {
+    process.env.QUANTA_REWIND_CAPTURE = "1"
+    __resetRuntimeConfig()
+    const id = "turn-on-durable"
+    const spy = spyRegistry([{ sha: "a".repeat(40), tag: "tool:x" }])
+    const base = makeBase({
+      cwd: dir,
+      shadowCheckpoint: { mode: "per-mutating", granularPolicy: policyWith(spy.registry) },
+    } as Partial<RuntimeBase>)
+
+    await runRuntimeTurn({
+      base,
+      history: [],
+      prompt: "go",
+      state: undefined,
+      idMeta: mkMeta(id, dir),
+    })
+
+    const reloaded = await loadSessionById(id)
+    // Ids are now on the persisted transcript (addressable ⇒ /rewind works).
+    const msgIds = (reloaded?.messages ?? []).map((m) => m.id)
+    expect(msgIds.every((x) => typeof x === "string" && x.length > 0)).toBe(true)
+    // BEFORE HOP-2 the feeder no-op'd at `no-message-id` and this array was []
+    // (F3 inert). Now a durable checkpoint is bound to the LAST message id.
+    const ckpts = reloaded?.rollbackCheckpoints ?? []
+    expect(ckpts.length).toBeGreaterThan(0)
+    expect(ckpts[0]?.messageId).toBe(msgIds[msgIds.length - 1])
+    expect(ckpts[0]?.checkpointSha).toBe("a".repeat(40))
   })
 
   test("GATE-ON + NO idMeta (path-mode / stateless) ⇒ zero capture (id-mode only)", async () => {

@@ -251,6 +251,14 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
       "Post-turn durable rewind-checkpoint capture — binds the newest per-tool shadow anchor SHA to the last message id so /rewind --restore-files can restore (RFC01-A2 feeder). Unset ⇒ no capture, /rewind fail-closes safe.",
   },
   {
+    envKey: "QUANTA_MESSAGE_IDS",
+    kind: "bool",
+    default: false,
+    group: "session",
+    describe:
+      "Durable stable message-id assignment at the per-turn persist boundary (RFC13-HOP2) — mints a deterministic id on each id-less message BEFORE the save + checkpoint hook so /rewind (message table / --restore-files) + the F3 capture feeder become addressable. Idempotent: existing ids survive resume/resave. Also implied by QUANTA_REWIND_CAPTURE (F3 is inert without ids). Unset ⇒ no ids, transcript byte-identical, /rewind fail-closes.",
+  },
+  {
     envKey: "QUANTA_PTY_INHERIT_ENV",
     kind: "bool",
     default: false,
