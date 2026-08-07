@@ -10,9 +10,13 @@
  *      tool with `name: "progress-audit"` arms a gate that permits only
  *      Read/Grep/Bash. A disallowed tool MUST be denied as a recoverable
  *      tool_result and NOT actually executed (counting-stub proof).
- *   3. The user's own SKILL.md and the system progress-audit coexist —
- *      neither shadows the other, and system skills WIN on a name collision
- *      so a user cannot impersonate `progress-audit` with a weaker version.
+ *   3. The user's own SKILL.md and the system progress-audit coexist. On a
+ *      name collision the READ-TIME registry precedence is user-wins
+ *      (ADR-0134: `admin > repo > team > user > personal > system > builtIn`;
+ *      "system: 사용자 disable 가능"). The "system cannot be shadowed" security
+ *      posture is NOT a read-time rule — it is enforced at the PROPOSAL/IMPORT
+ *      admission layer (`skill_create` → `system_shadow` refusal), which a raw
+ *      on-disk SKILL.md bypasses by design (registry.ts:293, compiler.ts:15-17).
  *
  * Deterministic: scripted fake LLM, no network, temp skill dir cleaned up.
  * Modeled on `tests/integration/skill-scope-e2e.test.ts`.
@@ -192,10 +196,12 @@ describe("progress-audit system skill — discovery + scoping (e2e)", () => {
     }
   })
 
-  test("a user SKILL.md and the system progress-audit coexist; system wins on collision", async () => {
-    // Write a user skill named the same as the system one with a weaker
-    // allowlist. The system skill MUST win (security-relevant: a user must
-    // not be able to shadow progress-audit's audit-discipline body).
+  test("a user SKILL.md and the system progress-audit coexist; user wins on collision (ADR-0134 read-time precedence)", async () => {
+    // Write a user skill named the same as the system one with a narrower
+    // allowlist. The USER skill wins at READ-TIME (ADR-0134 precedence:
+    // user > system). Shadow protection is NOT a read-time rule — it lives at
+    // the proposal/import admission layer (`skill_create` → `system_shadow`),
+    // which a raw on-disk SKILL.md deliberately bypasses (registry.ts:293).
     await mkdir(join(dir, "progress-audit"), { recursive: true })
     await writeFile(
       join(dir, "progress-audit", "SKILL.md"),
@@ -237,18 +243,25 @@ describe("progress-audit system skill — discovery + scoping (e2e)", () => {
     const features = await buildSessionFeatures(cfg)
     const al = features.skillAllowlists
     expect(al).toBeDefined()
-    // The SYSTEM skill's allowlist (Read/Grep/Bash) wins — NOT the user
-    // override's `["Bash"]`. This is the security invariant: a user-supplied
-    // skill cannot shadow a system one with a weaker (or different) policy.
-    expect(al?.get("progress-audit")).toEqual(["Read", "Grep", "Bash"])
+    // The USER skill's allowlist (`["Bash"]`) wins at read-time — ADR-0134
+    // precedence resolves user > system on a name collision. The registry is
+    // the single precedence authority (RFC03-0 snapshot cutover 7c81f8d49).
+    expect(al?.get("progress-audit")).toEqual(["Bash"])
     // The user's distinctly-named skill also appears in the catalogue.
     const userHelper = features.activeSkills?.find((s) => s.name === "userhelper")
     expect(userHelper).toBeDefined()
 
-    // The Skill tool's catalogue must NOT advertise the user's override
-    // description for `progress-audit`.
+    // Read-time user-wins: the Skill tool catalogue advertises the USER
+    // override's description for `progress-audit` (it is the collision winner).
+    // This is NOT a security hole — installing a shadowing skill is refused at
+    // proposal admission (`skill_create` → `system_shadow`); a raw on-disk file
+    // is an operator-trusted mount that ADR-0134 lets disable the system skill.
     const skillTool = features.extraTools.find((t) => t.name === "Skill")
-    expect(skillTool?.description).not.toContain("USER OVERRIDE")
+    expect(skillTool?.description).toContain("USER OVERRIDE")
+    // The system audit-discipline body is NOT lost — it is still discoverable
+    // as the shadowed entry (registry records every overridden scope), so the
+    // host/CLI can surface "user shadows system" and the operator can remove it.
+    expect(al?.get("userhelper")).toBeUndefined()
   })
 
   test("user skill with malformed frontmatter does not crash discovery; system skill still present", async () => {

@@ -40,6 +40,7 @@ import type { ConnectedSessionTransport, SessionTransport } from "@/ipc/session"
 import type { SessionEvent, SessionSnapshotLite } from "@/protocol/session"
 import { supported } from "@/protocol/session"
 import type { RuntimeFacade, RuntimeSession, SessionDispatchResult } from "@/sdk/runtime"
+import { __resetRuntimeConfig } from "@/shared"
 import { capabilitiesFor, makeSnapshotLite } from "../support/session-fixtures"
 
 const handles: WebDaemonHandle[] = []
@@ -66,6 +67,12 @@ beforeAll(() => {
   dbDir = mkdtempSync(join(tmpdir(), "quanta-resume-e2e-"))
   process.env.QUANTA_WEB_DB_DIR = dbDir
   delete process.env.QUANTA_WEB_DB // ensure persistence ON for the main suite
+  // ADR-0503 P4 — `openThreadStore()` now reads the DB dir from the CACHED
+  // `runtimeConfig().webDbDir`, not `process.env` directly. Without dropping the
+  // cache the seed store + the daemon both fall back to the DEFAULT dir and the
+  // seeded foreign thread never surfaces (TR-02/TR-05 read `[]`). Re-materialize
+  // the frozen config now that the temp override is in `process.env`.
+  __resetRuntimeConfig()
   // Seed the FOREIGN thread's persisted transcript BEFORE the daemon opens the
   // same DB file. The daemon's own live session (LIVE_SESSION_ID) is upserted at
   // boot; this foreign thread stands in for a conversation started on ANOTHER
@@ -90,6 +97,9 @@ afterAll(() => {
   else process.env.QUANTA_WEB_DB_DIR = prevDbDir
   if (prevDbGate === undefined) delete process.env.QUANTA_WEB_DB
   else process.env.QUANTA_WEB_DB = prevDbGate
+  // Drop the temp-dir override from the frozen config so a later test file that
+  // opens the store does not inherit this run's private dir.
+  __resetRuntimeConfig()
   try {
     rmSync(dbDir, { recursive: true, force: true })
   } catch {

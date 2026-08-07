@@ -159,6 +159,12 @@ describe("DockerSandbox e2e — stub docker binary, real spawn pipeline", () => 
 
   test("2b. Docker client is scrubbed while requested container env remains available", async () => {
     process.env.DOCKER_SANDBOX_HOST_SECRET = "must-not-reach-docker-client"
+    // The allowlisted witness must be a var the TEST controls: `LANG` is not
+    // exported on every host (bare CI shells / this box leave it unset), so a
+    // sandbox that correctly only forwards EXISTING allowlisted vars had nothing
+    // to forward and the assertion misfired as a code failure. Set it explicitly
+    // so the "allowlisted var passes through" invariant is hermetic.
+    process.env.LANG = "en_US.UTF-8"
     try {
       writeStub({ stdout: "ok", exit: 0, recordEnv: true })
       const sb = new DockerSandbox({ dockerBin: stubBin })
@@ -168,9 +174,10 @@ describe("DockerSandbox e2e — stub docker binary, real spawn pipeline", () => 
       expect(seen).not.toContain("DOCKER_SANDBOX_HOST_SECRET")
       expect(seen).not.toContain("must-not-reach-docker-client")
       expect(seen).toContain("PATH=")
-      expect(seen).toContain("LANG=")
+      expect(seen).toContain("LANG=en_US.UTF-8")
     } finally {
       delete process.env.DOCKER_SANDBOX_HOST_SECRET
+      delete process.env.LANG
     }
   })
 

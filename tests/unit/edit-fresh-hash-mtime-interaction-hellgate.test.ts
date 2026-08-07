@@ -268,6 +268,16 @@ describe("jul-13 edit-fresh-hash × mtime guard — fast-apply-merge success pat
           return { ok: true as const, merged, rationale: "test merge" }
         },
       },
+      // 0661ed316 hardening: the merge rung now REFUSES to land a model merge
+      // unless the host wired an explicit pre-commit reviewer (a whole-file
+      // model merge has no deterministic semantic-preservation proof). Wire an
+      // approving reviewer so this test exercises the SUCCESS path it pins;
+      // the reviewer-absent refusal is covered separately below.
+      fastApplyMergeReview: {
+        async approve() {
+          return true
+        },
+      },
     }
 
     // old_string absent verbatim → exact+fuzzy miss → merge rung → verified merge.
@@ -291,5 +301,35 @@ describe("jul-13 edit-fresh-hash × mtime guard — fast-apply-merge success pat
     )
     expect(r2.ok).toBe(true)
     expect(readFileSync(path, "utf8")).toBe("ALPHA2\nBETA_MERGED\n")
+  })
+
+  test("the merge rung REFUSES to land (falls through to typed mismatch) when NO pre-commit reviewer is wired (0661ed316 mandatory-review gate)", async () => {
+    // Load-bearing counterpart to the success path above: with `fastApplyMerge`
+    // wired but `fastApplyMergeReview` ABSENT, a whole-file model merge has no
+    // semantic-preservation proof, so the rung must NOT land it — it falls
+    // through to the byte-identical typed mismatch and the file is unchanged.
+    const path = join(dir, "no-reviewer.txt")
+    writeFileSync(path, "alpha\nbeta\n", "utf8")
+
+    const ctx: ToolContext = {
+      cwd: dir,
+      signal: new AbortController().signal,
+      editFreshHash: true,
+      fastApplyMerge: {
+        async apply(_input: { original: string; editSketch: string; path?: string }) {
+          return { ok: true as const, merged: "alpha\nBETA_MERGED\n", rationale: "test merge" }
+        },
+      },
+      // fastApplyMergeReview intentionally omitted.
+    }
+
+    const r = await runEdit(
+      { path, old_string: "beta_MISSING_ANCHOR", new_string: "BETA_MERGED" },
+      ctx,
+    )
+    expect(r.ok).toBe(false)
+    expect(r.output).not.toContain("fast-apply merge")
+    // The file MUST be untouched — no unapproved model merge landed.
+    expect(readFileSync(path, "utf8")).toBe("alpha\nbeta\n")
   })
 })

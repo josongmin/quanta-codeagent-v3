@@ -562,9 +562,11 @@ export const SLICE_BOUNDARY_CONFIGS: Record<string, SliceBoundaryConfig> = {
   lsp: {
     slice: "lsp",
     denyImports: [...PEER_LIBRARY_DENY, ...LAYER2_DENY],
-    // `base.ts` (server spawn env), `server-mem-budget.ts` /
+    // `adapters/base/transport.ts` (server spawn env — split out of the former
+    // `base.ts` god-module, 48685efa1), `server-mem-budget.ts` /
     // `server-rss-watchdog.ts` (resource-cap env knobs) read env at call time.
-    envAllowFiles: ["base.ts", "server-mem-budget.ts", "server-rss-watchdog.ts"],
+    // Path-scoped so a future env read in the `base.ts` barrel still trips.
+    envAllowFiles: ["base/transport.ts", "server-mem-budget.ts", "server-rss-watchdog.ts"],
     requireSliceBarrel: true,
   },
   media: {

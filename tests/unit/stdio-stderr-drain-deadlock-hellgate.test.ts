@@ -105,15 +105,23 @@ describe("U4 — stdio stderr drain prevents pipe-buffer deadlock", () => {
         super(spec, { command: ["unused"] })
       }
       installAndPump(proc: unknown): void {
+        // 48685efa1 — the stdout/stderr pumps + `proc` were split out of
+        // `LspClient` into the `LspTransport` collaborator. The client keeps a
+        // `dispatch` method wired into `transport.ports.onMessage`, and delegates
+        // `this.proc` to `transport.proc`. So the probe now injects the fake proc
+        // and drives the REAL private pumps THROUGH the transport (the drain
+        // invariant is unchanged — only its owning object moved).
         const self = this as unknown as {
-          proc: unknown
-          readPump: Promise<void>
-          stderrPump: Promise<void>
-          pumpStdout(): Promise<void>
-          drainStderr(): Promise<void>
+          transport: {
+            proc: unknown
+            readPump: Promise<void>
+            stderrPump: Promise<void>
+            pumpStdout(): Promise<void>
+            drainStderr(): Promise<void>
+          }
           dispatch(m: unknown): void
         }
-        self.proc = proc
+        self.transport.proc = proc
         // Capture dispatched responses by id (mirror of production dispatch).
         const origDispatch = self.dispatch.bind(self)
         self.dispatch = (m: unknown) => {
@@ -121,8 +129,8 @@ describe("U4 — stdio stderr drain prevents pipe-buffer deadlock", () => {
           if (typeof r.id === "number") this.received.push(r.id)
           origDispatch(m)
         }
-        self.readPump = self.pumpStdout()
-        self.stderrPump = self.drainStderr()
+        self.transport.readPump = self.transport.pumpStdout()
+        self.transport.stderrPump = self.transport.drainStderr()
       }
     }
 
