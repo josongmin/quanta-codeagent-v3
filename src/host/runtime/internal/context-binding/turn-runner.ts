@@ -11,6 +11,7 @@ import { drainNewArtifacts } from "../../artifact-drain"
 import { toSessionHostTurnEvent } from "../session-host-turn-event-bridge"
 import { approvalPlaceholderOutcome, isRuntimeApprovalRequiredError } from "./approval-support"
 import { buildAgentConfigFromBase, buildAgentConfigFromBaseInput, getSessionId } from "./base"
+import { buildRewindCaptureHook } from "./rewind-capture-wire"
 import type { RuntimeBase } from "./types"
 
 export interface RuntimeTurnResult {
@@ -158,12 +159,17 @@ export const runRuntimeTurn = async (args: {
     )
     const messages = outcome.messages
     const errorMessage = turnStream.getLastErrorMessage()
+    // RFC-01 A2 — build the OPTIONAL post-turn rewind-checkpoint feeder. Returns
+    // undefined (⇒ persistTurn byte-identical) unless QUANTA_REWIND_CAPTURE is set
+    // AND a granular checkpoint registry is wired. Best-effort / non-throwing.
+    const captureCheckpoint = buildRewindCaptureHook(args.base)
     await persistTurn({
       state: args.state,
       idMeta: args.idMeta,
       sessionId: getSessionId(args.base),
       messages,
       outcome,
+      ...(captureCheckpoint !== undefined ? { captureCheckpoint } : {}),
     })
     // A2 — drain artifacts registered during THIS turn into protocol refs. The
     // registry is present ONLY when `QUANTA_ARTIFACT_STORE` lifted it onto the

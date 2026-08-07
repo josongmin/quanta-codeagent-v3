@@ -243,6 +243,14 @@ export const KNOBS_A: readonly RuntimeConfigKnob[] = [
     describe: "PTY/tmux session attach gate.",
   },
   {
+    envKey: "QUANTA_REWIND_CAPTURE",
+    kind: "bool",
+    default: false,
+    group: "session",
+    describe:
+      "Post-turn durable rewind-checkpoint capture — binds the newest per-tool shadow anchor SHA to the last message id so /rewind --restore-files can restore (RFC01-A2 feeder). Unset ⇒ no capture, /rewind fail-closes safe.",
+  },
+  {
     envKey: "QUANTA_PTY_INHERIT_ENV",
     kind: "bool",
     default: false,
