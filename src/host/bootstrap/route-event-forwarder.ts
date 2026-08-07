@@ -1,4 +1,4 @@
-import { runtimeConfigFromEnv } from "@/shared"
+import { errMessage, logger, runtimeConfigFromEnv } from "@/shared"
 import type { AgentEvent, StreamPort } from "@/stream"
 
 /** RFC02-3 (A8) — build the PRODUCTION route sink forwarder + its late-bind
@@ -28,8 +28,11 @@ export const buildRouteEventForwarder = (
     sink: (ev: AgentEvent): void => {
       try {
         target(ev)
-      } catch {
-        // best-effort: a bound-target throw is dropped.
+      } catch (e) {
+        // best-effort: a bound-target throw is dropped (observability never
+        // breaks its subject), but ATTRIBUTED — a throwing sink is a real defect,
+        // just a non-fatal one, so surface it at warn (never stranded work).
+        logger.warn(`route-event-forwarder: bound target threw: ${errMessage(e)}`)
       }
     },
     bind: (emit: (ev: AgentEvent) => void): void => {

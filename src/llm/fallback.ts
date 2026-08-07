@@ -1,4 +1,4 @@
-import { LLMError } from "@/shared"
+import { errMessage, LLMError, logger } from "@/shared"
 import type { LlmSurfaceId, LlmTransportId } from "@/shared/llm-route-types"
 import type { LLMPort } from "./ports"
 import { isFallbackKind } from "./retry"
@@ -206,8 +206,10 @@ export class FallbackLLM implements LLMPort {
     if (this.onTransition === undefined) return
     try {
       this.onTransition(t)
-    } catch {
-      /* route-transition sink failure must not block the stream */
+    } catch (e) {
+      // route-transition sink failure must not block the stream — but a throwing
+      // observability callback is a real (non-fatal) defect, so surface at warn.
+      logger.warn(`fallback-llm: onTransition sink threw: ${errMessage(e)}`)
     }
   }
 
@@ -216,8 +218,10 @@ export class FallbackLLM implements LLMPort {
   private emit(name: string, labels: Record<string, string>): void {
     try {
       this.metrics.increment(name, 1, labels)
-    } catch {
-      /* metric-sink failure must not block the stream */
+    } catch (e) {
+      // metric-sink failure must not block the stream — but a throwing metric
+      // sink is a real (non-fatal) defect, so surface at warn.
+      logger.warn(`fallback-llm: metric sink threw: ${errMessage(e)}`)
     }
   }
 

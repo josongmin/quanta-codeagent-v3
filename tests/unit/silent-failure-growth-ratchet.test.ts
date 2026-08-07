@@ -204,7 +204,23 @@ const CATCH_RETURN_EMPTY_BASELINE = 111
 // first real LSP call simply warms cold), never a stranded-work path, so a
 // `logger.debug` swallow is correct and the catch must not propagate (it is
 // invoked via `void`). Ceiling 8 → 9.
-const DEBUG_ONLY_CATCH_BASELINE = 9
+// Re-measured 2026-08-08 (classify-not-paper): +4, all from the 2026-08-01
+// 8-bucket quality refactor (commit 8a60faa1a), NONE a pump/transport/exit path
+// (the Form-D danger class). AUDITED all 4 as DOCUMENTED fail-open bench-eval
+// probes whose module header pins the safe fallback, so `.debug` is the correct
+// attribution (upgrading to `.warn`+propagate would be WRONG — the failure is a
+// valid path, not stranded work):
+//   • runner/batch/eval/llm-candidate-select.ts ×2 — `chooseBestCandidate` /
+//     `reviewBestCandidate` ask/parse failure ⇒ "FAILS OPEN to the caller's
+//     deterministic winner" (module INVARIANT, header lines 16-19); the LLM only
+//     re-ranks an already-admissible set, so a probe miss keeps the deterministic
+//     pick, never resurrects/strands a candidate.
+//   • runner/batch/eval/selection-smoke.ts ×2 — issue-MWE smoke write/exec
+//     failure ⇒ `null` ("setup/exec failures stay fail-open", header line 66-67);
+//     `null` is consumed as "no smoke signal", never as a real negative.
+// These 4 predate the aug-02 RFC work (the RFC packets added ZERO debug-only
+// sites — verified by per-file base→live diff). Ceiling 9 → 13.
+const DEBUG_ONLY_CATCH_BASELINE = 13
 // D13: re-measured after widening NON_ABORTABLE_SLEEP_RE to tolerate the typed
 // `new Promise<void>(…)` form — the prod count is 12 (was 6 under the
 // generic-blind regex; the extra 6 were always there, just invisible).

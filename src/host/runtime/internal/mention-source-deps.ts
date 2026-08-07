@@ -42,7 +42,7 @@
 import type { NamedAgentResolver } from "@/agent"
 import type { BuildDefaultMentionResolverOptions } from "@/agent/mention-runner"
 import type { McpToolInfo, ThreadSummary } from "@/agent/plugin-app-resolver"
-import { parseEnvFlag } from "@/shared"
+import { errMessage, logger, parseEnvFlag } from "@/shared"
 
 /** A `name + description` autocomplete registry entry (+ optional insert-payload
  *  override). Structurally identical to `apps/cli/at-autocomplete#NamedEntry`,
@@ -125,7 +125,10 @@ const threadSummaryFor = (
     try {
       const all = await sessions()
       return all.find((m) => m.id === id) ?? null
-    } catch {
+    } catch (e) {
+      // Session-list load fault ⇒ id resolves null (NO-THROW mention resolver),
+      // but a failing session store is a real (non-fatal) defect, surfaced at warn.
+      logger.warn(`mention-thread-summary: session load failed: ${errMessage(e)}`)
       return null
     }
   }

@@ -2,6 +2,7 @@ import type { AgentOutcome } from "@/agent"
 import { saveSession } from "@/agent"
 import type { Message } from "@/llm"
 import { type SavePayload, type SessionMeta, saveSessionById } from "@/session"
+import { errMessage, logger } from "@/shared"
 
 /**
  * Per-turn persistence — surface-AGNOSTIC.
@@ -88,9 +89,11 @@ export const persistTurn = async (input: PersistTurnInput): Promise<void> => {
     if (input.captureCheckpoint !== undefined) {
       try {
         await input.captureCheckpoint({ sessionId: idMeta.id, messages })
-      } catch {
-        // Swallow — checkpoint capture is observability-class; it MUST NOT break
-        // the turn's persistence (fail-OPEN, mirrors the checkpoint slice).
+      } catch (e) {
+        // checkpoint capture is observability-class; it MUST NOT break the
+        // turn's persistence (fail-OPEN, mirrors the checkpoint slice) — but a
+        // broken checkpoint hook is a real (non-fatal) defect, surfaced at warn.
+        logger.warn(`persist-turn: captureCheckpoint failed: ${errMessage(e)}`)
       }
     }
   }

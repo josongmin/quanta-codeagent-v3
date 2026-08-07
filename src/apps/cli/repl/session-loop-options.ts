@@ -12,6 +12,7 @@ import { loadNamedAgents } from "@/agent"
 import type { MentionLiveSources } from "@/host/runtime/internal/mention-source-deps"
 import { resolveModelEffortSupport } from "@/llm/provider-metadata"
 import { listSessions, type SessionMeta } from "@/session"
+import { errMessage, logger } from "@/shared"
 import { atAutocompleteEnabled } from "../at-autocomplete"
 import type { McpServerInfo } from "../mcp-cmd"
 import type { CliFeatureConfig } from "./cli-feature-config"
@@ -90,7 +91,13 @@ const buildProviderMentionSources = async (
   const hasMcp = mcpServers !== undefined && mcpServers.length > 0
   // Fail-open: a load fault ⇒ undefined ⇒ no subagent candidates (the provider
   // omits the lister). Same loader the resolver path uses.
-  const subagents = await loadNamedAgents(setup.cwd).catch(() => undefined)
+  const subagents = await loadNamedAgents(setup.cwd).catch((e) => {
+    // Fail-open probe (see comment above): a load fault ⇒ no subagent
+    // candidates, but a failing agents-dir scan is a real (non-fatal) defect,
+    // surfaced at warn (never stranded work — the mention list just omits them).
+    logger.warn(`session-loop-options: loadNamedAgents failed: ${errMessage(e)}`)
+    return undefined
+  })
   return {
     ...(hasMcp ? { mcpServers } : {}),
     ...(subagents !== undefined ? { subagents } : {}),
