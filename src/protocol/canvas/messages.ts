@@ -43,6 +43,35 @@ export interface DiffLineData {
   readonly lineNumber?: number
 }
 
+/** RFC-12 (deferred) SURFACE B — an anchored review comment, projected from the
+ *  agent-emitted `ReviewFinding` (`@/tool/git/review-diff` + `review-anchor.ts`)
+ *  for render over the matching diff line. The daemon maps the finding's
+ *  `anchor.line` (1-based, new-side) → the render-side line so the overlay lands
+ *  on the right row. Only the render-relevant, honesty-safe fields cross the wire
+ *  — the anchor's hashes/hunkId (an apply-target concern) do NOT.
+ *
+ *  Member-for-member mirror of the web copy's `DiffAnchorComment`
+ *  (`apps/web-frontend/src/types/protocol.ts`), which the `DiffView` overlay
+ *  consumes via its `comments` prop.
+ *
+ *  ADDITIVE + OPTIONAL on {@link ToolDiffMessage}: a daemon that does not
+ *  serialize `anchors` leaves the field `undefined`, and the DiffView overlay is
+ *  absent (byte-identical to the pre-RFC-12 diff render). */
+export interface DiffAnchorComment {
+  /** 1-based line the comment addresses (matches a `DiffLineData.lineNumber` on
+   *  the new/added side). */
+  readonly line: number
+  /** Reviewer disposition (RFC09-2) — closed union, mirrors `ReviewVerdict`.
+   *  Optional (an un-dispositioned finding still overlays). */
+  readonly verdict?: "confirmed" | "plausible"
+  /** Open-ended kebab category slug (RFC09-2). Free string. */
+  readonly category?: string
+  /** One-line reviewer summary (RFC09-2 `shortSummary`), else the finding body. */
+  readonly summary: string
+  /** Finding severity (drives the badge hue). */
+  readonly severity?: "info" | "warning" | "error"
+}
+
 /** A tool's file diff, ready to render. The daemon has already applied the
  *  CLI caps (64 KiB/side, 200-line) and converted ops → lines. */
 export interface ToolDiffMessage {
@@ -68,6 +97,12 @@ export interface ToolDiffMessage {
   readonly additions: number
   readonly deletions: number
   readonly emittedAt: number
+  /** RFC-12 (deferred) SURFACE B — anchored review comments to overlay on the
+   *  diff. ADDITIVE + OPTIONAL: absent (a daemon that never serializes it, i.e.
+   *  a non-review diff) ⇒ the DiffView render is byte-identical to the pre-RFC-12
+   *  diff. Present ONLY when the diff HAS review anchors (data-driven, no gate
+   *  knob). */
+  readonly anchors?: readonly DiffAnchorComment[]
 }
 
 /** The latest per-category segmented context usage. Structurally identical to

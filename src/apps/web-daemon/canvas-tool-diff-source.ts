@@ -31,6 +31,8 @@
  * legacy swallow.
  */
 
+import type { DiffAnchorComment } from "@/protocol/canvas"
+import type { ReviewFinding } from "@/tool/git/review-diff"
 import { type CanvasSourceOptions, fanOutIsolated } from "./canvas-fanout"
 
 /** A captured tool mutation: the full pre/post file text + correlation id. */
@@ -39,6 +41,47 @@ export interface CapturedToolDiff {
   readonly before: string
   readonly after: string
   readonly path?: string
+  /** RFC-12 (deferred) SURFACE B — anchored review comments already projected
+   *  from this diff's `ReviewFinding` anchors via {@link reviewFindingsToAnchors}
+   *  onto the render-side new line. ADDITIVE + OPTIONAL: absent (a non-review
+   *  mutation — the `write`/`edit` capture path) ⇒ the emitter serializes NO
+   *  `anchors` key ⇒ byte-identical to the pre-RFC-12 `tool.diff` frame. */
+  readonly anchors?: readonly DiffAnchorComment[]
+}
+
+/**
+ * RFC-12 (deferred) SURFACE B — project the agent-emitted `ReviewFinding[]` of a
+ * reviewed diff onto the render-side {@link DiffAnchorComment[]} the web DiffView
+ * overlay consumes. PURE (no I/O) — REUSES the existing `ReviewFinding` /
+ * `review-anchor` output, it does NOT define a second finding schema.
+ *
+ * Only findings that ARE anchored (`finding.anchor` present) AND whose anchor
+ * targets THIS diff's `path` overlay — an un-anchored blob comment or a
+ * cross-file finding is dropped (it has no diff line to land on). The comment's
+ * `line` is the ANCHOR's validated new-side line (NOT `finding.line`, which the
+ * reviewer may report loosely); `summary` is the reviewer's `shortSummary`, else
+ * the finding body (`what`). The anchor's hashes / `hunkId` (an apply-target
+ * concern) never cross to the render wire. Verdict / category / severity ride
+ * only when present (`exactOptionalPropertyTypes`).
+ */
+export const reviewFindingsToAnchors = (
+  findings: readonly ReviewFinding[],
+  diffPath: string,
+): readonly DiffAnchorComment[] => {
+  const anchors: DiffAnchorComment[] = []
+  for (const f of findings) {
+    const anchor = f.anchor
+    // Only anchored findings targeting THIS diff's file can overlay a line.
+    if (anchor === undefined || anchor.path !== diffPath) continue
+    anchors.push({
+      line: anchor.line,
+      summary: f.shortSummary ?? f.what,
+      ...(f.verdict !== undefined ? { verdict: f.verdict } : {}),
+      ...(f.category !== undefined ? { category: f.category } : {}),
+      ...(f.severity !== undefined ? { severity: f.severity } : {}),
+    })
+  }
+  return anchors
 }
 
 export interface CanvasToolDiffSourceHandle {

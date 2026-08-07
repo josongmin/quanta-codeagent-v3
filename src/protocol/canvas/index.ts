@@ -12,6 +12,7 @@ export type {
   CanvasMessageKind,
   CanvasWireEnvelope,
   ContextUsageMessage,
+  DiffAnchorComment,
   DiffLineData,
   DiffLineType,
   ToolDiffMessage,

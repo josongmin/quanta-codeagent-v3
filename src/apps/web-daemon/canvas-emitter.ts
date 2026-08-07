@@ -32,6 +32,7 @@ import {
   type ArtifactReadyMessage,
   type CanvasMessage,
   type ContextUsageMessage,
+  type DiffAnchorComment,
   type DiffLineData,
   encodeCanvasFrame,
   type ToolDiffMessage,
@@ -132,6 +133,12 @@ export interface ToolDiffInput {
   readonly language?: string
   /** Force a binary placeholder (e.g. the caller already knows it's binary). */
   readonly binary?: boolean
+  /** RFC-12 (deferred) SURFACE B — anchored review comments already projected
+   *  from the diff's `ReviewFinding` anchors (`reviewFindingsToAnchors` in
+   *  `canvas-tool-diff-source.ts`) onto the new-side line. ADDITIVE + OPTIONAL:
+   *  absent / empty ⇒ NO `anchors` key on the emitted frame (byte-identical to a
+   *  non-review diff). Present + non-empty ⇒ overlaid on the DiffView. */
+  readonly anchors?: readonly DiffAnchorComment[]
 }
 
 export interface CanvasEmitterHandle {
@@ -178,6 +185,11 @@ const buildToolDiffMessage = (
     isBinary(input.after) ||
     input.before.length > caps.maxBytes ||
     input.after.length > caps.maxBytes
+  // SURFACE B — only carry the `anchors` key when the diff HAS review anchors;
+  // an absent / empty projection leaves the key OFF the frame so a non-review
+  // diff is byte-identical to the pre-RFC-12 wire (data-driven, no gate knob).
+  const anchorPart =
+    input.anchors !== undefined && input.anchors.length > 0 ? { anchors: input.anchors } : {}
   const base = {
     kind: "tool.diff" as const,
     toolCallId: input.toolCallId,
@@ -186,7 +198,7 @@ const buildToolDiffMessage = (
     emittedAt: now,
   }
   if (binary) {
-    return { ...base, binary: true, lines: [], additions: 0, deletions: 0 }
+    return { ...base, binary: true, lines: [], additions: 0, deletions: 0, ...anchorPart }
   }
   const ops = diffOps(input.before, input.after)
   const allLines = diffOpsToLines(ops)
@@ -199,6 +211,7 @@ const buildToolDiffMessage = (
     additions,
     deletions,
     ...(truncated ? { truncated: true, moreLines: allLines.length - caps.maxLines } : {}),
+    ...anchorPart,
   }
 }
 
