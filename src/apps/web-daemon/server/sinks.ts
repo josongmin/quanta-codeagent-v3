@@ -14,6 +14,7 @@ import {
   agentStateObservationToMessage,
   encodeAgentStateFrame,
 } from "@/protocol/agent-state"
+import type { DiffAnchorComment } from "@/protocol/canvas"
 import type { ArtifactRef } from "@/protocol/session"
 import { type CanvasEmitterHandle, createCanvasEmitter } from "../canvas-emitter"
 import {
@@ -126,6 +127,13 @@ export interface CanvasToolDiff {
   readonly before: string
   readonly after: string
   readonly path?: string
+  /** RFC-12 (deferred) SURFACE B — anchored review comments already projected
+   *  from the diff's `ReviewFinding` anchors (`reviewFindingsToAnchors` in
+   *  `canvas-tool-diff-source.ts`) onto the render-side new line. ADDITIVE +
+   *  OPTIONAL: absent (the common `write`/`edit` capture) ⇒ the emitter carries
+   *  NO `anchors` key (byte-identical). Structural mirror of
+   *  `canvas-tool-diff-source.ts#CapturedToolDiff.anchors`. */
+  readonly anchors?: readonly DiffAnchorComment[]
 }
 
 /**
@@ -226,6 +234,9 @@ export const attachCanvasSink = (
         before: diff.before,
         after: diff.after,
         ...(diff.path !== undefined ? { path: diff.path } : {}),
+        // SURFACE B — thread the already-projected anchors additively; absent ⇒
+        // the emitter serializes no `anchors` key (byte-identical non-review diff).
+        ...(diff.anchors !== undefined ? { anchors: diff.anchors } : {}),
       }),
     )
   }
