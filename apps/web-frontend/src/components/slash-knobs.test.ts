@@ -191,7 +191,7 @@ describe("filterKnobGroups", () => {
 describe("fetchKnobs", () => {
   it("attaches the Bearer header and parses the body", async () => {
     const fetchMock = vi.fn(
-      async (_url: string | URL, _init?: RequestInit): Promise<Response> =>
+      async (_url: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
         new Response(JSON.stringify({ total: 0, groups: [] }), { status: 200 }),
     )
     stubFetch(fetchMock)
@@ -211,7 +211,7 @@ describe("fetchKnobs", () => {
 describe("postKnobValue", () => {
   it("POSTs a single key + returns ok", async () => {
     const fetchMock = vi.fn(
-      async (_url: string | URL, _init?: RequestInit): Promise<Response> =>
+      async (_url: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
         new Response("{}", { status: 200 }),
     )
     stubFetch(fetchMock)
