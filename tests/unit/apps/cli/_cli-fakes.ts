@@ -277,6 +277,7 @@ export const makeFakeSessionSetup = (
   midTurnApprovalChannel: createMidTurnApprovalChannel(),
   runtimeContext: makeFakeRuntimeContext(),
   permissionStore: undefined,
+  hunkUndoStore: undefined,
   costPanel: undefined,
   branchProgress: undefined,
   planStore: undefined,

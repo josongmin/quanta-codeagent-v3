@@ -77,12 +77,16 @@ describe("classifyGcCandidate (pure verdict matrix)", () => {
   })
 
   test("detached registration ⇒ moved (branch mismatch)", () => {
-    const c = classifyGcCandidate(
-      "s1",
-      ownership(),
-      [reg({ branch: undefined, detached: true })],
-      false,
-    )
+    // A detached worktree carries NO branch — build it directly so the optional
+    // `branch` key is OMITTED (exactOptionalPropertyTypes rejects `branch: undefined`).
+    const detached: WorktreeInspection = {
+      path: "/repo/.quanta/worktrees/wt1",
+      detached: true,
+      locked: false,
+      prunable: false,
+      bare: false,
+    }
+    const c = classifyGcCandidate("s1", ownership(), [detached], false)
     expect(c.verdict).toBe("moved")
   })
 

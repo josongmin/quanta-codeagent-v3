@@ -95,22 +95,24 @@ describe("front door — runConfigMigrationImport threads a review surface out",
     // The review surface LISTS the staged proposal as PENDING.
     const pending = review?.list() ?? []
     expect(pending.length).toBe(1)
-    expect(pending[0]?.name).toBe("imported-helper")
-    expect(pending[0]?.targetPath).toBe("imported-helper/SKILL.md")
+    const proposal = pending[0]
+    if (proposal === undefined) throw new Error("expected exactly one pending proposal")
+    expect(proposal.name).toBe("imported-helper")
+    expect(proposal.targetPath).toBe("imported-helper/SKILL.md")
     // Bound by content HASH (not a tool-name string).
-    expect(pending[0]?.artifactHash).toMatch(/^[0-9a-f]{64}$/)
+    expect(proposal.artifactHash).toMatch(/^[0-9a-f]{64}$/)
 
     // NO live write before approve.
     const livePath = join(importSkillsDir(home), "imported-helper", "SKILL.md")
     await expect(stat(livePath)).rejects.toBeDefined()
 
     // Approve → the EXISTING CAS promote writes the live SKILL.md verbatim.
-    const id = pending[0]?.id ?? ""
+    const id = proposal.id
     const res = await review?.approve(id)
     expect(res?.ok).toBe(true)
     const written = await readFile(livePath, "utf8")
     // The live bytes are EXACTLY the imported (normalized) SKILL.md, hash-matched.
-    expect(sha256Hex(written)).toBe(pending[0]?.artifactHash)
+    expect(sha256Hex(written)).toBe(proposal.artifactHash)
     // The converter force-stamps `stability: experimental` — the promoted live
     // file carries it (an imported skill lands experimental, never `stable`).
     expect(written).toContain("stability: experimental")

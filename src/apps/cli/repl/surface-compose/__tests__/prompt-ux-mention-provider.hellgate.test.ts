@@ -78,8 +78,9 @@ describe("buildPromptUx — RFC-12-2 @-autocomplete mention listers wired", () =
   })
 
   test("red-on-injection — drop the subagent source ⇒ ONLY subagent candidates gone", async () => {
+    const droppedMcp = liveSources().mcpServers
     const dropped: MentionLiveSources = {
-      mcpServers: liveSources().mcpServers,
+      ...(droppedMcp !== undefined ? { mcpServers: droppedMcp } : {}),
       sessions: async () => [{ id: "abc-1", title: "Prior thread" }],
     }
     const ux = await buildPromptUx(

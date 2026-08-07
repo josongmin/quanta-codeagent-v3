@@ -143,10 +143,10 @@ const composeUx = async (env: NodeJS.ProcessEnv, wire: EffortCycleWire | undefin
  *  map, typing `seed` first. Returns the submitted line. When `map`/`hook` are
  *  absent the reader runs the gate-OFF path. */
 const pressChord = async (args: {
-  readonly map?: KeybindingMap
-  readonly hook?: () => void
+  readonly map?: KeybindingMap | undefined
+  readonly hook?: (() => void) | undefined
   readonly presses: number
-  readonly seed?: string
+  readonly seed?: string | undefined
 }): Promise<string> => {
   const { io, stdin } = makeIO()
   const p = readLine(

@@ -209,7 +209,7 @@ describe("reconcileCreatingWorktree (crash between intent and publish)", () => {
     )
     const meta: SessionMeta = {
       ...mkMeta("rec", "/r"),
-      workspaceOwnership: ready.ok ? ready.record : undefined,
+      ...(ready.ok ? { workspaceOwnership: ready.record } : {}),
     }
     const v = await reconcileCreatingWorktree(meta, clock)
     expect(v.kind).toBe("noop")

@@ -87,8 +87,8 @@ const routeChanged = (fromModel: string, toModel: string): AgentEvent => ({
   type: "model_route_changed",
   fromModel,
   toModel,
-  reason: "provider_error",
-  routeKind: "fallback",
+  reason: "provider_server_error",
+  routeKind: "provider_fallback",
   at: 0,
 })
 

@@ -63,7 +63,9 @@ describe("session-bootstrap registrySnapshotRef", () => {
     const ctx = await createRunAgentContext(baseCfg({ registry }))
     // The pinned snapshot's registry IS cfg.registry, and its specs are exactly
     // `registry.specs()` — the prior expression, byte-identical.
-    expect(ctx.session.registrySnapshot.registry).toBe(registry)
+    const snapshot = ctx.session.registrySnapshot
+    if (snapshot === undefined) throw new Error("expected a pinned registry snapshot")
+    expect(snapshot.registry).toBe(registry)
     expect(ctx.session.specs.map((s) => s.name)).toEqual(registry.specs().map((s) => s.name))
     // No ref was consulted — the slot is absent.
     expect(ctx.cfg.registrySnapshotRef).toBeUndefined()
@@ -88,7 +90,9 @@ describe("session-bootstrap registrySnapshotRef", () => {
 
     // Pinned the PUBLISHED generation (identity + id), NOT a fresh build.
     expect(ctx.session.registrySnapshot).toBe(published)
-    expect(ctx.session.registrySnapshot.registry).toBe(nextRegistry)
+    const snapshot = ctx.session.registrySnapshot
+    if (snapshot === undefined) throw new Error("expected a pinned registry snapshot")
+    expect(snapshot.registry).toBe(nextRegistry)
     expect(ctx.session.specs.map((s) => s.name)).toContain("beta")
     // Proof it did NOT fall back to cfg.registry (which has 'write', not 'beta').
     expect(ctx.session.specs.map((s) => s.name)).not.toContain("write")

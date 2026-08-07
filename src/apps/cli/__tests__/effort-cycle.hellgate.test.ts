@@ -83,10 +83,10 @@ const SPARSE: ModelEffortSupport = {
 // ── A. pure cycle leaf ─────────────────────────────────────────────────────
 describe("effort-cycle — pure nextSupportedEffort", () => {
   test("A1 — five-tier wraps default→low→medium→high→max→default", () => {
-    const order: EffortLevel[] = ["default", "low", "medium", "high", "max"]
-    for (let i = 0; i < order.length; i++) {
-      const expected = order[(i + 1) % order.length]
-      expect(nextSupportedEffort(order[i], FIVE_TIER)).toBe(expected)
+    const order: readonly [EffortLevel, ...EffortLevel[]] = ["default", "low", "medium", "high", "max"]
+    for (const [i, current] of order.entries()) {
+      const expected = order[(i + 1) % order.length] ?? order[0]
+      expect(nextSupportedEffort(current, FIVE_TIER)).toBe(expected)
     }
     // Explicit wrap witness.
     expect(nextSupportedEffort("max", FIVE_TIER)).toBe("default")

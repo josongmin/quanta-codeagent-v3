@@ -336,6 +336,9 @@ const buildSetup = async (
     liveModelSource: { source: () => "test-model" },
     contextUsageHolder: undefined as never,
     permissionStore: undefined,
+    // RFC-def `/undo` — durable hunk-mutation journal store; absent by default
+    // (gate off) in the fixture. Required on SessionSetupResult.
+    hunkUndoStore: undefined,
     // L5 M-11 — per-session search-wire teardown. The fixture leaves it
     // `undefined` (no wire built) by default; the dispose hellgates below
     // inject their own via the `searchPipelineDispose` deps slot.

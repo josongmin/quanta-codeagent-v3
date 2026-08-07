@@ -156,6 +156,7 @@ describe("RFC09-1 — HookBus forwards command promptHook on the existing channe
       type: "user_prompt_submit",
       prompt: "do it",
       attachmentsCount: 0,
+      threadId: "t-append",
     })
     expect(res.promptHook?.injectBeforeUser).toBe("REPO FACT: bridged")
     expect(res.promptHook?.injectAfterSystem).toBeUndefined()
@@ -173,6 +174,7 @@ describe("RFC09-1 — HookBus forwards command promptHook on the existing channe
       type: "user_prompt_submit",
       prompt: "do it",
       attachmentsCount: 0,
+      threadId: "t-append",
     })
     expect(res.promptHook).toBeUndefined()
   })
@@ -237,6 +239,7 @@ describe("RFC09-1 — front door: command-hook context in the ACTUAL assembled r
       type: "user_prompt_submit",
       prompt: "do it",
       attachmentsCount: 0,
+      threadId: "t-append",
     })
     const injects: HookPromptInject[] = emit.promptHook !== undefined ? [emit.promptHook] : []
     expect(injects.length).toBe(1)
@@ -269,6 +272,7 @@ describe("RFC09-1 — front door: command-hook context in the ACTUAL assembled r
       type: "user_prompt_submit",
       prompt: "do it",
       attachmentsCount: 0,
+      threadId: "t-append",
     })
     const out = buildTurnContext(
       baseCtx({ hookPromptInjects: emit.promptHook !== undefined ? [emit.promptHook] : [] }),
@@ -300,6 +304,7 @@ describe("RFC09-1 — no-field baseline byte-identical", () => {
       type: "user_prompt_submit",
       prompt: "do it",
       attachmentsCount: 0,
+      threadId: "t-append",
     })
     expect(emit.promptHook).toBeUndefined()
 
