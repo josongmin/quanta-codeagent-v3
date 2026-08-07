@@ -638,6 +638,9 @@ const parseSecuritySlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
  *  and the scriptable status-line config (the trailing run of the legacy literal). */
 const parseConfigTailSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => {
   return {
+    // RFC-01 A2 — post-turn durable rewind-checkpoint capture feeder. Default
+    // false ⇒ no capture, /rewind --restore-files fail-closes safe (byte-identical).
+    rewindCapture: gateOn(env, "QUANTA_REWIND_CAPTURE"),
     // jun-7 TLS-MITM — OPERATOR-OPT-IN (stronger gate). Requires BOTH the master
     // switch `=1` AND the verbatim ack phrase, so a stray `=1` cannot mint a
     // trust anchor. Either missing ⇒ false ⇒ CONNECT stays a raw tunnel

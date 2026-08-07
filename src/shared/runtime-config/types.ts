@@ -683,6 +683,12 @@ export interface RuntimeConfig extends RuntimeConfigPaths {
    *  (byte-identical, exec-risk). When ON, the composition root wires a
    *  `DefaultToolPorts.ptySession` backend (tmux/Bun). */
   readonly ptyAttach: boolean
+  /** RFC-01 A2 — post-turn durable rewind-checkpoint capture feeder
+   *  (`QUANTA_REWIND_CAPTURE`). Default false ⇒ `persistTurn` records NO
+   *  checkpoint and `/rewind --restore-files` fail-closes safe (byte-identical).
+   *  When ON (and a granular checkpoint registry is wired) the turn-runner feeds
+   *  a durable `message → shadow SHA` record so a later restore can resolve. */
+  readonly rewindCapture: boolean
   /** D3 (jun-7-naive-impl-hardening) — PTY env-inherit ESCAPE HATCH
    *  (`QUANTA_PTY_INHERIT_ENV`). Default false ⇒ the PTY child's env is SCRUBBED
    *  through the same `scrubEnv`/`applyLocalEnv` chokepoint as `runShell`

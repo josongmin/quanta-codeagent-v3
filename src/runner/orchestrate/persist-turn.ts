@@ -23,6 +23,22 @@ import { type SavePayload, type SessionMeta, saveSessionById } from "@/session"
  * existing call site in `repl.ts` and the unit test reach the same function.
  */
 
+/** RFC-01 A2 feeder hook — record a durable rewind checkpoint for the turn that
+ *  just persisted (`/rewind --restore-files` restores to it). Runs AFTER the
+ *  id-mode transcript save so the message ids it binds to are already durable.
+ *
+ *  Default-OFF: the composition root builds this ONLY when the dedicated capture
+ *  gate is set AND the ShadowOdb/registry substrate exists; ABSENT ⇒ `persistTurn`
+ *  makes ZERO extra calls and is byte-identical to the prior save-only path.
+ *
+ *  Best-effort by contract: the hook itself NEVER throws (it swallows every
+ *  failure to a typed result); `persistTurn` additionally guards the call so a
+ *  hook bug can never break the turn's persistence. */
+export type PersistTurnCheckpointHook = (input: {
+  readonly sessionId: string
+  readonly messages: readonly Message[]
+}) => Promise<void>
+
 /** Inputs for {@link persistTurn} — every field mirrors the bindings the
  *  in-line REPL block used to close over. */
 export interface PersistTurnInput {
@@ -39,6 +55,10 @@ export interface PersistTurnInput {
   messages: Message[]
   /** Outcome of the just-completed turn. */
   outcome: AgentOutcome
+  /** RFC-01 A2 — OPTIONAL durable rewind-checkpoint feeder. ABSENT ⇒ byte-
+   *  identical (no extra call). Only fires alongside the id-mode auto-save (the
+   *  ids it binds to must be persisted first). See {@link PersistTurnCheckpointHook}. */
+  captureCheckpoint?: PersistTurnCheckpointHook
 }
 
 export const persistTurn = async (input: PersistTurnInput): Promise<void> => {
@@ -61,5 +81,17 @@ export const persistTurn = async (input: PersistTurnInput): Promise<void> => {
       messages,
     }
     await saveSessionById(idMeta, payload)
+    // RFC-01 A2 — feed a durable rewind checkpoint AFTER the transcript is on
+    // disk (so the message ids the checkpoint binds to are durable). ABSENT hook
+    // ⇒ this whole block is skipped (byte-identical). Best-effort: the hook does
+    // not throw, but we still guard so a hook bug can never break persistence.
+    if (input.captureCheckpoint !== undefined) {
+      try {
+        await input.captureCheckpoint({ sessionId: idMeta.id, messages })
+      } catch {
+        // Swallow — checkpoint capture is observability-class; it MUST NOT break
+        // the turn's persistence (fail-OPEN, mirrors the checkpoint slice).
+      }
+    }
   }
 }
