@@ -11,8 +11,8 @@
     {
       "file": "tests/unit/bench-closure-prompt-wiring-hellgate.test.ts",
       "name": "chaMultisiteSteer is injected into both the prompt prelude and localize-phase config",
-      "resourceClass": "env",
-      "reason": "withEnv() mutates the process-GLOBAL QUANTA_BENCH_LOCALIZE_PHASE knob; under the full parallel suite a sibling bench test reading/writing the same env var races the set->assert->restore window (the code-under-test reads process.env at call time). Passes with -t isolation (4/4, verified 3x). Fix path: thread localize-phase as an explicit param into the closure-prompt-wiring builder (drop the process.env read) so the test needs no global mutation — then retire this entry and lower maxCount."
+      "resourceClass": "timing",
+      "reason": "concurrency race: withEnv() mutates the process-GLOBAL QUANTA_BENCH_LOCALIZE_PHASE knob; under the full parallel suite a sibling bench test reading/writing the same env var races the set->assert->restore window (the code-under-test reads process.env at call time). Passes with -t isolation (4/4, verified 3x). Fix path: thread localize-phase as an explicit param into the closure-prompt-wiring builder (drop the process.env read) so the test needs no global mutation — then retire this entry and lower maxCount."
     }
   ]
 }
