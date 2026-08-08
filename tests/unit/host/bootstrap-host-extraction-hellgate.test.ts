@@ -230,7 +230,14 @@ describe("ADR-0299 host-bootstrap-extraction hellgate", () => {
     // In both forms the symbol is a parameter, never an import — so scanning
     // call-sites false-positives. We assert the genuine boundary instead: the
     // symbol is never pulled in via an `import` statement.
-    const offenders = grepDir("src/apps/cli/repl", /import[^;]*\bmaterializeReviewerAgent\b/m)
+    // Bound to a real named-import BINDING: `import { … materializeReviewerAgent … } from`.
+    // The old `/import[^;]*…/` spanned greedily across this no-semicolon codebase —
+    // from any earlier `import { … } from "…"` down to a DI-param reference — false-
+    // positiving the ALLOWED closure-injection form. `\{[^}]*\}` bounds to THIS import.
+    const offenders = grepDir(
+      "src/apps/cli/repl",
+      /import\s+(?:type\s+)?\{[^}]*\bmaterializeReviewerAgent\b[^}]*\}\s+from\b/m,
+    )
     expect(offenders).toEqual([])
   })
 
