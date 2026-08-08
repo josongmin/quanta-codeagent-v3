@@ -456,6 +456,8 @@ DR("debug_inspect — REAL Rust e2e via lldb-dap (third language)", () => {
         'version = "0.1.0"',
         'edition = "2021"',
         "",
+        "[workspace]",
+        "",
         "[[bin]]",
         'name = "t"',
         'path = "src/main.rs"',

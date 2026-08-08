@@ -46,6 +46,8 @@ const CARGO_TOML = [
   'version = "0.1.0"',
   'edition = "2021"',
   "",
+  "[workspace]",
+  "",
   "[[bin]]",
   'name = "t"',
   'path = "src/main.rs"',
