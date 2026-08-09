@@ -634,6 +634,7 @@ export type {
   ReviewerRequest,
   ReviewerResult,
   ReviewerRunner,
+  ReviewFindingMirror,
   SessionConfigSeam,
   ShellSnapshotRestoreSeam,
   ToolDiffSink,

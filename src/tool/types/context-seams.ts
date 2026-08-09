@@ -179,7 +179,36 @@ export interface ToolDiffSink {
     readonly before: string
     readonly after: string
     readonly path?: string
+    /** RFC-12 SURFACE B PRODUCER — the reviewed diff's ANCHORED findings, handed
+     *  by `git_review_diff` so the daemon-side sink projects them onto the render
+     *  overlay (`reviewFindingsToAnchors`). ADDITIVE + OPTIONAL: the `write`/`edit`
+     *  capture path omits it ⇒ the daemon emits NO `anchors` key (byte-identical
+     *  non-review diff). Typed via the {@link ReviewFindingMirror} structural
+     *  mirror so `@/tool` stays a leaf (no `@/apps/web-daemon` import). */
+    readonly findings?: readonly ReviewFindingMirror[]
   }): void
+}
+
+/** RFC-12 SURFACE B PRODUCER — structural mirror of the render-relevant subset of
+ *  `@/tool/git/review-diff`'s `ReviewFinding` that the daemon-side
+ *  `reviewFindingsToAnchors` projection reads. Kept HERE (in the seam mirror) so
+ *  the duck-typed {@link ToolDiffSink} shape does not force `@/tool/types` to
+ *  depend on `@/tool/git`; the concrete producer passes a real `ReviewFinding[]`
+ *  (a structural supertype of this) through the seam. */
+export interface ReviewFindingMirror {
+  readonly file: string
+  readonly severity?: "info" | "warning" | "error"
+  readonly what: string
+  readonly verdict?: "confirmed" | "plausible"
+  readonly category?: string
+  readonly shortSummary?: string
+  readonly anchor?: {
+    readonly path: string
+    readonly line: number
+    readonly hunkId: string
+    readonly beforeHash: string
+    readonly afterHash: string
+  }
 }
 
 /** ADR-0421 — duck-typed mirror of `FastApplyFallbackPort` from

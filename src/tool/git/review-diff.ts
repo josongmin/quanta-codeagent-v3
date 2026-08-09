@@ -19,6 +19,7 @@ import { z } from "zod"
 import { errMessage } from "@/shared"
 import type { ReviewerRequest, ReviewerResult, Tool, ToolContext, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
+import { emitReviewCanvasDiffs } from "./review-diff-canvas"
 import type { GitRunner } from "./types"
 
 /** Cap on the diff text we inject into the reviewer seed. A 600KB diff blows
@@ -351,16 +352,49 @@ export const gitReviewDiffTool = (runner: GitRunner): Tool<GitReviewDiffInput> =
     const prompt = buildReviewerPrompt(diffForReviewer, args.focus, truncated)
     yield { type: "progress", message: "Delegating to isolated reviewer (depth+1)…" }
 
-    yield {
-      type: "result",
-      result: await invokeReviewer(ctx.reviewerAgent, buildReviewerRequest(prompt, ctx)),
-    }
+    const result = await invokeReviewer(ctx.reviewerAgent, buildReviewerRequest(prompt, ctx))
+    // RFC-12 SURFACE B PRODUCER — render the reviewer's anchored findings as a
+    // canvas overlay. NO-OP (byte-identical) when the canvas sink is not wired;
+    // never throws (best-effort observation, the result is already computed).
+    await maybeEmitReviewCanvas(runner, ctx, {
+      unifiedDiff: outcome.body,
+      findings: result.structured?.findings ?? [],
+      base: args.base,
+      head: args.head,
+    })
+    yield { type: "result", result }
   },
 })
 
+/** RFC-12 SURFACE B PRODUCER glue — emit the per-file canvas diffs for a review's
+ *  findings. Isolated in one helper so `execute` stays under the cognitive cap and
+ *  a git-I/O failure in the canvas path can never break the tool result (the
+ *  findings already went back to the model). */
+const maybeEmitReviewCanvas = async (
+  runner: GitRunner,
+  ctx: ToolContext,
+  args: {
+    unifiedDiff: string
+    findings: readonly ReviewFinding[]
+    base: string
+    head: string
+  },
+): Promise<void> => {
+  try {
+    await emitReviewCanvasDiffs({ runner, ctx, ...args })
+  } catch {
+    // Best-effort: a canvas-render failure must never surface as a review
+    // failure. Swallow (the tool result is already assembled).
+  }
+}
+
 /** Result of the schema-parse + argv-build step (synchronous failure mode for
- *  bad input or rejected revisions). */
-type ArgvOutcome = { kind: "deny"; output: string } | { kind: "ok"; argv: string[]; focus?: string }
+ *  bad input or rejected revisions). Carries the resolved `base`/`head` so the
+ *  canvas producer can obtain the per-file before/after (`git show`) over the SAME
+ *  revision range the reviewer saw. */
+type ArgvOutcome =
+  | { kind: "deny"; output: string }
+  | { kind: "ok"; argv: string[]; base: string; head: string; focus?: string }
 
 /** Validate input + compose argv. Returns either a deny (bad schema or
  *  leading-`-` revision) or the ready-to-spawn argv. Extracted so `execute`
@@ -372,9 +406,11 @@ const parseAndBuildArgs = (input: GitReviewDiffInput): ArgvOutcome => {
   }
   try {
     const argv = buildArgs(parsed.data)
+    const base = parsed.data.base ?? "origin/main"
+    const head = parsed.data.head ?? "HEAD"
     return parsed.data.focus !== undefined
-      ? { kind: "ok", argv, focus: parsed.data.focus }
-      : { kind: "ok", argv }
+      ? { kind: "ok", argv, base, head, focus: parsed.data.focus }
+      : { kind: "ok", argv, base, head }
   } catch (e) {
     if (e instanceof GitReviewRevRejected) return { kind: "deny", output: e.message }
     throw e

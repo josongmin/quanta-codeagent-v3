@@ -50,6 +50,29 @@ export interface CapturedToolDiff {
 }
 
 /**
+ * RFC-12 SURFACE B PRODUCER — the sink-facing capture input. Structural SUPERSET
+ * of {@link CapturedToolDiff}: the `git_review_diff` PRODUCER hands its anchored
+ * `ReviewFinding[]` here (through the duck-typed `@/tool` `ToolDiffSink` seam) and
+ * the sink PROJECTS them into {@link CapturedToolDiff.anchors} via
+ * {@link reviewFindingsToAnchors} BEFORE fan-out. The `write`/`edit` capture path
+ * passes neither `findings` nor `anchors` ⇒ the projected `anchors` is empty ⇒ the
+ * emitted frame has NO `anchors` key (byte-identical non-review diff). Callers may
+ * ALSO pass `anchors` directly (the daemon-internal test wire); when both are
+ * present the direct `anchors` win (already-projected).
+ */
+export interface CaptureToolDiffInput {
+  readonly toolCallId: string
+  readonly before: string
+  readonly after: string
+  readonly path?: string
+  readonly anchors?: readonly DiffAnchorComment[]
+  /** Anchored review findings the sink projects onto `anchors` (per-file, keyed to
+   *  `path`) via {@link reviewFindingsToAnchors}. Structural supertype of the
+   *  `@/tool` `ReviewFindingMirror` the producer passes through the seam. */
+  readonly findings?: readonly ReviewFinding[]
+}
+
+/**
  * RFC-12 (deferred) SURFACE B — project the agent-emitted `ReviewFinding[]` of a
  * reviewed diff onto the render-side {@link DiffAnchorComment[]} the web DiffView
  * overlay consumes. PURE (no I/O) — REUSES the existing `ReviewFinding` /
@@ -84,9 +107,36 @@ export const reviewFindingsToAnchors = (
   return anchors
 }
 
+/**
+ * Project a capture input into the fanned-out {@link CapturedToolDiff}. When the
+ * caller already supplied `anchors` (the daemon-internal wire) they ride verbatim;
+ * otherwise the sink projects the anchored `findings` onto the render overlay via
+ * {@link reviewFindingsToAnchors} (keyed to the capture's `path`). Absent both ⇒
+ * no `anchors` key downstream (byte-identical non-review diff). PURE — the
+ * projection is the SAME `reviewFindingsToAnchors` the front-door reuses.
+ */
+export const projectCapturedToolDiff = (input: CaptureToolDiffInput): CapturedToolDiff => {
+  const projected =
+    input.anchors !== undefined
+      ? input.anchors
+      : input.findings !== undefined && input.path !== undefined
+        ? reviewFindingsToAnchors(input.findings, input.path)
+        : undefined
+  return {
+    toolCallId: input.toolCallId,
+    before: input.before,
+    after: input.after,
+    ...(input.path !== undefined ? { path: input.path } : {}),
+    ...(projected !== undefined && projected.length > 0 ? { anchors: projected } : {}),
+  }
+}
+
 export interface CanvasToolDiffSourceHandle {
-  /** Wire into `AgentConfig.onToolDiff`. Fans the capture out to subscribers. */
-  readonly sink: { capture(input: CapturedToolDiff): void }
+  /** Wire into `AgentConfig.onToolDiff`. Fans the capture out to subscribers. The
+   *  input is the PRODUCER-facing {@link CaptureToolDiffInput} (accepts anchored
+   *  `findings` the sink projects) — a structural supertype of the fanned-out
+   *  {@link CapturedToolDiff}. */
+  readonly sink: { capture(input: CaptureToolDiffInput): void }
   /** Subscribe to subsequent captures. Returns an unsubscribe closure. */
   readonly subscribe: (handler: (diff: CapturedToolDiff) => void) => () => void
   /** Cumulative count of subscriber deliveries that THREW (health signal). */
@@ -103,10 +153,17 @@ export const createCanvasToolDiffSource = (
   return {
     sink: {
       capture: (input) => {
+        // Project the producer's anchored findings onto the render overlay BEFORE
+        // fan-out (reuses `reviewFindingsToAnchors`); a non-review capture carries
+        // neither findings nor anchors ⇒ byte-identical `CapturedToolDiff`.
         // Isolate throws (siblings + the already-written file are safe) AND
         // surface them via the optional observer. Absent observer ⇒ legacy
         // swallow (byte-identical).
-        failures += fanOutIsolated(subscribers, input, opts.onSubscriberError)
+        failures += fanOutIsolated(
+          subscribers,
+          projectCapturedToolDiff(input),
+          opts.onSubscriberError,
+        )
       },
     },
     subscribe: (handler) => {
