@@ -1,8 +1,8 @@
 import type { AgentOutcome } from "@/agent"
 import { saveSession } from "@/agent"
 import type { Message } from "@/llm"
-import { type SavePayload, type SessionMeta, saveSessionById } from "@/session"
-import { errMessage, logger } from "@/shared"
+import { assignMessageIds, type SavePayload, type SessionMeta, saveSessionById } from "@/session"
+import { errMessage, logger, runtimeConfig } from "@/shared"
 
 /**
  * Per-turn persistence — surface-AGNOSTIC.
@@ -60,10 +60,76 @@ export interface PersistTurnInput {
    *  identical (no extra call). Only fires alongside the id-mode auto-save (the
    *  ids it binds to must be persisted first). See {@link PersistTurnCheckpointHook}. */
   captureCheckpoint?: PersistTurnCheckpointHook
+  /** RFC-13 HOP-2 — id-assign gate (injectable purely for tests; production
+   *  reads it from `runtimeConfig()`). When true, id-LESS messages are minted a
+   *  stable deterministic id at the TOP of `persistTurn` (before BOTH saves and
+   *  the checkpoint hook). Default (undefined ⇒ read config) OFF ⇒ NO assign ⇒
+   *  transcript byte-identical. See {@link maybeAssignMessageIds}. */
+  assignIds?: boolean
+}
+
+/** RFC-13 HOP-2 — mint STABLE, deterministic ids at the per-turn persist
+ *  boundary, gated + IDEMPOTENT.
+ *
+ *  - Gate OFF ⇒ the SAME array reference is returned (zero mutation) so the
+ *    saved transcript is byte-identical to the id-less path.
+ *  - Gate ON ⇒ `assignMessageIds` mints an id on EACH id-LESS message; a
+ *    message that ALREADY carries a non-empty id is passed through unchanged
+ *    (idempotent — ids survive resume/resave, never re-minted).
+ *
+ *  Scheme: sequential `m{k}` where `k` is the smallest non-negative integer NOT
+ *  already used by ANY existing message id in this transcript. Rationale: the
+ *  naive position-based `m{index}` COLLIDES when a pre-existing id (e.g. `m1`
+ *  from a fork/prior save) equals a future position's mint — two messages would
+ *  share an id and `resolveMessageIdPrefix` would go ambiguous, breaking
+ *  `/rewind`. Seeding past the used set guarantees every minted id is UNIQUE
+ *  while staying deterministic AND stable across resave (existing ids are
+ *  preserved by `assignMessageIds`, and the transcript is append-only per turn,
+ *  so the same id-less message re-mints the same `m{k}`). Pure: input array is
+ *  not mutated.
+ *
+ *  Best-effort: `assignMessageIds` cannot throw for well-formed messages, but if
+ *  a caller passes a hostile shape the assignment MUST NOT break persistence, so
+ *  the call is guarded and falls back to the original messages on any throw. */
+export const maybeAssignMessageIds = (messages: Message[], gateOn: boolean): Message[] => {
+  if (!gateOn) return messages
+  try {
+    // Collect ids already present so a fresh mint can never collide with one at
+    // a different position. `assignMessageIds` calls `idFor(i)` ONLY for id-less
+    // messages, in ascending index order — we hand out the next unused `m{k}`.
+    const used = new Set<string>()
+    for (const m of messages) {
+      if (typeof m.id === "string" && m.id.length > 0) used.add(m.id)
+    }
+    let next = 0
+    const nextFreeId = (): string => {
+      let candidate = `m${next}`
+      while (used.has(candidate)) {
+        next += 1
+        candidate = `m${next}`
+      }
+      // Reserve it so two id-less messages in the SAME pass never collide either.
+      used.add(candidate)
+      next += 1
+      return candidate
+    }
+    return assignMessageIds(messages, () => nextFreeId())
+  } catch {
+    // Assignment is best-effort; never let it break the turn's persistence.
+    return messages
+  }
 }
 
 export const persistTurn = async (input: PersistTurnInput): Promise<void> => {
-  const { state, idMeta, sessionId, messages, outcome } = input
+  const { state, idMeta, sessionId, outcome } = input
+  // RFC-13 HOP-2 — assign STABLE ids FIRST (before BOTH saves AND the checkpoint
+  // hook) so the saved transcript is addressable and the hook binds to a durable
+  // id. Gate: the dedicated `messageIds` knob OR `rewindCapture` (F3 is inert
+  // without ids, so enabling capture implies assignment). `input.assignIds`
+  // overrides purely for tests. Default OFF ⇒ same array ⇒ byte-identical.
+  const cfg = runtimeConfig()
+  const gateOn = input.assignIds ?? (cfg.messageIds || cfg.rewindCapture)
+  const messages = maybeAssignMessageIds(input.messages, gateOn)
   if (state) {
     await saveSession(state, {
       sessionId,

@@ -641,6 +641,10 @@ const parseConfigTailSlice = (env: RuntimeConfigEnv): Partial<RuntimeConfig> => 
     // RFC-01 A2 — post-turn durable rewind-checkpoint capture feeder. Default
     // false ⇒ no capture, /rewind --restore-files fail-closes safe (byte-identical).
     rewindCapture: gateOn(env, "QUANTA_REWIND_CAPTURE"),
+    // RFC-13 HOP-2 — durable message-id assignment at the per-turn persist
+    // boundary. Default false ⇒ no ids assigned, transcript byte-identical,
+    // /rewind + F3 checkpoint-capture fail-close as today.
+    messageIds: gateOn(env, "QUANTA_MESSAGE_IDS"),
     // jun-7 TLS-MITM — OPERATOR-OPT-IN (stronger gate). Requires BOTH the master
     // switch `=1` AND the verbatim ack phrase, so a stray `=1` cannot mint a
     // trust anchor. Either missing ⇒ false ⇒ CONNECT stays a raw tunnel
