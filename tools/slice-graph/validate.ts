@@ -25,7 +25,20 @@ export interface ForbiddenEdge {
   readonly from: string
   readonly to: ReadonlyArray<string>
   readonly reason: string
+  /** Import specifiers (exact, or `prefix/`-matched) that are EXEMPT from this
+   *  rule — an ADR-blessed pure primitive that physically lives in a `to` slice
+   *  but is declared surface-agnostic and safe to consume from any slice. The
+   *  carve-out is narrow: every OTHER specifier under the same `to` still fails. */
+  readonly except?: ReadonlyArray<string>
 }
+
+/** ADR-0440: `@/runner/diff-ops` is the surface-agnostic pure line-LCS/diff-math
+ *  primitive (only depends on `@/shared`), hoisted into `runner/` so the CLI ANSI
+ *  preview AND the web-daemon canvas emitter AND the review-anchor tool consume ONE
+ *  implementation. It is a pure leaf, not a Layer-2 runner concern — so importing
+ *  it is NOT a reverse-layering up-import. Every non-diff-ops `@/runner/*` import
+ *  from a lower slice still violates. */
+const ADR0440_PURE_RUNNER: ReadonlyArray<string> = ["@/runner/diff-ops"]
 
 /** Forbidden edges. Slice names without `/` match top-level slices (e.g.
  *  `agent`). Slash-form names (`agent/subagent-resume`) match per-file
@@ -112,6 +125,7 @@ export const SLICE_RULES: ReadonlyArray<ForbiddenEdge> = [
     from,
     to: ["runner", "host", "ipc", "apps"],
     reason: `${from} is a lower layer; importing a Layer-2 surface (runner/host/ipc/apps) is a reverse-layering up-import (ADR-0001)`,
+    except: ADR0440_PURE_RUNNER,
   })),
 
   // === Plane-clean sub-slice rules (helper primitives cannot pull the loop) ===
@@ -199,8 +213,13 @@ interface MatchCtx {
   readonly out: SliceGraphViolation[]
 }
 
+const isExempt = (spec: string, except: ReadonlyArray<string> | undefined): boolean =>
+  except !== undefined && except.some((e) => spec === e || spec.startsWith(`${e}/`))
+
 const tryMatchRuleDest = (ctx: MatchCtx, dest: string): void => {
   if (!specMatchesDest(ctx.src.spec, dest)) return
+  // ADR-blessed pure primitive living in a `to` slice ⇒ not a reverse-layering edge.
+  if (isExempt(ctx.src.spec, ctx.rule.except)) return
   const key = `${ctx.src.file}::${ctx.rule.from}->${dest}`
   if (ctx.seen.has(key)) return
   ctx.seen.add(key)

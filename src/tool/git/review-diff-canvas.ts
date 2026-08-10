@@ -23,6 +23,7 @@
  * `git_review_diff` is byte-identical (the findings still return to the model).
  */
 
+import { errMessage, logger } from "@/shared"
 import type { ToolContext } from "../types"
 import { safeRun } from "./_shared"
 import { synthesizeAnchoredFindings } from "./review-anchor-synth"
@@ -121,10 +122,11 @@ export const emitReviewCanvasDiffs = async (args: {
     if (anchored.length === 0) continue
     try {
       sink.capture({ toolCallId, before, after, path, findings: anchored })
-    } catch {
+    } catch (e) {
       // The review already returned to the model; a throwing observation sink
       // must never surface as a tool failure (belt-and-braces — the daemon sink
-      // is no-throw by contract).
+      // is no-throw by contract). Attribute so a contract breach is not lost.
+      logger.warn(`review-canvas: sink.capture failed for ${path}: ${errMessage(e)}`)
     }
   }
 }

@@ -166,9 +166,14 @@ describe("C. Real-graph audit over <repo>/src", () => {
     // their type-only metric-port imports after the prior baseline was set.
     // This snapshot is the "silent-drift baseline" future audits drive toward
     // 0 — any NEW edge forces a reviewed snapshot bump in the same PR.
+    // Lowered 9→8 (2026-08-10): the RFC-12 canvas landing's `tool → @/runner/diff-ops`
+    // VALUE imports (review-anchor{,-synth}.ts) are NOT reverse-layering — diff-ops is
+    // ADR-0440's surface-agnostic pure primitive (see `ADR0440_PURE_RUNNER` carve-out in
+    // validate.ts) — and a stale `tool/subagent-mailbox` edge dropped. Remaining 8 are
+    // the type-only metric/registry-port edges above.
     const g = await getRealGraph()
     const v = validateGraph(g)
-    expect(v.length).toBeLessThanOrEqual(9)
+    expect(v.length).toBeLessThanOrEqual(8)
   }, 30_000)
 
   test("14. Top-imported slices: shared / agent / llm rank high", async () => {

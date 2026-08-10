@@ -114,8 +114,10 @@ export const maybeAssignMessageIds = (messages: Message[], gateOn: boolean): Mes
       return candidate
     }
     return assignMessageIds(messages, () => nextFreeId())
-  } catch {
+  } catch (e) {
     // Assignment is best-effort; never let it break the turn's persistence.
+    // Attribute the failure so a real id-assignment bug is not silently lost.
+    logger.warn(`persist-turn: message-id assignment failed: ${errMessage(e)}`)
     return messages
   }
 }

@@ -226,6 +226,10 @@ const tryParseOne = (candidate: string): ReviewReport | null => {
   try {
     return projectReport(JSON.parse(trimmed))
   } catch {
+    // LEGIT best-effort probe: a `JSON.parse` throw on non-JSON reviewer output
+    // IS the answer (the caller `tryParseReport` deliberately tries multiple
+    // candidates expecting most to fail). `null` is normal control flow, not a
+    // swallowed error — logging every prose/fenced attempt would be pure noise.
     return null
   }
 }

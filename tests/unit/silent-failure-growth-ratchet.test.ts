@@ -158,7 +158,15 @@ const SRC = join(__dirname, "..", "..", "src")
 // as the shell.ts askConsent `} catch { return false }` precedent above. (The
 // store.ts rollback-preserve read is ATTRIBUTED via logger.warn, not counted.)
 // Ceiling 1154 → 1155.
-const BARE_CATCH_BASELINE = 1155
+// Re-measured 2026-08-10 (aug-02 canvas/rewind landings): 3 NEW bare catches
+// appeared; 2 were FIXED (bound + `logger.warn` attribution) — `persist-turn.ts`
+// message-id assignment and `review-diff-canvas.ts` sink.capture, both moved out
+// of this bucket. The remaining +1 is a JUSTIFIED best-effort probe:
+// `tool/git/review-diff.ts::tryParseOne` — a `JSON.parse` throw on non-JSON
+// reviewer output IS the answer (`tryParseReport` deliberately tries multiple
+// candidates expecting most to fail); `null` is normal control flow, not a
+// swallowed error. +1 justified site only — NO blanket bump. Ceiling 1155 → 1156.
+const BARE_CATCH_BASELINE = 1156
 // Re-measured 2026-06-25 (repo-cache GC + committed in-flight bench work): the
 // `reapStaleMirrorTemps` `stat(p).catch(() => null)` not-found PROBE (handled via
 // `if (st !== null …)`, a vanished orphan tmp is simply skipped) plus one further
