@@ -63,8 +63,20 @@ const classifyInIsolation = async (f: ParsedFailure): Promise<IsolationVerdict> 
   if (!f.file) return "inconclusive"
   const { output } = await runBunTest([f.file, "-t", f.leaf])
   const r = parseBunTestOutput(output)
-  // `-t` matched nothing ⇒ the isolation didn't actually exercise the test.
-  if (r.pass === 0 && r.fail === 0 && r.error === 0) return "inconclusive"
+  // `-t` matched nothing (a name with regex-special chars — `(`/`[`/`{`/`*`/… —
+  // makes the pattern match zero tests). This is a SYSTEMATIC blind spot: a REAL
+  // failure whose name breaks `-t` was being labelled "inconclusive", so an
+  // operator could mistake it for an ambiguous flake and quarantine it. Fall back
+  // to FILE-level isolation: run the whole file alone. If the file fails, the
+  // failure is REAL; if the file is fully green, it was a parallelism FLAKE. Only
+  // a file with genuinely zero tests stays inconclusive.
+  if (r.pass === 0 && r.fail === 0 && r.error === 0) {
+    const { output: fileOut } = await runBunTest([f.file])
+    const fr = parseBunTestOutput(fileOut)
+    if (fr.fail > 0 || fr.error > 0) return "real"
+    if (fr.pass > 0) return "flake"
+    return "inconclusive"
+  }
   // passes alone (and at least one test ran) ⇒ flake.
   if (r.fail === 0 && r.error === 0 && r.pass > 0) return "flake"
   return "real"
