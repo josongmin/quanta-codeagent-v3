@@ -21,10 +21,13 @@ afterAll(() => {
 
 describe("patch-gen budget lease", () => {
   test("a second lease gets only the remaining global budget", async () => {
+    // explicit `limit` ⇒ immune to a PARALLEL test poisoning the process-global
+    // QUANTA_BENCH_PATCH_GEN_BUDGET env (resolveGlobalPatchGenBudget reads it).
     const first = await acquirePatchGenBudgetLease({
       label: "first",
       requestedUnits: 12,
       dir: DIR,
+      limit: 16,
       waitMs: 1_000,
       pollMs: 10,
     })
@@ -32,13 +35,14 @@ describe("patch-gen budget lease", () => {
       label: "second",
       requestedUnits: 16,
       dir: DIR,
+      limit: 16,
       waitMs: 1_000,
       pollMs: 10,
     })
     try {
       expect(first.units).toBe(12)
       expect(second.units).toBe(4)
-      const state = await readPatchGenBudgetState({ dir: DIR })
+      const state = await readPatchGenBudgetState({ dir: DIR, limit: 16 })
       expect(state.limit).toBe(16)
       expect(state.inUse).toBe(16)
       expect(state.available).toBe(0)
