@@ -1,0 +1,1534 @@
+From 5c3efa9bde2a213af368ccdbaef5dcbe0d5f1f11 Mon Sep 17 00:00:00 2001
+From: Jo <songmin@Joui-MacBookPro.local>
+Date: Fri, 10 Jul 2026 07:42:17 +0900
+Subject: [PATCH] =?UTF-8?q?feat(cli):=20W4=20verbs/channel=20cluster=20?=
+ =?UTF-8?q?=E2=80=94=20deferred+attach=20approval=20verb=20parity,=20empty?=
+ =?UTF-8?q?-steer=20re-ask,=20labeled=20channel=20supersede,=20attach=20cl?=
+ =?UTF-8?q?aim=20gate=20(jul-10=20uiux)?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- UUX-1-06: ONE shared NORMAL-verb prompt (promptNormalApprovalVerbs) for the
+  inline confirm AND the deferred fallback; ToolAction-bound verbs ([p]/[P]/[h])
+  are capability-DECLARED, not forked; deferred 't <steer>' now survives as
+  {decision:'deny', steer} through the wire union.
+- UUX-1-19: attach prompt upgrades y/N → [y]/[a]lways-session/[N]/deny+s[t]eer;
+  wire capability verified (ApprovalRespondCommand.scope/steer forwarded by the
+  kernel scheduler to host.resolveApproval); rich answer sent verbatim, approve
+  re-runs the turn (web parity), legacy string answers byte-identical.
+- UUX-2-18: empty deny-steer re-prompts once ('steer text required (or N to
+  deny)') in the shared reader — repl inline + deferred + escalation + attach.
+- C2: awaitLine(signal?, label?) — a superseded release names its superseder;
+  askLine + elicitation reads print WHICH ask won; unlabeled shapes untouched.
+- C3 (mitigation): attach ApprovalLineGate orders line ARRIVALS vs prompt
+  RENDER — a line typed before the approval prompt appeared flows to the
+  session, never eaten as its answer (audit scenario pinned).
+
+Hellgate: RED-first proven (9 verb/steer/label fails + labeled-supersede +
+attach export missing), then green; adversarial audit caught a real
+return-in-try/finally release-ordering bug (return await, pinned by tests).
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+---
+ src/apps/cli/attach-cmd.ts                    | 137 +++++-
+ src/apps/cli/attach/attach-client.ts          |  57 ++-
+ src/apps/cli/attach/index.ts                  |   1 +
+ src/apps/cli/mcp-elicitation-prompter.ts      |  14 +-
+ ...-approval-channel-release.hellgate.test.ts |  35 ++
+ .../cli/repl/mid-turn-approval-channel.ts     |  36 +-
+ src/apps/cli/repl/runtime-context-compose.ts  | 247 +++++++----
+ .../cli/approval-verb-parity-hellgate.test.ts | 299 +++++++++++++
+ .../attach-approval-verbs-hellgate.test.ts    | 410 ++++++++++++++++++
+ 9 files changed, 1128 insertions(+), 108 deletions(-)
+ create mode 100644 tests/unit/apps/cli/approval-verb-parity-hellgate.test.ts
+ create mode 100644 tests/unit/apps/cli/attach/attach-approval-verbs-hellgate.test.ts
+
+diff --git a/src/apps/cli/attach-cmd.ts b/src/apps/cli/attach-cmd.ts
+index 1ff87ba40..56b7c84db 100644
+--- a/src/apps/cli/attach-cmd.ts
++++ b/src/apps/cli/attach-cmd.ts
+@@ -13,7 +13,7 @@
+  */
+ 
+ import * as readline from "node:readline/promises"
+-import { attachToDaemon } from "./attach"
++import { type AttachApprovalAnswer, attachToDaemon } from "./attach"
+ import {
+   createMidTurnApprovalChannel,
+   type MidTurnApprovalChannel,
+@@ -39,7 +39,8 @@ OPTIONS:
+   --token <token>   Bearer token (or set QUANTA_WEB_AUTH_TOKEN)
+   -h, --help        Show this help
+ 
+-Type a line to run a turn on the shared session. Approval prompts ask y/N.
++Type a line to run a turn on the shared session. Approval prompts offer
++[y]es / [a]lways session / [N]o / deny+s[t]eer.
+ Ctrl-C cancels the in-flight turn and detaches.
+ `
+ 
+@@ -78,9 +79,16 @@ export const parseAttachArgs = (argv: readonly string[], env: NodeJS.ProcessEnv)
+   }
+ }
+ 
+-/** Line-by-line async iterator over stdin (closeable for clean shutdown). */
+-const createStdinLines = (): { lines: AsyncIterable<string>; close: () => void } => {
++/** Line-by-line async iterator over stdin (closeable for clean shutdown).
++ *  C3 (jul-10 W4) — an optional `onLine` tap observes every line AT ARRIVAL
++ *  (the readline `line` event, i.e. when the operator hit Enter), so the
++ *  approval line-claim gate can order arrivals against prompt renders even
++ *  though the read loop pulls lines later. */
++const createStdinLines = (opts?: {
++  readonly onLine?: () => void
++}): { lines: AsyncIterable<string>; close: () => void } => {
+   const rl = readline.createInterface({ input: process.stdin })
++  if (opts?.onLine !== undefined) rl.on("line", opts.onLine)
+   const lines = rl[Symbol.asyncIterator]() as AsyncIterableIterator<string>
+   return {
+     lines: { [Symbol.asyncIterator]: () => lines },
+@@ -88,20 +96,117 @@ const createStdinLines = (): { lines: AsyncIterable<string>; close: () => void }
+   }
+ }
+ 
++/** C3 (jul-10 W4, mitigation) — the approval line-claim GATE. The read loop's
++ *  `claimApprovalLine` previously claimed a line whenever a channel waiter was
++ *  pending — inverting causality for a line the operator had ALREADY typed
++ *  before the approval prompt rendered (it got eaten as the prompt's answer).
++ *  The gate orders line ARRIVALS (readline `line` tap) against the prompt
++ *  RENDER: only a line typed after the prompt appeared may answer it; earlier
++ *  lines flow to the session. A line pulled without an arrival record (no tap
++ *  wired — bare test harnesses) is treated as fresh (legacy behavior). */
++export interface ApprovalLineGate {
++  /** Called at readline `line` arrival (operator pressed Enter). */
++  noteLineArrival(): void
++  /** Called when an approval prompt is rendered. The steer sub-prompts of one
++   *  approval do NOT re-mark (a pasted "t\n<steer>" burst stays claimed). */
++  markPromptRendered(): void
++  /** Called when the approval interaction fully settles. */
++  markPromptAnswered(): void
++  /** Read-loop seam: claim `line` for the pending approval, or let it flow. */
++  claim(line: string): boolean
++}
++
++export const createApprovalLineGate = (channel: MidTurnApprovalChannel): ApprovalLineGate => {
++  let seq = 0
++  let renderSeq: number | undefined
++  const arrivals: number[] = []
++  return {
++    noteLineArrival() {
++      seq += 1
++      arrivals.push(seq)
++    },
++    markPromptRendered() {
++      // First render of THIS approval wins; steer sub-prompts keep the anchor.
++      if (renderSeq === undefined) renderSeq = seq
++    },
++    markPromptAnswered() {
++      renderSeq = undefined
++    },
++    claim(line: string): boolean {
++      // Pop THIS line's arrival record even when not claiming — FIFO stays in
++      // sync with the read loop (one claim call per pulled line). No record ⇒
++      // untapped source ⇒ treat as freshly typed.
++      let arrival = arrivals.shift()
++      if (arrival === undefined) {
++        seq += 1
++        arrival = seq
++      }
++      if (renderSeq === undefined) return false // no prompt visible
++      if (arrival <= renderSeq) return false // typed BEFORE the prompt ⇒ session input
++      return channel.tryResolve(line)
++    },
++  }
++}
++
+ /** WS-B (jul-10, UUX-3-02) — the approval prompt no longer opens a SECOND
+  *  readline on the stdin the read-loop iterator already owns (the two raced:
+  *  the operator's "y" could be consumed by the loop and sent to the session
+  *  as input). ONE stdin owner: the prompt renders on stderr and awaits the
+  *  next line ROUTED from the read loop via the channel (`claimApprovalLine`
+  *  in attach-client consults it before treating a line as session input).
+- *  A typed channel release maps to "n" (fail-closed deny). */
+-const buildChannelApprovalPrompt = (
++ *  A typed channel release maps to a plain deny (fail-closed).
++ *
++ *  UUX-1-19 (jul-10 W4) — verb upgrade. The wire (`ApprovalRespondCommand`)
++ *  carries `scope` + `steer` and the kernel scheduler forwards both to
++ *  `host.resolveApproval`, so the prompt offers the SAME answer vocabulary the
++ *  daemon accepts: [y]es / [a]lways session (scope:"session" — the standing
++ *  grant) / [N]o / deny+s[t]eer (corrective steer on the deny lease). An empty
++ *  steer re-prompts ONCE (UUX-2-18) before degrading to a plain deny. */
++type AskLine = (prompt: string) => Promise<string | undefined>
++
++/** UUX-2-18 (attach half) — deny+steer sub-flow: an empty steer re-asks ONCE
++ *  ("steer text required (or N to deny)") before degrading to a plain deny.
++ *  `undefined` from `ask` = channel release ⇒ fail-closed plain deny. */
++const askDenySteer = async (ask: AskLine): Promise<AttachApprovalAnswer> => {
++  const steer = (await ask("Steer (what to do instead): "))?.trim()
++  if (steer === undefined) return { decision: "deny" }
++  if (steer.length > 0) return { decision: "deny", steer }
++  const retry = (await ask("steer text required (or N to deny): "))?.trim()
++  if (retry === undefined || retry.length === 0 || retry.toLowerCase() === "n") {
++    return { decision: "deny" }
++  }
++  return { decision: "deny", steer: retry }
++}
++
++export const buildChannelApprovalPrompt = (
+   channel: MidTurnApprovalChannel,
+-): ((reason: string) => Promise<string>) => {
+-  return async (reason: string): Promise<string> => {
+-    process.stderr.write(`Approve "${reason}"? [y/N] `)
+-    const result = await channel.awaitLine()
+-    return result.kind === "line" ? result.line : "n"
++  gate: ApprovalLineGate,
++): ((reason: string) => Promise<AttachApprovalAnswer>) => {
++  /** Render one sub-prompt and await its routed line; `undefined` = released. */
++  const ask: AskLine = async (prompt) => {
++    process.stderr.write(prompt)
++    gate.markPromptRendered()
++    const result = await channel.awaitLine(undefined, "approval")
++    if (result.kind === "line") return result.line
++    process.stderr.write("\n[quanta] approval prompt released unanswered — treated as deny.\n")
++    return undefined
++  }
++  return async (reason: string): Promise<AttachApprovalAnswer> => {
++    try {
++      const first = await ask(
++        `Approve "${reason}"? [y]es / [a]lways session / [N]o / deny+s[t]eer: `,
++      )
++      if (first === undefined) return { decision: "deny" }
++      const ans = first.trim().toLowerCase()
++      if (ans === "y" || ans === "yes") return { decision: "approve" }
++      if (ans === "a" || ans === "always") return { decision: "approve", scope: "session" }
++      // `await` is load-bearing: the enclosing finally (markPromptAnswered)
++      // must run AFTER the steer sub-flow settles, not when its promise mints.
++      if (ans === "t") return await askDenySteer(ask)
++      return { decision: "deny" }
++    } finally {
++      gate.markPromptAnswered()
++    }
+   }
+ }
+ 
+@@ -128,10 +233,14 @@ export const runAttachCmd = async (
+   }
+ 
+   const attach = deps.attach ?? attachToDaemon
+-  const stdin = createStdinLines()
+   // WS-B (UUX-3-02) — one stdin owner: approval answers ride the read loop.
+   const approvalChannel = createMidTurnApprovalChannel()
+   approvalChannel.active = true // the iterator owns stdin for the whole attach
++  // C3 (jul-10 W4) — the claim gate orders line arrivals against prompt
++  // renders so a line typed BEFORE an approval prompt appeared is never eaten
++  // as its answer (it flows to the session instead).
++  const approvalGate = createApprovalLineGate(approvalChannel)
++  const stdin = createStdinLines({ onLine: () => approvalGate.noteLineArrival() })
+ 
+   process.stderr.write(`attaching to ${args.url} …\n`)
+   const session = await attach({
+@@ -139,8 +248,8 @@ export const runAttachCmd = async (
+     ...(args.token !== undefined ? { token: args.token } : {}),
+     stdin: stdin.lines,
+     write: (chunk) => void process.stdout.write(chunk),
+-    promptApproval: buildChannelApprovalPrompt(approvalChannel),
+-    claimApprovalLine: (line) => approvalChannel.tryResolve(line),
++    promptApproval: buildChannelApprovalPrompt(approvalChannel, approvalGate),
++    claimApprovalLine: (line) => approvalGate.claim(line),
+   })
+ 
+   // Ctrl-C ⇒ best-effort turn.cancel + close (attachToDaemon.close handles it),
+diff --git a/src/apps/cli/attach/attach-client.ts b/src/apps/cli/attach/attach-client.ts
+index d5c15ceb2..609164515 100644
+--- a/src/apps/cli/attach/attach-client.ts
++++ b/src/apps/cli/attach/attach-client.ts
+@@ -30,7 +30,7 @@ import {
+   type SessionTransportMessage,
+   wrapWebSocketLikeAsSessionTransport,
+ } from "@/ipc/session"
+-import type { SessionCommand, SessionEvent } from "@/protocol/session"
++import type { ApprovalRespondCommand, SessionCommand, SessionEvent } from "@/protocol/session"
+ import { buildApprovalRespondCommand, buildLineCommands } from "./commands"
+ import {
+   type AttachHandshake,
+@@ -58,6 +58,20 @@ export type AttachSocketCtor = new (
+   protocols?: string | readonly string[],
+ ) => AttachSocket
+ 
++/** UUX-1-19 (jul-10 W4) — the attach prompter's RICH decision, mirroring what
++ *  the wire (`ApprovalRespondCommand`) actually carries: the kernel scheduler
++ *  forwards `scope` + `steer` verbatim to `host.resolveApproval`, so the
++ *  attach surface can offer [a]lways-session and deny+s[t]eer as first-class
++ *  verbs instead of collapsing everything onto y/N. A plain string answer is
++ *  the LEGACY shape (y/yes ⇒ approve, else deny) and stays accepted. */
++export interface AttachApprovalAnswer {
++  readonly decision: "approve" | "deny"
++  /** Only meaningful on `approve` (the wire's standing-grant scopes). */
++  readonly scope?: "once" | "session" | "session_prefix"
++  /** Only meaningful on `deny` (the wire's corrective steer). */
++  readonly steer?: string
++}
++
+ export interface AttachToDaemonOptions {
+   /** WS URL of the daemon session endpoint, e.g. `ws://127.0.0.1:4096/`. */
+   readonly url: string
+@@ -67,8 +81,10 @@ export interface AttachToDaemonOptions {
+   readonly stdin: AsyncIterable<string>
+   /** Terminal sink — defaults to `process.stdout.write`. */
+   readonly write: (chunk: string) => void
+-  /** Approval prompt — returns the operator's raw answer (`"y"`/`"n"`/…). */
+-  readonly promptApproval: (reason: string) => Promise<string>
++  /** Approval prompt — resolves either the operator's raw answer string
++   *  (LEGACY: `"y"`/`"n"`/…) or the rich {@link AttachApprovalAnswer} carrying
++   *  the wire's scope/steer (UUX-1-19). */
++  readonly promptApproval: (reason: string) => Promise<string | AttachApprovalAnswer>
+   /** WS-B (jul-10, UUX-3-02) — the pending-approval line claim. The attach
+    *  surface has ONE stdin owner (the `stdin` iterator feeding the read loop);
+    *  while an approval prompt is awaiting its answer, the NEXT line belongs to
+@@ -99,6 +115,37 @@ const withAuthQuery = (url: string, token: string | undefined): string => {
+   return `${url}${sep}token=${encodeURIComponent(token)}`
+ }
+ 
++/** UUX-1-19 — map the prompter's answer onto the wire. A STRING answer keeps
++ *  the legacy y/N mapping (`buildApprovalRespondCommand`, byte-identical); a
++ *  rich {@link AttachApprovalAnswer} carries `scope`/`steer` verbatim — the
++ *  kernel scheduler forwards both to `host.resolveApproval`. A steer is only
++ *  attached to a DENY and never as an empty string (the normalizer SSOT's
++ *  no-phantom-steer rule, mirrored at the wire boundary). */
++const buildRespondForAnswer = (args: {
++  readonly sessionId: string
++  readonly approvalId: string
++  readonly answer: string | AttachApprovalAnswer
++  readonly commandId: string
++  readonly issuedAt: string
++}): ApprovalRespondCommand => {
++  const { sessionId, approvalId, answer, commandId, issuedAt } = args
++  if (typeof answer === "string") {
++    return buildApprovalRespondCommand({ sessionId, approvalId, answer, commandId, issuedAt })
++  }
++  return {
++    sessionId,
++    commandId,
++    issuedAt,
++    type: "approval.respond",
++    approvalId,
++    decision: answer.decision,
++    ...(answer.decision === "approve" && answer.scope !== undefined ? { scope: answer.scope } : {}),
++    ...(answer.decision === "deny" && answer.steer !== undefined && answer.steer.trim().length > 0
++      ? { steer: answer.steer }
++      : {}),
++  }
++}
++
+ const resolveCtor = (override: AttachSocketCtor | undefined): AttachSocketCtor => {
+   if (override !== undefined) return override
+   const g = globalThis as { WebSocket?: AttachSocketCtor }
+@@ -179,7 +226,9 @@ export const attachToDaemon = async (opts: AttachToDaemonOptions): Promise<Attac
+         // A throwing/garbage prompter fail-safes to a literal "n" so the
+         // approval is DENIED, never approved and never left hanging. (#5)
+         const answer = await opts.promptApproval(reason).catch(() => "n")
+-        const respond = buildApprovalRespondCommand({
++        // UUX-1-19 — string answers keep the legacy y/N mapping; a rich answer
++        // rides the wire's scope/steer (see {@link buildRespondForAnswer}).
++        const respond = buildRespondForAnswer({
+           sessionId: sid,
+           approvalId,
+           answer,
+diff --git a/src/apps/cli/attach/index.ts b/src/apps/cli/attach/index.ts
+index a3824c91c..10ad399a2 100644
+--- a/src/apps/cli/attach/index.ts
++++ b/src/apps/cli/attach/index.ts
+@@ -8,6 +8,7 @@
+  */
+ 
+ export type {
++  AttachApprovalAnswer,
+   AttachedSession,
+   AttachSocket,
+   AttachSocketCtor,
+diff --git a/src/apps/cli/mcp-elicitation-prompter.ts b/src/apps/cli/mcp-elicitation-prompter.ts
+index be6439561..33d871511 100644
+--- a/src/apps/cli/mcp-elicitation-prompter.ts
++++ b/src/apps/cli/mcp-elicitation-prompter.ts
+@@ -132,9 +132,17 @@ export const readViaMidTurnChannelOrReadline = async (
+     if (signal.aborted) return null
+     // Audit W3-C1 — thread the consumer's signal so an MCP-side cancel
+     // RELEASES this waiter (consumer_aborted): a dead ask can never claim the
+-    // operator's next typed line.
+-    const result = await channel.awaitLine(signal)
+-    return result.kind === "line" ? result.line : null
++    // operator's next typed line. C2 (jul-10 W4) — label the ask so a
++    // one-waiter collision (approval vs elicitation) is diagnosable, and print
++    // WHICH ask superseded this one before mapping to cancellation.
++    const result = await channel.awaitLine(signal, "elicitation")
++    if (result.kind === "line") return result.line
++    if (result.cause === "superseded") {
++      process.stderr.write(
++        `\n[quanta] elicitation prompt released unanswered (superseded by ${result.supersededBy ?? "a newer"} prompt) — treated as canceled.\n`,
++      )
++    }
++    return null
+   }
+   return readLine("", signal)
+ }
+diff --git a/src/apps/cli/repl/__tests__/mid-turn-approval-channel-release.hellgate.test.ts b/src/apps/cli/repl/__tests__/mid-turn-approval-channel-release.hellgate.test.ts
+index 8b094a0b9..cc646e921 100644
+--- a/src/apps/cli/repl/__tests__/mid-turn-approval-channel-release.hellgate.test.ts
++++ b/src/apps/cli/repl/__tests__/mid-turn-approval-channel-release.hellgate.test.ts
+@@ -65,3 +65,38 @@ describe("HELLGATE WS-A — mid-turn channel typed release", () => {
+     expect(ch.tryResolve("stray")).toBe(false)
+   })
+ })
++
++// ── C2 (jul-10 W4) — multi-consumer honesty: WHICH ask superseded which ──────
++
++describe("HELLGATE C2 — labeled supersede is diagnosable (no queue, still fail-closed)", () => {
++  test("a LABELED superseding awaitLine names itself on the stale waiter's release", async () => {
++    const ch = createMidTurnApprovalChannel()
++    const stale = ch.awaitLine(undefined, "approval")
++    const fresh = ch.awaitLine(undefined, "elicitation")
++    expect(await stale).toEqual({
++      kind: "released",
++      cause: "superseded",
++      supersededBy: "elicitation",
++    })
++    ch.tryResolve("ok")
++    expect(await fresh).toEqual({ kind: "line", line: "ok" })
++  })
++
++  test("SHAPE STABILITY: an UNLABELED supersede keeps the exact legacy shape (no supersededBy key)", async () => {
++    const ch = createMidTurnApprovalChannel()
++    const stale = ch.awaitLine()
++    void ch.awaitLine()
++    const released = await stale
++    expect(released).toEqual({ kind: "released", cause: "superseded" })
++    expect(Object.hasOwn(released, "supersededBy")).toBe(false)
++  })
++
++  test("clear() releases carry NO supersededBy (only a supersede names a superseder)", async () => {
++    const ch = createMidTurnApprovalChannel()
++    const p = ch.awaitLine(undefined, "approval")
++    ch.clear("turn_teardown")
++    const released = await p
++    expect(released).toEqual({ kind: "released", cause: "turn_teardown" })
++    expect(Object.hasOwn(released, "supersededBy")).toBe(false)
++  })
++})
+diff --git a/src/apps/cli/repl/mid-turn-approval-channel.ts b/src/apps/cli/repl/mid-turn-approval-channel.ts
+index 3ed1330bd..489618e38 100644
+--- a/src/apps/cli/repl/mid-turn-approval-channel.ts
++++ b/src/apps/cli/repl/mid-turn-approval-channel.ts
+@@ -39,10 +39,22 @@ export type MidTurnReleaseCause =
+   | "consumer_aborted"
+ 
+ /** What `awaitLine` resolves to: a REAL operator line (possibly empty — an empty
+- *  Enter is still input) vs a typed RELEASE (never disguised as input). */
++ *  Enter is still input) vs a typed RELEASE (never disguised as input).
++ *
++ *  C2 (jul-10 W4) — the channel is shared by approval prompts AND elicitation
++ *  (registry slot), so a `superseded` release additionally names the LABEL of
++ *  the ask that superseded this waiter (when the superseder declared one). The
++ *  collision stays fail-closed — this only makes it diagnosable at the consumer
++ *  ("approval prompt superseded by elicitation ask", not a mystery deny). */
+ export type MidTurnLineResult =
+   | { readonly kind: "line"; readonly line: string }
+-  | { readonly kind: "released"; readonly cause: MidTurnReleaseCause }
++  | {
++      readonly kind: "released"
++      readonly cause: MidTurnReleaseCause
++      /** Only on `cause: "superseded"`, and only when the superseding
++       *  `awaitLine` passed a label. NEVER set on teardown/abort releases. */
++      readonly supersededBy?: string
++    }
+ 
+ export interface MidTurnApprovalChannel {
+   /** True while an in-turn reader owns stdin (set by the session loop around each
+@@ -54,8 +66,11 @@ export interface MidTurnApprovalChannel {
+    *  the turn ends first — the caller maps a release to a fail-closed deny AND
+    *  surfaces the cause (never a silent deny). An optional `signal` releases
+    *  THIS waiter (`consumer_aborted`) when the consumer cancels mid-await, so a
+-   *  dead ask can never claim the operator's next line (audit W3-C1). */
+-  awaitLine(signal?: AbortSignal): Promise<MidTurnLineResult>
++   *  dead ask can never claim the operator's next line (audit W3-C1).
++   *  C2 (jul-10 W4) — an optional `label` names THIS ask (e.g. "approval",
++   *  "elicitation"); when it supersedes a stale waiter, that waiter's release
++   *  carries `supersededBy: label` so the collision is diagnosable. */
++  awaitLine(signal?: AbortSignal, label?: string): Promise<MidTurnLineResult>
+   /** Session loop `onLine`: deliver a captured line to a waiting approval. Returns
+    *  true iff it was consumed (so the caller skips the normal follow-up routing). */
+   tryResolve(line: string): boolean
+@@ -86,18 +101,21 @@ export const currentMidTurnApprovalChannel = (): MidTurnApprovalChannel | undefi
+ 
+ export const createMidTurnApprovalChannel = (): MidTurnApprovalChannel => {
+   let pending: ((result: MidTurnLineResult) => void) | undefined
+-  const release = (cause: MidTurnReleaseCause): void => {
++  const release = (cause: MidTurnReleaseCause, supersededBy?: string): void => {
+     if (pending === undefined) return
+     const resolve = pending
+     pending = undefined
+-    resolve({ kind: "released", cause })
++    // C2 — only a supersede names its superseder; the key is OMITTED otherwise
++    // so teardown/abort release shapes stay byte-identical to the WS-A landing.
++    resolve({ kind: "released", cause, ...(supersededBy !== undefined ? { supersededBy } : {}) })
+   }
+   return {
+     active: false,
+-    awaitLine(signal?: AbortSignal): Promise<MidTurnLineResult> {
++    awaitLine(signal?: AbortSignal, label?: string): Promise<MidTurnLineResult> {
+       // A prior unfinished waiter would be a wiring bug (one approval at a time);
+-      // release it TYPED before replacing, so it can't leak or fake a deny.
+-      release("superseded")
++      // release it TYPED before replacing, so it can't leak or fake a deny —
++      // and NAME the superseding ask (C2) so the collision is diagnosable.
++      release("superseded", label)
+       if (signal?.aborted === true) {
+         return Promise.resolve({ kind: "released", cause: "consumer_aborted" })
+       }
+diff --git a/src/apps/cli/repl/runtime-context-compose.ts b/src/apps/cli/repl/runtime-context-compose.ts
+index c816982aa..d160c12c8 100644
+--- a/src/apps/cli/repl/runtime-context-compose.ts
++++ b/src/apps/cli/repl/runtime-context-compose.ts
+@@ -61,18 +61,29 @@ import { createCliPlanExitPort, createCliUserInputPort } from "./session-host-po
+ // fail-closes to deny ("입력창이 안 떠서"). When `channel.active`, route through
+ // the in-turn reader's captured line instead of a conflicting readline. Between
+ // turns (`active` false) keep the ad-hoc readline (byte-identical legacy).
+-const askLine = async (channel: MidTurnApprovalChannel, prompt: string): Promise<string> => {
++const askLine = async (
++  channel: MidTurnApprovalChannel,
++  prompt: string,
++  label = "prompt",
++): Promise<string> => {
+   if (channel.active) {
+     process.stderr.write(prompt)
+-    const result = await channel.awaitLine()
++    const result = await channel.awaitLine(undefined, label)
+     if (result.kind === "line") return result.line
+     // WS-A (jul-10, UUX-1-22) — a RELEASED prompt (turn canceled/backgrounded/
+     // ended with the ask unanswered) maps to the same fail-closed "" the callers
+     // already treat as deny, but NEVER silently: the operator sees WHY the
+     // prompt vanished, and the outcome is attributed to the release — not to a
+-    // decision they never made.
++    // decision they never made. C2 (jul-10 W4) — a SUPERSEDED release names
++    // which ask won the channel, so the one-waiter collision is diagnosable.
++    const why =
++      result.cause === "turn_teardown"
++        ? "turn ended"
++        : result.cause === "superseded"
++          ? `superseded by ${result.supersededBy ?? "a newer"} prompt`
++          : "canceled by its consumer"
+     process.stderr.write(
+-      `\n[quanta] prompt released unanswered (${result.cause === "turn_teardown" ? "turn ended" : "superseded by a newer prompt"}) — treated as deny/fail-closed.\n`,
++      `\n[quanta] ${label} prompt released unanswered (${why}) — treated as deny/fail-closed.\n`,
+     )
+     return ""
+   }
+@@ -111,6 +122,7 @@ const buildBackgroundConsentPort =
+       await askLine(
+         channel,
+         `Command still running after ${secs}s: ${shown}\nMove to background? [y]es / [N]o (kill) `,
++        "background-consent",
+       )
+     )
+       .trim()
+@@ -147,6 +159,22 @@ interface EscalationScopeView {
+   readonly justification?: string | undefined
+ }
+ 
++/** UUX-2-18 (CLI half) — the ONE deny-steer text reader. An EMPTY steer answer
++ *  re-prompts ONCE ("steer text required (or N to deny)") instead of silently
++ *  degrading to a plain deny — the operator chose the steer verb; a phantom ""
++ *  must never eat their intent. Still-empty / "N" ⇒ `undefined` (plain deny —
++ *  the normalizer SSOT would strip a "" steer anyway; this is the UX half).
++ *  Shared by the escalation arm AND the normal verb prompt (no fork copy). */
++const askSteerText = async (deps: CliHitlDeps): Promise<string | undefined> => {
++  const first = (await askLine(deps.channel, "Steer (what to do instead): ", "approval")).trim()
++  if (first.length > 0) return first
++  const second = (
++    await askLine(deps.channel, "steer text required (or N to deny): ", "approval")
++  ).trim()
++  if (second.length === 0 || second.toLowerCase() === "n") return undefined
++  return second
++}
++
+ const promptEscalationVerbs = async (
+   deps: CliHitlDeps,
+   scope: EscalationScopeView,
+@@ -160,6 +188,7 @@ const promptEscalationVerbs = async (
+     await askLine(
+       deps.channel,
+       "Allow [o]nce / allow [s]ession / [d]eny / deny+s[t]eer? [o/s/D/t] ",
++      "approval",
+     )
+   )
+     .trim()
+@@ -174,14 +203,91 @@ const promptEscalationVerbs = async (
+     return { decision: "allow", scope: "session" }
+   }
+   if (ans === "t") {
+-    const steer = (await askLine(deps.channel, "Steer (what to do instead): ")).trim()
++    const steer = await askSteerText(deps)
+     deps.rejectCounter.recordDeny()
+-    return steer.length > 0 ? { decision: "deny_and_steer", steer } : { decision: "deny" }
++    return steer !== undefined ? { decision: "deny_and_steer", steer } : { decision: "deny" }
+   }
+   deps.rejectCounter.recordDeny()
+   return { decision: "deny" }
+ }
+ 
++/** UUX-1-06 (A-r2) — the ONE shared NORMAL-approval verb prompt (PromptSpec-
++ *  lite). Both the inline confirm ({@link buildCliOnConfirm}) and the deferred
++ *  fallback ({@link buildCliApprovalPrompt}) render + answer-map through THIS
++ *  helper, so the verb set can never fork between the two routes again.
++ *  Verbs that structurally need the full `ToolAction` are DECLARED as
++ *  capability flags (absent ⇒ not offered), never copy-forked:
++ *   - `hunk`        — [h]unk-select needs the action's previewable diff;
++ *   - `prefixLabel` — [p]/[P] prefix grants need the action's shellCommand. */
++interface NormalVerbCaps {
++  /** Prompt subject: the tool name (inline) or "pending action" (deferred). */
++  readonly subject: string
++  /** [h]unk-select capability (inline-only — needs the ToolAction). */
++  readonly hunk?: { readonly diff: ActionDiff; readonly ids: string[] }
++  /** [p] prefix-grant capability (inline-only — needs `shellCommand`). */
++  readonly prefixLabel?: string | null
++  /** [P] durable prefix capability (needs a wired trust-scope registry). */
++  readonly durable?: boolean
++}
++
++type NormalVerbAnswer =
++  | { readonly kind: "allow"; readonly scope?: "session" }
++  | { readonly kind: "allow_prefix"; readonly durable: boolean }
++  | { readonly kind: "hunk_select" }
++  | { readonly kind: "deny"; readonly steer?: string }
++
++const renderNormalVerbPrompt = (caps: NormalVerbCaps): string => {
++  const prefixLabel = caps.prefixLabel ?? null
++  const durable = caps.durable === true && prefixLabel !== null
++  // T05 — append the [h]unk-select verb when a per-hunk option exists.
++  const hunkVerb = caps.hunk !== undefined ? " / [h]unk-select" : ""
++  return durable
++    ? `Allow ${caps.subject}? [y]es / [a]lways session / [p] \`${prefixLabel}\` this session / [P] \`${prefixLabel}\` ALL sessions / [N]o / deny+s[t]eer${hunkVerb}: `
++    : prefixLabel !== null
++      ? `Allow ${caps.subject}? [y]es / [a]lways session / [p] always \`${prefixLabel}\` cmds / [N]o / deny+s[t]eer${hunkVerb}: `
++      : `Allow ${caps.subject}? [y]es / [a]lways session / [N]o / deny+s[t]eer${hunkVerb}: `
++}
++
++const promptNormalApprovalVerbs = async (
++  deps: CliHitlDeps,
++  caps: NormalVerbCaps,
++): Promise<NormalVerbAnswer> => {
++  const prefixLabel = caps.prefixLabel ?? null
++  const durable = caps.durable === true && prefixLabel !== null
++  // Capture the RAW answer too: the prefix verbs are case-SENSITIVE ([p] this
++  // session vs [P] all sessions) and the lowercased `ans` cannot tell them
++  // apart — so the durable check reads `raw` and runs BEFORE the `ans` "p"
++  // check (a typed "P" lowercases to "p", so durable must win first).
++  const raw = (await askLine(deps.channel, renderNormalVerbPrompt(caps), "approval")).trim()
++  const ans = raw.toLowerCase()
++  deps.idleMonitor.markActive()
++  // T05 — [h] drives the per-hunk picker (only offered when the cap is set).
++  if (caps.hunk !== undefined && ans === "h") return { kind: "hunk_select" }
++  if (ans === "y" || ans === "yes") {
++    deps.rejectCounter.recordAccept()
++    return { kind: "allow" }
++  }
++  if (ans === "a" || ans === "always") {
++    deps.rejectCounter.recordAccept()
++    return { kind: "allow", scope: "session" }
++  }
++  if (durable && raw === "P") {
++    deps.rejectCounter.recordAccept()
++    return { kind: "allow_prefix", durable: true }
++  }
++  if (prefixLabel !== null && ans === "p") {
++    deps.rejectCounter.recordAccept()
++    return { kind: "allow_prefix", durable: false }
++  }
++  if (ans === "t") {
++    const steer = await askSteerText(deps)
++    deps.rejectCounter.recordDeny()
++    return steer !== undefined ? { kind: "deny", steer } : { kind: "deny" }
++  }
++  deps.rejectCounter.recordDeny()
++  return { kind: "deny" }
++}
++
+ /** T05 — when `QUANTA_HUNK_APPROVAL` is ON, compute the previewed mutation's
+  *  `(path, before, after)` so the confirm prompt can offer per-hunk selection.
+  *  Returns the diff + its atomic hunk ids ONLY when there are ≥2 hunks (a single
+@@ -310,59 +416,40 @@ const buildCliOnConfirm =
+     // #20 durable — the [P] verb is offered ONLY when a prefix is safe AND a
+     // persistent trust-scope registry is wired (gate `QUANTA_TRUST_SCOPE` on).
+     const durable = prefixLabel !== null && deps.trustScope !== undefined
+-    // Capture the RAW answer too: the prefix verbs are case-SENSITIVE ([p] this
+-    // session vs [P] all sessions) and the lowercased `ans` cannot tell them
+-    // apart — so the durable check below reads `raw` and runs BEFORE the `ans`
+-    // "p" check (a typed "P" lowercases to "p", so durable must win first).
+-    // T05 — append the [h]unk-select verb when a per-hunk option exists.
+-    const hunkVerb = hunkOption !== undefined ? " / [h]unk-select" : ""
+-    const raw = (
+-      await askLine(
+-        deps.channel,
+-        durable
+-          ? `Allow ${action.tool}? [y]es / [a]lways session / [p] \`${prefixLabel}\` this session / [P] \`${prefixLabel}\` ALL sessions / [N]o / deny+s[t]eer${hunkVerb}: `
+-          : prefixLabel !== null
+-            ? `Allow ${action.tool}? [y]es / [a]lways session / [p] always \`${prefixLabel}\` cmds / [N]o / deny+s[t]eer${hunkVerb}: `
+-            : `Allow ${action.tool}? [y]es / [a]lways session / [N]o / deny+s[t]eer${hunkVerb}: `,
+-      )
+-    ).trim()
+-    const ans = raw.toLowerCase()
+-    deps.idleMonitor.markActive()
+-    // T05 — [h] drives the per-hunk picker (only offered when hunkOption is set).
+-    if (hunkOption !== undefined && ans === "h") {
+-      return runHunkSelect(deps, hunkOption.diff, hunkOption.ids)
+-    }
+-    if (ans === "y" || ans === "yes") {
+-      deps.rejectCounter.recordAccept()
+-      return true
+-    }
+-    if (ans === "a" || ans === "always") {
+-      deps.rejectCounter.recordAccept()
+-      return { decision: "allow", scope: "session" }
+-    }
+-    // #20 durable — [P] (capital, exact) mints a DURABLE program-token grant into
+-    // the persistent registry (survives across sessions) AND allows this session
+-    // (session_prefix). Checked BEFORE the lowercase [p] so a typed "P" is durable.
+-    if (durable && raw === "P" && deps.trustScope !== undefined && prefixLabel !== null) {
+-      deps.trustScope.registry.grant(deps.trustScope.projectKey, {
+-        tool: action.tool,
+-        scope: "project",
+-        commandPattern: prefixLabel,
+-      })
+-      deps.rejectCounter.recordAccept()
+-      return { decision: "allow", scope: "session_prefix" }
+-    }
+-    if (prefixLabel !== null && ans === "p") {
+-      deps.rejectCounter.recordAccept()
+-      return { decision: "allow", scope: "session_prefix" }
+-    }
+-    if (ans === "t") {
+-      const steer = (await askLine(deps.channel, "Steer (what to do instead): ")).trim()
+-      deps.rejectCounter.recordDeny()
+-      return steer.length > 0 ? { decision: "deny_and_steer", steer } : false
++    // UUX-1-06 — render + answer-map through the SHARED verb helper (the
++    // deferred prompt consumes the same one); only the DECISION SHAPING below
++    // is inline-specific (ConfirmDecision vs the wire union).
++    const answer = await promptNormalApprovalVerbs(deps, {
++      subject: action.tool,
++      ...(hunkOption !== undefined ? { hunk: hunkOption } : {}),
++      prefixLabel,
++      durable,
++    })
++    switch (answer.kind) {
++      case "hunk_select":
++        // Structurally gated: the helper only returns this when the cap was set.
++        return hunkOption !== undefined
++          ? runHunkSelect(deps, hunkOption.diff, hunkOption.ids)
++          : false
++      case "allow":
++        return answer.scope === "session" ? { decision: "allow", scope: "session" } : true
++      case "allow_prefix":
++        // #20 durable — [P] mints a DURABLE program-token grant into the
++        // persistent registry (survives across sessions) AND allows this
++        // session (session_prefix).
++        if (answer.durable && deps.trustScope !== undefined && prefixLabel !== null) {
++          deps.trustScope.registry.grant(deps.trustScope.projectKey, {
++            tool: action.tool,
++            scope: "project",
++            commandPattern: prefixLabel,
++          })
++        }
++        return { decision: "allow", scope: "session_prefix" }
++      case "deny":
++        return answer.steer !== undefined
++          ? { decision: "deny_and_steer", steer: answer.steer }
++          : false
+     }
+-    deps.rejectCounter.recordDeny()
+-    return false
+   }
+ 
+ const buildCliApprovalPrompt =
+@@ -391,25 +478,27 @@ const buildCliApprovalPrompt =
+       return { decision: "deny" }
+     }
+     process.stderr.write(`Approval required: ${approval.reason}\n`)
+-    // jun-10 — "[a]lways session" on the DEFERRED prompt too: resolves
+-    // approve+scope:"session" so the runtime controller mints the standing
+-    // grant (one abort+re-run round-trip per key per session, not per ask).
+-    const ans = (
+-      await askLine(deps.channel, "Approve pending action? [y]es / [a]lways session / [N]o ")
+-    )
+-      .trim()
+-      .toLowerCase()
+-    deps.idleMonitor.markActive()
+-    if (ans === "y" || ans === "yes") {
+-      deps.rejectCounter.recordAccept()
+-      return "approve"
+-    }
+-    if (ans === "a" || ans === "always") {
+-      deps.rejectCounter.recordAccept()
+-      return { decision: "approve", scope: "session" }
++    // UUX-1-06 (A-r2) — the deferred NORMAL arm offers the SAME verbs the
++    // inline confirm offers, via the SAME helper: [y]/[a]lways-session/[N]/
++    // deny+s[t]eer. It only has a `PendingApprovalView` (no ToolAction), so the
++    // ToolAction-bound capabilities ([p]/[P] prefix, [h]unk, diff preview) are
++    // structurally ABSENT — declared by omitting the caps, never copy-forked.
++    // A deny+steer maps onto the wire union; the session-turn-driver threads
++    // the steer to `session.approval.respond` ⇒ the host lease carries it.
++    const answer = await promptNormalApprovalVerbs(deps, { subject: "pending action" })
++    switch (answer.kind) {
++      case "allow":
++        // jun-10 — "[a]lways session" resolves approve+scope:"session" so the
++        // runtime controller mints the standing grant (one abort+re-run
++        // round-trip per key per session, not per ask).
++        return answer.scope === "session" ? { decision: "approve", scope: "session" } : "approve"
++      case "deny":
++        return answer.steer !== undefined ? { decision: "deny", steer: answer.steer } : "deny"
++      default:
++        // allow_prefix / hunk_select are unreachable without their caps —
++        // fail CLOSED if the helper ever regresses.
++        return "deny"
+     }
+-    deps.rejectCounter.recordDeny()
+-    return "deny"
+   }
+ 
+ export interface ComposeCliRuntimeContextArgs {
+@@ -723,9 +812,11 @@ export const composeCliRuntimeContext = async (
+     })
+   }
+   const permissionStore = await loadPermissionStore()
+-  const planExitPort = createCliPlanExitPort({ ask: (p) => askLine(midTurnApprovalChannel, p) })
++  const planExitPort = createCliPlanExitPort({
++    ask: (p) => askLine(midTurnApprovalChannel, p, "plan-exit"),
++  })
+   const userInputPort = createCliUserInputPort({
+-    ask: (p) => askLine(midTurnApprovalChannel, p),
++    ask: (p) => askLine(midTurnApprovalChannel, p, "user-input"),
+     stream: turnStream,
+   })
+   // ADR-0296 PROMPT mode — see {@link buildBackgroundConsentPort}. Bound to the
+diff --git a/tests/unit/apps/cli/approval-verb-parity-hellgate.test.ts b/tests/unit/apps/cli/approval-verb-parity-hellgate.test.ts
+new file mode 100644
+index 000000000..c3d820506
+--- /dev/null
++++ b/tests/unit/apps/cli/approval-verb-parity-hellgate.test.ts
+@@ -0,0 +1,299 @@
++/**
++ * ★ HELLGATE — Wave-4 verbs cluster (jul-10 uiux structural):
++ *
++ *   UUX-1-06 (A-r2) — DEFERRED approval verb parity. The deferred NORMAL
++ *   prompt (`buildCliApprovalPrompt`, non-escalation arm) offered only
++ *   [y]/[a]/[N] while the inline confirm offered deny+s[t]eer too — answering
++ *   "t <steer>" at the deferred prompt yielded a PLAIN deny and the operator's
++ *   corrective steer silently vanished. Both arms must render/map through ONE
++ *   shared helper (capability-declared: verbs that structurally need the
++ *   ToolAction — [p]/[P] prefix, [h]unk — stay inline-only, DECLARED not forked).
++ *
++ *   UUX-2-18 (CLI half) — an empty deny-steer answer RE-PROMPTS once
++ *   ("steer text required (or N to deny)") instead of silently degrading to a
++ *   plain deny.
++ *
++ *   C2 — a SUPERSEDED channel release is diagnosable: the consumer notice names
++ *   WHICH ask superseded which (label threaded through `awaitLine`).
++ */
++
++import { afterEach, beforeEach, describe, expect, test } from "bun:test"
++import type { MidTurnLineResult } from "@/apps/cli/repl/mid-turn-approval-channel"
++import { __testing } from "@/apps/cli/repl/runtime-context-compose"
++import type { ToolAction } from "@/permission"
++import type { PendingApprovalView } from "@/protocol/session"
++import { normalizeApprovalDecision } from "@/runner/orchestrate"
++
++// ── fixtures ──────────────────────────────────────────────────────────────────
++
++/** A scripted channel: each awaitLine consumes the next entry (a raw line or a
++ *  typed release). Captures the labels consumers pass (C2). */
++const scriptedChannel = (script: readonly (string | MidTurnLineResult)[]) => {
++  const queue = [...script]
++  const labels: (string | undefined)[] = []
++  return {
++    labels,
++    channel: {
++      active: true,
++      awaitLine: async (_signal?: AbortSignal, label?: string): Promise<MidTurnLineResult> => {
++        labels.push(label)
++        const next = queue.shift()
++        if (next === undefined) throw new Error("channel script exhausted — prompt over-asked")
++        return typeof next === "string" ? { kind: "line", line: next } : next
++      },
++      tryResolve: () => false,
++      clear: () => {},
++    },
++  }
++}
++
++const makeDeps = (script: readonly (string | MidTurnLineResult)[]) => {
++  const counters = { accepts: 0, denies: 0 }
++  const { channel, labels } = scriptedChannel(script)
++  return {
++    counters,
++    labels,
++    deps: {
++      idleMonitor: { markActive: () => {} } as never,
++      rejectCounter: {
++        recordAccept: () => {
++          counters.accepts += 1
++        },
++        recordDeny: () => {
++          counters.denies += 1
++        },
++      } as never,
++      channel: channel as never,
++    },
++  }
++}
++
++const approval: PendingApprovalView = {
++  approvalId: "ap-1",
++  reason: "terminal.needs_approval",
++  requestedAt: "2026-07-10T00:00:00.000Z",
++}
++
++const plainAction: ToolAction = { tool: "edit_file", input: {}, isReadOnly: false }
++
++const captureStderr = async (fn: () => Promise<unknown>): Promise<string> => {
++  const orig = process.stderr.write.bind(process.stderr)
++  let buf = ""
++  process.stderr.write = ((chunk: unknown) => {
++    buf += String(chunk)
++    return true
++  }) as typeof process.stderr.write
++  try {
++    await fn()
++  } finally {
++    process.stderr.write = orig
++  }
++  return buf
++}
++
++// Quiet gates so the inline confirm renders ONLY the verb prompt.
++const ENV_KEYS = ["QUANTA_PREFLIGHT_CHECK", "QUANTA_DIFF_PREVIEW", "QUANTA_HUNK_APPROVAL"] as const
++const saved: Record<string, string | undefined> = {}
++beforeEach(() => {
++  for (const k of ENV_KEYS) {
++    saved[k] = process.env[k]
++    process.env[k] = "0"
++  }
++})
++afterEach(() => {
++  for (const k of ENV_KEYS) {
++    if (saved[k] === undefined) delete process.env[k]
++    else process.env[k] = saved[k]
++  }
++})
++
++// ── UUX-1-06 — deferred verb parity ──────────────────────────────────────────
++
++describe("HELLGATE UUX-1-06 — deferred approval verb parity (shared helper)", () => {
++  test("RED pin: deferred 't' + steer text ⇒ the steer SURVIVES as {decision:'deny', steer}", async () => {
++    const { deps } = makeDeps(["t", "edit the fixture copy instead"])
++    const prompt = __testing.buildCliApprovalPrompt(deps as never)
++    const raw = await captureStderr(async () => {
++      const result = await prompt(approval)
++      expect(normalizeApprovalDecision(result)).toEqual({
++        decision: "deny",
++        steer: "edit the fixture copy instead",
++      })
++    })
++    expect(raw).toContain("Steer")
++  })
++
++  test("deferred prompt OFFERS the deny+steer verb (verb parity with the inline confirm)", async () => {
++    const { deps } = makeDeps(["y"])
++    const prompt = __testing.buildCliApprovalPrompt(deps as never)
++    const out = await captureStderr(() => prompt(approval))
++    expect(out).toContain("deny+s[t]eer")
++    expect(out).toContain("[a]lways session")
++  })
++
++  test("capability flags: the deferred arm (no ToolAction) offers NO [p]/[P] prefix and NO hunk verb", async () => {
++    const { deps } = makeDeps(["y"])
++    const prompt = __testing.buildCliApprovalPrompt(deps as never)
++    const out = await captureStderr(() => prompt(approval))
++    expect(out).not.toContain("[p]")
++    expect(out).not.toContain("hunk")
++    expect(out).not.toContain("ALL sessions")
++  })
++
++  test("PAIRED control: 'a' still maps to approve+session (pre-existing verb intact)", async () => {
++    const { deps, counters } = makeDeps(["a"])
++    const prompt = __testing.buildCliApprovalPrompt(deps as never)
++    await captureStderr(async () => {
++      expect(normalizeApprovalDecision(await prompt(approval))).toEqual({
++        decision: "approve",
++        scope: "session",
++      })
++    })
++    expect(counters.accepts).toBe(1)
++  })
++
++  test("PAIRED control: 'y' approves; empty answer fail-closes to a plain deny", async () => {
++    {
++      const { deps } = makeDeps(["y"])
++      const prompt = __testing.buildCliApprovalPrompt(deps as never)
++      await captureStderr(async () => {
++        expect(normalizeApprovalDecision(await prompt(approval))).toEqual({ decision: "approve" })
++      })
++    }
++    {
++      const { deps, counters } = makeDeps([""])
++      const prompt = __testing.buildCliApprovalPrompt(deps as never)
++      await captureStderr(async () => {
++        expect(normalizeApprovalDecision(await prompt(approval))).toEqual({ decision: "deny" })
++      })
++      expect(counters.denies).toBe(1)
++    }
++  })
++
++  test("SAME-HELPER proof: inline and deferred render the IDENTICAL verb tail for a plain action", async () => {
++    const verbTail = "[y]es / [a]lways session / [N]o / deny+s[t]eer: "
++    const inline = makeDeps(["y"])
++    const inlineOut = await captureStderr(() =>
++      __testing.buildCliOnConfirm(inline.deps as never)(plainAction),
++    )
++    const deferred = makeDeps(["y"])
++    const deferredOut = await captureStderr(() =>
++      __testing.buildCliApprovalPrompt(deferred.deps as never)(approval),
++    )
++    expect(inlineOut).toContain(verbTail)
++    expect(deferredOut).toContain(verbTail)
++    // The inline wording the hitl e2e pins stays byte-identical.
++    expect(inlineOut).toContain(`Allow edit_file? ${verbTail}`)
++  })
++})
++
++// ── UUX-2-18 — empty steer re-asks once ──────────────────────────────────────
++
++describe("HELLGATE UUX-2-18 — empty deny-steer re-prompts once (never silent degrade)", () => {
++  test("deferred: 't' → empty → re-prompt → steer text ⇒ steer survives", async () => {
++    const { deps } = makeDeps(["t", "", "run the linter first"])
++    const prompt = __testing.buildCliApprovalPrompt(deps as never)
++    const out = await captureStderr(async () => {
++      expect(normalizeApprovalDecision(await prompt(approval))).toEqual({
++        decision: "deny",
++        steer: "run the linter first",
++      })
++    })
++    expect(out).toContain("steer text required (or N to deny)")
++  })
++
++  test("deferred: 't' → empty → empty again ⇒ plain deny (no phantom steer)", async () => {
++    const { deps } = makeDeps(["t", "", ""])
++    const prompt = __testing.buildCliApprovalPrompt(deps as never)
++    await captureStderr(async () => {
++      expect(normalizeApprovalDecision(await prompt(approval))).toEqual({ decision: "deny" })
++    })
++  })
++
++  test("deferred: 't' → empty → 'N' ⇒ plain deny (the offered escape hatch)", async () => {
++    const { deps } = makeDeps(["t", "", "N"])
++    const prompt = __testing.buildCliApprovalPrompt(deps as never)
++    await captureStderr(async () => {
++      expect(normalizeApprovalDecision(await prompt(approval))).toEqual({ decision: "deny" })
++    })
++  })
++
++  test("inline confirm: 't' → empty → re-prompt → steer ⇒ deny_and_steer (not a silent plain deny)", async () => {
++    const { deps, counters } = makeDeps(["t", "", "prefer rg over grep"])
++    const onConfirm = __testing.buildCliOnConfirm(deps as never)
++    const out = await captureStderr(async () => {
++      expect(await onConfirm(plainAction)).toEqual({
++        decision: "deny_and_steer",
++        steer: "prefer rg over grep",
++      })
++    })
++    expect(out).toContain("steer text required (or N to deny)")
++    expect(counters.denies).toBe(1)
++  })
++
++  test("inline ESCALATION arm re-asks too (the shared steer reader, no fork)", async () => {
++    const { deps } = makeDeps(["t", "", "use the scoped variant"])
++    const onConfirm = __testing.buildCliOnConfirm(deps as never)
++    const escalation: ToolAction = {
++      tool: "bash",
++      input: {},
++      isReadOnly: false,
++      scopeContext: { activeSkill: "deploy", reason: "out of scope" },
++    } as never
++    await captureStderr(async () => {
++      expect(await onConfirm(escalation)).toEqual({
++        decision: "deny_and_steer",
++        steer: "use the scoped variant",
++      })
++    })
++  })
++})
++
++// ── C2 — superseded release diagnosability at the consumer ───────────────────
++
++describe("HELLGATE C2 — a superseded ask names its superseder (diagnosable, still fail-closed)", () => {
++  test("deferred prompt: a superseded release prints WHICH ask superseded it, maps to deny", async () => {
++    const { deps } = makeDeps([
++      { kind: "released", cause: "superseded", supersededBy: "elicitation" },
++    ])
++    const prompt = __testing.buildCliApprovalPrompt(deps as never)
++    let decision: unknown
++    const out = await captureStderr(async () => {
++      decision = await prompt(approval)
++    })
++    expect(normalizeApprovalDecision(decision as never)).toEqual({ decision: "deny" })
++    expect(out).toContain("superseded by elicitation")
++  })
++
++  test("the approval prompts LABEL their asks 'approval' on the channel", async () => {
++    const { deps, labels } = makeDeps(["y"])
++    const prompt = __testing.buildCliApprovalPrompt(deps as never)
++    await captureStderr(() => prompt(approval))
++    expect(labels).toEqual(["approval"])
++  })
++
++  test("elicitation reads LABEL their asks 'elicitation' on the channel", async () => {
++    const { readViaMidTurnChannelOrReadline } = await import("@/apps/cli/mcp-elicitation-prompter")
++    const { registerMidTurnApprovalChannel, createMidTurnApprovalChannel } = await import(
++      "@/apps/cli/repl/mid-turn-approval-channel"
++    )
++    const labels: (string | undefined)[] = []
++    const real = createMidTurnApprovalChannel()
++    const spy = {
++      active: true,
++      awaitLine: (signal?: AbortSignal, label?: string) => {
++        labels.push(label)
++        return real.awaitLine(signal, label)
++      },
++      tryResolve: (line: string) => real.tryResolve(line),
++      clear: (cause: never) => real.clear(cause),
++    }
++    registerMidTurnApprovalChannel(spy as never)
++    const read = readViaMidTurnChannelOrReadline(new AbortController().signal)
++    real.tryResolve("blue")
++    expect(await read).toBe("blue")
++    expect(labels).toEqual(["elicitation"])
++    // Restore a benign registration for other tests in this process.
++    registerMidTurnApprovalChannel(real)
++  })
++})
+diff --git a/tests/unit/apps/cli/attach/attach-approval-verbs-hellgate.test.ts b/tests/unit/apps/cli/attach/attach-approval-verbs-hellgate.test.ts
+new file mode 100644
+index 000000000..fe20d2181
+--- /dev/null
++++ b/tests/unit/apps/cli/attach/attach-approval-verbs-hellgate.test.ts
+@@ -0,0 +1,410 @@
++/**
++ * ★ HELLGATE — Wave-4 verbs cluster (jul-10 uiux structural), attach surface:
++ *
++ *   UUX-1-19 — attach approval verbs. The attach prompt was y/N-only while the
++ *   wire (`ApprovalRespondCommand`) already carries `scope` + `steer` and the
++ *   kernel scheduler forwards BOTH to `host.resolveApproval`. The prompt now
++ *   offers [y]/[a]lways-session/[N]/deny+s[t]eer and the client sends the rich
++ *   decision on the wire.
++ *
++ *   C3 (mitigation) — queued-line claim inversion: a line the operator typed
++ *   BEFORE the approval prompt rendered must flow to the SESSION, never be
++ *   eaten as the prompt's answer. `createApprovalLineGate` tracks line-arrival
++ *   order vs prompt-render order; `claimApprovalLine` consults it.
++ */
++
++import { describe, expect, test } from "bun:test"
++import { type AttachSocket, type AttachSocketCtor, attachToDaemon } from "@/apps/cli/attach"
++import { buildChannelApprovalPrompt, createApprovalLineGate } from "@/apps/cli/attach-cmd"
++import { createMidTurnApprovalChannel } from "@/apps/cli/repl/mid-turn-approval-channel"
++import {
++  encodeSessionTransportMessage,
++  type SessionTransportMessage,
++  tryDecodeSessionTransportMessage,
++} from "@/ipc/session"
++import type { SessionEvent } from "@/protocol/session"
++
++const captureStderr = async (fn: () => Promise<unknown>): Promise<string> => {
++  const orig = process.stderr.write.bind(process.stderr)
++  let buf = ""
++  process.stderr.write = ((chunk: unknown) => {
++    buf += String(chunk)
++    return true
++  }) as typeof process.stderr.write
++  try {
++    await fn()
++  } finally {
++    process.stderr.write = orig
++  }
++  return buf
++}
++
++/** Drive the prompt with a scripted line sequence via the REAL channel. */
++const drivePrompt = async (
++  reason: string,
++  lines: readonly string[],
++): Promise<{ answer: unknown; out: string }> => {
++  const channel = createMidTurnApprovalChannel()
++  channel.active = true
++  const gate = createApprovalLineGate(channel)
++  const prompt = buildChannelApprovalPrompt(channel, gate)
++  let answer: unknown
++  const out = await captureStderr(async () => {
++    const run = prompt(reason)
++    for (const line of lines) {
++      // Let the prompt arm its waiter, then type.
++      await new Promise((r) => setTimeout(r, 1))
++      gate.noteLineArrival()
++      expect(gate.claim(line)).toBe(true)
++    }
++    answer = await run
++  })
++  return { answer, out }
++}
++
++// ── UUX-1-19 — verb upgrade ──────────────────────────────────────────────────
++
++describe("HELLGATE UUX-1-19 — attach approval verbs (wire carries scope+steer)", () => {
++  test("RED pin: the prompt offers [a]lways session and deny+s[t]eer (not y/N-only)", async () => {
++    const { out } = await drivePrompt("run git push", ["y"])
++    expect(out).toContain("[a]lways session")
++    expect(out).toContain("deny+s[t]eer")
++  })
++
++  test("'y' ⇒ {decision:'approve'}", async () => {
++    const { answer } = await drivePrompt("run git push", ["y"])
++    expect(answer).toEqual({ decision: "approve" })
++  })
++
++  test("'a' ⇒ {decision:'approve', scope:'session'} — the wire's standing-grant verb", async () => {
++    const { answer } = await drivePrompt("run git push", ["a"])
++    expect(answer).toEqual({ decision: "approve", scope: "session" })
++  })
++
++  test("empty answer ⇒ fail-closed plain deny", async () => {
++    const { answer } = await drivePrompt("run git push", [""])
++    expect(answer).toEqual({ decision: "deny" })
++  })
++
++  test("'t' + steer text ⇒ {decision:'deny', steer} — the steer survives to the wire shape", async () => {
++    const { answer } = await drivePrompt("run git push", ["t", "use --dry-run first"])
++    expect(answer).toEqual({ decision: "deny", steer: "use --dry-run first" })
++  })
++
++  test("UUX-2-18 attach half: empty steer re-prompts once, then carries the retyped steer", async () => {
++    const { answer, out } = await drivePrompt("run git push", ["t", "", "push to a fork instead"])
++    expect(out).toContain("steer text required (or N to deny)")
++    expect(answer).toEqual({ decision: "deny", steer: "push to a fork instead" })
++  })
++
++  test("UUX-2-18 attach half: empty steer twice ⇒ plain deny (no phantom steer)", async () => {
++    const { answer } = await drivePrompt("run git push", ["t", "", ""])
++    expect(answer).toEqual({ decision: "deny" })
++  })
++
++  test("a typed channel RELEASE mid-prompt ⇒ fail-closed deny", async () => {
++    const channel = createMidTurnApprovalChannel()
++    channel.active = true
++    const gate = createApprovalLineGate(channel)
++    const prompt = buildChannelApprovalPrompt(channel, gate)
++    let answer: unknown
++    await captureStderr(async () => {
++      const run = prompt("run rm -rf")
++      await new Promise((r) => setTimeout(r, 1))
++      channel.clear("turn_teardown")
++      answer = await run
++    })
++    expect(answer).toEqual({ decision: "deny" })
++  })
++})
++
++// ── attach-client: rich answer → wire ────────────────────────────────────────
++
++type Listeners = {
++  message: Array<(event: { data: unknown }) => void>
++  open: Array<() => void>
++  close: Array<() => void>
++  error: Array<() => void>
++}
++
++interface FakeSocket extends AttachSocket {
++  readonly sent: SessionTransportMessage[]
++  deliver(message: SessionTransportMessage): void
++  fireOpen(): void
++}
++
++const makeFakeSocket = (): FakeSocket => {
++  const listeners: Listeners = { message: [], open: [], close: [], error: [] }
++  const sent: SessionTransportMessage[] = []
++  let readyState = 0
++  return {
++    get readyState() {
++      return readyState
++    },
++    send(data: string) {
++      const msg = tryDecodeSessionTransportMessage(data)
++      if (msg !== undefined) sent.push(msg)
++    },
++    close() {
++      readyState = 3
++    },
++    addEventListener(type: "message" | "open" | "close" | "error", handler: never) {
++      ;(listeners[type] as unknown[]).push(handler)
++    },
++    removeEventListener(type, handler) {
++      const bucket = listeners[type]
++      const idx = bucket.indexOf(handler as never)
++      if (idx >= 0) bucket.splice(idx, 1)
++    },
++    sent,
++    deliver(message) {
++      const data = encodeSessionTransportMessage(message)
++      for (const h of [...listeners.message]) h({ data })
++    },
++    fireOpen() {
++      readyState = 1
++      for (const h of [...listeners.open]) h()
++    },
++  }
++}
++
++const snapshotMsg = (sid: string): SessionTransportMessage => ({
++  kind: "snapshot",
++  snapshot: {
++    sessionId: sid,
++    revision: 1,
++    seq: 1,
++    state: { status: "idle", draftInput: "", permissionMode: "default", messageCount: 0 },
++    capabilities: {
++      approvals: "none",
++      tools: false,
++      memory: false,
++      artifacts: false,
++      subagents: false,
++      automation: false,
++      shellSnapshot: false,
++      transport: "websocket",
++    },
++    pendingApproval: null,
++    openArtifacts: [],
++  },
++})
++
++const approvalEvent = (approvalId: string): SessionTransportMessage => ({
++  kind: "event",
++  event: {
++    eventId: `e-${approvalId}`,
++    seq: 5,
++    revision: 1,
++    emittedAt: "t",
++    type: "approval.requested",
++    approval: { approvalId, reason: "run git push", requestedAt: "t" },
++  } as SessionEvent,
++})
++
++const parkedStdin = (): AsyncIterable<string> =>
++  (async function* () {
++    await new Promise<void>(() => {})
++  })()
++
++const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 30))
++
++const attachWithPrompter = async (
++  sid: string,
++  promptApproval: (reason: string) => Promise<never>,
++): Promise<{ socket: FakeSocket; close: () => Promise<void> }> => {
++  const socket = makeFakeSocket()
++  const ctor = function (this: unknown, _url: string) {
++    return socket
++  } as unknown as AttachSocketCtor
++  const session = await attachToDaemon({
++    url: "ws://127.0.0.1:0/",
++    stdin: parkedStdin(),
++    write: () => undefined,
++    promptApproval: promptApproval as never,
++    webSocketCtor: ctor,
++  })
++  socket.fireOpen()
++  socket.deliver(snapshotMsg(sid))
++  await flush()
++  return { socket, close: () => session.close() }
++}
++
++const commandsOf = (socket: FakeSocket) =>
++  socket.sent.flatMap((m) => (m.kind === "command" ? [m.command] : []))
++
++describe("HELLGATE UUX-1-19 — attach client sends the RICH decision on the wire", () => {
++  test("approve+session reaches approval.respond with scope INTACT, then re-runs the turn", async () => {
++    const { socket, close } = await attachWithPrompter("rich-1", (async () => ({
++      decision: "approve",
++      scope: "session",
++    })) as never)
++    socket.deliver(approvalEvent("ap-rich"))
++    await flush()
++    const cmds = commandsOf(socket)
++    const respond = cmds.find((c) => c.type === "approval.respond")
++    expect(respond).toBeDefined()
++    if (respond?.type !== "approval.respond") throw new Error("narrow")
++    expect(respond.decision).toBe("approve")
++    expect(respond.scope).toBe("session")
++    // approve ⇒ a bare turn.run claims the grant (web parity).
++    const idx = cmds.indexOf(respond)
++    expect(cmds.slice(idx + 1).some((c) => c.type === "turn.run")).toBe(true)
++    await close()
++  })
++
++  test("deny+steer reaches approval.respond with the steer INTACT and does NOT re-run", async () => {
++    const { socket, close } = await attachWithPrompter("rich-2", (async () => ({
++      decision: "deny",
++      steer: "use --dry-run first",
++    })) as never)
++    socket.deliver(approvalEvent("ap-steer"))
++    await flush()
++    const cmds = commandsOf(socket)
++    const respond = cmds.find((c) => c.type === "approval.respond")
++    expect(respond).toBeDefined()
++    if (respond?.type !== "approval.respond") throw new Error("narrow")
++    expect(respond.decision).toBe("deny")
++    expect(respond.steer).toBe("use --dry-run first")
++    const idx = cmds.indexOf(respond)
++    expect(cmds.slice(idx + 1).some((c) => c.type === "turn.run")).toBe(false)
++    await close()
++  })
++
++  test("LEGACY compat: a string 'y' answer still approves (old prompter shape)", async () => {
++    const { socket, close } = await attachWithPrompter("legacy-1", (async () => "y") as never)
++    socket.deliver(approvalEvent("ap-legacy"))
++    await flush()
++    const respond = commandsOf(socket).find((c) => c.type === "approval.respond")
++    if (respond?.type !== "approval.respond") throw new Error("narrow")
++    expect(respond.decision).toBe("approve")
++    expect(respond.scope).toBeUndefined()
++    await close()
++  })
++
++  test("a THROWING prompter still fail-safes to a plain deny", async () => {
++    const { socket, close } = await attachWithPrompter("throw-1", (async () => {
++      throw new Error("tty exploded")
++    }) as never)
++    socket.deliver(approvalEvent("ap-throw"))
++    await flush()
++    const respond = commandsOf(socket).find((c) => c.type === "approval.respond")
++    if (respond?.type !== "approval.respond") throw new Error("narrow")
++    expect(respond.decision).toBe("deny")
++    expect(respond.steer).toBeUndefined()
++    await close()
++  })
++})
++
++// ── WIRING — runAttachCmd threads prompt + claim through the SAME gate ───────
++
++describe("HELLGATE — runAttachCmd wires the verb prompt and the claim gate together", () => {
++  test("the wired promptApproval resolves the RICH shape and the wired claim answers it", async () => {
++    const { runAttachCmd } = await import("@/apps/cli/attach-cmd")
++    let captured:
++      | {
++          promptApproval: (reason: string) => Promise<unknown>
++          claimApprovalLine?: (line: string) => boolean
++        }
++      | undefined
++    const code = await runAttachCmd([], {
++      attach: (async (opts: never) => {
++        captured = opts
++        return {
++          sessionId: "wire-1",
++          done: Promise.resolve(),
++          close: async () => undefined,
++        }
++      }) as never,
++    })
++    expect(code).toBe(0)
++    expect(captured).toBeDefined()
++    expect(captured?.claimApprovalLine).toBeDefined()
++    // No prompt visible ⇒ the wired claim lets a line flow to the session.
++    expect(captured?.claimApprovalLine?.("hello agent")).toBe(false)
++    // Render the prompt, answer through the wired claim, get the RICH shape —
++    // this proves promptApproval and claimApprovalLine share ONE channel+gate.
++    const out = await captureStderr(async () => {
++      const run = captured?.promptApproval("run git push")
++      await new Promise((r) => setTimeout(r, 1))
++      expect(captured?.claimApprovalLine?.("a")).toBe(true)
++      expect(await run).toEqual({ decision: "approve", scope: "session" })
++    })
++    expect(out).toContain("deny+s[t]eer")
++  })
++})
++
++// ── C3 — queued-line claim inversion (mitigation) ────────────────────────────
++
++describe("HELLGATE C3 — a line typed BEFORE the approval prompt rendered is NOT eaten", () => {
++  test("AUDIT SCENARIO: queued-before-render line flows to the session; the next line answers", async () => {
++    const channel = createMidTurnApprovalChannel()
++    channel.active = true
++    const gate = createApprovalLineGate(channel)
++    const prompt = buildChannelApprovalPrompt(channel, gate)
++
++    // Operator typed a line; it is QUEUED (arrival noted) before any approval.
++    gate.noteLineArrival() // "deploy the staging build"
++
++    // approval.requested arrives → prompt renders → waiter pends.
++    let answer: unknown
++    await captureStderr(async () => {
++      const run = prompt("run rm -rf")
++      await new Promise((r) => setTimeout(r, 1))
++
++      // The read loop now pulls the OLD queued line: it must NOT be eaten even
++      // though a waiter is pending (this is exactly the inversion bug).
++      expect(gate.claim("deploy the staging build")).toBe(false)
++
++      // The operator's NEXT line (typed after the prompt) answers it.
++      gate.noteLineArrival()
++      expect(gate.claim("y")).toBe(true)
++      answer = await run
++    })
++    expect(answer).toEqual({ decision: "approve" })
++  })
++
++  test("no prompt visible ⇒ never claims (lines always flow to the session)", () => {
++    const channel = createMidTurnApprovalChannel()
++    channel.active = true
++    const gate = createApprovalLineGate(channel)
++    gate.noteLineArrival()
++    expect(gate.claim("hello agent")).toBe(false)
++  })
++
++  test("after the prompt is ANSWERED, later lines flow to the session again", async () => {
++    const channel = createMidTurnApprovalChannel()
++    channel.active = true
++    const gate = createApprovalLineGate(channel)
++    const prompt = buildChannelApprovalPrompt(channel, gate)
++    await captureStderr(async () => {
++      const run = prompt("run git push")
++      await new Promise((r) => setTimeout(r, 1))
++      gate.noteLineArrival()
++      expect(gate.claim("y")).toBe(true)
++      await run
++    })
++    gate.noteLineArrival()
++    expect(gate.claim("next user turn")).toBe(false)
++  })
++
++  test("a PASTED 't\\n<steer>' burst is fully claimed by the prompt (steer prompt does not reset the gate)", async () => {
++    const channel = createMidTurnApprovalChannel()
++    channel.active = true
++    const gate = createApprovalLineGate(channel)
++    const prompt = buildChannelApprovalPrompt(channel, gate)
++    let answer: unknown
++    await captureStderr(async () => {
++      const run = prompt("run git push")
++      await new Promise((r) => setTimeout(r, 1))
++      // Both lines arrive before the steer sub-prompt renders (paste).
++      gate.noteLineArrival()
++      gate.noteLineArrival()
++      expect(gate.claim("t")).toBe(true)
++      await new Promise((r) => setTimeout(r, 1))
++      expect(gate.claim("fix the config instead")).toBe(true)
++      answer = await run
++    })
++    expect(answer).toEqual({ decision: "deny", steer: "fix the config instead" })
++  })
++})
+-- 
+2.50.1 (Apple Git-155)
+
