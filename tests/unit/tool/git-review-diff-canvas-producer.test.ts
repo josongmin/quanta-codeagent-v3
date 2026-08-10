@@ -140,7 +140,13 @@ describe("git_review_diff PRODUCER — anchored canvas overlay (front-door)", ()
       before: string
       after: string
       path: string
-      anchors?: { line: number; verdict?: string; category?: string; summary: string }[]
+      anchors?: {
+        line: number
+        verdict?: string
+        category?: string
+        summary: string
+        severity?: "info" | "warning" | "error"
+      }[]
     }
     expect(diff.toolCallId).toBe("call-1")
     expect(diff.path).toBe(PATH)
