@@ -17,9 +17,11 @@
  *       Surface B (`/rewind --restore-files`). The CLI now routes the file
  *       restore through `executeRollback` + `buildRollbackEffectPort` via
  *       `rewind-restore-coordinator-wire.ts` (the two caller assertions FLIPPED
- *       to WIRED). Still deferred: `resumePendingRollback` (no `/rewind`
- *       recovery verb yet) and the transcript-owner `rewind.ts` safe-degrade for
- *       the no-coordinator path — both remain honest FINDINGS below.
+ *       to WIRED). RFC01-3 crash-recovery then CLOSED the last A2 dead seam:
+ *       `resumePendingRollback` now has a production caller (the wire's
+ *       `recoverPending` / the `/rewind --recover` verb). Still deferred: the
+ *       transcript-owner `rewind.ts` safe-degrade for the no-coordinator path —
+ *       an honest FINDING below.
  *
  * These are caller-grep proofs over the REAL src tree: a failing assertion means
  * a production caller was ADDED (the seam got wired — delete the corresponding
@@ -27,9 +29,9 @@
  * never occurs in production).
  */
 
+import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join } from "node:path"
-import { describe, expect, test } from "bun:test"
 
 const SRC = join(import.meta.dir, "..", "..", "src")
 
@@ -90,18 +92,25 @@ describe("R2B → WIRED — RFC01 durable ThreadRollback saga (RFC-def Surface B
   // (`rewind-restore-coordinator-wire.ts`) that calls `executeRollback` with the
   // ShadowOdb-backed `buildRollbackEffectPort`. Per this file's contract, the two
   // caller-grep assertions FLIP to LIVE-wiring checks (RED if the wiring
-  // regresses). `resumePendingRollback` stays a deferred seam (no `/rewind`
-  // recovery verb yet) and the transcript-owner `rewind.ts` STILL safe-degrades
-  // when no coordinator is injected — both remain honest FINDINGS below.
+  // regresses). RFC01-3 crash-recovery then wired `resumePendingRollback`
+  // (`recoverPending` / `/rewind --recover`) — its assertion is now a LIVE-wiring
+  // check too. The transcript-owner `rewind.ts` STILL safe-degrades when no
+  // coordinator is injected — an honest FINDING below.
 
   test("WIRED: executeRollback has a production caller (the restore coordinator wire)", () => {
     const callers = filesContaining(/\bexecuteRollback\s*\(/, ["thread-rollback.ts"])
     expect(callers.some((f) => f.includes("rewind-restore-coordinator-wire.ts"))).toBe(true)
   })
 
-  test("FINDING: resumePendingRollback has no production caller (recovery verb deferred)", () => {
+  test("WIRED: resumePendingRollback has a production caller (the `/rewind --recover` crash-recovery wire)", () => {
+    // RFC01-3 crash-recovery CLOSED this dead seam: `rewind-restore-coordinator-
+    // wire.ts` `recoverPending` scans `pendingOperationIds` on restart and drives
+    // each stuck `requested` op through `resumePendingRollback`, surfaced by the
+    // `/rewind --recover` verb. Per this file's contract ("a failing assertion
+    // means a production caller was ADDED — flip it"), this now RED-s if the wire
+    // regresses back to a dead seam.
     const callers = filesContaining(/\bresumePendingRollback\s*\(/, ["thread-rollback.ts"])
-    expect(callers).toEqual([])
+    expect(callers.some((f) => f.includes("rewind-restore-coordinator-wire.ts"))).toBe(true)
   })
 
   test("WIRED: buildRollbackEffectPort (real ShadowOdb effect adapter) IS invoked", () => {
@@ -152,7 +161,9 @@ describe("R2B dead-seam sweep — RFC02-3 model-route transition witness", () =>
     // and the /retry-with emit (retry-with.ts) are unreachable. Assert there is
     // no CONCRETE-FUNCTION assignment `onModelReroute: (` / `onModelReroute: fn`
     // (an arrow/named function value, not the passthrough spread).
-    const concreteAssign = filesContaining(/\bonModelReroute:\s*(\(|async|function|[A-Za-z_$][\w$]*\s*,)/)
+    const concreteAssign = filesContaining(
+      /\bonModelReroute:\s*(\(|async|function|[A-Za-z_$][\w$]*\s*,)/,
+    )
     // (The runtime-wire passthrough `onModelReroute: deps.onModelReroute` would
     // match the identifier arm, so exclude it explicitly by requiring the value
     // is NOT `deps.onModelReroute`.)
@@ -160,7 +171,9 @@ describe("R2B dead-seam sweep — RFC02-3 model-route transition witness", () =>
       const src = readFileSync(f, "utf8")
       // keep only files with an onModelReroute assignment whose value is not the
       // pure passthrough identifier.
-      return /\bonModelReroute:\s*(?!deps\.onModelReroute\b)(\(|async|function|[A-Za-z_$])/.test(src)
+      return /\bonModelReroute:\s*(?!deps\.onModelReroute\b)(\(|async|function|[A-Za-z_$])/.test(
+        src,
+      )
         ? !/\bonModelReroute:\s*deps\.onModelReroute\b/.test(
             src.match(/\bonModelReroute:[^\n]*/)?.[0] ?? "",
           )

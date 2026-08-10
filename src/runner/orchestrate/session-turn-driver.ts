@@ -24,6 +24,7 @@ import type { RuntimeSession, SessionDispatchResult } from "@/sdk/runtime"
 import { type ApprovalDecisionResult, normalizeApprovalDecision } from "./approval-decision"
 import { attachCrashResumePartial, withCrashResumeMarker } from "./crash-resume-wire"
 import { pinTurnBoundaryCwd, type WorktreeCwdPort } from "./worktree-cwd-pin-wire"
+import { reconcileCreatingWorktreeAtResume } from "./worktree-reconcile-wire"
 
 /** The SDK turn payload (the non-undefined `turn` of a dispatch result). */
 type SessionTurnPayload = NonNullable<SessionDispatchResult["turn"]>
@@ -142,6 +143,19 @@ const resolvePendingApproval = async (
 export const runSessionTurn = async (args: RunSessionTurnArgs): Promise<SessionTurnResult> => {
   const { session, resolveApproval, text, images, turnSignal, beforeTurn, sessionId, env } = args
   const body = async (): Promise<SessionTurnResult> => {
+    // RFC-06 §RFC06-2 — crash-resume RECONCILIATION follower. Runs FIRST, at the
+    // very top of the turn body (the resume/session-load boundary every resumed
+    // session funnels through), so a worktree create that CRASHED mid-way (a
+    // durable `creating` orphan) is resolved BEFORE the cwd pin: `creating→ready`
+    // when the worktree is registered on disk (so the pin below can then pin it),
+    // or rolled to a clean terminal when it is not. Gate-gated (the SAME
+    // `QUANTA_WORKTREE_CWD_PIN` opt-in as the pin) + only when a durable
+    // `sessionId` is known ⇒ byte-identical no-op otherwise (nothing loaded,
+    // nothing inspected, nothing written). NEVER removes an on-disk worktree.
+    // Best-effort (never throws): a follower must not break a turn.
+    if (sessionId !== undefined) {
+      await reconcileCreatingWorktreeAtResume({ sessionId, env })
+    }
     // RFC-06 §RFC06-2 — turn-boundary cwd pin FOLLOWER. Runs HERE, at the very
     // top of the turn body (BEFORE any input.append / model call), so a
     // current-thread→worktree transition that published a `ready` ownership on a

@@ -32,6 +32,14 @@ export interface ThreadSummary {
   readonly gitBranch?: string
   /** Codex `thread_source` — "new"/"resumed"/"forked"/"subagent". */
   readonly threadSource?: string
+  /** B4 lineage — the session id THIS thread was forked from (`SessionMeta.
+   *  forkedFromId`). The ONLY parentage edge for a persisted user session. The
+   *  `@thread:` composition-root uses it to compute the caller's lineage scope
+   *  (self + transitive ancestors + transitive descendants) so a SIBLING /
+   *  unrelated thread is never resolvable. Absent ⇒ "no known parent" (a root of
+   *  its own fork chain), never lossy stripping — same discipline as the git /
+   *  provenance optionals. Metadata-only; NEVER the transcript. */
+  readonly forkedFromId?: string
 }
 
 /**

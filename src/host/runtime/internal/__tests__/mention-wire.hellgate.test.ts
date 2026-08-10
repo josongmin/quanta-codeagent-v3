@@ -133,6 +133,11 @@ const THREAD = "QUANTA_MENTION_THREAD"
 const cfgWithSubagents = (cwd: string): AgentConfig =>
   ({
     cwd,
+    // B4 lineage — the caller's own thread id. `abc-1` (the session these tests
+    // mention via `@thread:abc-1`) IS the caller, so a self-mention is in-lineage
+    // and keeps resolving. Sibling-refusal is pinned in the dedicated lineage
+    // hellgate (mention-thread-lineage.hellgate.test.ts).
+    sessionId: "abc-1",
     namedAgentResolver: new NamedAgentRegistry([
       {
         agentType: "explorer",

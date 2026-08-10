@@ -52,6 +52,10 @@ const liveSources = (): MentionLiveSources => ({
   mcpServers,
   subagents: registry(),
   sessions: async () => sessions,
+  // B4 lineage — the caller IS `abc-1` (a self-mention is trivially in-lineage),
+  // so these baseline cases keep resolving `@thread:abc-1`. The dedicated lineage
+  // security hellgate (mention-thread-lineage.hellgate.test.ts) pins sibling-refusal.
+  selfThreadId: "abc-1",
 })
 
 // ── RESOLVER side (submit-time context injection) ───────────────────────────
@@ -114,13 +118,21 @@ describe("RFC-12-2 wiring — resolver owners from live sources", () => {
   })
 
   test("red-on-injection — drop the MCP source ⇒ ONLY mcp dark, others live", async () => {
-    const dropped: MentionLiveSources = { subagents: registry(), sessions: async () => sessions }
+    const dropped: MentionLiveSources = {
+      subagents: registry(),
+      sessions: async () => sessions,
+      selfThreadId: "abc-1",
+    }
     const frags = await resolveFrags("@mcp:github @subagent:explorer @thread:abc-1", dropped, {})
     expect(frags.map((f) => f.kind)).toEqual(["subagent", "thread"])
   })
 
   test("red-on-injection — drop the subagent source ⇒ ONLY subagent dark", async () => {
-    const dropped: MentionLiveSources = { mcpServers, sessions: async () => sessions }
+    const dropped: MentionLiveSources = {
+      mcpServers,
+      sessions: async () => sessions,
+      selfThreadId: "abc-1",
+    }
     const frags = await resolveFrags("@mcp:github @subagent:explorer @thread:abc-1", dropped, {})
     expect(frags.map((f) => f.kind)).toEqual(["mcp", "thread"])
   })

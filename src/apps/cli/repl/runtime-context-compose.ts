@@ -127,10 +127,15 @@ const buildMentionOwnerSources = (boot: SessionBootstrapResult): MentionLiveSour
       cwd: m.cwd,
       ...(m.gitBranch !== undefined ? { gitBranch: m.gitBranch } : {}),
       ...(m.threadSource !== undefined ? { threadSource: m.threadSource } : {}),
+      // B4 lineage — carry the fork parentage so the `@thread:` resolver can scope
+      // to the caller's lineage (self ∪ ancestors ∪ descendants). Metadata-only.
+      ...(m.forkedFromId !== undefined ? { forkedFromId: m.forkedFromId } : {}),
     }))
   return {
     ...(hasMcp ? { mcpServers } : {}),
     sessions,
+    // B4 lineage scope — the caller's OWN thread id (fail-closed if absent).
+    ...(boot.sessionId !== undefined ? { selfThreadId: boot.sessionId } : {}),
   }
 }
 

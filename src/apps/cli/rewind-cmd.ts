@@ -112,12 +112,41 @@ export interface RestoreFilesCoordinatorPort {
     readonly operationId: string
     readonly targetId: string
   }): Promise<RestoreFilesOutcome>
+
+  /** RFC01-3 crash-recovery — `/rewind --recover`. Scan the durable
+   *  `rollbackOperations` for any op still `requested` (a rollback interrupted
+   *  by a crash BETWEEN intent-persist and terminal-receipt) and drive each to a
+   *  terminal state via the coordinator's explicit `resumePendingRollback` path
+   *  (re-resolve checkpoint → effect → terminal receipt; NOT a blind retry).
+   *  Idempotent: a session with no pending op returns `recovered: []` and mutates
+   *  nothing. Surfaced verbatim so the operator sees exactly what was recovered.
+   *  Typed structurally (no `@/agent` import) so the CLI slice stays at the top
+   *  of the DAG. */
+  recoverPending(req: { readonly sessionId: string }): Promise<RecoverPendingOutcome>
 }
 
 /** Closed outcome of {@link RestoreFilesCoordinatorPort.restoreToMessage}. */
 export type RestoreFilesOutcome =
   | { readonly kind: "restored" }
   | { readonly kind: "refused"; readonly reason: string }
+
+/** Per-operation result of a crash-recovery resume. */
+export interface RecoveredOperation {
+  readonly operationId: string
+  /** Terminal state the resume reached (`rolled_back` on a successful restore,
+   *  `rollback_failed` on a fail-closed refusal), or `still_pending` when the
+   *  session/records vanished and the op could not be advanced. */
+  readonly outcome: "rolled_back" | "rollback_failed" | "still_pending"
+  /** Operator-visible detail (errorCode for a failure). */
+  readonly detail?: string
+}
+
+/** Closed outcome of {@link RestoreFilesCoordinatorPort.recoverPending}. A
+ *  session with no `requested` breadcrumb yields an empty `recovered` list
+ *  (idempotent no-op). */
+export interface RecoverPendingOutcome {
+  readonly recovered: readonly RecoveredOperation[]
+}
 
 declare module "./slash-commands" {
   interface SlashContext {
@@ -190,12 +219,14 @@ interface RewindFlags {
   readonly toLast: boolean
   readonly yes: boolean
   readonly restoreFiles: boolean
+  readonly recover: boolean
 }
 
 const parseRewindArgs = (args: readonly string[]): RewindFlags | string => {
   let toLast = false
   let yes = false
   let restoreFiles = false
+  let recover = false
   let idPrefix: string | undefined
   for (const a of args) {
     if (a === "--to-last" || a === "--last") {
@@ -204,6 +235,8 @@ const parseRewindArgs = (args: readonly string[]): RewindFlags | string => {
       yes = true
     } else if (a === "--restore-files") {
       restoreFiles = true
+    } else if (a === "--recover") {
+      recover = true
     } else if (a.startsWith("--")) {
       return `unknown flag: ${a}`
     } else {
@@ -218,6 +251,7 @@ const parseRewindArgs = (args: readonly string[]): RewindFlags | string => {
     toLast,
     yes,
     restoreFiles,
+    recover,
   }
   return out
 }
@@ -458,6 +492,51 @@ const finishConfirmedRewind = async (
 }
 
 /* ------------------------------------------------------------------ */
+/* /rewind --recover (RFC01-3 crash-recovery front door)               */
+/* ------------------------------------------------------------------ */
+
+/** RFC01-3 crash-recovery verb. On restart a rollback that crashed BETWEEN the
+ *  `requested` intent-persist and the terminal receipt leaves a durable pending
+ *  breadcrumb (`pendingOperationIds`). `/rewind --recover` reads that breadcrumb
+ *  and drives each pending op to a terminal state through the coordinator's
+ *  explicit `resumePendingRollback` path (never a blind retry). Requires the
+ *  SAME extra-destructive gate as `--restore-files` (`QUANTA_REWIND_GIT=1` +
+ *  an injected coordinator). Absent coordinator ⇒ a clear "not wired" refusal;
+ *  no state is touched (byte-identical to a surface that never wired the seam).
+ *
+ *  Idempotent: a session with NO pending breadcrumb prints "nothing to recover"
+ *  and exits 0 — re-running after a completed recovery is a no-op (the resume
+ *  path returns the existing terminal receipt without re-firing the effect). */
+const runRecover = async (state: RewindSlashState, ctx: SlashContext): Promise<number> => {
+  const coordinator = state.restoreFilesCoordinator
+  if (coordinator === undefined) {
+    ctx.err(
+      "/rewind --recover: crash-recovery is not wired in this surface (set QUANTA_REWIND_GIT=1 — destructive)\n",
+    )
+    return 1
+  }
+  const { recovered } = await coordinator.recoverPending({ sessionId: state.sessionId })
+  if (recovered.length === 0) {
+    ctx.out("/rewind --recover: nothing to recover (no pending rollback)\n")
+    return 0
+  }
+  let anyStuck = false
+  for (const op of recovered) {
+    if (op.outcome === "rolled_back") {
+      ctx.out(`recovered ${shortId(op.operationId)}: rolled_back\n`)
+    } else if (op.outcome === "rollback_failed") {
+      ctx.out(`recovered ${shortId(op.operationId)}: rollback_failed (${op.detail ?? "unknown"})\n`)
+    } else {
+      anyStuck = true
+      ctx.err(
+        `/rewind --recover: ${shortId(op.operationId)} could not be advanced (${op.detail ?? "still pending"})\n`,
+      )
+    }
+  }
+  return anyStuck ? 1 : 0
+}
+
+/* ------------------------------------------------------------------ */
 /* /rewind                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -482,6 +561,17 @@ const rewindCmdImpl: SlashCommand = {
     if (typeof parsed === "string") {
       ctx.err(`/rewind: ${parsed}\n`)
       return 1
+    }
+
+    // RFC01-3 crash-recovery front door — takes NO id (it acts on the durable
+    // pending-op breadcrumb, not the transcript), so it dispatches BEFORE the
+    // id/list resolution. Extra-destructive gate is the same as --restore-files.
+    if (parsed.recover) {
+      if (parsed.idPrefix !== undefined || parsed.toLast || parsed.restoreFiles) {
+        ctx.err("/rewind --recover: takes no id / other flags\n")
+        return 1
+      }
+      return await runRecover(state, ctx)
     }
 
     const saved = await loadSessionById(state.sessionId)
@@ -571,6 +661,11 @@ const rewindCmdImpl: SlashCommand = {
         value: "--restore-files",
         kind: "argument",
         description: "git reset --hard (DESTRUCTIVE)",
+      },
+      {
+        value: "--recover",
+        kind: "argument",
+        description: "resume a crash-interrupted rollback (DESTRUCTIVE)",
       },
     ]
   },

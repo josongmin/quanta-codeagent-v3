@@ -42,8 +42,13 @@ import {
   createSavedSessionRollbackStore,
   executeRollback,
   type RollbackEffectPort,
+  resumePendingRollback,
+  type ThreadRollbackDeps,
 } from "@/agent/thread-rollback"
+import { latestOperation, pendingOperationIds } from "@/session"
 import type {
+  RecoveredOperation,
+  RecoverPendingOutcome,
   RestoreFilesCoordinatorPort,
   RestoreFilesOutcome,
 } from "../rewind-cmd"
@@ -89,10 +94,37 @@ const toRestoreOutcome = (
   return { kind: "refused", reason: `session not found: ${outcome.sessionId}` }
 }
 
+/** Map a single `resumePendingRollback` outcome to the CLI-slice recovery row.
+ *  A `recovery_required`/`session_missing` outcome means the resume could NOT
+ *  advance the op to a terminal receipt (the record vanished mid-recovery) —
+ *  surfaced as `still_pending` so the operator sees it is unresolved, NOT
+ *  silently swallowed. */
+const toRecoveredOperation = (
+  operationId: string,
+  outcome: Awaited<ReturnType<typeof resumePendingRollback>>,
+): RecoveredOperation => {
+  if (outcome.kind === "rolled_back") return { operationId, outcome: "rolled_back" }
+  if (outcome.kind === "rollback_failed") {
+    return { operationId, outcome: "rollback_failed", detail: outcome.errorCode }
+  }
+  if (outcome.kind === "recovery_required") {
+    return {
+      operationId,
+      outcome: "still_pending",
+      detail: "resume did not reach a terminal receipt",
+    }
+  }
+  return {
+    operationId,
+    outcome: "still_pending",
+    detail: `session not found: ${outcome.sessionId}`,
+  }
+}
+
 /**
- * Build the `RestoreFilesCoordinatorPort` the `/rewind --restore-files` command
- * consumes. Reuses the EXISTING coordinator + effect bridge — no new store,
- * writer, hash, or restore path.
+ * Build the `RestoreFilesCoordinatorPort` the `/rewind --restore-files` and
+ * `/rewind --recover` commands consume. Reuses the EXISTING coordinator + effect
+ * bridge — no new store, writer, hash, or restore path.
  */
 export const buildRewindRestoreCoordinator = (
   deps: RewindRestoreCoordinatorDeps,
@@ -103,22 +135,50 @@ export const buildRewindRestoreCoordinator = (
       ? buildRollbackEffectPort({ registry: deps.perTool.registry, restore: deps.perTool.restore })
       : failClosedEffectPort
   const now = deps.now ?? Date.now
+  const rollbackDeps: ThreadRollbackDeps = { store, effect, now }
   return {
     async restoreToMessage(req) {
-      const outcome = await executeRollback(
-        { store, effect, now },
-        {
-          sessionId: req.sessionId,
-          operationId: req.operationId,
-          // The durable checkpoint mapping is keyed by turn/message boundary; the
-          // `/rewind` target is a message id. `resolveRollbackTarget` matches the
-          // recorded `turnId`, so a target with no recorded checkpoint (the
-          // production reality today) fail-closes to `missing-checkpoint` — the
-          // safe refusal. No branch/path/ordinal guessing.
-          targetTurnId: req.targetId,
-        },
-      )
+      const outcome = await executeRollback(rollbackDeps, {
+        sessionId: req.sessionId,
+        operationId: req.operationId,
+        // The durable checkpoint mapping is keyed by turn/message boundary; the
+        // `/rewind` target is a message id. `resolveRollbackTarget` matches the
+        // recorded `turnId`, so a target with no recorded checkpoint (the
+        // production reality today) fail-closes to `missing-checkpoint` — the
+        // safe refusal. No branch/path/ordinal guessing.
+        targetTurnId: req.targetId,
+      })
       return toRestoreOutcome(outcome)
+    },
+    // RFC01-3 crash-recovery — THE wire that turns the durable `requested`
+    // breadcrumb from a dead write into a live guarantee. Load the current
+    // records, scan `pendingOperationIds` (ops with an intent but NO terminal
+    // receipt — a crash BETWEEN persist-intent and persist-terminal), and drive
+    // EACH through the coordinator's explicit `resumePendingRollback` (re-resolve
+    // the recorded target → effect → terminal receipt). This is NOT a blind
+    // retry: the op is KNOWN-pending and its `targetTurnId` comes from the durable
+    // record, never guessed. Idempotent: no pending ⇒ empty list, no mutation;
+    // an already-terminal op (a completed prior recovery) is skipped by
+    // `pendingOperationIds` and, even if resumed, `resumePendingRollback` returns
+    // the existing receipt WITHOUT re-firing the effect.
+    async recoverPending(req) {
+      const records = await store.load(req.sessionId)
+      if (records === undefined) return { recovered: [] }
+      const pending = pendingOperationIds(records.operations)
+      const recovered: RecoveredOperation[] = []
+      for (const operationId of pending) {
+        // The durable `requested` record carries the original `targetTurnId` —
+        // re-resolve from it, never re-derive a target from the transcript.
+        const op = latestOperation(records.operations, operationId)
+        if (op === undefined) continue
+        const outcome = await resumePendingRollback(rollbackDeps, {
+          sessionId: req.sessionId,
+          operationId,
+          targetTurnId: op.targetTurnId,
+        })
+        recovered.push(toRecoveredOperation(operationId, outcome))
+      }
+      return { recovered } satisfies RecoverPendingOutcome
     },
   }
 }

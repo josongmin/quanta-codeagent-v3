@@ -18,7 +18,20 @@
  *   - Subagent: the EXISTING `NamedAgentResolver` (`loadNamedAgents(cwd)` →
  *     `NamedAgentRegistry`), the same read-only port the subagent runner
  *     consults for spawn-time role identity.
- *   - Thread: the live session store (`listSessions` → `SessionMeta`).
+ *   - Thread: the live session store (`listSessions` → `SessionMeta`), SCOPED to
+ *     the CALLER's lineage (B4 / jul-15 sibling-leak class — see below).
+ *
+ * B4 LINEAGE SCOPE (aug-10 security fix — the jul-15 sibling-leak class):
+ * the `@thread:` resolver + enumerator resolve ONLY threads inside the caller's
+ * lineage — `self ∪ transitive-ancestors ∪ transitive-descendants` over the
+ * `SessionMeta.forkedFromId` fork chain (the only parentage edge a persisted
+ * user session carries). A SIBLING (forked from the same parent as the caller
+ * but neither an ancestor nor a descendant) or an UNRELATED thread resolves
+ * `null` and never appears as an autocomplete candidate. FAIL-CLOSED: when the
+ * caller's own thread id (`selfThreadId`) is ABSENT the lineage set cannot be
+ * computed, so the scope is EMPTY and every `@thread:` id resolves `null` — the
+ * tightening is a strict subset, never a widening. Bounded to METADATA
+ * (title/cwd/branch/source) even in-lineage; the transcript is never surfaced.
  *
  * PER-KIND KILL-SWITCHES: each kind rides its `QUANTA_MENTION_{MCP,SUBAGENT,
  * THREAD}` knob (default-ON; `=off` opts out). The RESOLVER honours these
@@ -85,6 +98,12 @@ export interface MentionLiveSources {
   /** The live session-list thunk (`listSessions`). Absent ⇒ no `@thread:`
    *  candidates + `@thread:` resolves null. */
   readonly sessions?: SessionListSource
+  /** B4 lineage scope — the CALLER's OWN thread id (`AgentConfig.sessionId` /
+   *  the bootstrapped session id). The `@thread:` resolver + enumerator scope
+   *  to this thread's lineage (self ∪ ancestors ∪ descendants over the fork
+   *  chain). ABSENT ⇒ FAIL-CLOSED: the lineage set is empty ⇒ NO `@thread:` id
+   *  resolves and NO thread is enumerated (a strict subset, never a widening). */
+  readonly selfThreadId?: string
 }
 
 /** A knob is ON unless explicitly disabled (`0`/`false`/`off`/`no`). Delegates
@@ -114,16 +133,89 @@ const mcpListingFor = (
   return async (server: string) => byName.get(server) ?? null
 }
 
+/**
+ * B4 lineage scope — compute the set of thread ids inside the caller's lineage
+ * over the `forkedFromId` fork chain: `self ∪ transitive-ancestors ∪
+ * transitive-descendants`. Pure; no IO.
+ *
+ * FAIL-CLOSED: an absent / empty `selfId`, or a `selfId` that names no thread in
+ * the list, yields the EMPTY set (the caller is unknown ⇒ nothing is in-scope).
+ * The walk is cycle-safe (a `visited`/`seen` guard) so a corrupt self-referential
+ * or looped fork chain terminates instead of spinning.
+ *
+ *   - ANCESTORS: follow `forkedFromId` upward from self until it is absent or
+ *     dangling (the parent may have been deleted — provenance, not a live ptr).
+ *   - DESCENDANTS: fixpoint over "any thread whose `forkedFromId` is already in
+ *     the in-scope set" — this captures the WHOLE subtree, not just direct
+ *     children, and stays sibling-tight (a sibling's parent is the caller's
+ *     parent, never the caller or a descendant, so it is never admitted).
+ */
+export const computeLineageIds = (
+  all: readonly ThreadSummary[],
+  selfId: string | undefined,
+): ReadonlySet<string> => {
+  const scope = new Set<string>()
+  if (typeof selfId !== "string" || selfId.length === 0) return scope // fail-closed
+  const byId = new Map<string, ThreadSummary>()
+  for (const m of all) if (typeof m?.id === "string" && m.id.length > 0) byId.set(m.id, m)
+  if (!byId.has(selfId)) return scope // self not in the list ⇒ unknown caller ⇒ empty
+  scope.add(selfId)
+  // Descendants FIRST, seeded by SELF ONLY (never by ancestors — else the
+  // fixpoint would walk DOWN from a shared ancestor into a SIBLING's subtree,
+  // which is exactly the leak this gate closes). A `descendants` set separate
+  // from `scope` keeps the seed clean; fixpoint admits any thread whose parent
+  // is already a known descendant (or self).
+  const descendants = new Set<string>([selfId])
+  let grew = true
+  while (grew) {
+    grew = false
+    for (const m of all) {
+      const parent = m.forkedFromId
+      if (
+        typeof m?.id === "string" &&
+        m.id.length > 0 &&
+        !descendants.has(m.id) &&
+        typeof parent === "string" &&
+        descendants.has(parent)
+      ) {
+        descendants.add(m.id)
+        grew = true
+      }
+    }
+  }
+  for (const d of descendants) scope.add(d)
+  // Ancestors: walk the parent chain upward from SELF (cycle-safe). Ancestors are
+  // added to `scope` but NOT to the descendant seed, so their OTHER children
+  // (the caller's siblings) are never swept in.
+  let cursor: string | undefined = byId.get(selfId)?.forkedFromId
+  const seenUp = new Set<string>([selfId])
+  while (typeof cursor === "string" && cursor.length > 0 && !seenUp.has(cursor)) {
+    seenUp.add(cursor)
+    if (byId.has(cursor)) scope.add(cursor)
+    cursor = byId.get(cursor)?.forkedFromId
+  }
+  return scope
+}
+
 /** Project the live session list into a `ThreadSummaryPort`: `id → summary`, or
  *  `null` for an unknown id. Reads the list once per lookup (the session store's
- *  own IO); a load fault ⇒ every id resolves `null` (NO-THROW). */
+ *  own IO); a load fault ⇒ every id resolves `null` (NO-THROW).
+ *
+ *  B4 LINEAGE GATE (load-bearing): the summary is returned ONLY when `id` is in
+ *  the caller's lineage set (see {@link computeLineageIds}). An out-of-lineage id
+ *  — a SIBLING or unrelated thread — resolves `null`, exactly as an unknown id
+ *  would (no oracle: refused and absent are indistinguishable to the caller).
+ *  FAIL-CLOSED on an absent `selfThreadId` (empty scope ⇒ every id null). */
 const threadSummaryFor = (
   sessions: SessionListSource,
+  selfThreadId: string | undefined,
 ): NonNullable<BuildDefaultMentionResolverOptions["threadSummary"]> => {
   return async (id: string) => {
     if (typeof id !== "string" || id.length === 0) return null
     try {
       const all = await sessions()
+      const scope = computeLineageIds(all, selfThreadId)
+      if (!scope.has(id)) return null // out-of-lineage (sibling/unrelated) ⇒ refused
       return all.find((m) => m.id === id) ?? null
     } catch (e) {
       // Session-list load fault ⇒ id resolves null (NO-THROW mention resolver),
@@ -149,7 +241,7 @@ export const buildMentionResolverOwners = (
       : {}),
     ...(sources.subagents !== undefined ? { subagents: sources.subagents } : {}),
     ...(sources.sessions !== undefined
-      ? { threadSummary: threadSummaryFor(sources.sessions) }
+      ? { threadSummary: threadSummaryFor(sources.sessions, sources.selfThreadId) }
       : {}),
   }
 }
@@ -240,7 +332,11 @@ export const buildMentionProviderListers = async (
     } catch {
       snapshot = []
     }
-    const entries = listThreadsFrom(snapshot)
+    // B4 lineage scope — enumerate ONLY the caller's lineage (self ∪ ancestors ∪
+    // descendants). A sibling / unrelated thread is never suggested; fail-closed
+    // to zero candidates when `selfThreadId` is absent (empty scope).
+    const scope = computeLineageIds(snapshot, sources.selfThreadId)
+    const entries = listThreadsFrom(snapshot.filter((m) => scope.has(m.id)))
     threadLister = () => entries
   }
   return {

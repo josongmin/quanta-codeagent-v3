@@ -38,6 +38,10 @@ const liveSources = (): MentionLiveSources => ({
   mcpServers,
   subagents: registry(),
   sessions: async () => [{ id: "abc-1", title: "Prior thread", cwd: "/work" }],
+  // B4 lineage — the caller IS `abc-1`, so its own thread enumerates (self is
+  // trivially in-lineage). Sibling-exclusion is pinned in the dedicated lineage
+  // hellgate (mention-thread-lineage.hellgate.test.ts).
+  selfThreadId: "abc-1",
 })
 
 const candidatesFor = async (

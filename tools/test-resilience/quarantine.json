@@ -1,18 +1,12 @@
 {
-  "_comment": "Known-flaky tests under the full parallel suite (2000+ files). Each PASSES in true isolation (-t) — the flake is parallelism/resource contention, NOT a code defect. maxCount is a one-directional ratchet: lower it as flakes are structurally fixed (replay seam for external-server, test-isolation for timing). NEVER raise without a recorded reason. HISTORY: started at 4 (2 LSP external-server + 1 node-repl timing); the 2 LSP entries were RETIRED by SOTA ① (real rust-analyzer tests gated behind QUANTA_REAL_TOOLCHAIN_E2E serial lane + deterministic replay coverage in evidence-lsp-bridge-replay-deterministic.test.ts) — ratchet lowered 4 -> 2.",
-  "maxCount": 2,
+  "_comment": "Known-flaky tests under the full parallel suite (2000+ files). Each PASSES in true isolation (-t) — the flake is parallelism/resource contention, NOT a code defect. maxCount is a one-directional ratchet: lower it as flakes are structurally fixed (replay seam for external-server, test-isolation for timing). NEVER raise without a recorded reason. HISTORY: started at 4 (2 LSP external-server + 1 node-repl timing); the 2 LSP entries were RETIRED by SOTA ① (real rust-analyzer tests gated behind QUANTA_REAL_TOOLCHAIN_E2E serial lane + deterministic replay coverage in evidence-lsp-bridge-replay-deterministic.test.ts) — ratchet lowered 4 -> 2. Then bench-closure-prompt-wiring-hellgate ('chaMultisiteSteer …') was RETIRED (aug-10) by threading localize-phase as an explicit postureOverride/stateOverride param into buildConfig instead of mutating the process-GLOBAL QUANTA_BENCH_LOCALIZE_PHASE knob via withEnv — the test now needs no env mutation, so the cross-file parallel bleed is gone at the source — ratchet lowered 2 -> 1.",
+  "maxCount": 1,
   "entries": [
     {
       "file": "tests/unit/runtime/node-repl-timeout-reap-hellgate.test.ts",
       "name": "a healthy exec still completes",
       "resourceClass": "timing",
       "reason": "intra-file interference: the sibling timeout-reap tests spawn/kill real node children, pressuring the real `node -i` REPL stdout flush so the best-effort content capture (line 95) loses the race. Passes with -t isolation (4/4). Fix path: per-test child isolation or make content check non-fatal (its own comment says ok:true+reusability is the deterministic proof)."
-    },
-    {
-      "file": "tests/unit/bench-closure-prompt-wiring-hellgate.test.ts",
-      "name": "chaMultisiteSteer is injected into both the prompt prelude and localize-phase config",
-      "resourceClass": "timing",
-      "reason": "concurrency race: withEnv() mutates the process-GLOBAL QUANTA_BENCH_LOCALIZE_PHASE knob; under the full parallel suite a sibling bench test reading/writing the same env var races the set->assert->restore window (the code-under-test reads process.env at call time). Passes with -t isolation (4/4, verified 3x). Fix path: thread localize-phase as an explicit param into the closure-prompt-wiring builder (drop the process.env read) so the test needs no global mutation — then retire this entry and lower maxCount."
     }
   ]
 }

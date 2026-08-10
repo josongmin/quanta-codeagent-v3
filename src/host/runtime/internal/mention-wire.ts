@@ -62,6 +62,15 @@ export const installCliMentionInjector = (
     const ownerSources: MentionLiveSources = {
       ...sources,
       ...(cfg.namedAgentResolver !== undefined ? { subagents: cfg.namedAgentResolver } : {}),
+      // B4 lineage scope — the caller's OWN thread id gates `@thread:` to this
+      // thread's lineage (self ∪ ancestors ∪ descendants). A caller-supplied
+      // `selfThreadId` on `sources` (rare) is honoured; otherwise the config's
+      // session id is authoritative. Absent ⇒ fail-closed (no thread resolves).
+      ...(cfg.sessionId !== undefined
+        ? { selfThreadId: cfg.sessionId }
+        : sources?.selfThreadId !== undefined
+          ? { selfThreadId: sources.selfThreadId }
+          : {}),
     }
     const mentionResolver = buildDefaultMentionResolver({
       cwd: cfg.cwd,

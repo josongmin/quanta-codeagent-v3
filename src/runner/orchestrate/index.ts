@@ -49,3 +49,8 @@ export {
   type WorktreeCwdPinArgs,
   type WorktreeCwdPort,
 } from "./worktree-cwd-pin-wire"
+export {
+  type ReconcileClock,
+  reconcileCreatingWorktreeAtResume,
+  type WorktreeReconcileArgs,
+} from "./worktree-reconcile-wire"

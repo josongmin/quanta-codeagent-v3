@@ -108,7 +108,12 @@ const buildProviderMentionSources = async (
         cwd: m.cwd,
         ...(m.gitBranch !== undefined ? { gitBranch: m.gitBranch } : {}),
         ...(m.threadSource !== undefined ? { threadSource: m.threadSource } : {}),
+        // B4 lineage — carry fork parentage so the `@thread:` autocomplete lister
+        // scopes candidates to the caller's lineage (never suggest a sibling).
+        ...(m.forkedFromId !== undefined ? { forkedFromId: m.forkedFromId } : {}),
       })),
+    // B4 lineage scope — the caller's OWN thread id (fail-closed if absent).
+    ...(setup.sessionId !== undefined ? { selfThreadId: setup.sessionId } : {}),
   }
 }
 
