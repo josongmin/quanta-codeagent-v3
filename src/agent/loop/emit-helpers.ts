@@ -1,10 +1,11 @@
 import type { StreamEvent, ToolChoice } from "@/llm"
 import { costUsd } from "@/observability"
 import type { PromptPolicySnapshot, TurnPolicySnapshot } from "@/shared"
-import { errMessage, logger, runtimeConfig } from "@/shared"
+import { errMessage, LLMError, logger, runtimeConfig } from "@/shared"
 import type { BudgetBreach } from "../budget-ledger"
 import type { CancelSubagentOutcome, ResponseQueuedReason } from "../control-op-handler"
 import type { AgentRecorder } from "../metrics"
+import { applyMeasuredUsageLimit } from "../objective"
 import type { RecoveryReason } from "../recovery"
 import type { AgentConfig } from "../types"
 import type { TurnWorkMetricsCollector } from "../work-metrics-collector"
@@ -210,6 +211,51 @@ export const objectiveBudgetExhausted = (config: AgentConfig, threadId: string):
     // skip the advisory nudge) is a defensive default, NOT an enforcement-bypass
     // fix — no efficacy A/B required.
     return true
+  }
+}
+
+/**
+ * RFC-06 A4.3 — feed a MEASURED provider 429 (`LLMError.retryAfterMs`, the
+ * server's `retry-after` delta parsed at the `fromSdkError` boundary) into the
+ * objective as a transient `usage_limited` window.
+ *
+ * GATE (byte-identical default-OFF): reads `runtimeConfig().objectiveBudgetEnforce`
+ * — the SAME gate `objectiveBudgetExhausted` rides. When OFF this returns BEFORE
+ * touching the objective port, so NO `markUsageLimited` mutation ever happens
+ * (the objective is byte-identical to today). When ON, an `active`/`usage_limited`
+ * objective is limited until `Date.now() + retryAfterMs` (auto-resets when the
+ * clock passes it — see `applyMeasuredUsageLimit`'s no-resurrect + no-double-count
+ * contract).
+ *
+ * `result` is the loop's non-success recovery payload: it carries the thrown
+ * stream `error` ONLY on the `{ error, message }` arm (a successfully-assembled
+ * turn has no `error`). We act ONLY on an `LLMError` bearing a finite positive
+ * `retryAfterMs` — a 429 without a parsable retry-after (no epoch) is left to
+ * blind-exponential backoff and does NOT limit the objective.
+ *
+ * Returns `true` iff a window was set (for the caller to attribute / observe);
+ * NO-THROW — any failure degrades to `false`.
+ */
+export const markObjectiveUsageLimitedFrom429 = (
+  config: AgentConfig,
+  threadId: string,
+  result: { readonly error: unknown } | { readonly message: unknown },
+): boolean => {
+  if (!runtimeConfig().objectiveBudgetEnforce) return false
+  if (config.objective === undefined || threadId.length === 0) return false
+  if (!("error" in result)) return false
+  const error = result.error
+  if (!(error instanceof LLMError)) return false
+  // `retryAfterMs` is present ONLY when the boundary parsed a server delay from a
+  // rate-limit / overload response. Absent ⇒ no measured epoch ⇒ no-op (blind
+  // backoff owns that case; we never invent a window).
+  const retryAfterMs = error.retryAfterMs
+  if (retryAfterMs === undefined) return false
+  try {
+    return applyMeasuredUsageLimit(config.objective, threadId, retryAfterMs)
+  } catch (e) {
+    logger.warn(`loop.markObjectiveUsageLimitedFrom429: ${errMessage(e)}`)
+    return false
   }
 }
 

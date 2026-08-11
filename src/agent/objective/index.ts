@@ -22,6 +22,7 @@ export {
 } from "./continuation"
 export { buildPursuitContinuationPrompt, GOAL_PURSUIT_DISCIPLINE } from "./pursuit-prompt"
 export { createObjectiveStore } from "./store"
+export { applyMeasuredUsageLimit, type UsageLimitPort } from "./usage-limit-wire"
 export type {
   Blocker,
   Objective,

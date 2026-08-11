@@ -52,7 +52,6 @@ import { buildNetworkDispatchGuard } from "@/agent/dispatch-guard"
 import { editRepairLoopEnabled } from "@/agent/edit-repair-loop"
 import { lspDiagnosticsProvider } from "@/agent/lsp-bridge"
 import { buildDefaultMentionResolver } from "@/agent/mention-runner"
-import { createObjectiveStore, type ObjectivePort } from "@/agent/objective"
 import { autoWirePluginActivation } from "@/agent/plugin-activation-handler"
 import { getGlobalSessionResourceRegistry } from "@/agent/session-resource-registry"
 import { buildCallerOwnedRegistryWithTelemetry } from "@/agent/session-resource-registry/caller-owned-builder"
@@ -110,6 +109,7 @@ import { persistBudgetLedger } from "./budget-ledger-persist"
 import { applyCapabilityWires, buildCapabilityWires } from "./capability-wire-registry"
 import { buildAppPluginMentionDeps } from "./internal/mention-app-plugin-deps"
 import { buildMentionSymbolDeps } from "./internal/mention-symbol-deps"
+import { maybeWireObjective } from "./objective-store-wire"
 import { maybeWirePeerMessageSurface } from "./peer-message-sink-wire"
 import { maybeWirePeerTeamMessaging } from "./peer-team-wire"
 import { maybeWirePiiRedaction } from "./pii-redaction-wire"
@@ -394,21 +394,6 @@ const maybeWireAppshot = (cfg: AgentConfig, env: AssemblerEnv): void => {
   // the handle appshot itself spawned. The tier-1 appshot block registers it into
   // teardown (mirrors browserDispose).
   slot.appshotDispose = wire.dispose
-}
-
-/** ADR-0394 — objective tools (`objective_set`/`objective_update`/`objective_get`).
- *  Default-ON: an in-memory `ObjectivePort` is wired unless
- *  `QUANTA_OBJECTIVE_TOOLS="0"`. Lightweight (no I/O / external dep).
- *  Caller-override-precedence (ADR-0332): a pre-set slot is preserved. */
-const maybeWireObjective = (cfg: AgentConfig, env: AssemblerEnv): void => {
-  // Opt-in (not default-OFF→ON here): this assembler is SHARED by bench/eval +
-  // web-daemon, so a default-ON would change their tool menu (and SWE-bench
-  // reproducibility). The CLI host seeds `QUANTA_OBJECTIVE_TOOLS=1` (index.ts)
-  // to opt in; other surfaces stay byte-identical unless they set it.
-  if (!gateOn(env, "QUANTA_OBJECTIVE_TOOLS")) return
-  const slot = cfg as AgentConfig & { objective?: ObjectivePort }
-  if (slot.objective !== undefined) return
-  slot.objective = createObjectiveStore()
 }
 
 /** ADR-0416 — inter-subagent mailbox (`subagent_send_message`/`subagent_read_messages`).

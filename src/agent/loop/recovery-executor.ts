@@ -18,7 +18,12 @@ import type { TurnSession, TurnState } from "../turn-context"
 import { maybeRunCloseoutCritic } from "./closeout-critic-wire"
 import { emitCompactionEvent } from "./compaction-wire"
 import { resetEffortClassifier } from "./context-assembler"
-import { emitRecovery, objectiveBudgetExhausted, resolveWindowModel } from "./emit-helpers"
+import {
+  emitRecovery,
+  markObjectiveUsageLimitedFrom429,
+  objectiveBudgetExhausted,
+  resolveWindowModel,
+} from "./emit-helpers"
 import { sleep } from "./sleep"
 import type { StreamSuccess, TurnResult } from "./types"
 
@@ -55,6 +60,16 @@ export const applyNonSuccessRecoveryAction = async (
 ): Promise<Step | null> => {
   const { config } = session
   const { wm } = state
+  // RFC-06 A4.3 — measured `usage_limited` PRODUCER. A same-turn recovery caused
+  // by a provider 429 carries the classified `LLMError` (with the server's
+  // `retry-after` delta) on `result.error`. Feed that MEASURED signal into the
+  // objective as a transient usage window BEFORE dispatching the action, so a
+  // `backoff` (retry pending) AND a terminal `error` (retries exhausted) both
+  // mark the goal `usage_limited` until capacity returns. Gated + no-throw (see
+  // `markObjectiveUsageLimitedFrom429`): default-OFF is byte-identical (the gate
+  // returns before any objective mutation). Distinct from `recordUsage` (the
+  // self-report ledger) — no double-count.
+  markObjectiveUsageLimitedFrom429(config, config.sessionId ?? "", result)
   if (action.do === "error") {
     // Loop-control fix (jun-25, FIX-2): when the `error` terminal was minted
     // from a SUCCESSFULLY-assembled turn (the malformed-tool-use seal — the
