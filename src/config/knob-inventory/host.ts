@@ -199,7 +199,7 @@ export const HOST: readonly KnobInventoryEntry[] = [
     group: "host-gate",
     home: "runtime-config",
     describe: "Objective management tools gate.",
-    readSite: "host/runtime/agent-config-assembler.ts",
+    readSite: "host/runtime/objective-store-wire.ts",
   },
   {
     envKey: "QUANTA_IDENTITY",

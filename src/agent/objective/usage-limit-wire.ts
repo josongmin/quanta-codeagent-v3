@@ -63,32 +63,33 @@ export const applyMeasuredUsageLimit = (
   retryAfterMs: number | undefined,
   now: () => number = Date.now,
 ): boolean => {
-  try {
-    // A 429 WITHOUT a parsable retry-after carries NO epoch — there is nothing
-    // to bound the window by, so we do NOT limit (blind-exponential backoff owns
-    // that case; inventing an arbitrary window would be a magic threshold).
-    if (retryAfterMs === undefined || !Number.isFinite(retryAfterMs) || retryAfterMs <= 0) {
-      return false
-    }
-    if (typeof threadId !== "string" || threadId.length === 0) return false
-
-    // NO-RESURRECT: read the CURRENT derived status. Only an `active` (or an
-    // already `usage_limited`, i.e. re-arm/extend) objective may be limited.
-    // Unknown thread ⇒ null ⇒ no-op. `blocked` / `budget_limited` / `paused` /
-    // `completed` are left untouched.
-    const current = objective.get(threadId)
-    if (current === null) return false
-    if (current.status !== "active" && current.status !== "usage_limited") return false
-
-    const until = now() + retryAfterMs
-    // Overflow guard: a hostile/near-`MAX` clock + delta could overflow to a
-    // non-finite epoch; markUsageLimited would then CLEAR the window (its
-    // contract). Bail rather than accidentally clear.
-    if (!Number.isFinite(until) || until <= 0) return false
-
-    objective.markUsageLimited(threadId, until)
-    return true
-  } catch {
+  // NO-THROW is owned by the sole caller (`markObjectiveUsageLimitedFrom429`),
+  // which wraps this call in an ATTRIBUTED try/catch (logger.warn + errMessage).
+  // Keeping this adapter pure avoids a bare (unattributed) swallow here and keeps
+  // the single no-throw boundary at the layer that owns observability.
+  //
+  // A 429 WITHOUT a parsable retry-after carries NO epoch — there is nothing
+  // to bound the window by, so we do NOT limit (blind-exponential backoff owns
+  // that case; inventing an arbitrary window would be a magic threshold).
+  if (retryAfterMs === undefined || !Number.isFinite(retryAfterMs) || retryAfterMs <= 0) {
     return false
   }
+  if (typeof threadId !== "string" || threadId.length === 0) return false
+
+  // NO-RESURRECT: read the CURRENT derived status. Only an `active` (or an
+  // already `usage_limited`, i.e. re-arm/extend) objective may be limited.
+  // Unknown thread ⇒ null ⇒ no-op. `blocked` / `budget_limited` / `paused` /
+  // `completed` are left untouched.
+  const current = objective.get(threadId)
+  if (current === null) return false
+  if (current.status !== "active" && current.status !== "usage_limited") return false
+
+  const until = now() + retryAfterMs
+  // Overflow guard: a hostile/near-`MAX` clock + delta could overflow to a
+  // non-finite epoch; markUsageLimited would then CLEAR the window (its
+  // contract). Bail rather than accidentally clear.
+  if (!Number.isFinite(until) || until <= 0) return false
+
+  objective.markUsageLimited(threadId, until)
+  return true
 }
