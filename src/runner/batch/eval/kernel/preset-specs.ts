@@ -93,6 +93,33 @@ export const AGENTLESS_V6_SINGLEPASS_EXECFULL_STICKY: PresetSpec = {
 }
 
 /**
+ * `agentless-v6-singlepass-execfull-subagent` — aug-13 EFFICACY A/B arm. The v6
+ * measured winner PLUS `subagent: 1` ONLY (single variable) — the Tier-1 subagent
+ * system (aug-02 absorbed, default-OFF). Control = `agentless-v6-singlepass-execfull`;
+ * this measures whether subagent is a SWE resolve-rate lever. OPT-IN arm (not a
+ * promoted default). Identical to AGENTLESS_V6_SINGLEPASS_EXECFULL except the one
+ * added param.
+ */
+export const AGENTLESS_V6_SINGLEPASS_EXECFULL_SUBAGENT: PresetSpec = {
+  id: "agentless-v6-singlepass-execfull-subagent",
+  steps: ["localize", "repro", "repair", "verify"],
+  params: {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    subagent: "1",
+  },
+  note: "aug-13 efficacy A/B arm: v6 winner + subagent:1 ONLY (single variable). Control = agentless-v6-singlepass-execfull.",
+}
+
+/**
  * `agentless-v1-nosteer` — the A/B BASELINE for the `lsp-steer` grounding steer.
  * Identical to `agentless-v1` but with the steer explicitly `off`, so
  * `--preset agentless-v1` vs this is a clean single-variable measure of the
@@ -490,6 +517,7 @@ export const PRESET_SPECS: Readonly<Record<string, PresetSpec>> = Object.freeze(
   [AGENTLESS_V1.id]: AGENTLESS_V1,
   [AGENTLESS_V6_SINGLEPASS_EXECFULL.id]: AGENTLESS_V6_SINGLEPASS_EXECFULL,
   [AGENTLESS_V6_SINGLEPASS_EXECFULL_STICKY.id]: AGENTLESS_V6_SINGLEPASS_EXECFULL_STICKY,
+  [AGENTLESS_V6_SINGLEPASS_EXECFULL_SUBAGENT.id]: AGENTLESS_V6_SINGLEPASS_EXECFULL_SUBAGENT,
   [AGENTLESS_V1_NOSTEER.id]: AGENTLESS_V1_NOSTEER,
   [AGENTLESS_V6_CLOSURE_CONTROL.id]: AGENTLESS_V6_CLOSURE_CONTROL,
   [AGENTLESS_V6_CLOSURE_REPAIR.id]: AGENTLESS_V6_CLOSURE_REPAIR,
