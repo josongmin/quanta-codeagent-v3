@@ -105,6 +105,26 @@ export const KNOB_PRESETS: Readonly<Record<string, Readonly<Record<string, strin
     "retry-transient": "3",
     "bench-in-loop-exec": "full",
   },
+  // aug-13 EFFICACY A/B arm — v6-singlepass-execfull + `subagent:1` ONLY (single
+  // variable). Control = `agentless-v6-singlepass-execfull`; treatment = this.
+  // Measures whether the Tier-1 subagent system (aug-02 absorbed, default-OFF) is
+  // a SWE resolve-rate lever. Mirrors the `agentless-v1` vs `-nosteer` pattern —
+  // NOT a promoted default (no global byte-identical change). Run picks-10 both
+  // arms via full-remote SPOT, then `quanta-bench wave2-ab`. Do NOT confound with
+  // `everything` (which flips subagent+skills+localize+branch together).
+  "agentless-v6-singlepass-execfull-subagent": {
+    lsp: "1",
+    "localize-phase": "5",
+    "issue-hint": "agentless",
+    "issue-hint-expected-actual": "1",
+    "repro-test": "5",
+    "repo-map": "1",
+    "read-outline": "1",
+    "test-runner": "1",
+    "retry-transient": "3",
+    "bench-in-loop-exec": "full",
+    subagent: "1",
+  },
   // jun-28 AUTONOMOUS-SAFE arm — v6-singlepass-execfull + sticky-red verify gate.
   // The proven autonomous-safety bundle (verify-guard mustPass + STICKY: a failing
   // verify is cleared only by re-running the SAME command green — flipped
