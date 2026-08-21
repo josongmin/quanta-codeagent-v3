@@ -43,6 +43,24 @@ export const resolveBenchExecutionPreset = (args: {
   return asNonEmpty(args.argvPreset) ?? CURRENT_BENCH_BASE_PRESET
 }
 
+/** Remote Pro spans Python, Go, JS, and TS, while the current strict remote box
+ * proves only Pyright. Use the LSP-optional baseline for Pro only when the
+ * operator did not explicitly choose any preset. Explicit experiments retain
+ * the normal precedence unchanged. */
+export const resolveRemoteBenchExecutionPreset = (args: {
+  readonly family: string
+  readonly envVars: Record<string, string | undefined>
+  readonly argvPreset?: string | undefined
+}): string => {
+  const resolved = resolveBenchExecutionPreset(args)
+  const explicitlySelected =
+    asNonEmpty(args.envVars.QUANTA_BENCH_PRESET) !== undefined ||
+    gateOn(args.envVars, "QUANTA_BENCH_SOTA") ||
+    asNonEmpty(args.envVars.QUANTA_KNOBS_PRESET) !== undefined ||
+    asNonEmpty(args.argvPreset) !== undefined
+  return args.family.toLowerCase() === "pro" && !explicitlySelected ? "agentless-v1" : resolved
+}
+
 /** Seed `QUANTA_BENCH_PRESET` only when the operator did NOT already select a
  * posture through env. This keeps local `bench run` / `index.ts` honest by
  * default while preserving explicit `QUANTA_BENCH_SOTA` / `QUANTA_KNOBS_PRESET`
@@ -58,7 +76,11 @@ export const seedBenchExecutionPreset = (
   }
   if (gateOn(env, "QUANTA_BENCH_SOTA")) return
   if (asNonEmpty(env.QUANTA_KNOBS_PRESET) !== undefined) return
-  env.QUANTA_BENCH_PRESET = resolveBenchExecutionPreset({ envVars: env, argvPreset })
+  env.QUANTA_BENCH_PRESET = resolveRemoteBenchExecutionPreset({
+    family: env.QUANTA_SWEBENCH_DATASET_FAMILY ?? "verified",
+    envVars: env,
+    argvPreset,
+  })
 }
 
 /** Shared preset-list rendering for both legacy `index.ts --list-presets` and

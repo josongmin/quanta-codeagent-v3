@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { toInstance } from "@/runner/batch/corpus/dataset"
 import {
+  bridgeDatasetFamilyToEnv,
   gradeEvaluatorForFamily,
   parseTasksForFamily,
   resolveDatasetFamily,
@@ -16,6 +17,24 @@ describe("resolveDatasetFamily", () => {
   test("unknown ⇒ verified (fail-safe to the byte-identical default)", () => {
     expect(resolveDatasetFamily("bogus", {})).toBe("verified")
     expect(resolveDatasetFamily("PRO", {})).toBe("pro") // case-insensitive
+  })
+})
+
+describe("bridgeDatasetFamilyToEnv", () => {
+  test("writes the resolved CLI family for full-remote/pool downstream readers", () => {
+    const env: Record<string, string | undefined> = {
+      QUANTA_SWEBENCH_DATASET_FAMILY: "verified",
+    }
+    expect(bridgeDatasetFamilyToEnv("pro", env)).toBe("pro")
+    expect(env.QUANTA_SWEBENCH_DATASET_FAMILY).toBe("pro")
+  })
+
+  test("does not mutate an existing env selector when the CLI flag is absent", () => {
+    const env: Record<string, string | undefined> = {
+      QUANTA_SWEBENCH_DATASET_FAMILY: "live",
+    }
+    expect(bridgeDatasetFamilyToEnv(undefined, env)).toBe("live")
+    expect(env.QUANTA_SWEBENCH_DATASET_FAMILY).toBe("live")
   })
 })
 

@@ -80,12 +80,10 @@ export interface FullRemoteConfig {
 
 export const D = {
   region: "ap-northeast-2",
-  // PREBAKED AMI (quanta-bench-easydjango, 2026-06-17): docker + uv + the swebench
-  // easy-django eval images already pulled. Skips the cold cloud-init image-pull
-  // that dominated bootstrap (the stock ubuntu-22.04 ami-0afe1fd15675c3f15 re-pulled
-  // GB of swebench images every launch). userData stays idempotent (re-running
-  // present installs is fast; bun is still installed there). Override via cfg.ami.
-  ami: "ami-04c2cdd2e17b15779",
+  // Resolve Canonical's current Ubuntu 22.04 amd64 image at launch. The previous
+  // private prebaked AMI was deleted and made every smoke fail at RunInstances.
+  // An explicit cfg.ami / QUANTA_FULL_REMOTE_AMI still wins for prebaked boxes.
+  ami: "ssm:/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id",
   // jun-27: 4xlarge (16 vCPU/32GB) default — patch-gen is LLM-API-bound (cores idle
   // on the wire) and grading is serial (max_workers≈6), so the 8xlarge's 32 vCPU were
   // paid-for idle. ~$0.24/hr spot vs ~$0.5/hr. Bump back via the env override for

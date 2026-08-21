@@ -42,6 +42,34 @@ export const isLiveDataset = (datasetName: string): boolean =>
 export const isLiveRun = (datasetName: string, family: string | undefined): boolean =>
   isLiveDataset(datasetName) || (family ?? "").toLowerCase() === "live"
 
+/** Resolve a stable public SSM AMI reference just before launch. Explicit ami-*
+ * overrides pass through byte-for-byte; malformed/failed SSM results fail loud
+ * before RunInstances rather than surfacing as an opaque InvalidAMIID retry. */
+export const resolveLaunchAmi = async (
+  awsFn: (args: readonly string[]) => Promise<SpawnResult>,
+  configured: string,
+): Promise<string> => {
+  if (!configured.startsWith("ssm:")) return configured
+  const parameterName = configured.slice("ssm:".length)
+  const result = await awsFn([
+    "ssm",
+    "get-parameter",
+    "--name",
+    parameterName,
+    "--query",
+    "Parameter.Value",
+    "--output",
+    "text",
+  ])
+  const imageId = oneLine(result.stdout)
+  if (result.code !== 0 || !/^ami-[0-9a-f]+$/.test(imageId)) {
+    throw new Error(
+      `[full-remote] AMI SSM resolution failed for ${parameterName} (code ${result.code}): ${result.stderr || result.stdout}`,
+    )
+  }
+  return imageId
+}
+
 /** RFC jun-29 — pick the `swebench` harness build for the box's grading shim. Stock PyPI
  *  `swebench` only knows the ORIGINAL SWE-bench repos (its `make_test_spec` does
  *  `MAP_REPO_VERSION_TO_SPECS[repo][version]` and KeyErrors on a SWE-bench-Live repo —
@@ -188,7 +216,8 @@ const userData = (ttl: number): string =>
     // "rg: command not found" and the agent silently fell back to bash grep
     // (measured on django-11400: 5/5 grep-tool calls + find_references all failed).
     // Installing it un-breaks the grep tool too, not just find_references.
-    "apt-get update -y && apt-get install -y docker.io git curl unzip ripgrep",
+    // PyPI pyright's managed Node binary links libatomic.so.1 on Ubuntu.
+    "apt-get update -y && apt-get install -y docker.io git curl unzip ripgrep libatomic1",
     "systemctl enable --now docker",
     "usermod -aG docker ubuntu",
     "su - ubuntu -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'",
@@ -308,6 +337,7 @@ const launchInstance = async (
   log: (m: string) => void,
 ): Promise<string> => {
   const onDemand = cfg.onDemand ?? false
+  const imageId = await resolveLaunchAmi(awsFn, cfg.ami ?? D.ami)
   // The subnet/AZ is DELIBERATELY NOT pinned unless the caller sets `subnetId` —
   // pinning an AZ is the #1 cause of `InsufficientInstanceCapacity`.
   const typeCandidates = [
@@ -317,7 +347,7 @@ const launchInstance = async (
     "ec2",
     "run-instances",
     "--image-id",
-    cfg.ami ?? D.ami,
+    imageId,
     "--instance-type",
     instanceType,
     "--key-name",
@@ -636,21 +666,42 @@ const waitForBoxReady = async (
 const SSH_TERMINAL_ERROR =
   /Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED|identity file .* not accessible|Bad (?:configuration|owner)|Could not resolve hostname|UNPROTECTED PRIVATE KEY/i
 
+const createInstanceTerminator = (
+  keep: boolean,
+  awsFn: (args: readonly string[]) => Promise<SpawnResult>,
+  iid: string,
+): (() => Promise<void>) =>
+  keep
+    ? async () => {}
+    : async () => {
+        const terminated = await awsFn(["ec2", "terminate-instances", "--instance-ids", iid])
+        if (terminated.code !== 0) throw terminateFailure(iid, terminated)
+      }
+
+const resolveProvisionContext = (cfg: FullRemoteConfig) => {
+  const spawn = cfg.spawn ?? defaultSpawn
+  const region = cfg.region ?? D.region
+  const onDemand = cfg.onDemand ?? false
+  return {
+    spawn,
+    region,
+    keyPath: cfg.keyPath ?? D.keyPath,
+    ttl: cfg.ttlMinutes ?? D.ttlMinutes,
+    keep: cfg.keep ?? false,
+    marketLabel: onDemand ? "on-demand" : "spot",
+    log: cfg.onLog ?? (() => {}),
+    awsFn: aws(spawn, region),
+  }
+}
+
 /**
  * Launch + bootstrap a box; return a live {@link BoxSession}. On ANY failure
  * after the instance exists, the box is terminated before the error propagates
  * (a half-provisioned box must never linger and burn money / hold a credential).
  */
 export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> => {
-  const spawn = cfg.spawn ?? defaultSpawn
-  const region = cfg.region ?? D.region
-  const keyPath = cfg.keyPath ?? D.keyPath
-  const ttl = cfg.ttlMinutes ?? D.ttlMinutes
-  const onDemand = cfg.onDemand ?? false
-  const keep = cfg.keep ?? false
-  const marketLabel = onDemand ? "on-demand" : "spot"
-  const log = cfg.onLog ?? (() => {})
-  const awsFn = aws(spawn, region)
+  const { spawn, region, keyPath, ttl, keep, marketLabel, log, awsFn } =
+    resolveProvisionContext(cfg)
 
   log("[full-remote] ensuring security group (:22 from your IP)…")
   const sgId = await ensureSecurityGroup(
@@ -662,11 +713,7 @@ export const provisionBox = async (cfg: FullRemoteConfig): Promise<BoxSession> =
   )
   const iid = await launchInstance(awsFn, cfg, sgId, ttl, marketLabel, log)
 
-  const terminate = async (): Promise<void> => {
-    if (keep) return
-    const terminated = await awsFn(["ec2", "terminate-instances", "--instance-ids", iid])
-    if (terminated.code !== 0) throw terminateFailure(iid, terminated)
-  }
+  const terminate = createInstanceTerminator(keep, awsFn, iid)
 
   // jun-27 #4: live BOOTSTRAP-phase spans so the ~20min provision window is visible
   // in the operator's trace UI — a slow bootstrap vs a DEAD one no longer look the

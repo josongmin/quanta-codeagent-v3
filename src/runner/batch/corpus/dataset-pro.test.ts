@@ -41,6 +41,31 @@ describe("Pro ingest — normalize + parse + carry (RFC jun-29)", () => {
     expect(inst.swebench?.passToPass).toBeDefined()
   })
 
+  test("real Pro Python-literal f2p with mixed quotes derives a real testCmd", () => {
+    const row = {
+      ...proRow,
+      fail_to_pass: "['tests/test_x.py::test_plain', \"tests/test_x.py::test_param[it's valid]\"]",
+      pass_to_pass: "['tests/test_x.py::test_regression']",
+    }
+    const inst = toInstance(
+      parseSwebenchJsonl(JSON.stringify(row), normalizeProRow)[0]!,
+      "/tmp/repo",
+    )
+    expect(inst.testCmd).not.toBe("true")
+    expect(inst.testCmd).toContain("test_plain")
+    expect(inst.testCmd).toContain("test_param")
+    expect(inst.swebench?.passToPass).toEqual(["tests/test_x.py::test_regression"])
+  })
+
+  test("Python-literal parser stays data-only and rejects expressions", () => {
+    const row = { ...proRow, fail_to_pass: "[dangerous()]" }
+    const inst = toInstance(
+      parseSwebenchJsonl(JSON.stringify(row), normalizeProRow)[0]!,
+      "/tmp/repo",
+    )
+    expect(inst.testCmd).toBe("true")
+  })
+
   // Paired control — proves the normalizer is LOAD-BEARING: an un-normalized PYTHON Pro
   // row (lowercase keys) yields the testCmd:"true" no-op (the fake-green risk). Python so
   // the ONLY reason for "true" is the missing FAIL_TO_PASS, not the repo_language gate.

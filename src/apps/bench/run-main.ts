@@ -16,7 +16,8 @@
 import "@/runner/knobs/knobs"
 import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
-import { join } from "node:path"
+import { homedir } from "node:os"
+import { join, resolve } from "node:path"
 import { BUDGET_PRESETS } from "@/agent"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
 import {
@@ -281,6 +282,20 @@ type SwebenchTaskDeps = {
   repoBaseUrl: string
 }
 
+const prepareSwebenchWorkDir = async (
+  task: SwebenchTask,
+): Promise<{ readonly work: string; readonly dest: string }> => {
+  if (!gateOn(process.env, "QUANTA_BENCH_RESUME")) {
+    const work = await mkdtemp(join(benchWorkRoot(), `swebench-${task.instanceId}-`))
+    return { work, dest: join(work, "repo") }
+  }
+  const work = join(benchWorkRoot(), task.instanceId.replace(/[^A-Za-z0-9._-]/g, "_"))
+  const dest = join(work, "repo")
+  await rm(dest, { recursive: true, force: true })
+  await mkdir(dest, { recursive: true })
+  return { work, dest }
+}
+
 const runSwebenchTask = async (
   task: SwebenchTask,
   deps: SwebenchTaskDeps,
@@ -295,19 +310,8 @@ const runSwebenchTask = async (
   // assumes workers=1 / chunk-size=1 (Tier-0 default) — a deterministic path
   // loses mkdtemp's uniqueness, so concurrent same-instance runs would collide;
   // no locking is added.
-  let dest: string
-  // The dir to `rm` on the finally path: the parent that holds `repo` (so both
-  // the checkout and its wrapper are gone), identical semantics in both modes.
-  let work: string
-  if (gateOn(process.env, "QUANTA_BENCH_RESUME")) {
-    work = join(benchWorkRoot(), task.instanceId.replace(/[^A-Za-z0-9._-]/g, "_"))
-    dest = join(work, "repo")
-    await rm(dest, { recursive: true, force: true })
-    await mkdir(dest, { recursive: true })
-  } else {
-    work = await mkdtemp(join(benchWorkRoot(), `swebench-${task.instanceId}-`))
-    dest = join(work, "repo")
-  }
+  // The `work` parent is removed in finally so checkout + wrapper disappear.
+  const { work, dest } = await prepareSwebenchWorkDir(task)
   // Live progress to run.log: under concurrency the per-instance result line is
   // emitted only at the END of the batch (all in-flight at once → ~15min silence
   // mid-run). A START line + an inline DONE line make each instance's lifecycle
@@ -386,6 +390,47 @@ const runSwebenchTask = async (
   }
 }
 
+const executeSwebenchTasks = async (
+  selected: readonly SwebenchTask[],
+  concurrency: number,
+  taskDeps: SwebenchTaskDeps,
+): Promise<{ readonly results: InstanceResult[]; readonly runHealth?: RunHealthSummary }> => {
+  const stopLaneProgress = startLaneProgressRenderer()
+  try {
+    if (concurrency > 1) {
+      return {
+        results: await mapWithConcurrency(selected, concurrency, (task) =>
+          runSwebenchTask(task, taskDeps),
+        ),
+      }
+    }
+    const out = await runBatchWithHealth({
+      instances: selected,
+      env: process.env,
+      runInstance: (task) => runSwebenchTask(task, taskDeps),
+      idOf: (task) => task.instanceId,
+    })
+    return {
+      results: out.results,
+      runHealth: {
+        aborted: out.runHealth.aborted,
+        verdict: out.runHealth.verdict,
+        reason: out.runHealth.reason,
+        attempted: out.runHealth.attempted,
+        total: out.runHealth.total,
+      },
+    }
+  } finally {
+    stopLaneProgress()
+  }
+}
+
+const logRepairConfig = (repair: { maxRounds: number } | undefined): void => {
+  if (repair !== undefined) {
+    logger.info(`bench: repair rounds enabled (maxRounds=${repair.maxRounds})`)
+  }
+}
+
 const runDatasetMode = async (
   datasetFile: string,
   llm: LLMPort,
@@ -437,9 +482,7 @@ const runDatasetMode = async (
   // `Math.max(0, NaN)` === NaN and reached `maxRounds`, silently breaking the
   // repair-round comparison. NaN/negative ⇒ 0 (no repair).
   const repair = repairConfigFromArg(repairArg)
-  if (repair !== undefined) {
-    logger.info(`bench: repair rounds enabled (maxRounds=${repair.maxRounds})`)
-  }
+  logRepairConfig(repair)
 
   const repoBaseUrl = process.env.QUANTA_SWEBENCH_REPO_BASE_URL ?? "https://github.com/"
   const taskDeps = {
@@ -465,35 +508,9 @@ const runDatasetMode = async (
   // HEALTHY run this is byte-identical (every instance attempted, no abort) — the
   // gate only fires on systemic failure. Concurrency>1 keeps the plain parallel
   // map (health-abort is a serial-path optimisation).
-  let runHealth: RunHealthSummary | undefined
-  let results: InstanceResult[]
-  // Live view of parallel candidate lanes (repair-breadth / verify-select) —
-  // TTY panel or non-TTY prefixed logs. Inert when disabled or nothing emits.
-  const stopLaneProgress = startLaneProgressRenderer()
-  try {
-    if (concurrency > 1) {
-      results = await mapWithConcurrency(selected, concurrency, (task) =>
-        runSwebenchTask(task, taskDeps),
-      )
-    } else {
-      const out = await runBatchWithHealth({
-        instances: selected,
-        env: process.env,
-        runInstance: (task) => runSwebenchTask(task, taskDeps),
-        idOf: (task) => task.instanceId,
-      })
-      results = out.results
-      runHealth = {
-        aborted: out.runHealth.aborted,
-        verdict: out.runHealth.verdict,
-        reason: out.runHealth.reason,
-        attempted: out.runHealth.attempted,
-        total: out.runHealth.total,
-      }
-    }
-  } finally {
-    stopLaneProgress()
-  }
+  // Live view of parallel candidate lanes (repair-breadth / verify-select) is
+  // owned by the extracted executor and stays inert when nothing emits.
+  const { results, runHealth } = await executeSwebenchTasks(selected, concurrency, taskDeps)
 
   const reportPath = argValue("--report") ?? join(benchRunDir(benchRunId()), "report.json")
   await writeArtifacts(
@@ -636,6 +653,7 @@ const maybeRunDatasetMode = async (
       n: cfg.n,
       limit: cfg.limit,
       pythonHarness: gateOn(process.env, "QUANTA_SWEBENCH_PYTHON"),
+      ...(datasetFamily() === "pro" ? { verifierLabel: "ScaleAI SWE-bench Pro harness" } : {}),
       preset: process.env.QUANTA_BENCH_PRESET ?? "(unset)",
     })
     for (const line of formatDryRunPlan(plan)) logger.info(line)
@@ -711,18 +729,29 @@ const maybeRunDatasetMode = async (
 // so verify()/gold-sanity transparently grade with the ScaleAI harness. Opts come
 // from box-set env (QUANTA_SWEBENCH_PRO_HARNESS_DIR/RAW_SAMPLE_PATH/PYTHON_BIN).
 const buildProGradeVerifier = (): RunCfg["pythonSwebench"] => {
-  const harnessDir = process.env.QUANTA_SWEBENCH_PRO_HARNESS_DIR
-  const rawSamplePath = process.env.QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH
+  const defaultHarnessDir = join(homedir(), "swebench-pro")
+  const defaultPythonBin = join(homedir(), "swebench-pro-venv", "bin", "python")
+  const configuredHarnessDir = process.env.QUANTA_SWEBENCH_PRO_HARNESS_DIR
+  const harnessDir =
+    configuredHarnessDir ??
+    (existsSync(join(defaultHarnessDir, "swe_bench_pro_eval.py")) ? defaultHarnessDir : undefined)
+  const configuredRawSamplePath =
+    process.env.QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH ?? argValue("--swebench")
+  const rawSamplePath =
+    configuredRawSamplePath !== undefined ? resolve(configuredRawSamplePath) : undefined
   if (!harnessDir || !rawSamplePath) {
     logger.error(
       "dataset-family=pro requires QUANTA_SWEBENCH_PRO_HARNESS_DIR + " +
-        "QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH (clone scaleapi/SWE-bench_Pro-os). " +
+        "QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH, or the default ~/swebench-pro clone plus " +
+        "the --swebench JSONL path. " +
         "REFUSING to fake-grade. Aborting.",
     )
     exitFn(1)
     return undefined
   }
-  const pythonBin = process.env.QUANTA_SWEBENCH_PRO_PYTHON_BIN
+  const configuredPythonBin = process.env.QUANTA_SWEBENCH_PRO_PYTHON_BIN
+  const pythonBin =
+    configuredPythonBin ?? (existsSync(defaultPythonBin) ? defaultPythonBin : undefined)
   const dockerhubUsername = process.env.QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME
   const modelName = process.env.QUANTA_SWEBENCH_PRO_MODEL_NAME
   logger.info(
@@ -784,6 +813,23 @@ const buildPythonSwebench = async (): Promise<RunCfg["pythonSwebench"]> => {
       }
 }
 
+const exitCustomDryRunIfRequested = (
+  cfg: { corpusRoot: string; n: number; limit: number | null },
+  all: Instance[],
+  pythonHarness: boolean,
+): boolean => {
+  if (!argFlag("--dry-run")) return false
+  const plan = buildDryRunPlan(cfg.corpusRoot, all, {
+    n: cfg.n,
+    limit: cfg.limit,
+    pythonHarness,
+    preset: process.env.QUANTA_BENCH_PRESET ?? "(unset)",
+  })
+  for (const line of formatDryRunPlan(plan)) logger.info(line)
+  exitFn(0)
+  return true
+}
+
 /** Custom-corpus entrypoint (the path when no --swebench dataset is given).
  *  Handles --dry-run (no LLM), empty-corpus + no-key guidance, then runs. */
 const runCustomCorpusMode = async (
@@ -808,17 +854,7 @@ const runCustomCorpusMode = async (
   const pythonHarness = gateOn(process.env, "QUANTA_SWEBENCH_PYTHON")
 
   // `--dry-run`: load + count + print the plan; NEVER build an LLM or run.
-  if (argFlag("--dry-run")) {
-    const plan = buildDryRunPlan(cfg.corpusRoot, all, {
-      n: cfg.n,
-      limit: cfg.limit,
-      pythonHarness,
-      preset: process.env.QUANTA_BENCH_PRESET ?? "(unset)",
-    })
-    for (const line of formatDryRunPlan(plan)) logger.info(line)
-    exitFn(0)
-    return
-  }
+  if (exitCustomDryRunIfRequested(cfg, all, pythonHarness)) return
 
   if (all.length === 0) {
     logger.info(
@@ -909,13 +945,15 @@ export const applyBenchEnvDefaults = (
 export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   exitFn = deps.exit ?? defaultExitFn
   loadEnv([".env.dev", ".env.local", ".env"])
-  applyBenchEnvDefaults(process.env, { argvPreset: argValue("--preset") })
   // jul-01 audit A1 follow-up — bridge --dataset-family flag → env at the LEGACY
   // direct entry too (`bun src/apps/bench/index.ts … --dataset-family live`), which
   // bypasses cli.ts main(). Closes the footgun both A1+A2 audits flagged: without it
   // the local-Live guard (env-reader) wouldn't fire on a direct-invoke. After .env load
   // so the flag wins; no-op when absent (byte-identical).
   bridgeDatasetFamilyToEnv(argValue("--dataset-family"))
+  // Pro spans Python, Go, JS, and TS, so family selection must be visible before
+  // the default preset is seeded. Explicit preset selectors retain precedence.
+  applyBenchEnvDefaults(process.env, { argvPreset: argValue("--preset") })
 
   if (argFlag("--help") || argFlag("-h")) {
     printHelp()

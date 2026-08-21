@@ -14,6 +14,7 @@ export interface DryRunPlan {
   n: number
   limit: number | null
   pythonHarness: boolean
+  verifierLabel?: string
   preset: string
   /** First few instance ids — a cheap preview of what a real run would do. */
   sample: string[]
@@ -23,7 +24,13 @@ const buildPlan = (
   sourceLabel: DryRunPlan["sourceLabel"],
   sourcePath: string,
   ids: readonly string[],
-  cfg: { n: number; limit: number | null; pythonHarness: boolean; preset: string },
+  cfg: {
+    n: number
+    limit: number | null
+    pythonHarness: boolean
+    verifierLabel?: string
+    preset: string
+  },
 ): DryRunPlan => {
   const selected = cfg.limit === null ? ids : ids.slice(0, cfg.limit)
   return {
@@ -34,6 +41,7 @@ const buildPlan = (
     n: cfg.n,
     limit: cfg.limit,
     pythonHarness: cfg.pythonHarness,
+    ...(cfg.verifierLabel !== undefined ? { verifierLabel: cfg.verifierLabel } : {}),
     preset: cfg.preset,
     sample: selected.slice(0, 10),
   }
@@ -43,7 +51,13 @@ const buildPlan = (
 export const buildDryRunPlan = (
   corpusRoot: string,
   instances: Instance[],
-  cfg: { n: number; limit: number | null; pythonHarness: boolean; preset: string },
+  cfg: {
+    n: number
+    limit: number | null
+    pythonHarness: boolean
+    verifierLabel?: string
+    preset: string
+  },
 ): DryRunPlan => {
   return buildPlan(
     "corpus",
@@ -57,7 +71,13 @@ export const buildDryRunPlan = (
 export const buildDatasetDryRunPlan = (
   datasetFile: string,
   tasks: SwebenchTask[],
-  cfg: { n: number; limit: number | null; pythonHarness: boolean; preset: string },
+  cfg: {
+    n: number
+    limit: number | null
+    pythonHarness: boolean
+    verifierLabel?: string
+    preset: string
+  },
 ): DryRunPlan =>
   buildPlan(
     "dataset",
@@ -75,6 +95,6 @@ export const formatDryRunPlan = (plan: DryRunPlan): string[] => [
   }`,
   `  best-of-n: ${plan.n}`,
   `  preset: ${plan.preset}`,
-  `  verifier: ${plan.pythonHarness ? "official python swebench harness" : "local testCmd"}`,
+  `  verifier: ${plan.verifierLabel ?? (plan.pythonHarness ? "official python swebench harness" : "local testCmd")}`,
   `  sample ids: ${plan.sample.join(", ") || "(none)"}`,
 ]

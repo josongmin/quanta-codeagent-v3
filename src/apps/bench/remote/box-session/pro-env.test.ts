@@ -34,8 +34,19 @@ describe("buildProEnv — Pro override forwarding (jun-30 wiring fix)", () => {
     expect(out).toBe(
       `QUANTA_SWEBENCH_PRO_HARNESS_DIR="$HOME/swebench-pro" ` +
         `QUANTA_SWEBENCH_PRO_PYTHON_BIN="$HOME/swebench-pro-venv/bin/python" ` +
-        `QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH='${DATASET}' `,
+        `QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH="$HOME/instances.jsonl" `,
     )
+  })
+
+  test("expands a pool dataset path before Node resolves it", () => {
+    const out = buildProEnv(
+      { QUANTA_SWEBENCH_DATASET_FAMILY: "pro" },
+      "~/runs/chunk-01/instances.jsonl",
+    )
+    expect(out).toContain(
+      `QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH="$HOME/runs/chunk-01/instances.jsonl"`,
+    )
+    expect(out).not.toContain("='~/")
   })
 
   test("empty-string overrides are treated as unset (not forwarded)", () => {

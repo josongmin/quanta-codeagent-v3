@@ -3,14 +3,16 @@
  * (ADR-0536 P0). Backend construction (ec2 | ssh | fanout) + grade-only and
  * full-remote dispatch. Moved verbatim; behaviour-identical.
  */
+
+import { createHash } from "node:crypto"
 import { readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { gateOn, logger, runtimeConfig } from "@/shared"
 import { describeAuthSource, resolveAuthLaunchFile } from "../auth-pool"
-import { resolveDatasetFamily } from "../dataset-family"
+import { bridgeDatasetFamilyToEnv, resolveDatasetFamily } from "../dataset-family"
 import { ensureBenchTraceSink } from "../default-trace-sink"
-import { resolveBenchExecutionPreset } from "../preset"
+import { resolveRemoteBenchExecutionPreset } from "../preset"
 import type { GradeBackend } from "../remote/backend"
 import { createEc2Backend } from "../remote/ec2"
 import { createFanoutBackend } from "../remote/fanout"
@@ -28,6 +30,21 @@ import {
   resolveCliAuthSource,
   resolvedIdsFromReport,
 } from "./shared"
+
+/** Filesystem-safe bounded run id. The instance selector can contain hundreds
+ * of bytes (especially for a multi-instance smoke); forwarding it verbatim made
+ * `mkdir observe/<runId>` fail with ENAMETOOLONG before the first model call. */
+export const fullRemoteRunId = (instanceSelector: string | undefined, now = Date.now()): string => {
+  const selector = instanceSelector?.trim() || "all"
+  const count = selector === "all" ? 0 : selector.split(",").filter((id) => id.trim() !== "").length
+  const first = selector
+    .split(",", 1)[0]
+    ?.replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 36)
+  const digest = createHash("sha256").update(selector).digest("hex").slice(0, 12)
+  return `fullremote-${first || "all"}-${count}x-${digest}-${now}`
+}
 
 /** Build ONE backend instance for `spec` (ec2 | ssh:host). A fresh call mints a
  *  fresh box (fanout uses this per shard). */
@@ -130,7 +147,8 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   const authFile = resolveAuthLaunchFile(authSource)
   const authJson = dry ? "{}" : await refreshRemoteAuthJson(authFile)
   const instance = argValue("--instance")
-  const preset = resolveBenchExecutionPreset({
+  const preset = resolveRemoteBenchExecutionPreset({
+    family: resolveDatasetFamily(undefined, process.env),
     envVars: process.env,
     argvPreset: argValue("--preset"),
   })
@@ -188,7 +206,7 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   // waterfall is auto-captured to a file (never silently lost). Opt out with
   // QUANTA_OTEL_ENDPOINT=off, or set your own endpoint to use an external sink.
   const trace = ensureBenchTraceSink(process.env, {
-    runId: `fullremote-${argValue("--instance") ?? "all"}-${Date.now()}`,
+    runId: fullRemoteRunId(argValue("--instance")),
     log: (m) => logger.info(m),
   })
   try {
@@ -216,6 +234,9 @@ const cmdGradeFullRemote = async (): Promise<void> => {
 }
 
 export const cmdGrade = async (): Promise<void> => {
+  // Full-remote bootstrap and on-box grading consume the canonical env selector.
+  // Bridge before dispatch so a CLI-only Pro selection cannot fall into Verified.
+  bridgeDatasetFamilyToEnv(argValue("--dataset-family"), process.env)
   if ((argValue("--mode") ?? "grade-only") === "full") return cmdGradeFullRemote()
 
   const predictions = argValue("--predictions")

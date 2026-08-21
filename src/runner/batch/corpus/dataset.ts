@@ -31,6 +31,7 @@ import {
   parseSelectedTestFilesToRun,
   selectedTestFilesVerifierCommand,
 } from "./selected-test-files-verifier"
+import { parseSerializedStringList } from "./string-list-literal"
 
 /** A single official SWE-bench task (subset of the upstream row we use). */
 export interface SwebenchTask {
@@ -400,7 +401,7 @@ export const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
       }) ?? "true"
     )
   }
-  const names = decodeTestNameList(raw.FAIL_TO_PASS)
+  const names = parseSerializedStringList(raw.FAIL_TO_PASS)
   if (names === undefined) return "true"
   const repo = typeof raw.repo === "string" ? raw.repo : ""
   const version = typeof raw.version === "string" ? raw.version : undefined
@@ -457,32 +458,15 @@ export const synthesizeTestCmd = (raw: Record<string, unknown>): string => {
   return `${prefix} pytest -x --no-header ${parts.join(" ")}`
 }
 
-const decodeTestNameList = (value: unknown): readonly string[] | undefined => {
-  let parsed: unknown
-  if (typeof value === "string") {
-    try {
-      parsed = JSON.parse(value)
-    } catch {
-      return undefined
-    }
-  } else {
-    parsed = value
-  }
-  if (!Array.isArray(parsed)) return undefined
-  const names = parsed.filter((t): t is string => typeof t === "string" && t.length > 0)
-  return names.length > 0 ? names : undefined
-}
-
 /** Parse a SWE-bench test-name array field (`PASS_TO_PASS` / `FAIL_TO_PASS`) —
- *  a JSON-encoded string array OR an already-decoded array of pytest node-ids /
- *  bare names. Returns the non-empty string entries, or `undefined` when the
- *  field is absent, malformed, or empty (so callers omit it rather than
- *  threading `[]`). EVAL-ONLY use. */
+ *  a JSON-encoded array, a Pro Python-literal array, OR an already-decoded array
+ *  of pytest node-ids / bare names. Returns the non-empty string entries, or
+ *  `undefined` when absent, malformed, or empty. EVAL-ONLY use. */
 export const parseTestNameList = (
   raw: Record<string, unknown>,
   key: string,
 ): readonly string[] | undefined => {
-  return decodeTestNameList(raw[key])
+  return parseSerializedStringList(raw[key])
 }
 
 export const toInstance = (task: SwebenchTask, repoPath: string): Instance => {

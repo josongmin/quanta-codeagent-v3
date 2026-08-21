@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { applyBenchEnvDefaults } from "@/apps/bench/index"
-import { CURRENT_BENCH_BASE_PRESET, resolveBenchExecutionPreset } from "@/apps/bench/preset"
+import {
+  CURRENT_BENCH_BASE_PRESET,
+  resolveBenchExecutionPreset,
+  resolveRemoteBenchExecutionPreset,
+} from "@/apps/bench/preset"
 
 /**
  * Structural fixes for two bench-scaffold defects that crippled gpt-5.4 on
@@ -62,6 +66,14 @@ describe("bench scaffold: stale-read guard default", () => {
     applyBenchEnvDefaults(env, { argvPreset: "agentless-v3-select-regression" })
     expect(env.QUANTA_BENCH_PRESET).toBe("agentless-v3-select-regression")
   })
+
+  test("local Pro defaults to the polyglot-safe preset", () => {
+    const env: Record<string, string | undefined> = {
+      QUANTA_SWEBENCH_DATASET_FAMILY: "pro",
+    }
+    applyBenchEnvDefaults(env)
+    expect(env.QUANTA_BENCH_PRESET).toBe("agentless-v1")
+  })
 })
 
 describe("bench execution preset resolution", () => {
@@ -86,5 +98,19 @@ describe("bench execution preset resolution", () => {
         argvPreset: "agentless-v3-thin",
       }),
     ).toBe("agentless-v1")
+  })
+
+  test("remote Pro defaults to polyglot-safe v1 but preserves explicit selection", () => {
+    expect(resolveRemoteBenchExecutionPreset({ family: "pro", envVars: {} })).toBe("agentless-v1")
+    expect(
+      resolveRemoteBenchExecutionPreset({
+        family: "pro",
+        envVars: {},
+        argvPreset: "agentless-v3-thin-strict",
+      }),
+    ).toBe("agentless-v3-thin-strict")
+    expect(resolveRemoteBenchExecutionPreset({ family: "verified", envVars: {} })).toBe(
+      CURRENT_BENCH_BASE_PRESET,
+    )
   })
 })

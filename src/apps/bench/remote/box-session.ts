@@ -351,10 +351,16 @@ const buildResumePrelaunchStep = (forwardedBenchEnv: string): string => {
  */
 export const buildProEnv = (env: NodeJS.ProcessEnv, datasetPath: string): string => {
   if ((env.QUANTA_SWEBENCH_DATASET_FAMILY ?? "").toLowerCase() !== "pro") return ""
+  // `~` expands only when it starts a shell word. Inside `KEY='~/…'` it remains
+  // literal, and the on-box Node process then resolves it as `<cwd>/~/…`.
+  // Convert our home-relative chunk paths to an absolute shell-expanded value.
+  const rawSamplePath = datasetPath.startsWith("~/")
+    ? `"$HOME/${datasetPath.slice(2)}"`
+    : shq(datasetPath)
   let proEnv =
     `QUANTA_SWEBENCH_PRO_HARNESS_DIR="$HOME/swebench-pro" ` +
     `QUANTA_SWEBENCH_PRO_PYTHON_BIN="$HOME/swebench-pro-venv/bin/python" ` +
-    `QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH=${shq(datasetPath)} `
+    `QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH=${rawSamplePath} `
   if (env.QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME)
     proEnv += `QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME=${shq(env.QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME)} `
   if (env.QUANTA_SWEBENCH_PRO_MODEL_NAME)

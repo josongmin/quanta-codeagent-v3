@@ -60,8 +60,11 @@ const MODELS_PATH = "/models"
  *  0.0.1 probe filtered the entire catalog out and surfaced as the misleading
  *  "empty catalog — account may not have model access" error. We pin a current
  *  Codex CLI release so newly-rolled models stay visible; bump it when the
- *  backend gates a model behind a higher minimum. Probe-verified 2026-06-02. */
-const MODELS_CLIENT_VERSION = "0.131.0"
+ *  backend gates a model behind a higher minimum. aug-19: bumped 0.131.0 →
+ *  0.146.0 (current Codex CLI release) so models gated behind a higher minimum
+ *  (e.g. a gpt-5.6-family slug) surface instead of being filtered out.
+ *  Probe-verified 2026-06-02 at 0.131.0. */
+const MODELS_CLIENT_VERSION = "0.146.0"
 
 /** Cached `/models` catalog (memo). Keyed by `account_id` so multiple
  *  surfaces / accounts in one process keep separate caches. The catalog

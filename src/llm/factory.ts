@@ -32,21 +32,18 @@ export type Provider = LLMProvider
  *  entry points (`cli`, `bench`, `eval`) previously each duplicated. */
 export const DEFAULT_MODEL: Record<Provider, string> = {
   anthropic: "claude-sonnet-4-6",
-  // jun-15: default bumped `gpt-5-mini` → `gpt-5.4`. The bare `gpt-5.4` slug is
+  // aug-19: default bumped `gpt-5.4` → `gpt-5.6-terra`. The bare slug is
   // not in MODEL_CONTEXT_WINDOWS but routes through the `gpt-5` family fallback
   // (provider-metadata.ts) so the 400k window / reasoning catalog resolve cleanly
   // with no table edit. Override with `--model` / `QUANTA_MODEL=<slug>`.
-  openai: "gpt-5.4",
+  openai: "gpt-5.6-terra",
   // ChatGPT-OAuth subscription path. The Codex-only `gpt-5-codex` slug is
   // rejected by chatgpt.com backend ("not supported when using Codex with
-  // a ChatGPT account"). jun-10: bumped `gpt-5` → `gpt-5.4` — the bare
-  // `gpt-5` slug dropped out of the `/codex/models` subscription catalog, so
-  // every session opened with a silent-substitution warn and ran the
-  // server-picked fallback instead of a deliberate default. Override with
-  // `QUANTA_MODEL=<slug>`; an account whose catalog lacks gpt-5.4 still
-  // degrades safely (`resolveModelFromCatalog` swaps to the catalog default
-  // with a loud warn).
-  "chatgpt-oauth": "gpt-5.4",
+  // a ChatGPT account"). aug-19: bumped `gpt-5.4` → `gpt-5.6-terra`. Override
+  // with `QUANTA_MODEL=<slug>`; an account whose catalog lacks gpt-5.6-terra
+  // still degrades safely (`resolveModelFromCatalog` swaps to the catalog
+  // default with a loud warn).
+  "chatgpt-oauth": "gpt-5.6-terra",
 }
 
 /** Per-provider env var holding the API key. The `chatgpt-oauth` entry is a

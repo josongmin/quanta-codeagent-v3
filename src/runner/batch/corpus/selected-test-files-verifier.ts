@@ -1,27 +1,10 @@
 import { isJsLikeRepoLanguage, normalizeRepoLanguage } from "../repo-language"
+import { parseSerializedStringList } from "./string-list-literal"
 
 const shellQuote = (s: string): string => `'${s.replace(/'/g, "'\\''")}'`
 const shellWord = (s: string): string => (/^[A-Za-z0-9_./:=+-]+$/.test(s) ? s : shellQuote(s))
 
 const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-
-const parseStringList = (value: unknown): readonly string[] | undefined => {
-  let parsed: unknown
-  if (typeof value === "string") {
-    try {
-      parsed = JSON.parse(value)
-    } catch {
-      return undefined
-    }
-  } else {
-    parsed = value
-  }
-  if (!Array.isArray(parsed)) return undefined
-  const items = parsed.filter(
-    (entry): entry is string => typeof entry === "string" && entry.trim() !== "",
-  )
-  return items.length > 0 ? items : undefined
-}
 
 /** Go `selected_test_files_to_run` entries are TEST/FUZZ selectors, not file paths.
  *  They frequently include subtest / seed suffixes with spaces, commas, `#`, etc.
@@ -45,7 +28,7 @@ const buildNodeVerifierCommand = (entries: readonly string[]): string | undefine
 }
 
 export const parseSelectedTestFilesToRun = (value: unknown): readonly string[] | undefined =>
-  parseStringList(value)
+  parseSerializedStringList(value)
 
 export const selectedTestFilesVerifierCommand = (args: {
   readonly repoLanguage: string | undefined

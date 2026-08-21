@@ -23,6 +23,7 @@ import {
   type GradeOutcome,
   type SpawnFn,
 } from "./backend"
+import { resolveLaunchAmi } from "./box-session/ec2-lifecycle"
 import { createSshBackend, type SshBackendConfig } from "./ssh"
 
 export interface Ec2BackendConfig {
@@ -58,11 +59,10 @@ export interface Ec2BackendConfig {
 
 const DEFAULTS = {
   region: "ap-northeast-2",
-  // Prebaked AMI (available 2026-06-17, swe-bench-tools/bake-ami.sh): docker +
-  // uv + all 84 easy-django swebench EVAL images pre-pulled into /var/lib/docker.
-  // Boxes boot ready → no cloud-init install, no ~150GB image pull → grade
-  // ~15min → ~3-5min. Stock fallback (clean Ubuntu): ami-0afe1fd15675c3f15.
-  ami: "ami-04c2cdd2e17b15779",
+  // Resolve Canonical's current regional Ubuntu 22.04 image at launch time.
+  // The former baked AMI was region-local and was deleted, so keeping an AMI
+  // id here made every default launch fail before bootstrap.
+  ami: "ssm:/aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id",
   // 16 vCPU is plenty for the default grading concurrency (max_workers≈6) — the
   // prior 8xlarge (32 vCPU) paid for idle cores. ~$0.24/hr spot vs ~$0.5/hr.
   // Bump back to a larger type explicitly (--instance-type) only for high
@@ -89,7 +89,7 @@ const buildUserData = (ttlMinutes: number): string =>
     "#!/bin/bash",
     "set -eux",
     `shutdown -h +${ttlMinutes}`,
-    "apt-get update -y && apt-get install -y docker.io git python3-pip",
+    "apt-get update -y && apt-get install -y docker.io git python3-pip libatomic1",
     "systemctl enable --now docker",
     "usermod -aG docker ubuntu",
     "su - ubuntu -c 'curl -LsSf https://astral.sh/uv/install.sh | sh'",
@@ -244,6 +244,7 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
   /** Stage 1: run-instances SPOT with the validated params. */
   const launchInstance = async (sgId: string): Promise<string> => {
     const userData = buildUserData(ttlMinutes)
+    const imageId = await resolveLaunchAmi(aws, ami)
     // Capacity resilience: do NOT pin a subnet/AZ unless the caller set one
     // (pinning an AZ is the #1 cause of InsufficientInstanceCapacity), and fall
     // back across instance types on a capacity error.
@@ -254,7 +255,7 @@ export const createEc2Backend = (cfg: Ec2BackendConfig = {}): GradeBackend => {
       "ec2",
       "run-instances",
       "--image-id",
-      ami,
+      imageId,
       "--instance-type",
       it,
       "--key-name",

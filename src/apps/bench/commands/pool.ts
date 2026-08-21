@@ -12,7 +12,8 @@ import {
   describeAuthSource,
   resolveAuthLaunchFile,
 } from "../auth-pool"
-import { resolveBenchExecutionPreset } from "../preset"
+import { bridgeDatasetFamilyToEnv } from "../dataset-family"
+import { resolveRemoteBenchExecutionPreset } from "../preset"
 import { refreshRemoteAuthJson } from "../remote/fresh-auth"
 import { buildForwardedBenchEnv } from "../remote/full"
 import { type PoolChunk, runPool } from "../remote/pool"
@@ -200,6 +201,8 @@ const planPoolChunkAccounts = (src: AuthSource, chunks: readonly PoolChunk[]): s
 }
 
 export const cmdPool = async (): Promise<void> => {
+  // Pool preflight, provisioning, and every on-box chunk read this env selector.
+  bridgeDatasetFamilyToEnv(argValue("--dataset-family"), process.env)
   if (!hasFlag("--allow-remote-secrets")) {
     logger.info(
       "refused: pool runs patch-gen on remote boxes and needs an LLM credential there. " +
@@ -216,7 +219,8 @@ export const cmdPool = async (): Promise<void> => {
   const authSource = resolveCliAuthSource()
   const authFile = resolveAuthLaunchFile(authSource)
   if (!hasFlag("--dry-run")) await refreshPoolAuthSource(authSource)
-  const preset = resolveBenchExecutionPreset({
+  const preset = resolveRemoteBenchExecutionPreset({
+    family: process.env.QUANTA_SWEBENCH_DATASET_FAMILY ?? "verified",
     envVars: process.env,
     argvPreset: argValue("--preset"),
   })
@@ -290,6 +294,34 @@ export const cmdPool = async (): Promise<void> => {
   summarizePoolRun(out, chunks.length)
 }
 
+type PoolRunResult = Awaited<ReturnType<typeof runPool>>[number]
+
+const summarizePoolChunk = (
+  result: PoolRunResult,
+): {
+  readonly resolved: number
+  readonly lost: number
+  readonly partial: number
+  lines: string[]
+} => {
+  const resolved = result.result.resolved?.length ?? 0
+  const missing = result.missing?.length ?? 0
+  const lost = result.lost ? 1 : 0
+  const partial = !result.lost && missing > 0 ? 1 : 0
+  let tag = "ok"
+  if (result.lost) tag = "❓ LOST"
+  else if (missing > 0) tag = "⚠️ PARTIAL"
+  return {
+    resolved,
+    lost,
+    partial,
+    lines: [
+      `[pool] chunk ${result.chunk.runId}: ${tag} — resolved ${resolved} | unresolved ${result.result.unresolved?.length ?? 0} | missing ${missing} | attempts ${result.attempts}`,
+      ...(result.missing ?? []).map((id) => `[pool]   ❓ MISSING ${id}`),
+    ],
+  }
+}
+
 export const summarizePoolRunLines = (
   out: Awaited<ReturnType<typeof runPool>>,
   chunkCount: number,
@@ -298,16 +330,12 @@ export const summarizePoolRunLines = (
   let lost = 0
   let partial = 0
   const lines: string[] = []
-  for (const r of out) {
-    resolved += r.result.resolved?.length ?? 0
-    if (r.lost) lost += 1
-    const missing = r.missing?.length ?? 0
-    if (!r.lost && missing > 0) partial += 1
-    const tag = r.lost ? "❓ LOST" : missing > 0 ? "⚠️ PARTIAL" : "ok"
-    lines.push(
-      `[pool] chunk ${r.chunk.runId}: ${tag} — resolved ${r.result.resolved?.length ?? 0} | unresolved ${r.result.unresolved?.length ?? 0} | missing ${missing} | attempts ${r.attempts}`,
-    )
-    for (const id of r.missing ?? []) lines.push(`[pool]   ❓ MISSING ${id}`)
+  for (const result of out) {
+    const summary = summarizePoolChunk(result)
+    resolved += summary.resolved
+    lost += summary.lost
+    partial += summary.partial
+    lines.push(...summary.lines)
   }
   lines.push(
     `[pool] DONE — total resolved ${resolved} across ${chunkCount} chunks; ${lost} lost; ${partial} partial`,

