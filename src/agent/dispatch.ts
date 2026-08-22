@@ -21,6 +21,7 @@ import {
   consultDedupGate,
   consultDispatchGuard,
   consultLocalizePhase,
+  consultQuestionAvailability,
   consultTestScope,
 } from "./dispatch/preflight-consults"
 import { buildToolContext, maybeBuildInterruptRouter } from "./dispatch/tool-context"
@@ -327,10 +328,16 @@ type PreAdmissibilityConsult = (
 const PRE_ADMISSIBILITY_CONSULTS: readonly PreAdmissibilityConsult[] = [consultPlanModeSeam]
 
 /** The uniform pre-flight consults, in canonical order (dedup → localize-phase →
- *  test-scope → dispatch-guard). Each is default-OFF (returns null unless its
- *  feature is wired), consulted BEFORE the admissibility gate so a rejected call
- *  never burns permission/HITL/hook work. Adding a pre-flight = one array entry,
- *  not a new inline `if (short) return short` (OCP). */
+ *  test-scope → dispatch-guard → question-availability). Each is default-OFF
+ *  (returns null unless its feature is wired), consulted BEFORE the admissibility
+ *  gate so a rejected call never burns permission/HITL/hook work. Adding a
+ *  pre-flight = one array entry, not a new inline `if (short) return short` (OCP).
+ *
+ *  `consultQuestionAvailability` (RFC-05 E5) is the pre-DISPATCH half of the
+ *  one-reader-two-sites contract: it resolves the SAME reader/predicate the
+ *  model-spec projection (`buildUserInputBlock`) uses, so a STALE
+ *  `request_user_input` handle cannot bypass a later posture change — spec
+ *  visibility and dispatch admission never diverge. */
 const PRE_FLIGHT_CONSULTS: readonly ((
   call: ToolUseBlock,
   config: AgentConfig,
@@ -339,6 +346,7 @@ const PRE_FLIGHT_CONSULTS: readonly ((
   consultLocalizePhase,
   consultTestScope,
   consultDispatchGuard,
+  consultQuestionAvailability,
 ]
 
 /** §20.4 (ticket-12) — subagent FS ownership ENFORCEMENT. After the admissibility

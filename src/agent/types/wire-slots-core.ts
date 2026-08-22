@@ -29,7 +29,7 @@ import type { ShellExecObserver, UserInputRequester } from "@/tool"
 import type { BranchSearchConfig } from "../branch-search"
 import type { BriefStore } from "../brief"
 import type { DedupGate, DedupGateCaps } from "../dispatch-dedup"
-import type { DispatchGuard } from "../dispatch-guard"
+import type { DispatchGuard, QuestionAvailabilityReader } from "../dispatch-guard"
 import type { EffortLevel } from "../effort"
 import type { EffortClassifierPort } from "../effort-classifier"
 import type { FastApplyFallbackPort, FastApplyPort } from "../fast-apply-fallback"
@@ -261,6 +261,23 @@ export interface WireSlotsCoreConfig {
    * (`QUANTA_WEB_SUBAGENTS`), so panel-ON + attention-OFF leaks nothing.
    */
   questionBroker?: UserQuestionBroker
+  /**
+   * RFC-05 E5 — the AGENT-owned `request_user_input` availability reader. A
+   * narrow, duck-typed capability the composition binds from the live posture
+   * authority (`livePostureQuestionReader`): `askOutsidePlan()` re-reads the
+   * bound question knob on every call. It is the ONE reader that drives BOTH the
+   * model tool-SPEC projection (`buildUserInputBlock` omits the tool when denied)
+   * AND the pre-DISPATCH admission consult (`consultQuestionAvailability` rejects
+   * a stale handle when denied) — so visibility and execution never diverge.
+   *
+   * Duck-typed / agent-owned on purpose (RFC-05 hard rule): the `@/tool` slice
+   * MUST NOT import `@/permission`. The permission-slice predicate
+   * (`canRequestUserInput`) is reached ONLY through this agent-side reader.
+   *
+   * Default-OFF: ABSENT ⇒ question available by default (no posture denies) —
+   * byte-identical to the pre-E5 spec/dispatch path.
+   */
+  questionGuard?: QuestionAvailabilityReader
   /**
    * ADR-0296 PROMPT-mode consent port. When wired AND the effective bash
    * `timeout_behavior` is `prompt`, the bash tool calls this AT the deadline to

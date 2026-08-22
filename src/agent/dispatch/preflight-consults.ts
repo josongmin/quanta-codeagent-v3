@@ -1,14 +1,19 @@
 import type { ToolUseBlock } from "@/llm"
 import { isTestFilePath } from "@/shared"
 import type { DecisionEvent } from "@/stream"
-import { stackDenyReason } from "../deny-reason-wire"
+import { modeApprovalDenyReason, stackDenyReason } from "../deny-reason-wire"
 import { DedupGate } from "../dispatch-dedup"
-import type { GuardDecision } from "../dispatch-guard"
+import { type GuardDecision, questionAvailability } from "../dispatch-guard"
 import { deny } from "../dispatch-helpers"
 import type { DispatchResult } from "../dispatch-types"
 import { decideLocalizePhase, MUTATING_TOOL_NAMES } from "../localize-phase-guard"
+import { resolveCollaborationMode } from "../mode"
 import { mutatingTargetPaths } from "../mutating-tools"
 import type { AgentConfig } from "../types"
+
+/** The tool this consult governs. A drift-guard test pins it to the real
+ *  `requestUserInputTool().name` so a rename cannot silently unhook the guard. */
+const REQUEST_USER_INPUT_TOOL = "request_user_input"
 
 const guardContent = (decision: Exclude<GuardDecision, { kind: "allow" }>): string =>
   decision.kind === "ask"
@@ -205,4 +210,44 @@ export const consultDispatchGuard = (
   // vs recoverable posture) — NEVER `decision.reason`, which echoes the matched
   // path/command/host. `layer:"stack"`, pillar OMITTED.
   return deny(call.id, guardContent(decision), "guard-deny", guardStructuredReason(decision))
+}
+
+/** Model-facing steer surfaced when a `request_user_input` call is rejected by
+ *  the E5 question posture. Categorical (no input echoed) — the model learns the
+ *  tool is unavailable this turn and continues without asking. */
+const QUESTION_UNAVAILABLE_STEER =
+  "Blocked: asking the operator a question is disabled for this turn's posture " +
+  "(questions outside plan mode are turned off). Proceed using the information " +
+  "you already have, or enter plan mode where questions are always available."
+
+/**
+ * RFC-05 E5 — pre-DISPATCH question-availability consult. For a
+ * `request_user_input` call it resolves the SAME reader/predicate the model-spec
+ * projection (`buildUserInputBlock`) uses — so a STALE handle (a call the model
+ * kept from a cached tool spec built when the posture still admitted it) cannot
+ * bypass a later posture change: visibility and execution never diverge.
+ *
+ * Only `request_user_input` is governed; every other tool returns `null`
+ * immediately. Default-OFF byte-identical: with no `config.questionGuard` bound,
+ * `questionAvailability` returns AVAILABLE and this returns `null` (one property
+ * read, zero allocation). Sibling to `consultDispatchGuard` — a uniform
+ * pre-flight consult run BEFORE the admissibility gate.
+ *
+ * The deny carries the same categorical structured reason class as the plan-mode
+ * seam block (`modeApprovalDenyReason`) — this is an approval-posture deny at the
+ * dispatch seam — and NEVER echoes the prompt input on the safe reason.
+ */
+export const consultQuestionAvailability = (
+  call: ToolUseBlock,
+  config: AgentConfig,
+): DispatchResult | null => {
+  if (call.name !== REQUEST_USER_INPUT_TOOL) return null
+  const availability = questionAvailability(config.questionGuard, resolveCollaborationMode(config))
+  if (availability.available) return null
+  return deny(
+    call.id,
+    QUESTION_UNAVAILABLE_STEER,
+    "question-unavailable",
+    modeApprovalDenyReason(`request_user_input unavailable: ${availability.reason}`),
+  )
 }

@@ -21,12 +21,24 @@
  */
 
 import { requestUserInputTool, type Tool } from "@/tool"
+import { questionAvailability } from "../dispatch-guard"
+import { resolveCollaborationMode } from "../mode"
 import type { AgentConfig } from "../types"
 
 /** Build the user-input tool when EITHER the legacy `userInputPort` OR the
- *  attention `questionBroker` (RFC-01 A3) is wired. Returns `undefined` when
- *  neither producer is present. */
+ *  attention `questionBroker` (RFC-01 A3) is wired, AND the RFC-05 E5 question
+ *  posture ADMITS it for this turn's collaboration mode.
+ *
+ *  RFC-05 E5 — model-SPEC projection: `questionAvailability(config.questionGuard,
+ *  resolveCollaborationMode(config))` is the SAME reader/predicate the
+ *  pre-dispatch consult (`consultQuestionAvailability`) resolves through, so the
+ *  spec and the dispatch admission can never diverge. Default-OFF: no
+ *  `questionGuard` bound ⇒ available (byte-identical — the tool is present
+ *  whenever a producer is wired, exactly as before E5). */
 export const buildUserInputBlock = (config: AgentConfig): Tool | undefined => {
   if (config.userInputPort === undefined && config.questionBroker === undefined) return undefined
+  if (!questionAvailability(config.questionGuard, resolveCollaborationMode(config)).available) {
+    return undefined
+  }
   return requestUserInputTool() as Tool
 }

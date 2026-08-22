@@ -12,5 +12,11 @@ export type { NetworkGuardSpec, NetworkPosture } from "./network-guard"
 export { buildNetworkDispatchGuard } from "./network-guard"
 export { noOpDispatchGuard } from "./no-op-guard"
 export type { DispatchGuard } from "./port"
+export type { QuestionAvailabilityReader } from "./question-availability"
+export {
+  livePostureQuestionReader,
+  questionAvailability,
+  turnModeFromCollab,
+} from "./question-availability"
 export type { GuardDecision } from "./types"
 export { ALL_GUARD_DECISION_KINDS } from "./types"
