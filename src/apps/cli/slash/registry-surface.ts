@@ -64,6 +64,7 @@ import { cronCmd, inboxCmd, scheduleCmd } from "./cron-cmd"
 import { kbCmd } from "./kb-cmd"
 import { mcpResourcesCmd } from "./mcp-resources-cmd"
 import { modelCmd } from "./model-cmd"
+import { isObjectiveEditorEnabled, objectiveCmd } from "./objective"
 import { onboardCmd } from "./onboard-cmd"
 import {
   identityCmd,
@@ -648,6 +649,11 @@ export const buildSurfaceSlashCommands = (
   // table are byte-identical when the gate is unset (registration ≠ execution;
   // parity with the /ps + /init gates).
   ...(isAttentionNavEnabled() ? [attentionCmd] : []),
+  // RFC-03 C3 — `/objective` CAS-guarded objective editor. DEFAULT-OFF (opt-IN):
+  // only registered when QUANTA_PROPOSE_GOAL is on, so `/help` + the command
+  // table are byte-identical when the gate is unset (registration ≠ execution;
+  // parity with the /attention + /ps gates).
+  ...(isObjectiveEditorEnabled() ? [objectiveCmd] : []),
   forkCheckpointCmd,
   queueCmd,
   webCmd,

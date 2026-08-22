@@ -165,6 +165,19 @@ export const decodeSessionCommand = (raw: string): SessionCommand => {
   if (envelope.payload.type === "turn.run") {
     assertOptionalString(envelope.payload, "command", "causedByApprovalId")
   }
+  // RFC-03 C3 — the objective mutation payload carries a closed
+  // {@link ObjectiveMutation}. The codec is a LEAF (no `@/objective` value
+  // import): it asserts wire-shape sanity — `mutation` is a plain object with a
+  // string `kind` — and the HOST authority is the full validator (an unknown
+  // kind / malformed payload fails closed at `prepare`/`commit`, never a store
+  // effect). Fail here so a scalar/array `mutation` cannot reach the host.
+  if (envelope.payload.type === "session.objective.mutate") {
+    assertObjectField(envelope.payload, "command", "mutation")
+    assertString(envelope.payload.mutation as Record<string, unknown>, "objective_mutation", "kind")
+    // The OBJECTIVE-domain CAS target is optional; when present it must be a
+    // finite number (a string `"2"` would silently `!==` a numeric revision).
+    assertOptionalFiniteNumber(envelope.payload, "command", "expectedObjectiveRevision")
+  }
   return envelope.payload as unknown as SessionCommand
 }
 

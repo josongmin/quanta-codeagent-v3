@@ -85,6 +85,12 @@ const AT_TYPE_NARROWINGS: Readonly<Record<string, string>> = {
   LlmContinuationObservation: "unknown",
   // @/shared/turn-policy-types
   TurnPolicySnapshot: "unknown",
+  // @/objective (RFC-03 C3) — the closed `ObjectiveMutation` union backs
+  // `session.objective.mutate`. The web composer does not yet CONSTRUCT typed
+  // objective mutations (the CLI + kernel/host are the C3 write path; the web
+  // inline editor is the later D3 UX), so the UI treats the payload opaquely →
+  // top type (same posture as `Message`, which the UI also never builds).
+  ObjectiveMutation: "unknown",
 }
 
 /** Names imported from `@/*` in a canonical file — collected so the generator

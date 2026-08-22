@@ -242,6 +242,19 @@ export interface SessionHost {
   }): Promise<void> | void
   setIdentityMode?(mode: string): Promise<void> | void
   setToolProfile?(profile: string): Promise<void> | void
+  /** RFC-03 C3 — apply an out-of-band OBJECTIVE mutation (the CLI-edit / web
+   *  composer front door). The host binds the ACTOR to `user` (a surface-issued
+   *  command is an operator action, never trusted from the wire) and the
+   *  objective THREAD to the session's own thread, then routes it through the
+   *  objective authority's `prepare`/`commit` under CAS on `expectedRevision`. A
+   *  stale revision is a no-op (the authority rejects it without clobbering a
+   *  newer commit). Absent ⇒ the surface wired no objective authority (the
+   *  reducer still echoes the session revision). Duck-typed `unknown` mutation so
+   *  `@/kernel` needs no `@/objective` value import; the host casts it back. */
+  mutateObjective?(args: {
+    readonly mutation: unknown
+    readonly expectedRevision?: number
+  }): Promise<void> | void
   /** Switch the session permission mode mid-session. Honored live by the next
    *  turn's gate when the surface wired a getter/setter `permission.mode`. */
   setPermissionMode?(mode: string): Promise<void> | void

@@ -5,6 +5,7 @@ import type { MemorySlashState } from "../../memory-cmd"
 import type { PermissionInspectSlashState } from "../../permission-explain"
 import type { RetryWithSessionState } from "../../retry-with"
 import type { ConvCheckpointSlashState } from "../../rewind-conv-cmd"
+import { buildObjectiveSlashState, isObjectiveEditorEnabled } from "../../slash/objective"
 import type { SessionSetupResult } from "../session-setup"
 import type { SurfaceCoreState } from "./core-state"
 import { buildSurfaceDispatch, buildVoiceLiveSlot } from "./dispatch"
@@ -108,6 +109,14 @@ export const buildSurfaceDispatchWire = (
     sessionIo: mutable.sessionIo,
     ...(typeof setup.sessionId === "string" && setup.sessionId.length > 0
       ? { goal: { port: core.objectiveStore, threadId: setup.sessionId } }
+      : {}),
+    // RFC-03 C3 — the CAS-guarded `/objective` editor wire over the SAME store.
+    // Gated on QUANTA_PROPOSE_GOAL (registration parity) AND a session thread id;
+    // absent ⇒ `/objective` prints "not wired" (default-OFF byte-identical).
+    ...(isObjectiveEditorEnabled() &&
+    typeof setup.sessionId === "string" &&
+    setup.sessionId.length > 0
+      ? { objectiveEditor: buildObjectiveSlashState(core.objectiveStore, setup.sessionId) }
       : {}),
     presets: core.presetResolver,
     contextUsage: () => core.contextUsageHolder.view(),

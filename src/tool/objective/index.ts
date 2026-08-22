@@ -35,7 +35,7 @@ import type {
   WaitingOn,
 } from "@/objective"
 import { errMessage } from "@/shared"
-import type { Tool, ToolContext, ToolEvent, ToolResult } from "../types"
+import type { ObjectiveApprovalRequest, Tool, ToolContext, ToolEvent, ToolResult } from "../types"
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SCHEMAS
@@ -243,22 +243,75 @@ const commitError = (res: Extract<CommitResult, { ok: false }>): string => {
   }
 }
 
-/** Prepare + commit ONE model-actor mutation through the authority, returning the
- *  resulting objective or a typed error. Approval is C3's concern: under the
- *  gate-OFF default the authority commits without approval (byte-identical); the
- *  admitted flag is inert there and never bypasses a live gate. */
-const routeModelMutation = (
-  authority: ObjectiveAuthority,
-  threadId: string,
-  mutation: ObjectiveMutation,
-): ToolResult => {
-  const prepared = authority.prepare({ threadId, actor: "model", mutation })
-  const res = authority.commit(prepared, { admitted: !prepared.approvalRequired })
+/** Render a successful commit into the tool result, or a typed error. */
+const commitResult = (res: CommitResult): ToolResult => {
   if (!res.ok) return errResult(commitError(res))
   const o = res.snapshot.state?.objective
   return o !== undefined && o !== null
     ? okResult(o)
     : errResult("objective mutation applied but not readable")
+}
+
+const NO_CONFIRM_SURFACE =
+  "objective proposal requires approval but no confirmation surface is available (fail-closed)"
+
+/** Clip a proposed goal for the one-line approval dialog. */
+const clipGoal = (goal: string): string => (goal.length > 160 ? `${goal.slice(0, 157)}…` : goal)
+
+/** RFC-03 C3 — build the operator-facing proposal from the closed mutation. */
+const buildApprovalRequest = (mutation: ObjectiveMutation): ObjectiveApprovalRequest => {
+  if (mutation.kind === "set") {
+    return {
+      operation: "set",
+      goal: mutation.goal,
+      summary: `Set goal: ${clipGoal(mutation.goal)}`,
+    }
+  }
+  if (mutation.kind === "updateStatus") {
+    return { operation: "updateStatus", summary: `Set objective status: ${mutation.status}` }
+  }
+  return { operation: mutation.kind, summary: `Objective ${mutation.kind}` }
+}
+
+/**
+ * RFC-03 C3 — prepare + (gated) approve + commit ONE model-actor mutation.
+ *
+ *   - GATE OFF (`approvalRequired:false`): commit immediately with the inert
+ *     admitted flag — byte-identical legacy (`ctx.requestObjectiveApproval` is
+ *     NEVER consulted).
+ *   - GATE ON: the authority (SSOT) is first PROBED with an un-admitted commit —
+ *     a pure no-op, since policy is checked before CAS and before any store
+ *     effect — to surface a structural rejection an approval could never cure
+ *     (`forbidden-completion` / `approval-unavailable`) WITHOUT prompting. For a
+ *     genuine proposal the EXISTING confirm port is awaited BETWEEN `prepare` and
+ *     `commit` (RFC-03 §8: no store lock is held across the wait — `prepare`
+ *     returned an immutable candidate). On DENY nothing commits (no-op); on
+ *     APPROVE the commit re-checks CAS against the prepared revision, so a
+ *     concurrent edit during the wait yields `stale` instead of clobbering.
+ */
+const routeModelMutation = async (
+  authority: ObjectiveAuthority,
+  threadId: string,
+  mutation: ObjectiveMutation,
+  ctx: ToolContext,
+): Promise<ToolResult> => {
+  const prepared = authority.prepare({ threadId, actor: "model", mutation })
+  if (!prepared.approvalRequired) {
+    // Gate OFF (or a trusted non-model actor upstream): the admitted flag is
+    // inert; the authority commits exactly as before.
+    return commitResult(authority.commit(prepared, { admitted: true }))
+  }
+  // Probe for a rejection that approval cannot cure (no store effect, no prompt).
+  const probe = authority.commit(prepared, { admitted: false })
+  if (!probe.ok && probe.reason !== "approval-required") return commitResult(probe)
+  const requester = ctx.requestObjectiveApproval
+  if (requester === undefined) return errResult(NO_CONFIRM_SURFACE)
+  const decision = await requester(buildApprovalRequest(mutation))
+  if (!decision.admitted) {
+    const suffix = decision.note !== undefined && decision.note !== "" ? ` — ${decision.note}` : ""
+    return errResult(`objective proposal declined by operator${suffix}`)
+  }
+  return commitResult(authority.commit(prepared, { admitted: true }))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -298,7 +351,7 @@ const buildObjectiveSet = (authority: ObjectiveAuthority): Tool<ObjectiveSetInpu
       if (parsed.data.budget?.max_turns !== undefined)
         budget.maxTurns = parsed.data.budget.max_turns
       if (Object.keys(budget).length > 0) mutation.budget = budget
-      yield { type: "result", result: routeModelMutation(authority, threadId, mutation) }
+      yield { type: "result", result: await routeModelMutation(authority, threadId, mutation, ctx) }
     } catch (e) {
       yield { type: "result", result: errResult(`objective_set error: ${errMessage(e)}`) }
     }
@@ -354,7 +407,7 @@ const buildObjectiveUpdate = (authority: ObjectiveAuthority): Tool<ObjectiveUpda
     try {
       yield {
         type: "result",
-        result: routeModelMutation(authority, threadId, opToMutation(parsed.data.op)),
+        result: await routeModelMutation(authority, threadId, opToMutation(parsed.data.op), ctx),
       }
     } catch (e) {
       yield { type: "result", result: errResult(`objective_update error: ${errMessage(e)}`) }

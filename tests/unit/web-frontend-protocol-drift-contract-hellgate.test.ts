@@ -591,6 +591,11 @@ const DELIBERATE_TOOLCHAIN_NARROWINGS: Readonly<Record<string, ApprovedFieldNarr
     canonical: "Message[]",
     why: "copy cannot import `Message` (@/llm) and the UI never constructs or sends this payload — top-type is safe for a non-writer",
   },
+  "SessionObjectiveMutateCommand.mutation": {
+    copy: "unknown",
+    canonical: "ObjectiveMutation",
+    why: "copy cannot import `ObjectiveMutation` (@/objective); the C3 write path is the CLI + kernel/host, and the web inline objective editor is the later D3 UX — until then the UI never constructs this payload, so top-type is safe (same posture as `Message`)",
+  },
   "SessionStateView.lastLlmRequest": {
     copy: "unknown & { policy?: unknown; }",
     canonical:

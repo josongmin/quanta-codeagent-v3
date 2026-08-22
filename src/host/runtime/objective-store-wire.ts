@@ -33,7 +33,22 @@ export const maybeWireObjective = (cfg: AgentConfig, env: Env): void => {
   // enforceBudget rides `QUANTA_OBJECTIVE_BUDGET_ENFORCE`: OFF ⇒ the store never
   // derives usage_limited/budget_limited (byte-identical informational store).
   const enforceBudget = gateOn(env, "QUANTA_OBJECTIVE_BUDGET_ENFORCE")
+  // RFC-03 C3 — `QUANTA_PROPOSE_GOAL` posture. ON ⇒ the authority gates every
+  // model-originated set/replace/completion behind an admitted approval receipt
+  // (the objective tool adapter awaits the existing `onConfirm` port between
+  // `prepare` and `commit`; no store lock is held across that wait). OFF (the
+  // default) ⇒ `gateOn` absent ⇒ byte-identical legacy (model mutations commit
+  // without approval). `confirmationAvailable` is fail-closed: under the gate a
+  // surface with NO confirm authority (`cfg.onConfirm` absent) refuses activation
+  // (`approval-unavailable`), NEVER an approval bypass. `onConfirm` is a surface
+  // capability the composition sets before the objective tools execute; when it
+  // is not yet present the authority stays fail-closed and the tool adapter's own
+  // `ctx.requestObjectiveApproval` presence check backstops it at execute time.
+  const gateProposal = gateOn(env, "QUANTA_PROPOSE_GOAL")
   // RFC-03 C2 — construct through the ONE objective-authority builder (assembly
   // owns lifetime/restore), never a surface-local `createObjectiveStore()`.
-  slot.objective = buildObjectiveAuthority(enforceBudget ? { enforceBudget: true } : {})
+  slot.objective = buildObjectiveAuthority({
+    ...(enforceBudget ? { enforceBudget: true } : {}),
+    ...(gateProposal ? { gateOn: true, confirmationAvailable: cfg.onConfirm !== undefined } : {}),
+  })
 }

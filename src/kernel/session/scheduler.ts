@@ -904,6 +904,17 @@ export const dispatchSessionCommand = async (
       await ctx.host.setPermissionMode?.(command.mode)
       nextState = reconcileSessionPostureState(nextState, ctx.host.describe())
       immediateEvents = immediateEvents.map((event) => rewriteStateUpdatedEvent(event, nextState))
+    } else if (command.type === "session.objective.mutate") {
+      // RFC-03 C3 — apply the objective mutation to the host authority (actor
+      // `user`, CAS on `expectedRevision`). Fire-and-await like the posture
+      // setters: the objective domain is host-owned, so there is no kernel-state
+      // reconcile — the reducer already emitted the session revision echo.
+      await ctx.host.mutateObjective?.({
+        mutation: command.mutation,
+        ...(command.expectedObjectiveRevision !== undefined
+          ? { expectedRevision: command.expectedObjectiveRevision }
+          : {}),
+      })
     }
     // Audit R2 H1: register the turn-owned cancel controller BEFORE the awaited
     // event-log persistence so a turn.cancel dispatched during that window —

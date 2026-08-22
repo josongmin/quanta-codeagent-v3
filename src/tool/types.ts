@@ -188,6 +188,10 @@ export interface ToolContext {
    *  `AgentConfig.userInputPort`. Absent ⇒ the tool yields a graceful
    *  `ok:false` (mode `error`); the loop is byte-identical. */
   requestUserInput?: UserInputRequester
+  /** RFC-03 C3 — OPTIONAL objective-proposal approval requester (HITL adapter),
+   *  awaited BETWEEN the authority's `prepare` and `commit` (no lock held across
+   *  the wait); see {@link ObjectiveApprovalRequester}, fail-closed under gate. */
+  requestObjectiveApproval?: ObjectiveApprovalRequester
   /** ADR-0091 — OPTIONAL git-write-protection detector. The `write`/`edit`
    *  tools call this with their resolved target path BEFORE touching the
    *  filesystem; a non-null return is a static escape-vector deny (`.git/hooks`,
@@ -582,6 +586,7 @@ import type {
   FileHistorySink,
   GitWriteGuard,
   GitWriteProtectReason,
+  ObjectiveApprovalRequester,
   PlanEntryRequester,
   PlanExitRequester,
   PlanMutator,
@@ -617,6 +622,9 @@ export type {
   FileHistorySink,
   GitWriteGuard,
   GitWriteProtectReason,
+  ObjectiveApprovalDecision,
+  ObjectiveApprovalRequest,
+  ObjectiveApprovalRequester,
   PlanDeltaKind,
   PlanEntryRequester,
   PlanExitRequester,

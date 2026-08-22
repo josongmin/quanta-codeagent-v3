@@ -1,8 +1,9 @@
-import { gitWriteProtectReason } from "@/permission"
+import { gitWriteProtectReason, type ToolAction } from "@/permission"
 import { runtimeConfig } from "@/shared"
 import type { WorkingStateHandle } from "@/tool"
 import { type InterruptRouter, makeInterruptRouter, type ToolContext } from "@/tool"
 import { bindWriteBudgetTurn } from "@/tool/_shared/write-budget"
+import { normalizeConfirm } from "../confirm-decision"
 import type { resolveCollaborationMode } from "../mode"
 import { planStoreToMutator } from "../plan/mutator-adapter"
 import { runPlanExitFlow } from "../plan-exit-flow"
@@ -93,6 +94,36 @@ const resolveRequestUserInput = (config: AgentConfig): ToolContext["requestUserI
       )
     : config.userInputPort
 
+/** RFC-03 C3 — the objective-proposal HITL adapter. Present ONLY when BOTH the
+ *  objective authority (`config.objective`) and the host confirm authority
+ *  (`config.onConfirm`) are wired — so a session with no objective (default-OFF
+ *  `QUANTA_OBJECTIVE_TOOLS`) keeps a byte-identical ctx and the tool adapter's
+ *  fail-closed backstop fires if the confirm authority is missing under the gate.
+ *  It adapts the EXISTING `onConfirm(ToolAction)` port (NOT a static-registry
+ *  escalation, NOT `ask_user:false`) into the objective-approval shape: `allow` ⇒
+ *  admitted; `deny` / `deny_and_steer` ⇒ declined (the steer becomes the note).
+ *  The objective tool adapter invokes this BETWEEN `prepare` and `commit`, so no
+ *  store lock is held across the await. */
+const buildObjectiveApproval = (config: AgentConfig): ToolContext["requestObjectiveApproval"] => {
+  const onConfirm = config.onConfirm
+  if (onConfirm === undefined || config.objective === undefined) return undefined
+  return async (request) => {
+    const action: ToolAction = {
+      tool: "propose_goal",
+      isReadOnly: false,
+      input: {
+        operation: request.operation,
+        summary: request.summary,
+        ...(request.goal !== undefined ? { goal: request.goal } : {}),
+      },
+    }
+    const decision = normalizeConfirm(await onConfirm(action))
+    if (decision.decision === "allow") return { admitted: true }
+    if (decision.decision === "deny_and_steer") return { admitted: false, note: decision.steer }
+    return { admitted: false }
+  }
+}
+
 const buildSessionSeams = (args: {
   config: AgentConfig
   workingState: WorkingStateHandle | undefined
@@ -103,6 +134,7 @@ const buildSessionSeams = (args: {
   const { config, workingState, requestPlanExit, enterPlanMode, reviewerAgent } = args
   const shellSnapshot = config.shellSnapshotSession?.currentSeam()
   const requestUserInput = resolveRequestUserInput(config)
+  const requestObjectiveApproval = buildObjectiveApproval(config)
   return {
     ...(workingState !== undefined ? { workingState } : {}),
     ...(requestPlanExit !== undefined ? { requestPlanExit } : {}),
@@ -113,6 +145,7 @@ const buildSessionSeams = (args: {
       ? { planMutator: planStoreToMutator(config.planStore) }
       : {}),
     ...(requestUserInput !== undefined ? { requestUserInput } : {}),
+    ...(requestObjectiveApproval !== undefined ? { requestObjectiveApproval } : {}),
     ...(config.backgroundConsentPort !== undefined
       ? { requestBackgroundConsent: config.backgroundConsentPort }
       : {}),

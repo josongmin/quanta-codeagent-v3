@@ -1,4 +1,5 @@
 import type { ImageBlock, Message } from "@/llm/types"
+import type { ObjectiveMutation } from "@/objective"
 
 export interface SessionCommandEnvelope<TType extends string> {
   readonly sessionId: string
@@ -60,6 +61,28 @@ export interface SessionTranscriptReplaceCommand
   readonly messages: readonly Message[]
 }
 
+/**
+ * RFC-03 C3 — out-of-band OBJECTIVE mutation (the CLI-edit / web-composer front
+ * door). Carries ONE closed {@link ObjectiveMutation}; the ACTOR is bound by the
+ * host to `user` (a surface-issued command is an operator action — NEVER trusted
+ * from the wire) and the objective THREAD is the session's own thread (bound by
+ * the host, never from model/wire input, RFC-03 §8). The envelope's
+ * `expectedObjectiveRevision` is the OBJECTIVE-domain CAS target — DISTINCT from
+ * the envelope's `expectedRevision`, which the kernel reserves for SESSION-level
+ * optimistic concurrency. A stale multi-surface objective edit is rejected by the
+ * host authority instead of clobbering a newer commit; a "revision request"
+ * (revise-during-approval) is simply a fresh command carrying the current
+ * objective revision — a NEW prepare cycle, not a mutation of an approved
+ * candidate. Absent ⇒ the host binds the current objective revision (an atomic
+ * caller). The `@/objective` value slice is never imported here; only the type
+ * flows through the wire.
+ */
+export interface SessionObjectiveMutateCommand
+  extends SessionCommandEnvelope<"session.objective.mutate"> {
+  readonly mutation: ObjectiveMutation
+  readonly expectedObjectiveRevision?: number
+}
+
 export interface ApprovalRespondCommand extends SessionCommandEnvelope<"approval.respond"> {
   readonly approvalId: string
   readonly decision: "approve" | "deny"
@@ -102,12 +125,14 @@ export type SessionCommand =
   | SessionTranscriptReplaceCommand
   | SessionToolProfileSetCommand
   | SessionPermissionSetCommand
+  | SessionObjectiveMutateCommand
   | ApprovalRespondCommand
 
 export const SESSION_COMMAND_TYPES = [
   "approval.respond",
   "input.append",
   "session.identity.set",
+  "session.objective.mutate",
   "session.permission.set",
   "session.transcript.replace",
   "session.tool_profile.set",

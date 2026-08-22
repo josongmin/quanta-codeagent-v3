@@ -10,10 +10,12 @@
  */
 
 import type { ImageBlock, Message } from "@/llm/types"
+import type { ObjectiveMutation } from "@/objective"
 import type {
   ApprovalRespondCommand,
   InputAppendCommand,
   SessionIdentitySetCommand,
+  SessionObjectiveMutateCommand,
   SessionPermissionSetCommand,
   SessionToolProfileSetCommand,
   SessionTranscriptReplaceCommand,
@@ -123,6 +125,28 @@ export const buildToolProfileSet = (
   sessionId: deps.sessionId,
   type: "session.tool_profile.set",
   profile,
+  ...commandMeta(deps, meta),
+})
+
+/**
+ * RFC-03 C3 — build a `session.objective.mutate` command carrying ONE closed
+ * {@link ObjectiveMutation}. `meta.expectedObjectiveRevision` is the OBJECTIVE-
+ * domain CAS target (distinct from the envelope's session-level
+ * `expectedRevision`); a stale multi-surface edit is rejected by the host
+ * authority. The actor + objective thread are bound by the HOST, never carried
+ * on the wire.
+ */
+export const buildObjectiveMutate = (
+  deps: CommandBuildDeps,
+  mutation: ObjectiveMutation,
+  meta: Partial<Omit<SessionObjectiveMutateCommand, "sessionId" | "type" | "mutation">> | undefined,
+): SessionObjectiveMutateCommand => ({
+  sessionId: deps.sessionId,
+  type: "session.objective.mutate",
+  mutation,
+  ...(meta?.expectedObjectiveRevision !== undefined
+    ? { expectedObjectiveRevision: meta.expectedObjectiveRevision }
+    : {}),
   ...commandMeta(deps, meta),
 })
 

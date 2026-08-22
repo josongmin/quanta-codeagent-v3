@@ -529,6 +529,33 @@ export type UserInputRequester = (req: {
   multiline?: boolean
 }) => Promise<UserInputOutcome>
 
+/** RFC-03 C3 — the proposal surfaced to the operator when a MODEL-originated
+ *  objective mutation is gated (`QUANTA_PROPOSE_GOAL` ON). `operation` is the
+ *  closed objective operation kind (`set` / `updateStatus` / `markCriterion` …)
+ *  stringified so `@/tool` needs no `@/objective` value import; `goal` is the
+ *  proposed goal text for a set/replace (absent for other operations); `summary`
+ *  is a dialog-readable one-line description the surface renders verbatim. */
+export interface ObjectiveApprovalRequest {
+  readonly operation: string
+  readonly goal?: string
+  readonly summary: string
+}
+
+/** RFC-03 C3 — the CLOSED approval outcome. `admitted:true` is the ONLY thing
+ *  that lets a gated model mutation commit; `admitted:false` is a plain decline
+ *  (optionally carrying the operator's corrective `note`, e.g. a deny-and-steer
+ *  message). The tool NEVER fabricates an `admitted:true`. */
+export type ObjectiveApprovalDecision =
+  | { readonly admitted: true }
+  | { readonly admitted: false; readonly note?: string }
+
+/** RFC-03 C3 — the HITL adapter port. The dispatch seam builds it from the
+ *  existing host `onConfirm` authority; the objective tool adapter invokes it
+ *  between `prepare` and `commit` (no store lock held across the wait). */
+export type ObjectiveApprovalRequester = (
+  request: ObjectiveApprovalRequest,
+) => Promise<ObjectiveApprovalDecision>
+
 /** ADR-0111 — duck-typed mirror of `SubagentRunner` from `@/subagent/types`.
  *  Kept here so `@/tool` stays slice-isolated from `@/subagent` (RFC §3.1;
  *  biome enforces). The producer-side `SubagentRunner` carries a larger

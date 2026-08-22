@@ -159,6 +159,32 @@ export const reduceSessionCommand = (
         ],
       }
     }
+    case "session.objective.mutate": {
+      // RFC-03 C3 — the objective DOMAIN state lives in the host authority, not
+      // in `KernelSessionState`; the kernel owns only the session revision echo
+      // (mirrors `session.permission.set`, whose live cell is also host-owned).
+      // The reducer bumps the session revision + emits a state echo so
+      // subscribers observe the command was processed; the SCHEDULER applies the
+      // mutation to the host authority (actor `user`, CAS on the command's
+      // `expectedRevision`). A stale objective CAS is the authority's concern —
+      // it no-ops without corrupting kernel state.
+      const nextState = withRevision({ ...state })
+      return {
+        state: nextState,
+        hostAction: { kind: "none" },
+        events: [
+          {
+            eventId: crypto.randomUUID(),
+            seq: state.seq + 1,
+            revision: nextState.revision,
+            emittedAt,
+            causedByCommandId: command.commandId,
+            type: "session.state.updated",
+            state: toSessionStateView(nextState),
+          },
+        ],
+      }
+    }
     case "session.transcript.replace": {
       if (state.status === "running" || state.pendingApproval !== null) {
         throw new SessionProtocolValidationError("transcript_replace_unavailable")

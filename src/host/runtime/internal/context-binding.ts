@@ -6,6 +6,12 @@ import type {
   SessionHostSideConversationArgs,
   SessionHostSideConversationResult,
 } from "@/kernel/session"
+import {
+  asObjectiveAuthority,
+  isObjectiveOperationKind,
+  type ObjectiveMutation,
+  type ObjectivePort,
+} from "@/objective"
 import { isPermissionMode } from "@/permission"
 import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "@/sdk/runtime/base"
 import { createSingleSessionRuntimeHost } from "../builder"
@@ -183,6 +189,46 @@ const runSessionHostTurn = async (deps: {
   return toSessionHostTurnResult(result)
 }
 
+/** RFC-03 C3 — validate the wire-decoded objective mutation defensively. The
+ *  protocol codec already asserted `mutation.kind` is a string; here the host
+ *  confirms it is a KNOWN closed operation kind before handing it to the
+ *  authority. Full field validation is the authority's `prepare`/`commit`
+ *  (unknown/malformed ⇒ no store effect); this just fails closed on an unknown
+ *  discriminant so a hostile wire payload never reaches the domain. */
+const asWireObjectiveMutation = (mutation: unknown): ObjectiveMutation | null => {
+  if (mutation === null || typeof mutation !== "object") return null
+  const kind = (mutation as { kind?: unknown }).kind
+  return isObjectiveOperationKind(kind) ? (mutation as ObjectiveMutation) : null
+}
+
+/**
+ * RFC-03 C3 — apply an out-of-band objective mutation to the session's authority
+ * (the `SessionHost.mutateObjective` body, module-level to keep
+ * {@link createRuntimeSessionHost} under the god-function cap). Binds the ACTOR
+ * to `user` (a surface-issued command is an operator action, never trusted from
+ * the wire) and the THREAD to THIS session (`base.sessionId` — the same id the
+ * `objective_*` tools + `/goal` key on), then routes through the authority's
+ * prepare/commit under CAS on `expectedRevision`. A stale revision, unknown
+ * thread, or unwired authority is a no-op (never a clobber of a newer commit).
+ */
+const applyHostObjectiveMutation = (
+  base: { objective?: unknown; sessionId?: string },
+  args: { mutation: unknown; expectedRevision?: number },
+): void => {
+  const port = base.objective
+  const threadId = base.sessionId
+  const parsed = asWireObjectiveMutation(args.mutation)
+  if (port === undefined || threadId === undefined || parsed === null) return
+  const authority = asObjectiveAuthority(port as ObjectivePort)
+  const prepared = authority.prepare({
+    threadId,
+    actor: "user",
+    mutation: parsed,
+    ...(args.expectedRevision !== undefined ? { expectedRevision: args.expectedRevision } : {}),
+  })
+  authority.commit(prepared, { admitted: true })
+}
+
 const createRuntimeSessionHost = (args: {
   readonly state: RuntimeContextBindingState
   readonly options: CreateRuntimeContextHostArgs
@@ -300,6 +346,9 @@ const createRuntimeSessionHost = (args: {
       if (!isToolProfileName(profile)) return
       args.options.boot?.toolProfileState?.set(profile)
     },
+    // RFC-03 C3 — out-of-band objective front door (body extracted to keep this
+    // factory under the god-function cap).
+    mutateObjective: (mutateArgs) => applyHostObjectiveMutation(base, mutateArgs),
     setPermissionMode: async (mode) => {
       // Fail-closed: only a KNOWN PermissionMode reaches the gate. An unknown
       // string would make `modePolicy[mode]` undefined downstream, so we ignore

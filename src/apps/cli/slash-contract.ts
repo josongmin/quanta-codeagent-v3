@@ -334,6 +334,15 @@ export interface SlashContext {
    *  (parity with `/agents`). `/attention` itself is only REGISTERED behind the
    *  same gate (help catalog byte-identical when OFF). */
   readonly attention?: import("./slash/attention-cmd").AttentionSlashState | undefined
+  /** RFC-03 C3 `/objective` — the live CAS-guarded objective editor wire (show /
+   *  edit / pause / resume / clear). A thin projection over the objective
+   *  AUTHORITY (built by {@link import("./slash/objective").buildObjectiveSlashState}
+   *  over the SAME store `/goal` + the LLM `objective_*` tools share). Present iff
+   *  `QUANTA_PROPOSE_GOAL` is on AND the surface wired the objective store; absent
+   *  ⇒ `/objective` prints "not wired" + exit 0 (parity with `/attention`).
+   *  `/objective` itself is only REGISTERED behind the same gate (help catalog
+   *  byte-identical when OFF). */
+  readonly objectiveEditor?: import("./slash/objective").ObjectiveSlashState | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host

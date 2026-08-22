@@ -101,6 +101,11 @@ type SurfaceDispatchArgs = {
    *  the surface minted the store; absent ⇒ slot omitted ⇒ `/goal` prints "not
    *  wired" (default-OFF byte-identical). */
   readonly goal?: SlashContext["goal"]
+  /** RFC-03 C3 `/objective` — the CAS-guarded objective editor wire (built over
+   *  the SAME store as `goal`). Present iff QUANTA_PROPOSE_GOAL is on AND the
+   *  surface minted the store; absent ⇒ slot omitted ⇒ `/objective` prints "not
+   *  wired" (default-OFF byte-identical). */
+  readonly objectiveEditor?: SlashContext["objectiveEditor"]
   /** §9.6 `/presets` — the shared `StickyPresetResolver` (the SAME instance the
    *  loop's role→model resolution consults). Present iff the surface minted it;
    *  absent ⇒ slot omitted ⇒ `/presets` prints "not wired" (default-OFF
@@ -146,6 +151,7 @@ const buildLiveSlashContext = (args: SurfaceDispatchArgs): SlashContext => {
     ...optionalSlashSlot("automation", automation),
     ...optionalSlashSlot("permissionInspect", args.permissionInspect),
     ...optionalSlashSlot("goal", args.goal),
+    ...optionalSlashSlot("objectiveEditor", args.objectiveEditor),
     ...optionalSlashSlot("presets", args.presets),
     ...optionalSlashSlot("skillReview", args.skillReview),
   }
