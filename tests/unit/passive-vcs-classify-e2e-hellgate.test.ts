@@ -164,6 +164,11 @@ describe("C/D. knob ON → classified events reach the wired sink", () => {
     expect(sink.events).toHaveLength(1)
     expect(sink.events[0]?.commit?.kind).toBe("commit")
     expect(sink.events[0]?.commit?.sha).toMatch(/^[0-9a-f]{7,40}$/)
+    // RFC-07 G1 front-door receipt: the NEW `commit.branch` field reaches the
+    // wired sink for a REAL commit (the repo is on branch `main`). This is the
+    // non-vacuous proof the field flows through the already-wired stream sink,
+    // not merely a pure-classifier return value.
+    expect(sink.events[0]?.commit?.branch).toBe("main")
   })
 
   test("HELL-E2E-D2: real --amend → commit.kind 'amend' + branch 'amended' reaches sink", async () => {

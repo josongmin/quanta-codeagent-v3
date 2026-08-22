@@ -43,7 +43,8 @@ describe("A. merged — Fast-forward / Merge made by", () => {
     ].join("\n")
     const ev = ok0("git merge --no-ff feature", out)
     expect(ev?.branch).toEqual({ action: "merged" })
-    expect(ev?.commit).toEqual({ kind: "merge", sha: "9f8e7d6" })
+    // RFC-07 G1: the `[main 9f8e7d6]` bracket authoritatively carries the branch.
+    expect(ev?.commit).toEqual({ kind: "merge", sha: "9f8e7d6", branch: "main" })
   })
 
   test("HELL-A3: 'Merge made by' WITHOUT a bracket line still gets commit.kind merge (no sha)", () => {
@@ -83,7 +84,8 @@ describe("C. amended — --amend command flag", () => {
   test("HELL-C1: commit --amend → commit.kind amend + branch amended", () => {
     const out = "[main 1234abc] reworded message\n Date: ...\n 1 file changed"
     const ev = ok0("git commit --amend -m 'reworded message'", out)
-    expect(ev?.commit).toEqual({ kind: "amend", sha: "1234abc" })
+    // RFC-07 G1: the `[main 1234abc]` bracket authoritatively carries the branch.
+    expect(ev?.commit).toEqual({ kind: "amend", sha: "1234abc", branch: "main" })
     expect(ev?.branch).toEqual({ action: "amended" })
   })
 
@@ -109,7 +111,8 @@ describe("D. cherry-pick", () => {
   test("HELL-D1: cherry-pick that landed → commit.kind cherry-pick + sha", () => {
     const out = "[main 7a8b9c0] Fix: the thing\n Date: ...\n 1 file changed, 2 insertions(+)"
     const ev = ok0("git cherry-pick 7a8b9c0", out)
-    expect(ev?.commit).toEqual({ kind: "cherry-pick", sha: "7a8b9c0" })
+    // RFC-07 G1: the `[main 7a8b9c0]` bracket authoritatively carries the branch.
+    expect(ev?.commit).toEqual({ kind: "cherry-pick", sha: "7a8b9c0", branch: "main" })
   })
 
   test("HELL-D2: cherry-pick --abort (no landed commit) → no commit facet", () => {
@@ -200,12 +203,18 @@ describe("F. pr — gh pull request reference", () => {
   test("HELL-F1: gh pr create URL → pr.number + url", () => {
     const out = "https://github.com/owner/repo/pull/4242"
     const ev = ok0("gh pr create --fill", out)
-    expect(ev?.pr).toEqual({ number: 4242, url: "https://github.com/owner/repo/pull/4242" })
+    // RFC-07 G1: `gh pr create` argv authoritatively yields action "created".
+    expect(ev?.pr).toEqual({
+      number: 4242,
+      url: "https://github.com/owner/repo/pull/4242",
+      action: "created",
+    })
   })
 
   test("HELL-F2: 'Pull request #N' phrase → pr.number (no url)", () => {
     const ev = ok0("gh pr merge 17 --squash", "Pull request #17 successfully merged.")
-    expect(ev?.pr).toEqual({ number: 17 })
+    // RFC-07 G1: `gh pr merge` (no auto flags) authoritatively yields "merged".
+    expect(ev?.pr).toEqual({ number: 17, action: "merged" })
   })
 
   test("HELL-F3: gh pr view URL embedded in a longer line", () => {
@@ -222,7 +231,8 @@ describe("F. pr — gh pull request reference", () => {
 describe("G. sha extraction edge cases", () => {
   test("HELL-G1: root-commit bracket → sha extracted (last hex token)", () => {
     const ev = ok0("git commit -m init", "[main (root-commit) abcd123] init")
-    expect(ev?.commit).toEqual({ kind: "commit", sha: "abcd123" })
+    // RFC-07 G1: the `(root-commit)` parenthetical is stripped → branch "main".
+    expect(ev?.commit).toEqual({ kind: "commit", sha: "abcd123", branch: "main" })
   })
 
   test("HELL-G2: detached HEAD bracket → sha extracted", () => {
@@ -319,14 +329,16 @@ describe("I. multi-facet — several signals in one output", () => {
     ].join("\n")
     const ev = ok0("git merge --no-ff topic && git push origin main", out)
     expect(ev?.branch).toEqual({ action: "merged" })
-    expect(ev?.commit).toEqual({ kind: "merge", sha: "feed123" })
+    // RFC-07 G1: the `[main feed123]` bracket authoritatively carries the branch.
+    expect(ev?.commit).toEqual({ kind: "merge", sha: "feed123", branch: "main" })
     expect(ev?.push).toEqual({ localRef: "main", remoteRef: "main" })
   })
 
   test("HELL-I2: `gh pr merge` printing both a PR ref and a merge phrase → pr + merged", () => {
     const out = ["Pull request #88 successfully merged.", "Fast-forward"].join("\n")
     const ev = ok0("gh pr merge 88 --merge", out)
-    expect(ev?.pr).toEqual({ number: 88 })
+    // RFC-07 G1: `gh pr merge` (no auto flags) authoritatively yields "merged".
+    expect(ev?.pr).toEqual({ number: 88, action: "merged" })
     expect(ev?.branch).toEqual({ action: "merged" })
   })
 

@@ -18,6 +18,7 @@
 
 export { maybeEmitPassiveVcs, type PassiveVcsHookCtx } from "./bash-hook"
 export { classifyPassiveVcs } from "./classifier"
+export { type GhPrCommand, parseGhPrCommand } from "./pr-action"
 export { noopVcsEventSink, type PassiveVcsEventSink } from "./sink"
 export type {
   PassiveVcsInput,
@@ -27,5 +28,6 @@ export type {
   VcsCommitKind,
   VcsEvent,
   VcsPr,
+  VcsPrAction,
   VcsPush,
 } from "./types"

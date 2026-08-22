@@ -20,6 +20,7 @@
  *    "looks git-ish" heuristics.
  */
 
+import { parseGhPrCommand, type VcsPrAction } from "./pr-action"
 import type { PassiveVcsInput, VcsBranch, VcsCommit, VcsEvent, VcsPr, VcsPush } from "./types"
 
 /**
@@ -113,6 +114,12 @@ const CHERRY_PICK_CMD = /(?:^|\s)cherry-pick(?:\s|$)/
  *  the bracket pair before `]`, which is the abbreviated hash. */
 const COMMIT_BRACKET = /^\[[^\]]*?\b([0-9a-f]{7,40})\][^\n]*/m
 
+/** Same anchor as {@link COMMIT_BRACKET} but ALSO captures the bracket PREFIX
+ *  (everything before the sha) so the leading branch token can be read. Group 1
+ *  = prefix (`main `, `feat/x `, `main (root-commit) `, `detached HEAD `),
+ *  group 2 = sha. */
+const COMMIT_BRACKET_PREFIX = /^\[([^\]]*?)\b([0-9a-f]{7,40})\][^\n]*/m
+
 /** `git reset --hard` / post-rebase prints `HEAD is now at <sha> <subject>`.
  *  Used as a secondary sha source (and as the amend/rebase sha when no
  *  `[branch sha]` line is present). */
@@ -144,6 +151,36 @@ const firstSha = (stdout: string): string | undefined => {
   return undefined
 }
 
+/**
+ * The branch a commit landed on, read LITERALLY from the `[<branch> <sha>]`
+ * bracket prefix. AUTHORITATIVE-ONLY — sourced solely from the matched bracket,
+ * never from a `HEAD is now at` line or any other inference:
+ *  - no sha-bearing bracket ⇒ `undefined` (no branch to read; never fabricated);
+ *  - `[detached HEAD <sha>]` ⇒ `undefined` (detached ≠ a branch);
+ *  - a `(root-commit)` / `(<n> commits)` parenthetical is stripped;
+ *  - any residual whitespace in the prefix ⇒ ambiguous ⇒ `undefined` (never
+ *    pick a token).
+ */
+const commitBranch = (stdout: string): string | undefined => {
+  const m = COMMIT_BRACKET_PREFIX.exec(stdout)
+  const prefixRaw = m?.[1]
+  if (prefixRaw === undefined) return undefined
+  // Strip a single trailing parenthetical (`(root-commit)` / `(2 commits)`).
+  const prefix = prefixRaw.replace(/\s*\([^)]*\)\s*$/, "").trim()
+  if (prefix === "") return undefined
+  if (prefix === "detached HEAD") return undefined
+  // A real ref name has no internal whitespace; anything else is ambiguous.
+  if (/\s/.test(prefix)) return undefined
+  return prefix
+}
+
+/** Attach `branch` to a commit facet only when the bracket authoritatively
+ *  carried one. */
+const withBranch = (commit: VcsCommit, stdout: string): VcsCommit => {
+  const branch = commitBranch(stdout)
+  return branch !== undefined ? { ...commit, branch } : commit
+}
+
 const deriveCommit = (input: PassiveVcsInput): VcsCommit | undefined => {
   const { command, stdout } = input
   const sha = firstSha(stdout)
@@ -153,23 +190,23 @@ const deriveCommit = (input: PassiveVcsInput): VcsCommit | undefined => {
     // A cherry-pick that landed a commit prints `[branch sha]`; a no-op /
     // empty pick (`--allow-empty` aside) does not. Require the sha so an
     // `--abort` / `--continue` with no landed commit produces no commit facet.
-    if (sha !== undefined) return { kind: "cherry-pick", sha }
+    if (sha !== undefined) return withBranch({ kind: "cherry-pick", sha }, stdout)
     return undefined
   }
 
   // Amend is a command-shape signal (stdout is identical to a normal commit).
   if (AMEND_FLAG.test(command)) {
-    return sha !== undefined ? { kind: "amend", sha } : { kind: "amend" }
+    return withBranch(sha !== undefined ? { kind: "amend", sha } : { kind: "amend" }, stdout)
   }
 
   // A non-fast-forward merge created a merge commit.
   if (MERGE_COMMIT_LINE.test(stdout)) {
-    return sha !== undefined ? { kind: "merge", sha } : { kind: "merge" }
+    return withBranch(sha !== undefined ? { kind: "merge", sha } : { kind: "merge" }, stdout)
   }
 
   // A plain commit prints `[branch sha] subject`.
   if (sha !== undefined && COMMIT_BRACKET.test(stdout)) {
-    return { kind: "commit", sha }
+    return withBranch({ kind: "commit", sha }, stdout)
   }
 
   return undefined
@@ -227,17 +264,41 @@ const derivePush = (input: PassiveVcsInput): VcsPush | undefined => {
 }
 
 const derivePr = (input: PassiveVcsInput): VcsPr | undefined => {
-  const url = PR_URL.exec(input.stdout)
-  if (url?.[1] !== undefined) {
-    const n = Number.parseInt(url[1], 10)
-    return Number.isInteger(n) ? { number: n, url: url[0] } : undefined
+  // Authoritative PR identity from stdout (existing behavior — unchanged).
+  let stdoutNumber: number | undefined
+  let url: string | undefined
+  const urlMatch = PR_URL.exec(input.stdout)
+  if (urlMatch?.[1] !== undefined) {
+    const n = Number.parseInt(urlMatch[1], 10)
+    if (Number.isInteger(n)) {
+      stdoutNumber = n
+      url = urlMatch[0]
+    }
   }
-  const hash = PR_HASH.exec(input.stdout)
-  if (hash?.[1] !== undefined) {
-    const n = Number.parseInt(hash[1], 10)
-    return Number.isInteger(n) ? { number: n } : undefined
+  if (stdoutNumber === undefined) {
+    const hash = PR_HASH.exec(input.stdout)
+    if (hash?.[1] !== undefined) {
+      const n = Number.parseInt(hash[1], 10)
+      if (Number.isInteger(n)) stdoutNumber = n
+    }
   }
-  return undefined
+
+  // Action from the exact `gh pr <verb>` argv command-shape.
+  const grammar = parseGhPrCommand(input.command)
+  const action: VcsPrAction | undefined = grammar?.action
+  const argvNumber = grammar?.number
+
+  // An action requires an AUTHORITATIVE PR identity: the stdout number OR an
+  // explicit argv PR number. Without an action we keep the ORIGINAL behavior
+  // (facet only when stdout carried an identity) — an argv number alone (e.g. a
+  // read-only `gh pr view 9`) does NOT invent a facet.
+  const number = stdoutNumber ?? (action !== undefined ? argvNumber : undefined)
+  if (number === undefined) return undefined
+
+  const out: { number: number; url?: string; action?: VcsPrAction } = { number }
+  if (url !== undefined) out.url = url
+  if (action !== undefined) out.action = action
+  return out
 }
 
 /**

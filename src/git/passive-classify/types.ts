@@ -14,6 +14,10 @@
  * is a compile error at every exhaustive consumer.
  */
 
+import type { VcsPrAction } from "./pr-action"
+
+export type { VcsPrAction } from "./pr-action"
+
 /** What kind of commit-producing operation landed. CLOSED enum. */
 export type VcsCommitKind =
   | "commit" // plain `git commit` (`[branch sha] msg`)
@@ -33,6 +37,11 @@ export type VcsBranchAction = "merged" | "rebased" | "amended"
 export interface VcsCommit {
   readonly kind: VcsCommitKind
   readonly sha?: string
+  /** The branch the commit landed on, read LITERALLY from the leading token of
+   *  the matched `[<branch> <sha>]` bracket. Omitted (never guessed) when the
+   *  bracket is absent, is a `[detached HEAD <sha>]`, or is otherwise ambiguous.
+   *  A `(root-commit)` / `(<n> commits)` parenthetical is stripped. */
+  readonly branch?: string
 }
 
 /** A push that succeeded. `remote`/`branch` are parsed from the `to..from`
@@ -56,6 +65,11 @@ export interface VcsPr {
   readonly number: number
   /** The PR URL when gh printed one. */
   readonly url?: string
+  /** The action the `gh pr <verb>` invocation performed, from the exact argv
+   *  command-shape ({@link VcsPrAction} grammar). Emitted ONLY with an
+   *  authoritative PR identity (argv number or stdout URL/#N) and exit 0;
+   *  omitted for read-only verbs, conflicting flags, and ambiguous argv. */
+  readonly action?: VcsPrAction
 }
 
 /**
