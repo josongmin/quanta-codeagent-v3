@@ -28,10 +28,12 @@ const AVAILABILITY: ReviewerAvailability = { hasAutoReview: false, hasGuardianRe
 const DEFAULT_X: PostureRecord = {
   threadPermission: APPROVAL_LADDER.auto, // workspace-write / on-request / user
   askOutsidePlan: true,
+  mode: "acceptEdits",
 }
 const DEFAULT_Y: PostureRecord = {
   threadPermission: APPROVAL_LADDER["guardian-approvals"], // workspace-write / on-request / agent
   askOutsidePlan: false,
+  mode: "bypass",
 }
 
 let dir: string
@@ -110,6 +112,10 @@ describe("RFC-05 E2 — future-thread default thread-copy boundary", () => {
     expect(resumedA.read().effective.askOutsidePlan).toBe(true)
     expect(resumedB.read().effective.threadPermission.approvalsReviewer).toBe("agent")
     expect(resumedB.read().effective.askOutsidePlan).toBe(false)
+    // RFC-05 E2b: the requested MODE is part of the copied binding too, and it
+    // survives the restart with the thread's own value (X=acceptEdits, Y=bypass).
+    expect(resumedA.read().effective.effectiveMode).toBe("acceptEdits")
+    expect(resumedB.read().effective.effectiveMode).toBe("bypass")
   })
 
   test("an unset default reads as current behavior; a new thread copies it", async () => {
@@ -126,6 +132,8 @@ describe("RFC-05 E2 — future-thread default thread-copy boundary", () => {
     })
     expect(auth.read().effective.threadPermission.sandboxPolicy.type).toBe("read-only")
     expect(auth.read().effective.askOutsidePlan).toBe(true)
+    // An unset default's mode is the current-behavior default mode.
+    expect(auth.read().effective.effectiveMode).toBe("default")
     expect(store.getPostureDefault()).toBeUndefined()
   })
 })

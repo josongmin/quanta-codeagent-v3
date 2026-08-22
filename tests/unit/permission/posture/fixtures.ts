@@ -7,6 +7,7 @@
 
 import type { ThreadPermission } from "../../../../src/permission/permission-store"
 import type { PostureRecord } from "../../../../src/permission/posture/types"
+import type { PermissionMode } from "../../../../src/permission/types"
 
 const APPROVAL_POLICIES: ReadonlyArray<ThreadPermission["approvalPolicy"]> = [
   "never",
@@ -26,17 +27,24 @@ const SANDBOXES: ReadonlyArray<ThreadPermission["sandboxPolicy"]> = [
 
 const ASK: ReadonlyArray<boolean> = [true, false]
 
-/** All 64 complete posture records (4 x 2 x 4 x 2). */
+// RFC-05 E2b — the permission-mode axis. Enumerated (not sampled) so the lossless
+// invariant is proven over EVERY mode, reusing the existing PermissionMode union.
+const MODES: ReadonlyArray<PermissionMode> = ["default", "acceptEdits", "bypass", "auto"]
+
+/** All 256 complete posture records (4 x 2 x 4 x 2 x 4 — the mode axis added). */
 export const allCompleteRecords = (): readonly PostureRecord[] => {
   const out: PostureRecord[] = []
   for (const approvalPolicy of APPROVAL_POLICIES) {
     for (const approvalsReviewer of REVIEWERS) {
       for (const sandboxPolicy of SANDBOXES) {
         for (const askOutsidePlan of ASK) {
-          out.push({
-            threadPermission: { approvalPolicy, approvalsReviewer, sandboxPolicy },
-            askOutsidePlan,
-          })
+          for (const mode of MODES) {
+            out.push({
+              threadPermission: { approvalPolicy, approvalsReviewer, sandboxPolicy },
+              askOutsidePlan,
+              mode,
+            })
+          }
         }
       }
     }
@@ -53,6 +61,7 @@ export const DISTINCT_BASE: PostureRecord = {
     sandboxPolicy: { type: "danger-full-access" },
   },
   askOutsidePlan: false,
+  mode: "bypass",
 }
 
 /** Nth complete record, by index, with a NAMED failure. The fixtures are a

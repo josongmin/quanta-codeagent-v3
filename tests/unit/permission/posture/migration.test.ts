@@ -14,6 +14,7 @@ import type { ThreadPermission } from "../../../../src/permission/permission-sto
 import { migrateLegacy } from "../../../../src/permission/posture/presets"
 import {
   CURRENT_BEHAVIOR_ASK_OUTSIDE_PLAN,
+  CURRENT_BEHAVIOR_MODE,
   INITIAL_REVISION,
 } from "../../../../src/permission/posture/types"
 
@@ -28,6 +29,13 @@ describe("migrateLegacy — missing new fields map to current behavior", () => {
 
   test("absent revision -> INITIAL_REVISION", () => {
     expect(migrateLegacy({ threadPermission: TP }).revision).toBe(INITIAL_REVISION)
+  })
+
+  test("absent mode -> current behavior (the existing default mode)", () => {
+    // RFC-05 E2b: a record written before the mode axis migrates to the current
+    // default mode — NO behavior change (not a new blocking mode).
+    expect(migrateLegacy({ threadPermission: TP }).record.mode).toBe(CURRENT_BEHAVIOR_MODE)
+    expect(migrateLegacy({ threadPermission: TP }).record.mode).toBe("default")
   })
 
   test("absent requestedPatch -> empty patch", () => {
@@ -53,6 +61,10 @@ describe("migrateLegacy — provided values pass through (no override)", () => {
     expect(
       migrateLegacy({ threadPermission: TP, askOutsidePlan: false }).record.askOutsidePlan,
     ).toBe(false)
+  })
+
+  test("explicit mode is honored (not forced to current behavior)", () => {
+    expect(migrateLegacy({ threadPermission: TP, mode: "bypass" }).record.mode).toBe("bypass")
   })
 
   test("explicit revision + requestedPatch pass through", () => {

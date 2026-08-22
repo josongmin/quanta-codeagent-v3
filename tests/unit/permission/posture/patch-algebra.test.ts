@@ -61,6 +61,8 @@ describe("applyPreset — lossless over ALL complete records (RED rail a)", () =
         expect(next.threadPermission.approvalsReviewer).toBeDefined()
         expect(next.threadPermission.sandboxPolicy).toBeDefined()
         expect(typeof next.askOutsidePlan).toBe("boolean")
+        // The mode axis is a first-class complete-record field (preset-agnostic).
+        expect(next.mode).toBeDefined()
       }
     }
   })
@@ -75,6 +77,12 @@ describe("applyPatch — arbitrary partial patches preserve omitted fields (RED 
     { label: "sandbox only", patch: { sandboxPolicy: { type: "read-only" } } },
     { label: "askOutsidePlan=false only", patch: { askOutsidePlan: false } },
     { label: "askOutsidePlan=true only", patch: { askOutsidePlan: true } },
+    // RFC-05 E2b — mode-only patches: setting mode must not touch other fields,
+    // and every OTHER partial patch must PRESERVE the base's mode.
+    { label: "mode=bypass only", patch: { mode: "bypass" } },
+    { label: "mode=acceptEdits only", patch: { mode: "acceptEdits" } },
+    { label: "mode=default only", patch: { mode: "default" } },
+    { label: "mode=auto only", patch: { mode: "auto" } },
     { label: "empty patch (identity)", patch: {} },
   ]
 
@@ -92,6 +100,9 @@ describe("applyPatch — arbitrary partial patches preserve omitted fields (RED 
           patch.sandboxPolicy ?? record.threadPermission.sandboxPolicy,
         )
         expect(next.askOutsidePlan).toBe(patch.askOutsidePlan ?? record.askOutsidePlan)
+        // The mode axis obeys the SAME lossless rule: an omitted mode is
+        // preserved from the base; a named mode wins.
+        expect(next.mode).toBe(patch.mode ?? record.mode)
       }
     }
   })

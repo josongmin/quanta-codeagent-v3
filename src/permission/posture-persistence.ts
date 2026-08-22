@@ -29,9 +29,11 @@ import type { ThreadPermission } from "./permission-store"
 import type { PosturePersistedRecord } from "./posture/ports"
 import {
   CURRENT_BEHAVIOR_ASK_OUTSIDE_PLAN,
+  CURRENT_BEHAVIOR_MODE,
   type PosturePatch,
   type PostureRecord,
 } from "./posture/types"
+import { isPermissionMode } from "./types"
 
 /** Current on-disk posture-section schema version. This is INDEPENDENT of the
  *  store's top-level `STATE_VERSION`: the posture section is an ADDITIVE arm, so
@@ -122,6 +124,7 @@ const parsePosturePatch = (v: unknown): PosturePatch | null => {
     approvalsReviewer?: ThreadPermission["approvalsReviewer"]
     sandboxPolicy?: ThreadPermission["sandboxPolicy"]
     askOutsidePlan?: boolean
+    mode?: PosturePatch["mode"]
   } = {}
   if (v.approvalPolicy !== undefined) {
     if (!isApprovalPolicy(v.approvalPolicy)) return null
@@ -140,6 +143,12 @@ const parsePosturePatch = (v: unknown): PosturePatch | null => {
     if (typeof v.askOutsidePlan !== "boolean") return null
     out.askOutsidePlan = v.askOutsidePlan
   }
+  // The permission-mode axis (RFC-05 E2b). Absent ⇒ omitted (applyPatch fills it
+  // from the base's current-behavior mode); PRESENT-but-invalid ⇒ fail-closed.
+  if (v.mode !== undefined) {
+    if (!isPermissionMode(v.mode)) return null
+    out.mode = v.mode
+  }
   return out
 }
 
@@ -154,6 +163,11 @@ const parsePostureRecord = (v: unknown): PostureRecord | null => {
   const sandbox = parseSandboxPolicy(tp.sandboxPolicy)
   if (sandbox === null) return null
   if (typeof v.askOutsidePlan !== "boolean") return null
+  // The permission-mode axis (RFC-05 E2b). Legacy-absent ⇒ current-behavior mode
+  // (additive migration — a default written before the mode axis still loads);
+  // PRESENT-but-invalid ⇒ fail-closed (the whole default is rejected).
+  if (v.mode !== undefined && !isPermissionMode(v.mode)) return null
+  const mode = v.mode === undefined ? CURRENT_BEHAVIOR_MODE : v.mode
   return {
     threadPermission: {
       approvalPolicy: tp.approvalPolicy,
@@ -161,6 +175,7 @@ const parsePostureRecord = (v: unknown): PostureRecord | null => {
       sandboxPolicy: sandbox,
     },
     askOutsidePlan: v.askOutsidePlan,
+    mode,
   }
 }
 
@@ -217,6 +232,7 @@ export const parsePostureSection = (
 export const currentBehaviorDefaultRecord = (): PostureRecord => ({
   threadPermission: APPROVAL_LADDER["read-only"],
   askOutsidePlan: CURRENT_BEHAVIOR_ASK_OUTSIDE_PLAN,
+  mode: CURRENT_BEHAVIOR_MODE,
 })
 
 /* ------------------------------------------------------------------------- *

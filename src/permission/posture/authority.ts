@@ -29,6 +29,7 @@
 import { errMessage } from "@/shared"
 import type { PermissionStore } from "../permission-store"
 import { currentBehaviorDefaultRecord, POSTURE_SCHEMA_VERSION } from "../posture-persistence"
+import type { PermissionMode } from "../types"
 import { buildResolvedPosture } from "./availability"
 import type {
   ManagedPolicyPort,
@@ -74,6 +75,10 @@ export interface PostureAuthorityDeps {
   readonly reviewerAvailability: ReviewerAvailability
   /** Managed-policy producer for the view's admitted locks. Absent ⇒ no locks. */
   readonly managedPolicy?: ManagedPolicyPort | undefined
+  /** The mode the managed policy forces on the effective view (RFC-05 E2b),
+   *  caller-supplied. Absent ⇒ the record's requested mode is the effective
+   *  mode. Deterministic; E3 wires this from the live managed policy. */
+  readonly managedMode?: PermissionMode | undefined
 }
 
 /** Raised when a durable write does not reach disk. The authority converts it
@@ -105,7 +110,14 @@ const decodePersisted = (
   }
   const applied = applyPatch(base, rec.requestedPatch)
   return {
-    record: { threadPermission: applied.threadPermission, askOutsidePlan: rec.boundAskOutsidePlan },
+    record: {
+      threadPermission: applied.threadPermission,
+      askOutsidePlan: rec.boundAskOutsidePlan,
+      // The requested mode round-trips through the lossless `requestedPatch`
+      // (which `encodeRecord` fills via `toCustomPatch`); a legacy patch that
+      // omits it falls back to the base's current-behavior mode via applyPatch.
+      mode: applied.mode,
+    },
     revision: rec.revision,
   }
 }
@@ -153,6 +165,7 @@ export const createPostureAuthority = (deps: PostureAuthorityDeps): PostureAutho
         requestedPatch: toCustomPatch(record),
         availability: deps.reviewerAvailability,
         ...(managed !== undefined ? { managedPolicy: managed.read() } : {}),
+        ...(deps.managedMode !== undefined ? { managedMode: deps.managedMode } : {}),
       }),
     )
 
@@ -223,6 +236,8 @@ export interface ThreadPostureBindingDeps {
   readonly defaults: PermissionDefaultsPort
   readonly reviewerAvailability: ReviewerAvailability
   readonly managedPolicy?: ManagedPolicyPort | undefined
+  /** Managed mode clamp for the bound thread's effective view (RFC-05 E2b). */
+  readonly managedMode?: PermissionMode | undefined
 }
 
 /**
@@ -252,6 +267,7 @@ export const createThreadPostureBinding = async (
     persistence: deps.persistence,
     reviewerAvailability: deps.reviewerAvailability,
     ...(deps.managedPolicy !== undefined ? { managedPolicy: deps.managedPolicy } : {}),
+    ...(deps.managedMode !== undefined ? { managedMode: deps.managedMode } : {}),
   })
 }
 

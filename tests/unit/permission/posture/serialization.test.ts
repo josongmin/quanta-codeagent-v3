@@ -28,9 +28,11 @@ describe("serializePosture — key-order independent", () => {
         },
       },
       askOutsidePlan: true,
+      mode: "acceptEdits",
     }
     // Same data, keys inserted in a different order at every level.
     const b: PostureRecord = {
+      mode: "acceptEdits",
       askOutsidePlan: true,
       threadPermission: {
         sandboxPolicy: {
@@ -67,6 +69,7 @@ describe("serializeResolvedPosture — deterministic and brand-free", () => {
       sandboxPolicy: { type: "read-only" },
     },
     askOutsidePlan: false,
+    mode: "default",
   }
 
   test("two identical resolved postures serialize byte-identically", () => {

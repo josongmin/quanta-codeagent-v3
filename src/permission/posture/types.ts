@@ -22,7 +22,7 @@
 
 import type { NamedApprovalLadderRung } from "../approval-ladder"
 import type { ThreadPermission } from "../permission-store"
-import type { ReviewerTier } from "../types"
+import type { PermissionMode, ReviewerTier } from "../types"
 
 // Type-only re-export of the closed lock surface. The IMPLEMENTATION (brand +
 // admission + producers) lives in `availability.ts` so a lock can only be
@@ -50,6 +50,14 @@ export type AskOutsidePlan = boolean
  *  questions) — forbidden by "missing legacy fields map to current behavior". */
 export const CURRENT_BEHAVIOR_ASK_OUTSIDE_PLAN: AskOutsidePlan = true
 
+/** Legacy-absence migration target for the permission-MODE axis (RFC-05 E2b).
+ *  The mode axis is the EXISTING {@link PermissionMode} union — no new value.
+ *  Current behavior is the base `default` mode (the mode `evaluate()` asks in;
+ *  see `policy.ts`), so an absent stored `mode` migrates to `default`. Defaulting
+ *  to any other mode would CHANGE current behavior for existing sessions —
+ *  forbidden by "missing legacy fields map to current behavior". */
+export const CURRENT_BEHAVIOR_MODE: PermissionMode = "default"
+
 /** The revision a freshly-migrated / never-mutated posture carries. The domain
  *  revision is a CAS token for E2; it is independent of any kernel event
  *  sequence. */
@@ -66,6 +74,13 @@ export const INITIAL_REVISION = 0 as const
 export interface PostureRecord {
   readonly threadPermission: ThreadPermission
   readonly askOutsidePlan: AskOutsidePlan
+  /** The operator-REQUESTED permission mode — the EXISTING {@link PermissionMode}
+   *  union, reused verbatim (no new value/discriminant). A top-level axis
+   *  ORTHOGONAL to `ThreadPermission` (which has no mode field) and to the
+   *  question knob, so a preset selection never clobbers it. The effective mode
+   *  the gate reads is resolved from this against the managed policy (see
+   *  {@link EffectivePosture.effectiveMode}). */
+  readonly mode: PermissionMode
 }
 
 /* ------------------------------------------------------------------------- *
@@ -92,6 +107,10 @@ export interface PosturePatch {
   readonly approvalsReviewer?: ThreadPermission["approvalsReviewer"] | undefined
   readonly sandboxPolicy?: ThreadPermission["sandboxPolicy"] | undefined
   readonly askOutsidePlan?: AskOutsidePlan | undefined
+  /** The requested permission mode (existing {@link PermissionMode} union). An
+   *  omitted `mode` is PRESERVED from the base record on apply (the lossless
+   *  invariant); a named preset leaves it unmentioned (preset ≠ mode). */
+  readonly mode?: PermissionMode | undefined
 }
 
 /* ------------------------------------------------------------------------- *
@@ -116,6 +135,13 @@ export interface EffectivePosture {
   readonly threadPermission: ThreadPermission
   readonly reviewerRoute: ReviewerTier
   readonly askOutsidePlan: AskOutsidePlan
+  /** The fully-RESOLVED live permission mode the gate evaluates against
+   *  (`policy.ts` `ctx.mode`). RFC-05 "Canonical authority" requires this on the
+   *  resolved posture so E3 can retire the standalone mode cell and route the
+   *  gate through the posture live getter. Resolved from the record's requested
+   *  {@link PostureRecord.mode} against the current managed clamp — the EXISTING
+   *  {@link PermissionMode} union, never a new value. */
+  readonly effectiveMode: PermissionMode
 }
 
 /** The canonical resolved posture value (RFC-05 "Canonical authority"). The

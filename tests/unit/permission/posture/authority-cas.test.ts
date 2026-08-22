@@ -177,6 +177,58 @@ describe("RFC-05 E2 — posture authority CAS", () => {
     expect(auth.read().revision).toBe(1)
   })
 
+  test("a set that carries `mode` advances the effective mode, and reload reconstructs it", async () => {
+    const fake = makeFakePort()
+    const auth = createPostureAuthority({
+      threadId: "tm",
+      persistence: fake.port,
+      reviewerAvailability: AVAILABILITY,
+    })
+    // Legacy-absent ⇒ current default mode.
+    expect(auth.read().effective.effectiveMode).toBe("default")
+
+    const result = await auth.set({ mode: "bypass" }, 0)
+    expect(result.ok).toBe(true)
+    expect(auth.read().effective.effectiveMode).toBe("bypass")
+
+    // A fresh authority over the SAME persisted record reconstructs the mode
+    // (it round-trips through the durable requestedPatch, not an event replay).
+    const reloaded = createPostureAuthority({
+      threadId: "tm",
+      persistence: fake.port,
+      reviewerAvailability: AVAILABILITY,
+    })
+    expect(reloaded.read().effective.effectiveMode).toBe("bypass")
+  })
+
+  test("a managed mode clamp forces the effective mode over the persisted requested mode", async () => {
+    const fake = makeFakePort()
+    // Persist a requested mode of `bypass`...
+    const seeded = createPostureAuthority({
+      threadId: "tc",
+      persistence: fake.port,
+      reviewerAvailability: AVAILABILITY,
+    })
+    await seeded.set({ mode: "bypass" }, 0)
+
+    // ...then reload WITH a managed clamp to `default`: the clamp wins.
+    const clamped = createPostureAuthority({
+      threadId: "tc",
+      persistence: fake.port,
+      reviewerAvailability: AVAILABILITY,
+      managedMode: "default",
+    })
+    // RED-ON-INJECTION: drop `managedMode` from buildView ⇒ this is "bypass" ⇒ RED.
+    expect(clamped.read().effective.effectiveMode).toBe("default")
+    // Paired control: no clamp ⇒ the requested `bypass` stands.
+    const unclamped = createPostureAuthority({
+      threadId: "tc",
+      persistence: fake.port,
+      reviewerAvailability: AVAILABILITY,
+    })
+    expect(unclamped.read().effective.effectiveMode).toBe("bypass")
+  })
+
   test("the published view is immutable (frozen top-level and lock array)", async () => {
     const fake = makeFakePort()
     const auth = createPostureAuthority({

@@ -16,8 +16,10 @@
 
 import { APPROVAL_LADDER } from "../approval-ladder"
 import type { ThreadPermission } from "../permission-store"
+import type { PermissionMode } from "../types"
 import {
   CURRENT_BEHAVIOR_ASK_OUTSIDE_PLAN,
+  CURRENT_BEHAVIOR_MODE,
   INITIAL_REVISION,
   type PosturePatch,
   type PosturePreset,
@@ -90,10 +92,11 @@ const threadPermissionEquals = (a: ThreadPermission, b: ThreadPermission): boole
  * ------------------------------------------------------------------------- */
 
 /** The lossless PATCH a preset denotes: the three `ThreadPermission` fields of
- *  the corresponding {@link APPROVAL_LADDER} rung. `askOutsidePlan` is
- *  deliberately OMITTED so selecting a preset never touches the question knob.
- *  This is a projection of the SSOT rung into a partial patch — never a second
- *  table. */
+ *  the corresponding {@link APPROVAL_LADDER} rung. `askOutsidePlan` AND `mode`
+ *  are deliberately OMITTED so selecting a preset never touches the question
+ *  knob NOR the permission mode (preset ≠ mode — a named preset may leave `mode`
+ *  unmentioned). This is a projection of the SSOT rung into a partial patch —
+ *  never a second table. */
 export const presetPatch = (preset: PosturePreset): PosturePatch => {
   const rung = APPROVAL_LADDER[preset]
   return {
@@ -114,6 +117,9 @@ export const applyPatch = (record: PostureRecord, patch: PosturePatch): PostureR
     sandboxPolicy: patch.sandboxPolicy ?? record.threadPermission.sandboxPolicy,
   },
   askOutsidePlan: patch.askOutsidePlan ?? record.askOutsidePlan,
+  // `??` (not `||`): only a genuinely-absent `mode` falls back to the base;
+  // every named mode (including no falsy member exists in the union) wins.
+  mode: patch.mode ?? record.mode,
 })
 
 /** Apply a named preset losslessly (preserves `askOutsidePlan`). */
@@ -128,6 +134,7 @@ export const toCustomPatch = (record: PostureRecord): PosturePatch => ({
   approvalsReviewer: record.threadPermission.approvalsReviewer,
   sandboxPolicy: record.threadPermission.sandboxPolicy,
   askOutsidePlan: record.askOutsidePlan,
+  mode: record.mode,
 })
 
 /* ------------------------------------------------------------------------- *
@@ -166,6 +173,7 @@ export const buildRequested = (
 export interface LegacyPostureInput {
   readonly threadPermission: ThreadPermission
   readonly askOutsidePlan?: boolean | undefined
+  readonly mode?: PermissionMode | undefined
   readonly revision?: number | undefined
   readonly requestedPatch?: PosturePatch | undefined
 }
@@ -186,9 +194,13 @@ export interface MigratedPosture {
  *  verbatim. */
 export const migrateLegacy = (input: LegacyPostureInput): MigratedPosture => {
   const askOutsidePlan = input.askOutsidePlan ?? CURRENT_BEHAVIOR_ASK_OUTSIDE_PLAN
+  // Legacy-absent `mode` maps to the existing default mode — NO behavior change
+  // for a record written before the mode axis existed.
+  const mode = input.mode ?? CURRENT_BEHAVIOR_MODE
   const record: PostureRecord = {
     threadPermission: input.threadPermission,
     askOutsidePlan,
+    mode,
   }
   const revision = input.revision ?? INITIAL_REVISION
   const patch = input.requestedPatch ?? {}

@@ -32,6 +32,7 @@ describe("RFC-05 E2 — corrupt schema rejection + legacy migration", () => {
         approvalsReviewer: "agent",
         sandboxPolicy: { type: "danger-full-access" },
         askOutsidePlan: false,
+        mode: "bypass",
       },
       boundAskOutsidePlan: false,
       revision: 42,
@@ -50,6 +51,8 @@ describe("RFC-05 E2 — corrupt schema rejection + legacy migration", () => {
     expect(view.effective.threadPermission.approvalPolicy).toBe("on-request")
     expect(view.effective.threadPermission.sandboxPolicy.type).toBe("read-only")
     expect(view.effective.askOutsidePlan).toBe(true) // current behavior: unrestricted
+    // The corrupt `bypass` mode is NOT trusted — migrates to current default.
+    expect(view.effective.effectiveMode).toBe("default")
     expect(view.revision).toBe(0) // NOT the corrupt record's 42
   })
 
@@ -74,6 +77,7 @@ describe("RFC-05 E2 — corrupt schema rejection + legacy migration", () => {
         approvalsReviewer: "user",
         sandboxPolicy: { type: "workspace-write" },
         askOutsidePlan: false,
+        mode: "acceptEdits",
       },
       boundAskOutsidePlan: false,
       revision: 3,
@@ -88,6 +92,8 @@ describe("RFC-05 E2 — corrupt schema rejection + legacy migration", () => {
     expect(view.revision).toBe(3)
     expect(view.effective.threadPermission.sandboxPolicy.type).toBe("workspace-write")
     expect(view.effective.askOutsidePlan).toBe(false)
+    // The requested mode reconstructs from the durable patch.
+    expect(view.effective.effectiveMode).toBe("acceptEdits")
     // workspace-write + on-request + user projects to the "auto" preset.
     expect(view.requested.preset).toBe("auto")
   })

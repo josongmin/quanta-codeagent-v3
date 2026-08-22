@@ -72,14 +72,18 @@ describe("resolveEffective — reuses selectDefaultReviewer (no remap)", () => {
   // "matches the SSOT" property above cannot be vacuously true via a shared bug.
   test("read-only rung (approvalsReviewer=user) resolves to the user route", () => {
     const route = resolveEffective(
-      { threadPermission: APPROVAL_LADDER["read-only"], askOutsidePlan: true },
+      { threadPermission: APPROVAL_LADDER["read-only"], askOutsidePlan: true, mode: "default" },
       { hasAutoReview: true, hasGuardianReview: true },
     ).reviewerRoute
     expect(route).toBe("user")
   })
 
   test("guardian-approvals rung routes to guardian only when the guardian is live", () => {
-    const record = { threadPermission: APPROVAL_LADDER["guardian-approvals"], askOutsidePlan: true }
+    const record = {
+      threadPermission: APPROVAL_LADDER["guardian-approvals"],
+      askOutsidePlan: true,
+      mode: "default" as const,
+    }
     expect(
       resolveEffective(record, { hasAutoReview: false, hasGuardianReview: true }).reviewerRoute,
     ).toBe("guardian_subagent")
@@ -99,6 +103,18 @@ describe("resolveEffective — reuses selectDefaultReviewer (no remap)", () => {
       expect(effective.threadPermission).toEqual(record.threadPermission)
       expect(effective.askOutsidePlan).toBe(record.askOutsidePlan)
       expect(effective.reviewerRoute).toBeDefined()
+      // RFC-05 E2b: unclamped, the effective mode is the record's requested mode.
+      expect(effective.effectiveMode).toBe(record.mode)
+    }
+  })
+
+  test("effectiveMode is CLAMPED/FORCED by the managed mode over every record", () => {
+    for (const record of RECORDS) {
+      // A managed clamp forces the effective mode regardless of the record's mode
+      // (paired control: without the clamp the record's own mode stands).
+      expect(resolveEffective(record, availabilities[0], "default").effectiveMode).toBe("default")
+      expect(resolveEffective(record, availabilities[0], "bypass").effectiveMode).toBe("bypass")
+      expect(resolveEffective(record, availabilities[0]).effectiveMode).toBe(record.mode)
     }
   })
 })

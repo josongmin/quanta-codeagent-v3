@@ -35,6 +35,7 @@ const VALID_RECORD: PosturePersistedRecord = {
     approvalsReviewer: "agent",
     sandboxPolicy: { type: "workspace-write", writableRoots: ["/repo"], networkAccess: true },
     askOutsidePlan: false,
+    mode: "bypass",
   },
   boundAskOutsidePlan: false,
   revision: 5,
@@ -61,6 +62,9 @@ describe("RFC-05 E2 — store posture section", () => {
     expect(got?.revision).toBe(5)
     expect(got?.boundAskOutsidePlan).toBe(false)
     expect(got?.requestedPatch.sandboxPolicy?.type).toBe("workspace-write")
+    // RFC-05 E2b: the requested MODE persists inside the lossless patch and
+    // round-trips across a restart.
+    expect(got?.requestedPatch.mode).toBe("bypass")
   })
 
   test("the future-thread default persists as a SEPARATE entry", async () => {
@@ -72,6 +76,7 @@ describe("RFC-05 E2 — store posture section", () => {
         sandboxPolicy: { type: "read-only" },
       },
       askOutsidePlan: false,
+      mode: "acceptEdits",
     })
     await store.flush()
 
@@ -80,6 +85,8 @@ describe("RFC-05 E2 — store posture section", () => {
     expect(def).toBeDefined()
     expect(def?.threadPermission.approvalPolicy).toBe("always")
     expect(def?.askOutsidePlan).toBe(false)
+    // The mode axis round-trips as part of the separate default record.
+    expect(def?.mode).toBe("acceptEdits")
     // The default is NOT a per-thread bound record.
     expect(store2.getPosture("t1")).toBeUndefined()
   })
@@ -147,6 +154,39 @@ describe("RFC-05 E2 — store posture section", () => {
     expect(store.getHost("h")).toBe("read-only")
     expect(store.getPosture("t")).toBeUndefined()
     expect(store.getPostureDefault()).toBeUndefined()
+  })
+
+  test("a persisted default missing `mode` migrates additively to the current mode", async () => {
+    // A posture.default written before the E2b mode axis: valid record shape but
+    // no `mode` key. It must LOAD (not be dropped) with mode = current default —
+    // RFC-05 E2b legacy-absent → current behavior, additive (no field lost).
+    const raw = {
+      version: 1,
+      perThread: {},
+      perHost: {},
+      deniedActions: {},
+      posture: {
+        perThread: {},
+        default: {
+          threadPermission: {
+            approvalPolicy: "always",
+            approvalsReviewer: "user",
+            sandboxPolicy: { type: "read-only" },
+          },
+          askOutsidePlan: false,
+          // no `mode` key
+        },
+      },
+    }
+    await writeFile(filePath, JSON.stringify(raw), "utf8")
+
+    const store = await freshStore()
+    const def = store.getPostureDefault()
+    // RED-ON-INJECTION: reject-on-absent (return null when v.mode === undefined)
+    // in parsePostureRecord ⇒ the whole default is dropped ⇒ def is undefined.
+    expect(def).toBeDefined()
+    expect(def?.threadPermission.approvalPolicy).toBe("always")
+    expect(def?.mode).toBe("default")
   })
 
   test("flushDurable reports write success", async () => {

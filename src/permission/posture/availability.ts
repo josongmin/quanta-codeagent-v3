@@ -24,7 +24,7 @@ import { isRecord } from "@/shared"
 import type { ControlPolicy } from "../permission-profile"
 import type { ThreadPermission } from "../permission-store"
 import { type ReviewerSandboxProfile, selectDefaultReviewer } from "../reviewer-default-policy"
-import type { ReviewerTier } from "../types"
+import type { PermissionMode, ReviewerTier } from "../types"
 import { buildRequested, OFFERED_PRESETS } from "./presets"
 import type {
   EffectivePosture,
@@ -166,10 +166,21 @@ const sandboxProfileOf = (sandbox: ThreadPermission["sandboxPolicy"]): ReviewerS
 /** Resolve the effective posture from a complete record. The reviewer route is
  *  resolved through the EXISTING {@link selectDefaultReviewer} policy with the
  *  thread's own authority present — E1 makes no fail-down assumption and adds no
- *  route. */
+ *  route.
+ *
+ *  `effectiveMode` (RFC-05 E2b) is the record's requested {@link
+ *  PostureRecord.mode}, CLAMPED/FORCED by an optional `managedMode`: when the
+ *  managed policy forces a mode, that mode wins; otherwise the requested mode
+ *  stands. The clamp is CALLER-SUPPLIED (like the reviewer-availability flags):
+ *  E3 derives it from the live managed {@link ControlPolicy} and never assumes a
+ *  fail-down here. A legacy-absent record's `mode` is already migrated to the
+ *  current default mode upstream, so an unclamped resolve is current behavior.
+ *  The reviewer route stays a SEPARATE axis — `effectiveMode` does not feed it
+ *  (the route call keeps its own input), matching the canonical split. */
 export const resolveEffective = (
   record: PostureRecord,
   availability: ReviewerAvailability,
+  managedMode?: PermissionMode | undefined,
 ): EffectivePosture => {
   const reviewerRoute: ReviewerTier = selectDefaultReviewer({
     threadPermission: record.threadPermission,
@@ -186,6 +197,7 @@ export const resolveEffective = (
     threadPermission: record.threadPermission,
     reviewerRoute,
     askOutsidePlan: record.askOutsidePlan,
+    effectiveMode: managedMode ?? record.mode,
   }
 }
 
@@ -198,8 +210,12 @@ export const buildResolvedPosture = (input: {
   requestedPatch: PosturePatch
   availability: ReviewerAvailability
   managedPolicy?: ControlPolicy | undefined
+  /** The mode the managed policy forces on the effective view (RFC-05 E2b),
+   *  caller-supplied from the live {@link ControlPolicy}. Absent ⇒ the record's
+   *  requested mode stands. */
+  managedMode?: PermissionMode | undefined
 }): ResolvedPermissionPosture => {
-  const effective = resolveEffective(input.record, input.availability)
+  const effective = resolveEffective(input.record, input.availability, input.managedMode)
   return {
     revision: input.revision,
     requested: buildRequested(input.record.threadPermission, input.requestedPatch),
