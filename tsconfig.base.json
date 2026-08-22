@@ -43,6 +43,8 @@
       "@/stream/*": ["./src/stream/*"],
       "@/activity": ["./src/activity/index.ts"],
       "@/activity/*": ["./src/activity/*"],
+      "@/attention": ["./src/attention/index.ts"],
+      "@/attention/*": ["./src/attention/*"],
       "@/permission": ["./src/permission/index.ts"],
       "@/permission/*": ["./src/permission/*"],
       "@/runtime": ["./src/runtime/index.ts"],
