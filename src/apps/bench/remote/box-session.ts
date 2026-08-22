@@ -40,10 +40,10 @@ import { mirrorReportToSsot } from "@/runner/batch/report"
 import { foldGroundingReceipts } from "@/shared"
 import { benchHome } from "../corpus"
 import { presetRequiresLiveLspGrounding } from "../preset"
+import { resolveDatasetFamilyProfile } from "../profiles/registry"
 import type { SpawnFn, SpawnResult } from "./backend"
 import { assertRemoteAccessTokenFreshEnough, stripToAccessToken } from "./box-session/auth"
 import { runBenchDetachedPoll } from "./box-session/detached-poll"
-import { resolveSwebenchNamespace } from "./box-session/ec2-lifecycle"
 import { probePyrightGrounding, remoteLspLaunchReceipt } from "./box-session/pyright-grounding"
 import { BENCH_SSH_SAFE_OPTS, openOtelReverseTunnel, shq } from "./box-session/shell"
 import {
@@ -334,41 +334,16 @@ const buildResumePrelaunchStep = (forwardedBenchEnv: string): string => {
   )
 }
 
-/**
- * Build the Pro-only `KEY=val ` env prefix that points the on-box Scale verifier at
- * the harness clone + venv python + shipped dataset, and forwards the operator's
- * DockerHub-username / model-name overrides. PURE — deterministic over the given env.
- *
- * Returns "" for any non-Pro family ⇒ byte-identical to the Verified/Live path.
- *
- * WHY the override forward exists as a tested seam: QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME
- * and QUANTA_SWEBENCH_PRO_MODEL_NAME are read by buildProGradeVerifier (apps/bench/index.ts)
- * to override the verifier defaults (jefzda / quanta). They are NOT `QUANTA_BENCH_*`-prefixed
- * and are NOT in FORWARD_EXTRA_ENV, so without this they are SILENTLY DROPPED on the box — a
- * fork whose Pro images live under a different DockerHub user would have every image-pull fail
- * (all-infra) while the local operator's override is ignored. Forwarded ONLY when set so an
- * unset var stays absent (byte-identical).
- */
-export const buildProEnv = (env: NodeJS.ProcessEnv, datasetPath: string): string => {
-  if ((env.QUANTA_SWEBENCH_DATASET_FAMILY ?? "").toLowerCase() !== "pro") return ""
-  // `~` expands only when it starts a shell word. Inside `KEY='~/…'` it remains
-  // literal, and the on-box Node process then resolves it as `<cwd>/~/…`.
-  // Convert our home-relative chunk paths to an absolute shell-expanded value.
-  const rawSamplePath = datasetPath.startsWith("~/")
-    ? `"$HOME/${datasetPath.slice(2)}"`
-    : shq(datasetPath)
-  let proEnv =
-    `QUANTA_SWEBENCH_PRO_HARNESS_DIR="$HOME/swebench-pro" ` +
-    `QUANTA_SWEBENCH_PRO_PYTHON_BIN="$HOME/swebench-pro-venv/bin/python" ` +
-    `QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH=${rawSamplePath} `
-  if (env.QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME)
-    proEnv += `QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME=${shq(env.QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME)} `
-  if (env.QUANTA_SWEBENCH_PRO_MODEL_NAME)
-    proEnv += `QUANTA_SWEBENCH_PRO_MODEL_NAME=${shq(env.QUANTA_SWEBENCH_PRO_MODEL_NAME)} `
-  return proEnv
-}
-
-const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): string => {
+/** The literal command the box runs for one chunk. PURE string builder — exported
+ *  so the T4 stop-rule + wiring tests can assert the family-derived tokens
+ *  (prebuilt-image namespace, on-box env prefix) without provisioning a box. */
+export const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): string => {
+  // aug-22 HIGH-4: BOTH family-conditional pieces of this command — the
+  // prebuilt-image namespace and the on-box env prefix — now come from the ONE
+  // family profile. This module used to call `buildProEnv(family, …)` and
+  // `resolveSwebenchNamespace(…, family)`, each re-deciding what "pro"/"live"
+  // mean, which is why a hypothetical family #4 had to edit box-session too.
+  const profile = resolveDatasetFamilyProfile(params.datasetFamily)
   const idsFlag =
     params.instanceIds && params.instanceIds.length > 0
       ? ` --instance ${shq(params.instanceIds.join(","))}`
@@ -381,7 +356,13 @@ const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): string 
   // the shipped dataset (which doubles as the Scale --raw_sample_path), and forward the operator's
   // DockerHub-username / model-name overrides. Empty for Verified/Live ⇒ byte-identical. The
   // verifier reads these (buildProGradeVerifier).
-  const proEnv = buildProEnv(process.env, paths.dataset)
+  // HIGH-1 (aug-22): keyed on the chunk's TYPED family, not on the LAUNCHING
+  // process's ambient env — `process.env` here supplies only the operator's
+  // per-family OVERRIDE knobs, never the family itself.
+  const onBoxEnvPrefix = profile.onBoxEnvPrefix({
+    datasetPath: paths.dataset,
+    env: process.env,
+  })
   return (
     // FORK-STORM GUARD (jun-28): on some repos (measured: pydata/xarray) the
     // model's repo commands run via `uv run` leaked ~4700 live `uv` processes
@@ -399,8 +380,8 @@ const buildBenchCommand = (params: GradeChunkParams, paths: ChunkPaths): string 
     // Live publishes prebuilt images under `starryzhang`, not `swebench` — derive the
     // namespace from the dataset (parallel to the grading-shim pip-spec). A forwarded
     // QUANTA_SWEBENCH_NAMESPACE (operator override) still comes after and last-wins.
-    `QUANTA_SWEBENCH_NAMESPACE=${shq(resolveSwebenchNamespace(process.env.QUANTA_SWEBENCH_DATASET_NAME ?? "", undefined, process.env.QUANTA_SWEBENCH_DATASET_FAMILY))} QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${params.concurrency} ` +
-    proEnv +
+    `QUANTA_SWEBENCH_NAMESPACE=${shq(profile.harnessSpec({ datasetName: process.env.QUANTA_SWEBENCH_DATASET_NAME ?? "" }).namespace)} QUANTA_SWEBENCH_MAX_WORKERS=4 QUANTA_BENCH_CONCURRENCY=${params.concurrency} ` +
+    onBoxEnvPrefix +
     params.forwardedBenchEnv +
     trajectoryRecordEnv +
     `~/.bun/bin/bun run src/apps/bench/cli.ts run --swebench ${paths.dataset}${idsFlag} ` +
@@ -907,7 +888,7 @@ export const gradeChunkOnBox = async (
 
 export { PHANTOM_DEPS, stripToAccessToken } from "./box-session/auth"
 export {
-  assertProDatasetGradeable,
+  assertDatasetGradeableForFamily,
   assertRemoteDatasetLaunchable,
   assertRemoteDatasetSelectionExists,
   assertRemoteStrictGroundingSupported,

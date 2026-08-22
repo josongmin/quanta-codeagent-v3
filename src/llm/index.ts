@@ -108,6 +108,27 @@ export {
 } from "./provider-metadata"
 export type { ProviderEnv, ProviderId, ResolvedProvider } from "./providers"
 export { isRefusalStopReason, PROVIDER_ENV_KEYS, resolveProvider } from "./providers"
+// Reasoning-effort delivery SSOT. Surfaced on the barrel because a composition
+// root that REPORTS an effort (bench receipts, leaderboard rows, the Terminal
+// adapter) must be able to ask the same question the wire asks — "is this effort
+// actually delivered?" — instead of assuming it was. The decision is a
+// discriminated union with no silent-drop arm; see `reasoning-effort.ts`.
+export type {
+  ReasoningEffortDecision,
+  ReasoningEffortSurface,
+  ResponsesReasoningEffort,
+} from "./reasoning-effort"
+export {
+  assertReasoningEffortAcceptedByWire,
+  assertReasoningEffortDeliverable,
+  decideReasoningEffort,
+  decideResponsesReasoningEffort,
+  deliveredReasoningEffort,
+  describeReasoningEffortDecision,
+  isReasoningEffortHonest,
+  RESPONSES_REASONING_EFFORTS,
+  resolveDeliverableReasoningEffort,
+} from "./reasoning-effort"
 export type {
   ResponsesContinuationEntry,
   ResponsesContinuationStore,

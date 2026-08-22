@@ -13,11 +13,9 @@
  */
 
 import { describe, expect, test } from "bun:test"
+import type { DatasetFamily } from "@/apps/bench/dataset-family-token"
+import { resolveDatasetFamilyProfile } from "@/apps/bench/profiles/registry"
 import { SPHINX_RA_SHIM } from "@/apps/bench/python-swebench"
-import {
-  resolveSwebenchNamespace,
-  resolveSwebenchPipSpec,
-} from "@/apps/bench/remote/box-session/ec2-lifecycle"
 import { buildRemoteGradeScript } from "@/apps/bench/remote/ssh"
 
 describe("ssh grade script — SPHINX_RA_SHIM wiring", () => {
@@ -57,14 +55,23 @@ describe("ssh grade script — SPHINX_RA_SHIM wiring", () => {
  * `grade --backend ssh:host --dataset-family live` would install the STOCK swebench
  * harness (which only knows the ORIGINAL repos) and pull `swebench/...` images →
  * KeyError on every Live repo. Now the family selects the harness fork + image org
- * via the SAME SSOT resolvers the full-remote box path uses, so the two never drift.
+ * via the SAME SSOT profile port the full-remote box path uses, so the two never drift.
  */
 describe("ssh grade script — dataset-family awareness (verified vs live)", () => {
   const ds = "~/instances.jsonl"
+  // aug-22 HIGH-4: `createSshBackend` resolves the family PROFILE and reads its
+  // `harnessSpec` port — the same port the full-remote box path uses — instead of
+  // the old `resolveSwebenchPipSpec(…, family)` helpers that each re-decided what
+  // "live" means. Drive that port here so the two paths cannot drift.
+  const specFor = (family: DatasetFamily, pipSpecOverride?: string, namespaceOverride?: string) =>
+    resolveDatasetFamilyProfile(family).harnessSpec({
+      datasetName: ds,
+      pipSpecOverride,
+      namespaceOverride,
+    })
 
   test("verified (no family / undefined) ⇒ stock swebench fork + swebench namespace (byte-identical legacy)", () => {
-    const fromSpec = resolveSwebenchPipSpec(ds, undefined, "verified")
-    const namespace = resolveSwebenchNamespace(ds, undefined, "verified")
+    const { pipSpec: fromSpec, namespace } = specFor("verified")
     const s = buildRemoteGradeScript(4, fromSpec, namespace)
     expect(s).toContain("--from swebench ")
     expect(s).toContain("--namespace swebench")
@@ -73,8 +80,7 @@ describe("ssh grade script — dataset-family awareness (verified vs live)", () 
   })
 
   test("live ⇒ SWE-bench-Live harness fork + starryzhang prebuilt-image namespace", () => {
-    const fromSpec = resolveSwebenchPipSpec(ds, undefined, "live")
-    const namespace = resolveSwebenchNamespace(ds, undefined, "live")
+    const { pipSpec: fromSpec, namespace } = specFor("live")
     const s = buildRemoteGradeScript(4, fromSpec, namespace)
     expect(s).toContain("--from git+https://github.com/SWE-bench-Live/SWE-bench-Live ")
     expect(s).toContain("--namespace starryzhang")
@@ -84,8 +90,7 @@ describe("ssh grade script — dataset-family awareness (verified vs live)", () 
   })
 
   test("operator env override (QUANTA_SWEBENCH_PIP_SPEC / _NAMESPACE) still wins for live", () => {
-    const fromSpec = resolveSwebenchPipSpec(ds, "swebench==3.0.0", "live")
-    const namespace = resolveSwebenchNamespace(ds, "myorg", "live")
+    const { pipSpec: fromSpec, namespace } = specFor("live", "swebench==3.0.0", "myorg")
     const s = buildRemoteGradeScript(4, fromSpec, namespace)
     expect(s).toContain("--from swebench==3.0.0 ")
     expect(s).toContain("--namespace myorg")

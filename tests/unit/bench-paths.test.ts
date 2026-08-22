@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { tmpdir } from "node:os"
 import {
   benchHome,
+  benchInstanceWorkSlug,
   benchRunDir,
   benchRunsRoot,
   benchWorkRoot,
@@ -57,5 +58,14 @@ describe("benchHome — persistent root precedence", () => {
   test("benchRunDir groups under runs/<runId>", () => {
     const dir = benchRunDir("run-xyz")
     expect(dir).toBe(`${benchRunsRoot()}/run-xyz`)
+  })
+
+  test("agent-visible work slug is stable and does not expose the instance id", () => {
+    const id = "instance_owner__repo-deadbeefcafebabefeedface0123456789abcdef"
+    const slug = benchInstanceWorkSlug(id)
+    expect(slug).toMatch(/^[0-9a-f]{20}$/)
+    expect(slug).toBe(benchInstanceWorkSlug(id))
+    expect(slug).not.toContain("deadbeef")
+    expect(slug).not.toContain(id)
   })
 })

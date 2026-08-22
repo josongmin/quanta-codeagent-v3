@@ -1,7 +1,7 @@
 import { loadCorpus as defaultLoadCorpus, type Prediction, writePredictions } from "./corpus"
 import { knobsForReport, resolveBenchKnobs } from "./eval/knobs-bench"
-import type { RunHealthSummary } from "./report"
-import { type BenchReportKnobs, buildReport, writeReport } from "./report"
+import type { AggregateOfficialGradeInput, DatasetFamily, RunHealthSummary } from "./report"
+import { type BenchReportKnobs, buildReport, toCanonicalSweReport, writeReport } from "./report"
 import type { Instance, InstanceResult } from "./types"
 
 export interface BatchArtifactMeta {
@@ -10,7 +10,7 @@ export interface BatchArtifactMeta {
   /** Dataset family (RFC jun-29 R4) — recorded in the report so verified/live/pro
    *  runs are distinguishable in the leaderboard SSOT (else a Pro resolved-rate is
    *  averaged into the Verified one). Absent ⇒ verified ⇒ byte-identical legacy report. */
-  datasetFamily?: "verified" | "live" | "pro"
+  datasetFamily?: DatasetFamily
   n: number
   /**
    * Optional pre-resolved knob telemetry. When provided, embedded verbatim
@@ -24,6 +24,12 @@ export interface BatchArtifactMeta {
    *  AND non-healthy/aborted, embedded in the report's `runHealth` field;
    *  omitted for a plain healthy run (byte-identical report). */
   runHealth?: RunHealthSummary
+  /** PMX-05 — the official grader's receipt for this campaign, when one ran.
+   *  `buildReport` runs the ONE aggregation over it and persists the totals +
+   *  per-instance dispositions. Absent ⇒ no `officialGrade` section ⇒ the report
+   *  is byte-identical to the pre-PMX-05 shape. Carried through the existing
+   *  `...meta` spread, so no other wiring changes. */
+  officialGrade?: AggregateOfficialGradeInput
 }
 
 export interface LoadSelectedInstancesOptions {
@@ -171,11 +177,21 @@ export const writeArtifacts = async (
     // knob posture for after-the-fact comparison. With an empty registry
     // the section is `{ resolved:{}, inactive:[] }` — a safe baseline marker.
     const knobs = meta.knobs ?? collectBenchKnobsTelemetry()
+    // BFND-02: this is the SWE composition root, so the report body is lifted into
+    // the canonical union HERE — the writer only ever sees a fully identified
+    // report. `toCanonicalSweReport` is inert on the bytes (the writer re-encodes
+    // the legacy SWE shape), so a verified run stays byte-identical.
     await writeReport(
       reportFile,
-      buildReport(
-        { ...meta, knobs, ...(meta.runHealth !== undefined ? { runHealth: meta.runHealth } : {}) },
-        [...results],
+      toCanonicalSweReport(
+        buildReport(
+          {
+            ...meta,
+            knobs,
+            ...(meta.runHealth !== undefined ? { runHealth: meta.runHealth } : {}),
+          },
+          [...results],
+        ),
       ),
     )
   }

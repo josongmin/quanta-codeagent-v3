@@ -25,4 +25,11 @@ export {
   type TerminationType,
 } from "./failure-classifier"
 export { loadCorpus, writeSyntheticCorpus, writeSyntheticRealCorpus } from "./loader"
-export { benchHome, benchRunDir, benchRunId, benchRunsRoot, benchWorkRoot } from "./paths"
+export {
+  benchHome,
+  benchInstanceWorkSlug,
+  benchRunDir,
+  benchRunId,
+  benchRunsRoot,
+  benchWorkRoot,
+} from "./paths"

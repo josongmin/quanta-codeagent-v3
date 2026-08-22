@@ -1,33 +1,51 @@
 import { describe, expect, test } from "bun:test"
-import {
-  buildSwebenchShim,
-  ensureBoxSwebenchShimCurrent,
-  isLiveDataset,
-  isLiveRun,
-  resolveSwebenchNamespace,
-  resolveSwebenchPipSpec,
-} from "./ec2-lifecycle"
+import type { DatasetFamily } from "../../dataset-family-token"
+import { isLiveDataset } from "../../profiles/harness-spec"
+import { resolveDatasetFamilyProfile } from "../../profiles/registry"
+import { buildSwebenchShim, ensureBoxSwebenchShimCurrent } from "./ec2-lifecycle"
+
+// aug-22 HIGH-4 — the pip-spec / namespace DERIVATION is the family profile's
+// `harnessSpec` port (ec2-lifecycle no longer owns a `family === "live"` compare;
+// it calls the profile). These thin helpers drive that port so the historical
+// assertions below keep their exact meaning.
+const pipSpecFor = (
+  datasetName: string,
+  override?: string,
+  family: DatasetFamily = "verified",
+): string =>
+  resolveDatasetFamilyProfile(family).harnessSpec({ datasetName, pipSpecOverride: override })
+    .pipSpec
+const namespaceFor = (
+  datasetName: string,
+  override?: string,
+  family: DatasetFamily = "verified",
+): string =>
+  resolveDatasetFamilyProfile(family).harnessSpec({ datasetName, namespaceOverride: override })
+    .namespace
+/** A run is Live iff the dataset NAME looks Live OR the family's own profile says
+ *  its harness is the Live fork — the same two signals `isLiveRun` folded, now
+ *  read off the profile instead of a string compare. */
+const isLiveRun = (datasetName: string, family: DatasetFamily): boolean =>
+  pipSpecFor(datasetName, undefined, family) !== "swebench"
 
 // RFC jun-29 — stock PyPI swebench KeyErrors on SWE-bench-Live repos (not in
 // MAP_REPO_VERSION_TO_SPECS, measured `KeyError: 'conan-io/conan'`). The box grading shim
 // must pull the SWE-bench-Live fork for a Live dataset; Verified/Pro stay on stock.
-describe("resolveSwebenchPipSpec (Live grading fix)", () => {
+describe("harnessSpec.pipSpec (Live grading fix)", () => {
   test("SWE-bench-Live dataset ⇒ Live fork", () => {
-    expect(resolveSwebenchPipSpec("SWE-bench-Live/SWE-bench-Live", undefined)).toBe(
+    expect(pipSpecFor("SWE-bench-Live/SWE-bench-Live", undefined)).toBe(
       "git+https://github.com/SWE-bench-Live/SWE-bench-Live",
     )
   })
 
   test("Verified / Pro / empty ⇒ stock swebench (byte-identical)", () => {
-    expect(resolveSwebenchPipSpec("princeton-nlp/SWE-bench_Verified", undefined)).toBe("swebench")
-    expect(resolveSwebenchPipSpec("ScaleAI/SWE-bench_Pro", undefined)).toBe("swebench")
-    expect(resolveSwebenchPipSpec("", undefined)).toBe("swebench")
+    expect(pipSpecFor("princeton-nlp/SWE-bench_Verified", undefined)).toBe("swebench")
+    expect(pipSpecFor("ScaleAI/SWE-bench_Pro", undefined)).toBe("swebench")
+    expect(pipSpecFor("", undefined)).toBe("swebench")
   })
 
   test("explicit QUANTA_SWEBENCH_PIP_SPEC override wins over derivation", () => {
-    expect(resolveSwebenchPipSpec("SWE-bench-Live/SWE-bench-Live", "swebench==4.0.0")).toBe(
-      "swebench==4.0.0",
-    )
+    expect(pipSpecFor("SWE-bench-Live/SWE-bench-Live", "swebench==4.0.0")).toBe("swebench==4.0.0")
   })
 
   // audit HIGH-3: the earlier exact `includes("SWE-bench-Live")` silently fell back to
@@ -41,7 +59,7 @@ describe("resolveSwebenchPipSpec (Live grading fix)", () => {
       "/home/u/SWE_bench_Live.jsonl",
     ]) {
       expect(isLiveDataset(name)).toBe(true)
-      expect(resolveSwebenchPipSpec(name, undefined)).toBe(
+      expect(pipSpecFor(name, undefined)).toBe(
         "git+https://github.com/SWE-bench-Live/SWE-bench-Live",
       )
     }
@@ -72,22 +90,22 @@ describe("isLiveRun + family-aware derivations (full-remote inert-fix)", () => {
   test("family=live forces Live even with a local path / empty name", () => {
     expect(isLiveRun("live-5.jsonl", "live")).toBe(true)
     expect(isLiveRun("", "live")).toBe(true)
-    expect(isLiveRun("", "LIVE")).toBe(true) // case-insensitive family
-    expect(resolveSwebenchPipSpec("live-5.jsonl", undefined, "live")).toBe(
+
+    expect(pipSpecFor("live-5.jsonl", undefined, "live")).toBe(
       "git+https://github.com/SWE-bench-Live/SWE-bench-Live",
     )
-    expect(resolveSwebenchNamespace("live-5.jsonl", undefined, "live")).toBe("starryzhang")
+    expect(namespaceFor("live-5.jsonl", undefined, "live")).toBe("starryzhang")
   })
 
   test("family=verified/pro/undefined ⇒ stock (byte-identical)", () => {
     expect(isLiveRun("pro-5.jsonl", "pro")).toBe(false)
-    expect(isLiveRun("verified-5.jsonl", undefined)).toBe(false)
-    expect(resolveSwebenchPipSpec("verified-5.jsonl", undefined, "verified")).toBe("swebench")
-    expect(resolveSwebenchNamespace("pro-5.jsonl", undefined, "pro")).toBe("swebench")
+    expect(isLiveRun("verified-5.jsonl", "verified")).toBe(false)
+    expect(pipSpecFor("verified-5.jsonl", undefined, "verified")).toBe("swebench")
+    expect(namespaceFor("pro-5.jsonl", undefined, "pro")).toBe("swebench")
   })
 
   test("dataset NAME alone (no family) still detects Live (back-compat)", () => {
-    expect(resolveSwebenchPipSpec("SWE-bench-Live/SWE-bench-Live", undefined)).toBe(
+    expect(pipSpecFor("SWE-bench-Live/SWE-bench-Live", undefined)).toBe(
       "git+https://github.com/SWE-bench-Live/SWE-bench-Live",
     )
   })
@@ -133,9 +151,10 @@ describe("ensureBoxSwebenchShimCurrent — stale-shim self-heal on reuse", () =>
 
   test("Verified box reused for a Live run ⇒ shim REWRITTEN (no KeyError)", async () => {
     const { session, cmds } = fakeSession(buildSwebenchShim("swebench"))
-    await withEnv({ QUANTA_SWEBENCH_DATASET_FAMILY: "live" }, () =>
-      ensureBoxSwebenchShimCurrent(session),
-    )
+    // aug-22 HIGH-1: the family is a TYPED argument off the launch config. It
+    // used to be read from the LAUNCHING process's ambient env, which only held
+    // the right value because the composition root had mirrored argv into it.
+    await ensureBoxSwebenchShimCurrent(session, "live")
     expect(cmds.some((c) => c.startsWith("cat > ~/swebench-python"))).toBe(true) // rewrote
     expect(cmds.some((c) => c.includes("import swebench"))).toBe(true) // re-warmed
   })
@@ -143,35 +162,47 @@ describe("ensureBoxSwebenchShimCurrent — stale-shim self-heal on reuse", () =>
   test("shim already current (Live want, Live shim) ⇒ NO rewrite (fast no-op)", async () => {
     const fork = "git+https://github.com/SWE-bench-Live/SWE-bench-Live"
     const { session, cmds } = fakeSession(buildSwebenchShim(fork))
-    await withEnv({ QUANTA_SWEBENCH_DATASET_FAMILY: "live" }, () =>
-      ensureBoxSwebenchShimCurrent(session),
-    )
+    await ensureBoxSwebenchShimCurrent(session, "live")
     expect(cmds.some((c) => c.startsWith("cat > ~/swebench-python"))).toBe(false) // untouched
   })
 
   test("Verified want + Verified shim ⇒ NO rewrite (byte-identical reuse)", async () => {
     const { session, cmds } = fakeSession(buildSwebenchShim("swebench"))
-    await ensureBoxSwebenchShimCurrent(session)
+    await ensureBoxSwebenchShimCurrent(session, "verified")
     expect(cmds.some((c) => c.startsWith("cat > ~/swebench-python"))).toBe(false)
+  })
+
+  // Wiring-proof (aug-22): an ambient env var claiming "live" can no longer flip
+  // the shim decision — only the TYPED argument can. Paired control: the SAME
+  // fake box goes the other way when the typed family really is live.
+  test("ambient QUANTA_SWEBENCH_DATASET_FAMILY is NOT an authority for the shim", async () => {
+    const stock = fakeSession(buildSwebenchShim("swebench"))
+    await withEnv({ QUANTA_SWEBENCH_DATASET_FAMILY: "live" }, () =>
+      ensureBoxSwebenchShimCurrent(stock.session, "verified"),
+    )
+    expect(stock.cmds.some((c) => c.startsWith("cat > ~/swebench-python"))).toBe(false)
+    const live = fakeSession(buildSwebenchShim("swebench"))
+    await ensureBoxSwebenchShimCurrent(live.session, "live")
+    expect(live.cmds.some((c) => c.startsWith("cat > ~/swebench-python"))).toBe(true)
   })
 })
 
 // audit Live CRITICAL-2: Live publishes prebuilt images under `starryzhang`, not the default
 // `swebench` org; grading a Live repo against `swebench` can't find the image (measurement-hole
 // counted as a miss). The namespace must auto-derive from the dataset, parallel to the pip-spec.
-describe("resolveSwebenchNamespace (Live image-namespace fix)", () => {
+describe("harnessSpec.namespace (Live image-namespace fix)", () => {
   test("Live dataset (any spelling) ⇒ starryzhang", () => {
-    expect(resolveSwebenchNamespace("SWE-bench-Live/SWE-bench-Live", undefined)).toBe("starryzhang")
-    expect(resolveSwebenchNamespace("swebench-live.jsonl", undefined)).toBe("starryzhang")
+    expect(namespaceFor("SWE-bench-Live/SWE-bench-Live", undefined)).toBe("starryzhang")
+    expect(namespaceFor("swebench-live.jsonl", undefined)).toBe("starryzhang")
   })
 
   test("Verified / Pro / empty ⇒ swebench (byte-identical)", () => {
-    expect(resolveSwebenchNamespace("princeton-nlp/SWE-bench_Verified", undefined)).toBe("swebench")
-    expect(resolveSwebenchNamespace("ScaleAI/SWE-bench_Pro", undefined)).toBe("swebench")
-    expect(resolveSwebenchNamespace("", undefined)).toBe("swebench")
+    expect(namespaceFor("princeton-nlp/SWE-bench_Verified", undefined)).toBe("swebench")
+    expect(namespaceFor("ScaleAI/SWE-bench_Pro", undefined)).toBe("swebench")
+    expect(namespaceFor("", undefined)).toBe("swebench")
   })
 
   test("explicit QUANTA_SWEBENCH_NAMESPACE override wins", () => {
-    expect(resolveSwebenchNamespace("SWE-bench-Live/SWE-bench-Live", "custom-ns")).toBe("custom-ns")
+    expect(namespaceFor("SWE-bench-Live/SWE-bench-Live", "custom-ns")).toBe("custom-ns")
   })
 })

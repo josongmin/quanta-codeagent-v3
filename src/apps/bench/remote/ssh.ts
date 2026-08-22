@@ -18,7 +18,9 @@ import { readFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { errMessage } from "@/shared"
+import { resolveDatasetFamilyProfile } from "../profiles/registry"
 import { SPHINX_RA_SHIM } from "../python-swebench"
+import { datasetFamilyOrDefault } from "../run-config"
 import {
   DEFAULT_MAX_WORKERS,
   defaultSpawn,
@@ -28,7 +30,6 @@ import {
   parseSwebenchReport,
   type SpawnFn,
 } from "./backend"
-import { resolveSwebenchNamespace, resolveSwebenchPipSpec } from "./box-session/ec2-lifecycle"
 
 export interface SshBackendConfig {
   /** `user@ip` ssh target. */
@@ -103,11 +104,11 @@ export const buildRemoteGradeScript = (
   maxWorkers: number,
   /** Harness install spec (`--from`): stock `swebench` for verified/pro, the
    *  SWE-bench-Live fork for live. Resolved by the caller via the SSOT
-   *  {@link resolveSwebenchPipSpec} so this grade-only path agrees with the
+   *  the family profile's `harnessSpec` port so this grade-only path agrees with the
    *  full-remote box path. Defaults to `swebench` (byte-identical legacy). */
   fromSpec = "swebench",
   /** Prebuilt-image org (`--namespace`): `swebench` for verified/pro,
-   *  `starryzhang` for live (resolved via {@link resolveSwebenchNamespace}). */
+   *  `starryzhang` for live (resolved via the same `harnessSpec` port). */
   namespace = "swebench",
 ): string => {
   const shimB64 = Buffer.from(SPHINX_RA_SHIM, "utf8").toString("base64")
@@ -193,16 +194,18 @@ export const createSshBackend = (cfg: SshBackendConfig): GradeBackend => {
     // must install the SWE-bench-Live fork + pull `starryzhang` images, else the
     // stock `swebench` harness KeyErrors on Live repos. Reuses the SAME SSOT
     // resolvers as the full-remote box path; operator env overrides still win.
-    const fromSpec = resolveSwebenchPipSpec(
-      opts.datasetPath,
-      process.env.QUANTA_SWEBENCH_PIP_SPEC,
-      opts.family,
-    )
-    const namespace = resolveSwebenchNamespace(
-      opts.datasetPath,
-      process.env.QUANTA_SWEBENCH_NAMESPACE,
-      opts.family,
-    )
+    // aug-22 HIGH-4: the harness build comes from the family PROFILE's
+    // `harnessSpec` port (the same port the full-remote box path uses), so this
+    // grade-only path cannot drift from it and knows no family names itself.
+    // The ABSENT-selector default comes from its ONE owner (`datasetFamilyOrDefault`,
+    // re-audit R4), not a private literal here — this layer knows no family names.
+    const { pipSpec: fromSpec, namespace } = resolveDatasetFamilyProfile(
+      datasetFamilyOrDefault(opts.family),
+    ).harnessSpec({
+      datasetName: opts.datasetPath,
+      pipSpecOverride: process.env.QUANTA_SWEBENCH_PIP_SPEC,
+      namespaceOverride: process.env.QUANTA_SWEBENCH_NAMESPACE,
+    })
     const script = buildRemoteGradeScript(maxWorkers, fromSpec, namespace).replace(
       "RUNID",
       () => opts.runId,

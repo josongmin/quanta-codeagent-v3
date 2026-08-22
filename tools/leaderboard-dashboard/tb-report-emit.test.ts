@@ -32,7 +32,7 @@ describe("buildTbReport dedup preference (P1-F)", () => {
         { id: "t", passed: false, durationMs: 25_000, error: { kind: "agent-crash" } },
         { id: "t", passed: false, durationMs: 1_200_000 },
       ],
-      { preset: "p", model: "m", timestamp: "T" },
+      { preset: "p", model: "m", timestamp: "T", datasetRef: "harbor@2.1.0" },
     )
     expect(r.perInstance).toHaveLength(1)
     expect(r.perInstance[0]?.durationMs).toBe(1_200_000) // real attempt, not the 25s crash
@@ -44,7 +44,7 @@ describe("buildTbReport dedup preference (P1-F)", () => {
         { id: "t", passed: true, durationMs: 200_000 },
         { id: "t", passed: true, durationMs: 40_000 },
       ],
-      { preset: "p", model: "m", timestamp: "T" },
+      { preset: "p", model: "m", timestamp: "T", datasetRef: "harbor@2.1.0" },
     )
     expect(r.perInstance[0]?.durationMs).toBe(40_000)
   })
@@ -52,11 +52,34 @@ describe("buildTbReport dedup preference (P1-F)", () => {
 
 describe("buildTbReport arm stamp (P1-C) + honest model (P3-A)", () => {
   test("arm passthrough when provided; absent ⇒ no arm field", () => {
-    expect(buildTbReport([{ id: "a", passed: true, durationMs: 1 }], { preset: "p", model: "m", timestamp: "T", arm: "baseline" }).arm).toBe("baseline")
-    expect("arm" in buildTbReport([{ id: "a", passed: true, durationMs: 1 }], { preset: "p", model: "m", timestamp: "T" })).toBe(false)
+    expect(
+      buildTbReport([{ id: "a", passed: true, durationMs: 1 }], {
+        preset: "p",
+        model: "m",
+        timestamp: "T",
+        datasetRef: "harbor@2.1.0",
+        arm: "baseline",
+      }).arm,
+    ).toBe("baseline")
+    expect(
+      "arm" in
+        buildTbReport([{ id: "a", passed: true, durationMs: 1 }], {
+          preset: "p",
+          model: "m",
+          timestamp: "T",
+          datasetRef: "harbor@2.1.0",
+        }),
+    ).toBe(false)
   })
   test("model:undefined is preserved (never fabricated)", () => {
-    expect(buildTbReport([{ id: "a", passed: true, durationMs: 1 }], { preset: "p", model: undefined, timestamp: "T" }).model).toBeUndefined()
+    expect(
+      buildTbReport([{ id: "a", passed: true, durationMs: 1 }], {
+        preset: "p",
+        model: undefined,
+        timestamp: "T",
+        datasetRef: "harbor@2.1.0",
+      }).model,
+    ).toBeUndefined()
   })
 })
 
@@ -90,10 +113,23 @@ describe("buildTbReport — SSOT IR the dashboard consumes", () => {
     { id: "kv-store-grpc", passed: true, durationMs: 200_000 },
     { id: "compile-compcert", passed: false, durationMs: 30_000 },
   ]
-  const rep = buildTbReport(insts, { preset: "TB +levers", model: "gpt-5.5", timestamp: "T" })
+  const rep = buildTbReport(insts, {
+    preset: "TB +levers",
+    model: "gpt-5.5",
+    timestamp: "T",
+    datasetRef: "harbor@2.1.0",
+  })
 
-  test("datasetFamily is terminal-bench (the 4th family)", () => {
-    expect(rep.datasetFamily).toBe("terminal-bench")
+  // BFND-02: TB is a top-level SUITE, no longer a 4th `datasetFamily`. The emitted
+  // artifact carries EXPLICIT identity and no family axis at all.
+  test("identity is the terminal-bench SUITE (explicit suite + version + dataset ref)", () => {
+    expect(rep.benchmarkSuite).toBe("terminal-bench")
+    expect(rep.benchmarkVersion).toBe("2.1")
+    expect(rep.datasetRef).toBe("harbor@2.1.0")
+    expect("datasetFamily" in (rep as unknown as Record<string, unknown>)).toBe(false)
+  })
+  test("precomputed official-shaped totals ride with the report", () => {
+    expect(rep.totals).toEqual({ total: 2, resolved: 1, resolvedPct: 50 })
   })
   test("perInstance matches the dashboard's {id,passed} contract", () => {
     // Dashboard buildRunFromFile REQUIRES perInstance array with id + passed===true.
@@ -114,7 +150,12 @@ describe("buildTbReport — SSOT IR the dashboard consumes", () => {
       { id: "t", passed: false, durationMs: 10 },
       { id: "t", passed: true, durationMs: 999 }, // a later PASS must win over an earlier FAIL
     ]
-    const r = buildTbReport(dupes, { preset: "p", model: "m", timestamp: "T" })
+    const r = buildTbReport(dupes, {
+      preset: "p",
+      model: "m",
+      timestamp: "T",
+      datasetRef: "harbor@2.1.0",
+    })
     expect(r.perInstance).toHaveLength(1)
     expect(r.perInstance[0]?.passed).toBe(true)
   })
@@ -126,7 +167,7 @@ describe("buildTbReport — SSOT IR the dashboard consumes", () => {
         { id: "t", passed: true, durationMs: 999 },
         { id: "t", passed: false, durationMs: 10 },
       ],
-      { preset: "p", model: "m", timestamp: "T" },
+      { preset: "p", model: "m", timestamp: "T", datasetRef: "harbor@2.1.0" },
     )
     expect(r.perInstance[0]?.passed).toBe(true)
   })

@@ -11,9 +11,11 @@
  *   quanta-bench box up                  # provision + bootstrap ONE warm box, leave it alive
  */
 import { errMessage, gateOn, logger, renderLspGroundingStatus } from "@/shared"
+import { resolveBenchmarkRunConfig } from "../benchmark-suite"
 import { boxRunLogPath, D, inspectBox, provisionBox } from "../remote/box-session"
 import { BENCH_SSH_SAFE_OPTS } from "../remote/box-session/shell"
 import { type PatchGenBudgetState, readPatchGenBudgetState } from "../remote/token-budget"
+import { type BenchRunConfig, readDatasetFamilySelector } from "../run-config"
 import { argValue, hasFlag, positionals, printBlock } from "./shared"
 
 const BOX_TAG_FILTERS = [
@@ -886,14 +888,37 @@ const cmdBoxRm = async (region: string): Promise<void> => {
   if (r.code !== 0) process.exit(1)
 }
 
-const cmdBoxUp = async (): Promise<void> => {
+/** The provisioner port. Defaults to the real {@link provisionBox}; injected by
+ *  the hellgate so `box up`'s launch-config construction can be observed WITHOUT
+ *  a RunInstances call. (This seam is not optional hygiene: writing the R1/R2
+ *  hellgate against the un-injected root provisioned ten live spot boxes.) */
+export type ProvisionBoxPort = typeof provisionBox
+
+export interface CmdBoxDeps {
+  readonly provision?: ProvisionBoxPort
+}
+
+const cmdBoxUp = async (runConfig: BenchRunConfig, provision: ProvisionBoxPort): Promise<void> => {
   const amiOverride = argValue("--ami") ?? process.env.QUANTA_FULL_REMOTE_AMI
   logger.info("[box] provisioning + bootstrapping ONE warm box (left alive for reuse)…")
-  const session = await provisionBox({
+  const session = await provision({
     repoDir: process.cwd(),
     authJson: "{}", // no patch-gen here; pool ships the real token per chunk
     datasetPath: "",
     launchMode: "warm-box",
+    // aug-22 re-audit R1 — thread the TYPED family onto the launch config.
+    // `bootstrapBox` picks the swebench pip-spec / grading shim and runs the
+    // family profile's `setupBox` port off THIS field. It used to read
+    // `?? process.env.QUANTA_SWEBENCH_DATASET_FAMILY`; the T2 repair deleted that
+    // ambient tail without giving `box` a typed thread, so `box up` silently
+    // downgraded a Pro/Live box to Verified (stock harness, no Pro bootstrap).
+    //
+    // Set ONLY for an EXPLICIT selector: `undefined` means "the operator selected
+    // nothing", which is what keeps the downstream subprocess wire byte-identical
+    // to HEAD (see `buildSubprocessFamilyEnv`).
+    ...(runConfig.familySelector === "explicit"
+      ? { swebenchDatasetFamily: runConfig.datasetFamily }
+      : {}),
     ...(amiOverride !== undefined && amiOverride !== "" ? { ami: amiOverride } : {}),
     onDemand: gateOn(process.env, "QUANTA_FULL_REMOTE_ONDEMAND"),
     keep: true, // leave it alive — that is the whole point of `box up`
@@ -904,14 +929,30 @@ const cmdBoxUp = async (): Promise<void> => {
   )
 }
 
-export const cmdBox = async (): Promise<void> => {
+/** aug-22 re-audit R2 — resolve the SWE-suite run config at the BOX composition
+ *  root, fail-closed, exactly like `run` / `grade` / `pool` / `bestk-passk`.
+ *  `box` was the one family-BEARING subcommand with no family gate at all: it
+ *  neither parsed nor validated `--dataset-family`, so `box up --dataset-family
+ *  prow` provisioned (and paid for) a Verified box in silence. Resolved at the
+ *  ROOT rather than inside `up` so an operator who typo'd the selector is told
+ *  so on every `box` invocation instead of only the expensive one. */
+const resolveBoxRunConfig = (argvFamily: string | undefined): BenchRunConfig => {
+  const cfg = resolveBenchmarkRunConfig({ subcommand: "box", argvFamily, env: process.env })
+  if (cfg.benchmarkSuite !== "swe-bench") {
+    throw new Error("box is the swe-bench composition root")
+  }
+  return cfg.swe
+}
+
+export const cmdBox = async (deps: CmdBoxDeps = {}): Promise<void> => {
+  const runConfig = resolveBoxRunConfig(readDatasetFamilySelector(process.argv))
   const region = argValue("--region") ?? process.env.QUANTA_FULL_REMOTE_REGION ?? D.region
   const action = positionals()[0] ?? "ls"
   if (action === "ls") return cmdBoxLs(region)
   if (action === "status") return cmdBoxStatus(region)
   if (action === "logs") return cmdBoxLogs(region)
   if (action === "rm") return cmdBoxRm(region)
-  if (action === "up") return cmdBoxUp()
+  if (action === "up") return cmdBoxUp(runConfig, deps.provision ?? provisionBox)
   logger.info(
     "usage: quanta-bench box <ls [--json]|status [--json]|logs [iid|busy|latest] [--lines N] [--follow|--json]|rm <iid|all>|up>",
   )

@@ -1,28 +1,33 @@
 #!/usr/bin/env bun
 /**
  * tb-report-emit — normalize a Terminal-Bench (harbor) result tree into ONE
- * report.json in the SAME SSOT IR the leaderboard dashboard already consumes for
- * SWE-bench verified/live/pro (RFC 06, jul-2). No suite abstraction, no dashboard
- * render changes: TB becomes a 4th `datasetFamily` that flows through the existing
- * report-scan → campaign-group → render pipeline.
+ * canonical report.json.
  *
  * WHY (jul-3): harbor writes per-task `verifier/reward.txt` (0|1) + `result.json`
  * (started/finished, token/cost stats) under `<jobTs>/<task>__<hash>/`. That is a
  * DIFFERENT on-disk shape from our `*.report.json`, and it lives on the bench box.
- * This tool reads a (synced) harbor tree and emits `report.json` with
- * `datasetFamily:"terminal-bench"` + `perInstance:[{id:<task>, passed:reward===1}]`
- * so the dashboard shows the run identically to a verified campaign.
+ * This tool reads a (synced) harbor tree and emits one report per run.
+ *
+ * BFND-02: the emitted artifact is the `terminal-bench` BRANCH of
+ * `CanonicalBenchReport` — explicit suite identity, a pinned `datasetRef`, and
+ * lossless per-trial receipts — written through the canonical `writeReport` and
+ * its canonical mirror. It is NO LONGER a 4th `datasetFamily` (families are the
+ * SWE axis); the dashboard resolves both encodings via `report-identity.ts` until
+ * BFND-03 replaces that with the suite-keyed projector registry.
  *
  * The verdicts are the REAL harbor-graded rewards (the task's own hidden test
  * suite), read verbatim — not synthesized. The report carries
  * `source:"terminal-bench-harbor"` so provenance is explicit.
  *
  *   bun tb-report-emit.ts --tree ~/.quanta/bench/tb-raw/failset-levers \
+ *       --dataset-ref terminal-bench@2.1.0 \
  *       --preset "TB +levers" --model gpt-5.5 --tag levers [--out <dir>] [--dry-run]
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { basename, join } from "node:path"
+import { benchResultsDir, type TerminalBenchReport, writeReport } from "@/runner/batch/report"
+import { buildTerminalBenchReport } from "@/runner/batch/report-terminal"
 
 // ── pure core (unit-tested) ─────────────────────────────────────────────────
 
@@ -74,32 +79,26 @@ export const durationMsFromResult = (result: unknown): number => {
   return Number.isFinite(s) && Number.isFinite(f) && f >= s ? f - s : 0
 }
 
-export interface TbReport {
-  timestamp: string
-  model: string | undefined
-  datasetFamily: "terminal-bench"
-  source: string
-  /** P1-C (RFC jul-3): the A/B arm this run belongs to, stamped EXPLICITLY at emit
-   *  (`--arm`) so the dashboard never has to guess it from a preset substring (which
-   *  silently sorted an oc1/owned-only run into `baseline` and inverted the control). */
-  arm?: "baseline" | "levers"
-  knobs: { preset: string; resolved: Record<string, never>; inactive: never[] }
-  perInstance: Array<{
-    id: string
-    passed: boolean
-    turns: number
-    durationMs: number
-    error?: { readonly kind: "agent-timeout" | "agent-crash" }
-  }>
-}
+/** BFND-02: Terminal-Bench is a SUITE, not a 4th `datasetFamily`. The emitted
+ *  artifact is the canonical `terminal-bench` branch of `CanonicalBenchReport`
+ *  (explicit suite + version + pinned dataset ref), persisted through the SAME
+ *  writer as a SWE report. */
+export type TbReport = TerminalBenchReport
 
-/** Build a report.json shaped EXACTLY like a real bench report (perInstance +
- *  knobs.preset + model + datasetFamily) so the dashboard parses it identically.
- *  Dedups to ONE verdict per task (any-pass wins, mirroring the dashboard's
- *  any-pass=solved semantic and campaign-log-to-report's dedup). */
+/** Dedup a Harbor tree to ONE receipt per task (any-pass wins, mirroring the
+ *  dashboard's any-pass=solved semantic) and hand the run's final trial set to
+ *  the canonical Terminal-Bench builder, which owns the envelope + metrics. */
 export const buildTbReport = (
   instances: readonly TbInstance[],
-  opts: { preset: string; model: string | undefined; timestamp: string; arm?: "baseline" | "levers" },
+  opts: {
+    preset: string
+    model: string | undefined
+    timestamp: string
+    /** The pinned Harbor dataset the rewards came from. REQUIRED — a report that
+     *  cannot say WHICH dataset graded it must not exist (no fabrication). */
+    datasetRef: string
+    arm?: "baseline" | "levers"
+  },
 ): TbReport => {
   const best = new Map<string, TbInstance>()
   for (const inst of instances) {
@@ -107,21 +106,13 @@ export const buildTbReport = (
     if (cur === undefined || preferInstance(inst, cur)) best.set(inst.id, inst)
   }
   const rows = [...best.values()].sort((a, b) => a.id.localeCompare(b.id))
-  return {
+  return buildTerminalBenchReport(rows, {
+    datasetRef: opts.datasetRef,
     timestamp: opts.timestamp,
     model: opts.model,
-    datasetFamily: "terminal-bench",
-    source: "terminal-bench-harbor",
+    preset: opts.preset,
     ...(opts.arm !== undefined ? { arm: opts.arm } : {}),
-    knobs: { preset: opts.preset, resolved: {}, inactive: [] },
-    perInstance: rows.map((r) => ({
-      id: r.id,
-      passed: r.passed,
-      turns: 0, // harbor reward tree carries no turn count; trajectory-only.
-      durationMs: r.durationMs,
-      ...(r.error !== undefined ? { error: r.error } : {}),
-    })),
-  }
+  })
 }
 
 /** Dedup preference (P1-F, RFC jul-3): a PASS always beats a non-pass. Among two of the
@@ -216,15 +207,18 @@ const argOf = (flag: string): string | undefined => {
   return i >= 0 ? process.argv[i + 1] : undefined
 }
 
-const main = (): void => {
+const main = async (): Promise<void> => {
   const out = (s: string): void => {
     process.stdout.write(`${s}\n`)
   }
   const tree = argOf("--tree")
   const preset = argOf("--preset") ?? "terminal-bench"
-  if (tree === undefined) {
+  // BFND-02: identity is EXPLICIT. A Terminal artifact must name the Harbor
+  // dataset it was graded against — never inferred from the tree path or a tag.
+  const datasetRef = argOf("--dataset-ref")
+  if (tree === undefined || datasetRef === undefined || datasetRef.trim() === "") {
     out(
-      "usage: tb-report-emit.ts --tree <harbor-tree> [--preset name] [--model m] [--tag t] [--out dir] [--dry-run]",
+      "usage: tb-report-emit.ts --tree <harbor-tree> --dataset-ref <harbor-dataset@version> [--preset name] [--model m] [--tag t] [--out dir] [--dry-run]",
     )
     process.exit(2)
   }
@@ -241,11 +235,11 @@ const main = (): void => {
     process.exit(2)
   }
   const tag = argOf("--tag") ?? "tb"
+  // ONE results-dir owner: the canonical `benchResultsDir()`. `off` disables the
+  // MIRROR, not this tool's output, so an explicit sink is still needed then —
+  // byte-identical destination behaviour to the pre-BFND-02 fallback chain.
   const outDir =
-    argOf("--out") ??
-    (process.env.QUANTA_BENCH_RESULTS_DIR && process.env.QUANTA_BENCH_RESULTS_DIR !== "off"
-      ? process.env.QUANTA_BENCH_RESULTS_DIR
-      : join(homedir(), ".quanta", "bench", "results"))
+    argOf("--out") ?? benchResultsDir() ?? join(homedir(), ".quanta", "bench", "results")
 
   const instances = scanHarborTree(tree, realFs)
   if (instances.length === 0) {
@@ -255,6 +249,7 @@ const main = (): void => {
   const report = buildTbReport(instances, {
     preset,
     model,
+    datasetRef,
     timestamp: new Date().toISOString(),
     ...(arm !== undefined ? { arm } : {}),
   })
@@ -263,13 +258,14 @@ const main = (): void => {
   if (process.argv.includes("--dry-run")) {
     out(`[dry-run] would write ${dest}`)
   } else {
-    mkdirSync(outDir, { recursive: true })
-    writeFileSync(dest, JSON.stringify(report, null, 2))
+    // ONE writer: the canonical `writeReport` (+ its canonical mirror), never a
+    // hand-rolled serialization.
+    await writeReport(dest, report)
     out(`wrote ${basename(dest)} → ${outDir}`)
   }
   out(
-    `  ${report.perInstance.length} tasks (${passed.length} PASS) family=terminal-bench preset="${preset}"`,
+    `  ${report.perInstance.length} tasks (${passed.length} PASS) suite=terminal-bench dataset=${datasetRef} preset="${preset}"`,
   )
 }
 
-if (import.meta.main) main()
+if (import.meta.main) void main()

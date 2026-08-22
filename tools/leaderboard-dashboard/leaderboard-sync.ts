@@ -23,6 +23,7 @@
 import { existsSync, readdirSync, readFileSync, type Stats, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { decodeReportArtifact } from "./projectors/registry"
 
 // ── pure core (unit-tested; no IO) ──────────────────────────────────────────
 
@@ -168,35 +169,57 @@ const walkReportFiles = (root: string, acc: string[], depth = 0): void => {
   }
 }
 
+/**
+ * MED-C — fold ONE persisted artifact into SWE leaderboard rows.
+ *
+ * Identity comes from {@link decodeReportArtifact} (the single read boundary),
+ * never from this module's own reading of the bytes: a foreign suite's artifact
+ * contributes nothing here even when its task ids happen to match the SWE
+ * instance-id shape, and an artifact whose identity cannot be established is
+ * dropped rather than guessed into the SWE set.
+ */
+export const sweRowsFromArtifact = (raw: unknown, ts: number): ReportRow[] => {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return []
+  try {
+    if (decodeReportArtifact(raw).benchmarkSuite !== "swe-bench") return []
+  } catch {
+    return []
+  }
+  const d = raw as Record<string, unknown>
+  const preset = (d.knobs as { preset?: string })?.preset
+  const model = d.model as string | undefined
+  const pi = (d.perInstance ?? d.results) as Array<Record<string, unknown>> | undefined
+  if (!Array.isArray(pi)) return []
+  const rows: ReportRow[] = []
+  for (const r of pi) {
+    const id = (r.id ?? r.instance_id) as string | undefined
+    if (id === undefined) continue
+    rows.push({
+      id,
+      passed: r.passed === true,
+      preset,
+      model,
+      turns: typeof r.turns === "number" ? r.turns : undefined,
+      ts,
+    })
+  }
+  return rows
+}
+
 const readReportRows = (roots: readonly string[]): ReportRow[] => {
   const files: string[] = []
   for (const root of roots) walkReportFiles(root, files)
   const rows: ReportRow[] = []
   for (const p of files) {
     let st: Stats
-    let d: Record<string, unknown>
+    let d: unknown
     try {
       st = statSync(p)
-      d = JSON.parse(readFileSync(p, "utf8")) as Record<string, unknown>
+      d = JSON.parse(readFileSync(p, "utf8"))
     } catch {
       continue
     }
-    const preset = (d.knobs as { preset?: string })?.preset
-    const model = d.model as string | undefined
-    const pi = (d.perInstance ?? d.results) as Array<Record<string, unknown>> | undefined
-    if (!Array.isArray(pi)) continue
-    for (const r of pi) {
-      const id = (r.id ?? r.instance_id) as string | undefined
-      if (id === undefined) continue
-      rows.push({
-        id,
-        passed: r.passed === true,
-        preset,
-        model,
-        turns: typeof r.turns === "number" ? r.turns : undefined,
-        ts: st.mtimeMs,
-      })
-    }
+    rows.push(...sweRowsFromArtifact(d, st.mtimeMs))
   }
   return rows
 }

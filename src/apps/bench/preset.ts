@@ -1,5 +1,7 @@
 import { KNOB_PRESETS, presetRequiresLiveLspGrounding } from "@/runner/knobs"
 import { gateOn } from "@/shared"
+import type { DatasetFamily } from "./dataset-family-token"
+import { resolveDatasetFamilyProfile } from "./profiles/registry"
 
 export const CURRENT_BENCH_BASE_PRESET = "agentless-v3-thin-strict"
 export const V5_ADAPTIVE_PRESET = "agentless-v5-thin-and-expanded"
@@ -43,12 +45,16 @@ export const resolveBenchExecutionPreset = (args: {
   return asNonEmpty(args.argvPreset) ?? CURRENT_BENCH_BASE_PRESET
 }
 
-/** Remote Pro spans Python, Go, JS, and TS, while the current strict remote box
- * proves only Pyright. Use the LSP-optional baseline for Pro only when the
- * operator did not explicitly choose any preset. Explicit experiments retain
- * the normal precedence unchanged. */
+/** Per-family REMOTE preset default (T4 layer 5). Remote Pro spans Python, Go,
+ * JS, and TS while the current strict remote box proves only Pyright, so Pro's
+ * profile declares the LSP-optional baseline — applied ONLY when the operator did
+ * not explicitly choose any preset. Explicit experiments retain the normal
+ * precedence unchanged. */
 export const resolveRemoteBenchExecutionPreset = (args: {
-  readonly family: string
+  /** TYPED resolved family (aug-22 HIGH-1) — never a raw env string. Already
+   *  normalized by the ONE `normalizeDatasetFamilyToken` owner, so no ad-hoc
+   *  case-folding is needed (or permitted) here. */
+  readonly family: DatasetFamily
   readonly envVars: Record<string, string | undefined>
   readonly argvPreset?: string | undefined
 }): string => {
@@ -58,16 +64,28 @@ export const resolveRemoteBenchExecutionPreset = (args: {
     gateOn(args.envVars, "QUANTA_BENCH_SOTA") ||
     asNonEmpty(args.envVars.QUANTA_KNOBS_PRESET) !== undefined ||
     asNonEmpty(args.argvPreset) !== undefined
-  return args.family.toLowerCase() === "pro" && !explicitlySelected ? "agentless-v1" : resolved
+  // aug-22 HIGH-4: the per-family default preset is the profile's
+  // `remoteDefaultPreset` field, not a `family === "pro"` compare here. A family
+  // with no opinion leaves the normal precedence untouched.
+  const familyDefault = resolveDatasetFamilyProfile(args.family).remoteDefaultPreset
+  return familyDefault !== undefined && !explicitlySelected ? familyDefault : resolved
 }
 
 /** Seed `QUANTA_BENCH_PRESET` only when the operator did NOT already select a
  * posture through env. This keeps local `bench run` / `index.ts` honest by
  * default while preserving explicit `QUANTA_BENCH_SOTA` / `QUANTA_KNOBS_PRESET`
- * experiments unchanged. */
+ * experiments unchanged.
+ *
+ * HIGH-1 (aug-22): `family` is now a REQUIRED TYPED parameter threaded from the
+ * composition root's resolved `BenchRunConfig`. It used to be read back out of
+ * `env.QUANTA_SWEBENCH_DATASET_FAMILY` — which the composition root had written
+ * four lines earlier from argv, making argv→env→preset a pure in-process
+ * round-trip through ambient env. The typed field is the sole authority; env is
+ * only ever a wire for a real subprocess. */
 export const seedBenchExecutionPreset = (
   env: Record<string, string | undefined>,
-  argvPreset?: string,
+  argvPreset: string | undefined,
+  family: DatasetFamily,
 ): void => {
   const envPreset = asNonEmpty(env.QUANTA_BENCH_PRESET)
   if (envPreset !== undefined) {
@@ -77,7 +95,7 @@ export const seedBenchExecutionPreset = (
   if (gateOn(env, "QUANTA_BENCH_SOTA")) return
   if (asNonEmpty(env.QUANTA_KNOBS_PRESET) !== undefined) return
   env.QUANTA_BENCH_PRESET = resolveRemoteBenchExecutionPreset({
-    family: env.QUANTA_SWEBENCH_DATASET_FAMILY ?? "verified",
+    family,
     envVars: env,
     argvPreset,
   })

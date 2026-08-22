@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { mkdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -40,6 +41,12 @@ const ensureDir = (dir: string): string => {
  *  run is inspectable; callers still `rm` their own `mkdtemp` subdir on the
  *  success path. */
 export const benchWorkRoot = (): string => ensureDir(join(benchHome(), "work"))
+
+/** Opaque agent-visible workdir component. Dataset instance ids are retained in
+ * reports and grader metadata, but never exposed through the sandbox path: some
+ * SWE-bench Pro ids contain the upstream fix commit SHA. */
+export const benchInstanceWorkSlug = (instanceId: string): string =>
+  createHash("sha256").update(instanceId).digest("hex").slice(0, 20)
 
 /** Run-output root (predictions / report / observe trajectories). */
 export const benchRunsRoot = (): string => ensureDir(join(benchHome(), "runs"))

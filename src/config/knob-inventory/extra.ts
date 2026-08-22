@@ -239,6 +239,33 @@ export const EXTRA: readonly KnobInventoryEntry[] = [
     describe: "SWE-bench corpus root.",
     readSite: "apps/bench/index.ts",
   },
+  // PMX-01 — SWE-bench ProMax's OWN settings. Deliberately NOT spelled
+  // `QUANTA_SWEBENCH_PRO_*`: ProMax and ScaleAI Pro are different corpora with
+  // different evaluators and must never share a grader, a harness location, or a
+  // report partition. Both are resolved ONCE at the bench composition root
+  // (`apps/bench/run-config.ts` → `promax/settings.ts`), fail-closed on an
+  // explicitly-set-but-unusable value; absent leaves the ProMax lane unconfigured
+  // rather than guessing a bundle (PMX-00 forbids search paths and downloads).
+  {
+    envKey: "QUANTA_PROMAX_BUNDLE_ROOT",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "SWE-bench ProMax: ABSOLUTE root of the operator's already-verified, frozen upstream bundle checkout (dataset + eval metadata + the pinned test_run.py). No default and no search path — an unset value leaves the ProMax lane unconfigured instead of resolving a moving ref. A relative or blank value is REFUSED at the composition root.",
+    readSite: "apps/bench/promax/settings.ts",
+  },
+  {
+    envKey: "QUANTA_PROMAX_PYTHON",
+    kind: "string",
+    default: undefined,
+    group: "bench",
+    home: "bench",
+    describe:
+      "SWE-bench ProMax: the interpreter that runs the pinned upstream evaluator (bare name or absolute path). Unset ⇒ the pinned-evaluator invocation boundary's own `python` default. A blank value is REFUSED at the composition root.",
+    readSite: "apps/bench/promax/settings.ts",
+  },
   {
     envKey: "QUANTA_ALLOW_EXTRA_BOXES",
     kind: "bool",

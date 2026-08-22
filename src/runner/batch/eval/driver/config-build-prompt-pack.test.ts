@@ -83,6 +83,25 @@ describe("A2 — batch eval driver threads promptPack:'batch' into config.system
     // And the exact pack the driver selects DOES carry it (the seam value).
     expect(buildSystemPrompt(process.cwd(), { promptPack: "batch" })).toContain(BATCH_RULE_MARKER)
   })
+
+  test("scored SWE sessions omit external web tools while custom bench sessions retain them", () => {
+    const sandbox = process.cwd()
+    const configFor = (instance: Instance) =>
+      buildConfig(
+        instance,
+        makeDeps(),
+        sandbox,
+        new AbortController().signal,
+        nullStream,
+      ).registry.toolNames()
+
+    const scored = configFor(makeSwebenchInstance(sandbox))
+    expect(scored).not.toContain("web_fetch")
+    expect(scored).not.toContain("read_image_url")
+    expect(configFor(makeInstance(sandbox))).toEqual(
+      expect.arrayContaining(["web_fetch", "read_image_url"]),
+    )
+  })
 })
 
 describe("verify axis (jul-4) — QUANTA_BENCH_REPRODUCE_FIRST gates reproduce-first into config.system", () => {

@@ -18,6 +18,7 @@ import type {
 } from "./providers/provider-port"
 import { resolveProvider } from "./providers/registry"
 import { type VertexAdapterOptions, VertexProviderAdapter } from "./providers/vertex-adapter"
+import { assertReasoningEffortAcceptedByWire, decideReasoningEffort } from "./reasoning-effort"
 import { jsonlReplayStore, replayLlmPort } from "./replay"
 import type { CacheTtl } from "./types"
 
@@ -177,6 +178,26 @@ const ADAPTER_REGISTRY: Record<
     // normalizes to Anthropic's auto|standard_only and drops the rest. Absent ⇒
     // omitted ⇒ no `service_tier` key (byte-identical).
     const serviceTier = resolveServiceTier(opts, env)
+    // Reasoning effort on Anthropic: EXPLICIT, not an absence. The Messages API
+    // has no `reasoning.effort` field (@anthropic-ai/sdk@0.40.1 — its extended-
+    // thinking channel is `thinking:{budget_tokens}`, fed by the SEPARATE
+    // `QUANTA_EFFORT` knob). Previously this arm simply never read
+    // `reasoningEffort`, so a run configured with an effort ran at the model's
+    // own default while the receipt still claimed the requested value. The
+    // decision is now taken and asserted here, at the composition root, so the
+    // run refuses to start rather than misreport. Nothing requested ⇒ `absent`
+    // ⇒ no throw and a byte-identical adapter config.
+    // Construction-time assert is the WIRE-acceptance one: `rejected` is fatal,
+    // `unsupported` is not. Anthropic short-circuits every requested effort to
+    // `unsupported`, and `anthropic` is the DEFAULT provider (`resolveProvider`
+    // below), so a fatal here bricked interactive sessions — the Tauri daemon
+    // forwards QUANTA_REASONING_EFFORT and the web `/effort` slash writes it.
+    // Nothing is misreported by building an adapter; the receipt path is the
+    // choke point that must gate on `isReasoningEffortHonest` (bench roots call
+    // `assertReasoningEffortDeliverable` and refuse to start).
+    assertReasoningEffortAcceptedByWire(
+      decideReasoningEffort(resolveReasoningEffort(opts, env), "anthropic-messages"),
+    )
     // gap-other-agent GAP 3 — 1M-context: strip the `[1m]` suffix off the API
     // model id and, when active+eligible, ADD the `context-1m-2025-08-07` beta
     // header (de-duped). Inactive ⇒ canonical model unchanged, no header added

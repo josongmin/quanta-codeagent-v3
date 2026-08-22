@@ -3,11 +3,11 @@ import {
   buildResponsesBody,
   messageToResponsesItems,
   normalizeResponsesOutputItem,
-  normalizeResponsesReasoningEffort,
   normalizeResponsesReasoningVerbosity,
   strictExtensionTail,
   toResponsesToolChoice,
 } from "@/llm/openai-responses-wire"
+import { decideResponsesReasoningEffort } from "@/llm/reasoning-effort"
 import type { Message, StreamInput } from "@/llm/types"
 import { LLMError } from "@/shared"
 
@@ -90,21 +90,33 @@ describe("toResponsesToolChoice", () => {
 
 // ─── TICKET 23 — reasoning summary:"auto" + verbosity + effort xhigh ──────────
 
-describe("normalizeResponsesReasoningEffort — xhigh forward-compat", () => {
+describe("decideResponsesReasoningEffort — xhigh forward-compat", () => {
+  // Successor of `normalizeResponsesReasoningEffort`, which returned
+  // `string | undefined` and so could not tell "nothing requested" apart from
+  // "cannot be delivered". The in-set arms below are unchanged in outcome.
   test("accepts the existing closed set (case-insensitive)", () => {
-    expect(normalizeResponsesReasoningEffort("minimal")).toBe("minimal")
-    expect(normalizeResponsesReasoningEffort("LOW")).toBe("low")
-    expect(normalizeResponsesReasoningEffort("Medium")).toBe("medium")
-    expect(normalizeResponsesReasoningEffort("high")).toBe("high")
+    expect(decideResponsesReasoningEffort("minimal")).toEqual({
+      kind: "delivered",
+      effort: "minimal",
+    })
+    expect(decideResponsesReasoningEffort("LOW")).toEqual({ kind: "delivered", effort: "low" })
+    expect(decideResponsesReasoningEffort("Medium")).toEqual({
+      kind: "delivered",
+      effort: "medium",
+    })
+    expect(decideResponsesReasoningEffort("high")).toEqual({ kind: "delivered", effort: "high" })
   })
   test("accepts 'xhigh' (forward-compat) lowercased, incl. 'XHIGH'", () => {
-    expect(normalizeResponsesReasoningEffort("xhigh")).toBe("xhigh")
-    expect(normalizeResponsesReasoningEffort("XHIGH")).toBe("xhigh")
+    expect(decideResponsesReasoningEffort("xhigh")).toEqual({ kind: "delivered", effort: "xhigh" })
+    expect(decideResponsesReasoningEffort("XHIGH")).toEqual({ kind: "delivered", effort: "xhigh" })
   })
-  test("rejects out-of-set values ('ultra' / undefined) ⇒ undefined", () => {
-    expect(normalizeResponsesReasoningEffort("ultra")).toBeUndefined()
-    expect(normalizeResponsesReasoningEffort(undefined)).toBeUndefined()
-    expect(normalizeResponsesReasoningEffort("")).toBeUndefined()
+  test("out-of-set 'ultra' is REJECTED — distinct from absent, never dropped", () => {
+    expect(decideResponsesReasoningEffort("ultra")).toMatchObject({
+      kind: "rejected",
+      requested: "ultra",
+    })
+    expect(decideResponsesReasoningEffort(undefined)).toEqual({ kind: "absent" })
+    expect(decideResponsesReasoningEffort("")).toEqual({ kind: "absent" })
   })
 })
 

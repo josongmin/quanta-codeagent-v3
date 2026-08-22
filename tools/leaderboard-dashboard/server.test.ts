@@ -16,8 +16,24 @@
 import { describe, expect, test } from "bun:test"
 import { readFileSync } from "node:fs"
 import { join, basename as pathBasename } from "node:path"
+import { renderDashboardPage } from "./page"
+import { suiteClientAssets } from "./projectors/registry"
 
-const SRC = readFileSync(join(import.meta.dir, "server.ts"), "utf8")
+/**
+ * HIGH-F — bind the REAL artifact.
+ *
+ * The previous harness manufactured `server.ts + suiteClientAssets().script`
+ * ITSELF, so nothing asserted that the page actually interpolates a suite bundle:
+ * deleting the Terminal client wiring from the served page left every test green.
+ * `PAGE` below is the exact byte-string `routeRequest` hands the browser, so a
+ * client function is only extractable here because the page really ships it.
+ */
+const PAGE = renderDashboardPage({ tracePort: 4318 })
+
+/** server.ts still owns the SERVER-side helpers (parse/classify/aggregate); the
+ *  client layer lives in the rendered page. Both are the shipped source. */
+const SERVER_SRC = readFileSync(join(import.meta.dir, "server.ts"), "utf8")
+const SRC = [SERVER_SRC, PAGE].join("\n")
 // campaignKeyOf was extracted to family-partition.ts (genuinely importable; also
 // unit-tested in family-partition.test.ts). The aggregation harness below slices its
 // REAL source from there — `indexOf("const campaignKeyOf =")` lands past the `export `,
@@ -51,8 +67,68 @@ function extractEsc(): string {
   return m2[0]
 }
 
+/**
+ * BFND-03: the SWE render path is now reached through the page's SUITE dispatch
+ * (`suiteView()` → a registered suite's hooks, else the default shell). Every
+ * harness that evaluates a shell renderer must therefore carry the real dispatch
+ * helpers — sliced from the shipped source — plus an EMPTY `SUITE_VIEWS`, which
+ * is what "no suite claimed this view" looks like in the browser.
+ */
+const SUITE_DISPATCH_PRELUDE: readonly string[] = [
+  'var BENCH="verified";',
+  "var SUITE_VIEWS={};",
+  extractEsc(),
+  extractFn("suiteOfView"),
+  extractFn("suiteView"),
+]
+
 const HOSTILE = `</style><script>alert(1)</script>`
 const HOSTILE_CHARS = `& < > " '`
+
+// ---------------------------------------------------------------------------
+// HIGH-F rail — the served page really ships each REGISTERED suite's client
+// bundle. This is the rail the old harness could not have: it compares the page
+// the server hands out against what the registry says the suites contributed.
+// ---------------------------------------------------------------------------
+
+describe("BFND-03 — the served page interpolates the suite client bundles", () => {
+  test("the registry's bundles are present VERBATIM in the shipped page", () => {
+    const assets = suiteClientAssets()
+    // Known-item floor first: the registry must actually have something to ship,
+    // so an empty-registry regression cannot satisfy `toContain("")`.
+    expect(assets.script.length).toBeGreaterThan(1000)
+    expect(assets.style.length).toBeGreaterThan(50)
+    expect(assets.script).toContain("function renderTbCards")
+    // ...and the page carries them byte-for-byte.
+    expect(PAGE).toContain(assets.script)
+    expect(PAGE).toContain(assets.style)
+  })
+
+  test("the Terminal suite's real render entry points reach the browser", () => {
+    for (const fn of [
+      "function tbOurResults",
+      "function tbTaskRows",
+      "function renderTbCards",
+      "function renderTbMatrix",
+      "function drawTbMatrix",
+    ]) {
+      expect(PAGE).toContain(fn)
+    }
+    // ...and the shell's suite dispatch that those bundles register into.
+    expect(PAGE).toContain("var SUITE_VIEWS = {}")
+    expect(PAGE).toContain("function suiteView()")
+    expect(PAGE).toContain("SUITE_VIEWS[")
+  })
+
+  test("the page is a real document, and its dynamic inputs are interpolated", () => {
+    expect(PAGE.startsWith("<!doctype html>")).toBe(true)
+    expect(PAGE.trimEnd().endsWith("</html>")).toBe(true)
+    // Non-vacuity for the interpolation itself: a distinct port must appear, so a
+    // page that had gone static (all `${…}` dropped) fails here.
+    expect(renderDashboardPage({ tracePort: 45678 })).toContain("45678")
+    expect(PAGE).not.toContain("45678")
+  })
+})
 
 /** Evaluate the shipped `esc` helper in isolation. */
 function loadEsc(): (s: string) => string {
@@ -226,7 +302,10 @@ describe("dashboard XSS escaping", () => {
     const DATA = {
       topScaffolds: [{ key: HOSTILE, model: HOSTILE, resolved: 1, pct: 50 }],
     }
-    const src = ['var BENCH="verified";', extractEsc(), extractFn("renderScaffolds"), "return renderScaffolds();"].join("\n")
+    const src = SUITE_DISPATCH_PRELUDE.concat([
+      extractFn("renderScaffolds"),
+      "return renderScaffolds();",
+    ]).join("\n")
     const out = new Function("DATA", "document", src)(DATA, {}) as string
     expect(out).not.toContain("<script>")
     expect(out).toContain("&lt;script&gt;")
@@ -370,7 +449,10 @@ describe("dashboard XSS escaping", () => {
       live: [],
       coverage: null,
     }
-    const src = ['var BENCH="verified";', extractEsc(), extractFn("renderCards"), "renderCards(); return null;"].join("\n")
+    const src = SUITE_DISPATCH_PRELUDE.concat([
+      extractFn("renderCards"),
+      "renderCards(); return null;",
+    ]).join("\n")
     const doc = {
       sink: "",
       getElementById() {
@@ -529,6 +611,211 @@ function loadAgg(): AggModule {
   return new Function("basename", js)(pathBasename) as AggModule
 }
 
+// ---------------------------------------------------------------------------
+// HIGH-F rail — server.ts DELEGATES to the projector registry with a LIVE CALL.
+//
+// The old rail was `expect(src).toContain("projectReport")` — a bare-identifier
+// substring, satisfied by a dead import. Here we run server.ts's REAL
+// `buildRunFromFile` with an injected `projectReport` and prove (a) it is called
+// with the parsed artifact, (b) every suite-derived field on the Run comes back
+// from the projection, and (c) a refusing projector drops the run.
+// ---------------------------------------------------------------------------
+
+interface DispatchProbe {
+  buildRun: (file: string, mtime: number) => Record<string, unknown> | null
+  calls: unknown[]
+}
+
+const ARTIFACT = {
+  timestamp: "2026-08-22T00:00:00.000Z",
+  model: "gpt-5.5",
+  knobs: { preset: "raw-knobs-preset" },
+  perInstance: [
+    { id: "django__django-1", passed: true, turns: 3, durationMs: 10 },
+    { id: "django__django-2", passed: false, turns: 4, durationMs: 20 },
+  ],
+}
+
+function loadDispatch(projection: unknown, artifact: unknown = ARTIFACT): DispatchProbe {
+  const ts = [
+    sliceExprArrow("const asRecord ="),
+    sliceConst("asString"),
+    sliceConst("RE_RUNNABLE_TERMINATIONS"),
+    sliceDecl("function isReRunnableHole"),
+    sliceDecl("function classifyFail"),
+    sliceExprArrow("const instanceIsUnmeasured ="),
+    sliceExprArrow("const rowBaseOf ="),
+    sliceExprArrow("const sweRowsOf ="),
+    sliceExprArrow("const terminalRowsOf ="),
+    sliceDecl("const tallyOf ="),
+    sliceDecl("function buildRunFromFile"),
+    "return buildRunFromFile;",
+  ].join("\n")
+  const calls: unknown[] = []
+  const projectReport = (raw: unknown): unknown => {
+    calls.push(raw)
+    if (projection === null) throw new Error("unidentifiable artifact")
+    return projection
+  }
+  const buildRun = new Function(
+    "readFileSync",
+    "basename",
+    "presetLabel",
+    "projectReport",
+    TRANSPILER.transformSync(ts),
+  )(
+    () => JSON.stringify(artifact),
+    (p: string) => pathBasename(p),
+    () => "SERVER-SIDE-FALLBACK-LABEL",
+    projectReport,
+  ) as DispatchProbe["buildRun"]
+  return { buildRun, calls }
+}
+
+describe("BFND-03 — server.ts dispatches every artifact through the registry", () => {
+  test("the projector is CALLED with the parsed artifact, and its projection is used", () => {
+    const { buildRun, calls } = loadDispatch({
+      benchmarkSuite: "terminal-bench",
+      instanceRowKind: "trial-receipt",
+      viewId: "terminal-bench",
+      campaignIdentity: "terminal-bench@2.1 pinned-ref",
+      presetLabel: "TB +levers",
+      headline: { resolved: 7, total: 9 },
+    })
+    const run = buildRun("/runs/x.report.json", 123)
+    // (a) the LIVE call happened, with the artifact itself — not a filename sniff.
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toEqual(ARTIFACT)
+    // (b) every suite-derived field is the projection's, including the headline
+    //     that overrides the shell's own row count (2 rows, 1 passed).
+    expect(run).not.toBeNull()
+    expect(run?.benchmarkSuite).toBe("terminal-bench")
+    expect(run?.viewId).toBe("terminal-bench")
+    expect(run?.campaignIdentity).toBe("terminal-bench@2.1 pinned-ref")
+    expect(run?.preset).toBe("TB +levers")
+    expect(run?.resolved).toBe(7)
+    expect(run?.total).toBe(9)
+    expect("datasetFamily" in (run ?? {})).toBe(false)
+  })
+
+  test("PAIRED CONTROL: a different projection produces a different Run", () => {
+    const { buildRun } = loadDispatch({
+      benchmarkSuite: "swe-bench",
+      instanceRowKind: "swe-grade",
+      viewId: "pro",
+      datasetFamily: "pro",
+      campaignIdentity: "pro",
+    })
+    const run = buildRun("/runs/x.report.json", 123)
+    expect(run?.benchmarkSuite).toBe("swe-bench")
+    expect(run?.viewId).toBe("pro")
+    expect(run?.datasetFamily).toBe("pro")
+    expect(run?.campaignIdentity).toBe("pro")
+    // No projected headline ⇒ the shell counts rows itself (1 of 2 passed).
+    expect(run?.resolved).toBe(1)
+    expect(run?.total).toBe(2)
+    // No suite-owned preset label ⇒ the SWE fingerprint chain runs.
+    expect(run?.preset).toBe("SERVER-SIDE-FALLBACK-LABEL")
+  })
+
+  test("a REFUSED artifact is dropped, never rendered under a guessed identity", () => {
+    const { buildRun, calls } = loadDispatch(null)
+    expect(buildRun("/runs/x.report.json", 123)).toBeNull()
+    expect(calls).toHaveLength(1)
+  })
+
+  // -------------------------------------------------------------------------
+  // MED-D — the consumer shape is split PER SUITE. A Terminal row must not carry
+  // the SWE-only `fail` / `goldResolved` channels, and a SWE row must not carry
+  // the Terminal-only infra-fault `error` channel. Observed on the rows the
+  // server actually puts in the `/api/data` payload.
+  // -------------------------------------------------------------------------
+
+  /** One artifact whose rows carry BOTH suites' per-instance vocabularies, so a
+   *  broad element type would happily keep every key on every row. */
+  const MIXED_ARTIFACT = {
+    timestamp: "2026-08-22T00:00:00.000Z",
+    model: "gpt-5.5",
+    knobs: { preset: "p" },
+    perInstance: [
+      {
+        id: "row-a",
+        passed: false,
+        turns: 4,
+        durationMs: 20,
+        goldResolved: false,
+        failure: { termination: "throttled" },
+        error: { kind: "agent-crash" },
+      },
+      { id: "row-b", passed: true, turns: 1, durationMs: 5 },
+    ],
+  }
+
+  const rowsFor = (instanceRowKind: string, viewId: string): Record<string, unknown>[] => {
+    const { buildRun } = loadDispatch(
+      { benchmarkSuite: "s", instanceRowKind, viewId, campaignIdentity: "id" },
+      MIXED_ARTIFACT,
+    )
+    const run = buildRun("/runs/x.report.json", 1)
+    return (run?.perInstance ?? []) as Record<string, unknown>[]
+  }
+
+  test("a Terminal run's rows carry NO SWE-only fields", () => {
+    const rows = rowsFor("trial-receipt", "terminal-bench")
+    expect(rows).toHaveLength(2)
+    for (const row of rows) {
+      expect("fail" in row).toBe(false)
+      expect("goldResolved" in row).toBe(false)
+      // ...while the Terminal channel it DOES own survives (non-vacuity).
+      expect(Object.keys(row).sort()).toEqual(
+        row.id === "row-a"
+          ? ["durationMs", "error", "id", "passed", "turns"]
+          : ["durationMs", "id", "passed", "turns"],
+      )
+    }
+    expect(rows[0]?.error).toEqual({ kind: "agent-crash" })
+  })
+
+  test("a SWE run's rows carry NO Terminal-only infra-fault field", () => {
+    const rows = rowsFor("swe-grade", "verified")
+    expect(rows).toHaveLength(2)
+    for (const row of rows) expect("error" in row).toBe(false)
+    // ...while the SWE channels it DOES own survive (non-vacuity).
+    expect(rows[0]?.goldResolved).toBe(false)
+    expect((rows[0]?.fail as { termination: string } | null)?.termination).toBe("throttled")
+    expect(rows[1]?.fail).toBeNull()
+  })
+
+  test("PAIRED CONTROL: the D1 denominator rule survives the split on BOTH suites", () => {
+    // agent-crash is a re-runnable hole on Terminal (its own `error` channel)…
+    const { buildRun: tb } = loadDispatch(
+      {
+        benchmarkSuite: "terminal-bench",
+        instanceRowKind: "trial-receipt",
+        viewId: "terminal-bench",
+        campaignIdentity: "id",
+      },
+      MIXED_ARTIFACT,
+    )
+    const tbRun = tb("/runs/x.report.json", 1)
+    expect(tbRun?.unmeasured).toBe(1)
+    expect(tbRun?.total).toBe(1)
+    // …and `throttled` is one on SWE (its own `fail.reRunnable` channel).
+    const { buildRun: swe } = loadDispatch(
+      {
+        benchmarkSuite: "swe-bench",
+        instanceRowKind: "swe-grade",
+        viewId: "verified",
+        campaignIdentity: "",
+      },
+      MIXED_ARTIFACT,
+    )
+    const sweRun = swe("/runs/x.report.json", 1)
+    expect(sweRun?.unmeasured).toBe(1)
+    expect(sweRun?.total).toBe(1)
+  })
+})
+
 // A failing perInstance-like report row with a given termination.
 const failRow = (
   id: string,
@@ -555,7 +842,13 @@ const makeRun = (
     model: "m",
     preset: "p",
     mtime: 1,
+    benchmarkSuite: "swe-bench",
+    instanceRowKind: "swe-grade",
+    viewId: datasetFamily,
     datasetFamily,
+    // BFND-03: what the SWE projector emits for this family — verified ⇒ "" (no
+    // prefix, byte-identical legacy key), every other family ⇒ its own space.
+    campaignIdentity: datasetFamily === "verified" ? "" : datasetFamily,
     perInstance: rows.map((r) => ({
       id: r.id,
       passed: r.passed === true,
@@ -699,6 +992,53 @@ describe("campaign denominator excludes re-runnable holes (FLAG-B)", () => {
     expect(naiveRate).toBeLessThan(realRate) // deflation iff we (wrongly) included it
   })
 
+  // BFND-03: the D1 infra-fault rule now lives in the shared denominator, so a
+  // campaign rollup agrees with the persisted headline the report builder stamps.
+  test("an explicit agent-CRASH leaves the campaign denominator (D1), with a PAIRED CONTROL", () => {
+    const withError = (id: string, kind: string) => ({
+      id,
+      passed: false,
+      turns: 1,
+      fail: null,
+      error: { kind },
+    })
+    const runWith = (rows: unknown[]): unknown => ({
+      label: "tb-camp",
+      file: "/runs/tb-camp.report.json",
+      model: "m",
+      preset: "p",
+      mtime: 1,
+      benchmarkSuite: "terminal-bench",
+      instanceRowKind: "trial-receipt",
+      viewId: "terminal-bench",
+      campaignIdentity: "terminal-bench@2.1 ref",
+      perInstance: rows,
+    })
+    const crashed = firstCampaign([
+      runWith([
+        { id: "a", passed: true, turns: 1, fail: null },
+        { id: "b", passed: false, turns: 1, fail: null },
+        withError("c", "agent-crash"),
+      ]),
+    ])
+    expect(crashed.resolved).toBe(1)
+    expect(crashed.total).toBe(2) // crash left the denominator
+    expect(crashed.unmeasured).toBe(1)
+
+    // CONTROL: an agent-TIMEOUT is a GENUINE miss — the agent spent its whole
+    // budget — so it must STAY in the denominator. Same shape, different kind.
+    const timedOut = firstCampaign([
+      runWith([
+        { id: "a", passed: true, turns: 1, fail: null },
+        { id: "b", passed: false, turns: 1, fail: null },
+        withError("c", "agent-timeout"),
+      ]),
+    ])
+    expect(timedOut.resolved).toBe(1)
+    expect(timedOut.total).toBe(3)
+    expect(timedOut.unmeasured).toBe(0)
+  })
+
   test("instance measured in one shard, throttled in another counts as MEASURED (not unmeasured)", () => {
     // Same campaign key via identical dir; two shard files (shard syntax keeps one campaign).
     const shardA = makeRun("camp-shard1", [failRow("repo-1", "throttled")])
@@ -717,7 +1057,10 @@ describe("realMiss card excludes re-runnable holes (FLAG-C)", () => {
   // capture the rendered cards via a fake document, then assert the 진짜 격차
   // value does NOT count a throttled hash>1 instance.
   function runRenderCards(DATA: unknown): string {
-    const src = ['var BENCH="verified";', extractEsc(), extractFn("renderCards"), "renderCards(); return null;"].join("\n")
+    const src = SUITE_DISPATCH_PRELUDE.concat([
+      extractFn("renderCards"),
+      "renderCards(); return null;",
+    ]).join("\n")
     let sink = ""
     const doc = {
       getElementById() {
@@ -779,14 +1122,22 @@ describe("realMiss card excludes re-runnable holes (FLAG-C)", () => {
 
 describe("tbOurResults (D1/P1-C) — infra-fault exclusion + explicit arm routing", () => {
   const runTbOur = (DATA: unknown) => {
-    const src = ['var BENCH="terminal-bench";', extractFn("tbOurResults"), "return tbOurResults();"].join("\n")
-    return new Function("DATA", src)(DATA) as { base: Record<string, unknown>; lev: Record<string, unknown> }
+    const src = [
+      extractFn("tbRuns"),
+      extractFn("tbArmOf"),
+      extractFn("tbOurResults"),
+      "return tbOurResults();",
+    ].join("\n")
+    return new Function("DATA", src)(DATA) as {
+      base: Record<string, unknown>
+      lev: Record<string, unknown>
+    }
   }
   test("agent-crash is EXCLUDED (not a miss); agent-timeout STAYS a fail; pass kept", () => {
     const out = runTbOur({
       runs: [
         {
-          datasetFamily: "terminal-bench",
+          benchmarkSuite: "terminal-bench",
           arm: "levers",
           preset: "x",
           perInstance: [
@@ -805,7 +1156,12 @@ describe("tbOurResults (D1/P1-C) — infra-fault exclusion + explicit arm routin
     const out = runTbOur({
       runs: [
         // preset lacks "levers" but arm says levers ⇒ must land in lev, NOT base.
-        { datasetFamily: "terminal-bench", arm: "levers", preset: "TB +oc1", perInstance: [{ id: "t", passed: true }] },
+        {
+          benchmarkSuite: "terminal-bench",
+          arm: "levers",
+          preset: "TB +oc1",
+          perInstance: [{ id: "t", passed: true }],
+        },
       ],
     })
     expect(out.lev.t).toBe(true)

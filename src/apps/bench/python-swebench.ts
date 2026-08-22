@@ -37,6 +37,7 @@ import { join } from "node:path"
 import type { GradeBreakdown } from "@/runner/batch/types"
 import { abortableSleep, abortReasonOf, errMessage, logger, runtimeConfig } from "@/shared"
 import { benchWorkRoot } from "./corpus/paths"
+import type { DatasetFamily } from "./dataset-family-token"
 import { type HarnessConfig, harnessFlags, resolveHarnessConfig } from "./harness"
 import type { Instance } from "./types"
 
@@ -107,6 +108,18 @@ export interface PySwebenchOpts {
    *  Absent ⇒ `resolveHarnessConfig()` is called inside `buildArgv` to pull
    *  the frozen runtime-config defaults. Tests inject explicit configs. */
   harnessConfig?: HarnessConfig
+  /** TYPED resolved dataset family, threaded from the composition root's
+   *  `BenchRunConfig` (aug-22 HIGH-1). Carried for logging/attribution only —
+   *  this module makes NO decision from it (aug-22 HIGH-4: it used to hold a
+   *  `family === "live"` compare, the last family branch outside the profile
+   *  registry). Absent ⇒ the byte-identical legacy default. */
+  datasetFamily?: DatasetFamily
+  /** LOCAL-grade refusal supplied by the family PROFILE's grade evaluator
+   *  (aug-22 HIGH-4). Given the effective `--namespace`, it returns a fail-loud
+   *  guidance string, or undefined to proceed. Absent ⇒ proceed (the families
+   *  that need no local guard simply do not supply one), so this module never
+   *  needs to know which family is which. */
+  localGradeRefusal?: (namespace: string | undefined) => string | undefined
 }
 
 export interface PySwebenchResult {
@@ -557,12 +570,13 @@ const gradeWithRetry = async (
  *  guidance string to fail-LOUD, or undefined to proceed. BOX-SAFE: the full-remote/
  *  box path ALWAYS sets `QUANTA_SWEBENCH_NAMESPACE` (=starryzhang for Live), so it is
  *  never tripped; an operator who manually sets the namespace + installs the Live fork
- *  also proceeds. Pure (family + namespace in) ⇒ unit-testable. */
-export const localLiveGradeRefusal = (
-  family: string,
-  namespace: string | undefined,
-): string | undefined =>
-  family === "live" && (namespace ?? "").trim() === ""
+ *  also proceeds. Pure (namespace in) ⇒ unit-testable.
+ *
+ *  aug-22 HIGH-4: FAMILY-AGNOSTIC. The `family === "live"` gate that used to live
+ *  here is now the LIVE profile's grade evaluator supplying this function as
+ *  `opts.localGradeRefusal`; families that need no local guard supply nothing. */
+export const liveLocalGradeRefusal = (namespace: string | undefined): string | undefined =>
+  (namespace ?? "").trim() === ""
     ? "refusing local SWE-bench-Live grade: host stock `swebench` cannot grade Live repos " +
       "and `starryzhang` images are amd64. Grade Live via `--backend ec2|ssh` or `--mode full`, " +
       "or set QUANTA_SWEBENCH_NAMESPACE=starryzhang with the SWE-bench-Live fork installed."
@@ -588,16 +602,14 @@ export const evaluateWithPythonSwebench = async (
       log: `empty prediction for ${meta.instanceId}`,
     }
   }
-  // jul-01 audit A2 — refuse a LOCAL SWE-bench-Live grade on the unconfigured path
-  // (host stock `swebench` KeyErrors on Live repos; `starryzhang` images are amd64).
-  // Fail-LOUD with guidance instead of a cryptic KeyError. The full-remote/box path
-  // always sets QUANTA_SWEBENCH_NAMESPACE, so it is NOT tripped (see localLiveGradeRefusal).
-  const liveRefusal = localLiveGradeRefusal(
-    (process.env.QUANTA_SWEBENCH_DATASET_FAMILY ?? "").toLowerCase(),
-    process.env.QUANTA_SWEBENCH_NAMESPACE,
-  )
-  if (liveRefusal !== undefined) {
-    return { resolved: false, gradingCompleted: false, log: liveRefusal }
+  // jul-01 audit A2 — refuse a LOCAL grade the host cannot honestly perform, when
+  // the family's profile supplies such a guard (today: SWE-bench-Live, whose host
+  // stock `swebench` KeyErrors on Live repos and whose images are amd64). Fail-LOUD
+  // with guidance instead of a cryptic KeyError. The full-remote/box path always
+  // sets QUANTA_SWEBENCH_NAMESPACE, so it is NOT tripped.
+  const refusal = opts.localGradeRefusal?.(process.env.QUANTA_SWEBENCH_NAMESPACE)
+  if (refusal !== undefined) {
+    return { resolved: false, gradingCompleted: false, log: refusal }
   }
 
   const spawn = opts.spawn ?? defaultSpawn

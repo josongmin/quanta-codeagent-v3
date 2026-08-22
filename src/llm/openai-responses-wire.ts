@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from "node:util"
 import { dispatchNoThrow, LLMError } from "@/shared"
 import type { LLMProvider } from "@/shared/errors"
 import { parseToolInputOrThrow } from "./adapters/shared"
+import { resolveDeliverableReasoningEffort } from "./reasoning-effort"
 import type { LlmCheckpoint, ResponsesCheckpoint } from "./target-metadata"
 import type {
   Message,
@@ -125,9 +126,14 @@ export interface BuildResponsesBodyOptions {
    *  root and threaded in as plain config — this wire never reads process.env
    *  (slice-boundary invariant). Omitted ⇒ no `service_tier` field (default). */
   readonly serviceTier?: string
-  /** Reasoning effort (`"minimal" | "low" | "medium" | "high" | "xhigh"`).
-   *  Env-derived (`QUANTA_REASONING_EFFORT`) but resolved at the composition
-   *  root and passed in. Omitted ⇒ no `effort` inside `reasoning` (default). */
+  /** Reasoning effort — one of `RESPONSES_REASONING_EFFORTS` (`none | minimal |
+   *  low | medium | high | xhigh`, case-insensitive; see `./reasoning-effort`
+   *  for the vendored-SDK citation behind that set). Env-derived
+   *  (`QUANTA_REASONING_EFFORT`) but resolved at the composition root and passed
+   *  in. Omitted / empty ⇒ no `effort` inside `reasoning` (provider default).
+   *  An OUT-OF-SET value THROWS a fatal `bad_request` `LLMError` — it is never
+   *  silently omitted, because omitting it would ship the provider's default
+   *  effort under a receipt claiming the requested one. */
   readonly reasoningEffort?: string
   /** Reasoning-summary request (`QUANTA_REASONING_SUMMARY`, bool). When true,
    *  `reasoning.summary: "auto"` is added so the model streams a human-readable
@@ -329,25 +335,20 @@ export const toResponsesToolChoice = (
 const normalizeResponsesServiceTier = (value: string | undefined): string | undefined =>
   value !== undefined && value.length > 0 ? value : undefined
 
-/** Normalize a caller-supplied reasoning-effort value to the closed
- *  `minimal | low | medium | high | xhigh` set (case-insensitive). Anything
- *  else ⇒ omitted. `xhigh` is a forward-compat extra-effort tier some Responses
- *  models expose; it is an opaque pass-through here — this normalizer stays the
- *  CLOSED-SET SSOT so an out-of-set value (`ultra`, typo) never reaches the wire
- *  and 400s. Env derivation (`QUANTA_REASONING_EFFORT`) happens at the
- *  composition root; this wire never reads process.env. */
-export const normalizeResponsesReasoningEffort = (
-  value: string | undefined,
-): string | undefined => {
-  const effort = value?.toLowerCase()
-  return effort === "minimal" ||
-    effort === "low" ||
-    effort === "medium" ||
-    effort === "high" ||
-    effort === "xhigh"
-    ? effort
-    : undefined
-}
+/** Resolve a caller-supplied reasoning-effort value to the value that goes on
+ *  the wire, THROWING when it cannot be delivered.
+ *
+ *  The closed set (and the evidence for it) lives in `./reasoning-effort` — the
+ *  single place that decides. This wrapper exists only so the body builder reads
+ *  as one call. It deliberately has NO "silently omit" path: the predecessor
+ *  (`normalizeResponsesReasoningEffort`) returned `string | undefined` and
+ *  collapsed "nothing requested" and "cannot be delivered" onto the same
+ *  `undefined`, so a run configured with `max` shipped at the provider default
+ *  while every receipt still claimed `max`. See the header of
+ *  `reasoning-effort.ts`. Env derivation (`QUANTA_REASONING_EFFORT`) happens at
+ *  the composition root; this wire never reads process.env. */
+const resolveWireReasoningEffort = (value: string | undefined): string | undefined =>
+  resolveDeliverableReasoningEffort(value, "openai-responses")
 
 /** Normalize a caller-supplied reasoning `text.verbosity` value to the closed
  *  `low | medium | high` set (case-insensitive). Anything else (incl. undefined
@@ -388,7 +389,7 @@ export const buildResponsesBody = (
     return flattened !== "" ? flattened : DEFAULT_INSTRUCTIONS
   })()
   const serviceTier = normalizeResponsesServiceTier(options.serviceTier)
-  const reasoningEffort = normalizeResponsesReasoningEffort(options.reasoningEffort)
+  const reasoningEffort = resolveWireReasoningEffort(options.reasoningEffort)
   const reasoningSummary = options.reasoningSummary === true
   const reasoningSummaryDetail = options.reasoningSummaryDetail
   const verbosity = normalizeResponsesReasoningVerbosity(options.reasoningVerbosity)

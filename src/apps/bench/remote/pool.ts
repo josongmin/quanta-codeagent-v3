@@ -27,9 +27,9 @@
  * byte-compatible.
  */
 import { errMessage } from "@/shared"
-import { resolveDatasetFamily } from "../dataset-family"
+import { resolveBenchRunConfig } from "../run-config"
 import {
-  assertProDatasetGradeable,
+  assertDatasetGradeableForFamily,
   assertRemoteDatasetLaunchable,
   assertRemoteDatasetSelectionExists,
   assertRemoteStrictGroundingSupported,
@@ -71,27 +71,39 @@ const acquirePoolSingleBoxGuard = async (
 /** Per-chunk launchability preflight — dataset reachable, selection non-empty,
  *  and strict-grounding supported for the configured preset. Throws on any gap. */
 const assertPoolChunksLaunchable = (chunks: readonly PoolChunk[], cfg: PoolConfig): void => {
+  // T2 — read the TYPED family off the box provision config (previously dropped
+  // argv). Falls back to env only when the typed field is unset. Resolved ONCE
+  // for the whole chunk list: every preflight below decodes through THIS family's
+  // reader, so a chunk cannot be validated by one family's parser and then run by
+  // another's.
+  const family = resolveBenchRunConfig({
+    argvFamily: cfg.provision.swebenchDatasetFamily,
+    env: process.env,
+  }).datasetFamily
   for (const chunk of chunks) {
     assertRemoteDatasetLaunchable({
       datasetPath: chunk.datasetPath,
       surface: `pool chunk ${chunk.runId}`,
+      family,
     })
-    assertProDatasetGradeable({
+    assertDatasetGradeableForFamily({
       datasetPath: chunk.datasetPath,
       ...(chunk.instanceIds !== undefined ? { instanceIds: chunk.instanceIds } : {}),
       surface: `pool chunk ${chunk.runId}`,
-      family: resolveDatasetFamily(undefined, process.env),
+      family,
     })
     assertRemoteDatasetSelectionExists({
       datasetPath: chunk.datasetPath,
       ...(chunk.instanceIds !== undefined ? { instanceIds: chunk.instanceIds } : {}),
       surface: `pool chunk ${chunk.runId}`,
+      family,
     })
     assertRemoteStrictGroundingSupported({
       preset: cfg.preset,
       datasetPath: chunk.datasetPath,
       ...(chunk.instanceIds !== undefined ? { instanceIds: chunk.instanceIds } : {}),
       surface: `pool chunk ${chunk.runId}`,
+      family,
     })
   }
 }

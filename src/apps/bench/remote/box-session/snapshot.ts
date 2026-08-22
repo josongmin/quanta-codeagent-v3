@@ -72,7 +72,7 @@ const selectionMeta = (
   const ids =
     params.instanceIds !== undefined && params.instanceIds.length > 0
       ? [...params.instanceIds]
-      : readDatasetInstanceIds(params.datasetPath)
+      : readDatasetInstanceIds(params.datasetPath, params.datasetFamily)
   return {
     instanceCount: ids.length,
     ...(ids.length > 0 ? { instancePreview: ids.slice(0, 3) } : {}),

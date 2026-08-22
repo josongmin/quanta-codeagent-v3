@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { buildProEnv } from "../box-session"
+import type { DatasetFamily } from "../../dataset-family-token"
+import { resolveDatasetFamilyProfile } from "../../profiles/registry"
+
+/** The PRODUCTION seam this pins: `buildBenchCommand` resolves the chunk's family
+ *  profile and calls its `onBoxEnvPrefix` port. aug-22 HIGH-4 replaced the old
+ *  `buildProEnv(family, env, path)` wrapper — which held the `family === "pro"`
+ *  compare inside box-session — with this profile field. */
+const buildProEnv = (family: DatasetFamily, env: NodeJS.ProcessEnv, datasetPath: string): string =>
+  resolveDatasetFamilyProfile(family).onBoxEnvPrefix({ datasetPath, env })
 
 // Wiring-proof (jun-30): QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME / _MODEL_NAME are operator
 // overrides READ by buildProGradeVerifier (apps/bench/index.ts) but are neither
@@ -7,13 +15,13 @@ import { buildProEnv } from "../box-session"
 // SILENTLY DROPPED and the box graded with the verifier defaults (jefzda / quanta). A fork whose
 // Pro images live under a different DockerHub user would have every image-pull fail (all-infra).
 // These pin the Pro-only forward.
-describe("buildProEnv — Pro override forwarding (jun-30 wiring fix)", () => {
+describe("onBoxEnvPrefix — Pro override forwarding (jun-30 wiring fix)", () => {
   const DATASET = "~/instances.jsonl"
 
   test("forwards QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME + _MODEL_NAME (shell-quoted) on Pro", () => {
     const out = buildProEnv(
+      "pro",
       {
-        QUANTA_SWEBENCH_DATASET_FAMILY: "pro",
         QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME: "myfork",
         QUANTA_SWEBENCH_PRO_MODEL_NAME: "my-model",
       },
@@ -27,7 +35,7 @@ describe("buildProEnv — Pro override forwarding (jun-30 wiring fix)", () => {
   })
 
   test("a Pro run WITHOUT the overrides omits both keys (byte-identical to legacy proEnv)", () => {
-    const out = buildProEnv({ QUANTA_SWEBENCH_DATASET_FAMILY: "pro" }, DATASET)
+    const out = buildProEnv("pro", {}, DATASET)
     expect(out).not.toContain("QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME")
     expect(out).not.toContain("QUANTA_SWEBENCH_PRO_MODEL_NAME")
     // legacy three-var proEnv, exact spacing
@@ -39,10 +47,7 @@ describe("buildProEnv — Pro override forwarding (jun-30 wiring fix)", () => {
   })
 
   test("expands a pool dataset path before Node resolves it", () => {
-    const out = buildProEnv(
-      { QUANTA_SWEBENCH_DATASET_FAMILY: "pro" },
-      "~/runs/chunk-01/instances.jsonl",
-    )
+    const out = buildProEnv("pro", {}, "~/runs/chunk-01/instances.jsonl")
     expect(out).toContain(
       `QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH="$HOME/runs/chunk-01/instances.jsonl"`,
     )
@@ -51,8 +56,8 @@ describe("buildProEnv — Pro override forwarding (jun-30 wiring fix)", () => {
 
   test("empty-string overrides are treated as unset (not forwarded)", () => {
     const out = buildProEnv(
+      "pro",
       {
-        QUANTA_SWEBENCH_DATASET_FAMILY: "pro",
         QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME: "",
         QUANTA_SWEBENCH_PRO_MODEL_NAME: "",
       },
@@ -64,15 +69,19 @@ describe("buildProEnv — Pro override forwarding (jun-30 wiring fix)", () => {
 
   test("non-Pro family forwards NOTHING even when overrides are set (byte-identical Verified/Live)", () => {
     const verified = buildProEnv(
+      "verified",
       {
-        QUANTA_SWEBENCH_DATASET_FAMILY: "verified",
         QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME: "myfork",
         QUANTA_SWEBENCH_PRO_MODEL_NAME: "my-model",
       },
       DATASET,
     )
     expect(verified).toBe("")
-    expect(buildProEnv({ QUANTA_SWEBENCH_DATASET_FAMILY: "live" }, DATASET)).toBe("")
-    expect(buildProEnv({}, DATASET)).toBe("")
+    expect(buildProEnv("live", {}, DATASET)).toBe("")
+    // The whole family union flows through: ONLY pro emits a prefix, and the
+    // decision comes from the TYPED argument — an ambient env var claiming "pro"
+    // can no longer switch it on.
+    expect(buildProEnv("verified", { QUANTA_SWEBENCH_DATASET_FAMILY: "pro" }, DATASET)).toBe("")
+    expect(buildProEnv("pro", {}, DATASET)).not.toBe("")
   })
 })

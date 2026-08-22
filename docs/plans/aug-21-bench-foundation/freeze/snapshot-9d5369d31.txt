@@ -1,0 +1,14 @@
+# COMBINED FREEZE SNAPSHOT (Phase 0 gate) — DO NOT treat dirty overlay as baseline
+captured HEAD: 9d5369d310bba9cfcdf2508ca62e6274f184cdd4
+branch/upstream: # branch.oid 9d5369d310bba9cfcdf2508ca62e6274f184cdd4
+# branch.head main
+# branch.upstream origin/main
+# branch.ab +0 -0
+
+## dirty files (porcelain)
+?? docs/plans/aug-21-bench-foundation/freeze/
+
+## per-file churn
+
+## untracked (new)
+docs/plans/aug-21-bench-foundation/freeze/snapshot-9d5369d31.txt

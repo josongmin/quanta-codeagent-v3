@@ -6,8 +6,8 @@
  *
  *  - observe / artifact I/O plumbing: `resolveObserve`, `attemptObs`,
  *    `withObserve`, `finalizeObserve`, `writeArtifacts`
- *  - SWE-bench dataset-task prep: `datasetFamily`, `readSwebenchTasks`,
- *    `filterSwebenchTasks`, `runPrepareImages`
+ *  - SWE-bench dataset-task prep: `readSwebenchTasks`, `filterSwebenchTasks`,
+ *    `runPrepareImages`
  *
  * `ObserveCtx` / `RunCfg` live in `run-main.ts` and are pulled in here as
  * TYPE-ONLY imports (erased at runtime → no cycle).
@@ -28,11 +28,13 @@ import {
 import { matchesInstanceFilter, writeArtifacts as writeBatchArtifacts } from "@/runner/batch/core"
 import type { RunHealthSummary } from "@/runner/batch/report"
 import { logger } from "@/shared"
-import { benchRunDir, benchRunId, type SwebenchTask } from "./corpus"
-import { type DatasetFamily, parseTasksForFamily, resolveDatasetFamily } from "./dataset-family"
+import { benchRunDir, benchRunId } from "./corpus"
+import type { DatasetFamily } from "./dataset-family"
 import { finalizeRun } from "./eval"
 import { prepareImages, resolveHarnessConfig } from "./harness"
 import type { AttemptObservation } from "./observe"
+import { readFamilyCorpusText } from "./profiles/corpus-read"
+import { type FamilyCorpusRow, type FamilyCorpusTask, runnableTasksOf } from "./profiles/corpus-row"
 import { argValue } from "./run-args"
 import type { ObserveCtx, RunCfg } from "./run-main"
 import type { InstanceResult } from "./types"
@@ -150,22 +152,38 @@ export const runPrepareImages = async (instanceIds: string[]): Promise<number> =
   return result.ok ? 0 : 1
 }
 
-/** Resolve the dataset family (verified|live|pro) from `--dataset-family` /
- *  QUANTA_SWEBENCH_DATASET_FAMILY. Default "verified" (byte-identical legacy). */
-export const datasetFamily = (): DatasetFamily =>
-  resolveDatasetFamily(argValue("--dataset-family"), process.env)
-
 // REGRESSION FIX (jun-30): the god-MODULE split (11adab597) dropped the family-aware
 // parse — Pro rows MUST be normalized (lowercase fail_to_pass + extra fields) or they
 // degrade to the `testCmd:"true"` no-op. Verified/Live are the standard schema.
-export const readSwebenchTasks = (datasetFile: string): SwebenchTask[] =>
-  parseTasksForFamily(readFileSync(datasetFile, "utf8"), datasetFamily())
+//
+// HIGH-1 (aug-22): `family` is a REQUIRED TYPED parameter. This used to call a
+// local `datasetFamily()` helper that re-resolved `--dataset-family` + ambient
+// `process.env` on every call — a second, independent authority that could (and
+// did, for whitespace-padded selectors) disagree with the typed `BenchRunConfig`
+// the composition root had already admitted, silently parsing Pro rows with the
+// Verified identity parse and degrading them to `testCmd:"true"`.
+//
+// PMX-02: the reader is the FAMILY's, not this module's. `readFamilyCorpusText`
+// resolves `DatasetFamilyProfile.readCorpus`, so a family whose corpus is an
+// official JSON array is decoded here by the same reader the remote preflight and
+// the pool chunk slicer use. Only RUNNABLE rows are returned, which is exactly
+// what `parseSwebenchJsonl` used to yield.
+export type SwebenchRunnableRow = FamilyCorpusRow & { readonly task: FamilyCorpusTask }
+
+export const readSwebenchTasks = (
+  datasetFile: string,
+  family: DatasetFamily,
+): SwebenchRunnableRow[] => [
+  ...runnableTasksOf(readFamilyCorpusText(readFileSync(datasetFile, "utf8"), family)),
+]
 
 /** Apply the `--instance <substr>` filter to ALREADY-parsed tasks. Pure — no
  *  IO — so the dataset file is read + JSON-parsed exactly ONCE per run and the
  *  parsed corpus is threaded through (filter + empty-check + limit) instead of
  *  re-reading the same 500-row file three times. */
-export const filterSwebenchTasks = (parsed: readonly SwebenchTask[]): SwebenchTask[] => {
+export const filterSwebenchTasks = (
+  parsed: readonly SwebenchRunnableRow[],
+): SwebenchRunnableRow[] => {
   const instanceFilter = argValue("--instance")
   return instanceFilter !== undefined && instanceFilter !== ""
     ? parsed.filter((t) => matchesInstanceFilter(t.instanceId, instanceFilter))
@@ -179,7 +197,17 @@ export const writeArtifacts = async (
   predictionsFile: string,
   reportFile: string,
   results: InstanceResult[],
-  meta: { provider: string; model: string; n: number; runHealth?: RunHealthSummary },
+  meta: {
+    provider: string
+    model: string
+    n: number
+    /** BFND-02 — the resolved dataset family. This seam previously DROPPED it,
+     *  so every locally-written report lost its family discriminator and a Pro
+     *  resolved-rate was averaged into the Verified one by the leaderboard SSOT.
+     *  Absent / verified ⇒ omitted from the report (byte-identical legacy shape). */
+    datasetFamily?: DatasetFamily
+    runHealth?: RunHealthSummary
+  },
 ): Promise<void> => {
   await writeBatchArtifacts(predictionsFile, reportFile, results, meta)
   logger.info(`wrote ${predictionsFile} (${results.length} prediction(s)) and ${reportFile}`)

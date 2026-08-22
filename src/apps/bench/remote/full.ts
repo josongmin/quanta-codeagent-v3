@@ -18,10 +18,11 @@
 import { basename } from "node:path"
 import { resolveNoProgressBudgetMs } from "@/runner/batch/eval/no-progress-watchdog"
 import { errMessage } from "@/shared"
-import { resolveDatasetFamily } from "../dataset-family"
+import { familyPlanNotes } from "../profiles/plan"
+import { type BenchRunConfig, buildSubprocessFamilyEnv, resolveBenchRunConfig } from "../run-config"
 import { resolveBenchTrajectoryDefault } from "../trajectory"
 import {
-  assertProDatasetGradeable,
+  assertDatasetGradeableForFamily,
   assertRemoteDatasetLaunchable,
   assertRemoteDatasetSelectionExists,
   assertRemoteStrictGroundingSupported,
@@ -48,7 +49,7 @@ import { absorbFullRemoteResult } from "./verdict-buckets"
 // Re-export the public surface so existing importers (tests + callers) keep
 // resolving these from "./full" after the box-session.ts extraction.
 export {
-  assertProDatasetGradeable,
+  assertDatasetGradeableForFamily,
   assertRemoteDatasetLaunchable,
   assertRemoteDatasetSelectionExists,
   assertRemoteStrictGroundingSupported,
@@ -210,13 +211,22 @@ export const runWithRelaunch = async (
 }
 
 /** Dry-run plan lines — printed instead of provisioning anything. */
-const dryRunPlan = (cfg: FullRemoteConfig): readonly string[] => {
+const dryRunPlan = (cfg: FullRemoteConfig, runConfig: BenchRunConfig): readonly string[] => {
+  const family = runConfig.datasetFamily
   const onDemand = cfg.onDemand ?? false
   const marketLabel = onDemand ? "on-demand" : "spot"
   const ttl = cfg.ttlMinutes ?? D.ttlMinutes
   const preset = cfg.preset ?? D.preset
   const concurrency = resolveConcurrency()
   return [
+    // LOW-10: the RESOLVED family drives the box's harness fork, pip spec and
+    // image namespace, so a plan that omits it cannot distinguish a correct
+    // Verified launch from a silently mis-resolved Live/Pro one.
+    `[dry-run] dataset-family=${family}`,
+    // PMX-01: whatever THIS family wants an operator to see before spending a
+    // box (ProMax ⇒ the frozen upstream pin + bundle root). Empty for every
+    // family that declares no notes, so existing plans are byte-identical.
+    ...familyPlanNotes(runConfig),
     `[dry-run] would launch ${cfg.instanceType ?? D.instanceType} ${marketLabel} (IMDSv2 hop-1, shutdown -h +${ttl})`,
     `[dry-run] would bootstrap bun+uv+pyright langserver, then rsync ${cfg.repoDir} (excl node_modules/.git) + bun install`,
     "[dry-run] would ship STRIPPED token over ssh stdin (access_token only; refresh/id dropped)",
@@ -281,6 +291,7 @@ const runFullRemoteAttempt = async (args: {
   readonly preset: string
   readonly model: string
   readonly concurrency: number
+  readonly runConfig: BenchRunConfig
   readonly log: (msg: string) => void
 }): Promise<FullRemoteRunAttempt> => {
   let lease: FullRemoteLease | undefined
@@ -297,6 +308,7 @@ const runFullRemoteAttempt = async (args: {
         preset: args.preset,
         model: args.model,
         concurrency: effectiveConcurrency,
+        runConfig: args.runConfig,
         onLog: args.log,
       }),
       primaryErr: undefined,
@@ -400,6 +412,11 @@ const runSingleFullRemoteChunk = async (args: {
   readonly preset: string
   readonly model: string
   readonly concurrency: number
+  /** TYPED run config resolved ONCE in `createFullRemoteBackend.run()` (aug-22
+   *  HIGH-1). The launching side no longer re-reads ambient env for it. It is
+   *  the whole config, not a bare family, because the subprocess WIRE shape
+   *  depends on whether the operator NAMED the family (re-audit R3). */
+  readonly runConfig: BenchRunConfig
   readonly onLog: (msg: string) => void
 }): Promise<FullRemoteResult> => {
   const terminateWithContext = async (primaryErr?: unknown): Promise<void> => {
@@ -425,7 +442,21 @@ const runSingleFullRemoteChunk = async (args: {
       concurrency: args.concurrency,
       artifactSuffix: args.session.iid,
       recordTrajectory: fullRemoteRecordTrajectoryEnabled(),
-      forwardedBenchEnv: buildForwardedBenchEnv(process.env),
+      // HIGH-1 (aug-22): the TYPED family threaded off the box config drives BOTH
+      // the on-box env prefix / image namespace (params.datasetFamily below) AND
+      // the SUBPROCESS WIRE. The wire is a per-call ENVELOPE — a copy of the
+      // parent env with the resolved family encoded onto it — so nothing in the
+      // LAUNCHING process can read the family back out of ambient `process.env`
+      // as an authority. Previously the composition root mutated `process.env`
+      // and this line picked the value back up from there.
+      //
+      // re-audit R3: the ENVELOPE takes the whole run config, so an ABSENT
+      // selector emits no family key at all (HEAD's wire shape) instead of
+      // stamping a fabricated `='verified'` onto every default box command.
+      forwardedBenchEnv: buildForwardedBenchEnv(
+        buildSubprocessFamilyEnv(args.runConfig, process.env),
+      ),
+      datasetFamily: args.runConfig.datasetFamily,
       // No-progress (wedged-box) idle-abort budget, resolved HERE at the
       // allowlisted full-remote composition root (env reads belong at the root;
       // box-session stays env-free). Unset ⇒ Infinity ⇒ off (byte-identical).
@@ -465,30 +496,55 @@ export const createFullRemoteBackend = (
   )
 
   const run = async (): Promise<FullRemoteResult> => {
-    if (cfg.dryRun) return { dryRun: true, plan: dryRunPlan(cfg) }
+    // T2/HIGH-1 — resolve the TYPED family ONCE for this launch, off the box
+    // config's typed field. `process.env` is the INGRESS fallback only for
+    // callers that never resolved a config (the CLI always sets the typed
+    // field); it is never written here, and every downstream decision on this
+    // launch (preflight, on-box env prefix, image namespace, pip-spec, the
+    // subprocess wire) takes THIS value rather than re-reading ambient env.
+    //
+    // LOW-10: resolved ABOVE the dry-run early return, so `--dry-run` reports
+    // the SAME family the real launch would use (and fails closed on the same
+    // invalid selectors) instead of planning without ever consulting it.
+    const runConfig = resolveBenchRunConfig({
+      argvFamily: cfg.swebenchDatasetFamily,
+      env: process.env,
+    })
+    const family = runConfig.datasetFamily
+    if (cfg.dryRun) return { dryRun: true, plan: dryRunPlan(cfg, runConfig) }
     assertRemoteDatasetLaunchable({
       datasetPath: cfg.datasetPath,
       surface: "full-remote",
+      family,
     })
-    assertProDatasetGradeable({
+    assertDatasetGradeableForFamily({
       datasetPath: cfg.datasetPath,
       ...(cfg.instanceIds !== undefined ? { instanceIds: cfg.instanceIds } : {}),
       surface: "full-remote",
-      family: resolveDatasetFamily(undefined, process.env),
+      family,
     })
     assertRemoteDatasetSelectionExists({
       datasetPath: cfg.datasetPath,
       ...(cfg.instanceIds !== undefined ? { instanceIds: cfg.instanceIds } : {}),
       surface: "full-remote",
+      family,
     })
     assertRemoteStrictGroundingSupported({
       preset,
       datasetPath: cfg.datasetPath,
       ...(cfg.instanceIds !== undefined ? { instanceIds: cfg.instanceIds } : {}),
       surface: "full-remote",
+      family,
     })
     const guard = await acquireFullRemoteSingleBoxGuard(cfg)
-    const attempt = await runFullRemoteAttempt({ cfg, preset, model, concurrency, log })
+    const attempt = await runFullRemoteAttempt({
+      cfg,
+      preset,
+      model,
+      concurrency,
+      runConfig,
+      log,
+    })
     const cleanupErr = await releaseFullRemoteResources({
       lease: attempt.lease,
       guard,

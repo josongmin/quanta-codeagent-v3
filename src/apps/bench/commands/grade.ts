@@ -10,15 +10,17 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { gateOn, logger, runtimeConfig } from "@/shared"
 import { describeAuthSource, resolveAuthLaunchFile } from "../auth-pool"
-import { bridgeDatasetFamilyToEnv, resolveDatasetFamily } from "../dataset-family"
+import { resolveBenchmarkRunConfig } from "../benchmark-suite"
 import { ensureBenchTraceSink } from "../default-trace-sink"
 import { resolveRemoteBenchExecutionPreset } from "../preset"
 import type { GradeBackend } from "../remote/backend"
+import { readDatasetInstanceIds } from "../remote/box-session/dataset-preflight"
 import { createEc2Backend } from "../remote/ec2"
 import { createFanoutBackend } from "../remote/fanout"
 import { refreshRemoteAuthJson } from "../remote/fresh-auth"
 import { createFullRemoteBackend, runWithRelaunch } from "../remote/full"
 import { createSshBackend } from "../remote/ssh"
+import { type BenchRunConfig, readDatasetFamilySelector } from "../run-config"
 import {
   allowExtraBoxes,
   argValue,
@@ -26,10 +28,20 @@ import {
   modelNameFromPredictions,
   parseMaxWorkers,
   printBlock,
-  readDatasetInstanceIds,
   resolveCliAuthSource,
   resolvedIdsFromReport,
 } from "./shared"
+
+/** BFND-01 — resolve the SWE-suite run config at the grade composition root.
+ *  `grade`/`remote` are SWE-only subcommands, so the suite resolver always
+ *  yields the swe-bench branch; we return its nested typed T2 config. */
+const resolveGradeRunConfig = (argvFamily: string | undefined): BenchRunConfig => {
+  const cfg = resolveBenchmarkRunConfig({ subcommand: "grade", argvFamily, env: process.env })
+  if (cfg.benchmarkSuite !== "swe-bench") {
+    throw new Error("grade is the swe-bench composition root")
+  }
+  return cfg.swe
+}
 
 /** Filesystem-safe bounded run id. The instance selector can contain hundreds
  * of bytes (especially for a multi-instance smoke); forwarding it verbatim made
@@ -115,6 +127,11 @@ const logFullRemoteOutcome = (out: {
  *  dropped), enforces IMDSv2 hop-1 + TTL, and always terminates. --dry-run plans
  *  it safely without launching. Instance-aware relaunch recovers box loss. */
 const cmdGradeFullRemote = async (): Promise<void> => {
+  // T2 — re-resolve the ONE typed config (idempotent: cmdGrade already validated +
+  // serialized the family into env). Threaded as the TYPED family into the preset
+  // AND onto the full-remote backend config (`swebenchDatasetFamily`), so the box
+  // launch reads the typed field instead of a fresh `resolveDatasetFamily(undefined, env)`.
+  const runConfig = resolveGradeRunConfig(readDatasetFamilySelector(process.argv))
   if (!hasFlag("--allow-remote-secrets")) {
     logger.info(
       "refused: --mode full runs patch-gen on the remote box and needs an LLM credential there. " +
@@ -148,7 +165,7 @@ const cmdGradeFullRemote = async (): Promise<void> => {
   const authJson = dry ? "{}" : await refreshRemoteAuthJson(authFile)
   const instance = argValue("--instance")
   const preset = resolveRemoteBenchExecutionPreset({
-    family: resolveDatasetFamily(undefined, process.env),
+    family: runConfig.datasetFamily,
     envVars: process.env,
     argvPreset: argValue("--preset"),
   })
@@ -161,7 +178,8 @@ const cmdGradeFullRemote = async (): Promise<void> => {
           .split(",")
           .map((s) => s.trim())
           .filter((s) => s !== "")
-      : readDatasetInstanceIds(dataset)
+      : // PMX-02 — decoded through the family's ONE reader.
+        readDatasetInstanceIds(dataset, runConfig.datasetFamily)
   // HARD GUARD: `--keep` forces 0 relaunches — a kept box is NOT auto-terminated
   // on loss, so relaunching would orphan it (runaway spot billing). Also 0 when
   // the expected set is unknown (can't reconcile what's missing).
@@ -182,6 +200,15 @@ const cmdGradeFullRemote = async (): Promise<void> => {
       authJson,
       datasetPath: dataset,
       ...(ids.length > 0 ? { instanceIds: [...ids] } : {}),
+      // T2 — thread the TYPED family onto the box config so the full-remote
+      // preflight/launch reads it here instead of a fresh env read that dropped argv.
+      // re-audit R3: set ONLY for an EXPLICIT selector. `undefined` on this field
+      // means "the operator selected nothing" — the provenance the subprocess wire
+      // encoder needs to reproduce HEAD's absent-selector shape (no family key at
+      // all). Consumers that need a concrete family call `datasetFamilyOrDefault`.
+      ...(runConfig.familySelector === "explicit"
+        ? { swebenchDatasetFamily: runConfig.datasetFamily }
+        : {}),
       preset,
       ...(fullModel !== undefined ? { model: fullModel } : {}),
       ...(amiOverride !== undefined && amiOverride !== "" ? { ami: amiOverride } : {}),
@@ -234,9 +261,16 @@ const cmdGradeFullRemote = async (): Promise<void> => {
 }
 
 export const cmdGrade = async (): Promise<void> => {
-  // Full-remote bootstrap and on-box grading consume the canonical env selector.
-  // Bridge before dispatch so a CLI-only Pro selection cannot fall into Verified.
-  bridgeDatasetFamilyToEnv(argValue("--dataset-family"), process.env)
+  // T2 — resolve the ONE typed run config (fail-closed: an explicit-but-unknown
+  // family errors instead of silently grading as Verified).
+  //
+  // HIGH-1 (aug-22): the resolved family is NOT written back into the ambient
+  // `process.env`. Every in-process consumer below takes the TYPED
+  // `runConfig.datasetFamily` (preset selection, the ssh grade-only harness/
+  // namespace, the full-remote box config). The subprocess/SSH wire is encoded
+  // into a per-call ENVELOPE at the boundary that owns it
+  // (`remote/full.ts` → `buildSubprocessFamilyEnv`), never here.
+  const runConfig = resolveGradeRunConfig(readDatasetFamilySelector(process.argv))
   if ((argValue("--mode") ?? "grade-only") === "full") return cmdGradeFullRemote()
 
   const predictions = argValue("--predictions")
@@ -287,8 +321,8 @@ export const cmdGrade = async (): Promise<void> => {
   const outDir = argValue("--out")
   // RFC jun-29 — thread the dataset family so the ssh grade-only path picks the
   // right harness fork + image namespace (live ⇒ SWE-bench-Live + starryzhang).
-  // Resolved from --dataset-family / QUANTA_SWEBENCH_DATASET_FAMILY (default verified).
-  const family = resolveDatasetFamily(argValue("--dataset-family"), process.env)
+  // Reads the TYPED family off the ONE resolved config (no fresh env read).
+  const family = runConfig.datasetFamily
   const out = await backend.grade(gradePredictions, {
     datasetPath: dataset,
     runId,

@@ -7,7 +7,13 @@ export interface RunKeyFields {
   file: string
   label: string
   model: string
-  datasetFamily: string
+  /**
+   * BFND-03: the run's SUITE-SCOPED identity segment, produced by its projector
+   * (`ProjectedRun.campaignIdentity`) — a SWE family for SWE runs, a benchmark
+   * version + pinned dataset ref for Terminal ones. The campaign key starts with
+   * suite identity, so reports of incompatible identities never coalesce.
+   */
+  campaignIdentity: string
 }
 
 /**
@@ -16,8 +22,9 @@ export interface RunKeyFields {
  *
  * RFC jun-29 R4 PARTITION: a pro/live run NEVER merges into a verified campaign — else
  * a Pro resolved-rate is unioned with (and averaged into) the Verified leaderboard
- * number, the exact dataset-conflation R4 fences. Verified gets NO prefix, so the
- * existing 100% of runs keep byte-identical campaign keys.
+ * number, the exact dataset-conflation R4 fences. Verified projects to an EMPTY
+ * identity segment and so gets NO prefix, which is what keeps the existing 100% of
+ * runs on byte-identical campaign keys.
  */
 export const campaignKeyOf = (run: RunKeyFields): string => {
   const dir = basename(run.file.replace(/\/[^/]+$/, ""))
@@ -29,7 +36,5 @@ export const campaignKeyOf = (run: RunKeyFields): string => {
       : /^local-/.test(run.label)
         ? `${dir}/local-singles`
         : run.label
-  return run.datasetFamily && run.datasetFamily !== "verified"
-    ? `[${run.datasetFamily}] ${base}`
-    : base
+  return run.campaignIdentity ? `[${run.campaignIdentity}] ${base}` : base
 }

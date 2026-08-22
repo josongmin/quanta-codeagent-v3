@@ -38,6 +38,7 @@ import {
 import { errMessage, LLMError, type LLMErrorKind, logger } from "@/shared"
 import { buildResponsesBody } from "../openai-responses-wire"
 import type { LLMPort } from "../ports"
+import { resolveDeliverableReasoningEffort } from "../reasoning-effort"
 import {
   defaultResponsesReasoningCarryoverStore,
   prepareResponsesContinuationRequest,
@@ -208,7 +209,13 @@ export class ChatGPTOAuthAdapter implements LLMPort {
     this.maxTokens = config.maxTokens
     this.streamTimeoutMs = resolveAdapterStreamTimeouts(config)
     this.serviceTier = config.serviceTier
-    this.reasoningEffort = config.reasoningEffort
+    // Fail BEFORE the first model invocation (see the OpenAI-Responses adapter):
+    // a misconfigured effort stops the run from starting instead of shipping the
+    // provider default under a receipt claiming the requested value.
+    this.reasoningEffort = resolveDeliverableReasoningEffort(
+      config.reasoningEffort,
+      "chatgpt-oauth",
+    )
     this.reasoningSummary = config.reasoningSummary === true
     this.reasoningSummaryDetail = config.reasoningSummaryDetail
     this.reasoningVerbosity = config.reasoningVerbosity

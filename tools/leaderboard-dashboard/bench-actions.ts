@@ -9,9 +9,25 @@
  *
  * Pure + exported for unit test — no process spawning here (the server owns child_process).
  */
+import { DATASET_FAMILIES, type DatasetFamily } from "@/apps/bench/dataset-family-token"
 
-export type Family = "verified" | "pro" | "live"
-const FAMILIES: ReadonlySet<string> = new Set(["verified", "pro", "live"])
+/**
+ * The dataset-family axis. NOT re-declared here (aug-22 G1): this module used to
+ * carry its OWN `"verified" | "pro" | "live"` union plus a matching Set, i.e. a
+ * SECOND independently-maintained registry of a closed axis whose canonical owner
+ * is `src/apps/bench/dataset-family-token.ts`. It had already drifted — PMX-01
+ * added `promax` canonically and the dashboard kept 400-ing it, so a web-launched
+ * ProMax campaign was impossible while the CLI accepted the same token.
+ *
+ * The VALIDATION posture is deliberately unchanged: exact-match membership
+ * against the registry (never `normalizeDatasetFamilyToken`, which trims and
+ * case-folds). This is a privilege boundary fed by an untrusted web body, and the
+ * value it admits is serialized straight onto argv AND into
+ * `QUANTA_SWEBENCH_DATASET_FAMILY` for a REAL subprocess — so it must admit only
+ * the exact tokens the child will re-resolve, with no coercion of its own.
+ */
+export type Family = DatasetFamily
+const FAMILIES: ReadonlySet<string> = new Set<string>(DATASET_FAMILIES)
 
 /** Thrown on invalid input. The server returns 400 with `.message`; never spawns. */
 export class ActionError extends Error {}

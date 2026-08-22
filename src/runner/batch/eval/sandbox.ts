@@ -1,6 +1,6 @@
 /**
  * Per-instance sandbox lifecycle: create an isolated `cp -R` copy of the
- * instance's repo into `benchWorkRoot()/bench-<id>-XXXX`, hand it to the
+ * instance's repo into `benchWorkRoot()/bench-<opaque>-XXXX`, hand it to the
  * driver, then unconditionally `rm -rf` on the finally path. Pure path
  * functions: no behavior change vs the prior inline runner.ts block, just a
  * single-responsibility module the driver imports.
@@ -10,7 +10,7 @@
 import { cp, mkdir, mkdtemp, rm } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { gateOn } from "@/shared"
-import { benchWorkRoot } from "../corpus/paths"
+import { benchInstanceWorkSlug, benchWorkRoot } from "../corpus/paths"
 import type { Instance } from "../types"
 
 /** B1 (jun-27-bench-spot-resume-s3.md): when resume is enabled the sandbox
@@ -26,19 +26,13 @@ import type { Instance } from "../types"
  *  default). No locking is added here. */
 const resumeEnabled = (): boolean => gateOn(process.env, "QUANTA_BENCH_RESUME")
 
-/** Filesystem-safe instance id: replace any char outside [A-Za-z0-9._-] with
- *  "_" so an instance id never escapes its scoped dir or breaks path parsing. */
-const sanitizeId = (id: string): string => id.replace(/[^A-Za-z0-9._-]/g, "_")
-
 /** The deterministic instance-scoped sandbox path used in resume mode:
- *  `<benchWorkRoot()>/<sanitized id>/sandbox`. Stable across calls and across
- *  boxes for the same instance (→ stable agent cwd → stable prompt hashes for
- *  cross-box cassette replay). The leaf is `sandbox`, NOT `repo`, so it never
- *  collides with the prepared checkout the driver mints at
- *  `<benchWorkRoot()>/<id>/repo` (instance.repoPath) — otherwise createSandbox's
- *  clean-wipe would delete the prepared repo and copyRepo would see src===dest. */
+ *  `<benchWorkRoot()>/<opaque id>/sandbox`. Stable across calls and boxes for
+ *  the same instance, without exposing dataset ids that may contain answer-key
+ *  commit SHAs in the agent-visible cwd. The leaf is `sandbox`, NOT `repo`, so
+ *  it never collides with the prepared checkout. */
 const deterministicSandbox = (id: string): string =>
-  join(benchWorkRoot(), sanitizeId(id), "sandbox")
+  join(benchWorkRoot(), benchInstanceWorkSlug(id), "sandbox")
 
 /** Create the fresh sandbox dir. Returns the absolute sandbox path. Does NOT
  *  copy the repo — that is a separate step (see {@link copyRepo}) so the
@@ -65,7 +59,9 @@ export const createSandbox = async (instance: Instance): Promise<string> => {
   }
   // DEFAULT (resume OFF): byte-identical to the original — two random mkdtemp
   // levels (private parent + repo leaf) for concurrent-sibling isolation.
-  const parent = await mkdtemp(join(benchWorkRoot(), `bench-${instance.id}-`))
+  const parent = await mkdtemp(
+    join(benchWorkRoot(), `bench-${benchInstanceWorkSlug(instance.id)}-`),
+  )
   return mkdtemp(join(parent, "repo-"))
 }
 
@@ -86,7 +82,9 @@ export const copyRepo = async (instance: Instance, sandbox: string): Promise<voi
 // onto ONE tree and re-introduce the worktree race fork exists to prevent. Fork
 // output is also never the cassette-replay cwd, so determinism buys nothing here.
 export const forkSandbox = async (instanceId: string, sourceSandbox: string): Promise<string> => {
-  const parent = await mkdtemp(join(benchWorkRoot(), `bench-${instanceId}-fork-`))
+  const parent = await mkdtemp(
+    join(benchWorkRoot(), `bench-${benchInstanceWorkSlug(instanceId)}-fork-`),
+  )
   const sandbox = await mkdtemp(join(parent, "repo-"))
   await cp(sourceSandbox, sandbox, { recursive: true })
   return sandbox

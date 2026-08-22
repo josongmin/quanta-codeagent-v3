@@ -1,16 +1,24 @@
-# quanta ↔ Terminal-Bench (Harbor) adapter — installable package.
+# quanta ↔ Terminal-Bench 2.1 (Harbor) adapter — installable package.
 #
-# Exposes BOTH the pure box-free bridge (`quanta_terminal_bridge`) and the Harbor
-# `BaseAgent` glue module (`quanta_agent`) so Harbor can load the agent by import
-# selector:  `harbor run … --agent quanta_agent:QuantaAgent`
-# (RFC §3 `docs/rfc/jun-29-rfc-terminal-bench-integration.md` line 61 spells the
-# `--agent module:Class` shape — the `module` here is the top-level `quanta_agent`
-# py-module this package installs, the `Class` is `QuantaAgent`).
+# Exposes the pure box-free bridge (`quanta_terminal_bridge`), the ATIF emitter
+# (`quanta_terminal_atif`), and the Harbor `BaseAgent` glue module (`quanta_agent`)
+# so Harbor can load the agent by import selector:
 #
-# LOCAL DEV (no Docker, no Harbor): `pip install -e .` installs ONLY the bridge +
-# glue. harbor is an OPTIONAL extra (`.[harbor]`) — `quanta_agent` imports it under
-# a try/except fallback, so `import quanta_agent` works with harbor absent (the
-# `BaseAgent = object` path). Install `.[harbor]` only inside the box image.
+#     harbor run … --agent quanta_agent:QuantaAgent
+#
+# `--agent` is the CURRENT flag: harbor's `AgentFactory.create_agent_from_config`
+# treats an `--agent` value containing `:` as a custom-agent import path, and
+# `harbor run --help` documents it as "Agent to run, or a custom agent import path
+# (module.path:ClassName)". The old `--agent-import-path` flag no longer exists.
+#
+# INSTALL — there is exactly ONE supported path, and it is the locked one:
+#
+#     uv sync --project adapters/terminal-bench --extra dev --extra harbor --frozen
+#
+# See README.md. `harbor` is an OPTIONAL extra because `quanta_agent` imports it
+# under a try/except fallback (`BaseAgent = object`), which keeps `import
+# quanta_agent` green on a machine with no harbor — that import-safety property is
+# what lets the adapter test suite run box-free.
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -18,39 +26,49 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quanta-terminal-bench"
-version = "0.1.0"
-description = "quanta terminal-operator as a Harbor BaseAgent for Terminal-Bench (hands-side bridge + glue)"
+# Adapter package version. NOTE: this is NOT the agent version Harbor reports.
+# Agent provenance is the runtime-injected `QUANTA_TB_AGENT_VERSION`
+# ("<quanta package.json version>+g<sha>[.dirty]"), because a leaderboard row is
+# keyed on the exact Quanta commit, not on this packaging artifact. See
+# `quanta_agent.AGENT_VERSION_ENV`.
+version = "2.1.0"
+description = "quanta terminal-operator as a Harbor BaseAgent for Terminal-Bench 2.1 (hands-side bridge + glue + ATIF)"
 readme = "README.md"
-# 3.9 floor: the bridge + glue py_compile + run on 3.9 (local dev box is 3.9);
-# the box image ships a newer python for harbor, but the adapter itself stays 3.9-safe.
-requires-python = ">=3.9"
+# 3.12 floor: the pinned harbor requires >=3.12 (its own `requires-python`), and
+# the upstream leaderboard tooling pins 3.14. The adapter's own modules stay
+# syntax-compatible with older interpreters (`from __future__ import annotations`
+# + quoted annotations) so the stdlib-only bridge can also be exercised by a
+# system python, but the DECLARED, installable floor is what harbor needs.
+requires-python = ">=3.12"
 license = { text = "Proprietary" }
-# Core has ZERO third-party runtime deps — the bridge/glue are stdlib-only
-# (asyncio/json/os/tempfile/pathlib). This is what keeps `import quanta_agent`
-# green without harbor.
+# Core has ZERO third-party runtime deps — the bridge/glue/ATIF builder are
+# stdlib-only (asyncio/json/os/re/tempfile/pathlib). This is what keeps
+# `import quanta_agent` green without harbor.
 dependencies = []
 
 [project.optional-dependencies]
-# box-only: the real Harbor framework. NOT on PyPI as a usable package — the PyPI
-# `harbor` (0.1.20) is a yanked squat (RFC §10 line 132); the real one is the git
-# repo `harbor-framework/harbor`. Installed in the box image (see Dockerfile), NOT
-# here, so this extra is a documented pin target rather than a resolvable PyPI dep.
-# box-verify: confirm the exact ref/tag harbor pins to on the provisioned box and
-# replace the VCS URL below with the box's pinned commit before `tb run`.
+# PINNED, not floating. `harbor` on PyPI IS the real harbor-framework package
+# (author Alex Shaw, harborframework.com, the Terminal-Bench authors) — the old
+# note that PyPI `harbor` was a squat is stale: 0.1.20 was a yanked release of
+# this same project, and 0.13.0+ are the framework proper.
+#
+# 0.21.0 is the newest NON-dev release (2026-08-10); everything published after
+# it is a `0.21.1.devYYYYMMDDHHMM` nightly, which is not promotable evidence.
+# It satisfies the upstream leaderboard floor: terminal-bench-2-1's
+# `leaderboard/pyproject.toml` requires `harbor[modal]>=0.20.0`.
 harbor = [
-  # box-verify — pin to the commit the box uses; this VCS spec is the placeholder.
-  "harbor @ git+https://github.com/harbor-framework/harbor.git",
+  "harbor==0.21.0",
 ]
 dev = [
   "pytest>=7,<9",
 ]
 
 [tool.setuptools]
-# Top-level py-module `quanta_agent` (the Harbor selector target) + the bridge package.
+# Top-level py-module `quanta_agent` (the Harbor selector target) + the packages.
 py-modules = ["quanta_agent"]
 
 [tool.setuptools.packages.find]
-include = ["quanta_terminal_bridge*"]
+include = ["quanta_terminal_bridge*", "quanta_terminal_atif*"]
 namespaces = false
 
 [tool.pytest.ini_options]

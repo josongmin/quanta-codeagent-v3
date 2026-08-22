@@ -11,12 +11,18 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { officialJsonlCorpusReader } from "../../src/apps/bench/profiles/jsonl-corpus"
 import { assertUniqueChunkRunIds } from "../../src/apps/bench/remote/pool"
 import {
   baseRunIdFromPath,
   planMicrochunks,
   writeMicrochunks,
 } from "../../src/apps/bench/slicing/microchunk"
+
+// PMX-02 — the slicer takes the FAMILY's reader instead of splitting lines
+// itself. These cases use a JSONL corpus, so they pass the official JSONL
+// reader; `promax-one-reader.test.ts` covers the JSON-array family.
+const READ = officialJsonlCorpusReader
 
 const row = (id: string): string =>
   JSON.stringify({ instance_id: id, repo: "demo/repo", base_commit: "0".repeat(40) })
@@ -27,7 +33,7 @@ const DATASET = [row("django__django-1"), row("sklearn__sklearn-2"), row("sympy_
 
 describe("T-4 planMicrochunks (pure)", () => {
   test("chunkSize=1 ⇒ one instance per chunk, order preserved", () => {
-    const chunks = planMicrochunks(DATASET, "ds", 1)
+    const chunks = planMicrochunks(DATASET, "ds", 1, READ)
     expect(chunks.length).toBe(3)
     expect(chunks.map((c) => c.instanceIds)).toEqual([
       ["django__django-1"],
@@ -38,7 +44,7 @@ describe("T-4 planMicrochunks (pure)", () => {
 
   test("runIds are unique, FS-safe, and zero-padded for lexicographic run order", () => {
     const many = Array.from({ length: 12 }, (_v, i) => row(`r__r-${i}`)).join("\n")
-    const chunks = planMicrochunks(many, "big", 1)
+    const chunks = planMicrochunks(many, "big", 1, READ)
     const ids = chunks.map((c) => c.runId)
     expect(new Set(ids).size).toBe(ids.length) // unique
     // TEETH on the PADDING specifically (deleting padStart turns these red): with
@@ -58,13 +64,13 @@ describe("T-4 planMicrochunks (pure)", () => {
   })
 
   test("deterministic — same input twice ⇒ identical runIds", () => {
-    expect(planMicrochunks(DATASET, "ds", 1).map((c) => c.runId)).toEqual(
-      planMicrochunks(DATASET, "ds", 1).map((c) => c.runId),
+    expect(planMicrochunks(DATASET, "ds", 1, READ).map((c) => c.runId)).toEqual(
+      planMicrochunks(DATASET, "ds", 1, READ).map((c) => c.runId),
     )
   })
 
   test("chunkSize>1 groups instances and pads ordinals", () => {
-    const chunks = planMicrochunks(DATASET, "ds", 2)
+    const chunks = planMicrochunks(DATASET, "ds", 2, READ)
     expect(chunks.length).toBe(2)
     expect(chunks[0]?.instanceIds).toEqual(["django__django-1", "sklearn__sklearn-2"])
     expect(chunks[1]?.instanceIds).toEqual(["sympy__sympy-3"])
@@ -72,16 +78,16 @@ describe("T-4 planMicrochunks (pure)", () => {
 
   test("duplicate instance ids still yield unique runIds (ordinal prefix saves it)", () => {
     const dup = [row("same__x-1"), row("same__x-1")].join("\n")
-    const chunks = planMicrochunks(dup, "ds", 1)
+    const chunks = planMicrochunks(dup, "ds", 1, READ)
     expect(new Set(chunks.map((c) => c.runId)).size).toBe(2)
   })
 
   test("blank lines skipped; empty dataset ⇒ no chunks", () => {
-    expect(planMicrochunks("\n\n  \n", "ds", 1)).toEqual([])
+    expect(planMicrochunks("\n\n  \n", "ds", 1, READ)).toEqual([])
   })
 
   test("slice lines are VERBATIM from the source (no rewriting / no token bytes)", () => {
-    const chunks = planMicrochunks(DATASET, "ds", 1)
+    const chunks = planMicrochunks(DATASET, "ds", 1, READ)
     expect(chunks[0]?.lines).toEqual([row("django__django-1")])
     // round-trips to the exact source object — proves nothing is injected
     expect(JSON.parse(chunks[0]?.lines[0] ?? "{}").instance_id).toBe("django__django-1")
@@ -96,7 +102,7 @@ describe("T-4 writeMicrochunks (filesystem) ↔ pool", () => {
       const fs = require("node:fs") as typeof import("node:fs")
       fs.writeFileSync(dsPath, `${DATASET}\n`)
       const outDir = join(dir, "slices")
-      const chunks = writeMicrochunks({ datasetPath: dsPath, chunkSize: 1, outDir })
+      const chunks = writeMicrochunks({ datasetPath: dsPath, chunkSize: 1, outDir, readRows: READ })
       expect(chunks.length).toBe(3)
       // the pool's own uniqueness guard accepts them unchanged
       expect(() =>

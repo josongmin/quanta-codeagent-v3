@@ -6,6 +6,7 @@
  */
 
 import type { LspGroundingStatus } from "@/shared"
+import type { DatasetFamily } from "../../dataset-family-token"
 import { CURRENT_BENCH_BASE_PRESET } from "../../preset"
 import type { SpawnFn, SpawnResult } from "../backend"
 import type { BootstrapTracer, BootstrapTracerOpts } from "../bootstrap-tracer"
@@ -63,8 +64,11 @@ export interface FullRemoteConfig {
   readonly swebenchDatasetName?: string
   /** Explicit pip-spec override for the swebench grading shim on the box. */
   readonly swebenchPipSpec?: string
-  /** SWE-bench dataset family (e.g. "live", "pro") forwarded to the box. */
-  readonly swebenchDatasetFamily?: string
+  /** TYPED SWE-bench dataset family forwarded to the box. Typed (not `string`)
+   *  as of aug-22 HIGH-1: the launching side threads the resolved
+   *  `BenchRunConfig.datasetFamily` here instead of letting each consumer
+   *  re-derive it from ambient env. */
+  readonly swebenchDatasetFamily?: DatasetFamily
   /** Fail-closed single-box guard: if another quanta-bench box is already
    *  running, callers must opt in before launching a fresh one. */
   readonly allowExtraBoxes?: boolean
@@ -187,6 +191,12 @@ export interface GradeChunkParams {
   /** Forwarded `QUANTA_BENCH_*` env prefix (already built via
    *  {@link buildForwardedBenchEnv}). */
   readonly forwardedBenchEnv: string
+  /** TYPED dataset family for THIS chunk (aug-22 HIGH-1). REQUIRED so the box
+   *  command builder cannot fall back to reading the launching process's ambient
+   *  `process.env.QUANTA_SWEBENCH_DATASET_FAMILY` — which is what decided the Pro
+   *  on-box env prefix and the prebuilt-image namespace before, and which only
+   *  held the right value because the composition root had mutated ambient env. */
+  readonly datasetFamily: DatasetFamily
   /** jun-20 multi-auth (T-6): auth-pool account that leased this chunk. Surfaced
    *  in the box status snapshot for operator attribution. Omitted in single-auth. */
   readonly accountLabel?: string

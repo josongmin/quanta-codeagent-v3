@@ -8,6 +8,7 @@
 import { errMessage } from "@/shared"
 import { resolveResumeConfig, resumeActive } from "../../resume"
 import { resumeReplayBoxEnv } from "../../resume/resume-launch"
+import { datasetFamilyOrDefault } from "../../run-config"
 import {
   attachBox,
   BOX_DIED_DURING_RUN_ERROR,
@@ -760,6 +761,12 @@ const gradeChunkAttempt = async (
       paths,
       artifactSuffix: chunk.runId,
       recordTrajectory: cfg.recordTrajectory ?? false,
+      // HIGH-1 (aug-22): the chunk's TYPED family, taken off the pool's box
+      // provision config (which `cmdPool` threads from the resolved
+      // BenchRunConfig). The box command builder used to derive the Pro env
+      // prefix + image namespace from the LAUNCHING process's ambient
+      // `process.env.QUANTA_SWEBENCH_DATASET_FAMILY`.
+      datasetFamily: datasetFamilyOrDefault(cfg.provision.swebenchDatasetFamily),
       // DEFAULT-OFF: resumeForwardEnvFor returns "" unless bench-resume is active
       // AND this is a single-instance chunk, so the OFF path is byte-identical.
       forwardedBenchEnv: `${cfg.forwardedBenchEnv ?? ""}${resumeForwardEnvFor(chunk)}`,

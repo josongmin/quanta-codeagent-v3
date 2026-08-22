@@ -1,2 +1,3 @@
 quanta_agent
+quanta_terminal_atif
 quanta_terminal_bridge

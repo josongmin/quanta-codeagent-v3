@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { assertProDatasetGradeable, RemoteDatasetPreflightError } from "./dataset-preflight"
+import { assertDatasetGradeableForFamily, RemoteDatasetPreflightError } from "./dataset-preflight"
 
 const writeJsonl = (rows: Record<string, unknown>[]): string => {
   const dir = mkdtempSync(join(tmpdir(), "pro-pf-"))
@@ -18,21 +18,21 @@ const validProRow = (id = "scale__demo-1") => ({
   fail_to_pass: "['tests/test_x.py::test_y']",
 })
 
-describe("assertProDatasetGradeable — Scale-harness column preflight (fail-closed)", () => {
+describe("assertDatasetGradeableForFamily — Scale-harness column preflight (fail-closed)", () => {
   test("non-pro family ⇒ no-op (Verified/Live byte-identical, even on a Pro-shaped file)", () => {
     const path = writeJsonl([{ instance_id: "x" }]) // missing every Pro column
     expect(() =>
-      assertProDatasetGradeable({ datasetPath: path, surface: "t", family: "verified" }),
+      assertDatasetGradeableForFamily({ datasetPath: path, surface: "t", family: "verified" }),
     ).not.toThrow()
     expect(() =>
-      assertProDatasetGradeable({ datasetPath: path, surface: "t", family: "live" }),
+      assertDatasetGradeableForFamily({ datasetPath: path, surface: "t", family: "live" }),
     ).not.toThrow()
   })
 
   test("pro + all required columns present ⇒ ok", () => {
     const path = writeJsonl([validProRow(), validProRow("scale__demo-2")])
     expect(() =>
-      assertProDatasetGradeable({ datasetPath: path, surface: "t", family: "pro" }),
+      assertDatasetGradeableForFamily({ datasetPath: path, surface: "t", family: "pro" }),
     ).not.toThrow()
   })
 
@@ -41,7 +41,7 @@ describe("assertProDatasetGradeable — Scale-harness column preflight (fail-clo
     delete (bad as Record<string, unknown>).before_repo_set_cmd
     const path = writeJsonl([validProRow("ok-1"), bad])
     expect(() =>
-      assertProDatasetGradeable({ datasetPath: path, surface: "full-remote", family: "pro" }),
+      assertDatasetGradeableForFamily({ datasetPath: path, surface: "full-remote", family: "pro" }),
     ).toThrow(RemoteDatasetPreflightError)
   })
 
@@ -50,7 +50,7 @@ describe("assertProDatasetGradeable — Scale-harness column preflight (fail-clo
     delete (bad as Record<string, unknown>).selected_test_files_to_run
     const path = writeJsonl([bad])
     expect(() =>
-      assertProDatasetGradeable({ datasetPath: path, surface: "t", family: "pro" }),
+      assertDatasetGradeableForFamily({ datasetPath: path, surface: "t", family: "pro" }),
     ).toThrow(/selected_test_files_to_run/)
   })
 
@@ -58,7 +58,7 @@ describe("assertProDatasetGradeable — Scale-harness column preflight (fail-clo
     const bad = { ...validProRow(), fail_to_pass: null }
     const path = writeJsonl([bad])
     expect(() =>
-      assertProDatasetGradeable({ datasetPath: path, surface: "t", family: "pro" }),
+      assertDatasetGradeableForFamily({ datasetPath: path, surface: "t", family: "pro" }),
     ).toThrow(/fail_to_pass/)
   })
 
@@ -67,7 +67,7 @@ describe("assertProDatasetGradeable — Scale-harness column preflight (fail-clo
     delete (bad as Record<string, unknown>).before_repo_set_cmd
     const path = writeJsonl([validProRow("scale__good"), bad])
     expect(() =>
-      assertProDatasetGradeable({
+      assertDatasetGradeableForFamily({
         datasetPath: path,
         instanceIds: ["scale__good"],
         surface: "full-remote",
@@ -81,7 +81,7 @@ describe("assertProDatasetGradeable — Scale-harness column preflight (fail-clo
     delete (bad as Record<string, unknown>).before_repo_set_cmd
     const path = writeJsonl([validProRow("scale__good"), bad])
     expect(() =>
-      assertProDatasetGradeable({
+      assertDatasetGradeableForFamily({
         datasetPath: path,
         instanceIds: ["scale__bad"],
         surface: "full-remote",
@@ -101,7 +101,7 @@ describe("assertProDatasetGradeable — Scale-harness column preflight (fail-clo
     }
     const path = writeJsonl([row])
     expect(() =>
-      assertProDatasetGradeable({ datasetPath: path, surface: "t", family: "pro" }),
+      assertDatasetGradeableForFamily({ datasetPath: path, surface: "t", family: "pro" }),
     ).toThrow(/fail_to_pass/)
   })
 })

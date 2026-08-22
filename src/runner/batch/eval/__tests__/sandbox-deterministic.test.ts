@@ -17,7 +17,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { __resetRuntimeConfig } from "@/shared"
-import { benchWorkRoot } from "../../corpus/paths"
+import { benchInstanceWorkSlug, benchWorkRoot } from "../../corpus/paths"
 import type { Instance } from "../../types"
 import { cleanupSandbox, copyRepo, createSandbox } from "../sandbox"
 
@@ -54,8 +54,9 @@ describe("createSandbox — default OFF (byte-identical to today: random mkdtemp
     const a = await createSandbox(inst)
     const b = await createSandbox(inst)
     expect(a).not.toBe(b) // random suffix at both levels ⇒ distinct
-    // shape: <root>/bench-<id>-XXXX/repo-XXXX
-    expect(a).toMatch(/\/bench-psf__requests-5414-[^/]+\/repo-[^/]+$/)
+    // shape: <root>/bench-<opaque-id>-XXXX/repo-XXXX
+    expect(a).toMatch(/\/bench-[0-9a-f]{20}-[^/]+\/repo-[^/]+$/)
+    expect(a).not.toContain(inst.id)
     await cleanupSandbox(a)
     await cleanupSandbox(b)
   })
@@ -80,16 +81,19 @@ describe("createSandbox — resume ON (deterministic instance-scoped path)", () 
     const a = await createSandbox(inst)
     const b = await createSandbox(inst)
     expect(a).toBe(b) // deterministic ⇒ stable across calls/boxes
-    // shape: <root>/<sanitized id>/sandbox (leaf is `sandbox`, NOT `repo` — see F1)
-    expect(a).toBe(join(benchWorkRoot(), "psf__requests-5414", "sandbox"))
+    // shape: <root>/<opaque id>/sandbox (leaf is `sandbox`, NOT `repo` — see F1)
+    expect(a).toBe(join(benchWorkRoot(), benchInstanceWorkSlug(inst.id), "sandbox"))
+    expect(a).not.toContain(inst.id)
     await cleanupSandbox(a)
   })
 
-  test("instance id is sanitized: any char outside [A-Za-z0-9._-] → _", async () => {
+  test("instance id is opaque: dataset text and embedded commit SHA are absent", async () => {
     setResume("on")
-    const inst = makeInstance("weird/id:with spaces&stuff")
+    const inst = makeInstance("instance_repo-deadbeefcafebabefeedface0123456789abcdef")
     const a = await createSandbox(inst)
-    expect(a).toBe(join(benchWorkRoot(), "weird_id_with_spaces_stuff", "sandbox"))
+    expect(a).toBe(join(benchWorkRoot(), benchInstanceWorkSlug(inst.id), "sandbox"))
+    expect(a).not.toContain("deadbeef")
+    expect(a).not.toContain(inst.id)
     await cleanupSandbox(a)
   })
 
@@ -125,7 +129,7 @@ describe("F1 regression — deterministic sandbox MUST NOT collide with the prep
 
     const sandbox = await createSandbox(inst)
     expect(sandbox).not.toBe(repoPath) // distinct ⇒ no self-wipe, no cp src===dest
-    expect(sandbox).toBe(join(benchWorkRoot(), id, "sandbox"))
+    expect(sandbox).toBe(join(benchWorkRoot(), benchInstanceWorkSlug(id), "sandbox"))
     expect(existsSync(join(repoPath, "SOURCE_FILE"))).toBe(true) // prepared repo survived createSandbox
     await copyRepo(inst, sandbox) // would throw ERR_FS_CP_EINVAL if src===dest
     expect(existsSync(join(sandbox, "SOURCE_FILE"))).toBe(true) // source landed in the sandbox

@@ -1,5 +1,6 @@
 export {
   benchHome,
+  benchInstanceWorkSlug,
   benchRunDir,
   benchRunId,
   benchRunsRoot,

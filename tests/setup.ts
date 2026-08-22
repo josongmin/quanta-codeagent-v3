@@ -1,10 +1,38 @@
 // Preloaded by bun test (see bunfig.toml). Keep global test setup here.
 import { afterEach, beforeEach } from "bun:test"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { __setBranchRunAgentForTest } from "@/agent/branch-search-runner"
 import { __setLspAvailabilityOverrideForTest } from "@/agent/lsp-bridge"
 import { __resetSpanSink } from "@/observability"
 import { __resetDefaultMetricSink } from "@/observability/metrics/in-memory-registry"
 import { __resetKnobOverrides, __resetRuntimeConfig, setTerminalIo } from "@/shared"
+
+// FORCING FUNCTION (aug-22 incident): `writeReport`/`writeArtifacts` fan out to
+// `mirrorReportToSsot`, whose DEFAULT sink is the operator's LIVE
+// `~/.quanta/bench/results` corpus — the same trove the leaderboard dashboard
+// reads. Any test that writes a report therefore deposits synthetic runs into
+// real benchmark data: one suite left 80 artifacts there (32 of them carrying
+// `benchmarkSuite:"terminal-bench"`, i.e. fake Terminal-Bench runs in the
+// leaderboard corpus), another added 4 per invocation, and an audit found 11
+// test files on that path. Per-file `QUANTA_BENCH_RESULTS_DIR` discipline is a
+// convention every new test must remember, so redirect the mirror ONCE here:
+// the leak becomes structurally impossible instead of per-file convention.
+//
+// A temp DIR (not `off`) is deliberate — the mirror stays fully exercised, so
+// tests that assert mirror behaviour still observe a real effect. An explicit
+// operator/test-local override still wins: this only fills an ABSENT value, and
+// a test that sets its own per-test dir (see
+// `tests/unit/apps/bench/canonical-report-envelope.test.ts`) overrides it.
+// The reset is load-bearing, not defensive: ES imports run BEFORE this
+// statement, so any module above that touched `runtimeConfig()` during its own
+// initialisation has already frozen a config snapshot taken WITHOUT the
+// redirect. Measured: without this line `tests/unit/bench-write-artifacts.test.ts`
+// still deposited one artifact into the live corpus on every run.
+if (process.env.QUANTA_BENCH_RESULTS_DIR === undefined) {
+  process.env.QUANTA_BENCH_RESULTS_DIR = join(tmpdir(), "quanta-bench-test-results")
+  __resetRuntimeConfig()
+}
 
 beforeEach(() => {
   setTerminalIo({

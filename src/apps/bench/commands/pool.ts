@@ -12,13 +12,21 @@ import {
   describeAuthSource,
   resolveAuthLaunchFile,
 } from "../auth-pool"
-import { bridgeDatasetFamilyToEnv } from "../dataset-family"
+import { resolveBenchmarkRunConfig } from "../benchmark-suite"
+import type { DatasetFamily } from "../dataset-family-token"
 import { resolveRemoteBenchExecutionPreset } from "../preset"
+import { readFamilyCorpusText } from "../profiles/corpus-read"
+import { familyPlanNotes } from "../profiles/plan"
 import { refreshRemoteAuthJson } from "../remote/fresh-auth"
 import { buildForwardedBenchEnv } from "../remote/full"
 import { type PoolChunk, runPool } from "../remote/pool"
 import { createLeasePoolAuthProvider, type PoolAuthProvider } from "../remote/pool-auth"
 import { clampPatchGenConcurrency, resolveGlobalPatchGenBudget } from "../remote/token-budget"
+import {
+  type BenchRunConfig,
+  buildSubprocessFamilyEnv,
+  readDatasetFamilySelector,
+} from "../run-config"
 import {
   defaultMicrochunkDir,
   type Microchunk,
@@ -114,16 +122,23 @@ const microchunkToPoolChunk = (m: Microchunk): PoolChunk => ({
  * when `--chunk-size` is set. In dry-run, microchunks are PLANNED only (no slice
  * files written); a real run materializes them on disk.
  */
-const resolvePoolChunks = (datasets: readonly string[], dryRun: boolean): PoolChunk[] => {
+const resolvePoolChunks = (
+  datasets: readonly string[],
+  dryRun: boolean,
+  // PMX-02 — the family whose reader slices these chunks. Resolved once at the
+  // composition root and threaded, never re-derived here.
+  family: DatasetFamily,
+): PoolChunk[] => {
   const size = microchunkSizeArg()
   if (size === undefined) return buildPoolChunks(datasets)
+  const readRows = (text: string) => readFamilyCorpusText(text, family)
   const outDirOverride = argValue("--microchunk-dir")
   const chunks: PoolChunk[] = []
   for (const ds of datasets) {
     const outDir = outDirOverride ?? defaultMicrochunkDir(ds)
     if (dryRun) {
       const base = runIdFromDataset(ds)
-      const planned = planMicrochunks(readFileSync(ds, "utf8"), base, size)
+      const planned = planMicrochunks(readFileSync(ds, "utf8"), base, size, readRows)
       for (const p of planned) {
         chunks.push(
           microchunkToPoolChunk({
@@ -134,7 +149,7 @@ const resolvePoolChunks = (datasets: readonly string[], dryRun: boolean): PoolCh
         )
       }
     } else {
-      for (const m of writeMicrochunks({ datasetPath: ds, chunkSize: size, outDir })) {
+      for (const m of writeMicrochunks({ datasetPath: ds, chunkSize: size, outDir, readRows })) {
         chunks.push(microchunkToPoolChunk(m))
       }
     }
@@ -200,9 +215,29 @@ const planPoolChunkAccounts = (src: AuthSource, chunks: readonly PoolChunk[]): s
   })
 }
 
+/** BFND-01 — resolve the SWE-suite run config at the pool composition root.
+ *  `pool` is a SWE-only subcommand, so the suite resolver always yields the
+ *  swe-bench branch; we return its nested typed T2 config. */
+const resolvePoolRunConfig = (argvFamily: string | undefined): BenchRunConfig => {
+  const cfg = resolveBenchmarkRunConfig({ subcommand: "pool", argvFamily, env: process.env })
+  if (cfg.benchmarkSuite !== "swe-bench") {
+    throw new Error("pool is the swe-bench composition root")
+  }
+  return cfg.swe
+}
+
 export const cmdPool = async (): Promise<void> => {
-  // Pool preflight, provisioning, and every on-box chunk read this env selector.
-  bridgeDatasetFamilyToEnv(argValue("--dataset-family"), process.env)
+  // T2 — resolve the ONE typed config (fail-closed on an explicit-invalid family).
+  // Threaded as the TYPED family into preset + box provision + the per-chunk box
+  // command.
+  //
+  // HIGH-1 (aug-22): NOT written into ambient `process.env`. The subprocess wire
+  // is a per-call envelope (`buildSubprocessFamilyEnv`) handed to
+  // `buildForwardedBenchEnv` below, so nothing in this process can read the
+  // family back out of ambient env as an authority.
+  // BFND-01 — `pool` is a SWE-only subcommand; the suite resolver yields the
+  // swe-bench branch whose nested typed config carries the fail-closed family.
+  const runConfig = resolvePoolRunConfig(readDatasetFamilySelector(process.argv))
   if (!hasFlag("--allow-remote-secrets")) {
     logger.info(
       "refused: pool runs patch-gen on remote boxes and needs an LLM credential there. " +
@@ -211,7 +246,7 @@ export const cmdPool = async (): Promise<void> => {
     process.exit(2)
   }
   const datasets = requirePoolDatasets()
-  const chunks = resolvePoolChunks(datasets, hasFlag("--dry-run"))
+  const chunks = resolvePoolChunks(datasets, hasFlag("--dry-run"), runConfig.datasetFamily)
   const workers = resolvePoolWorkers()
   // jun-20 multi-auth (T-1): resolve EITHER the legacy single account or a
   // multi-account pool. T-3 schedules per-chunk leases off this; until then the
@@ -220,7 +255,7 @@ export const cmdPool = async (): Promise<void> => {
   const authFile = resolveAuthLaunchFile(authSource)
   if (!hasFlag("--dry-run")) await refreshPoolAuthSource(authSource)
   const preset = resolveRemoteBenchExecutionPreset({
-    family: process.env.QUANTA_SWEBENCH_DATASET_FAMILY ?? "verified",
+    family: runConfig.datasetFamily,
     envVars: process.env,
     argvPreset: argValue("--preset"),
   })
@@ -248,6 +283,13 @@ export const cmdPool = async (): Promise<void> => {
         ...(microchunkSizeArg() !== undefined
           ? [`microchunks: ${chunks.length} chunk(s) at chunk-size=${microchunkSizeArg()}`]
           : []),
+        // LOW-10: the RESOLVED family is stated on the plan. It decides the
+        // box-side harness fork, image namespace and preset, and was previously
+        // invisible — a mis-resolved `live`/`pro` planned identically to Verified.
+        `dataset-family=${runConfig.datasetFamily}`,
+        // PMX-01: the resolved family's own plan detail (ProMax ⇒ frozen upstream
+        // pin + bundle root). Empty ⇒ byte-identical for verified/live/pro.
+        ...familyPlanNotes(runConfig),
         `workers=${workers}  preset=${preset}  model=${model}  concurrency=${concurrency}  onDemand=${onDemand}  waitForIdle=${waitForIdle}`,
         ...chunks.map((c) => `chunk ${c.runId} ← ${c.datasetPath}  (box dir ~/runs/${c.runId}/)`),
         ...planPoolChunkAccounts(authSource, chunks),
@@ -263,6 +305,15 @@ export const cmdPool = async (): Promise<void> => {
       authJson: "{}", // unused for provisioning; the per-chunk provider ships the real token
       datasetPath: datasets[0] ?? "",
       launchMode: "pool",
+      // T2 — thread the TYPED family onto the box provision config so the pool
+      // preflight reads it here instead of a fresh env read that dropped argv.
+      // re-audit R3: set ONLY for an EXPLICIT selector. `undefined` on this field
+      // means "the operator selected nothing", which is the provenance the
+      // subprocess wire encoder needs to reproduce HEAD's absent-selector shape;
+      // consumers that need a concrete family call `datasetFamilyOrDefault`.
+      ...(runConfig.familySelector === "explicit"
+        ? { swebenchDatasetFamily: runConfig.datasetFamily }
+        : {}),
       preset,
       model,
       ...(amiOverride !== undefined && amiOverride !== "" ? { ami: amiOverride } : {}),
@@ -287,7 +338,12 @@ export const cmdPool = async (): Promise<void> => {
       const p = buildPoolAuthProvider(authSource)
       return p !== undefined ? { authProvider: p } : {}
     })(),
-    forwardedBenchEnv: buildForwardedBenchEnv(process.env),
+    // HIGH-1: the family rides the per-call SUBPROCESS ENVELOPE (a copy of the
+    // parent env with the resolved family encoded on it), never ambient env.
+    // re-audit R3: the envelope takes the whole run config, so an ABSENT selector
+    // forwards NO family key (HEAD's wire shape) rather than stamping a
+    // fabricated `='verified'` onto every default chunk's box command.
+    forwardedBenchEnv: buildForwardedBenchEnv(buildSubprocessFamilyEnv(runConfig, process.env)),
     recordTrajectory,
     onLog: (m) => logger.info(m),
   })

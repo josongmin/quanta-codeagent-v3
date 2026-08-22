@@ -5,10 +5,28 @@
  * ungroundable task fails LOUDLY locally instead of after an expensive provision.
  */
 
-import { readFileSync } from "node:fs"
-import { lspServerBinForFile, PYRIGHT_LANGSERVER_BIN } from "@/lsp/server-registry"
+import {
+  lspServerBinForExtension,
+  lspServerBinForFile,
+  PYRIGHT_LANGSERVER_BIN,
+} from "@/lsp/server-registry"
 import { byteCompare, filesFromUnifiedDiff } from "@/shared"
+import type { DatasetFamily } from "../../dataset-family-token"
 import { presetRequiresLiveLspGrounding } from "../../preset"
+import {
+  loadFamilyCorpusRowsOrThrow,
+  readFamilyCorpusFile,
+  readFamilyDatasetInstanceIds,
+} from "../../profiles/corpus-read"
+import type { FamilyCorpusRow } from "../../profiles/corpus-row"
+import { resolveDatasetFamilyProfile } from "../../profiles/registry"
+
+// The refusal TYPE lives in the family-agnostic leaf `./dataset-rows` so the
+// profile-layer shape checks can throw it without importing a consumer.
+// Re-exported here so the historical import surface (box-session.ts, tests) is
+// unchanged. PMX-02 retired that leaf's JSONL-only ROW READER — dataset reading
+// now has one owner, `DatasetFamilyProfile.readCorpus`.
+export { RemoteDatasetPreflightError } from "./dataset-rows"
 
 const PYRIGHT_LSP_BIN = PYRIGHT_LANGSERVER_BIN
 
@@ -19,11 +37,6 @@ interface RemoteStrictLspProbeTarget {
   readonly count: number
 }
 
-export interface ParsedDatasetRow {
-  readonly instanceId: string
-  readonly record: Record<string, unknown>
-}
-
 type RemoteStrictGroundingSupport =
   | { readonly kind: "unavailable" }
   | { readonly kind: "unknown-selection" }
@@ -31,8 +44,46 @@ type RemoteStrictGroundingSupport =
       readonly kind: "unknown-task-language"
       readonly instanceId: string
       readonly files: readonly string[]
+      /** Set when the row PUBLISHED a language that maps to no configured
+       *  language server — a different, more actionable failure than "the diff
+       *  headers were unreadable", and never a reason to consult the gold patch. */
+      readonly publicLanguage?: string
     }
   | { readonly kind: "ok"; readonly targets: readonly RemoteStrictLspProbeTarget[] }
+
+/**
+ * PUBLIC language label → a representative source-file extension.
+ *
+ * aug-22 G3. This maps only LABEL → EXTENSION; the extension → language-server
+ * decision stays with `@/lsp/server-registry`, which is the one routing SSOT, so
+ * this table can never disagree with the servers the box actually bootstraps.
+ * Keys are the lowercase upstream spellings (SWE-Bench-ProMax publishes exactly
+ * c / c++ / go / java / python / rust / typescript); `java` is deliberately
+ * PRESENT and deliberately maps to an extension the registry does not serve, so
+ * a Java task is refused by NAME rather than silently falling through.
+ */
+const PUBLIC_LANGUAGE_EXTENSION: ReadonlyMap<string, string> = new Map([
+  ["c", ".c"],
+  ["c++", ".cpp"],
+  ["cpp", ".cpp"],
+  ["go", ".go"],
+  ["java", ".java"],
+  ["javascript", ".js"],
+  ["python", ".py"],
+  ["rust", ".rs"],
+  ["typescript", ".ts"],
+])
+
+/** The probe target implied by a row's PUBLIC language, or null when that
+ *  language maps to no configured language server. */
+const strictBinForPublicLanguage = (
+  instanceId: string,
+  language: string,
+): RemoteStrictLspProbeTarget | null => {
+  const ext = PUBLIC_LANGUAGE_EXTENSION.get(language.trim().toLowerCase())
+  const bin = ext !== undefined ? lspServerBinForExtension(ext) : null
+  return bin === null ? null : { instanceId, bin, rel: `language=${language}`, count: 1 }
+}
 
 export class UnsupportedRemoteStrictLspGroundingError extends Error {
   constructor(message: string) {
@@ -45,13 +96,6 @@ export class RemoteDatasetSelectionPreflightError extends Error {
   constructor(message: string) {
     super(message)
     this.name = "RemoteDatasetSelectionPreflightError"
-  }
-}
-
-export class RemoteDatasetPreflightError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = "RemoteDatasetPreflightError"
   }
 }
 
@@ -80,13 +124,6 @@ const dominantRemoteStrictBinOf = (
   return best
 }
 
-const datasetTaskIdOf = (row: Record<string, unknown>): string | undefined => {
-  const official = row.instance_id
-  if (typeof official === "string" && official !== "") return official
-  const custom = row.id
-  return typeof custom === "string" && custom !== "" ? custom : undefined
-}
-
 const datasetGoldPatchOf = (row: Record<string, unknown>): string | undefined => {
   const official = row.patch
   if (typeof official === "string" && official.trim() !== "") return official
@@ -94,60 +131,34 @@ const datasetGoldPatchOf = (row: Record<string, unknown>): string | undefined =>
   return typeof custom === "string" && custom.trim() !== "" ? custom : undefined
 }
 
-export const readParsedDatasetRows = (path: string): ParsedDatasetRow[] | undefined => {
-  try {
-    return readFileSync(path, "utf8")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line !== "")
-      .flatMap((line) => {
-        try {
-          const row = JSON.parse(line) as unknown
-          if (typeof row !== "object" || row === null) return []
-          const record = row as Record<string, unknown>
-          const instanceId = datasetTaskIdOf(record)
-          return instanceId === undefined ? [] : [{ instanceId, record }]
-        } catch {
-          return []
-        }
-      })
-  } catch {
-    return undefined
-  }
-}
-
-const loadParsedDatasetRowsOrThrow = (args: {
-  readonly datasetPath: string
-  readonly surface: string
-}): ParsedDatasetRow[] => {
-  const rows = readParsedDatasetRows(args.datasetPath)
-  if (rows === undefined) {
-    throw new RemoteDatasetPreflightError(
-      `[${args.surface}] local dataset ${args.datasetPath} could not be read before launch. Refusing to spend a remote box on an unreadable dataset.`,
-    )
-  }
-  if (rows.length === 0) {
-    throw new RemoteDatasetPreflightError(
-      `[${args.surface}] local dataset ${args.datasetPath} contains no parseable task rows. Refusing a remote empty-dataset run.`,
-    )
-  }
-  return rows
-}
-
 const filesFromPatch = (patch: string): string[] => filesFromUnifiedDiff(patch)
 
 const remoteStrictGroundingSupportOf = (args: {
   readonly datasetPath: string
   readonly instanceIds?: readonly string[]
+  readonly family: DatasetFamily
 }): RemoteStrictGroundingSupport => {
-  const rows = readParsedDatasetRows(args.datasetPath)
+  const rows = readFamilyCorpusFile(args.datasetPath, args.family)
   if (rows === undefined) return { kind: "unavailable" }
   const selected = args.instanceIds !== undefined ? new Set(args.instanceIds) : undefined
   const targets = new Map<string, RemoteStrictLspProbeTarget>()
   let sawSelected = false
-  for (const { instanceId, record } of rows) {
+  for (const { instanceId, record, publicLanguage } of rows) {
     if (selected !== undefined && !selected.has(instanceId)) continue
     sawSelected = true
+    // aug-22 G3 — a family that PUBLISHES a language grounds on it, exclusively.
+    // No gold fallback: falling back would re-open the very leak this closes (and
+    // would silently ground a Rust task as Pyright whenever its gold patch
+    // happened to touch a `.py` helper).
+    if (publicLanguage !== undefined) {
+      const byLanguage = strictBinForPublicLanguage(instanceId, publicLanguage)
+      if (byLanguage === null) {
+        return { kind: "unknown-task-language", instanceId, files: [], publicLanguage }
+      }
+      if (!targets.has(byLanguage.bin)) targets.set(byLanguage.bin, byLanguage)
+      continue
+    }
+    // The historical path, for families that publish no language label.
     const patch = datasetGoldPatchOf(record)
     const files = patch !== undefined ? filesFromPatch(patch) : []
     const target = dominantRemoteStrictBinOf(instanceId, files)
@@ -162,11 +173,13 @@ export const assertRemoteDatasetSelectionExists = (args: {
   readonly datasetPath: string
   readonly instanceIds?: readonly string[]
   readonly surface: string
+  readonly family: DatasetFamily
 }): void => {
   if (args.instanceIds === undefined || args.instanceIds.length === 0) return
-  const rows = loadParsedDatasetRowsOrThrow({
+  const rows = loadFamilyCorpusRowsOrThrow({
     datasetPath: args.datasetPath,
     surface: args.surface,
+    family: args.family,
   })
   const available = new Set(rows.map((row) => row.instanceId))
   const missing = args.instanceIds.filter((id) => !available.has(id))
@@ -181,63 +194,42 @@ export const assertRemoteDatasetSelectionExists = (args: {
 export const assertRemoteDatasetLaunchable = (args: {
   readonly datasetPath: string
   readonly surface: string
+  readonly family: DatasetFamily
 }): void => {
-  void loadParsedDatasetRowsOrThrow(args)
+  void loadFamilyCorpusRowsOrThrow(args)
 }
 
-/** Columns Scale's `swe_bench_pro_eval.py` dereferences in `create_entryscript` (a KeyError on any
- *  absent one ⇒ that instance errors ⇒ `eval_results[id]=False` with NO run-marker ⇒ our verifier
- *  reads it as infra). A trimmed/derived JSONL, or a Verified-shaped file mislabeled
- *  `--dataset-family pro`, would pass the generic launchable check yet burn a box to all-infra. */
-const PRO_REQUIRED_COLUMNS = ["before_repo_set_cmd", "selected_test_files_to_run"] as const
-
-const proRowMissingFields = (row: Record<string, unknown>): string[] => {
-  const missing: string[] = PRO_REQUIRED_COLUMNS.filter(
-    (c) => row[c] === undefined || row[c] === null,
-  )
-  // LOWERCASE `fail_to_pass` specifically (non-null): Scale's create_entryscript reads
-  // `eval(raw_sample["fail_to_pass"])` — lowercase-only, NO uppercase fallback. An uppercase-only
-  // FAIL_TO_PASS row would KeyError in Scale, so the uppercase form does NOT satisfy this. (The
-  // official Pro JSONL ships lowercase; a null decodes to the no-op grade selection.)
-  if (row.fail_to_pass === undefined || row.fail_to_pass === null) missing.push("fail_to_pass")
-  return missing
-}
-
-/** FAIL-CLOSED Pro-dataset shape check — only acts when `family === "pro"` (no-op otherwise, so the
- *  Verified/Live paths are byte-identical). Refuses LOCALLY (before a box) a Pro dataset whose rows
- *  lack the Scale-harness-required columns, rather than discovering it as an all-infra remote slice. */
-export const assertProDatasetGradeable = (args: {
+/**
+ * FAIL-CLOSED per-family dataset gradeability preflight — the callee of BOTH
+ * `remote/full.ts` and `remote/pool.ts`. Resolves the family PROFILE and runs its
+ * `preflight` port; Pro's port is the Scale-column shape check, verified/live are
+ * no-ops (byte-identical).
+ *
+ * aug-22 HIGH-4: this used to be `assertProDatasetGradeable`, which early-returned
+ * on `args.family !== "pro"` and then called a body the registry imported BACK from
+ * this module — so the T4 `preflight` port had zero production consumers and a
+ * family #4 would still have had to edit here. There is now no family string in
+ * this module at all.
+ */
+export const assertDatasetGradeableForFamily = (args: {
   readonly datasetPath: string
   readonly instanceIds?: readonly string[]
   readonly surface: string
-  readonly family: string
+  readonly family: DatasetFamily
 }): void => {
-  if (args.family !== "pro") return
-  const rows = loadParsedDatasetRowsOrThrow({
+  resolveDatasetFamilyProfile(args.family).preflight({
     datasetPath: args.datasetPath,
+    ...(args.instanceIds !== undefined ? { instanceIds: args.instanceIds } : {}),
     surface: args.surface,
+    // Lazily bound to the family's OWN reader: verified/live never call it, so
+    // their preflight performs no read at all and stays byte-identical.
+    readRows: (): readonly FamilyCorpusRow[] =>
+      loadFamilyCorpusRowsOrThrow({
+        datasetPath: args.datasetPath,
+        surface: args.surface,
+        family: args.family,
+      }),
   })
-  // Only validate the OPERATOR-SELECTED rows when an `--instance` filter is provided — an
-  // unselected malformed row must not refuse a run that targets a single sound instance. With no
-  // filter (`instanceIds` absent/empty) the whole dataset is validated, unchanged.
-  const selected =
-    args.instanceIds !== undefined && args.instanceIds.length > 0
-      ? new Set(args.instanceIds)
-      : undefined
-  const offenders: string[] = []
-  for (const { instanceId, record } of rows) {
-    if (selected !== undefined && !selected.has(instanceId)) continue
-    const missing = proRowMissingFields(record)
-    if (missing.length > 0) offenders.push(`${instanceId} (missing: ${missing.join(", ")})`)
-  }
-  if (offenders.length === 0) return
-  const preview = offenders.slice(0, 5).join("; ")
-  const suffix = offenders.length > 5 ? ` (+${offenders.length - 5} more)` : ""
-  throw new RemoteDatasetPreflightError(
-    `[${args.surface}] dataset-family=pro but ${offenders.length} row(s) lack Scale-harness-required ` +
-      `columns (before_repo_set_cmd / selected_test_files_to_run / fail_to_pass): ${preview}${suffix}. ` +
-      "Refusing a remote run that would grade as all-infra. Use the official scaleapi Pro JSONL.",
-  )
 }
 
 export const assertRemoteStrictGroundingSupported = (args: {
@@ -245,11 +237,13 @@ export const assertRemoteStrictGroundingSupported = (args: {
   readonly datasetPath: string
   readonly instanceIds?: readonly string[]
   readonly surface: string
+  readonly family: DatasetFamily
 }): void => {
   if (!presetRequiresLiveLspGrounding(args.preset)) return
   const support = remoteStrictGroundingSupportOf({
     datasetPath: args.datasetPath,
     ...(args.instanceIds !== undefined ? { instanceIds: args.instanceIds } : {}),
+    family: args.family,
   })
   if (support.kind === "unavailable") return
   if (support.kind === "unknown-selection") {
@@ -261,9 +255,11 @@ export const assertRemoteStrictGroundingSupported = (args: {
     const preview = support.files.slice(0, 5).join(", ")
     const suffix = support.files.length > 5 ? ` (+${support.files.length - 5} more)` : ""
     const detail =
-      support.files.length === 0
-        ? "its gold patch exposed no parseable diff file headers"
-        : `its gold patch touched ${preview}${suffix}, but none map to a configured language server`
+      support.publicLanguage !== undefined
+        ? `its PUBLIC language "${support.publicLanguage}" maps to no configured language server`
+        : support.files.length === 0
+          ? "its gold patch exposed no parseable diff file headers"
+          : `its gold patch touched ${preview}${suffix}, but none map to a configured language server`
     throw new UnsupportedRemoteStrictLspGroundingError(
       `[${args.surface}] preset ${args.preset} requires live LSP grounding, but selected task ${support.instanceId} cannot be grounded: ${detail}. The remote box only bootstraps/proves ${PYRIGHT_LSP_BIN} today, so task language cannot be identified fail-closed.`,
     )
@@ -276,5 +272,9 @@ export const assertRemoteStrictGroundingSupported = (args: {
   )
 }
 
-export const readDatasetInstanceIds = (path: string): string[] =>
-  readParsedDatasetRows(path)?.map((row) => row.instanceId) ?? []
+/** Every instance id in a dataset file, decoded through the FAMILY's reader.
+ *  Best-effort (`[]` on an unreadable file) — its consumers are launch tags,
+ *  status snapshots and relaunch reconciliation, none of which may throw. */
+export const readDatasetInstanceIds = (path: string, family: DatasetFamily): string[] => [
+  ...readFamilyDatasetInstanceIds(path, family),
+]

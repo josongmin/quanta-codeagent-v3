@@ -1,0 +1,36 @@
+# Build / run artifacts of this adapter. None of these belong in Git.
+#
+# TB21-01 note: ten of these files were COMMITTED before this rule existed
+# (stale CPython 3.13 bytecode + setuptools metadata embedding an old package
+# version). A .gitignore rule does NOT untrack an already-tracked file, so the
+# `git rm --cached` for those ten is a separate, explicitly-staged step — see the
+# TB21-01 receipt for the exact list. This file only stops NEW ones appearing.
+
+# CPython bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# setuptools / build metadata
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# uv-managed project environment (`uv sync --project adapters/terminal-bench`).
+# uv already writes `.venv/.gitignore` containing `*`; this is belt-and-braces so
+# the rule survives a hand-made venv too.
+.venv/
+venv/
+
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# NOT ignored on purpose:
+#   uv.lock                 — the reproducibility pin (TB21-01 item 3)
+#   protocol-golden.json    — the cross-language wire contract (AP-8)

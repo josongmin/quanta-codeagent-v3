@@ -15,6 +15,8 @@
  * outputs. {@link defaultSpawn} is the only real effect in this slice.
  */
 
+import type { DatasetFamily } from "../dataset-family-token"
+
 /** Options for a single grading run. */
 export interface GradeOptions {
   /** Local path to the swebench instances dataset (instances.jsonl). */
@@ -28,10 +30,13 @@ export interface GradeOptions {
   /** Where to write the retrieved report locally. Default: OS tmp dir. */
   readonly outDir?: string
   /** Dataset family (RFC jun-29). Selects the grading harness fork + image
-   *  namespace for the remote grade: `live` ⇒ the SWE-bench-Live harness fork +
-   *  `starryzhang` prebuilt images; `verified`/`pro` ⇒ stock `swebench`. Absent ⇒
-   *  treated as `verified` (byte-identical to the pre-family grade path). */
-  readonly family?: "verified" | "live" | "pro"
+   *  namespace for the remote grade via that family's profile `harnessSpec` port.
+   *  Absent ⇒ treated as `verified` (byte-identical to the pre-family grade path).
+   *
+   *  aug-22 HIGH-4: typed as `DatasetFamily` rather than an inline copy of the
+   *  union — the duplicate literal was one more place a family #4 would have had
+   *  to be added by hand. */
+  readonly family?: DatasetFamily
 }
 
 /** Result of a grading run. */

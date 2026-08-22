@@ -26,6 +26,7 @@ import { quantaHomeDir } from "@/shared/quanta-home"
 import { runtimeConfig } from "@/shared/runtime-config"
 import type { Instance } from "../types"
 import { buildProjectEnvUvRunArgv } from "./project-env"
+import type { RepoCheckoutSpec } from "./public-task"
 import { specResolvedRunner, specRunnerKind } from "./repo-version-specs"
 import {
   parseSelectedTestFilesToRun,
@@ -152,35 +153,58 @@ export const normalizeProRow = (raw: Record<string, unknown>): Record<string, un
     : {}),
 })
 
-/** Check out `ref` in `destDir`, deepening a shallow clone once on failure.
- *  Throws a precise Error (with `label` for context) on any git failure. */
+/** Check out `ref` in `destDir`, recovering commits omitted from the mirror.
+ *
+ * A full bare clone still omits commits reachable only from provider-specific
+ * refs (for example GitHub pull-request refs). SWE-bench Pro can legitimately
+ * name one of those commits as `base_commit`. The sandbox clone's `origin` is
+ * our local mirror, so deepening that origin cannot discover the omitted
+ * object. After the cheap local retry, fetch the exact ref from the
+ * authoritative repository URL before declaring the dataset row broken.
+ */
 const checkoutOrDeepen = async (
-  task: SwebenchTask,
+  task: RepoCheckoutSpec,
   destDir: string,
   exec: Exec,
+  repoUrl: string,
   ref: string,
   label: string,
   timeoutMs: number,
 ): Promise<void> => {
   let checkout = await exec(`git checkout -q ${ref}`, destDir, timeoutMs)
-  if (checkout.code !== 0) {
-    // Shallow / partial clone may not contain `ref` — deepen & retry.
-    const fetch = await exec(
-      `git fetch -q --unshallow || git fetch -q --depth=2147483647 origin`,
-      destDir,
-      timeoutMs,
-    )
-    if (fetch.code !== 0) {
-      throw new Error(
-        `git fetch (deepen) failed for ${task.instanceId} (code ${fetch.code}): ${fetch.stderr.slice(0, 500)}`,
-      )
-    }
+  if (checkout.code === 0) return
+
+  // A shallow / partial local clone may only need its existing origin deepened.
+  const deepen = await exec(
+    `git fetch -q --unshallow || git fetch -q --depth=2147483647 origin`,
+    destDir,
+    timeoutMs,
+  )
+  if (deepen.code === 0) {
     checkout = await exec(`git checkout -q ${ref}`, destDir, timeoutMs)
-    if (checkout.code !== 0) {
-      throw new Error(
-        `git checkout ${label} (${ref}) failed for ${task.instanceId} (code ${checkout.code}): ${checkout.stderr.slice(0, 500)}`,
-      )
-    }
+    if (checkout.code === 0) return
+  }
+
+  // `origin` points at the local mirror. Fetch the exact object from the real
+  // repository to cover commits reachable only through refs the mirror did not
+  // clone (e.g. GitHub refs/pull/*). Do not mutate the shared mirror: multiple
+  // instances can prepare the same repository concurrently.
+  const exactFetch = await exec(
+    `git fetch -q --no-tags ${shellWord(repoUrl)} ${shellWord(ref)}`,
+    destDir,
+    timeoutMs,
+  )
+  if (exactFetch.code !== 0) {
+    throw new Error(
+      `git fetch exact ${label} (${ref}) failed for ${task.instanceId} from ${repoUrl} (code ${exactFetch.code}): ${exactFetch.stderr.slice(0, 500)}; local deepen: ${deepen.stderr.slice(0, 300)}`,
+    )
+  }
+
+  checkout = await exec(`git checkout -q ${ref}`, destDir, timeoutMs)
+  if (checkout.code !== 0) {
+    throw new Error(
+      `git checkout ${label} (${ref}) failed for ${task.instanceId} after exact upstream fetch (code ${checkout.code}): ${checkout.stderr.slice(0, 500)}`,
+    )
   }
 }
 
@@ -221,7 +245,12 @@ export const reapStaleMirrorTemps = async (repoCacheRoot: string): Promise<void>
  * absent, behavior is byte-identical to before (base_commit checkout only).
  */
 export const prepareTaskRepo = async (
-  task: SwebenchTask,
+  // PMX-02: the NARROW checkout role view, not the whole task. Repository
+  // preparation needs identity + two git refs and nothing else, and typing it
+  // that way means a caller physically cannot hand this function a gold-bearing
+  // row. `SwebenchTask` still satisfies it structurally, so every existing call
+  // site is unchanged.
+  task: RepoCheckoutSpec,
   destDir: string,
   exec: Exec,
   repoBaseUrl = DEFAULT_REPO_BASE_URL,
@@ -292,12 +321,13 @@ export const prepareTaskRepo = async (
       task,
       destDir,
       exec,
+      repoUrl,
       task.environmentSetupCommit,
       "environment_setup_commit",
       timeoutMs,
     )
   }
-  await checkoutOrDeepen(task, destDir, exec, task.baseCommit, "base_commit", timeoutMs)
+  await checkoutOrDeepen(task, destDir, exec, repoUrl, task.baseCommit, "base_commit", timeoutMs)
   return destDir
 }
 

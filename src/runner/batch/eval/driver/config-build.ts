@@ -106,6 +106,18 @@ const localEnvSlotOf = (instance: Instance, sandbox: string): Pick<AgentConfig, 
   }
 }
 
+/** External-content tools are excluded from scored SWE-bench sessions. Public
+ * issue text and the checked-out repository are the admissible evidence; live
+ * web access can retrieve the upstream fix (Pro instance ids may even encode
+ * its commit SHA), turning an official-harness PASS into answer-key leakage. */
+const SWE_BENCH_EXTERNAL_TOOLS = new Set(["read_image_url", "web_fetch", "web_search"])
+
+const benchDefaultTools = (instance: Instance): Tool[] => {
+  const tools = buildDefaultTools()
+  if (instance.swebench === undefined) return tools
+  return tools.filter((tool) => !SWE_BENCH_EXTERNAL_TOOLS.has(tool.name))
+}
+
 export const benchVerifyAuthorityCommandsOf = (
   instance: Instance,
 ): readonly string[] | undefined => {
@@ -139,7 +151,7 @@ const buildBenchRegistry = (instance: Instance, opt: BenchPosture, cwd: string):
     : []
   const benchVerifierTool = benchBoundTestRunner(instance)
   return new ToolRegistry([
-    ...buildDefaultTools(),
+    ...benchDefaultTools(instance),
     ...lspNavTools,
     ...astGrepTools,
     ...findRefsTools,

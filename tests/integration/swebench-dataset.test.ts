@@ -13,7 +13,7 @@ import {
   writePredictions,
 } from "../../src/apps/bench/corpus/dataset"
 import { runInstance } from "../../src/apps/bench/eval"
-import { buildReport, writeReport } from "../../src/apps/bench/report"
+import { buildReport, toCanonicalSweReport, writeReport } from "../../src/apps/bench/report"
 
 /** Mirror of bench.test.ts's FixingLLM: one edit turn via the real edit tool,
  *  then a final text turn. Extracts the sandbox from the runner's prompt. */
@@ -135,7 +135,10 @@ describe("swebench-dataset", () => {
         { id: "b-2", passed: false, patch: "", turns: 1, error: "boom" },
       ],
     )
-    await writeReport(file, report)
+    // BFND-02: the canonical writer takes the identified union — a bare report
+    // body no longer compiles. The lift is inert on the bytes (verified ⇒ legacy
+    // encoding), which is exactly what this on-disk shape assertion pins.
+    await writeReport(file, toCanonicalSweReport(report))
     const parsed = JSON.parse(readFileSync(file, "utf8"))
     expect(parsed.timestamp).toBe("2026-05-19T00:00:00.000Z")
     expect(parsed.totals).toEqual({ total: 2, resolved: 1, resolvedPct: 50 })
@@ -213,5 +216,85 @@ describe("swebench-dataset", () => {
     }
     expect(prediction.instance_id).toBe("local__mathlib-1")
     expect(prediction.model_patch.length).toBeGreaterThan(0)
+  }, 60000)
+
+  test("prepareTaskRepo fetches an exact base SHA omitted from the bare mirror", async () => {
+    // Model GitHub's refs/pull/* topology: clone --bare copies branch heads but
+    // not this provider-specific ref, while an exact SHA fetch remains valid.
+    const origin = join(dir, "origin", "detached.git")
+    await mkdir(origin, { recursive: true })
+    await writeFile(join(origin, "value.txt"), "branch\n")
+    const gitcfg = "-c user.email=t@t -c user.name=t -c commit.gpgsign=false"
+    expect(
+      (
+        await defaultExec(
+          `git init -q . && git ${gitcfg} add -A && git ${gitcfg} commit -q -m branch`,
+          origin,
+          30000,
+        )
+      ).code,
+    ).toBe(0)
+    const branchCommit = (await defaultExec("git rev-parse HEAD", origin, 30000)).stdout.trim()
+
+    await writeFile(join(origin, "value.txt"), "pull-request-only\n")
+    expect((await defaultExec(`git ${gitcfg} commit -qam hidden`, origin, 30000)).code).toBe(0)
+    const hiddenCommit = (await defaultExec("git rev-parse HEAD", origin, 30000)).stdout.trim()
+    expect(
+      (
+        await defaultExec(
+          `git update-ref refs/pull/1/head ${hiddenCommit} && git reset -q --hard ${branchCommit}`,
+          origin,
+          30000,
+        )
+      ).code,
+    ).toBe(0)
+
+    const task = parseSwebenchJsonl(
+      JSON.stringify({
+        instance_id: "local__detached-1",
+        repo: "origin/detached",
+        base_commit: hiddenCommit,
+        problem_statement: "check out the hidden commit",
+      }),
+    )[0]
+    expect(task).toBeDefined()
+    if (!task) return
+
+    const commands: string[] = []
+    const tracingExec = async (cmd: string, cwd: string, timeoutMs: number) => {
+      commands.push(cmd)
+      const result = await defaultExec(cmd, cwd, timeoutMs)
+      if (
+        result.code === 0 &&
+        cmd.startsWith("git clone ") &&
+        !cmd.startsWith("git clone --bare")
+      ) {
+        const [, , mirror, checkout] = cmd.split(" ")
+        if (mirror && checkout) {
+          // Simulate the production mirror topology that exposed this bug: the
+          // provider-only ref/object is absent from both mirror and sandbox,
+          // while it remains exact-fetchable from the authoritative origin.
+          await defaultExec(
+            "git update-ref -d refs/pull/1/head && git reflog expire --expire=now --all && git gc --prune=now",
+            mirror,
+            timeoutMs,
+          )
+          await defaultExec(
+            "git for-each-ref --format='delete %(refname)' refs/remotes refs/pull | git update-ref --stdin; git reflog expire --expire=now --all; git gc --prune=now",
+            checkout,
+            timeoutMs,
+          )
+        }
+      }
+      return result
+    }
+    const dest = join(dir, "detached-checkout")
+    await prepareTaskRepo(task, dest, tracingExec, join(dir), 30000)
+
+    expect((await defaultExec("git rev-parse HEAD", dest, 30000)).stdout.trim()).toBe(hiddenCommit)
+    expect(readFileSync(join(dest, "value.txt"), "utf8")).toBe("pull-request-only\n")
+    expect(
+      commands.some((cmd) => cmd.includes(`fetch -q --no-tags`) && cmd.includes(hiddenCommit)),
+    ).toBe(true)
   }, 60000)
 })

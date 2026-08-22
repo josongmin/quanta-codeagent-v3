@@ -1,4 +1,5 @@
 import type { LLMPort } from "../ports"
+import { resolveDeliverableReasoningEffort } from "../reasoning-effort"
 import {
   defaultResponsesContinuationStore,
   type ResponsesContinuationStore,
@@ -77,7 +78,15 @@ export class OpenAIResponsesAdapter implements LLMPort {
     this.streamTimeoutMs = resolveAdapterStreamTimeouts(config)
     this.continuationStore = config.continuationStore ?? defaultResponsesContinuationStore()
     this.serviceTier = config.serviceTier
-    this.reasoningEffort = config.reasoningEffort
+    // Fail BEFORE the first model invocation, not on the first request: a
+    // misconfigured effort must stop the run from starting rather than ship the
+    // provider default under a receipt claiming the requested value. `stream()`
+    // is still guarded at the wire (`buildResponsesBody`) — this is the early,
+    // composition-time half of the same SSOT decision.
+    this.reasoningEffort = resolveDeliverableReasoningEffort(
+      config.reasoningEffort,
+      "openai-responses",
+    )
     this.reasoningSummary = config.reasoningSummary === true
     this.reasoningSummaryDetail = config.reasoningSummaryDetail
     this.reasoningVerbosity = config.reasoningVerbosity

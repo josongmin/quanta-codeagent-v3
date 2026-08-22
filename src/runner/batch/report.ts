@@ -22,7 +22,6 @@
  * official harness green can count as clean leaderboard score.
  */
 import { createHash } from "node:crypto"
-import { quantaHomePath, runtimeConfig } from "@/shared"
 import {
   aggregate,
   classify,
@@ -40,6 +39,12 @@ import type { ReceiptEvidence, ScoreLabel } from "./eval/score-label"
 import { filesFromPatch } from "./eval/selection-paths"
 import type { BenchObserver, LocalizeData } from "./observe"
 import { resolvedTotals, scoreTotals } from "./observe"
+import type { DatasetFamily } from "./report-envelope"
+import {
+  type AggregateOfficialGradeInput,
+  aggregateOfficialGrade,
+  type OfficialGradeSection,
+} from "./report-official-grade"
 import type {
   BenchInstanceBudget,
   BenchReproTestTelemetry,
@@ -75,11 +80,78 @@ export const emitLocalize = (observer: BenchObserver | undefined, data: Localize
   }
 }
 
+/**
+ * BFND-02 — the canonical envelope (`CanonicalBenchReport`), its codec and the
+ * ONE writer live in the cohesive sibling `report-envelope.ts`. They are
+ * re-exported here so every existing importer of `@/runner/batch/report` keeps
+ * its import path, and so `report.ts` stays one concern: building the SWE report
+ * BODY. `buildReport` returns that body in its LEGACY persisted encoding;
+ * `toCanonicalSweReport` lifts it into the union at the composition root.
+ */
+export type {
+  BenchReportSuite,
+  CanonicalBenchReport,
+  DatasetFamily,
+  SweBenchReport,
+  TerminalBenchReport,
+  TerminalBenchVersion,
+  TerminalTrialReceipt,
+} from "./report-envelope"
+export {
+  benchResultsDir,
+  CanonicalReportIdentityError,
+  DATASET_FAMILIES,
+  decodeCanonicalReport,
+  encodeCanonicalReport,
+  isDatasetFamily,
+  mirrorReportToSsot,
+  TERMINAL_BENCH_VERSION,
+  TERMINAL_ONLY_KEYS,
+  toCanonicalSweReport,
+  writeReport,
+} from "./report-envelope"
+/**
+ * PMX-05 — the ONE official-grade aggregation owner lives in the cohesive sibling
+ * `report-official-grade.ts` and is re-exported here so `report.ts` stays one
+ * concern (building the SWE report BODY) while consumers keep one import path.
+ */
+export type {
+  AggregateOfficialGradeInput,
+  OfficialGradeCampaignMeta,
+  OfficialGradeDisplay,
+  OfficialGradeInstanceMeta,
+  OfficialGradeInstanceReceipt,
+  OfficialGradeLanguageTotals,
+  OfficialGradeSection,
+  OfficialGradeTotals,
+} from "./report-official-grade"
+export {
+  aggregateOfficialGrade,
+  assertOfficialGradeCoveringPartition,
+  decodeOfficialGradeSection,
+  formatOfficialGradeTotals,
+  OFFICIAL_GRADE_RATE_UNAVAILABLE,
+  OfficialGradePartitionError,
+  renderOfficialGradeCliLines,
+  renderOfficialGradeMarkdown,
+} from "./report-official-grade"
+
 export interface BenchReportMeta {
   model: string
   provider: string
   /** Dataset family (RFC jun-29 R4). Absent ⇒ verified. */
-  datasetFamily?: "verified" | "live" | "pro"
+  datasetFamily?: DatasetFamily
+  /**
+   * PMX-05 — the OFFICIAL-grade input for this campaign: a PMX-03 receipt plus
+   * the per-instance replay metadata. When present, `buildReport` runs the ONE
+   * aggregation (`aggregateOfficialGrade`) exactly once and persists the result;
+   * every display surface then reads that persisted section instead of folding
+   * `perInstance` rows for itself.
+   *
+   * Absent ⇒ the report omits the section entirely ⇒ byte-identical to the
+   * pre-PMX-05 shape, which is what keeps ~4000 live artifacts readable.
+   */
+  officialGrade?: AggregateOfficialGradeInput
 }
 
 /** Knob telemetry — exact registry state for the run. Cheaply serialisable
@@ -237,7 +309,7 @@ export interface BenchReport {
   /** Dataset family (RFC jun-29 R4) — present only for non-verified runs so a
    *  verified report stays byte-identical; lets the leaderboard SSOT separate
    *  verified/live/pro instead of conflating their resolved-rates. */
-  datasetFamily?: "verified" | "live" | "pro"
+  datasetFamily?: DatasetFamily
   n: number
   totals: {
     total: number
@@ -256,6 +328,19 @@ export interface BenchReport {
   /** Knob telemetry — recorded so two runs are comparable from the JSON
    *  alone. Always present (empty subfields when the registry is empty). */
   knobs: BenchReportKnobs
+  /**
+   * PMX-05 — the official-grade SSOT: the covering-partition totals, the campaign
+   * evaluator identity, one compact receipt per graded instance, and the named
+   * coverage gap. THE authority for score and coverage on this branch.
+   *
+   * `totals`/`scoreTotals` above stay legacy compatibility outputs; they answer a
+   * different question (what the LOCAL verifier said about the attempted rows)
+   * and must never be read as the official denominator.
+   *
+   * ABSENT unless the run actually invoked an official grader ⇒ a report without
+   * one is byte-identical to the pre-PMX-05 shape.
+   */
+  officialGrade?: OfficialGradeSection
   /** Run-health verdict from the early systemic-abort detector. ABSENT for a
    *  plain HEALTHY run (byte-identical report) — present only when the detector
    *  ran AND it has something worth recording: an abort, or a non-healthy
@@ -469,6 +554,11 @@ export const buildReport = (
       buildPerInstanceReportEntry(r, classifications[i] ?? { termination: "unknown", signals: [] }),
     ),
     knobs,
+    // PMX-05: the ONE official-grade aggregation, run EXACTLY once, right here.
+    // Omitted when the run had no official grader ⇒ byte-identical legacy report.
+    ...(meta.officialGrade !== undefined
+      ? { officialGrade: aggregateOfficialGrade(meta.officialGrade) }
+      : {}),
     // Emit the run-health verdict ONLY when it carries signal — an abort or a
     // non-healthy diagnosis. A plain `verdict:"healthy"` run omits the field so
     // a normal report stays byte-identical to the pre-feature shape.
@@ -477,43 +567,4 @@ export const buildReport = (
       ? { runHealth: meta.runHealth }
       : {}),
   }
-}
-
-/** Canonical SSOT sink for ALL bench reports — regardless of the caller-chosen
- *  `--report` path. Override with `QUANTA_BENCH_RESULTS_DIR`; disable the mirror
- *  with `QUANTA_BENCH_RESULTS_DIR=off`. Default `~/.quanta/bench/results`. */
-const benchResultsDir = (): string | null => {
-  const override = runtimeConfig().benchResultsDir
-  if (override === "off" || override === "0") return null
-  if (override && override.length > 0) return override
-  return quantaHomePath("bench", "results")
-}
-
-/** Mirror an already-written report's CONTENT into the canonical SSOT dir so
- *  results never scatter again — independent of the caller-chosen `--report`
- *  path. The mirror name is the sanitised source path, so re-runs to the same
- *  destination overwrite their own mirror (idempotent, no accumulation).
- *  Best-effort: a mirror failure never throws (the primary write already
- *  succeeded). Shared by `writeReport` (local batch) and the full-remote
- *  sidecar saver, so EVERY report path is covered by one canonical sink. */
-export const mirrorReportToSsot = async (sourceFile: string, content: string): Promise<void> => {
-  const dir = benchResultsDir()
-  if (!dir) return
-  try {
-    const { resolve } = await import("node:path")
-    const mirrorName = resolve(sourceFile)
-      .replace(/^[/\\]+/, "")
-      .replace(/[^a-zA-Z0-9._-]/g, "__")
-    await Bun.write(`${dir}/${mirrorName}`, content)
-  } catch {
-    // canonical mirror is best-effort — the source report already landed
-  }
-}
-
-/** Write the report as pretty JSON (trailing newline) and mirror it to the
- *  canonical SSOT dir (see {@link mirrorReportToSsot}). */
-export const writeReport = async (file: string, report: BenchReport): Promise<void> => {
-  const json = `${JSON.stringify(report, null, 2)}\n`
-  await Bun.write(file, json)
-  await mirrorReportToSsot(file, json)
 }

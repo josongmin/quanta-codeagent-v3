@@ -9,29 +9,12 @@ import { gateOn } from "@/shared"
 import { type AuthSource, resolveAuthSource, selectAuthSourceLabel } from "../auth-pool"
 import { argValue } from "../entry-bootstrap"
 
-/** Every `instance_id` in a SWE-bench dataset jsonl — the expected set that
- *  instance-aware relaunch reconciles against to detect partial box loss.
- *  Best-effort: unparseable/blank lines are skipped, a missing file ⇒ []. */
-export const readDatasetInstanceIds = (path: string): string[] => {
-  let raw: string
-  try {
-    raw = readFileSync(path, "utf8")
-  } catch {
-    return []
-  }
-  const ids: string[] = []
-  for (const line of raw.split("\n")) {
-    const t = line.trim()
-    if (t === "") continue
-    try {
-      const id = (JSON.parse(t) as { instance_id?: unknown }).instance_id
-      if (typeof id === "string" && id !== "") ids.push(id)
-    } catch {
-      /* skip malformed line */
-    }
-  }
-  return ids
-}
+// PMX-02: this module's OWN `readDatasetInstanceIds` is GONE. It split the file
+// on newlines and read `instance_id` itself — a second parser beside the family
+// reader, which for a JSON-array corpus would silently return `[]` and quietly
+// disable instance-aware relaunch reconciliation (`expected.length === 0` forces
+// maxRelaunch to 0). Callers use `remote/box-session/dataset-preflight`'s
+// family-aware reader instead.
 
 // argValue (--flag value / --flag=value) is the SSOT in ../entry-bootstrap —
 // shared by both bench entrypoints; re-exported so cli.ts + the handlers keep it.
@@ -69,9 +52,27 @@ export const printBlock = (s: string): void => {
   process.stdout.write(`${s}\n`)
 }
 
-/** Value-taking flags — their following token is a value, NOT a positional. */
+/** Value-taking flags — their following token is a value, NOT a positional.
+ *
+ *  DRIFT HAZARD (aug-22 NEW-2): this is a hand-maintained mirror of every
+ *  `argValue("--flag")` call site in `cli.ts` + `./` — and it had drifted by
+ *  EIGHT flags. `positionals()` only skips a flag's value when the flag is
+ *  listed here, so a missing entry leaks the VALUE into the positional list and
+ *  shifts every real positional one slot. Observed live: `quanta-bench wave2-ab
+ *  --control-predictions c.jsonl --treatment-predictions t.jsonl A.json B.json`
+ *  loaded `c.jsonl` (a PREDICTIONS file) as the control REPORT.
+ *  `composition-root-dispatch.test.ts` now scans the real handler bytes and
+ *  fails when a value-flag is read but not listed here. */
 export const VALUE_FLAGS = new Set([
   "--predictions",
+  "--control-predictions",
+  "--treatment-predictions",
+  "--dataset-family",
+  "--report",
+  "--observe-root",
+  "--skip-resolved",
+  "--limit",
+  "--min-cases",
   "--backend",
   "--dataset",
   "--max-workers",

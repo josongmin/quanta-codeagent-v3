@@ -16,8 +16,7 @@
 import "@/runner/knobs/knobs"
 import { existsSync } from "node:fs"
 import { mkdir, mkdtemp, rm } from "node:fs/promises"
-import { homedir } from "node:os"
-import { join, resolve } from "node:path"
+import { join } from "node:path"
 import { BUDGET_PRESETS } from "@/agent"
 import { DEFAULT_MODEL, type LLMPort, type Provider, pickProvider, tryCreateLLM } from "@/llm"
 import {
@@ -31,27 +30,27 @@ import { makeReproArtifactFsSink } from "@/runner/batch/eval/repro-artifacts-fs"
 import { runBatchWithHealth } from "@/runner/batch/eval/run-health"
 import type { RunHealthSummary } from "@/runner/batch/report"
 import { errMessage, gateOn, logger, runtimeConfig } from "@/shared"
+import { resolveBenchmarkRunConfig } from "./benchmark-suite"
 import {
+  benchInstanceWorkSlug,
   benchRunDir,
   benchRunId,
   benchWorkRoot,
   defaultExec,
   prepareTaskRepo,
-  type SwebenchTask,
-  toInstance,
 } from "./corpus"
-import { bridgeDatasetFamilyToEnv, gradeEvaluatorForFamily } from "./dataset-family"
+import type { DatasetFamily } from "./dataset-family-token"
 import { buildDatasetDryRunPlan, buildDryRunPlan, formatDryRunPlan } from "./dry-run"
 import { runInstance } from "./eval"
 import { type ForkBranchOutcome, formatForkBranchReport } from "./eval/fork-branch-report"
 import { type ForkExperiment, resolveForkExperiments } from "./eval/fork-experiments"
-import { isPythonSwebenchAvailable } from "./harness"
 import { startHostResourceSampler } from "./host-resource-sampler"
 import { startLaneProgressRenderer } from "./lane-progress-renderer"
 import { resolveModelLanes } from "./model-lanes"
 import { resolvedTotals } from "./observe"
 import { seedBenchExecutionPreset } from "./preset"
-import { evaluateWithPythonSwebench } from "./python-swebench"
+import { resolveDatasetFamilyProfile } from "./profiles/registry"
+import { buildPythonSwebench } from "./python-verifier-wiring"
 import {
   resolveBenchReasoningSummary,
   resolveBenchReasoningSummaryDetail,
@@ -64,14 +63,15 @@ import {
   repairConfigFromArg,
   resolveConcurrency,
 } from "./run-args"
+import { datasetFamilyOrDefault, readDatasetFamilySelector } from "./run-config"
 import {
   attemptObs,
-  datasetFamily,
   filterSwebenchTasks,
   finalizeObserve,
   readSwebenchTasks,
   resolveObserve,
   runPrepareImages,
+  type SwebenchRunnableRow,
   withBenchInstanceRoot,
   withObserve,
   writeArtifacts,
@@ -275,7 +275,7 @@ type SwebenchTaskDeps = {
    *  Threaded onto the per-instance `RunInstanceDeps.llmLanes`. Undefined ⇒
    *  byte-identical single-port path. */
   llmLanes?: readonly LLMPort[]
-  cfg: { n: number; limit?: number; maxTurns: number; timeoutMs: number }
+  cfg: { n: number; limit?: number; maxTurns: number; timeoutMs: number; family: DatasetFamily }
   pythonSwebench: Awaited<ReturnType<typeof buildPythonSwebench>>
   repair: { maxRounds: number } | undefined
   obs: ObserveCtx | undefined
@@ -283,13 +283,14 @@ type SwebenchTaskDeps = {
 }
 
 const prepareSwebenchWorkDir = async (
-  task: SwebenchTask,
+  task: SwebenchRunnableRow,
 ): Promise<{ readonly work: string; readonly dest: string }> => {
+  const opaqueInstance = benchInstanceWorkSlug(task.instanceId)
   if (!gateOn(process.env, "QUANTA_BENCH_RESUME")) {
-    const work = await mkdtemp(join(benchWorkRoot(), `swebench-${task.instanceId}-`))
+    const work = await mkdtemp(join(benchWorkRoot(), `swebench-${opaqueInstance}-`))
     return { work, dest: join(work, "repo") }
   }
-  const work = join(benchWorkRoot(), task.instanceId.replace(/[^A-Za-z0-9._-]/g, "_"))
+  const work = join(benchWorkRoot(), opaqueInstance)
   const dest = join(work, "repo")
   await rm(dest, { recursive: true, force: true })
   await mkdir(dest, { recursive: true })
@@ -297,7 +298,7 @@ const prepareSwebenchWorkDir = async (
 }
 
 const runSwebenchTask = async (
-  task: SwebenchTask,
+  task: SwebenchRunnableRow,
   deps: SwebenchTaskDeps,
 ): Promise<InstanceResult> => {
   // B1 (jun-27-bench-spot-resume-s3.md): when resume is ON, mint a
@@ -328,8 +329,17 @@ const runSwebenchTask = async (
       ...(deps.obs?.runId !== undefined ? { runId: deps.obs.runId } : {}),
     })
   try {
-    await prepareTaskRepo(task, dest, defaultExec, deps.repoBaseUrl, deps.cfg.timeoutMs)
-    const instance = toInstance(task, dest)
+    // PMX-02: repository preparation gets the NARROW checkout spec and the
+    // Instance is built by the FAMILY's own closure — so a family whose corpus
+    // ships gold inline has no route from the dataset file to `Instance`.
+    await prepareTaskRepo(
+      task.task.checkout,
+      dest,
+      defaultExec,
+      deps.repoBaseUrl,
+      deps.cfg.timeoutMs,
+    )
+    const instance = task.task.toInstance(dest)
     // A1 (jun-28): persist per-candidate repro artifacts UNDER the observe dir so
     // they ride the full-remote observe tarball. Rides the EXISTING observe opt-in
     // (no new knob): no observe handle ⇒ no sink ⇒ no-op (default-OFF).
@@ -391,7 +401,7 @@ const runSwebenchTask = async (
 }
 
 const executeSwebenchTasks = async (
-  selected: readonly SwebenchTask[],
+  selected: readonly SwebenchRunnableRow[],
   concurrency: number,
   taskDeps: SwebenchTaskDeps,
 ): Promise<{ readonly results: InstanceResult[]; readonly runHealth?: RunHealthSummary }> => {
@@ -439,11 +449,15 @@ const runDatasetMode = async (
    *  recorded turns carry instance/run labels in metadata. */
   freshLlm: (ctx?: { instanceId?: string; runId?: string }) => LLMPort,
   meta: { provider: string; model: string },
-  cfg: { n: number; limit?: number; maxTurns: number; timeoutMs: number },
+  // HIGH-1 (aug-22): `family` is the TYPED family resolved ONCE at the
+  // composition root and threaded here. Nothing below re-resolves it from argv
+  // or ambient env, so the corpus parse, the grade verifier, the dry-run label
+  // and the report stamp cannot disagree with the run that was admitted.
+  cfg: { n: number; limit?: number; maxTurns: number; timeoutMs: number; family: DatasetFamily },
   // Pre-parsed by the single caller (`maybeRunDatasetMode`) so the dataset file
   // is read + parsed ONCE per run: `parsed` is the raw corpus (drives the empty
   // check), `filtered` already has the `--instance` filter applied.
-  tasks: { parsed: readonly SwebenchTask[]; filtered: SwebenchTask[] },
+  tasks: { parsed: readonly SwebenchRunnableRow[]; filtered: SwebenchRunnableRow[] },
   obs?: ObserveCtx,
   /** G1 — verify-select model lanes (≥2 distinct-model ports) or undefined.
    *  Undefined ⇒ byte-identical single-port path. */
@@ -473,7 +487,7 @@ const runDatasetMode = async (
   // path does at :396). Without this, `deps.pythonSwebench` is always
   // undefined here and runner.verify() silently falls back to the no-op local
   // `testCmd:"true"` — i.e. `--swebench` could never reach real grading.
-  const pythonSwebench = await buildPythonSwebench()
+  const pythonSwebench = await buildPythonSwebench(cfg.family, exitFn)
   // b2 external repair rounds (ADR-0014). Default-OFF byte-identical: absent
   // ⇒ key omitted from deps ⇒ runner takes single-pass path (G2 gating). Set
   // either via `--repair-rounds <int>` or `QUANTA_REPAIR_ROUNDS`.
@@ -521,6 +535,11 @@ const runDatasetMode = async (
       provider: meta.provider,
       model: meta.model,
       n: cfg.n,
+      // BFND-02 — carry the resolved family into the report. The SAME typed field
+      // the corpus parse and the grade verifier were threaded (aug-22 HIGH-1), so
+      // the artifact can never disagree with the run that produced it. Verified ⇒
+      // omitted at serialization ⇒ byte-identical legacy report.
+      datasetFamily: cfg.family,
       ...(runHealth !== undefined ? { runHealth } : {}),
     },
   )
@@ -631,6 +650,12 @@ const maybeRunDatasetMode = async (
     limit: number | null
     maxTurns: number
     timeoutMs: number
+    /** The composition root's TYPED resolved family. REQUIRED (aug-22 HIGH-1):
+     *  every SWE parse / grade / label / report site below reads THIS field.
+     *  It used to be an optional declaration while those sites still called
+     *  `datasetFamily()` — a fresh argv+ambient-env re-resolution that could
+     *  disagree with the config the root had already admitted. */
+    family: DatasetFamily
   },
   obs?: ObserveCtx,
 ): Promise<boolean> => {
@@ -646,15 +671,18 @@ const maybeRunDatasetMode = async (
   // Parse the dataset file ONCE per run; the raw corpus + the `--instance`
   // filtered view are then threaded through the dry-run plan AND the run path
   // (no more 3× re-read/re-parse of the same JSONL).
-  const parsed = readSwebenchTasks(datasetFile)
+  const parsed = readSwebenchTasks(datasetFile, cfg.family)
   const filtered = filterSwebenchTasks(parsed)
   if (argFlag("--dry-run")) {
     const plan = buildDatasetDryRunPlan(datasetFile, filtered, {
       n: cfg.n,
       limit: cfg.limit,
       pythonHarness: gateOn(process.env, "QUANTA_SWEBENCH_PYTHON"),
-      ...(datasetFamily() === "pro" ? { verifierLabel: "ScaleAI SWE-bench Pro harness" } : {}),
+      ...((label) => (label !== undefined ? { verifierLabel: label } : {}))(
+        resolveDatasetFamilyProfile(cfg.family).verifierLabel,
+      ),
       preset: process.env.QUANTA_BENCH_PRESET ?? "(unset)",
+      datasetFamily: cfg.family, // LOW-10: the root's RESOLVED family, stated
     })
     for (const line of formatDryRunPlan(plan)) logger.info(line)
     exitFn(0)
@@ -708,6 +736,7 @@ const maybeRunDatasetMode = async (
         ...(cfg.limit !== null ? { limit: cfg.limit } : {}),
         maxTurns: cfg.maxTurns,
         timeoutMs: cfg.timeoutMs,
+        family: cfg.family,
       },
       { parsed, filtered },
       obs,
@@ -717,100 +746,6 @@ const maybeRunDatasetMode = async (
     hostMonitor.stop()
   }
   return true
-}
-
-/** Build the optional Python-harness wiring for the runner. Returns undefined
- *  unless `QUANTA_SWEBENCH_PYTHON=1` AND the official harness is importable
- *  (probe is real here). Default-off ⇒ the local testCmd path is unchanged. */
-// REGRESSION FIX (jun-30): the god-MODULE split (11adab597) dropped this Pro grader
-// branch — `family=pro` then fell through to the VERIFIED harness, which can't find
-// Pro instance_ids ⇒ gold-sanity "gold did not resolve" ⇒ 8/8 grader_invalid. The
-// Pro grader injects into the SAME `pythonSwebench` seam (gradeEvaluatorForFamily),
-// so verify()/gold-sanity transparently grade with the ScaleAI harness. Opts come
-// from box-set env (QUANTA_SWEBENCH_PRO_HARNESS_DIR/RAW_SAMPLE_PATH/PYTHON_BIN).
-const buildProGradeVerifier = (): RunCfg["pythonSwebench"] => {
-  const defaultHarnessDir = join(homedir(), "swebench-pro")
-  const defaultPythonBin = join(homedir(), "swebench-pro-venv", "bin", "python")
-  const configuredHarnessDir = process.env.QUANTA_SWEBENCH_PRO_HARNESS_DIR
-  const harnessDir =
-    configuredHarnessDir ??
-    (existsSync(join(defaultHarnessDir, "swe_bench_pro_eval.py")) ? defaultHarnessDir : undefined)
-  const configuredRawSamplePath =
-    process.env.QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH ?? argValue("--swebench")
-  const rawSamplePath =
-    configuredRawSamplePath !== undefined ? resolve(configuredRawSamplePath) : undefined
-  if (!harnessDir || !rawSamplePath) {
-    logger.error(
-      "dataset-family=pro requires QUANTA_SWEBENCH_PRO_HARNESS_DIR + " +
-        "QUANTA_SWEBENCH_PRO_RAW_SAMPLE_PATH, or the default ~/swebench-pro clone plus " +
-        "the --swebench JSONL path. " +
-        "REFUSING to fake-grade. Aborting.",
-    )
-    exitFn(1)
-    return undefined
-  }
-  const configuredPythonBin = process.env.QUANTA_SWEBENCH_PRO_PYTHON_BIN
-  const pythonBin =
-    configuredPythonBin ?? (existsSync(defaultPythonBin) ? defaultPythonBin : undefined)
-  const dockerhubUsername = process.env.QUANTA_SWEBENCH_PRO_DOCKERHUB_USERNAME
-  const modelName = process.env.QUANTA_SWEBENCH_PRO_MODEL_NAME
-  logger.info(
-    `using ScaleAI SWE-bench Pro harness for grading (${harnessDir}, python=${pythonBin ?? "python3"})`,
-  )
-  return {
-    evaluate: gradeEvaluatorForFamily("pro", {
-      harnessDir,
-      rawSamplePath,
-      ...(pythonBin !== undefined ? { pythonBin } : {}),
-      ...(dockerhubUsername ? { dockerhubUsername } : {}),
-      ...(modelName ? { modelName } : {}),
-    }),
-  }
-}
-
-const buildPythonSwebench = async (): Promise<RunCfg["pythonSwebench"]> => {
-  if (datasetFamily() === "pro") return buildProGradeVerifier()
-  if (!gateOn(process.env, "QUANTA_SWEBENCH_PYTHON")) return undefined
-  if (!(await isPythonSwebenchAvailable())) {
-    // FAIL LOUD — no silent fake fallback. The operator explicitly asked for
-    // real grading (QUANTA_SWEBENCH_PYTHON=1); silently degrading to the
-    // testCmd="true" no-op would fake a PASS for every swebench instance.
-    // Abort so a broken harness can never be mistaken for a green run.
-    logger.error(
-      'QUANTA_SWEBENCH_PYTHON=1 but `python -c "import swebench"` failed (60s probe). ' +
-        "REFUSING to fake-grade. Fix QUANTA_SWEBENCH_PYTHON_BIN / install swebench, " +
-        "or unset QUANTA_SWEBENCH_PYTHON. Aborting.",
-    )
-    exitFn(1)
-    return undefined // unreachable in prod (exitFn = process.exit)
-  }
-  // REGRESSION FIX (jun-30): restore the Live default the refactor dropped — family=live
-  // grades a DIFFERENT dataset; defaulting to Verified would look Live ids up in the
-  // Verified dataset (KeyError / mismatched spec). Verified/Pro unchanged.
-  const liveDefault = datasetFamily() === "live" ? "SWE-bench-Live/SWE-bench-Live" : undefined
-  const datasetName =
-    argValue("--dataset-name") ?? process.env.QUANTA_SWEBENCH_DATASET_NAME ?? liveDefault
-  logger.info(
-    `using official Python swebench harness for grading (dataset=${datasetName ?? "princeton-nlp/SWE-bench_Verified (default)"})`,
-  )
-  return datasetName !== undefined
-    ? {
-        evaluate: (instance, prediction, opts) =>
-          evaluateWithPythonSwebench(
-            instance,
-            prediction,
-            opts as Parameters<typeof evaluateWithPythonSwebench>[2],
-          ),
-        opts: { datasetName },
-      }
-    : {
-        evaluate: (instance, prediction, opts) =>
-          evaluateWithPythonSwebench(
-            instance,
-            prediction,
-            opts as Parameters<typeof evaluateWithPythonSwebench>[2],
-          ),
-      }
 }
 
 const exitCustomDryRunIfRequested = (
@@ -839,6 +774,12 @@ const runCustomCorpusMode = async (
     limit: number | null
     maxTurns: number
     timeoutMs: number
+    /** The composition root's TYPED resolved family. REQUIRED (aug-22 HIGH-1):
+     *  every SWE parse / grade / label / report site below reads THIS field.
+     *  It used to be an optional declaration while those sites still called
+     *  `datasetFamily()` — a fresh argv+ambient-env re-resolution that could
+     *  disagree with the config the root had already admitted. */
+    family: DatasetFamily
   },
   obs?: ObserveCtx,
 ): Promise<void> => {
@@ -868,7 +809,7 @@ const runCustomCorpusMode = async (
   const resolved = resolveLLM(`${instances.length} instance(s)`)
   if (resolved === null) return
   const { provider, model, llm } = resolved
-  const pythonSwebench = await buildPythonSwebench()
+  const pythonSwebench = await buildPythonSwebench(cfg.family, exitFn)
   logger.info(
     `bench: ${instances.length} instance(s), provider=${provider}, model=${model}, n=${cfg.n}`,
   )
@@ -897,6 +838,9 @@ const runCustomCorpusMode = async (
     argValue("--predictions") ?? join(benchRunDir(benchRunId()), "predictions.jsonl"),
     argValue("--report") ?? join(benchRunDir(benchRunId()), "report.json"),
     results,
+    // BFND-02: NO datasetFamily here on purpose. This is the CUSTOM-CORPUS mode —
+    // it never reads a SWE dataset, so `--dataset-family` has no meaning for it and
+    // stamping one would fabricate identity for a corpus the family never selected.
     { provider, model, n: cfg.n },
   )
   printSummary({ ...resolvedTotals(results), results })
@@ -936,24 +880,55 @@ const DEFAULT_BENCH_TIMEOUT_MS = 1_200_000
  *  CLI. */
 export const applyBenchEnvDefaults = (
   env: Record<string, string | undefined>,
-  opts: { argvPreset?: string | undefined } = {},
+  opts: {
+    argvPreset?: string | undefined
+    /** TYPED resolved family from the composition root's `BenchRunConfig`
+     *  (aug-22 HIGH-1). The preset seeder used to read this back out of
+     *  `env.QUANTA_SWEBENCH_DATASET_FAMILY`, which the composition root had just
+     *  written from argv — argv→env→preset was a pure in-process round-trip
+     *  through ambient env. Defaults to "verified" for the legacy callers that
+     *  never had a family axis (byte-identical). */
+    datasetFamily?: DatasetFamily
+  } = {},
 ): void => {
   if (env.QUANTA_STALE_READ_GUARD === undefined) env.QUANTA_STALE_READ_GUARD = "off"
-  seedBenchExecutionPreset(env, opts.argvPreset)
+  seedBenchExecutionPreset(env, opts.argvPreset, datasetFamilyOrDefault(opts.datasetFamily))
 }
 
 export const runMain = async (deps: MainDeps = {}): Promise<void> => {
   exitFn = deps.exit ?? defaultExitFn
   loadEnv([".env.dev", ".env.local", ".env"])
-  // jul-01 audit A1 follow-up — bridge --dataset-family flag → env at the LEGACY
-  // direct entry too (`bun src/apps/bench/index.ts … --dataset-family live`), which
-  // bypasses cli.ts main(). Closes the footgun both A1+A2 audits flagged: without it
-  // the local-Live guard (env-reader) wouldn't fire on a direct-invoke. After .env load
-  // so the flag wins; no-op when absent (byte-identical).
-  bridgeDatasetFamilyToEnv(argValue("--dataset-family"))
-  // Pro spans Python, Go, JS, and TS, so family selection must be visible before
-  // the default preset is seeded. Explicit preset selectors retain precedence.
-  applyBenchEnvDefaults(process.env, { argvPreset: argValue("--preset") })
+  // T2 — resolve the ONE typed run config at the composition root. Parses the
+  // family selector (argv `--dataset-family` wins, then env) EXACTLY ONCE and
+  // FAILS CLOSED on an explicit-but-unknown selector (a typo now errors instead
+  // of silently grading as Verified). ABSENT selector ⇒ verified (byte-identical
+  // legacy default). After .env load so the flag/env are populated.
+  //
+  // HIGH-1 (aug-22): the resolved family is NOT written back into `process.env`.
+  // The old bridge (and its renamed successor) mutated the ambient env here and
+  // the very next statement read it back through `preset.ts` — an argv→env→preset
+  // in-process round-trip. Every in-process consumer below now takes the TYPED
+  // `runConfig.datasetFamily`; env is written only into a per-call envelope handed
+  // to a real subprocess/SSH child (see `buildSubprocessFamilyEnv`).
+  // BFND-01 — resolve the ONE typed BenchRunConfig via the suite discriminator.
+  // The `run`/no-subcommand entry is the SWE suite (byte-compat); the nested
+  // swe branch carries the fail-closed typed datasetFamily. `terminal` never
+  // reaches here (cli.ts routes it to its own handler).
+  const benchConfig = resolveBenchmarkRunConfig({
+    subcommand: process.argv[2],
+    argvFamily: readDatasetFamilySelector(process.argv),
+    env: process.env,
+  })
+  if (benchConfig.benchmarkSuite !== "swe-bench") {
+    throw new Error("runMain is the swe-bench composition root; terminal-bench routes elsewhere")
+  }
+  const family = benchConfig.swe.datasetFamily
+  // Pro spans Python, Go, JS, and TS, so family selection must reach the preset
+  // seeder — as a TYPED argument. Explicit preset selectors retain precedence.
+  applyBenchEnvDefaults(process.env, {
+    argvPreset: argValue("--preset"),
+    datasetFamily: family,
+  })
 
   if (argFlag("--help") || argFlag("-h")) {
     printHelp()
@@ -1004,8 +979,8 @@ export const runMain = async (deps: MainDeps = {}): Promise<void> => {
 
   // Official-dataset mode takes precedence; when its flag/env is unset the
   // custom-corpus path is byte-for-byte unchanged.
-  if (await maybeRunDatasetMode({ n, limit, maxTurns, timeoutMs }, obs)) {
+  if (await maybeRunDatasetMode({ n, limit, maxTurns, timeoutMs, family }, obs)) {
     return
   }
-  await runCustomCorpusMode({ corpusRoot, n, limit, maxTurns, timeoutMs }, obs)
+  await runCustomCorpusMode({ corpusRoot, n, limit, maxTurns, timeoutMs, family }, obs)
 }

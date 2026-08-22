@@ -152,7 +152,10 @@ export const DAEMON: readonly KnobInventoryEntry[] = [
     default: undefined,
     group: "llm",
     home: "runtime-config",
-    describe: "Reasoning effort level (minimal|low|medium|high|xhigh).",
+    describe:
+      "Reasoning effort level (none|minimal|low|medium|high|xhigh) — " +
+      "OpenAI-Responses surfaces only; an out-of-set value or an Anthropic " +
+      "provider FAILS the run rather than silently using the provider default.",
     readSite: "llm/factory.ts",
   },
   {

@@ -1,0 +1,10 @@
+{
+ "schema_version": "ATIF-v1.7",
+ "trial": "20cdfc24-bd15-5a4e-ab8d-ef5a2d1c0094",
+ "steps": [
+  {
+   "type": "text",
+   "content": "fixture"
+  }
+ ]
+}

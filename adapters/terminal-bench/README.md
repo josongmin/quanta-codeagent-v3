@@ -1,119 +1,205 @@
-# quanta ↔ Terminal-Bench (Harbor) adapter
+# quanta ↔ Terminal-Bench 2.1 (Harbor) adapter
 
-Runs the quanta terminal-operator as a [Harbor](https://github.com/harbor-framework/harbor)
-`BaseAgent` against [Terminal-Bench](https://www.tbench.ai/) tasks.
+Runs the quanta terminal-operator as a [Harbor](https://harborframework.com/docs)
+`BaseAgent` against the canonical `terminal-bench/terminal-bench-2-1` dataset.
 
 Two halves, one box:
 
 - **Hands** (Python, this dir): `quanta_agent.QuantaAgent` (the Harbor `BaseAgent`
-  glue) + `quanta_terminal_bridge` (the pure line-delimited-JSON serve loop). Harbor
-  loads the agent and hands it a container `environment`.
+  glue), `quanta_terminal_bridge` (the pure line-delimited-JSON serve loop), and
+  `quanta_terminal_atif` (the ATIF trajectory emitter). Harbor loads the agent and
+  hands it a container `environment`.
 - **Brain** (TypeScript, repo `src/`): `src/apps/terminal/brain-mode.ts`, launched by
   the hands as a subprocess via the `quanta-terminal-brain` shim. The brain decides;
   its `container_exec` frames run on the box through the bridge → `environment.exec`.
 
-The pure bridge + the glue WIRING are unit-tested with no Docker and no Harbor
-(`tests/`, 27 tests). What needs a box is only the live `tb run` (real container,
-real installed brain, real creds) — flagged **box-phase** throughout.
+The pure bridge, the glue WIRING, provenance, reasoning effort and the ATIF
+conversion are all unit-tested with no Docker and no Harbor. What needs a box is
+only the live `harbor run` (real container, real installed brain, real creds).
 
 ---
 
-## Install (local dev — no Docker, no Harbor)
+## Pinned runtime
+
+| Thing | Pin | Where the pin comes from |
+| --- | --- | --- |
+| Harbor | `harbor==0.21.0` | newest non-dev PyPI release (2026-08-10); satisfies the upstream floor `harbor[modal]>=0.20.0` declared in [`terminal-bench-2-1/leaderboard/pyproject.toml`](https://github.com/harbor-framework/terminal-bench-2-1/blob/main/leaderboard/pyproject.toml) |
+| Dataset | `terminal-bench/terminal-bench-2-1` | [`leaderboard/src/leaderboard/core/hub.py`](https://github.com/harbor-framework/terminal-bench-2-1/blob/main/leaderboard/src/leaderboard/core/hub.py) `DATASET` |
+| Dataset ref | `sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a` | same file, `DATASET_REF` |
+| Coverage | 89 tasks × ≥ 5 trials | [`leaderboard/src/leaderboard/ci/static_analysis.py`](https://github.com/harbor-framework/terminal-bench-2-1/blob/main/leaderboard/src/leaderboard/ci/static_analysis.py) `EXPECTED_TASK_COUNT` / `MIN_TRIALS_PER_TASK` |
+
+> PyPI `harbor` **is** the real framework (author Alex Shaw, harborframework.com,
+> the Terminal-Bench authors). The older note that it was a name squat is stale:
+> `0.1.20` was a yanked release of this same project, and `0.13.0+` are the
+> framework proper. There is no separate `harbor-framework` distribution.
+
+`adapters/terminal-bench/uv.lock` pins the full transitive closure. Re-lock only
+by editing `pyproject.toml` and re-running `uv lock`.
+
+---
+
+## Install — one path
 
 ```sh
-cd adapters/terminal-bench
-pip install -e .
+uv sync --project adapters/terminal-bench --extra dev --extra harbor --frozen
 ```
 
-This installs the bridge + the `quanta_agent` glue with **zero** third-party deps.
-`quanta_agent` imports harbor under a `try/except` fallback, so importing it works
-with harbor absent:
+Then everything runs through that environment:
 
 ```sh
-python3 -c "import quanta_agent; print(quanta_agent.QuantaAgent.name())"   # -> quanta
-python3 -m pytest -q                                                       # -> 27 passed
+uv run --project adapters/terminal-bench python -c \
+  'from quanta_agent import QuantaAgent; print(QuantaAgent.name())'   # -> quanta
+uv run --project adapters/terminal-bench harbor run --help
+uv run --project adapters/terminal-bench python -m pytest -q adapters/terminal-bench/tests
 ```
 
-Install the real framework only inside the box image:
-
-```sh
-pip install -e ".[harbor]"   # box-phase; pulls harbor-framework/harbor (box-verify the ref)
-```
+`quanta_agent` imports harbor under a `try/except` fallback (`BaseAgent = object`),
+so `import quanta_agent` also works on a machine with no harbor — that is what
+lets a plain `python3 -m pytest -q adapters/terminal-bench/tests` run the box-free
+rails. The three ATIF-schema rails skip visibly in that mode; run them through
+`uv run` to exercise them against harbor's own validator.
 
 ---
 
 ## Register the agent with Harbor
 
-Harbor loads a CUSTOM agent by its **import path** `module:Class` via the
-`--agent-import-path` flag (VERIFIED against harbor 0.16.1 — it sets
-`AgentConfig.import_path`; the bare `--agent` flag is for harbor's BUILT-IN named agents
-only — `aider|claude-code|terminus-2|…`). This package installs a top-level `quanta_agent`
-module exposing `QuantaAgent` (a concrete `harbor.agents.base.BaseAgent` subclass —
-verified in-image: zero remaining abstract methods, `name()=="quanta"`), so the run flag is:
+Harbor unified custom agents onto `--agent`. From the pinned `harbor run --help`:
+
+> `--agent -a  [aider|…|vibe|acp:<agent>]  Agent to run, or a custom agent import
+> path (module.path:ClassName).`
+
+`AgentFactory.create_agent_from_config` treats an `--agent` value containing `:`
+as an import path. This package installs a top-level `quanta_agent` module
+exposing `QuantaAgent`, so the run flag is:
 
 ```
---agent-import-path quanta_agent:QuantaAgent
+--agent quanta_agent:QuantaAgent
+```
+
+Verified against the pinned package: `QuantaAgent` **is** a
+`harbor.agents.base.BaseAgent` subclass with **zero** remaining abstract methods,
+`QuantaAgent.import_path() == "quanta_agent:QuantaAgent"`, and
+`QuantaAgent.SUPPORTS_ATIF is True`.
+
+---
+
+## Agent version (`QUANTA_TB_AGENT_VERSION`) — required
+
+Harbor stamps every trial with `AgentInfo.version = self.version() or "unknown"`,
+and the leaderboard keys a submission on
+`(agent, agent_version, model_name, reasoning_effort)`. A run with no version is
+unattributable, so the adapter is **fail-closed**: constructing `QuantaAgent`
+without an injected version raises.
+
+```
+QUANTA_TB_AGENT_VERSION = <package-version>+g<sha>[.dirty]
+```
+
+| Part | Meaning |
+| --- | --- |
+| `<package-version>` | the quanta repo `package.json` `version` (e.g. `1.0.025`), dotted numeric segments |
+| `+g<sha>` | the exact commit, 7–40 lowercase hex |
+| `.dirty` | **required** when the working tree is not clean, **forbidden** when it is |
+
+A dirty run is allowed (development) but is never promotable, and can never
+present itself as the clean SHA. Anything else — absent, malformed, a bare SHA,
+a different dirty spelling — fails construction, before any model invocation.
+
+```sh
+harbor run … --ae QUANTA_TB_AGENT_VERSION="1.0.025+g$(git rev-parse --short=12 HEAD)"
 ```
 
 ---
 
-## Credentials (B6 — how provider keys reach the brain)
+## Reasoning effort
 
-**Secrets are NEVER baked into the image.** The Dockerfile holds no `ARG`/`ENV` key —
-a `docker history` / layer grep finds nothing. Creds flow in at **run time**:
+Pass Harbor's official agent kwarg; the adapter normalizes it and sets exactly one
+`QUANTA_REASONING_EFFORT` in the brain subprocess env:
+
+```sh
+harbor run … --ak reasoning_effort=high
+```
+
+| Set | Values | Behaviour |
+| --- | --- | --- |
+| Harbor vocabulary | `none minimal low medium high xhigh max default` | accepted (source: the reference agent `harbor/agents/terminus_2/terminus_2.py`) |
+| Quanta wire-honored | `minimal low medium high xhigh` | forwarded to the provider by `normalizeResponsesReasoningEffort` (`src/llm/openai-responses-wire.ts`) |
+| Anything else | — | **`ValueError` before the brain is spawned** — never a silent default |
+
+`max`, `none` and `default` are legal Harbor values that Quanta's Responses wire
+currently **drops**. Such a run still executes and still records the requested
+value, but `QuantaAgent.promotability()` marks it non-promotable with reason
+`reasoning-effort-not-wired:<value>` — reporting an effort the provider never
+received would be a false leaderboard receipt.
+
+`QUANTA_REASONING_EFFORT` reaches only the OpenAI-Responses-family adapters
+(`openai-responses`, `chatgpt-oauth`). On an Anthropic model it is inert today.
+
+---
+
+## ATIF trajectory
+
+`run()` writes `self.logs_dir / "trajectory.json"` in ATIF. That path is the whole
+contract: `harbor/upload/uploader.py` uploads `<trial_dir>/agent/trajectory.json`
+as the Hub `trajectory_path`, and `<trial_dir>/agent` *is* the agent's `logs_dir`.
+The pinned `AgentContext` has **no** trajectory field.
+
+The payload is validated by harbor's own
+`harbor.utils.trajectory_validator.TrajectoryValidator` over its own
+`extra="forbid"` pydantic models — this adapter does not mirror the schema.
+
+What is emitted, and what is not:
+
+- **preserved** — tool name, arguments, exit code / ok flag, result content, event
+  order (`step_id` sequential from 1), aggregate tokens + cost, model, effort,
+  termination status;
+- **excluded** — hidden verifier content (the adapter never sees it), credential
+  and env values, unbounded tool stdout (every string is capped at
+  `FIELD_CHAR_CAP`, the step list at `MAX_STEPS`), and synthetic reasoning text
+  (the brain records none, so no `reasoning_content` is ever invented);
+- **not replaced** — Quanta's own typed receipts (`verification`, `selfTest`,
+  `oracleLoop`, `envPosture`) still ride `AgentContext.metadata`, secret-scrubbed.
+
+A crashed, cancelled or timed-out trial still gets a bounded terminal receipt
+(`extra.termination` ∈ `completed | no_report | error`), so a failure is a
+recorded zero-reward trial, never a missing trial.
+
+`QuantaAgent.promotability()` returns `{"promotable": bool, "reasons": [...]}`,
+blocking on `dirty-worktree`, `reasoning-effort-not-wired:<v>`,
+`missing-atif-trajectory` (the upstream rail: a rewarded trial with no
+`trajectory_path` fails static analysis) and `invalid-atif-trajectory`.
+
+---
+
+## Credentials — how provider keys reach the brain
+
+**Secrets are never baked into an image or a committed file.** They flow in at run
+time:
 
 ```
 host shell / CI secret store
    ├─ host `export KEY=VAL`               (→ os.environ)            ┐
-   └─ harbor `--agent-env KEY=VAL`        (→ agent extra_env)       ┘  both merge:
+   └─ harbor `--ae KEY=VAL`               (→ agent extra_env)       ┘  both merge:
         └─ QuantaAgent._brain_run_env() = { ...os.environ, ...extra_env }  (extra_env wins)
-             └─ _spawn_brain(argv, env=…) -> quanta-terminal-brain shim -> bun -> brain-mode.ts
+             └─ _spawn_brain(argv, env=…) -> quanta-terminal-brain -> bun -> brain-mode.ts
                   └─ quanta LLM factory reads ANTHROPIC_API_KEY / OPENAI_API_KEY
 ```
 
-The brain's LLM factory (`src/llm/factory.ts`) selects a provider from
-`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`; `quanta_agent._CRED_ENV_ALLOWLIST` forwards
-exactly those plus `QUANTA_API_KEY`. Provide **at least one** of:
+Provide **at least one** of `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `QUANTA_API_KEY`.
 
-| env var             | used by                        |
-| ------------------- | ------------------------------ |
-| `ANTHROPIC_API_KEY` | brain LLM (Anthropic BYOK)     |
-| `OPENAI_API_KEY`    | brain LLM (OpenAI BYOK)        |
-| `QUANTA_API_KEY`    | brain LLM (quanta gateway)     |
+Redaction authority is `quanta_terminal_atif.SECRET_ENV_NAMES` plus the name
+suffixes `_API_KEY _KEY _PASSWORD _SECRET _TOKEN`: the live values of any
+matching env var are scrubbed out of both the ATIF trajectory and the
+`AgentContext.metadata` receipt, leaving a visible `[redacted:NAME]` marker. No
+environment is ever serialized.
 
-Pass them at run time via **host export** or harbor **`--agent-env`** (NOT harbor `-e`, which selects
-the environment TYPE, not env vars). Both land in the brain via `_brain_run_env()`:
+### Feature knobs (default-OFF)
 
 ```sh
-# box-phase — requires Docker daemon + harbor installed
-export OPENAI_API_KEY="$OPENAI_API_KEY"        # host export → os.environ → brain
-harbor run \
-  -d terminal-bench/terminal-bench-2 \
-  -m gpt-5 \
-  --agent-import-path quanta_agent:QuantaAgent \
-  --agent-env OPENAI_API_KEY="$OPENAI_API_KEY" # equivalently via --agent-env (extra_env overlay)
-```
-
-### Feature knobs (default-OFF; turn on for A/B the SAME way as creds)
-
-Both the env-posture and verify-before-finalize levers read their knobs from the merged brain env, so
-either delivery path works:
-
-```sh
-export QUANTA_TB_ENV_OWNED=1        # lever #1: brain may install/build/configure (owned env posture)
+export QUANTA_TB_ENV_OWNED=1        # lever #1: brain may install/build/configure
 export QUANTA_TB_VERIFY_GATE=1      # lever #2: pre-report exercise-evidence gate
-# …or per-run:  harbor run … --agent-env QUANTA_TB_ENV_OWNED=1 --agent-env QUANTA_TB_VERIFY_GATE=1
+# …or per-run:  harbor run … --ae QUANTA_TB_ENV_OWNED=1 --ae QUANTA_TB_VERIFY_GATE=1
 ```
-
-> Harbor itself shells out to the host `docker` to provision each task's container
-> (verified: it aborts with "Docker is not installed" when `docker` is absent), so
-> harbor runs on the HOST (Docker Desktop), not inside this image — the image is the
-> agent runtime harbor builds/uses. `QuantaAgent.run()` spawns the brain there and its
-> `container_exec` frames reach the task container via `environment.exec`.
-
-> Do **not** put keys in the Dockerfile, in `pyproject.toml`, or in any committed
-> file. The only baked env is `QUANTA_TERMINAL_BRAIN_CMD=quanta-terminal-brain`
-> (non-secret: it just names the brain shim).
 
 Model selection: `-m <model>` is harbor's; quanta's brain also honors
 `QUANTA_TERMINAL_MODEL` / the `QuantaAgent(model=…)` ctor arg → forwarded as
@@ -121,46 +207,28 @@ Model selection: `-m <model>` is harbor's; quanta's brain also honors
 
 ---
 
-## Build the box image (box-phase — requires Docker daemon)
-
-The Dockerfile's build context is the **quanta repo root** (it copies `src/`, the
-tsconfig path-alias config, and this adapter):
+## Live run shape (box-phase — Docker daemon + creds required)
 
 ```sh
-# from the repo root
-docker build -f adapters/terminal-bench/Dockerfile -t quanta-tb:local .
+uv run --project adapters/terminal-bench harbor run \
+  -d 'terminal-bench/terminal-bench-2-1@sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a' \
+  --agent quanta_agent:QuantaAgent \
+  -m openai/gpt-5.5 \
+  --ak reasoning_effort=xhigh \
+  --ae QUANTA_TB_AGENT_VERSION="1.0.025+g$(git rev-parse --short=12 HEAD)" \
+  --ae OPENAI_API_KEY="$OPENAI_API_KEY" \
+  -k 5
 ```
 
-Harbor builds/uses this image to provision the box. The image contains: the bun
-runtime + quanta `src/`, the `quanta-terminal-brain` shim, the Python hands
-(`pip install ".[harbor]"`), and `QUANTA_TERMINAL_BRAIN_CMD` pre-set. No creds.
+Harbor shells out to the host `docker` (or Daytona/Modal via `-e`) to provision
+each task's container, so harbor runs on the HOST; `QuantaAgent.run()` spawns the
+brain there and its `container_exec` frames reach the task container via
+`environment.exec`.
 
 ---
 
-## Box verification status (run against real Docker + harbor 0.16.1)
+## Box image
 
-VERIFIED on a live Docker daemon + the real `harbor` (jul-01):
-- ✅ **Image builds end-to-end** — `docker build … -t quanta-tb:local .` → 1.7 GB; the
-  real `harbor 0.16.1` + `quanta-terminal-bench 0.1.0` install. (Found+fixed: the image
-  needed `git` for pip's VCS clone of harbor.)
-- ✅ **Agent loads as a valid harbor agent** — `quanta_agent:QuantaAgent` import_path
-  resolves, IS a `harbor.agents.base.BaseAgent` subclass, ZERO remaining abstract methods.
-- ✅ **AgentContext fold verified** — harbor's real `AgentContext` (pydantic) accepts
-  `n_input_tokens`/`n_output_tokens`/`cost_usd` + the raw report on `metadata`
-  (`rollout_details` is `list[RolloutDetail]`, so the report rides `metadata` instead).
-- ✅ **brain shim** — `quanta-terminal-brain --version` → exit 0 (what `setup()` probes).
-- ✅ **real LLM wired** — `brain-mode.ts buildRealLlm` now binds the shared `tryCreateLLM`
-  provider factory (no longer a throw).
-
-Remaining for a green LIVE `tb run` (needs LLM tokens + a task):
-1. Run harbor on the HOST (Docker Desktop up) with this package installed
-   (`pip install -e adapters/terminal-bench`) — harbor provisions the task container via
-   the host `docker`.
-2. Download a task/dataset (`harbor download …` / `-d terminal-bench/…`).
-3. Provide a brain credential (`OPENAI_API_KEY`/`ANTHROPIC_API_KEY`/`QUANTA_API_KEY`) the
-   `tryCreateLLM` factory can use, and run:
-   ```sh
-   harbor run -d terminal-bench/terminal-bench-2 -m <model> \
-     --agent-import-path quanta_agent:QuantaAgent -e OPENAI_API_KEY="$OPENAI_API_KEY"
-   ```
-4. Score quanta+Opus-4.8 vs the standardized-scaffold Opus-4.8 baseline (58.3%).
+There is **no Quanta-owned image story**: Harbor owns the task sandbox
+(Docker/Daytona/Modal). `Dockerfile` in this directory has no automated consumer
+in this repo — see the TB21-01 receipt for its disposition.

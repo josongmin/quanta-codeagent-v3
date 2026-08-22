@@ -17,6 +17,10 @@ a plain temp file the fake brain "writes". This pins:
       forwarding) is what the TS brain must match,
   (e) setup() probes the brain and fails loud when it is absent.
 
+Since TB21-02 every construction also needs an injected ``QUANTA_TB_AGENT_VERSION``
+(provenance is fail-closed) and a ``logs_dir`` (where the ATIF trajectory lands),
+so these tests go through the ``agent`` helper below rather than ``QuantaAgent()``.
+
 NO real subprocess, NO harbor, NO Docker.
 """
 
@@ -25,11 +29,27 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import quanta_agent  # noqa: E402
 from quanta_agent import QuantaAgent  # noqa: E402
 from quanta_terminal_bridge import ExecResult  # noqa: E402
+
+DEV_VERSION = "1.0.025+g9d5369d310bb.dirty"
+
+
+@pytest.fixture(autouse=True)
+def _injected_agent_version(monkeypatch):
+    """Every trial carries provenance. A dirty dev value keeps these runs
+    explicitly non-promotable, which is exactly what a unit run is."""
+    monkeypatch.setenv(quanta_agent.AGENT_VERSION_ENV, DEV_VERSION)
+
+
+def agent(tmp_path, **kwargs):
+    """Construct the agent the way harbor does: logs_dir first, kwargs after."""
+    return QuantaAgent(logs_dir=tmp_path, **kwargs)
 
 
 # ── fakes ────────────────────────────────────────────────────────────────────
@@ -79,8 +99,9 @@ class FakeContext:
     """Harbor AgentContext stand-in exposing the slots run() should populate."""
 
     def __init__(self):
-        # Mirrors the real harbor 0.16.1 AgentContext slots run() populates.
+        # Mirrors the pinned harbor AgentContext slots run() populates.
         self.n_input_tokens = None
+        self.n_cache_tokens = None
         self.n_output_tokens = None
         self.cost_usd = None
         self.rollout_details = None  # list[RolloutDetail] — we never set this (typed, not a dict)
@@ -110,7 +131,7 @@ def _patch_spawn(monkeypatch, frames, report_payload, captured):
     monkeypatch.setattr(quanta_agent, "_spawn_brain", fake_spawn)
 
 
-def test_run_drives_serve_calls_env_exec_and_replies_to_brain(monkeypatch):
+def test_run_drives_serve_calls_env_exec_and_replies_to_brain(tmp_path, monkeypatch):
     env = FakeEnv(ExecResult(stdout="a.txt\nb.txt", stderr="", return_code=0))
     ctx = FakeContext()
     captured = {}
@@ -128,7 +149,7 @@ def test_run_drives_serve_calls_env_exec_and_replies_to_brain(monkeypatch):
         captured=captured,
     )
 
-    asyncio.run(QuantaAgent().run("do the thing", env, ctx))
+    asyncio.run(agent(tmp_path).run("do the thing", env, ctx))
 
     # (a) serve actually ran the brain's exec against the environment.
     assert env.calls == ["ls"]
@@ -147,13 +168,14 @@ def test_run_drives_serve_calls_env_exec_and_replies_to_brain(monkeypatch):
     assert ctx.n_input_tokens == 111
     assert ctx.n_output_tokens == 222
     assert ctx.cost_usd == 0.0042
-    # (d) the raw report rides metadata (dict-typed); rollout_details (list[RolloutDetail]) stays None.
+    # (d) the (secret-scrubbed) report rides metadata (dict-typed); rollout_details
+    #     (list[RolloutDetail]) stays None.
     assert ctx.metadata is not None and ctx.metadata.get("cost_usd") == 0.0042
     assert ctx.rollout_details is None
     assert brain.waited is True
 
 
-def test_run_spawn_contract_argv_and_instruction_file(monkeypatch):
+def test_run_spawn_contract_argv_and_instruction_file(tmp_path, monkeypatch):
     env = FakeEnv(ExecResult(stdout="", stderr="", return_code=0))
     ctx = FakeContext()
     captured = {}
@@ -165,7 +187,7 @@ def test_run_spawn_contract_argv_and_instruction_file(monkeypatch):
     )
     monkeypatch.setenv("QUANTA_TERMINAL_BRAIN_CMD", "my-brain")
 
-    asyncio.run(QuantaAgent(model="gpt-5").run("hello instruction", env, ctx))
+    asyncio.run(agent(tmp_path, model="gpt-5").run("hello instruction", env, ctx))
 
     argv = captured["argv"]
     assert argv[0] == "my-brain"  # configurable executable honored
@@ -178,7 +200,7 @@ def test_run_spawn_contract_argv_and_instruction_file(monkeypatch):
     assert isinstance(captured["env"], dict)
 
 
-def test_agent_env_overlays_into_brain_env(monkeypatch):
+def test_agent_env_overlays_into_brain_env(tmp_path, monkeypatch):
     """review P0: `--agent-env` (delivered by harbor as the ``extra_env`` kwarg) must reach the brain
     subprocess env, so `--agent-env QUANTA_TB_ENV_OWNED=1` flips the knob — not only a host export."""
     monkeypatch.delenv("QUANTA_TB_ENV_OWNED", raising=False)
@@ -188,8 +210,8 @@ def test_agent_env_overlays_into_brain_env(monkeypatch):
     captured = {}
     _patch_spawn(monkeypatch, frames=[], report_payload={"final": "x"}, captured=captured)
 
-    agent = QuantaAgent(extra_env={"QUANTA_TB_ENV_OWNED": "1", "QUANTA_TB_VERIFY_GATE": "1"})
-    asyncio.run(agent.run("x", env, ctx))
+    subject = agent(tmp_path, extra_env={"QUANTA_TB_ENV_OWNED": "1", "QUANTA_TB_VERIFY_GATE": "1"})
+    asyncio.run(subject.run("x", env, ctx))
 
     brain_env = captured["env"]
     assert brain_env["QUANTA_TB_ENV_OWNED"] == "1"  # the knob reaches the brain via --agent-env
@@ -197,7 +219,7 @@ def test_agent_env_overlays_into_brain_env(monkeypatch):
     assert "PATH" in brain_env  # host env still forwarded (os.environ base preserved)
 
 
-def test_agent_env_overlay_wins_over_host_and_drives_brain_cmd_and_model(monkeypatch):
+def test_agent_env_overlay_wins_over_host_and_drives_brain_cmd_and_model(tmp_path, monkeypatch):
     """extra_env OVERLAYS os.environ (extra wins) and is the single source for brain-cmd + model."""
     monkeypatch.setenv("QUANTA_TERMINAL_BRAIN_CMD", "host-brain")  # host value…
     monkeypatch.delenv("QUANTA_TERMINAL_MODEL", raising=False)
@@ -206,16 +228,17 @@ def test_agent_env_overlay_wins_over_host_and_drives_brain_cmd_and_model(monkeyp
     captured = {}
     _patch_spawn(monkeypatch, frames=[], report_payload={"final": "x"}, captured=captured)
 
-    agent = QuantaAgent(
-        extra_env={"QUANTA_TERMINAL_BRAIN_CMD": "agent-env-brain", "QUANTA_TERMINAL_MODEL": "gpt-5.5"}
+    subject = agent(
+        tmp_path,
+        extra_env={"QUANTA_TERMINAL_BRAIN_CMD": "agent-env-brain", "QUANTA_TERMINAL_MODEL": "gpt-5.5"},
     )
-    asyncio.run(agent.run("x", env, ctx))
+    asyncio.run(subject.run("x", env, ctx))
 
     assert captured["argv"][0] == "agent-env-brain"  # --agent-env overrides the host brain cmd
     assert _flag_value(captured["argv"], "--model") == "gpt-5.5"  # model resolved from merged env
 
 
-def test_run_tolerates_missing_report_fields(monkeypatch):
+def test_run_tolerates_missing_report_fields(tmp_path, monkeypatch):
     """A thin/partial report must degrade gracefully, never crash the box run."""
     env = FakeEnv(ExecResult(stdout="", stderr="", return_code=0))
     ctx = FakeContext()
@@ -227,11 +250,11 @@ def test_run_tolerates_missing_report_fields(monkeypatch):
         captured=captured,
     )
     # Must not raise even with a field-poor report.
-    asyncio.run(QuantaAgent().run("x", env, ctx))
+    asyncio.run(agent(tmp_path).run("x", env, ctx))
     assert ctx.n_input_tokens is None  # untouched, not crashed
 
 
-def test_run_tolerates_malformed_tokens_field(monkeypatch):
+def test_run_tolerates_malformed_tokens_field(tmp_path, monkeypatch):
     """A non-dict ``tokens`` (garbled brain report) must not crash teardown."""
     env = FakeEnv(ExecResult(stdout="", stderr="", return_code=0))
     ctx = FakeContext()
@@ -242,7 +265,7 @@ def test_run_tolerates_malformed_tokens_field(monkeypatch):
         report_payload={"tokens": 5, "cost_usd": 0.01},  # tokens is an int, not a dict
         captured=captured,
     )
-    asyncio.run(QuantaAgent().run("x", env, ctx))
+    asyncio.run(agent(tmp_path).run("x", env, ctx))
     assert ctx.n_input_tokens is None  # no token slots set
     assert ctx.cost_usd == 0.01  # but cost still applied
 
@@ -267,7 +290,7 @@ class ProbeEnv:
         return ExecResult(stdout="quanta-brain 0.1", stderr="", return_code=self._code)
 
 
-def test_setup_passes_when_brain_present(monkeypatch):
+def test_setup_passes_when_brain_present(tmp_path, monkeypatch):
     # The brain is HOST-side (run() spawns it as a subprocess), so setup() probes the host via
     # _probe_brain_version — NOT environment.exec. A present brain ⇒ (0, "") ⇒ no raise.
     seen = {}
@@ -277,17 +300,17 @@ def test_setup_passes_when_brain_present(monkeypatch):
         return 0, ""
 
     monkeypatch.setattr(quanta_agent, "_probe_brain_version", fake_probe)
-    asyncio.run(QuantaAgent().setup(ProbeEnv(version_code=0)))
+    asyncio.run(agent(tmp_path).setup(ProbeEnv(version_code=0)))
     assert seen["brain"]  # the host probe ran against the resolved brain cmd
 
 
-def test_setup_raises_when_brain_absent(monkeypatch):
+def test_setup_raises_when_brain_absent(tmp_path, monkeypatch):
     async def fake_probe(brain, env):
         return 127, "command not found"  # host PATH miss
 
     monkeypatch.setattr(quanta_agent, "_probe_brain_version", fake_probe)
     try:
-        asyncio.run(QuantaAgent().setup(ProbeEnv(version_code=127)))
+        asyncio.run(agent(tmp_path).setup(ProbeEnv(version_code=127)))
     except RuntimeError as e:
         assert "brain" in str(e).lower()
     else:  # pragma: no cover

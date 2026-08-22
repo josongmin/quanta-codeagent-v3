@@ -28,8 +28,9 @@ import {
   renderWave2BacklogMarkdown,
   renderWave2CoverageMarkdown,
 } from "../analyze/wave2-analysis"
-import { resolveDatasetFamily } from "../dataset-family"
+import { knownDatasetFamilyTokens } from "../dataset-family-token"
 import { renderBenchPresetListLines } from "../preset"
+import { readDatasetFamilySelector, resolveBenchRunConfig } from "../run-config"
 import { buildBackend } from "./grade"
 import {
   argValue,
@@ -208,17 +209,29 @@ export const cmdBestkPassk = async (): Promise<void> => {
   ) {
     logger.info(
       "usage: quanta-bench bestk-passk --observe-root <run-observe-dir> --dataset <instances.jsonl> " +
-        "--backend <ec2|ssh:user@host> --report <run-report.json> [--dataset-family verified|live|pro]",
+        // PMX-01: GENERATED from the ONE token registry. Hand-listing the families
+        // here is how `promax` would have shipped invisible to operators — and how
+        // the next family would too.
+        `--backend <ec2|ssh:user@host> --report <run-report.json> [--dataset-family ${knownDatasetFamilyTokens().join("|")}]`,
     )
     process.exit(2)
   }
+  // MED-7 (aug-22): route through the FAIL-CLOSED typed resolver, like
+  // run/grade/pool. This used the LENIENT `resolveDatasetFamily`, so an explicit
+  // typo (`--dataset-family prow`) silently became Verified and the whole
+  // candidate pool was re-graded against the wrong harness + image namespace —
+  // a quiet mis-grade reported as a clean Best@K/Pass@K ceiling. Resolved BEFORE
+  // any file IO so a typo fails immediately, not after a partial read.
+  const family = resolveBenchRunConfig({
+    argvFamily: readDatasetFamilySelector(process.argv),
+    env: process.env,
+  }).datasetFamily
   const meta = JSON.parse(readFileSync(report, "utf8")) as {
     model?: string
     resolved_ids?: unknown
   }
   const submittedResolvedIds = resolvedIdsFromReport(meta.resolved_ids)
   const modelName = meta.model ?? "quanta"
-  const family = resolveDatasetFamily(argValue("--dataset-family"), process.env)
   // Inject node:fs (fail-loud reads) + the official backend into the pure core.
   const fs: CandidatePoolFs = {
     listDir: (dir) => readdirSync(dir),

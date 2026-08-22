@@ -9,75 +9,63 @@
  *
  * Default = "verified" ⇒ byte-identical to the pre-RFC path (R1).
  */
-import {
-  normalizeProRow,
-  parseSwebenchJsonl,
-  type SwebenchTask,
-} from "@/runner/batch/corpus/dataset"
 import type { PythonSwebenchResult } from "@/runner/batch/eval/verdict"
-import { evaluateWithProSwebench, type ProSwebenchOpts } from "./pro-swebench"
-import { evaluateWithPythonSwebench } from "./python-swebench"
+import { type DatasetFamily, normalizeDatasetFamilyToken } from "./dataset-family-token"
+import type { ProSwebenchOpts } from "./pro-swebench"
+import { resolveDatasetFamilyProfile } from "./profiles/registry"
+import { datasetFamilyOrDefault } from "./run-config"
 import type { Instance } from "./types"
 
-export type DatasetFamily = "verified" | "live" | "pro"
+export type { DatasetFamily }
 
 /** Resolve the family from `--dataset-family` (argvValue) then
  *  `QUANTA_SWEBENCH_DATASET_FAMILY`, defaulting to "verified". Unknown ⇒ verified
- *  (fail-safe to the byte-identical default, never an undefined branch). */
+ *  (fail-safe to the byte-identical default, never an undefined branch).
+ *
+ *  HIGH-3 (aug-22): the token→family decision is NOT made here. It delegates to
+ *  the ONE owner, `normalizeDatasetFamilyToken`, which `parseDatasetFamilyOrThrow`
+ *  (the fail-closed composition-root resolver) also delegates to. Previously this
+ *  function only case-folded while run-config.ts also TRIMMED, so `" pro"`
+ *  validated as Pro at the composition root and resolved Verified here — the
+ *  corpus parse, verifier selection, dry-run label and report stamp all silently
+ *  disagreed with the run that had been admitted as Pro. The two resolvers now
+ *  differ ONLY in what they do with a token the owner rejects (default vs throw). */
 export const resolveDatasetFamily = (
   argvValue: string | undefined,
   env: NodeJS.ProcessEnv,
-): DatasetFamily => {
-  const raw = (argvValue ?? env.QUANTA_SWEBENCH_DATASET_FAMILY ?? "verified").toLowerCase()
-  return raw === "pro" || raw === "live" ? raw : "verified"
-}
+): DatasetFamily =>
+  // R4 (aug-22 re-audit): the ABSENT-selector default is not spelled here either.
+  // Both the "nothing was selected" branch and the "the owner rejected the token"
+  // branch delegate to `datasetFamilyOrDefault`, the ONE owner of that decision.
+  datasetFamilyOrDefault(
+    normalizeDatasetFamilyToken(argvValue ?? env.QUANTA_SWEBENCH_DATASET_FAMILY ?? ""),
+  )
 
-/** Bridge the `--dataset-family` CLI flag into the canonical
- *  `QUANTA_SWEBENCH_DATASET_FAMILY` env var so EVERY downstream reader sees it: the
- *  full-remote/pool pre-flight (`resolveDatasetFamily(undefined, env)`) AND the on-box
- *  grade (box-session forwards this env to the box). WITHOUT this, a
- *  `--dataset-family live` on the full-remote/pool path was a SILENT no-op (only an
- *  explicit `export` worked) → Live was graded as Verified (RFC jun-29 / jul-01 audit
- *  gap A1). Flag absent/empty ⇒ NO write (env/default untouched ⇒ byte-identical).
- *  Returns the resolved family. */
-export const bridgeDatasetFamilyToEnv = (
-  argvValue: string | undefined,
-  env: NodeJS.ProcessEnv = process.env,
-): DatasetFamily => {
-  const family = resolveDatasetFamily(argvValue, env)
-  if (argvValue !== undefined && argvValue !== "") env.QUANTA_SWEBENCH_DATASET_FAMILY = family
-  return family
-}
+// NOTE (jun-30 T2): the former `bridgeDatasetFamilyToEnv` in-process authority
+// bridge is GONE. The bench composition root now resolves ONE typed
+// `BenchRunConfig` (`./run-config`), which owns the fail-closed parse and threads
+// the typed `datasetFamily` field into every consumer. env is written ONLY by
+// `serializeFamilyForSubprocess` (the subprocess/SSH boundary WIRE encoder),
+// never as the in-process source of truth.
 
-/** Parse the dataset JSONL for the family: Pro rows carry lowercase `fail_to_pass`
- *  + extra fields and MUST be normalized (else they degrade to the `testCmd:"true"`
- *  no-op); verified/live are the standard upper-case schema (identity parse). */
-export const parseTasksForFamily = (text: string, family: DatasetFamily): SwebenchTask[] =>
-  family === "pro" ? parseSwebenchJsonl(text, normalizeProRow) : parseSwebenchJsonl(text)
+// PMX-02: `parseTasksForFamily` is GONE. It took dataset TEXT and returned
+// `SwebenchTask[]`, i.e. it hard-coded "the file is JSONL" and "a task carries the
+// whole upstream row on `.raw`" into the corpus seam — the two assumptions a
+// family whose corpus is an official JSON ARRAY of gold-bearing rows breaks. The
+// ONE corpus reader is now `DatasetFamilyProfile.readCorpus`, reached through
+// `profiles/corpus-read.ts`. Nothing here re-parses a dataset.
 
 /** Grade evaluator for the family. Pro ⇒ the Scale harness verifier (its opts carry
  *  the harness dir + raw CSV); verified/live ⇒ the official swebench harness. Both
  *  share the `PythonSwebenchResult` return shape AND the same process-global grading
  *  lock (R2), so the caller injects either into the one `VerifyDeps.pythonSwebench`
- *  seam with no verdict.ts change. */
+ *  seam with no verdict.ts change.
+ *
+ *  THIN SHIM (jun-30 T4): the harness selection lives in the ONE
+ *  `DatasetFamilyProfile` registry. This keeps the historical call surface
+ *  (`run-main.ts buildProGradeVerifier`) byte-compatible. */
 export const gradeEvaluatorForFamily = (
   family: DatasetFamily,
   proOpts: ProSwebenchOpts = {},
 ): ((instance: Instance, patch: string, opts?: unknown) => Promise<PythonSwebenchResult>) =>
-  family === "pro"
-    ? (instance, patch, opts) =>
-        // Forward ONLY the per-call signal from the seam's opts (the eval driver passes
-        // `{signal}`); the operator-injected harnessDir/rawSamplePath (proOpts) MUST win
-        // and never be overridable by a caller's opts (audit R2 #4 override footgun).
-        evaluateWithProSwebench(instance, patch, {
-          ...(typeof opts === "object" && opts !== null && "signal" in opts
-            ? { signal: (opts as { signal?: AbortSignal }).signal }
-            : {}),
-          ...proOpts,
-        })
-    : (instance, patch, opts) =>
-        evaluateWithPythonSwebench(
-          instance,
-          patch,
-          opts as Parameters<typeof evaluateWithPythonSwebench>[2],
-        )
+  resolveDatasetFamilyProfile(family).gradeEvaluator(proOpts)

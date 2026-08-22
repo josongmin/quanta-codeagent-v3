@@ -67,12 +67,30 @@ describe("bench scaffold: stale-read guard default", () => {
     expect(env.QUANTA_BENCH_PRESET).toBe("agentless-v3-select-regression")
   })
 
-  test("local Pro defaults to the polyglot-safe preset", () => {
-    const env: Record<string, string | undefined> = {
+  // aug-22 HIGH-1 — the family reaches the preset seeder as a TYPED argument off
+  // the composition root's resolved BenchRunConfig. It used to be read back out
+  // of `env.QUANTA_SWEBENCH_DATASET_FAMILY`, which the root had just written from
+  // argv (an in-process authority round-trip through ambient env). The env key is
+  // NOT an authority any more, so this asserts both directions.
+  test("local Pro defaults to the polyglot-safe preset (TYPED family, not env)", () => {
+    const env: Record<string, string | undefined> = {}
+    applyBenchEnvDefaults(env, { datasetFamily: "pro" })
+    expect(env.QUANTA_BENCH_PRESET).toBe("agentless-v1")
+  })
+
+  test("the family ENV key is NOT an authority for preset seeding", () => {
+    // env says pro, typed config says verified ⇒ verified wins.
+    const envSaysPro: Record<string, string | undefined> = {
       QUANTA_SWEBENCH_DATASET_FAMILY: "pro",
     }
-    applyBenchEnvDefaults(env)
-    expect(env.QUANTA_BENCH_PRESET).toBe("agentless-v1")
+    applyBenchEnvDefaults(envSaysPro, { datasetFamily: "verified" })
+    expect(envSaysPro.QUANTA_BENCH_PRESET).toBe(CURRENT_BENCH_BASE_PRESET)
+    // env says verified, typed config says pro ⇒ pro wins.
+    const envSaysVerified: Record<string, string | undefined> = {
+      QUANTA_SWEBENCH_DATASET_FAMILY: "verified",
+    }
+    applyBenchEnvDefaults(envSaysVerified, { datasetFamily: "pro" })
+    expect(envSaysVerified.QUANTA_BENCH_PRESET).toBe("agentless-v1")
   })
 })
 

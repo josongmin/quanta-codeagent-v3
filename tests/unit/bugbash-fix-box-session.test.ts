@@ -68,6 +68,9 @@ const baseParams = (artifactSuffix: string): GradeChunkParams => ({
   artifactSuffix,
   recordTrajectory: false,
   forwardedBenchEnv: "",
+  // aug-22 HIGH-1: the chunk's TYPED family (was derived from the launching
+  // process's ambient env inside buildBenchCommand).
+  datasetFamily: "verified",
 })
 
 const RUN_EXIT_OK = ok("0\n==XQ-RUN-EXIT-XQ==\n")
