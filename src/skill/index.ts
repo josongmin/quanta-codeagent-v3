@@ -129,6 +129,32 @@ export {
   type SkillSnapshot,
   type SkillSnapshotInputs,
 } from "./registry"
+// RFC-06 F1 — live skill runtime authority (registry + admin policy + durable
+// user-disabled set + unified revision; active/searchable/management projections;
+// CAS setEnabled; versioned fail-closed disabled-set store behind a port).
+export {
+  createInMemoryDisabledStore,
+  createJsonDisabledStore,
+  createSkillRuntimeAuthority,
+  DISABLED_SET_SCHEMA_VERSION,
+  type DisabledStoreFs,
+  type DisabledStorePort,
+  decodeDisabledSet,
+  deriveSkillProjections,
+  type EffectiveDisable,
+  effectiveDisable,
+  emptyDisabledSet,
+  type ManagedSkill,
+  nodeDisabledStoreFs,
+  type PersistedDisabledSet,
+  SKILL_DISABLE_REASONS,
+  type SkillDisableReason,
+  type SkillRuntimeAuthority,
+  type SkillRuntimeAuthorityDeps,
+  type SkillRuntimeView,
+  type SkillSetEnabledRejection,
+  type SkillSetEnabledResult,
+} from "./runtime"
 // jun-6 — agent-callable skill-authoring tool (scaffold + validate + install).
 export {
   createSkillCreatorTool,

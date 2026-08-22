@@ -28,6 +28,12 @@ export {
   LIVE_POSTURE_THREAD_ID,
   type PermissionModeSessionState,
 } from "./build-posture"
+// RFC-06 F1 — the single skill-runtime-authority builder. Surfaces construct the
+// per-session skill authority HERE (no surface-local discovery scan + per-consumer
+// disabled filter); it calls the REAL registry + admin-policy loaders and derives
+// the three consistent projections at one unified revision.
+export type { BuildSkillRuntimeAuthorityInput } from "./build-skills"
+export { buildSkillRuntimeAuthority } from "./build-skills"
 export { decodeObjectiveSnapshot } from "./restore"
 export type {
   AttentionReader,
