@@ -29,10 +29,30 @@
 import { describe, expect, it } from "bun:test"
 import {
   type ObservabilityHookBus,
+  type ObservabilityWireHandle,
   type ObservabilityWireOpts,
-  wireObservability,
+  wireObservability as wireObservabilityRaw,
 } from "@/agent/observability-wire"
 import type { ObservedToolEvent } from "@/agent/run-ledger-attribution"
+import { createObjectiveStore } from "@/objective"
+
+/**
+ * RFC-03 C2 — the objective authority is now INJECTED into the wire (the wire no
+ * longer mints its own store; construction is owned by the assembly
+ * `buildObjectiveAuthority` builder — see the constructor-owner ratchet). These
+ * unit tests exercise the wire in isolation, so this thin wrapper supplies the
+ * objective the composition root would inject — built with the SAME `opts.now`
+ * the wire used to forward to its objective factory, so the historical
+ * "objective present + now-forwarded + cross-wired" invariants are unchanged.
+ * Tests that pass their own `objective` (or run the OFF path) are untouched.
+ */
+const wireObservability = (opts: ObservabilityWireOpts = {}): ObservabilityWireHandle => {
+  if (opts.enabled === true && opts.objective === undefined) {
+    const objective = createObjectiveStore(opts.now !== undefined ? { now: opts.now } : {})
+    return wireObservabilityRaw({ ...opts, objective })
+  }
+  return wireObservabilityRaw(opts)
+}
 
 // -----------------------------------------------------------------------------
 // fakes

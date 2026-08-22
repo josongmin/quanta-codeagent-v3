@@ -240,6 +240,25 @@ const coreFromPort = (port: ObjectivePort): ObjectiveCore => ({
   },
 })
 
+/** RFC-03 C2 — restore-at-construction. Load each persisted per-thread domain
+ *  snapshot verbatim into the core and restore its EXACT revision (NOT the
+ *  `fromSnapshot` reset-to-1). Skips malformed / stateless / empty-thread entries
+ *  so a hostile/partial snapshot never plants a half thread. Module-level so it
+ *  keeps {@link createObjectiveAuthorityWithCore} under the complexity cap. */
+const hydrateDomains = (
+  core: ObjectiveCore,
+  revisions: Map<string, number>,
+  domains: readonly ObjectiveDomainSnapshot[] | undefined,
+): void => {
+  if (domains === undefined) return
+  for (const dom of domains) {
+    const threadId = isNonEmptyString(dom?.threadId) ? dom.threadId : ""
+    if (threadId === "" || dom.state === null) continue
+    if (!core.restoreThread(threadId, dom.state)) continue
+    revisions.set(threadId, Number.isFinite(dom.revision) && dom.revision >= 0 ? dom.revision : 1)
+  }
+}
+
 /** Factory variant that adopts an existing core (rather than minting one). */
 const createObjectiveAuthorityWithCore = (
   core: ObjectiveCore,
@@ -254,6 +273,10 @@ const createObjectiveAuthorityWithCore = (
     revisions.set(threadId, next)
     return next
   }
+  // RFC-03 C2 — restore-at-construction (durable resume): load each persisted
+  // per-thread snapshot verbatim + its EXACT revision (extracted to keep this
+  // factory under the cognitive-complexity cap).
+  hydrateDomains(core, revisions, opts?.restoreDomains)
   const readDomain = (threadId: string): ObjectiveDomainSnapshot => ({
     threadId: isNonEmptyString(threadId) ? threadId : "",
     revision: revisionOf(threadId),

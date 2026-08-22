@@ -14,6 +14,7 @@ import {
   wireObservability,
 } from "@/agent/observability-wire"
 import type { AssembleRequest } from "@/host/runtime/agent-config-assembler"
+import { buildObjectiveAuthority } from "@/runner/assemble/session-authorities"
 import { gateOn } from "@/shared"
 
 /**
@@ -58,14 +59,20 @@ const toObservabilityHookBus = (bus: HookBus): ObservabilityHookBus => ({
 export const resolveObservabilityWire = (
   env: NodeJS.ProcessEnv,
   opts: { readonly hookBus?: HookBus } = {},
-): ObservabilityWireHandle =>
-  wireObservability({
-    enabled: gateOn(env, "QUANTA_OBSERVABILITY"),
+): ObservabilityWireHandle => {
+  const enabled = gateOn(env, "QUANTA_OBSERVABILITY")
+  return wireObservability({
+    enabled,
     repoRoot: process.cwd(),
+    // RFC-03 C2 — INJECT the objective authority (constructed at the ONE assembly
+    // builder); the wire no longer mints its own. Only on the enabled path so the
+    // default-OFF byte-identity (noop handle, zero allocations) is preserved.
+    ...(enabled ? { objective: buildObjectiveAuthority() } : {}),
     // ADR-0415 — forward the adapted live bus so attribution subscribes to
     // `post_tool_use`. Omitted ⇒ ports populate, attribution stays inert.
     ...(opts.hookBus !== undefined ? { hookBus: toObservabilityHookBus(opts.hookBus) } : {}),
   })
+}
 
 /**
  * ADR-0415 — resolve the observability wire + project it into the conditional

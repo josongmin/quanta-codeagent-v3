@@ -175,6 +175,11 @@ export type {
 export { buildRecoveryGuidance, checkSessionStoreHealth } from "./store-health"
 export type {
   PersistedInterruptedTurn,
+  PersistedObjectiveBlocker,
+  PersistedObjectiveBudget,
+  PersistedObjectiveCriterion,
+  PersistedObjectiveSnapshot,
+  PersistedObjectiveThread,
   RollbackCheckpointRecord,
   RollbackOperationRecord,
   RollbackOperationState,
@@ -184,7 +189,12 @@ export type {
   WorkspaceOwnership,
   WorkspaceOwnershipState,
 } from "./types"
-export { ROLLBACK_RECORD_VERSION, SESSION_VERSION, WORKSPACE_OWNERSHIP_VERSION } from "./types"
+export {
+  OBJECTIVE_SNAPSHOT_VERSION,
+  ROLLBACK_RECORD_VERSION,
+  SESSION_VERSION,
+  WORKSPACE_OWNERSHIP_VERSION,
+} from "./types"
 // RFC-06 §RFC06-0 (aug-02) — persisted WorkspaceOwnership helpers (pure; ride
 // the existing atomic snapshot). No new binding/lease/TTL store, no reaper.
 export type { WorkspaceCreateIntent, WorkspaceTransitionResult } from "./workspace-ownership"

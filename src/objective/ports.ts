@@ -112,4 +112,17 @@ export interface ObjectiveAuthorityOptions {
   enforceBudget?: boolean | undefined
   gateOn?: boolean | undefined
   confirmationAvailable?: boolean | undefined
+  /**
+   * RFC-03 C2 — restore-at-construction seam. When present, each per-thread
+   * {@link ObjectiveDomainSnapshot} is loaded into the fresh authority as part of
+   * CONSTRUCTION: the thread's exact state is written back verbatim (ids / met /
+   * ordering / blockers / next actions / provenance / status intent) AND its
+   * per-thread `revision` is restored to the persisted value. This is the
+   * durable-resume entry point (session identity → saved objective → authority
+   * construction). Absent ⇒ a fresh empty authority (byte-identical legacy). A
+   * malformed / empty-thread snapshot is skipped (no partial thread). Unlike the
+   * whole-store `fromSnapshot` (which resets every revision to 1), this preserves
+   * the exact revision so CAS/undo bookkeeping survives a reopen.
+   */
+  restoreDomains?: readonly ObjectiveDomainSnapshot[] | undefined
 }

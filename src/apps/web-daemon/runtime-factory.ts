@@ -60,6 +60,7 @@ import {
   buildSubagentConfigCore,
   parseEnvFlag,
 } from "@/runner/assemble"
+import { buildObjectiveAuthority } from "@/runner/assemble/session-authorities"
 import {
   createRuntimeFromAgentConfigBase,
   type RuntimeAgentConfigBase,
@@ -315,6 +316,9 @@ const wireSessionObservability = (
   const handle = wireObservability({
     enabled: true,
     repoRoot: cwd,
+    // RFC-03 C2 — inject the objective authority from the ONE assembly builder
+    // (the wire no longer mints its own store).
+    objective: buildObjectiveAuthority(),
     hookBus: toObservabilityHookBus(bus),
   })
   return { handle, bus }

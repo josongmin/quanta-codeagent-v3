@@ -31,12 +31,28 @@ import {
   OBSERVABILITY_WIRE_SLOTS,
   type ObservabilityHookBus,
   type ObservabilityWirePortError,
-  wireObservability,
+  wireObservability as wireObservabilityRaw,
 } from "@/agent/observability-wire"
+import { createObjectiveStore } from "@/objective"
 
 /* ------------------------------------------------------------------ */
 /* Rig                                                                 */
 /* ------------------------------------------------------------------ */
+
+/** RFC-03 C2 — the objective authority is INJECTED into the wire (no longer
+ *  minted there; construction owned by the assembly builder — constructor-owner
+ *  ratchet). This wrapper supplies the objective the composition root would
+ *  inject, so the enabled-path "objective present + siblings intact" invariants
+ *  are unchanged; the OFF path and hostile-bus/degrade paths are untouched. */
+const wireObservability = (
+  opts: Parameters<typeof wireObservabilityRaw>[0] = {},
+): ReturnType<typeof wireObservabilityRaw> =>
+  opts?.enabled === true && opts.objective === undefined
+    ? wireObservabilityRaw({
+        ...opts,
+        objective: createObjectiveStore(opts.now !== undefined ? { now: opts.now } : {}),
+      })
+    : wireObservabilityRaw(opts)
 
 const throwingBus: ObservabilityHookBus = {
   subscribe: () => {

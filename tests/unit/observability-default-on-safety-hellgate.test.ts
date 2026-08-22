@@ -35,15 +35,33 @@ import { createApprovalGate } from "@/agent/approval-gate-wire"
 import { createApprovalStateMachine } from "@/agent/approval-state-machine"
 import { buildSessionFeatures } from "@/agent/features"
 import { HookBus } from "@/agent/hooks"
-import { wireObservability } from "@/agent/observability-wire"
+import { wireObservability as wireObservabilityRaw } from "@/agent/observability-wire"
 import { createRunLedgerHookSubscriber } from "@/agent/run-ledger-attribution"
 import type { AgentConfig } from "@/agent/types"
 import type { LLMPort } from "@/llm"
+import { createObjectiveStore } from "@/objective"
 import { installOtelSpanExportFromEnv } from "@/observability/otel-span-export"
 import { endSpan, getSpanSink, startSpan } from "@/observability/spans"
 import type { PermissionContext } from "@/permission"
 import type { StreamPort } from "@/stream"
 import { defaultTools, type Tool, ToolRegistry } from "@/tool"
+
+/**
+ * RFC-03 C2 — the objective authority is now INJECTED into the wire (the wire no
+ * longer mints its own store — construction is owned by the assembly builder,
+ * per the constructor-owner ratchet). This thin wrapper supplies the objective
+ * the composition root injects, so the historical enabled-path invariants
+ * (objective present, objective_* tools in the manifest) are unchanged.
+ */
+const wireObservability = (
+  opts: Parameters<typeof wireObservabilityRaw>[0] = {},
+): ReturnType<typeof wireObservabilityRaw> =>
+  opts?.enabled === true && opts.objective === undefined
+    ? wireObservabilityRaw({
+        ...opts,
+        objective: createObjectiveStore(opts.now !== undefined ? { now: opts.now } : {}),
+      })
+    : wireObservabilityRaw(opts)
 
 // ── minimal real AgentConfig (mirrors objective-tools-hellgate baseCfg) ──────
 const baseCfg = (over: Partial<AgentConfig> = {}): AgentConfig =>

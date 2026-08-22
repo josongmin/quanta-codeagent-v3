@@ -117,6 +117,17 @@ export interface ObservabilityWireOpts {
   readonly now?: () => number
   readonly hookBus?: ObservabilityHookBus
   /**
+   * RFC-03 C2 — the per-session objective authority, INJECTED by the composition
+   * root (constructed ONCE via the assembly `buildObjectiveAuthority` builder).
+   * The wire NO LONGER mints its own objective store (the RFC-03 C2 constructor-
+   * owner ratchet forbids a surface-local `createObjectiveStore()`). This leaf
+   * `@/agent` slice cannot import the `@/runner` builder, so the host/web
+   * composition root constructs the authority and passes it here. Absent ⇒ the
+   * `objective` slot AND its ApprovalStateMachine objective cross-wire are
+   * omitted (no fallback store) — `now` still drives `runLedger`/`approvalState`.
+   */
+  readonly objective?: ObjectivePort
+  /**
    * DOF-40 fail-closed seam. Invoked ONCE per port/subscription slot whose
    * factory or subscription threw during wiring — so a partial-wire failure
    * is SURFACED (which slot went offline is signalled), never silently

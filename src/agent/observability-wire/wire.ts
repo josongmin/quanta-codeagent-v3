@@ -36,7 +36,6 @@ import type { ShadowVerifyPort } from "@/agent/shadow-verify"
 import { createShadowVerify } from "@/agent/shadow-verify"
 import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
 import type { ObjectivePort } from "@/objective"
-import { createObjectiveStore } from "@/objective"
 import { errMessage, logger } from "@/shared"
 import type {
   ObservabilityWireHandle,
@@ -187,14 +186,15 @@ const constructHandleParts = (
 } => {
   const now = opts.now
 
-  // 1) Objective + RunLedger first — they have no inter-dependency, so
-  //    construction order is irrelevant. Each is independently failure-
-  //    isolated + failure-REPORTED (DOF-40).
-  const objective = tryConstruct(
-    "objective",
-    (): ObjectivePort => createObjectiveStore(now !== undefined ? { now } : {}),
-    reporter,
-  )
+  // 1) Objective is INJECTED (RFC-03 C2). The wire NO LONGER mints its own
+  //    objective store — the per-session objective authority is constructed once
+  //    at the assembly builder (`buildObjectiveAuthority`) and BOUND here via
+  //    `opts.objective` (constructor-owner ratchet: this leaf `@/agent` slice
+  //    cannot reach the `@/runner` builder, so the composition root injects it).
+  //    Absent ⇒ the objective slot + its ApprovalStateMachine cross-wire are
+  //    omitted (no fallback store). RunLedger is still constructed here (no
+  //    inter-dependency); it stays failure-isolated + failure-REPORTED (DOF-40).
+  const objective = opts.objective
   const runLedger = tryConstruct(
     "runLedger",
     (): RunLedgerPort => createRunLedger(now !== undefined ? { now } : {}),

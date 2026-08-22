@@ -18,7 +18,13 @@ import {
 } from "./paths"
 import { rollbackCheckpointRecordSchema, rollbackOperationRecordSchema } from "./rollback-record"
 import type { SessionRootProvider } from "./root-port"
-import { type SavedSession, type SavePayload, SESSION_VERSION, type SessionMeta } from "./types"
+import {
+  OBJECTIVE_SNAPSHOT_VERSION,
+  type SavedSession,
+  type SavePayload,
+  SESSION_VERSION,
+  type SessionMeta,
+} from "./types"
 import { workspaceOwnershipSchema } from "./workspace-ownership"
 
 /** Resolve `<root>/<id>.json` honoring an optional provider. When no
@@ -236,12 +242,59 @@ const sessionMetaSchema = z.object({
   // load (a restart-durability bug; see the LOSSLESS note above messageSchema).
   workspaceOwnership: workspaceOwnershipSchema.optional(),
 })
+// RFC-03 C2 — the strict objective-snapshot decoder. LOSSLESS mirror of
+// `PersistedObjectiveThread` (@/session/types) — the session slice never imports
+// @/objective, so this schema is the pure JSON validator. zod strips unknown
+// keys, so any field omitted here would be silently LOST on reopen (a resume-
+// fidelity bug — same discipline as `messageSchema`). `version` is a literal, so
+// an UNKNOWN objective-snapshot version fail-closes the WHOLE session load (never
+// partially applied) — the fail-closed migration contract of RFC-03 C2.
+const persistedObjectiveCriterionSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  met: z.boolean(),
+})
+const persistedObjectiveBlockerSchema = z.object({
+  id: z.string(),
+  reason: z.string(),
+  waitingOn: z.string(),
+  since: z.number().finite(),
+})
+const persistedObjectiveBudgetSchema = z.object({
+  maxTokens: z.number().finite().optional(),
+  tokensUsed: z.number().finite(),
+  maxTurns: z.number().finite().optional(),
+  turnsUsed: z.number().finite(),
+})
+const persistedObjectiveThreadSchema = z.object({
+  threadId: z.string().min(1),
+  revision: z.number().int().nonnegative(),
+  goal: z.string(),
+  successCriteria: z.array(persistedObjectiveCriterionSchema),
+  status: z.string(),
+  explicitStatus: z.enum(["active", "paused", "completed"]),
+  usageLimitedUntil: z.number().finite().optional(),
+  budget: persistedObjectiveBudgetSchema,
+  blockers: z.array(persistedObjectiveBlockerSchema),
+  nextActions: z.array(z.string()),
+  createdAt: z.number().finite(),
+  updatedAt: z.number().finite(),
+})
+const objectiveSnapshotSchema = z.object({
+  version: z.literal(OBJECTIVE_SNAPSHOT_VERSION),
+  threads: z.array(persistedObjectiveThreadSchema),
+})
 const savedSessionSchema = z.object({
   version: z.literal(SESSION_VERSION),
   meta: sessionMetaSchema,
   reason: z.string(),
   turns: z.number().int().nonnegative(),
   messages: z.array(messageSchema),
+  // RFC-03 C2 (aug-22) — durable objective snapshot. OPTIONAL: a legacy snapshot
+  // (minted before this field) validates and reads back ABSENT (legacy/no
+  // objective, never an inferred default). The `version` literal fail-closes the
+  // WHOLE load on an unknown version.
+  objective: objectiveSnapshotSchema.optional(),
   // RFC-01 A2 (aug-02) — durable rollback records. BOTH optional: a legacy
   // snapshot (minted before these fields) validates and the loader defaults
   // the absent collection to `[]` (see `readSavedSession`). The element
@@ -360,22 +413,27 @@ const commitMetaAfterSnapshot = async (
 /** RFC-01 A2 — read the durable rollback ledger ALREADY on disk so a save whose
  *  payload OMITS the fields PRESERVES them instead of wiping them. Fail-soft: a
  *  missing / corrupt / legacy file ⇒ nothing to preserve (⇒ byte-identical). */
-const readExistingRollback = async (
+const readExistingDurable = async (
   path: string,
-): Promise<Pick<SavedSession, "rollbackCheckpoints" | "rollbackOperations">> => {
+): Promise<Pick<SavedSession, "rollbackCheckpoints" | "rollbackOperations" | "objective">> => {
   if (!(await fileExists(path))) return {}
   try {
     const parsed = JSON.parse(await readFile(path)) as Partial<SavedSession>
-    const out: Pick<SavedSession, "rollbackCheckpoints" | "rollbackOperations"> = {}
+    const out: Pick<SavedSession, "rollbackCheckpoints" | "rollbackOperations" | "objective"> = {}
     if (Array.isArray(parsed.rollbackCheckpoints))
       out.rollbackCheckpoints = parsed.rollbackCheckpoints
     if (Array.isArray(parsed.rollbackOperations)) out.rollbackOperations = parsed.rollbackOperations
+    // RFC-03 C2 — preserve the durable objective snapshot across an omitting save
+    // (per-turn auto-save / crash-resume markers carry no objective) so a plain
+    // transcript save never wipes it. The coordinator's explicit fold still wins.
+    if (parsed.objective !== undefined && typeof parsed.objective === "object")
+      out.objective = parsed.objective
     return out
   } catch (e) {
     // Corrupt/unreadable existing file ⇒ nothing to preserve. Attributed (not a
     // silent swallow): the same save then OVERWRITES it, so the ledger is not
     // strandable here — but a corrupt session file is worth surfacing.
-    logger.warn("session: rollback-preserve read failed", { path, error: errMessage(e) })
+    logger.warn("session: durable-state-preserve read failed", { path, error: errMessage(e) })
     return {}
   }
 }
@@ -434,36 +492,48 @@ export const saveSessionById = (
       archived: path === archivedPath,
       lastTouched: Date.now(),
     }
-    // RFC-01 A2 — the rollback ledger is PERSISTED ACROSS SAVES, not a per-payload
-    // field. `messages` is threaded by every caller, but rollback records are only
-    // known to the `@/agent` coordinator; a plain transcript save (per-turn
-    // auto-save, crash-resume markers) omits them. PRESERVE whatever is already on
-    // disk when the payload omits a field — the coordinator's explicit fold still
-    // wins when it DOES provide them. Closes a data-loss class (a re-submitted
-    // rollback would otherwise re-run the destructive restore; pending-intent
-    // recovery markers would vanish).
-    const preserved =
-      payload.rollbackCheckpoints === undefined || payload.rollbackOperations === undefined
-        ? await readExistingRollback(path)
-        : {}
-    const rollbackCheckpoints = payload.rollbackCheckpoints ?? preserved.rollbackCheckpoints
-    const rollbackOperations = payload.rollbackOperations ?? preserved.rollbackOperations
+    // RFC-01 A2 + RFC-03 C2 — the durable side-records (rollback ledger + objective
+    // snapshot) are PERSISTED ACROSS SAVES: a plain transcript save omits them, so
+    // preserve the on-disk value; the explicit fold still wins. Only defined keys
+    // are returned, so the spread is BYTE-IDENTICAL for a legacy/empty session.
+    const durable = await resolveDurableRecords(payload, path)
     const saved: SavedSession = {
       version: SESSION_VERSION,
       meta: touched,
       reason: payload.reason,
       turns: payload.turns,
       messages: payload.messages,
-      // Conditional spread (never `field: undefined`) so a session with NO rollback
-      // ledger (legacy / never rolled back) still serializes BYTE-IDENTICALLY to the
-      // pre-RFC on-disk shape. `rollbackCheckpoints`/`rollbackOperations` are the
-      // payload's when provided, else the preserved on-disk values (see above).
-      ...(rollbackCheckpoints !== undefined ? { rollbackCheckpoints } : {}),
-      ...(rollbackOperations !== undefined ? { rollbackOperations } : {}),
+      ...durable,
     }
     await writeSessionFile(path, JSON.stringify(saved))
     await commitMetaAfterSnapshot(touched, provider)
   })
+
+/** RFC-01 A2 + RFC-03 C2 — resolve the durable side-records for a save: the
+ *  payload's value wins; an OMITTED field is PRESERVED from disk (a plain
+ *  transcript save never wipes the rollback ledger or objective snapshot). Only
+ *  reads the existing file when at least one field is omitted. Returns ONLY the
+ *  defined keys so the caller's spread serializes byte-identically for a
+ *  legacy/empty session. Extracted to keep `saveSessionById` under the
+ *  cognitive-complexity cap. */
+const resolveDurableRecords = async (
+  payload: SavePayload,
+  path: string,
+): Promise<Pick<SavedSession, "rollbackCheckpoints" | "rollbackOperations" | "objective">> => {
+  const needPreserve =
+    payload.rollbackCheckpoints === undefined ||
+    payload.rollbackOperations === undefined ||
+    payload.objective === undefined
+  const preserved = needPreserve ? await readExistingDurable(path) : {}
+  const out: Pick<SavedSession, "rollbackCheckpoints" | "rollbackOperations" | "objective"> = {}
+  const rollbackCheckpoints = payload.rollbackCheckpoints ?? preserved.rollbackCheckpoints
+  const rollbackOperations = payload.rollbackOperations ?? preserved.rollbackOperations
+  const objective = payload.objective ?? preserved.objective
+  if (rollbackCheckpoints !== undefined) out.rollbackCheckpoints = rollbackCheckpoints
+  if (rollbackOperations !== undefined) out.rollbackOperations = rollbackOperations
+  if (objective !== undefined) out.objective = objective
+  return out
+}
 
 /** Reconcile the lightweight index with a session's on-disk meta. The per-id
  *  JSON file is the source of truth (it is written FIRST in every mutator);
@@ -653,6 +723,9 @@ export const forkSession = async (
     reason: source.reason,
     turns: source.turns,
     messages: reconcileMessages(messagesCopy),
+    // RFC-03 C2 — a fork continues the source's goal, so carry the durable
+    // objective snapshot forward (absent ⇒ omitted ⇒ byte-identical).
+    ...(source.objective !== undefined ? { objective: source.objective } : {}),
   }
   await writeSessionFile(await resolveSessionFilePath(newId, provider), JSON.stringify(saved))
   await commitMetaAfterSnapshot(newMeta, provider)

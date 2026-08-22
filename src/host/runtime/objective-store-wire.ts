@@ -13,7 +13,8 @@
  */
 
 import type { AgentConfig } from "@/agent"
-import { createObjectiveStore, type ObjectivePort } from "@/objective"
+import type { ObjectivePort } from "@/objective"
+import { buildObjectiveAuthority } from "@/runner/assemble/session-authorities"
 import { gateOn } from "@/shared"
 
 /** Minimal env view — same record shape the assembler threads everywhere. */
@@ -32,5 +33,7 @@ export const maybeWireObjective = (cfg: AgentConfig, env: Env): void => {
   // enforceBudget rides `QUANTA_OBJECTIVE_BUDGET_ENFORCE`: OFF ⇒ the store never
   // derives usage_limited/budget_limited (byte-identical informational store).
   const enforceBudget = gateOn(env, "QUANTA_OBJECTIVE_BUDGET_ENFORCE")
-  slot.objective = createObjectiveStore(enforceBudget ? { enforceBudget: true } : {})
+  // RFC-03 C2 — construct through the ONE objective-authority builder (assembly
+  // owns lifetime/restore), never a surface-local `createObjectiveStore()`.
+  slot.objective = buildObjectiveAuthority(enforceBudget ? { enforceBudget: true } : {})
 }

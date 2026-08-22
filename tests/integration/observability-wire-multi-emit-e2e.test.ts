@@ -44,6 +44,7 @@ import {
 } from "@/agent/observability-wire"
 import type { RecoveryProvenance } from "@/agent/recovery-reason"
 import { attachObservabilityPorts } from "@/apps/web-daemon/runtime-factory"
+import { buildObjectiveAuthority } from "@/runner/assemble/session-authorities"
 import type { RuntimeFacade } from "@/sdk/runtime"
 
 /* ─────────────────────────────────────────────────────────────────────── */
@@ -77,6 +78,9 @@ const wireSessionObservability = (
   const handle = wireObservability({
     enabled: true,
     repoRoot: cwd,
+    // RFC-03 C2 — mirror the production injection (the wire no longer mints its
+    // own objective; the composition root injects the assembly-owned authority).
+    objective: buildObjectiveAuthority(),
     hookBus: toObservabilityHookBus(bus),
   })
   return { handle, bus }

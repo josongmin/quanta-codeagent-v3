@@ -5,8 +5,8 @@ import { createInterruptedTurnBuffer } from "@/agent/interrupted-turn"
 import { createShadowVerify } from "@/agent/shadow-verify"
 import { createShadowVerifyAdapters } from "@/agent/shadow-verify-adapters"
 import { createStickyPresetResolver, type StreamInput } from "@/llm"
-import { createObjectiveStore } from "@/objective"
 import type { RadarStore } from "@/radar"
+import { buildObjectiveAuthority } from "@/runner/assemble/session-authorities"
 import { isApprovedDecision } from "@/runner/orchestrate"
 import type { RuntimeFacadeComposeOptions } from "@/sdk/runtime"
 import { gateOn } from "@/shared"
@@ -130,7 +130,9 @@ export const buildSurfaceCoreState = (
     backgroundPortal,
     radarStore,
     browserNetHolder,
-    objectiveStore: createObjectiveStore(),
+    // RFC-03 C2 — the objective authority is constructed at the ONE builder
+    // (`buildObjectiveAuthority`), never a surface-local `createObjectiveStore()`.
+    objectiveStore: buildObjectiveAuthority(),
     presetResolver: createStickyPresetResolver(),
   }
 }

@@ -36,9 +36,23 @@ import { HookBus } from "@/agent"
 import {
   type ObservabilityHookBus,
   type ObservabilityWireHandle,
-  wireObservability,
+  type ObservabilityWireOpts,
+  wireObservability as wireObservabilityRaw,
 } from "@/agent/observability-wire"
+import { createObjectiveStore } from "@/objective"
 import type { RuntimeFacade } from "@/sdk/runtime"
+
+/** RFC-03 C2 — the objective authority is INJECTED into the wire (no longer
+ *  minted there; construction owned by the assembly builder — constructor-owner
+ *  ratchet). This wrapper supplies the objective the composition root injects so
+ *  the enabled-path invariants are unchanged; OFF path untouched. */
+const wireObservability = (opts: ObservabilityWireOpts = {}): ObservabilityWireHandle =>
+  opts.enabled === true && opts.objective === undefined
+    ? wireObservabilityRaw({
+        ...opts,
+        objective: createObjectiveStore(opts.now !== undefined ? { now: opts.now } : {}),
+      })
+    : wireObservabilityRaw(opts)
 
 // -----------------------------------------------------------------------------
 // fakes

@@ -244,6 +244,92 @@ export interface RollbackOperationRecord {
   readonly errorCode?: string
 }
 
+/* ------------------------------------------------------------------ */
+/* RFC-03 C2 — durable per-thread objective snapshot (aug-22 absorption).*/
+/*                                                                      */
+/* The objective authority (`@/objective`) is a leaf domain the         */
+/* `@/session` slice may NOT value-import (`denyImports` includes        */
+/* `@/objective`). So the session stores objective state as PLAIN JSON:  */
+/* this DTO is a self-contained, structurally-mirrored data record — NO  */
+/* behavior, NO import of the objective domain. The encode/restore       */
+/* ADAPTER that maps between the live authority and this DTO lives in    */
+/* the Layer-2 composition seam (`runner/assemble/session-authorities`), */
+/* which MAY import `@/objective`. Session I/O only persists/reads the   */
+/* DTO (a pure data blob).                                               */
+/*                                                                      */
+/* Schema evolution: `SavedSession.objective` is OPTIONAL. A legacy      */
+/* snapshot minted before this field reads back as ABSENT (⇒ legacy/no   */
+/* objective — NEVER an inferred default), and a session that never      */
+/* carried an objective serializes byte-identically (JSON.stringify      */
+/* drops the absent field). The `version` is a literal, so an UNKNOWN    */
+/* version fail-closes the WHOLE snapshot load (never partially applied) */
+/* — the same fail-closed migration contract as the rollback records.    */
+/* ------------------------------------------------------------------ */
+
+/** Current wire version for a persisted objective snapshot. Bumped only on a
+ *  shape change; the loader fail-closes on any other value so a forward-
+ *  incompatible record can never be half-read (mirrors the rollback records). */
+export const OBJECTIVE_SNAPSHOT_VERSION = 1 as const
+
+/** A single persisted success criterion (mirrors `@/objective` `SuccessCriterion`
+ *  structurally — ids survive the round-trip verbatim, never re-minted). */
+export interface PersistedObjectiveCriterion {
+  readonly id: string
+  readonly text: string
+  readonly met: boolean
+}
+
+/** A single persisted blocker (mirrors `@/objective` `Blocker` structurally). */
+export interface PersistedObjectiveBlocker {
+  readonly id: string
+  readonly reason: string
+  readonly waitingOn: string
+  readonly since: number
+}
+
+/** Persisted budget envelope (mirrors `@/objective` `ObjectiveBudget`). */
+export interface PersistedObjectiveBudget {
+  readonly maxTokens?: number
+  readonly tokensUsed: number
+  readonly maxTurns?: number
+  readonly turnsUsed: number
+}
+
+/** The full serializable state of ONE thread's objective + its per-thread
+ *  authority revision + the persisted EXPLICIT status intent (provenance). The
+ *  derived public `status` is stored for readability, but the authoritative
+ *  restore source for status is `explicitStatus` (re-derivation stays a pure
+ *  function of explicitStatus + criteria + blockers on the objective side). */
+export interface PersistedObjectiveThread {
+  readonly threadId: string
+  /** The per-thread mutation-authority revision at snapshot time (RFC-03 C1).
+   *  Restored verbatim so CAS/undo bookkeeping survives a reopen. */
+  readonly revision: number
+  readonly goal: string
+  readonly successCriteria: readonly PersistedObjectiveCriterion[]
+  /** Derived status at snapshot time (advisory; `explicitStatus` is the restore
+   *  source of truth for the caller's intent). */
+  readonly status: string
+  /** The caller's last EXPLICIT status intent — the ONLY status source on
+   *  restore (never inferred from the derived `status`). */
+  readonly explicitStatus: "active" | "paused" | "completed"
+  /** Transient usage-window expiry (epoch ms); omitted when no window is set. */
+  readonly usageLimitedUntil?: number
+  readonly budget: PersistedObjectiveBudget
+  readonly blockers: readonly PersistedObjectiveBlocker[]
+  readonly nextActions: readonly string[]
+  readonly createdAt: number
+  readonly updatedAt: number
+}
+
+/** The durable objective snapshot persisted on a {@link SavedSession}: every
+ *  live thread's full state + revision + provenance. Plain data — the session
+ *  slice never imports the objective domain to produce/consume it. */
+export interface PersistedObjectiveSnapshot {
+  readonly version: typeof OBJECTIVE_SNAPSHOT_VERSION
+  readonly threads: readonly PersistedObjectiveThread[]
+}
+
 export interface SavedSession {
   version: typeof SESSION_VERSION
   meta: SessionMeta
@@ -257,6 +343,12 @@ export interface SavedSession {
   /** RFC-01 A2 — durable rollback-operation receipts (intent + terminal).
    *  Absent on legacy snapshots and on sessions that never rolled back. */
   rollbackOperations?: RollbackOperationRecord[]
+  /** RFC-03 C2 — durable per-thread objective snapshot. Absent on legacy
+   *  snapshots and on sessions with no objective ⇒ serialization is
+   *  byte-identical; absence means legacy/no objective, never an inferred
+   *  default. Produced/consumed by the Layer-2 objective encode/restore
+   *  adapter (session stores the JSON only). */
+  objective?: PersistedObjectiveSnapshot
 }
 
 export interface SavePayload {
@@ -268,4 +360,9 @@ export interface SavePayload {
    *  as-is (a normal transcript save never drops rollback state). */
   rollbackCheckpoints?: RollbackCheckpointRecord[]
   rollbackOperations?: RollbackOperationRecord[]
+  /** RFC-03 C2 — optional durable objective snapshot to persist alongside the
+   *  transcript. Absent ⇒ the existing on-disk objective is preserved as-is (a
+   *  normal transcript save never drops objective state — same discipline as
+   *  the rollback ledger). */
+  objective?: PersistedObjectiveSnapshot
 }
