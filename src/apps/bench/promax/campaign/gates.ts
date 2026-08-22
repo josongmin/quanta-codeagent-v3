@@ -885,7 +885,12 @@ export const admitProMaxFullRun = (input: {
   //     instances publishes a 100% valid rate; the loss must be attributable to
   //     a lost chunk, and it is reported either way so it is never invisible.
   const covered = auditFullRunCoverage(
-    { expected, receipt: evidence.receipt, chunks: input.chunks },
+    {
+      expected,
+      receipt: evidence.receipt,
+      chunks: input.chunks,
+      maxUngradedAssigned: record.retry_policy.maxUngradedAssigned,
+    },
     add,
   )
 

@@ -1,8 +1,0 @@
-{"run":0,"turn":0,"event":{"type":"tool_use_start","id":"g1","name":"grep"}}
-{"run":0,"turn":0,"event":{"type":"tool_use_end","id":"g1","input":{"pattern":"Helo"}}}
-{"run":0,"turn":0,"event":{"type":"message_stop","stop_reason":"tool_use"}}
-{"run":0,"turn":1,"event":{"type":"tool_use_start","id":"e1","name":"edit"}}
-{"run":0,"turn":1,"event":{"type":"tool_use_end","id":"e1","input":{"path":"greeting.ts","old_string":"Helo world","new_string":"Hello world"}}}
-{"run":0,"turn":1,"event":{"type":"message_stop","stop_reason":"tool_use"}}
-{"run":0,"turn":2,"event":{"type":"text_delta","delta":"\"Helo\" 오타를 \"Hello\"로 고쳤습니다."}}
-{"run":0,"turn":2,"event":{"type":"message_stop","stop_reason":"end_turn"}}

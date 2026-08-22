@@ -94,10 +94,7 @@ const runIdFromDataset = (path: string): string => {
  *  Fail-closed on an unreadable/empty dataset: the pool is about to scp that
  *  exact file to a box and spend a grade on it, so a dataset that cannot be read
  *  here is a refusal, never a chunk with an unknown denominator. */
-const buildPoolChunks = (
-  datasetPaths: readonly string[],
-  family: DatasetFamily,
-): PoolChunk[] => {
+const buildPoolChunks = (datasetPaths: readonly string[], family: DatasetFamily): PoolChunk[] => {
   const seen = new Map<string, number>()
   return datasetPaths.map((datasetPath) => {
     const base = runIdFromDataset(datasetPath)

@@ -1,7 +1,0 @@
-{
-  "stopReason": "completed",
-  "turns": { "count": { "min": 3, "max": 3 } },
-  "toolCalls": { "required": ["read", "edit"], "orderedPrefix": ["read", "edit"] },
-  "files": [{ "path": "config.ts", "contains": ["8080"], "notContains": ["3000"] }],
-  "finalText": { "contains": ["계획"], "containsAny": ["8080", "완료"] }
-}

@@ -110,7 +110,7 @@ const recordInput = (): FreezeProMaxCampaignInput => ({
     minResolvedDelta: 3,
     maxCostUsdDelta: 40,
   },
-  retryPolicy: { maxChunkAttempts: 2, exhaustedDisposition: "missing" },
+  retryPolicy: { maxChunkAttempts: 2, exhaustedDisposition: "missing", maxUngradedAssigned: 0 },
   exceptionPolicy: {
     manifestVersion: 1,
     requiresOwner: true,
@@ -968,8 +968,14 @@ describe("Gate 6 — PMX-170 model run", () => {
       evidence: modelStage(PMX170, receipt),
       chunks,
     })
-    // exhausted within the FROZEN policy (2 attempts) ⇒ admitted, rows missing
-    expect({ ok: exhausted.ok, failures: codes(exhausted) }).toEqual({ ok: true, failures: [] })
+    // aug-22 F1: exhausting the FROZEN attempt policy explains the loss but does
+    // not license it. The campaign's `maxUngradedAssigned` is the ceiling, and
+    // this record declares 0, so a 20-row attributed loss is REFUSED — the audit
+    // found gate 6 passing a Full-170 that graded 1 of 170 on exactly this path.
+    expect({ ok: exhausted.ok, failures: codes(exhausted) }).toEqual({
+      ok: false,
+      failures: ["attempt_incomplete"],
+    })
     expect(exhausted.summary?.missing).toBe(lost.length)
 
     // …but a chunk that gave up EARLY is refused.

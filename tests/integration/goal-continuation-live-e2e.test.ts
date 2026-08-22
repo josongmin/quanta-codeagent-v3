@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { runAgent } from "@/agent"
+import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import {
   buildPursuitContinuationPrompt,
   type ContinuationDeps,
@@ -8,7 +9,6 @@ import {
   type ObjectivePort,
   runIdleContinuation,
 } from "@/objective"
-import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 import { defaultTools, ToolRegistry } from "@/tool"
 import { cfg, RecordingStream, text, toolUse, withTimeout } from "./_harness"
 

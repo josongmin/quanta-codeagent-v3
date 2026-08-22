@@ -1,9 +1,11 @@
 /**
- * Architecture ratchet — the git INDEX may not carry generated Python artifacts
- * or undeclared gitlinks.
+ * Architecture ratchet — the git INDEX may not carry generated Python artifacts,
+ * undeclared gitlinks, or a second copy of the source tree.
  *
- * Two real recurrences from the aug-21/22 bench campaign motivate this file, and
- * both are index-level defects that no source-tree lint can see:
+ * Three real incidents from aug-21/22 motivate this file, and every one of them
+ * is an index-level defect that no source-tree lint can see. The third
+ * (`isNestedTreeCopy`, documented at its own definition) landed while the first
+ * two were being repaired — which is the argument for the file existing at all.
  *
  *  1. **Generated Python artifacts.** CPython bytecode caches under
  *     `adapters/terminal-bench` (`__pycache__` directories holding `.pyc` files)
@@ -61,6 +63,35 @@ const GENERATED_PYTHON_PATTERNS: readonly RegExp[] = [
 
 export const isGeneratedPythonArtifact = (path: string): boolean =>
   GENERATED_PYTHON_PATTERNS.some((re) => re.test(path))
+
+/**
+ * The repository's own top-level source roots. A tracked path that puts one of
+ * these UNDER another directory is a second copy of the tree, not a feature.
+ */
+const SOURCE_ROOTS = ["src", "tests", "tools", "adapters"] as const
+
+/**
+ * Is this path a NESTED DUPLICATE of the source tree — i.e. `<anything>/src/…`,
+ * `<anything>/tests/…`, and so on?
+ *
+ * aug-22, commit `0cd1e5b84`: a scratch copy of the whole repository taken for a
+ * "pristine tree" audit was committed — 8 238 files, 85 MB, 1.55 M lines, under
+ * `.pristine-audit/`. Nothing in the toolchain objected. It is the most
+ * expensive index defect this repo has taken and the cheapest to detect: real
+ * source lives at the ROOT of each of these directories and nowhere else, so a
+ * second `src/` anywhere in the index is a duplicate by construction.
+ *
+ * Scoped to the FIRST path segment on purpose. `src/tool/git/…` is ordinary
+ * source, and a legitimate fixture may well contain a nested `tests/` — what is
+ * never legitimate is a top-level sibling of `src/` that itself contains a
+ * `src/`, which is exactly the shape a `cp -r` of the repo produces.
+ */
+export const isNestedTreeCopy = (path: string): boolean => {
+  const [first, second] = path.split("/")
+  if (first === undefined || second === undefined) return false
+  if ((SOURCE_ROOTS as readonly string[]).includes(first)) return false
+  return (SOURCE_ROOTS as readonly string[]).includes(second)
+}
 
 /** One `git ls-files -s` row, reduced to the two fields this file judges. */
 interface IndexEntry {
@@ -164,6 +195,28 @@ describe("arch: git index hygiene", () => {
     ).toEqual([])
   })
 
+  test("no second copy of the source tree is tracked", () => {
+    const offenders = readIndex()
+      .map((e) => e.path)
+      .filter(isNestedTreeCopy)
+    // Report the roots, not 8 000 paths — the actionable unit is the directory.
+    const roots = [...new Set(offenders.map((p) => p.split("/")[0]))].sort()
+
+    expect(
+      roots,
+      roots.length > 0
+        ? "A nested copy of the source tree is TRACKED — every clone pays for it and every " +
+            "index-wide tool (ratchets, fc admission, grep) is polluted by a stale twin of " +
+            `each file. Untrack the directory (files stay on disk):\n  ${roots
+              .map(
+                (r) =>
+                  `git rm -r --cached ${r}   (${offenders.filter((p) => p.startsWith(`${r}/`)).length} files)`,
+              )
+              .join("\n  ")}`
+        : "",
+    ).toEqual([])
+  })
+
   /* ── paired controls: the predicates themselves, on synthetic input ── */
 
   test("the generated-Python matcher flags every known form and no source file", () => {
@@ -187,6 +240,25 @@ describe("arch: git index hygiene", () => {
     )
     expect(parsed.map((e) => e.path)).toEqual(["src/a.ts", ".worktrees/base", "docs/my notes.md"])
     expect(parsed.filter(isGitlink).map((e) => e.path)).toEqual([".worktrees/base"])
+  })
+
+  test("the nested-copy matcher flags a duplicated tree and no real source path", () => {
+    // the aug-22 shape, and the same shape under any other scratch root
+    expect(isNestedTreeCopy(".pristine-audit/src/agent/prompt.ts")).toBe(true)
+    expect(isNestedTreeCopy(".pristine-audit/tests/unit/a.test.ts")).toBe(true)
+    expect(isNestedTreeCopy("backup-2026/tools/dev/x.ts")).toBe(true)
+    expect(isNestedTreeCopy("vendor/adapters/y.py")).toBe(true)
+    // real source, at the root of its own tree, must never be flagged
+    expect(isNestedTreeCopy("src/agent/prompt.ts")).toBe(false)
+    expect(isNestedTreeCopy("tests/unit/a.test.ts")).toBe(false)
+    expect(isNestedTreeCopy("tools/feature-catalog/cli.ts")).toBe(false)
+    expect(isNestedTreeCopy("adapters/terminal-bench/quanta_agent.py")).toBe(false)
+    // a nested directory that merely SHARES A NAME deeper down is fine — the
+    // matcher looks only at the first two segments, so ordinary source that
+    // happens to contain `src`/`tests` below the top level is not a duplicate.
+    expect(isNestedTreeCopy("src/tool/git/src/x.ts")).toBe(false)
+    expect(isNestedTreeCopy("docs/plans/notes.md")).toBe(false)
+    expect(isNestedTreeCopy("package.json")).toBe(false)
   })
 
   test("a gitlink is an offender only while .gitmodules does not declare it", () => {

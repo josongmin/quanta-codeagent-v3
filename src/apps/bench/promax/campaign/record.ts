@@ -129,6 +129,22 @@ export interface ProMaxContinuationRule {
 export interface ProMaxRetryPolicy {
   readonly maxChunkAttempts: number
   readonly exhaustedDisposition: "missing"
+  /**
+   * How many assigned rows this campaign is willing to finish WITHOUT a grade.
+   *
+   * aug-22 audit (F1): the coverage clause refused only UNACCOUNTED missing
+   * rows. A loss attributed to chunks that exhausted `maxChunkAttempts` had no
+   * ceiling at all, so gate 6 PASSED a Full-170 whose evaluator reported on 1 of
+   * 170 instances — the loss was visible in the receipt, but the gate that
+   * exists to authorise the packet's most expensive run said nothing.
+   *
+   * This is REQUIRED and has no default on purpose. Picking a tolerance here
+   * would be inventing a threshold; the campaign must state its own, and a
+   * record that does not is refused before any gate runs. `0` is the strict
+   * choice (every assigned row must be graded) and is what a leaderboard-shaped
+   * run should declare.
+   */
+  readonly maxUngradedAssigned: number
 }
 
 /**
@@ -415,6 +431,15 @@ const auditPolicies = (
   for (const [name, value] of Object.entries(input.concurrency)) {
     if (!positiveInt(value)) add("concurrency_invalid", `concurrency "${name}" is ${String(value)}`)
   }
+  const ungraded = input.retryPolicy.maxUngradedAssigned
+  if (!Number.isInteger(ungraded) || ungraded < 0) {
+    add(
+      "retry_policy_invalid",
+      `maxUngradedAssigned is ${String(ungraded)} — the campaign must declare, as a non-negative ` +
+        "integer, how many assigned rows it will accept finishing without a grade (0 = every " +
+        "assigned row must be graded)",
+    )
+  }
   if (!positiveInt(input.retryPolicy.maxChunkAttempts)) {
     add(
       "retry_policy_invalid",
@@ -658,7 +683,14 @@ const isRuleShape = (value: unknown): boolean => {
 
 const isRetryShape = (value: unknown): boolean => {
   const r = asRecord(value)
-  return r !== null && isNum(r.maxChunkAttempts) && r.exhaustedDisposition === "missing"
+  return (
+    r !== null &&
+    isNum(r.maxChunkAttempts) &&
+    r.exhaustedDisposition === "missing" &&
+    // REQUIRED (aug-22 F1): a record that never states its ungraded tolerance is
+    // refused here, before any gate can read a default that does not exist.
+    isNum(r.maxUngradedAssigned)
+  )
 }
 
 const isExceptionPolicyShape = (value: unknown): boolean => {

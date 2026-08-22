@@ -97,7 +97,7 @@ const baseInput = (): FreezeProMaxCampaignInput => ({
     minResolvedDelta: 3,
     maxCostUsdDelta: 40,
   },
-  retryPolicy: { maxChunkAttempts: 2, exhaustedDisposition: "missing" },
+  retryPolicy: { maxChunkAttempts: 2, exhaustedDisposition: "missing", maxUngradedAssigned: 0 },
   exceptionPolicy: {
     manifestVersion: 1,
     requiresOwner: true,
@@ -340,7 +340,11 @@ describe("PMX-06 frozen campaign record — refuses an unfreezable campaign", ()
     expect(
       codesOf({
         ...baseInput(),
-        retryPolicy: { maxChunkAttempts: 0, exhaustedDisposition: "missing" },
+        retryPolicy: {
+          maxChunkAttempts: 0,
+          exhaustedDisposition: "missing",
+          maxUngradedAssigned: 0,
+        },
       }),
     ).toContain("retry_policy_invalid")
   })
@@ -371,7 +375,11 @@ describe("PMX-06 frozen campaign record — refuses an unfreezable campaign", ()
         model: { ...baseInput().model, reasoningEffortRequested: "max" },
         budgets: { maxTurns: 0, maxTokens: 0, wallClockMs: 0 },
         concurrency: { patchGeneration: 0, grading: 0 },
-        retryPolicy: { maxChunkAttempts: 0, exhaustedDisposition: "missing" },
+        retryPolicy: {
+          maxChunkAttempts: 0,
+          exhaustedDisposition: "missing",
+          maxUngradedAssigned: 0,
+        },
         continuationRule: {
           ...baseInput().continuationRule,
           declaredAt: "2026-09-01T00:00:00.000Z",

@@ -91,6 +91,16 @@ export interface Campaign {
    * a different rounding rule — the same reason `officialGrade.display` does.
    */
   coverage?: string
+  /**
+   * aug-22 F5 — the members DID carry official totals and they did not form a
+   * covering partition, so `official`/`coverage` are absent by REFUSAL, not by
+   * absence. `resolved`/`total` fall back to the row fold; a surface that prints
+   * that rate must say the official denominator was rejected, otherwise the row
+   * is indistinguishable from a campaign that simply never ran an official
+   * grader — a rate with nothing beside it, which is the shape this file exists
+   * to prevent.
+   */
+  officialRejected?: true
 }
 
 // Per-instance rollup state inside one campaign. passed wins over everything;
@@ -158,7 +168,8 @@ const campaignRow = (
   // FLAG-B: unmeasured = instances NO run ever measured (all-throttle/infra).
   // They leave the denominator; surfaced separately as `unmeasured`.
   const unmeasured = seen.filter((s) => !s.passed && !s.measured).length
-  const official = rollUpOfficialGrade(members)
+  const outcome = rollUpOfficialGradeOutcome(members)
+  const official = outcome.kind === "summed" ? outcome.totals : undefined
   const display = official === undefined ? undefined : formatOfficialGradeTotals(official)
   return {
     key: group.key,
@@ -171,6 +182,10 @@ const campaignRow = (
     unmeasured,
     ...(official !== undefined ? { official } : {}),
     ...(display !== undefined ? { coverage: display.coverage } : {}),
+    // aug-22 F5: a REJECTED partition is not the same as no official grading.
+    // The row-fold rate below still renders, so the row has to say the official
+    // denominator was proven wrong instead of just omitting the coverage chip.
+    ...(outcome.kind === "rejected" ? { officialRejected: true as const } : {}),
     ...(group.datasetFamily !== undefined ? { datasetFamily: group.datasetFamily } : {}),
     viewId: group.viewId,
   }
@@ -240,6 +255,39 @@ export const rollUpOfficialGrade = (members: readonly Run[]): OfficialGradeTotal
   try {
     return sumOfficialGradeTotals(sections)
   } catch {
+    // REFUSING is correct: a member whose own totals are not a covering
+    // partition must not be summed into a headline. The campaign falls back to
+    // the historical row fold.
+    //
+    // aug-22 audit (F5): what was NOT correct is that the fallback rendered as a
+    // bare percentage with the coverage chip simply absent — indistinguishable
+    // from a campaign that never had official grading at all. The render layer
+    // now has to tell those apart, so the refusal is REPORTED rather than only
+    // returned as `undefined` (see `rollUpOfficialGradeOutcome`).
     return undefined
   }
+}
+
+/**
+ * Why a campaign has no official totals. `absent` means no member carried an
+ * official-grade section; `rejected` means one did and it did not add up.
+ *
+ * The distinction is the whole point: a rate rendered beside "no official
+ * grading here" is honest, and the same rate rendered beside a REJECTED
+ * partition is a number whose denominator was already proven wrong.
+ */
+export type OfficialGradeRollupOutcome =
+  | { readonly kind: "summed"; readonly totals: OfficialGradeTotals }
+  | { readonly kind: "absent" }
+  | { readonly kind: "rejected" }
+
+export const rollUpOfficialGradeOutcome = (
+  members: readonly Run[],
+): OfficialGradeRollupOutcome => {
+  const graded = members.filter(
+    (run) => run.instanceRowKind === "swe-grade" && run.officialGrade !== undefined,
+  )
+  if (graded.length === 0) return { kind: "absent" }
+  const totals = rollUpOfficialGrade(members)
+  return totals === undefined ? { kind: "rejected" } : { kind: "summed", totals }
 }

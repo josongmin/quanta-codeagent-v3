@@ -53,6 +53,7 @@
  * `undefined` spec ⇒ NOT ONE ssh round trip. That is what keeps every family
  * without a remote bootstrap (verified / live / pro) byte-identical.
  */
+import { errMessage } from "@/shared"
 import type {
   FamilyBootstrapCommand,
   FamilyBootstrapPhase,
@@ -236,7 +237,7 @@ export const executeFamilyRemoteBootstrap = async (
 
 const teardownFailureNote = (bootstrap: FamilyRemoteBootstrap, err: unknown): string =>
   `[full-remote] ⚠️ ${bootstrap.family} TEARDOWN also failed — the box may still carry ` +
-  `answer-key bytes; it must not be reused for an agent phase: ${String(err)}`
+  `answer-key bytes; it must not be reused for an agent phase: ${errMessage(err)}`
 
 /** Run the declared teardown, capturing rather than throwing so the caller can
  *  decide which error wins. */

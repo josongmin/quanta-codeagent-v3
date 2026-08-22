@@ -140,7 +140,10 @@ describe("C-A — the default chunk builder declares what the chunk is accountab
     const chunk = defaultChunkFor(IDS)
     const acc = createChunkCoverageAccumulator()
     accumulateChunkCoverage(acc, {
-      officialGrade: receiptOf(IDS, IDS.map((id) => dispo(id))),
+      officialGrade: receiptOf(
+        IDS,
+        IDS.map((id) => dispo(id)),
+      ),
       resolved: [...IDS],
     })
     const result = chunkCoverageResult(acc, chunk)
@@ -149,8 +152,9 @@ describe("C-A — the default chunk builder declares what the chunk is accountab
   })
 
   test("an unreadable dataset REFUSES rather than planning a denominator-less chunk", () => {
-    expect(() => resolvePoolChunks([join(tmpdir(), "definitely-absent.jsonl")], false, "verified"))
-      .toThrow(/could not be read|no parseable task rows/)
+    expect(() =>
+      resolvePoolChunks([join(tmpdir(), "definitely-absent.jsonl")], false, "verified"),
+    ).toThrow(/could not be read|no parseable task rows/)
   })
 })
 
@@ -160,7 +164,10 @@ describe("C-A — the default chunk builder declares what the chunk is accountab
 
 const sectionFor = (assigned: readonly string[], graded: readonly string[]): OfficialGradeSection =>
   aggregateOfficialGrade({
-    receipt: receiptOf(assigned, graded.map((id) => dispo(id))),
+    receipt: receiptOf(
+      assigned,
+      graded.map((id) => dispo(id)),
+    ),
     campaign: {
       quantaSha: "a".repeat(40),
       quantaDirty: false,
@@ -199,8 +206,9 @@ const deleteMissingRows = (section: OfficialGradeSection): Record<string, unknow
   }
   const totals = shrink(raw.totals as Record<string, unknown>)
   totals.by_language = Object.fromEntries(
-    Object.entries((raw.totals as Record<string, unknown>).by_language as Record<string, unknown>)
-      .map(([k, v]) => [k, shrink(v as Record<string, unknown>)]),
+    Object.entries(
+      (raw.totals as Record<string, unknown>).by_language as Record<string, unknown>,
+    ).map(([k, v]) => [k, shrink(v as Record<string, unknown>)]),
   )
   raw.totals = totals
   raw.missing_instance_ids = []

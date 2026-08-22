@@ -1,7 +1,0 @@
-{"run":0,"turn":0,"event":{"type":"tool_use_start","id":"call_1","name":"read"}}
-{"run":0,"turn":0,"event":{"type":"tool_use_end","id":"call_1","input":{"path":"README.md"}}}
-{"run":0,"turn":0,"event":{"type":"usage","inputTokens":4822,"outputTokens":14,"model":"replay"}}
-{"run":0,"turn":0,"event":{"type":"message_stop","stop_reason":"tool_use"}}
-{"run":0,"turn":1,"event":{"type":"text_delta","delta":"README.md 파일은 \"안녕\"이라는 단 한 줄로 되어 있습니다."}}
-{"run":0,"turn":1,"event":{"type":"usage","inputTokens":4850,"outputTokens":17,"model":"replay"}}
-{"run":0,"turn":1,"event":{"type":"message_stop","stop_reason":"end_turn"}}

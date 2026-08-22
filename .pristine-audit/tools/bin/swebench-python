@@ -1,4 +1,0 @@
-#!/usr/bin/env bash
-# Thin shim: bench's QUANTA_SWEBENCH_PYTHON_BIN target.
-# uvx runs swebench in an ephemeral env (cached) so we don't pollute user-base.
-exec uvx --from swebench --python 3.11 --quiet python "$@"

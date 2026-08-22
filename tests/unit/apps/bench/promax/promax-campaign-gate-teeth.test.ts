@@ -103,7 +103,7 @@ const input = (): FreezeProMaxCampaignInput => ({
     minResolvedDelta: 3,
     maxCostUsdDelta: 40,
   },
-  retryPolicy: { maxChunkAttempts: 2, exhaustedDisposition: "missing" },
+  retryPolicy: { maxChunkAttempts: 2, exhaustedDisposition: "missing", maxUngradedAssigned: 0 },
   exceptionPolicy: {
     manifestVersion: 1,
     requiresOwner: true,
@@ -252,6 +252,30 @@ const runCli = (argv: readonly string[]): CliRun => {
 }
 
 /** Gate 6, from bytes, with gates 1-5 already recorded as passing. */
+/** A campaign record identical to {@link RECORD} except that it DECLARES how many
+ *  assigned rows it will accept finishing without a grade. The tolerance has no
+ *  default anywhere in production — the campaign must state it — so a test that
+ *  wants an attributed loss admitted has to state it too.
+ *
+ *  RE-FROZEN, never hand-edited: the record is content-addressed and the evidence
+ *  cites its digest, so patching the JSON would be refused as a tampered record
+ *  (which is itself the behaviour `promax-campaign-fail-closed` pins). */
+const budgetedRecord = (maxUngradedAssigned: number): ProMaxFrozenCampaignRecord => {
+  const base = input()
+  const r = freezeProMaxCampaignRecord({
+    ...base,
+    retryPolicy: { ...base.retryPolicy, maxUngradedAssigned },
+  })
+  if (!r.ok) throw new Error(`fixture gap: ${r.failures.map((f) => f.code).join(", ")}`)
+  return r.record
+}
+
+const budgetedRecordPath = (record: ProMaxFrozenCampaignRecord): string =>
+  write(
+    `campaign-record-ungraded-${record.retry_policy.maxUngradedAssigned}.json`,
+    serializeProMaxCampaignRecord(record),
+  )
+
 const gate6 = (name: string, evidence: Json, recordPath = RECORD_PATH): CliRun =>
   runCli([
     "gate",
@@ -346,22 +370,55 @@ describe("G-A — gate 6 refuses a Full-170 whose coverage collapsed", () => {
       })),
       PMX170,
     )
-    const run = gate6(
-      "exhausted-chunk",
-      modelEvidenceDoc(PMX170, receipt, {
-        chunks: [
-          ...chunksOf(delivered, 20),
-          {
-            chunkId: "lost",
-            assignedInstanceIds: PMX170.slice(150),
-            attempts: 2,
-            delivered: false,
-          },
-        ],
-      }),
-    )
-    expect({ code: run.code, log: run.log }).toEqual({ code: 0, log: run.log })
+    const evidence = modelEvidenceDoc(PMX170, receipt, {
+      chunks: [
+        ...chunksOf(delivered, 20),
+        {
+          chunkId: "lost",
+          assignedInstanceIds: PMX170.slice(150),
+          attempts: 2,
+          delivered: false,
+        },
+      ],
+    })
+    const run = gate6("exhausted-chunk", evidence)
+    // aug-22 F1: ATTRIBUTION IS NOT A CEILING. Under the campaign's default
+    // `maxUngradedAssigned: 0` this loss is refused even though every missing row
+    // is attributed to an exhausted chunk — the audit found gate 6 PASSING a
+    // Full-170 that graded 1 of 170 for exactly this reason.
+    expect(run.code).not.toBe(0)
+    expect(run.log).toContain("attempt_incomplete")
+    // ...and the loss is still REPORTED, never silently dropped from assigned.
     expect(run.log).toMatch(/missing=20/)
+
+    // PAIRED CONTROL: a campaign that EXPLICITLY budgets the loss admits it, and
+    // the rows stay `missing` rather than becoming model misses. That is the
+    // original contract this test was written for; the ceiling is what is new.
+    const okRecord = budgetedRecord(20)
+    const admitted = gate6(
+      "exhausted-chunk-budgeted",
+      modelEvidenceDoc(PMX170, receipt, {
+        frozenRecordSha256: okRecord.sha256,
+        chunks: (evidence as Record<string, unknown>).chunks,
+      }),
+      budgetedRecordPath(okRecord),
+    )
+    expect(admitted.code).toBe(0)
+    expect(admitted.log).toMatch(/missing=20/)
+
+    // ...and one row beyond the declared budget flips it back to a refusal, so
+    // the ceiling is the live variable and not a constant that happens to pass.
+    const tightRecord = budgetedRecord(19)
+    const tooTight = gate6(
+      "exhausted-chunk-over-budget",
+      modelEvidenceDoc(PMX170, receipt, {
+        frozenRecordSha256: tightRecord.sha256,
+        chunks: (evidence as Record<string, unknown>).chunks,
+      }),
+      budgetedRecordPath(tightRecord),
+    )
+    expect(tooTight.code).not.toBe(0)
+    expect(tooTight.log).toContain("attempt_incomplete")
   })
 })
 

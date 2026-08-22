@@ -85,6 +85,12 @@ appshot-reach-*/
 # as an undocumented new feature file.
 .scratch/
 
+# Whole-repo scratch COPIES taken to measure something in a quiet tree. One was
+# committed on aug-22 (`0cd1e5b84`): 8 238 files / 85 MB / 1.55 M lines of a stale
+# twin of every source file, which every clone would pay for and which pollutes
+# every index-wide tool. Enforced by tests/unit/_arch/repo-index-hygiene.test.ts.
+.pristine-audit/
+
 # Hand-made `git worktree` checkouts of THIS repository. Committing one is not a
 # harmless stray file: git records it as a mode-160000 GITLINK, so every movement
 # of that worktree's HEAD shows up as a repo diff, and a fresh clone materialises

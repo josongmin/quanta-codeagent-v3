@@ -130,7 +130,7 @@ const recordInput = (): FreezeProMaxCampaignInput => ({
     minResolvedDelta: 3,
     maxCostUsdDelta: 40,
   },
-  retryPolicy: { maxChunkAttempts: 2, exhaustedDisposition: "missing" },
+  retryPolicy: { maxChunkAttempts: 2, exhaustedDisposition: "missing", maxUngradedAssigned: 0 },
   exceptionPolicy: {
     manifestVersion: 1,
     requiresOwner: true,

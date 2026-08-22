@@ -76,6 +76,17 @@ const promaxBootstrap = (): FamilyRemoteBootstrap => {
 // deliberately tiny and only understands the verbs the real plan issues.
 // ---------------------------------------------------------------------------
 
+/** 🔴 Nothing here may ever provision, pull or upload. A fake spawn cannot spend
+ *  by itself, but a regression that reached a real verb must FAIL the test
+ *  rather than be quietly absorbed by a stub that answers everything with 0. */
+const assertNoSpend = (rendered: string): void => {
+  for (const forbidden of ["run-instances", "docker pull", "--upload"]) {
+    if (rendered.includes(forbidden)) {
+      throw new Error(`SPEND GUARD: a bootstrap step reached "${forbidden}"`)
+    }
+  }
+}
+
 /** Strip the transport's single-quoting back to the argv the family declared. */
 const unquote = (rendered: string): string[] =>
   (rendered.match(/'[^']*'|\S+/g) ?? []).map((token) =>
@@ -97,38 +108,37 @@ class FakeBox {
   }
 
   run(rendered: string): SpawnResult {
-    for (const forbidden of ["run-instances", "docker pull", "--upload"]) {
-      if (rendered.includes(forbidden)) {
-        throw new Error(`SPEND GUARD: a bootstrap step reached "${forbidden}"`)
-      }
-    }
+    assertNoSpend(rendered)
     this.commands.push(rendered)
     const argv = unquote(rendered)
-    const [head, ...rest] = argv
-    if (head === "test" && rest[0] === "!" && rest[1] === "-e") {
-      // `test ! -e X` — exit 1 when X EXISTS. This is the whole absence gate.
-      return { code: this.exists(rest[2] ?? "") ? 1 : 0, stdout: "", stderr: "" }
+    const verb = argv.slice(0, 2).join(" ")
+    // `test ! -e X` — exit 1 when X EXISTS. This is the whole absence gate.
+    if (verb === "test !")
+      return { code: this.exists(argv[3] ?? "") ? 1 : 0, stdout: "", stderr: "" }
+    if (verb === "mkdir -p") return this.mkdir(argv[2] ?? "")
+    if (verb === "rm -rf") return this.rm(argv[2] ?? "")
+    // `git init -q <root>` — the moment the gold-bearing tree appears.
+    if (verb === "git init") return this.gitInit(argv[3] ?? "")
+    if (argv[0] === "sha256sum") return ok(digestFor(argv[1] ?? ""))
+    return ok()
+  }
+
+  private mkdir(path: string): SpawnResult {
+    this.entries.add(path)
+    return ok()
+  }
+
+  private rm(target: string): SpawnResult {
+    if (this.breakRemoval) return { code: 1, stdout: "", stderr: "rm: Device or resource busy" }
+    for (const entry of [...this.entries]) {
+      if (entry === target || entry.startsWith(`${target}/`)) this.entries.delete(entry)
     }
-    if (head === "mkdir" && rest[0] === "-p") {
-      this.entries.add(rest[1] ?? "")
-      return ok()
-    }
-    if (head === "rm" && rest[0] === "-rf") {
-      if (this.breakRemoval) return { code: 1, stdout: "", stderr: "rm: Device or resource busy" }
-      const target = rest[1] ?? ""
-      for (const entry of [...this.entries]) {
-        if (entry === target || entry.startsWith(`${target}/`)) this.entries.delete(entry)
-      }
-      return ok()
-    }
-    if (head === "git" && rest[0] === "init") {
-      // `git init -q <root>` — the moment the gold-bearing tree appears.
-      const root = rest[2] ?? ""
-      this.entries.add(root)
-      for (const rel of Object.values(PROMAX_V1_UPSTREAM_PATHS)) this.entries.add(`${root}/${rel}`)
-      return ok()
-    }
-    if (head === "sha256sum") return ok(digestFor(rest[0] ?? ""))
+    return ok()
+  }
+
+  private gitInit(root: string): SpawnResult {
+    this.entries.add(root)
+    for (const rel of Object.values(PROMAX_V1_UPSTREAM_PATHS)) this.entries.add(`${root}/${rel}`)
     return ok()
   }
 }
@@ -255,7 +265,7 @@ describe("A-A — the answer key does not survive a chunk boundary", () => {
     // …and the teardown really removed it.
     expect(box.exists(GOLD_ROOT)).toBe(false)
     expect(box.exists(`${GOLD_ROOT}/${PROMAX_V1_UPSTREAM_PATHS.dataset}`)).toBe(false)
-    const removed = box.commands.findIndex((c) => c === `'rm' '-rf' '${GOLD_ROOT}'`)
+    const removed = box.commands.indexOf(`'rm' '-rf' '${GOLD_ROOT}'`)
     expect(removed).toBeGreaterThan(created)
 
     // ---- CHUNK 2, same box ------------------------------------------------

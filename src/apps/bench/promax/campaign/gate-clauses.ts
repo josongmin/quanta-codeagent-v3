@@ -198,6 +198,8 @@ export const auditFullRunCoverage = (
     readonly expected: readonly string[]
     readonly receipt: OfficialGradeReceipt
     readonly chunks: readonly ProMaxChunkEvidence[]
+    /** The campaign's OWN declared tolerance — never a default invented here. */
+    readonly maxUngradedAssigned: number
   },
   add: ProMaxGateSink,
 ): ProMaxFullRunCoverage => {
@@ -215,6 +217,25 @@ export const auditFullRunCoverage = (
         `by the evaluator and NO lost chunk accounts for them ` +
         `(${unaccounted.slice(0, 3).join(", ")}) — the valid rate would then be published off a ` +
         "denominator that shrank silently; assigned never shrinks",
+    )
+  }
+  // aug-22 audit (F1): ATTRIBUTION IS NOT A CEILING. Refusing only the
+  // unaccounted rows left an attributed loss unbounded, so a Full-170 whose
+  // evaluator reported on 1 of 170 instances PASSED — every missing row sat in a
+  // chunk that had exhausted `maxChunkAttempts`, which made the loss explainable
+  // but not acceptable. The gate that authorises the packet's most expensive run
+  // has to say something about it.
+  //
+  // The bound is the campaign's OWN declared `maxUngradedAssigned`, never a
+  // threshold invented here: a default would be a hidden decision about when a
+  // run may publish off a shrunken denominator, and the record refuses to parse
+  // without the field.
+  if (missing.length > args.maxUngradedAssigned) {
+    add(
+      "attempt_incomplete",
+      `${missing.length} of ${args.expected.length} assigned instance(s) finished without a grade, ` +
+        `but the frozen retry policy declares maxUngradedAssigned=${args.maxUngradedAssigned} — ` +
+        `${unaccounted.length === 0 ? "the loss is fully attributed to exhausted chunks, which explains it without making it acceptable" : "and part of it is not even attributed"}`,
     )
   }
   let gradingValid = 0

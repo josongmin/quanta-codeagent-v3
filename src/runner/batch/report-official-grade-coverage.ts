@@ -30,10 +30,7 @@
  * agent ever ran, and naming them is the honest direction — it can only enlarge
  * the denominator). It may never name FEWER.
  */
-import type {
-  OfficialGradeInstanceReceipt,
-  OfficialGradeSection,
-} from "./report-official-grade"
+import type { OfficialGradeInstanceReceipt, OfficialGradeSection } from "./report-official-grade"
 import { OfficialGradePartitionError } from "./report-official-grade"
 
 /** The section's roster: every instance it accounts for, graded or missing. */

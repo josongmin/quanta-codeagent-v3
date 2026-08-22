@@ -1,0 +1,4 @@
+{
+  "note": "One-directional budget for the SLOWEST single unit test (ms). Replaces the old whole-suite 8000ms wall-clock assert in ci.yml, which no machine could satisfy once the suite passed ~36k tests. Raise NEVER \u2014 move the slow case to tests/integration or fake its slow dependency; tighten with `--tighten`. Pinned from a full local run: the current worst cases are REAL-toolchain e2e (real git / lldb-dap / cargo / go / ollama) that live in tests/unit and shell out to compilers, so this ceiling is loose by construction \u2014 on a runner lacking those toolchains they skip and the real slowest is far lower.",
+  "slowestMs": 17688
+}

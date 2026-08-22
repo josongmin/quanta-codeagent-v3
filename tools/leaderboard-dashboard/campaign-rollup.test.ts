@@ -260,3 +260,30 @@ describe("C1 — the rollup is wired to the surfaces that publish a rate", () =>
     expect(page).toContain("best.coverage")
   })
 })
+
+describe("F5 — a REJECTED official partition is distinguishable from no grading at all", () => {
+  test("rejected: the row keeps the fallback rate AND says the official denominator was refused", () => {
+    const broken = totalsOf({ assigned: 4, resolved: 1 })
+    const camps = groupRuns([
+      withOfficial("bad", { ...broken, assigned: 9 } as OfficialGradeTotals, [row("repo__a", true)]),
+    ])
+    const camp = camps[0]
+    if (camp === undefined) throw new Error("expected a campaign")
+    // The refusal itself is unchanged — an illegal partition publishes NO
+    // official numbers rather than a plausible-looking one.
+    expect(camp.official).toBeUndefined()
+    expect(camp.coverage).toBeUndefined()
+    // ...but the row now SAYS so, because the fallback rate still renders and a
+    // bare percentage with nothing beside it is the exact shape this surface
+    // exists to prevent.
+    expect(camp.officialRejected).toBe(true)
+  })
+
+  test("PAIRED CONTROL: a campaign that simply never graded is NOT marked rejected", () => {
+    const camps = groupRuns([withOfficial("none", undefined, [row("repo__a", true)])])
+    const camp = camps[0]
+    if (camp === undefined) throw new Error("expected a campaign")
+    expect(camp.official).toBeUndefined()
+    expect(camp.officialRejected).toBeUndefined()
+  })
+})

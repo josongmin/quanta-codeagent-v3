@@ -1,5 +1,0 @@
-{"run":0,"turn":0,"event":{"type":"tool_use_start","id":"gr1","name":"grep"}}
-{"run":0,"turn":0,"event":{"type":"tool_use_end","id":"gr1","input":{"pattern":"function calculate"}}}
-{"run":0,"turn":0,"event":{"type":"message_stop","stop_reason":"tool_use"}}
-{"run":0,"turn":1,"event":{"type":"text_delta","delta":"calculate 함수는 util.ts 에 정의되어 있습니다."}}
-{"run":0,"turn":1,"event":{"type":"message_stop","stop_reason":"end_turn"}}

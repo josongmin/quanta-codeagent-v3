@@ -1,5 +1,0 @@
-{"run":0,"turn":0,"event":{"type":"tool_use_start","id":"g1","name":"glob"}}
-{"run":0,"turn":0,"event":{"type":"tool_use_end","id":"g1","input":{"pattern":"*.ts"}}}
-{"run":0,"turn":0,"event":{"type":"message_stop","stop_reason":"tool_use"}}
-{"run":0,"turn":1,"event":{"type":"text_delta","delta":"alpha.ts, beta.ts 두 개의 .ts 파일이 있습니다."}}
-{"run":0,"turn":1,"event":{"type":"message_stop","stop_reason":"end_turn"}}

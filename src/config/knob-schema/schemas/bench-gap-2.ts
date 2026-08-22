@@ -124,7 +124,9 @@ export const fullRemoteReadyPollsSchema: KnobSchema<number> = {
   default: 90,
   describe:
     "Full-remote: cloud-init readiness window, in 10s polls (default 90 ≈ 15min). jun-25 BOX-LOSS RCA: a too-short window counted a slow-but-healthy box as LOST. A READY box returns on the first poll, so raising this only tolerates a slow bootstrap (degraded network / stock-AMI image re-pull). The test-seam cfg.maxReadyPolls still wins; unset/garbage ⇒ default.",
-  readSite: "apps/bench/remote/box-session/ec2-lifecycle.ts",
+  // aug-22: the readiness poll loop was extracted out of `ec2-lifecycle.ts` into
+  // its own module; the key is now read at `box-readiness.ts:57`.
+  readSite: "apps/bench/remote/box-session/box-readiness.ts",
   surfaces: BENCH,
   parse: parsePositiveInt,
 }

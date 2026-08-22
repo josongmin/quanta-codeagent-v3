@@ -29,11 +29,8 @@
 import { errMessage, logger, quantaHomePath, runtimeConfig } from "@/shared"
 import type { BenchReport } from "./report"
 import { CanonicalReportIdentityError, isRecord, refuse } from "./report-decode"
+import { decodeOfficialGradeSection, type OfficialGradeSection } from "./report-official-grade"
 import { assertOfficialGradeSectionCoversReportBody } from "./report-official-grade-coverage"
-import {
-  decodeOfficialGradeSection,
-  type OfficialGradeSection,
-} from "./report-official-grade"
 import { decodeTerminalBenchReport, type TerminalBenchReport } from "./report-terminal"
 
 /** Canonical SWE dataset-family union (RFC jun-29 R4). ProMax (PMX-05) is a

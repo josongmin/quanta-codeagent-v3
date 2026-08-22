@@ -498,7 +498,7 @@ function renderRuns() {
     h += '<tr><td class="inst" title="'+esc(r.members.join(", "))+'">'+famChip(r.datasetFamily)+esc(r.key)+'</td><td class="muted">'+esc(r.model)+'</td><td class="muted">'+esc(r.preset)+'</td>'+
       '<td class="muted">'+r.members.length+'</td>'+
       '<td>'+r.resolved+'/'+r.total+'</td>'+
-      '<td><span class="bar"><i style="width:'+pct+'%"></i></span> '+pct+'%'+(r.coverage? ' <span class="muted" style="font-size:10px" title="공식 채점 커버리지 = grading_valid/assigned. 분모가 줄어든 만큼 여기 보인다">cov '+esc(r.coverage)+'</span>':'')+'</td>'+
+      '<td><span class="bar"><i style="width:'+pct+'%"></i></span> '+pct+'%'+(r.coverage? ' <span class="muted" style="font-size:10px" title="공식 채점 커버리지 = grading_valid/assigned. 분모가 줄어든 만큼 여기 보인다">cov '+esc(r.coverage)+'</span>': (r.officialRejected? ' <span class="muted" style="font-size:10px;color:#f85149" title="이 캠페인의 공식 채점 합계가 covering partition이 아니라 거부됐다. 아래 비율은 공식 분모가 아니라 행 집계 폴백이다">공식분모 거부됨</span>':''))+'</td>'+
       extCell+
       '<td class="muted" title="재런 가능한 측정 구멍 — 해결률 분모서 제외됨">'+(unmeasured? '⟳ '+unmeasured : '·')+'</td>'+
       '<td class="muted">'+ (r.mtime? new Date(r.mtime).toLocaleString() : '—') +'</td></tr>';
