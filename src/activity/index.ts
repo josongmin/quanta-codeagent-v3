@@ -30,9 +30,14 @@ export {
 export {
   type WorktreeOpenOpts,
   type WorktreeSettledKind,
+  type WorktreeStep,
+  type WorktreeStepOutcome,
   worktreeOpenActivity,
   worktreeOpNodeId,
   worktreeSettleActivity,
+  worktreeStepId,
+  worktreeStepOpen,
+  worktreeStepSettle,
 } from "./producers/worktree"
 export {
   type ActivityTreeNode,

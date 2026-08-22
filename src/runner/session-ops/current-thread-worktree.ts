@@ -29,7 +29,15 @@
  */
 
 import { realpath } from "node:fs/promises"
-import { type ActivityStore, worktreeOpenActivity, worktreeSettleActivity } from "@/activity"
+import {
+  type ActivityStore,
+  type WorktreeStep,
+  type WorktreeStepOutcome,
+  worktreeOpenActivity,
+  worktreeSettleActivity,
+  worktreeStepOpen,
+  worktreeStepSettle,
+} from "@/activity"
 import {
   createPersistentWorktree,
   findByExactPath,
@@ -73,6 +81,42 @@ export interface TransitionActivity {
   readonly store: ActivityStore
   readonly turnId?: string
   readonly runId?: string
+  /**
+   * RFC-04 D1 — refine the coarse op node into a parent container with staged
+   * child step nodes (`workspace`/`checkout`). EXPLICIT opt-in, default OFF:
+   * absent/false ⇒ the op node stays a single coarse leaf, BYTE-IDENTICAL to its
+   * pre-D1 behavior (every existing caller/test emits no children). This is NOT
+   * "sink presence as gate" — a sink can be wired with `staged` off. The live
+   * env-gated turn-on (`QUANTA_WORKTREE_PROGRESS`) is wired by the D4 CLI/session
+   * ownership packet (which owns the shared CLI composition lock); `setup` staging
+   * is D3 (PARKED behind a trusted config owner) — D1 stages workspace/checkout only.
+   */
+  readonly staged?: boolean
+}
+
+/** RFC-04 D1 — emit a staged step OPEN (self-gated: no-op unless `staged` is
+ *  explicitly true, so the default path is byte-identical). */
+const emitStepOpen = (
+  activity: TransitionActivity | undefined,
+  operationId: string,
+  step: WorktreeStep,
+  at: number,
+): void => {
+  if (activity?.staged !== true) return
+  activity.store.emit(worktreeStepOpen(operationId, step, at))
+}
+
+/** RFC-04 D1 — settle a staged step (self-gated no-op unless `staged` is true).
+ *  `skipped ≠ failed`: the spine derives the container's honest status from these. */
+const emitStepSettle = (
+  activity: TransitionActivity | undefined,
+  operationId: string,
+  step: WorktreeStep,
+  outcome: WorktreeStepOutcome,
+  at: number,
+): void => {
+  if (activity?.staged !== true) return
+  activity.store.emit(worktreeStepSettle(operationId, step, outcome, at))
 }
 
 /** RFC02-5 — emit the correlated `running` OPEN (self-gated: a `undefined`
@@ -258,6 +302,14 @@ export const transitionThreadToWorktree = async (
   // it starts — never success-before-effect (the terminal comes only after the
   // effect settles below). Gate-OFF (no `activity`) ⇒ nothing is emitted.
   emitActivityOpen(activity, req, intent.branch, now)
+  // RFC-04 D1 — staged children (gated on `activity.staged`; byte-identical no-op
+  // otherwise). The `workspace` stage is the intent-persist + target-resolve that
+  // just completed (open→done); the `checkout` stage brackets the git effect
+  // (open now, settled done/failed once `createPersistentWorktree` returns). No
+  // checkout % yet — that is D2; here checkout is a plain running→terminal stage.
+  emitStepOpen(activity, req.ownershipId, "workspace", now)
+  emitStepSettle(activity, req.ownershipId, "workspace", "done", now)
+  emitStepOpen(activity, req.ownershipId, "checkout", now)
 
   // (2) The git effect — the KEPT create owner.
   let created: { worktreePath: string; branch: string }
@@ -278,12 +330,19 @@ export const transitionThreadToWorktree = async (
     await removeWorktree(target.worktreePath, req.repoRoot, { branch: intent.branch }).catch(
       () => undefined,
     )
+    // RFC-04 D1 — the `checkout` stage failed (before the parent terminal); the
+    // spine derives the container `failed` from this child.
+    emitStepSettle(activity, req.ownershipId, "checkout", "failed", failAt)
     // RFC02-5 — the effect FAILED; emit the single terminal `failed` transition
     // (after the effect settled, never before).
     emitActivitySettle(activity, req.ownershipId, "failed", failAt)
     const detail = e instanceof WorktreeForkError ? (e.detail ?? e.message) : errMessage(e)
     return { kind: "failed", errorCode: ERR_GIT, detail }
   }
+
+  // RFC-04 D1 — the git effect landed ⇒ the `checkout` stage is done (before the
+  // parent terminal, so the container derives `done` from all-done children).
+  emitStepSettle(activity, req.ownershipId, "checkout", "done", clock())
 
   // (3) Publish: refresh the record with the EXACT created path/branch, then
   // transition creating → ready and set the session cwd — one atomic write.

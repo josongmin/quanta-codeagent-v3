@@ -112,3 +112,81 @@ export const worktreeSettleActivity = (
   status: SETTLED_STATUS[kind],
   at: endedAt,
 })
+
+/* ─────────────────────────── RFC-04 D1 — staged steps ─────────────────────────
+ *
+ * D1 refines the single coarse op node into a PARENT CONTAINER with staged child
+ * step nodes, MIRRORING the `createWorkflowSink` container+child pattern
+ * (`store.ts:113`) — a container whose status the spine DERIVES from its children
+ * (`deriveContainerStatus`) — but deliberately NOT copying its `kind:"agent"`
+ * accounting error. The steps are `kind:"phase"` (structural stages, never
+ * agent-kind) so they NEVER fabricate agent/running/stuck counts; the container
+ * derives `failed` iff a child failed, and — load-bearing — a `skipped` child is
+ * NON-fatal (`skipped ≠ failed`), which is what lets a future "Environment setup
+ * skipped" coexist with a successfully created worktree.
+ *
+ * The step nodes carry NO {@link OperationCorrelation}: only the parent op node
+ * does, so a surface that filters operation rows by `correlation !== undefined`
+ * still resolves EXACTLY ONE op node per operation (the existing e2e fence).
+ */
+
+/** The closed set of worktree-init stages. A `Record<WorktreeStep, …>` label
+ *  table (below) is the drift-guard: adding a stage here fails to COMPILE until
+ *  it is labelled (the `exhaustive-record-classification` pattern). `setup` is
+ *  in the union so the label/producer contract is complete, but D1 does NOT wire
+ *  a `setup` child into the transaction — that is D3 (PARKED behind a trusted
+ *  config owner). D1 only emits `workspace`/`checkout`. */
+export type WorktreeStep = "workspace" | "checkout" | "setup"
+
+/** Human labels for each stage (mirrors the Codex staged-progress card copy).
+ *  Exhaustive `Record<WorktreeStep, string>` ⇒ a new stage cannot ship unlabelled. */
+const WORKTREE_STEP_LABEL: Readonly<Record<WorktreeStep, string>> = {
+  workspace: "Preparing workspace",
+  checkout: "Checking out files",
+  setup: "Setting up environment",
+}
+
+/** Terminal outcomes a stage step can settle to. `skipped` is a DELIBERATE,
+ *  non-fatal skip (proceed-anyway), distinct from `failed` — the derivation
+ *  distinction is load-bearing (see the module note above). */
+export type WorktreeStepOutcome = "done" | "failed" | "skipped"
+
+/** Stable id for a stage child, namespaced UNDER the parent op node id. The
+ *  parent id already url-encodes the operationId, and `step` is a fixed closed
+ *  union literal (no `/`), so a step id can never break the hierarchy or alias a
+ *  sibling operation's step (mirrors the `worktreeOpNodeId` discipline). */
+export const worktreeStepId = (operationId: string, step: WorktreeStep): string =>
+  `${worktreeOpNodeId(operationId)}/${step}`
+
+/** Open a stage child as a `running` leaf under the parent op container. `kind`
+ *  is `phase` (structural — NEVER `agent`) so the agent aggregate is invariant.
+ *  Carries no correlation (the parent op node owns it). */
+export const worktreeStepOpen = (
+  operationId: string,
+  step: WorktreeStep,
+  at?: number,
+): AgentActivityEvent => ({
+  type: "node_open",
+  node: {
+    id: worktreeStepId(operationId, step),
+    parentId: worktreeOpNodeId(operationId),
+    kind: "phase",
+    label: WORKTREE_STEP_LABEL[step],
+    status: "running",
+    ...(at !== undefined ? { at } : {}),
+  },
+})
+
+/** Settle a stage child to its terminal outcome. The spine derives the parent
+ *  container's honest status from these child outcomes at `materialize`. */
+export const worktreeStepSettle = (
+  operationId: string,
+  step: WorktreeStep,
+  outcome: WorktreeStepOutcome,
+  at?: number,
+): AgentActivityEvent => ({
+  type: "node_status",
+  id: worktreeStepId(operationId, step),
+  status: outcome,
+  ...(at !== undefined ? { at } : {}),
+})
