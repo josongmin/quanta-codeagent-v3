@@ -1,5 +1,6 @@
 import { realpath } from "node:fs/promises"
 import { runShell } from "./shell"
+import type { RunShellEvent } from "./types"
 import { isGitRepo, runWorktreeAddWithRetry } from "./worktree"
 import { findByExactPath, inspectWorktrees, type WorktreeInspection } from "./worktree-inspect"
 
@@ -22,13 +23,25 @@ export class WorktreeForkError extends Error {
   }
 }
 
-const git = async (repoRoot: string, args: string) => {
+const git = async (
+  repoRoot: string,
+  args: string,
+  // RFC-04 D2 — OPTIONAL typed output observer, kept CONSISTENT with the
+  // duplicate `git()` runner in `./worktree.ts` so progress threading never
+  // forks behavior between the two. When supplied, git's own stderr streams
+  // through `runShell.onShellEvent`; absent ⇒ byte-identical legacy path.
+  onShellEvent?: (event: RunShellEvent) => void,
+) => {
   // `args` is fully controlled by this module — every interpolated token is
   // first run through `safeId` / `safeBranch` / `safeRef` so a model/user-
   // provided string cannot inject shell metacharacters. Route through the
   // shared shell runner for env scrubbing + timeout parity with the rest of
-  // runtime/.
-  return runShell(`git ${args}`, { cwd: repoRoot })
+  // runtime/. When no observer is supplied the options bag is exactly `{ cwd }`
+  // — byte-identical to the pre-D2 legacy call.
+  return runShell(
+    `git ${args}`,
+    onShellEvent === undefined ? { cwd: repoRoot } : { cwd: repoRoot, onShellEvent },
+  )
 }
 
 /** Slugify an id into a filesystem-safe directory component. `/`, ` `, `;`
@@ -112,7 +125,19 @@ export const worktreeTargetIdentity = (
 export const createPersistentWorktree = async (
   id: string,
   repoRoot: string,
-  opts?: { branch?: string; baseRef?: string },
+  // RFC-04 D2 — `onShellEvent` is an OPTIONAL observer forwarded to the
+  // `git worktree add` step. A caller can build it with
+  // `checkoutProgressObserver` (`@/runtime/worktree-progress`) to surface git's
+  // OWN checkout ratio as it streams. Absent ⇒ byte-identical legacy path: the
+  // add command and its result are unchanged. NOTE: `git worktree add` has no
+  // `--progress` flag, so on a piped stderr it emits only `Preparing worktree`;
+  // real `Updating files: N% (x/y)` requires a git that streams it (or the
+  // consumer restructuring into `add --no-checkout` + `checkout --progress`).
+  opts?: {
+    branch?: string
+    baseRef?: string
+    onShellEvent?: (event: RunShellEvent) => void
+  },
 ): Promise<PersistentWorktree> => {
   if (!(await isGitRepo(repoRoot))) {
     throw new WorktreeForkError(`Not a git repository (or git unavailable): ${repoRoot}`)
@@ -138,6 +163,7 @@ export const createPersistentWorktree = async (
     repoRoot,
     `worktree add --no-track -B "${branch}" -- "${worktreePath}" "${baseRef}"`,
     worktreePath,
+    opts?.onShellEvent,
   )
   if (add.exitCode !== 0) {
     throw new WorktreeForkError(

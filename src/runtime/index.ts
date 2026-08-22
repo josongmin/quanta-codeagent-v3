@@ -82,8 +82,8 @@ export {
   forceRemoveWorktree,
   removalReachedAbsence,
   removeWorktree,
-  worktreeTargetIdentity,
   WorktreeForkError,
+  worktreeTargetIdentity,
 } from "./worktree-fork"
 // RFC-06 §RFC06-1 — typed porcelain worktree inspector (read adapter only; no
 // ownership/state/remove authority).
@@ -97,3 +97,12 @@ export {
   inspectWorktrees,
   parseWorktreePorcelain,
 } from "./worktree-inspect"
+// RFC-04 D2 — git-owned checkout-progress parser (pure; no fabricated %).
+export {
+  type CheckoutProgress,
+  type CheckoutProgressReader,
+  checkoutProgressObserver,
+  createCheckoutProgressReader,
+  INDETERMINATE,
+  parseCheckoutProgressLine,
+} from "./worktree-progress"
