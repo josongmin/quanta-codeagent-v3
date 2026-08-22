@@ -16,7 +16,11 @@
 import { describe, expect, test } from "bun:test"
 import type { GitDiffOperation } from "@/git"
 import { gitReviewDiffTool } from "@/tool/git/review-diff"
-import { gitRunnerReadPort, operationToArgs } from "@/tool/git/review-source-adapter"
+import {
+  gitRunnerReadPort,
+  operationToArgs,
+  workingTreeArgs,
+} from "@/tool/git/review-source-adapter"
 import type { GitRunner, GitRunResult } from "@/tool/git/types"
 import type { ToolContext, ToolEvent, ToolResult } from "@/tool/types"
 
@@ -80,6 +84,17 @@ describe("operationToArgs — resolved operation ⇒ git diff argv", () => {
   test("tree-range ⇒ two-dot from..to", () => {
     const op: GitDiffOperation = { kind: "tree-range", from: "a", to: "b" }
     expect(operationToArgs(op)).toEqual(["diff", "a..b"])
+  })
+})
+
+// --- workingTreeArgs (RFC-02 B4 front-door argv) -----------------------------
+
+describe("workingTreeArgs — working-tree ⇒ git diff <against>", () => {
+  test("default HEAD ⇒ diff HEAD (uncommitted vs HEAD)", () => {
+    expect(workingTreeArgs("HEAD")).toEqual(["diff", "HEAD"])
+  })
+  test("explicit against ⇒ diff <against>", () => {
+    expect(workingTreeArgs("origin/main")).toEqual(["diff", "origin/main"])
   })
 })
 
@@ -182,5 +197,57 @@ describe("git_review_diff — source field", () => {
     expect(r.ok).toBe(false)
     // Only the rev-parse peel ran; the diff was NEVER attempted (fail-closed).
     expect(runner.calls.every((c) => c.args[0] === "rev-parse")).toBe(true)
+  })
+})
+
+// --- RFC-02 B4 front-door arms (working-tree / last-turn) --------------------
+
+describe("git_review_diff — B4 working-tree source", () => {
+  test("working-tree default ⇒ git diff HEAD (no rev-parse peel), reviewer invoked", async () => {
+    const runner = new FakeRunner(() => ok(diffText))
+    const rv = reviewerStub()
+    await collect({ source: { kind: "working-tree" } }, runner, ctx(rv))
+    // Symbolic like branch-base: NO peel; exactly the working-tree diff argv.
+    expect(runner.calls.every((c) => c.args[0] !== "rev-parse")).toBe(true)
+    expect(runner.calls.at(-1)?.args).toEqual(["diff", "HEAD"])
+    expect(rv.calls.length).toBe(1)
+  })
+
+  test("working-tree against an explicit rev ⇒ git diff <against>", async () => {
+    const runner = new FakeRunner(() => ok(diffText))
+    await collect(
+      { source: { kind: "working-tree", against: "origin/main" } },
+      runner,
+      ctx(reviewerStub()),
+    )
+    expect(runner.calls.at(-1)?.args).toEqual(["diff", "origin/main"])
+  })
+
+  test("working-tree leading-dash against ⇒ typed deny, NO git call, NO reviewer", async () => {
+    const runner = new FakeRunner(() => ok(diffText))
+    const rv = reviewerStub()
+    const r = await collect(
+      { source: { kind: "working-tree", against: "--output=/tmp/x" } },
+      runner,
+      ctx(rv),
+    )
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain("must not begin with '-'")
+    expect(runner.calls.length).toBe(0)
+    expect(rv.calls.length).toBe(0)
+  })
+})
+
+describe("git_review_diff — B4 last-turn parked arm", () => {
+  test("last-turn ⇒ STABLE prerequisite deny, NO git call, NO reviewer", async () => {
+    const runner = new FakeRunner(() => ok(diffText))
+    const rv = reviewerStub()
+    const r = await collect({ source: { kind: "last-turn", turnId: "t1" } }, runner, ctx(rv))
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain("last-turn")
+    expect(r.output.toLowerCase()).toContain("boundary")
+    // Stable + terminal: never runs a diff, never silently falls back.
+    expect(runner.calls.length).toBe(0)
+    expect(rv.calls.length).toBe(0)
   })
 })

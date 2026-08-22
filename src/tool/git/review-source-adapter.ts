@@ -35,6 +35,15 @@ const assertNever = (x: never): never => {
   throw new Error(`unhandled GitDiffOperation: ${JSON.stringify(x)}`)
 }
 
+/** RFC-02 B4 — argv for the `working-tree` front-door source: `git diff <against>`
+ *  (default `HEAD`) i.e. UNCOMMITTED changes vs `against`. Kept here beside
+ *  {@link operationToArgs} so ALL `git diff` argv construction lives in this one
+ *  adapter. `against` stays SYMBOLIC (no port peel — the same posture as
+ *  `branch-base`): an unresolvable `against` fails closed at `git diff` exit, and
+ *  a leading-`-` `against` is rejected upstream so it can never be read as an
+ *  option. */
+export const workingTreeArgs = (against: string): string[] => ["diff", against]
+
 /** Bind a {@link GitRunner} as the resolver's {@link GitReadPort}. `resolveCommit`
  *  peels via `git rev-parse --verify --quiet <rev>^{commit}`: exit 0 ⇒ the single
  *  trimmed oid; any non-zero exit (missing / ambiguous / non-commit / spawn

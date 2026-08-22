@@ -16,13 +16,18 @@
  *  the tool yields a deterministic `ok:false` (no throw, no crash). */
 
 import { z } from "zod"
-import type { DiffSourceUnavailableReason, GitDiffOperation } from "@/git"
+import type { DiffSource, DiffSourceUnavailableReason, GitDiffOperation } from "@/git"
 import { applyGeneratedFilter, diffSourceSchema, resolveDiffSource } from "@/git"
 import { errMessage } from "@/shared"
 import type { ReviewerRequest, ReviewerResult, Tool, ToolContext, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { emitReviewCanvasDiffs } from "./review-diff-canvas"
-import { gitRunnerAttributePort, gitRunnerReadPort, operationToArgs } from "./review-source-adapter"
+import {
+  gitRunnerAttributePort,
+  gitRunnerReadPort,
+  operationToArgs,
+  workingTreeArgs,
+} from "./review-source-adapter"
 import type { GitRunner } from "./types"
 
 /** Cap on the diff text we inject into the reviewer seed. A 600KB diff blows
@@ -47,6 +52,56 @@ const REVIEW_NOTICE = [
  *  referenced in the diff. */
 const REVIEWER_TOOL_FILTER: readonly string[] = ["read", "grep", "glob"] as const
 
+/** RFC-02 B4 — the OPERATOR front door reuses the domain `diffSourceSchema` arms
+ *  (`branch-base` / `commit` / `range`, resolved through the port) and ADMITS two
+ *  more surface arms the real tool producer can serve WITHOUT the pure resolver:
+ *    • `working-tree` — uncommitted changes (`git diff <against>`, default HEAD),
+ *      symbolic like `branch-base` (no ref peel);
+ *    • `last-turn` — accepted at the schema so an operator can *select* it, but it
+ *      is UNSUPPORTED: it resolves to a stable prerequisite error (RFC-02 B5 is
+ *      parked). It is never a placeholder that silently falls back.
+ *  The three domain arms are SPREAD from `diffSourceSchema.options` so the shared
+ *  source contract has ONE definition (no drift between domain + front door). */
+const frontDoorSourceSchema = z.discriminatedUnion("kind", [
+  ...diffSourceSchema.options,
+  z.object({
+    kind: z.literal("working-tree"),
+    against: z
+      .string()
+      .optional()
+      .describe("Diff the working tree against this rev (default HEAD)"),
+  }),
+  z.object({ kind: z.literal("last-turn"), turnId: z.string() }),
+])
+export type FrontDoorSource = z.infer<typeof frontDoorSourceSchema>
+
+/** Exhaustive-classification drift guard for {@link FrontDoorSource}. Adding a
+ *  front-door arm without a `true` here (and a matching `case` in `prepareArgs`'s
+ *  switch) fails compile. Mirrors `DIFF_SOURCE_KINDS` in `@/git`. */
+const FRONT_DOOR_SOURCE_KINDS: Record<FrontDoorSource["kind"], true> = {
+  "branch-base": true,
+  commit: true,
+  range: true,
+  "working-tree": true,
+  "last-turn": true,
+}
+
+/** Runtime drift guard: the zod schema arms and the classification table must
+ *  enumerate the SAME kinds. Catches an arm added to only one of the two (the
+ *  compile guard already catches a table/type mismatch; this catches a schema
+ *  that grew a member the table never mirrored). */
+const FRONT_DOOR_SCHEMA_KINDS = new Set(
+  frontDoorSourceSchema.options.map((o) => o.shape.kind.value as string),
+)
+for (const k of Object.keys(FRONT_DOOR_SOURCE_KINDS)) {
+  if (!FRONT_DOOR_SCHEMA_KINDS.has(k)) {
+    throw new Error(`front-door source drift: '${k}' in table but not in schema`)
+  }
+}
+if (FRONT_DOOR_SCHEMA_KINDS.size !== Object.keys(FRONT_DOOR_SOURCE_KINDS).length) {
+  throw new Error("front-door source drift: schema has a kind the table does not classify")
+}
+
 export const gitReviewDiffInputSchema = z.object({
   /** Base revision for the three-dot diff. Default `origin/main`. */
   base: z.string().optional().describe("Base revision (default origin/main)"),
@@ -56,12 +111,14 @@ export const gitReviewDiffInputSchema = z.object({
   paths: z.array(z.string()).optional().describe("Restrict review to these paths"),
   /** Optional focus hint injected into the reviewer's seed prompt. */
   focus: z.string().optional().describe("Optional focus hint for the reviewer"),
-  /** RFC-02 B2 — first-class diff SOURCE picker (closed union: branch-base /
-   *  commit / range). MUTUALLY EXCLUSIVE with legacy `base`/`head`; supplying
-   *  both is a typed error. ABSENT ⇒ byte-identical `origin/main...HEAD`. */
-  source: diffSourceSchema
+  /** RFC-02 B2/B4 — first-class diff SOURCE picker. Supported arms: branch-base /
+   *  commit / range / working-tree (resolved to a real diff); `last-turn` is
+   *  ACCEPTED but returns a stable prerequisite error (RFC-02 B5, parked).
+   *  MUTUALLY EXCLUSIVE with legacy `base`/`head`; supplying both is a typed
+   *  error. ABSENT ⇒ byte-identical `origin/main...HEAD`. */
+  source: frontDoorSourceSchema
     .optional()
-    .describe("Diff source: branch-base | commit | range (excludes base/head)"),
+    .describe("Diff source: branch-base | commit | range | working-tree (excludes base/head)"),
   /** RFC-02 B3 — hide repo-DECLARED generated files (`.gitattributes
    *  linguist-generated`) from the review. ATTRIBUTE-ONLY: no filename/extension
    *  heuristic. ABSENT/false ⇒ byte-identical (check-attr never invoked). */
@@ -465,6 +522,11 @@ const maybeEmitReviewCanvas = async (
     head: string
   },
 ): Promise<void> => {
+  // RFC-02 B4 — the `working-tree` source has NO after-ref (`head === ""`): the
+  // canvas producer reads `git show <head>:path`, which cannot represent on-disk
+  // uncommitted state, so skip the overlay rather than mis-anchor against the
+  // index. The findings already returned to the model.
+  if (args.head === "") return
   try {
     await emitReviewCanvasDiffs({ runner, ctx, ...args })
   } catch {
@@ -492,6 +554,15 @@ type PreparedDiff =
 const SOURCE_MIXED_MSG =
   "git_review_diff: `source` is mutually exclusive with legacy `base`/`head` — " +
   "pass one or the other, not both."
+
+/** RFC-02 B4 — the STABLE prerequisite error for the parked `last-turn` arm. It
+ *  is deliberately terminal (never a silent fallback to a working/branch diff) and
+ *  self-describing so the operator knows WHY the arm is unavailable and what would
+ *  un-park it. Kept as a constant so its text is stable across surfaces/tests. */
+const LAST_TURN_UNAVAILABLE_MSG =
+  "git_review_diff: source 'last-turn' is not available yet — it requires an " +
+  "immutable per-turn before/after boundary (RFC-02 B5, parked). Select " +
+  "branch-base, commit, range, or working-tree instead."
 
 /** Human-readable, fail-closed reason for an unresolvable source. */
 const describeUnavailable = (r: DiffSourceUnavailableReason): string => {
@@ -539,11 +610,11 @@ const legacyPrepared = (data: GitReviewDiffInput): PreparedDiff => {
   }
 }
 
-/** Source-driven prep — resolve the closed union through the injected read port,
- *  fail closed on an unavailable source, and convert to argv via the adapter
- *  (the ONE argv mapping). */
+/** Source-driven prep — resolve the closed DOMAIN union (branch-base / commit /
+ *  range) through the injected read port, fail closed on an unavailable source,
+ *  and convert to argv via the adapter (the ONE argv mapping). */
 const sourcePrepared = async (
-  source: NonNullable<GitReviewDiffInput["source"]>,
+  source: DiffSource,
   data: GitReviewDiffInput,
   runner: GitRunner,
   ctx: ToolContext,
@@ -563,6 +634,62 @@ const sourcePrepared = async (
   }
 }
 
+/** RFC-02 B4 — `working-tree` prep. Reviews UNCOMMITTED changes vs `against`
+ *  (default `HEAD`) via `git diff <against>`. `against` stays SYMBOLIC (like
+ *  `branch-base`): a leading-`-` is rejected here (no option smuggling) and an
+ *  unresolvable ref fails closed at `git diff` exit — never a bare-`git diff`
+ *  fallback. `head` is left EMPTY: the after-side is the on-disk working tree,
+ *  which has no ref, so the (default-OFF) canvas overlay is skipped for it. */
+const workingTreePrepared = (
+  source: Extract<FrontDoorSource, { kind: "working-tree" }>,
+  data: GitReviewDiffInput,
+): PreparedDiff => {
+  const against = source.against ?? "HEAD"
+  if (against.startsWith("-")) {
+    return {
+      kind: "deny",
+      output: `git_review_diff: invalid against '${against}' (must not begin with '-')`,
+    }
+  }
+  return {
+    kind: "ok",
+    rangeArgs: workingTreeArgs(against),
+    paths: data.paths ?? [],
+    base: against,
+    head: "",
+    filterGenerated: data.filterGenerated ?? false,
+    ...(data.focus !== undefined ? { focus: data.focus } : {}),
+  }
+}
+
+const assertNeverSource = (x: never): never => {
+  throw new Error(`unhandled FrontDoorSource arm: ${JSON.stringify(x)}`)
+}
+
+/** Route a parsed front-door `source` to its prep. Supported domain arms delegate
+ *  to the port resolver; `working-tree` is served directly; `last-turn` returns
+ *  its stable prerequisite error. Exhaustive — a new arm without a case fails
+ *  compile via {@link assertNeverSource}. */
+const prepareSource = async (
+  source: FrontDoorSource,
+  data: GitReviewDiffInput,
+  runner: GitRunner,
+  ctx: ToolContext,
+): Promise<PreparedDiff> => {
+  switch (source.kind) {
+    case "branch-base":
+    case "commit":
+    case "range":
+      return sourcePrepared(source, data, runner, ctx)
+    case "working-tree":
+      return workingTreePrepared(source, data)
+    case "last-turn":
+      return { kind: "deny", output: LAST_TURN_UNAVAILABLE_MSG }
+    default:
+      return assertNeverSource(source)
+  }
+}
+
 /** Validate input, reject mixed source/legacy, and prepare the diff spec.
  *  Extracted so `execute` stays under the cog-complexity cap. */
 const prepareArgs = async (
@@ -579,7 +706,7 @@ const prepareArgs = async (
   if (data.base !== undefined || data.head !== undefined) {
     return { kind: "deny", output: SOURCE_MIXED_MSG }
   }
-  return sourcePrepared(data.source, data, runner, ctx)
+  return prepareSource(data.source, data, runner, ctx)
 }
 
 const REVIEWER_NOT_ATTACHED_MSG =
