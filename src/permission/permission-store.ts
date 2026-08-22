@@ -56,7 +56,18 @@ import { join } from "node:path"
 import { isRecord } from "@/shared"
 import { quantaHomeDir } from "@/shared/quanta-home"
 import { runtimeConfig } from "@/shared/runtime-config"
-import { createJsonStateFile, type ParseOutcome } from "./json-state-file"
+import { createJsonStateFile, type ParseOutcome, type PersistOutcome } from "./json-state-file"
+import type { PosturePersistedRecord } from "./posture/ports"
+import type { PostureRecord } from "./posture/types"
+import {
+  clonePostureSection,
+  createPostureDomain,
+  emptyPostureSection,
+  freezePostureSection,
+  type MutablePostureSection,
+  type PosturePersistedSection,
+  parsePostureSection,
+} from "./posture-persistence"
 
 /** Current on-disk schema version. Bump when the JSON shape changes; add a
  *  parallel branch in {@link parseState} so older versions can be migrated
@@ -109,6 +120,11 @@ export interface PermissionState {
   readonly perThread: Readonly<Record<string, ThreadPermission>>
   readonly perHost: Readonly<Record<string, HostAgentMode>>
   readonly deniedActions: Readonly<Record<string, DenialRecord>>
+  /** RFC-05 E2 — the versioned durable posture section: per-thread bound
+   *  records (delta patch + bound question value + revision) and the SEPARATE
+   *  future-thread default. ADDITIVE: a legacy file without it migrates to
+   *  current behavior (`emptyPostureSection`). */
+  readonly posture: PosturePersistedSection
 }
 
 const emptyState = (): PermissionState => ({
@@ -116,6 +132,7 @@ const emptyState = (): PermissionState => ({
   perThread: Object.freeze({}),
   perHost: Object.freeze({}),
   deniedActions: Object.freeze({}),
+  posture: freezePostureSection(emptyPostureSection()),
 })
 
 /** Canonical JSON: object keys sorted lexicographically at every level so
@@ -171,6 +188,7 @@ interface MutableState {
   perThread: Record<string, ThreadPermission>
   perHost: Record<string, HostAgentMode>
   deniedActions: Record<string, DenialRecord>
+  posture: MutablePostureSection
 }
 
 const cloneAsMutable = (state: PermissionState): MutableState => ({
@@ -178,6 +196,7 @@ const cloneAsMutable = (state: PermissionState): MutableState => ({
   perThread: { ...state.perThread },
   perHost: { ...state.perHost },
   deniedActions: { ...state.deniedActions },
+  posture: clonePostureSection(state.posture),
 })
 
 const snapshot = (state: MutableState): PermissionState =>
@@ -186,6 +205,7 @@ const snapshot = (state: MutableState): PermissionState =>
     perThread: Object.freeze({ ...state.perThread }),
     perHost: Object.freeze({ ...state.perHost }),
     deniedActions: Object.freeze({ ...state.deniedActions }),
+    posture: freezePostureSection(state.posture),
   })
 
 type ValidationResult<T> = { ok: true; value: T } | { ok: false; reason: string }
@@ -357,6 +377,12 @@ const parseState = (raw: unknown): ParseOutcome<PermissionState> => {
   if (!deniedActionsValidated.ok) {
     return { kind: "shape-invalid", reason: deniedActionsValidated.reason }
   }
+  // RFC-05 E2 — the posture section is an ADDITIVE, fail-closed arm: a
+  // corrupt/unknown-version per-thread record (or a malformed default) is
+  // DROPPED, not accepted, so a bad posture never becomes a live posture while
+  // the sibling grants (already validated above) survive. Absent ⇒ empty.
+  const rawPosture = isRecord(raw.posture) ? raw.posture : undefined
+  const posture = parsePostureSection(rawPosture?.perThread, rawPosture?.default)
   return {
     kind: "ok",
     state: Object.freeze({
@@ -364,6 +390,7 @@ const parseState = (raw: unknown): ParseOutcome<PermissionState> => {
       perThread: Object.freeze(perThreadValidated.value),
       perHost: Object.freeze(perHostValidated.value),
       deniedActions: Object.freeze(deniedActionsValidated.value),
+      posture: freezePostureSection(posture),
     }),
   }
 }
@@ -415,6 +442,24 @@ export interface PermissionStore extends PermissionReader {
   recordRiskSeen(threadId: string, actionSignature: string, seenRiskAt: number): void
   recordUserOverride(threadId: string, actionSignature: string, userOverrideAt: number): void
   clearDenial(threadId: string, actionSignature: string): void
+
+  // -- RFC-05 E2 durable posture section ------------------------------------
+  /** The operator's durable per-thread bound posture record (delta patch +
+   *  bound question value + revision), or `undefined` when the thread has none
+   *  (⇒ current-behavior migration). */
+  getPosture(threadId: string): PosturePersistedRecord | undefined
+  setPosture(threadId: string, record: PosturePersistedRecord): void
+  clearPosture(threadId: string): void
+  /** The SEPARATE future-thread default record (never a live-thread mutation).
+   *  `undefined` when the operator never set one (⇒ current behavior). */
+  getPostureDefault(): PostureRecord | undefined
+  setPostureDefault(record: PostureRecord): void
+
+  /** Flush and OBSERVE durability. Unlike {@link PermissionStore.flush} (void),
+   *  it reports whether the bytes reached disk — the posture authority's
+   *  persist-BEFORE-publish barrier: a `{durable:false}` outcome MUST prevent a
+   *  new live view from publishing. */
+  flushDurable(): Promise<PersistOutcome>
 
   /** Test seam: drop all in-memory state + remove the file. */
   reset(): Promise<void>
@@ -748,11 +793,23 @@ const mergePermissionState = (args: {
     deniedActions[key] = ours === undefined ? diskRec : mergeDenialRecord(ours, diskRec)
   }
 
+  // RFC-05 E2 — posture per-thread bound records follow the SAME 3-way grant
+  // merge (peer-added adopt / local-deleted stays deleted / local value wins),
+  // so the single-process identity law holds. The future-thread default is a
+  // single cell: our live value wins when set, else adopt the peer's.
+  const posturePerThread = mergeGrantMap(
+    onDisk.posture.perThread,
+    inMemory.posture.perThread,
+    baseline.posture.perThread,
+  )
+  const postureDefault = inMemory.posture.default ?? onDisk.posture.default
+
   return Object.freeze({
     version: STATE_VERSION,
     perThread: Object.freeze(perThread),
     perHost: Object.freeze(perHost),
     deniedActions: Object.freeze(deniedActions),
+    posture: freezePostureSection({ perThread: posturePerThread, default: postureDefault }),
   })
 }
 
@@ -800,10 +857,11 @@ export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): 
   const liveSnapshot = (): PermissionState => snapshot(state)
   const onMutate = (): void => file.flushDebounced(liveSnapshot)
 
-  // Three thin domain modules over the shared state + persistence seam.
+  // Thin domain modules over the shared state + persistence seam.
   const threads = createThreadStore(getState, onMutate)
   const hosts = createHostStore(getState, onMutate)
   const denials = createDenialLedger(getState, onMutate)
+  const posture = createPostureDomain(() => getState().posture, onMutate)
 
   const load = async (): Promise<void> => {
     await file.load((s) => {
@@ -838,6 +896,12 @@ export const createPermissionStore = (opts: CreatePermissionStoreOptions = {}): 
     recordUserOverride: denials.recordUserOverride,
     clearDenial: denials.clear,
     hasPostDenialOverride: denials.hasOverride,
+    getPosture: posture.getPosture,
+    setPosture: posture.setPosture,
+    clearPosture: posture.clearPosture,
+    getPostureDefault: posture.getDefault,
+    setPostureDefault: posture.setDefault,
+    flushDurable: () => file.flushDurable(liveSnapshot),
     reset,
   }
 }
