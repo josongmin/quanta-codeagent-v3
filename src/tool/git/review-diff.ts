@@ -16,10 +16,13 @@
  *  the tool yields a deterministic `ok:false` (no throw, no crash). */
 
 import { z } from "zod"
+import type { DiffSourceUnavailableReason, GitDiffOperation } from "@/git"
+import { applyGeneratedFilter, diffSourceSchema, resolveDiffSource } from "@/git"
 import { errMessage } from "@/shared"
 import type { ReviewerRequest, ReviewerResult, Tool, ToolContext, ToolEvent } from "../types"
 import { safeRun, stderrReason } from "./_shared"
 import { emitReviewCanvasDiffs } from "./review-diff-canvas"
+import { gitRunnerAttributePort, gitRunnerReadPort, operationToArgs } from "./review-source-adapter"
 import type { GitRunner } from "./types"
 
 /** Cap on the diff text we inject into the reviewer seed. A 600KB diff blows
@@ -53,6 +56,19 @@ export const gitReviewDiffInputSchema = z.object({
   paths: z.array(z.string()).optional().describe("Restrict review to these paths"),
   /** Optional focus hint injected into the reviewer's seed prompt. */
   focus: z.string().optional().describe("Optional focus hint for the reviewer"),
+  /** RFC-02 B2 — first-class diff SOURCE picker (closed union: branch-base /
+   *  commit / range). MUTUALLY EXCLUSIVE with legacy `base`/`head`; supplying
+   *  both is a typed error. ABSENT ⇒ byte-identical `origin/main...HEAD`. */
+  source: diffSourceSchema
+    .optional()
+    .describe("Diff source: branch-base | commit | range (excludes base/head)"),
+  /** RFC-02 B3 — hide repo-DECLARED generated files (`.gitattributes
+   *  linguist-generated`) from the review. ATTRIBUTE-ONLY: no filename/extension
+   *  heuristic. ABSENT/false ⇒ byte-identical (check-attr never invoked). */
+  filterGenerated: z
+    .boolean()
+    .optional()
+    .describe("Exclude repo-declared generated files (linguist-generated)"),
 })
 export type GitReviewDiffInput = z.infer<typeof gitReviewDiffInputSchema>
 
@@ -118,7 +134,7 @@ export interface ReviewReport {
   findings: ReviewFinding[]
 }
 
-/** Raised by `buildArgs` when `base` or `head` begins with `-` (would be
+/** Raised by `legacyPrepared` when `base` or `head` begins with `-` (would be
  *  parsed by `git diff` as an option, not a revision). Caught + turned into
  *  a deterministic `ok:false`. Same posture as `GitDiffBaseRejected` in
  *  `diff.ts`. */
@@ -134,16 +150,6 @@ class GitReviewRevRejected extends Error {
 
 const validateRev = (field: "base" | "head", v: string): void => {
   if (v.startsWith("-")) throw new GitReviewRevRejected(field, v)
-}
-
-const buildArgs = (input: GitReviewDiffInput): string[] => {
-  const base = input.base ?? "origin/main"
-  const head = input.head ?? "HEAD"
-  validateRev("base", base)
-  validateRev("head", head)
-  const args: string[] = ["diff", `${base}...${head}`]
-  if (input.paths && input.paths.length > 0) args.push("--", ...input.paths)
-  return args
 }
 
 const truncateDiff = (s: string): { text: string; truncated: boolean } => {
@@ -331,14 +337,25 @@ export const gitReviewDiffTool = (runner: GitRunner): Tool<GitReviewDiffInput> =
   hitlTier: () => "none",
 
   async *execute(input: GitReviewDiffInput, ctx: ToolContext): AsyncIterable<ToolEvent> {
-    const args = parseAndBuildArgs(input)
-    if (args.kind === "deny") {
-      yield { type: "result", result: { ok: false, output: args.output } }
+    const prep = await prepareArgs(input, runner, ctx)
+    if (prep.kind === "deny") {
+      yield { type: "result", result: { ok: false, output: prep.output } }
       return
     }
 
-    yield { type: "progress", message: `git ${args.argv.join(" ")}` }
-    const outcome = await extractDiff(runner, args.argv, ctx)
+    const finalized = await finalizeArgs(prep, runner, ctx)
+    if (finalized.kind === "deny") {
+      yield { type: "result", result: { ok: false, output: finalized.output } }
+      return
+    }
+    if (finalized.kind === "empty") {
+      yield { type: "result", result: emptyDiffResult() }
+      return
+    }
+
+    const argv = finalized.argv
+    yield { type: "progress", message: `git ${argv.join(" ")}` }
+    const outcome = await extractDiff(runner, argv, ctx)
     if (outcome.kind === "deny") {
       yield { type: "result", result: { ok: false, output: outcome.output } }
       return
@@ -353,7 +370,7 @@ export const gitReviewDiffTool = (runner: GitRunner): Tool<GitReviewDiffInput> =
     }
 
     const { text: diffForReviewer, truncated } = truncateDiff(outcome.body)
-    const prompt = buildReviewerPrompt(diffForReviewer, args.focus, truncated)
+    const prompt = buildReviewerPrompt(diffForReviewer, prep.focus, truncated)
     yield { type: "progress", message: "Delegating to isolated reviewer (depth+1)…" }
 
     const result = await invokeReviewer(ctx.reviewerAgent, buildReviewerRequest(prompt, ctx))
@@ -363,12 +380,76 @@ export const gitReviewDiffTool = (runner: GitRunner): Tool<GitReviewDiffInput> =
     await maybeEmitReviewCanvas(runner, ctx, {
       unifiedDiff: outcome.body,
       findings: result.structured?.findings ?? [],
-      base: args.base,
-      head: args.head,
+      base: prep.base,
+      head: prep.head,
     })
     yield { type: "result", result }
   },
 })
+
+/** Append `-- <paths…>` when paths are scoped. Kept separate from the range args
+ *  so the generated-file filter (B3) can substitute its own kept-path set. */
+const withPaths = (rangeArgs: readonly string[], paths: readonly string[]): string[] =>
+  paths.length > 0 ? [...rangeArgs, "--", ...paths] : [...rangeArgs]
+
+/** Final argv after the (optional) generated-file filter. `empty` short-circuits
+ *  to the empty-diff result; `deny` fails the whole review CLOSED (a filter that
+ *  could not run never silently degrades to an unfiltered diff). */
+type FinalArgs =
+  | { kind: "deny"; output: string }
+  | { kind: "empty" }
+  | { kind: "ok"; argv: string[] }
+
+/** Enumerate the changed paths for the prepared range via `--name-only -z`
+ *  (NUL-delimited so hostile filenames round-trip). Reuses the SAME range args
+ *  as the review diff — no second diff engine. */
+const enumerateChangedPaths = async (
+  prep: Extract<PreparedDiff, { kind: "ok" }>,
+  runner: GitRunner,
+  ctx: ToolContext,
+): Promise<{ kind: "deny"; output: string } | { kind: "ok"; paths: string[] }> => {
+  const nameArgs = [
+    "diff",
+    "--name-only",
+    "-z",
+    ...prep.rangeArgs.slice(1),
+    ...(prep.paths.length > 0 ? ["--", ...prep.paths] : []),
+  ]
+  const out = await safeRun(runner, nameArgs, ctx.cwd, "git diff", ctx.signal)
+  if (out.kind === "spawn-error") return { kind: "deny", output: out.message }
+  if (out.result.exitCode > 1) {
+    return {
+      kind: "deny",
+      output: stderrReason(out.result.stderr, out.result.exitCode, "git diff"),
+    }
+  }
+  return { kind: "ok", paths: out.result.stdout.split("\0").filter((p) => p.length > 0) }
+}
+
+/** Apply the generated-file filter when requested; otherwise pass the range +
+ *  paths straight through (byte-identical). */
+const finalizeArgs = async (
+  prep: Extract<PreparedDiff, { kind: "ok" }>,
+  runner: GitRunner,
+  ctx: ToolContext,
+): Promise<FinalArgs> => {
+  if (!prep.filterGenerated) {
+    return { kind: "ok", argv: withPaths(prep.rangeArgs, prep.paths) }
+  }
+  const names = await enumerateChangedPaths(prep, runner, ctx)
+  if (names.kind === "deny") return names
+  if (names.paths.length === 0) return { kind: "empty" }
+  const port = gitRunnerAttributePort(runner, ctx.cwd, ctx.signal)
+  const filtered = await applyGeneratedFilter(names.paths, port)
+  if (!filtered.ok) {
+    return {
+      kind: "deny",
+      output: `git_review_diff: generated-file filter failed — ${filtered.message}`,
+    }
+  }
+  if (filtered.kept.length === 0) return { kind: "empty" }
+  return { kind: "ok", argv: withPaths(prep.rangeArgs, filtered.kept) }
+}
 
 /** RFC-12 SURFACE B PRODUCER glue — emit the per-file canvas diffs for a review's
  *  findings. Isolated in one helper so `execute` stays under the cognitive cap and
@@ -392,33 +473,113 @@ const maybeEmitReviewCanvas = async (
   }
 }
 
-/** Result of the schema-parse + argv-build step (synchronous failure mode for
- *  bad input or rejected revisions). Carries the resolved `base`/`head` so the
- *  canvas producer can obtain the per-file before/after (`git show`) over the SAME
- *  revision range the reviewer saw. */
-type ArgvOutcome =
+/** Prepared diff spec. The RANGE args (`git diff <range>`) are kept separate
+ *  from `paths` so the generated-file filter (B3) can re-scope the path set
+ *  without re-parsing argv. `base`/`head` are the endpoints the canvas producer
+ *  uses for its per-file before/after (`git show`). */
+type PreparedDiff =
   | { kind: "deny"; output: string }
-  | { kind: "ok"; argv: string[]; base: string; head: string; focus?: string }
+  | {
+      kind: "ok"
+      rangeArgs: string[]
+      paths: string[]
+      base: string
+      head: string
+      focus?: string
+      filterGenerated: boolean
+    }
 
-/** Validate input + compose argv. Returns either a deny (bad schema or
- *  leading-`-` revision) or the ready-to-spawn argv. Extracted so `execute`
- *  stays under the cog-complexity cap. */
-const parseAndBuildArgs = (input: GitReviewDiffInput): ArgvOutcome => {
-  const parsed = gitReviewDiffInputSchema.safeParse(input)
-  if (!parsed.success) {
-    return { kind: "deny", output: `invalid input: ${parsed.error.message}` }
+const SOURCE_MIXED_MSG =
+  "git_review_diff: `source` is mutually exclusive with legacy `base`/`head` — " +
+  "pass one or the other, not both."
+
+/** Human-readable, fail-closed reason for an unresolvable source. */
+const describeUnavailable = (r: DiffSourceUnavailableReason): string => {
+  switch (r.kind) {
+    case "invalid-ref":
+      return `git_review_diff: invalid ${r.field} '${r.value}' (must not begin with '-')`
+    case "unresolvable-ref":
+      return `git_review_diff: ${r.field} '${r.value}' did not resolve to a commit`
   }
+}
+
+/** Endpoints the canvas producer diffs per-file. Derived from the RESOLVED
+ *  operation so `git show <base>:path` / `<head>:path` line up with the range. */
+const canvasEndpoints = (op: GitDiffOperation): { base: string; head: string } => {
+  switch (op.kind) {
+    case "branch-merge-base":
+      return { base: op.base, head: op.head }
+    case "commit-first-parent":
+      return { base: op.base, head: op.commit }
+    case "tree-range":
+      return { base: op.from, head: op.to }
+  }
+}
+
+/** Legacy (no `source`) prep — BYTE-IDENTICAL to today's `buildArgs`: default
+ *  `origin/main...HEAD`, leading-`-` revs rejected, paths carried through. */
+const legacyPrepared = (data: GitReviewDiffInput): PreparedDiff => {
+  const base = data.base ?? "origin/main"
+  const head = data.head ?? "HEAD"
   try {
-    const argv = buildArgs(parsed.data)
-    const base = parsed.data.base ?? "origin/main"
-    const head = parsed.data.head ?? "HEAD"
-    return parsed.data.focus !== undefined
-      ? { kind: "ok", argv, base, head, focus: parsed.data.focus }
-      : { kind: "ok", argv, base, head }
+    validateRev("base", base)
+    validateRev("head", head)
   } catch (e) {
     if (e instanceof GitReviewRevRejected) return { kind: "deny", output: e.message }
     throw e
   }
+  return {
+    kind: "ok",
+    rangeArgs: ["diff", `${base}...${head}`],
+    paths: data.paths ?? [],
+    base,
+    head,
+    filterGenerated: data.filterGenerated ?? false,
+    ...(data.focus !== undefined ? { focus: data.focus } : {}),
+  }
+}
+
+/** Source-driven prep — resolve the closed union through the injected read port,
+ *  fail closed on an unavailable source, and convert to argv via the adapter
+ *  (the ONE argv mapping). */
+const sourcePrepared = async (
+  source: NonNullable<GitReviewDiffInput["source"]>,
+  data: GitReviewDiffInput,
+  runner: GitRunner,
+  ctx: ToolContext,
+): Promise<PreparedDiff> => {
+  const port = gitRunnerReadPort(runner, ctx.cwd, ctx.signal)
+  const res = await resolveDiffSource(source, port)
+  if (!res.ok) return { kind: "deny", output: describeUnavailable(res.reason) }
+  const { base, head } = canvasEndpoints(res.operation)
+  return {
+    kind: "ok",
+    rangeArgs: operationToArgs(res.operation),
+    paths: data.paths ?? [],
+    base,
+    head,
+    filterGenerated: data.filterGenerated ?? false,
+    ...(data.focus !== undefined ? { focus: data.focus } : {}),
+  }
+}
+
+/** Validate input, reject mixed source/legacy, and prepare the diff spec.
+ *  Extracted so `execute` stays under the cog-complexity cap. */
+const prepareArgs = async (
+  input: GitReviewDiffInput,
+  runner: GitRunner,
+  ctx: ToolContext,
+): Promise<PreparedDiff> => {
+  const parsed = gitReviewDiffInputSchema.safeParse(input)
+  if (!parsed.success) {
+    return { kind: "deny", output: `invalid input: ${parsed.error.message}` }
+  }
+  const data = parsed.data
+  if (data.source === undefined) return legacyPrepared(data)
+  if (data.base !== undefined || data.head !== undefined) {
+    return { kind: "deny", output: SOURCE_MIXED_MSG }
+  }
+  return sourcePrepared(data.source, data, runner, ctx)
 }
 
 const REVIEWER_NOT_ATTACHED_MSG =

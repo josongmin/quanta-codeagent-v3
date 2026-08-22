@@ -30,3 +30,26 @@ export type {
   ConflictParseResult,
 } from "./conflict-parser"
 export { ConflictParserInputError, parseConflicts } from "./conflict-parser"
+// RFC-02 — review diff-source semantics (closed union resolver + generated-file
+// filter). Pure leaf; all git reads arrive through injected ports whose concrete
+// impls live in `@/tool/git/review-source-adapter`.
+export type {
+  CheckAttrResult,
+  DiffSource,
+  DiffSourceResolution,
+  DiffSourceUnavailableReason,
+  GeneratedAttributePort,
+  GeneratedFilterResult,
+  GitDiffOperation,
+  GitReadPort,
+} from "./review-source"
+export {
+  applyGeneratedFilter,
+  DIFF_SOURCE_KINDS,
+  diffSourceSchema,
+  EMPTY_TREE_OID,
+  LINGUIST_GENERATED,
+  parseCheckAttrZ,
+  partitionGenerated,
+  resolveDiffSource,
+} from "./review-source"
