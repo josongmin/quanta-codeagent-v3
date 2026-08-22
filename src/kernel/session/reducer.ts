@@ -159,6 +159,32 @@ export const reduceSessionCommand = (
         ],
       }
     }
+    case "session.posture.set": {
+      // RFC-05 E4 — the POSTURE domain state lives in the host authority (E2/E3),
+      // NOT in `KernelSessionState`; the reducer is NOT the restore authority
+      // (§E4 stop rule) — it projects only. It bumps the SESSION revision and
+      // emits ONE state echo so subscribers observe the command was processed;
+      // the SCHEDULER applies the mutation to the host projection under CAS and
+      // reconciles the resolved posture echo onto this event. A negative outcome
+      // (unsupported host / stale) is thrown by the scheduler before this echo is
+      // ever appended.
+      const nextState = withRevision({ ...state })
+      return {
+        state: nextState,
+        hostAction: { kind: "none" },
+        events: [
+          {
+            eventId: crypto.randomUUID(),
+            seq: state.seq + 1,
+            revision: nextState.revision,
+            emittedAt,
+            causedByCommandId: command.commandId,
+            type: "session.state.updated",
+            state: toSessionStateView(nextState),
+          },
+        ],
+      }
+    }
     case "session.objective.mutate": {
       // RFC-03 C3 — the objective DOMAIN state lives in the host authority, not
       // in `KernelSessionState`; the kernel owns only the session revision echo

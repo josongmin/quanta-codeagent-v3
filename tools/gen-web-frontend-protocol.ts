@@ -91,6 +91,12 @@ const AT_TYPE_NARROWINGS: Readonly<Record<string, string>> = {
   // inline editor is the later D3 UX), so the UI treats the payload opaquely →
   // top type (same posture as `Message`, which the UI also never builds).
   ObjectiveMutation: "unknown",
+  // @/permission/posture (RFC-05 E4) — the lossless `PosturePatch` backs
+  // `session.posture.set`. The write path is the CLI selector + kernel/host
+  // (behind QUANTA_POSTURE_SELECTOR); the web posture composer is not built
+  // yet, so the UI treats the payload opaquely → top type (same as
+  // `ObjectiveMutation`).
+  PosturePatch: "unknown",
 }
 
 /** Names imported from `@/*` in a canonical file — collected so the generator

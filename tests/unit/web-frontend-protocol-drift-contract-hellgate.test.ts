@@ -596,6 +596,11 @@ const DELIBERATE_TOOLCHAIN_NARROWINGS: Readonly<Record<string, ApprovedFieldNarr
     canonical: "ObjectiveMutation",
     why: "copy cannot import `ObjectiveMutation` (@/objective); the C3 write path is the CLI + kernel/host, and the web inline objective editor is the later D3 UX — until then the UI never constructs this payload, so top-type is safe (same posture as `Message`)",
   },
+  "SessionPostureSetCommand.patch": {
+    copy: "unknown",
+    canonical: "PosturePatch",
+    why: "copy cannot import `PosturePatch` (@/permission/posture); the RFC-05 E4 write path is the CLI selector + kernel/host (behind QUANTA_POSTURE_SELECTOR), and the web posture composer is not built yet — until then the UI never constructs this payload, so top-type is safe (same posture as `ObjectiveMutation`)",
+  },
   "SessionStateView.lastLlmRequest": {
     copy: "unknown & { policy?: unknown; }",
     canonical:

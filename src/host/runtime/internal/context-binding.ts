@@ -13,6 +13,8 @@ import {
   type ObjectivePort,
 } from "@/objective"
 import { isPermissionMode } from "@/permission"
+import type { PostureControl } from "@/permission/posture/control"
+import type { PostureCommandOutcome, PostureCommandScope } from "@/protocol/session"
 import type { RuntimeAgentConfigBase, RuntimeAgentTurnAssembler } from "@/sdk/runtime/base"
 import { createSingleSessionRuntimeHost } from "../builder"
 import type { RuntimeSessionConfig } from "../types"
@@ -229,6 +231,45 @@ const applyHostObjectiveMutation = (
   authority.commit(prepared, { admitted: true })
 }
 
+/** Duck-typed read of a wired {@link PostureControl} on the base. */
+const asPostureControl = (base: { postureControl?: unknown }): PostureControl | undefined =>
+  base.postureControl as PostureControl | undefined
+
+/**
+ * RFC-05 E4 — the `SessionHost.setPosture` body (module-level to keep the host
+ * factory under the god-function cap). The SINGLE posture projection: when the
+ * surface wired a live {@link PostureControl}, the patch is applied under CAS
+ * through the SHARED authority (so the next turn's gate reads it), returning the
+ * typed outcome. Absent control ⇒ the mode-only COMPAT fallback (the E3
+ * `permission.mode` adapter), which keeps the legacy `session.permission.set`
+ * byte-identical on a runtime without a posture control — a mode-only patch is
+ * all that verb ever sends. A non-mode field with no control cannot be honored;
+ * only the mode axis is live in that fallback.
+ */
+const applyHostPostureMutation = async (
+  base: { postureControl?: unknown; permission: { mode: string } },
+  args: { mutation: { patch: unknown; scope: PostureCommandScope; expectedRevision?: number } },
+): Promise<PostureCommandOutcome> => {
+  const control = asPostureControl(base)
+  const patch = args.mutation.patch as { readonly mode?: unknown }
+  if (control !== undefined) {
+    return await control.apply({
+      patch: args.mutation.patch as Parameters<PostureControl["apply"]>[0]["patch"],
+      scope: args.mutation.scope,
+      ...(args.mutation.expectedRevision !== undefined
+        ? { expectedRevision: args.mutation.expectedRevision }
+        : {}),
+    })
+  }
+  const mode = patch.mode
+  // Fail-closed: only a KNOWN PermissionMode reaches the live gate (an unknown
+  // string keeps the current mode instead of poisoning `modePolicy[mode]`).
+  if (typeof mode === "string" && isPermissionMode(mode)) {
+    base.permission.mode = mode
+  }
+  return { ok: true }
+}
+
 const createRuntimeSessionHost = (args: {
   readonly state: RuntimeContextBindingState
   readonly options: CreateRuntimeContextHostArgs
@@ -307,6 +348,14 @@ const createRuntimeSessionHost = (args: {
       ...(args.options.boot?.toolProfileState !== undefined
         ? { toolProfile: args.options.boot.toolProfileState.get() }
         : {}),
+      // RFC-05 E4 — echo the live resolved posture (requested / effective /
+      // locks) when a posture control is wired, so a posture mutation's reconcile
+      // carries it onto `session.state.updated`. Absent ⇒ omitted (byte-identical
+      // for a runtime without a posture control).
+      ...((): { posture?: import("@/protocol/session").PostureProjectionView } => {
+        const posture = asPostureControl(base)?.describe()
+        return posture !== undefined ? { posture } : {}
+      })(),
       messages: [...args.options.history],
       // Expose the LLM port's model slug so the kernel can carry it onto
       // `session.created` + `turn.completed`. Optional — adapters without
@@ -349,19 +398,13 @@ const createRuntimeSessionHost = (args: {
     // RFC-03 C3 — out-of-band objective front door (body extracted to keep this
     // factory under the god-function cap).
     mutateObjective: (mutateArgs) => applyHostObjectiveMutation(base, mutateArgs),
-    setPermissionMode: async (mode) => {
-      // Fail-closed: only a KNOWN PermissionMode reaches the gate. An unknown
-      // string would make `modePolicy[mode]` undefined downstream, so we ignore
-      // it (keep the current mode) rather than poison the gate.
-      if (!isPermissionMode(mode)) return
-      // Mutate the session's permission context in place. When the surface wired
-      // a LIVE getter/setter proxy for `permission.mode` (web daemon /
-      // bootstrap), the per-turn gate reads the new value on the NEXT turn — a
-      // real mid-session switch, not a display-only echo. On a plain
-      // `PermissionContext` the property is writable too, so this is a safe
-      // no-surprise assignment.
-      base.permission.mode = mode
-    },
+    // RFC-05 E4 — the SINGLE posture projection. `session.posture.set` and the
+    // legacy `session.permission.set` adapter both route here (body extracted to
+    // keep this factory under the god-function cap). Applies through the wired
+    // {@link PostureControl} (live authority ⇒ next-turn gate reads it) or the
+    // mode-only compat fallback; returns a typed outcome (never a silent
+    // success). `setPermissionMode` is RETIRED — no both-old-and-new host arm.
+    setPosture: (postureArgs) => applyHostPostureMutation(base, { mutation: postureArgs }),
     startSideConversation: async (
       sideArgs: SessionHostSideConversationArgs,
     ): Promise<SessionHostSideConversationResult> =>

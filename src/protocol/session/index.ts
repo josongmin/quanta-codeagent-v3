@@ -5,6 +5,7 @@ export {
   buildInputAppend,
   buildObjectiveMutate,
   buildPermissionSet,
+  buildPostureSet,
   buildToolProfileSet,
   buildTranscriptReplace,
   buildTurnCancel,
@@ -25,23 +26,30 @@ export {
 export type {
   ApprovalRespondCommand,
   InputAppendCommand,
+  PostureCommandScope,
   SessionCommand,
   SessionCommandEnvelope,
   SessionCommandType,
   SessionIdentitySetCommand,
   SessionObjectiveMutateCommand,
   SessionPermissionSetCommand,
+  SessionPostureSetCommand,
   SessionToolProfileSetCommand,
   SessionTranscriptReplaceCommand,
   TurnCancelCommand,
   TurnRunCommand,
 } from "./commands"
 export {
+  isPostureCommandScope,
   isSessionCommandType,
+  POSTURE_COMMAND_SCOPES,
   SESSION_COMMAND_TYPES,
 } from "./commands"
 export {
   SessionClosedError,
+  SessionPostureConflictError,
+  SessionPosturePersistError,
+  SessionPostureUnsupportedError,
   SessionProtocolError,
   SessionProtocolValidationError,
   SessionProtocolVersionError,
@@ -78,6 +86,13 @@ export {
   isSessionEventType,
   SESSION_EVENT_TYPES,
 } from "./events"
+export type {
+  PostureCommandOutcome,
+  PostureEffectiveView,
+  PostureLockView,
+  PostureProjectionView,
+  PostureRequestedView,
+} from "./posture-projection"
 export type {
   ResolvedReadModelSupport,
   ResolvedReadModels,

@@ -11,12 +11,15 @@
 
 import type { ImageBlock, Message } from "@/llm/types"
 import type { ObjectiveMutation } from "@/objective"
+import type { PosturePatch } from "@/permission/posture/types"
 import type {
   ApprovalRespondCommand,
   InputAppendCommand,
+  PostureCommandScope,
   SessionIdentitySetCommand,
   SessionObjectiveMutateCommand,
   SessionPermissionSetCommand,
+  SessionPostureSetCommand,
   SessionToolProfileSetCommand,
   SessionTranscriptReplaceCommand,
   TurnCancelCommand,
@@ -158,6 +161,33 @@ export const buildPermissionSet = (
   sessionId: deps.sessionId,
   type: "session.permission.set",
   mode,
+  ...commandMeta(deps, meta),
+})
+
+/**
+ * RFC-05 E4 — build a `session.posture.set` command carrying ONE lossless
+ * {@link PosturePatch}, the target {@link PostureCommandScope} (current-thread
+ * vs future-thread default), and (optionally)
+ * `meta.expectedPostureRevision` — the POSTURE-domain CAS target, DISTINCT from
+ * the envelope's session-level `expectedRevision`. A stale multi-surface edit is
+ * rejected by the host authority. The actor is bound by the HOST to `user`
+ * (a surface-issued command is an operator action, never trusted from the wire).
+ */
+export const buildPostureSet = (
+  deps: CommandBuildDeps,
+  patch: PosturePatch,
+  scope: PostureCommandScope,
+  meta:
+    | Partial<Omit<SessionPostureSetCommand, "sessionId" | "type" | "patch" | "scope">>
+    | undefined,
+): SessionPostureSetCommand => ({
+  sessionId: deps.sessionId,
+  type: "session.posture.set",
+  patch,
+  scope,
+  ...(meta?.expectedPostureRevision !== undefined
+    ? { expectedPostureRevision: meta.expectedPostureRevision }
+    : {}),
   ...commandMeta(deps, meta),
 })
 

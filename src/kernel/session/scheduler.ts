@@ -11,6 +11,7 @@ import type {
   SessionHostTurnEvent,
   SessionHostTurnResult,
 } from "./ports"
+import { applyPostureCommand } from "./posture-command"
 import { reduceSessionCommand } from "./reducer"
 import { projectSessionHostTurnEvent } from "./session-host-turn-event-projection"
 import {
@@ -240,12 +241,13 @@ const clearStreamingAssistantText = (transcript: KernelTranscriptState): KernelT
 
 const reconcileSessionPostureState = (
   state: KernelSessionState,
-  host: Pick<SessionHostDescription, "permissionMode" | "identityMode" | "toolProfile">,
+  host: Pick<SessionHostDescription, "permissionMode" | "identityMode" | "toolProfile" | "posture">,
 ): KernelSessionState => {
   const {
     permissionMode: _permissionMode,
     identityMode: _identityMode,
     toolProfile: _toolProfile,
+    posture: _posture,
     ...rest
   } = state
   return {
@@ -253,6 +255,9 @@ const reconcileSessionPostureState = (
     permissionMode: host.permissionMode,
     ...(host.identityMode !== undefined ? { identityMode: host.identityMode } : {}),
     ...(host.toolProfile !== undefined ? { toolProfile: host.toolProfile } : {}),
+    // RFC-05 E4 — carry the host's resolved posture echo (requested/effective/
+    // locks) at the same revision. Absent ⇒ byte-identical (no posture control).
+    ...(host.posture !== undefined ? { posture: host.posture } : {}),
   }
 }
 
@@ -900,8 +905,14 @@ export const dispatchSessionCommand = async (
       await ctx.host.setToolProfile?.(command.profile)
       nextState = reconcileSessionPostureState(nextState, ctx.host.describe())
       immediateEvents = immediateEvents.map((event) => rewriteStateUpdatedEvent(event, nextState))
-    } else if (command.type === "session.permission.set") {
-      await ctx.host.setPermissionMode?.(command.mode)
+    } else if (
+      command.type === "session.permission.set" ||
+      command.type === "session.posture.set"
+    ) {
+      // RFC-05 E4 — route the posture front door + the permission.set adapter
+      // through the single host projection; a negative outcome THROWS a typed
+      // error BEFORE any success echo is appended (never a silent success).
+      await applyPostureCommand(ctx, command)
       nextState = reconcileSessionPostureState(nextState, ctx.host.describe())
       immediateEvents = immediateEvents.map((event) => rewriteStateUpdatedEvent(event, nextState))
     } else if (command.type === "session.objective.mutate") {
@@ -947,6 +958,8 @@ export const dispatchSessionCommand = async (
       case "session.tool_profile.set":
         return { state: nextState, events: immediateEvents }
       case "session.permission.set":
+        return { state: nextState, events: immediateEvents }
+      case "session.posture.set":
         return { state: nextState, events: immediateEvents }
       case "session.transcript.replace":
         return {

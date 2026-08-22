@@ -43,10 +43,16 @@ describe("@/kernel/session", () => {
           toolProfile = profile
         }
       },
-      setPermissionMode: async (mode: string) => {
+      // RFC-05 E4 — the legacy `session.permission.set` is now an adapter onto
+      // the single posture projection (`setPosture` with a `{ mode }` patch at
+      // `scope: "current"`). Invalid modes are IGNORED (host-authoritative
+      // reconcile), returning a typed `ok` outcome.
+      setPosture: async (args: { patch: unknown }) => {
+        const mode = (args.patch as { mode?: string }).mode
         if (mode === "default" || mode === "acceptEdits" || mode === "auto" || mode === "bypass") {
           permissionMode = mode
         }
+        return { ok: true as const }
       },
       runTurn: async () => ({ outcome: makeOutcome("completed"), messages: [] }),
       close: async () => undefined,

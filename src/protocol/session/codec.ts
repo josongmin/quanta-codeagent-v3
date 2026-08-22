@@ -1,5 +1,5 @@
 import { errMessage } from "@/shared"
-import { isSessionCommandType, type SessionCommand } from "./commands"
+import { isPostureCommandScope, isSessionCommandType, type SessionCommand } from "./commands"
 import { SessionProtocolValidationError } from "./errors"
 import { isSessionEventType, type SessionEvent } from "./events"
 import type { SessionSnapshotLite } from "./snapshot"
@@ -177,6 +177,20 @@ export const decodeSessionCommand = (raw: string): SessionCommand => {
     // The OBJECTIVE-domain CAS target is optional; when present it must be a
     // finite number (a string `"2"` would silently `!==` a numeric revision).
     assertOptionalFiniteNumber(envelope.payload, "command", "expectedObjectiveRevision")
+  }
+  // RFC-05 E4 — the posture front-door payload carries a LOSSLESS
+  // {@link PosturePatch} + a CLOSED scope + an optional POSTURE-domain CAS
+  // target. The codec is a LEAF (no `@/permission` value import): it asserts
+  // wire-shape sanity — `patch` is a plain object, `scope` is one of the closed
+  // scopes, `expectedPostureRevision` (when present) is a finite number — and
+  // the HOST authority is the full patch validator. Fail here so a scalar/array
+  // `patch`, an unknown `scope`, or a string revision cannot reach the host.
+  if (envelope.payload.type === "session.posture.set") {
+    assertObjectField(envelope.payload, "command", "patch")
+    if (!isPostureCommandScope(envelope.payload.scope)) {
+      throw new SessionProtocolValidationError("bad_command_posture_scope")
+    }
+    assertOptionalFiniteNumber(envelope.payload, "command", "expectedPostureRevision")
   }
   return envelope.payload as unknown as SessionCommand
 }

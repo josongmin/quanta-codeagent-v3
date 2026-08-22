@@ -512,6 +512,9 @@ const buildOptionalSnapshotFields = (
   // `/goal` (Codex parity) — surface the objective store so the per-turn base
   // carries it into `maybeWireObjective` (mirrors `browserNet`).
   ...whenDefined("objective", base.objective),
+  // RFC-05 E4 — surface the posture front-door control so the per-turn base
+  // carries it onto the host `setPosture` projection (mirrors `objective`).
+  ...whenDefined("postureControl", base.postureControl),
   // §9.6 `/presets` — surface the role→model resolver so the compose PASS_THROUGH
   // patch round-trips it onto the base, whence `buildAgentConfigFromBase` spreads
   // it onto `AgentConfig.roleModelResolver` (mirrors `objective`). Absent ⇒ omitted

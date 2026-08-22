@@ -1,5 +1,6 @@
 import type { ImageBlock, Message } from "@/llm/types"
 import type { ObjectiveMutation } from "@/objective"
+import type { PosturePatch } from "@/permission/posture/types"
 
 export interface SessionCommandEnvelope<TType extends string> {
   readonly sessionId: string
@@ -48,9 +49,48 @@ export interface SessionToolProfileSetCommand
   readonly profile: string
 }
 
+/** RFC-05 E4 — the CLOSED scope axis of a `session.posture.set`: does the
+ *  mutation target the CURRENT (live) thread's posture, or the FUTURE-thread
+ *  DEFAULT (E2's two durable entries — a change to the default never reaches
+ *  back into already-created threads). A surface distinguishes the two so an
+ *  operator can say "change THIS session" vs "change what new sessions start
+ *  with". */
+export type PostureCommandScope = "current" | "default"
+
+/** The closed scope tuple. A drift-guarded {@link PostureCommandScope} witness
+ *  the codec fails closed against (an unknown scope string cannot route). */
+export const POSTURE_COMMAND_SCOPES = ["current", "default"] as const
+
+export const isPostureCommandScope = (value: unknown): value is PostureCommandScope =>
+  typeof value === "string" && (POSTURE_COMMAND_SCOPES as readonly string[]).includes(value)
+
+/**
+ * RFC-05 E4 — the versioned POSTURE front-door command (the CLI selector /
+ * web composer verb). Carries ONE lossless {@link PosturePatch} (the operator's
+ * requested projection — never a full-record replacement that would clobber the
+ * orthogonal question knob), the {@link PostureCommandScope} (current-thread
+ * mutation vs future-thread default), and an OPTIONAL POSTURE-domain
+ * `expectedPostureRevision` — the E2 CAS target, DISTINCT from the envelope's
+ * `expectedRevision` (which the kernel reserves for SESSION-level optimistic
+ * concurrency). A stale multi-surface posture edit is rejected by the host
+ * authority (a typed `stale_revision` conflict) instead of clobbering a newer
+ * commit; absent ⇒ the host binds the current posture revision (an atomic
+ * caller). The `@/permission` value slice is never imported here — only the
+ * `PosturePatch` TYPE flows through the wire; the host authority is the full
+ * validator (an unknown mode/policy fails closed at `set`, never a store poke).
+ */
+export interface SessionPostureSetCommand extends SessionCommandEnvelope<"session.posture.set"> {
+  readonly patch: PosturePatch
+  readonly scope: PostureCommandScope
+  readonly expectedPostureRevision?: number
+}
+
 /** Switch the session PERMISSION mode mid-session (default / acceptEdits /
- *  bypass / auto). Honored LIVE by the next turn's gate when the host wired a
- *  getter/setter `permission.mode` (web daemon / bootstrap). */
+ *  bypass / auto). RFC-05 E4 COMPATIBILITY ADAPTER: this legacy command no
+ *  longer has its own host-write arm — the kernel scheduler translates it into a
+ *  `{ mode }` posture patch at `scope: "current"` and routes it through the SAME
+ *  posture host projection as {@link SessionPostureSetCommand} (one command-union
+ *  version, no both-old-and-new arm). Honored LIVE by the next turn's gate. */
 export interface SessionPermissionSetCommand
   extends SessionCommandEnvelope<"session.permission.set"> {
   readonly mode: string
@@ -125,6 +165,7 @@ export type SessionCommand =
   | SessionTranscriptReplaceCommand
   | SessionToolProfileSetCommand
   | SessionPermissionSetCommand
+  | SessionPostureSetCommand
   | SessionObjectiveMutateCommand
   | ApprovalRespondCommand
 
@@ -134,6 +175,7 @@ export const SESSION_COMMAND_TYPES = [
   "session.identity.set",
   "session.objective.mutate",
   "session.permission.set",
+  "session.posture.set",
   "session.transcript.replace",
   "session.tool_profile.set",
   "turn.cancel",

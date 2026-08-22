@@ -26,6 +26,47 @@ export class SessionRevisionConflictError extends SessionProtocolError {
   }
 }
 
+/**
+ * RFC-05 E4 — a `session.posture.set` (or its `session.permission.set`
+ * compatibility adapter) could NOT be applied because the host wired NO posture
+ * projection method. A TYPED NEGATIVE — the command must never report success
+ * through an absent optional host method (RFC-05 E4 RED (b) / hard rule).
+ */
+export class SessionPostureUnsupportedError extends SessionProtocolError {
+  constructor() {
+    super("session posture command is unsupported: host wired no setPosture projection")
+    this.name = "SessionPostureUnsupportedError"
+  }
+}
+
+/**
+ * RFC-05 E4 — a `session.posture.set` was rejected by the host authority because
+ * its `expectedPostureRevision` no longer matches the live POSTURE-domain
+ * revision (a stale multi-surface edit). A typed CONFLICT — the winner's commit
+ * is never clobbered.
+ */
+export class SessionPostureConflictError extends SessionProtocolError {
+  constructor(
+    readonly expectedRevision: number,
+    readonly actualRevision: number,
+  ) {
+    super(`stale posture revision: expected ${expectedRevision}, got ${actualRevision}`)
+    this.name = "SessionPostureConflictError"
+  }
+}
+
+/**
+ * RFC-05 E4 — a `session.posture.set` could not durably persist (the authority's
+ * persist-before-publish barrier refused to publish). A typed negative — the old
+ * posture stays live, never a published-but-unpersisted mutation.
+ */
+export class SessionPosturePersistError extends SessionProtocolError {
+  constructor(readonly detail: string) {
+    super(`posture mutation failed to persist: ${detail}`)
+    this.name = "SessionPosturePersistError"
+  }
+}
+
 export class SessionClosedError extends SessionProtocolError {
   constructor(readonly sessionId: string) {
     super(`session ${sessionId} is closed`)

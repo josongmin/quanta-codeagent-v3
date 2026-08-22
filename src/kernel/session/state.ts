@@ -3,6 +3,7 @@ import type {
   ArtifactRef,
   CapabilityManifest,
   PendingApprovalView,
+  PostureProjectionView,
   SessionSnapshotLite,
   SessionStateView,
 } from "@/protocol/session"
@@ -39,6 +40,10 @@ export interface KernelSessionState {
   readonly permissionMode: string
   readonly identityMode?: string
   readonly toolProfile?: string
+  /** RFC-05 E4 — the resolved posture echo carried alongside the kernel state,
+   *  reconciled from the host `describe()` after a posture mutation. Present only
+   *  when the host wired a posture control (absent ⇒ byte-identical). */
+  readonly posture?: PostureProjectionView
   readonly pendingApproval: PendingApprovalView | null
   readonly transcript: KernelTranscriptState
   readonly artifacts: readonly ArtifactRef[]
@@ -120,6 +125,7 @@ export const toSessionStateView = (state: KernelSessionState): SessionStateView 
   permissionMode: state.permissionMode,
   ...(state.identityMode !== undefined ? { identityMode: state.identityMode } : {}),
   ...(state.toolProfile !== undefined ? { toolProfile: state.toolProfile } : {}),
+  ...(state.posture !== undefined ? { posture: state.posture } : {}),
   ...(state.modelSlug !== undefined ? { modelSlug: state.modelSlug } : {}),
   messageCount: state.transcript.messageCount,
   ...(state.transcript.lastUserText !== undefined

@@ -1,5 +1,6 @@
 import type { LlmContinuationObservation, LlmRequestObservation } from "@/shared/llm-route-types"
 import type { CapabilityManifest } from "./capabilities"
+import type { PostureProjectionView } from "./posture-projection"
 
 export interface ArtifactRef {
   readonly artifactId: string
@@ -98,6 +99,12 @@ export interface SessionStateView {
    *  `QUANTA_SESSION_FULL_FIDELITY` is ON (projection-gated); absent ⇒ byte-
    *  identical default-OFF. See {@link SessionTokenUsageView}. */
   readonly lastTokenUsage?: SessionTokenUsageView
+  /** RFC-05 E4 — the resolved posture echo (requested patch / effective view
+   *  incl `effectiveMode` / admitted locks) at THIS state revision. Present ONLY
+   *  when the host wired a posture control (a `session.posture.set` /
+   *  `session.permission.set` reconcile reads it from `describe()`); absent ⇒
+   *  byte-identical for a host without a posture projection source. */
+  readonly posture?: PostureProjectionView
 }
 
 export interface SessionSnapshotLite {

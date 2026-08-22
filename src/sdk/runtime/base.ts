@@ -28,6 +28,15 @@ export interface RuntimeAgentConfigAugments {
    *  complete ⇒ pursuit auto-stops). Duck-typed `unknown` here; `maybeWireObjective`
    *  preserves it (caller-override). Absent ⇒ assembler mints its own. */
   objective?: unknown
+  /** RFC-05 E4 — the surface-owned posture FRONT-DOOR control (`@/permission/
+   *  posture/control` `PostureControl`) threaded DOWN from the composition root so
+   *  the host `setPosture` projection and the CLI `/posture` selector mutate the
+   *  SAME live posture authority (a change here reaches the next turn's gate).
+   *  Duck-typed `unknown` at this SDK layer (the `@/permission` slice is not
+   *  importable here). Absent ⇒ the host's `setPosture` falls back to the
+   *  mode-only compat write (the E3 `permission.mode` adapter), byte-identical for
+   *  a runtime without a wired posture control. */
+  postureControl?: unknown
   admissibility?: unknown
   planExitPort?: unknown
   userInputPort?: unknown

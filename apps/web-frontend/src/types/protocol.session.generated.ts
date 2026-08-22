@@ -139,6 +139,7 @@ export interface SessionStateView {
 }
   readonly lastLlmContinuation?: unknown
   readonly lastTokenUsage?: SessionTokenUsageView
+  readonly posture?: PostureProjectionView
 }
 
 export interface SessionSnapshotLite {
@@ -182,6 +183,12 @@ export interface SessionToolProfileSetCommand extends SessionCommandEnvelope<"se
   readonly profile: string
 }
 
+export interface SessionPostureSetCommand extends SessionCommandEnvelope<"session.posture.set"> {
+  readonly patch: unknown
+  readonly scope: PostureCommandScope
+  readonly expectedPostureRevision?: number
+}
+
 export interface SessionPermissionSetCommand extends SessionCommandEnvelope<"session.permission.set"> {
   readonly mode: string
 }
@@ -209,13 +216,16 @@ export const SESSION_COMMAND_TYPES = [
     "session.identity.set",
     "session.objective.mutate",
     "session.permission.set",
+    "session.posture.set",
     "session.transcript.replace",
     "session.tool_profile.set",
     "turn.cancel",
     "turn.run",
 ] as const
 
-export type SessionCommand = InputAppendCommand | TurnRunCommand | TurnCancelCommand | SessionIdentitySetCommand | SessionTranscriptReplaceCommand | SessionToolProfileSetCommand | SessionPermissionSetCommand | SessionObjectiveMutateCommand | ApprovalRespondCommand
+export type PostureCommandScope = "current" | "default"
+
+export type SessionCommand = InputAppendCommand | TurnRunCommand | TurnCancelCommand | SessionIdentitySetCommand | SessionTranscriptReplaceCommand | SessionToolProfileSetCommand | SessionPermissionSetCommand | SessionPostureSetCommand | SessionObjectiveMutateCommand | ApprovalRespondCommand
 
 export type SessionCommandType = (typeof SESSION_COMMAND_TYPES)[number]
 

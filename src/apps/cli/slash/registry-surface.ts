@@ -66,6 +66,7 @@ import { mcpResourcesCmd } from "./mcp-resources-cmd"
 import { modelCmd } from "./model-cmd"
 import { isObjectiveEditorEnabled, objectiveCmd } from "./objective"
 import { onboardCmd } from "./onboard-cmd"
+import { isPostureSelectorEnabled, postureCmd } from "./posture"
 import {
   identityCmd,
   modeCmd,
@@ -654,6 +655,11 @@ export const buildSurfaceSlashCommands = (
   // table are byte-identical when the gate is unset (registration ≠ execution;
   // parity with the /attention + /ps gates).
   ...(isObjectiveEditorEnabled() ? [objectiveCmd] : []),
+  // RFC-05 E4 — `/posture` CAS-guarded approval-posture selector. DEFAULT-OFF
+  // (opt-IN): only registered when QUANTA_POSTURE_SELECTOR is on, so `/help` +
+  // the command table are byte-identical when the gate is unset (registration ≠
+  // execution; parity with the /objective + /attention gates).
+  ...(isPostureSelectorEnabled() ? [postureCmd] : []),
   forkCheckpointCmd,
   queueCmd,
   webCmd,

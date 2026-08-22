@@ -343,6 +343,13 @@ export interface SlashContext {
    *  `/objective` itself is only REGISTERED behind the same gate (help catalog
    *  byte-identical when OFF). */
   readonly objectiveEditor?: import("./slash/objective").ObjectiveSlashState | undefined
+  /** RFC-05 E4 — the CAS-guarded `/posture` selector wire over the SAME live
+   *  posture authority the per-turn gate reads (a `/posture` mutation changes the
+   *  next turn). Present iff `QUANTA_POSTURE_SELECTOR` is on AND the surface wired
+   *  the posture control; absent ⇒ `/posture` prints "not wired" + exit 0 (parity
+   *  with `/objective`). `/posture` itself is only REGISTERED behind the same gate
+   *  (help catalog byte-identical when OFF). */
+  readonly postureEditor?: import("./slash/posture").PostureSlashState | undefined
 }
 
 /** Inventory row returned by {@link SlashContext.skills}. Mirrors the host

@@ -4,6 +4,9 @@ import type {
   ArtifactRef,
   CapabilityManifest,
   PendingApprovalView,
+  PostureCommandOutcome,
+  PostureCommandScope,
+  PostureProjectionView,
   SessionEvent,
 } from "@/protocol/session"
 import type { ItemStreamCore } from "@/shared/item-stream"
@@ -31,6 +34,12 @@ export interface SessionHostDescription {
   readonly capabilityManifest: CapabilityManifest
   readonly identityMode?: string
   readonly toolProfile?: string
+  /** RFC-05 E4 — the resolved posture echo (requested / effective incl
+   *  `effectiveMode` / admitted locks) at the host's CURRENT posture revision.
+   *  Present ONLY when the host wired a posture control; the scheduler copies it
+   *  onto the `session.state.updated` echo after a posture mutation reconcile.
+   *  Absent ⇒ byte-identical for a host without a posture projection source. */
+  readonly posture?: PostureProjectionView
   readonly messages?: readonly Message[]
   /** Active LLM model slug if the host can introspect its port. Surfaces
    *  on `session.created` (one-shot) and `session.state.updated` (every
@@ -255,9 +264,24 @@ export interface SessionHost {
     readonly mutation: unknown
     readonly expectedRevision?: number
   }): Promise<void> | void
-  /** Switch the session permission mode mid-session. Honored live by the next
-   *  turn's gate when the surface wired a getter/setter `permission.mode`. */
-  setPermissionMode?(mode: string): Promise<void> | void
+  /**
+   * RFC-05 E4 — apply a POSTURE mutation (the CLI selector / web composer front
+   * door). The single posture host projection: `session.posture.set` routes here
+   * directly, and the legacy `session.permission.set` routes here too via its
+   * compatibility adapter (a `{ mode }` patch at `scope: "current"`) — ONE host
+   * method, no both-old-and-new arm. The host binds the ACTOR to `user` and the
+   * THREAD to its own session, applies the lossless `patch` under CAS on
+   * `expectedRevision` (E2 authority), and returns a TYPED outcome. `ok` ⇒ the
+   * scheduler reconciles the fresh posture from `describe()`; a `stale_revision`
+   * / `persist_failed` arm is a typed negative (no live mutation). The method
+   * being ABSENT is the distinct unsupported-host negative — the scheduler MUST
+   * raise it rather than report a silent success. Duck-typed `unknown` patch so
+   * `@/kernel` needs no `@/permission` value import; the host casts it back. */
+  setPosture?(args: {
+    readonly patch: unknown
+    readonly scope: PostureCommandScope
+    readonly expectedRevision?: number
+  }): Promise<PostureCommandOutcome> | PostureCommandOutcome
   startSideConversation?(
     args: SessionHostSideConversationArgs,
   ): Promise<SessionHostSideConversationResult>
