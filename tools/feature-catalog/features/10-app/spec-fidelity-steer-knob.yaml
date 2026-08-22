@@ -25,6 +25,8 @@ surface_integration:
 purpose: 'Default-OFF: when issue declares concrete expected output, append minimal-literal-fix steer. Fail-closed when no spec extracted.'
 evidence:
   code:
+    - src/config/knob-schema/schemas/bench-a.ts
+    - src/runner/batch/eval/knobs-bench.ts
     - src/runner/knobs/knobs/spec-fidelity-steer.ts
   adrs: [533]
   tests:
@@ -35,3 +37,17 @@ evidence:
     contract: []
 knobs: ["spec-fidelity-steer"]
 deliberate_hold: null
+notes: |
+  EVIDENCE REPOINT (2026-08-22): `src/runner/knobs/knobs/spec-fidelity-steer.ts` alone was
+  the declared evidence and it is a VESTIGIAL back-compat re-export — since the
+  knob-registration unification (`registerBenchKnobs` derives every bench Knob
+  from `ALL_BENCH_SCHEMAS`) that file self-registers nothing and no reached module
+  imports `specFidelitySteerKnob`, so `bun fc reachability --strict --symbols`
+  read the whole feature as UNREACHABLE. The knob itself is LIVE, just not there:
+    declare  `specFidelitySteerSchema` in `src/config/knob-schema/schemas/bench-a.ts` (envKey +
+             domain + default; the SSOT `registerBenchKnobs()` iterates)
+    read     `benchPostureFromState` / `benchOptIns` in
+             `src/runner/batch/eval/knobs-bench.ts` (`readKnobValue(state, "spec-fidelity-steer", …)`)
+    effect   `posture.specFidelitySteer` -> `src/runner/batch/eval/driver/config-build.ts` (minimal-literal-fix steer append)
+  Both added files are REACHED from `src/apps/bench/index.ts`. Maturity stays L3
+  because the wiring is real; only the evidence pointer was stale.

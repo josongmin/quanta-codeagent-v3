@@ -226,6 +226,47 @@ const parseStringList = (raw: unknown, label: string): readonly string[] => {
   return out
 }
 
+/** The history entry's optional METADATA, already validated by the caller — so
+ *  this step only decides which keys are present, never whether they are legal. */
+const historyEntryMetadata = (
+  raw: Record<string, unknown>,
+  narrowed: {
+    readonly kind: GroundingHistoryKind | undefined
+    readonly threadId: unknown
+    readonly referentId: unknown
+    readonly toolName: string | undefined
+  },
+): Omit<GroundingHistoryEntry, "role" | "text"> => ({
+  ...(narrowed.kind !== undefined ? { kind: narrowed.kind } : {}),
+  ...(narrowed.threadId !== undefined ? { threadId: narrowed.threadId as string | null } : {}),
+  ...(narrowed.referentId !== undefined
+    ? { referentId: narrowed.referentId as string | null }
+    : {}),
+  ...(raw.mentionedFileIds !== undefined
+    ? { mentionedFileIds: parseStringList(raw.mentionedFileIds, "history entry mentionedFileIds") }
+    : {}),
+  ...(raw.mentionedReferentIds !== undefined
+    ? {
+        mentionedReferentIds: parseStringList(
+          raw.mentionedReferentIds,
+          "history entry mentionedReferentIds",
+        ),
+      }
+    : {}),
+  ...(narrowed.toolName !== undefined ? { toolName: narrowed.toolName } : {}),
+  ...(raw.mentionedThreadIds !== undefined
+    ? {
+        mentionedThreadIds: parseStringList(
+          raw.mentionedThreadIds,
+          "history entry mentionedThreadIds",
+        ),
+      }
+    : {}),
+  ...(raw.policyMarkers !== undefined
+    ? { policyMarkers: parseStringList(raw.policyMarkers, "history entry policyMarkers") }
+    : {}),
+})
+
 const parseHistoryEntry = (raw: unknown): GroundingHistoryEntry => {
   if (!isRecord(raw)) throw new Error("history entry must be an object")
   const role = raw.role
@@ -248,45 +289,67 @@ const parseHistoryEntry = (raw: unknown): GroundingHistoryEntry => {
   if (referentId !== undefined && referentId !== null && typeof referentId !== "string") {
     throw new Error("history entry referentId must be string|null when present")
   }
-  const mentionedFileIds = raw.mentionedFileIds
-  const mentionedReferentIds = raw.mentionedReferentIds
   const toolName = raw.toolName
   if (toolName !== undefined && typeof toolName !== "string") {
     throw new Error("history entry toolName must be a string when present")
   }
-  const mentionedThreadIds = raw.mentionedThreadIds
-  const policyMarkers = raw.policyMarkers
   return {
     role,
     text,
-    ...(kind !== undefined ? { kind } : {}),
-    ...(threadId !== undefined ? { threadId: threadId as string | null } : {}),
-    ...(referentId !== undefined ? { referentId: referentId as string | null } : {}),
-    ...(mentionedFileIds !== undefined
-      ? { mentionedFileIds: parseStringList(mentionedFileIds, "history entry mentionedFileIds") }
-      : {}),
-    ...(mentionedReferentIds !== undefined
-      ? {
-          mentionedReferentIds: parseStringList(
-            mentionedReferentIds,
-            "history entry mentionedReferentIds",
-          ),
-        }
-      : {}),
-    ...(toolName !== undefined ? { toolName } : {}),
-    ...(mentionedThreadIds !== undefined
-      ? {
-          mentionedThreadIds: parseStringList(
-            mentionedThreadIds,
-            "history entry mentionedThreadIds",
-          ),
-        }
-      : {}),
-    ...(policyMarkers !== undefined
-      ? { policyMarkers: parseStringList(policyMarkers, "history entry policyMarkers") }
-      : {}),
+    ...historyEntryMetadata(raw, { kind, threadId, referentId, toolName }),
   }
 }
+
+/** Everything the state contract may carry BESIDES the required active thread.
+ *  Already validated by the caller; this step is pure projection. */
+const stateContractOptionalFields = (
+  raw: Record<string, unknown>,
+  narrowed: {
+    readonly latestToolResultId: unknown
+    readonly latestToolName: string | undefined
+    readonly primaryFileId: unknown
+  },
+): Omit<GroundingStateContract, "activeThreadId"> => ({
+  ...(raw.visibleThreadIds !== undefined
+    ? {
+        visibleThreadIds: parseStringList(
+          raw.visibleThreadIds,
+          "grounding case stateContract.visibleThreadIds",
+        ),
+      }
+    : {}),
+  ...(raw.pausedThreadIds !== undefined
+    ? {
+        pausedThreadIds: parseStringList(
+          raw.pausedThreadIds,
+          "grounding case stateContract.pausedThreadIds",
+        ),
+      }
+    : {}),
+  ...(narrowed.latestToolResultId !== undefined
+    ? { latestToolResultId: narrowed.latestToolResultId as string | null }
+    : {}),
+  ...(narrowed.latestToolName !== undefined ? { latestToolName: narrowed.latestToolName } : {}),
+  ...(raw.candidateFileIds !== undefined
+    ? {
+        candidateFileIds: parseStringList(
+          raw.candidateFileIds,
+          "grounding case stateContract.candidateFileIds",
+        ),
+      }
+    : {}),
+  ...(narrowed.primaryFileId !== undefined
+    ? { primaryFileId: narrowed.primaryFileId as string | null }
+    : {}),
+  ...(raw.policyMarkers !== undefined
+    ? {
+        policyMarkers: parseStringList(
+          raw.policyMarkers,
+          "grounding case stateContract.policyMarkers",
+        ),
+      }
+    : {}),
+})
 
 const parseStateContract = (raw: unknown): GroundingStateContract => {
   if (!isRecord(raw)) throw new Error("grounding case stateContract must be an object")
@@ -308,53 +371,13 @@ const parseStateContract = (raw: unknown): GroundingStateContract => {
   if (latestToolName !== undefined && typeof latestToolName !== "string") {
     throw new Error("grounding case stateContract.latestToolName must be a string when present")
   }
-  const candidateFileIds = raw.candidateFileIds
   const primaryFileId = raw.primaryFileId
   if (primaryFileId !== undefined && primaryFileId !== null && typeof primaryFileId !== "string") {
     throw new Error("grounding case stateContract.primaryFileId must be string|null when present")
   }
-  const visibleThreadIds = raw.visibleThreadIds
-  const pausedThreadIds = raw.pausedThreadIds
-  const policyMarkers = raw.policyMarkers
   return {
     activeThreadId,
-    ...(visibleThreadIds !== undefined
-      ? {
-          visibleThreadIds: parseStringList(
-            visibleThreadIds,
-            "grounding case stateContract.visibleThreadIds",
-          ),
-        }
-      : {}),
-    ...(pausedThreadIds !== undefined
-      ? {
-          pausedThreadIds: parseStringList(
-            pausedThreadIds,
-            "grounding case stateContract.pausedThreadIds",
-          ),
-        }
-      : {}),
-    ...(latestToolResultId !== undefined
-      ? { latestToolResultId: latestToolResultId as string | null }
-      : {}),
-    ...(latestToolName !== undefined ? { latestToolName } : {}),
-    ...(candidateFileIds !== undefined
-      ? {
-          candidateFileIds: parseStringList(
-            candidateFileIds,
-            "grounding case stateContract.candidateFileIds",
-          ),
-        }
-      : {}),
-    ...(primaryFileId !== undefined ? { primaryFileId: primaryFileId as string | null } : {}),
-    ...(policyMarkers !== undefined
-      ? {
-          policyMarkers: parseStringList(
-            policyMarkers,
-            "grounding case stateContract.policyMarkers",
-          ),
-        }
-      : {}),
+    ...stateContractOptionalFields(raw, { latestToolResultId, latestToolName, primaryFileId }),
   }
 }
 
@@ -463,8 +486,16 @@ const parseContextChange = (raw: unknown): GroundingContextChange => {
   }
 }
 
-export const parseGroundingCase = (raw: unknown): GroundingCase => {
-  if (!isRecord(raw)) throw new Error("grounding case must be an object")
+/** The case's REQUIRED spine: the fields without which it is not a case at all. */
+interface GroundingCaseSpine {
+  readonly id: string
+  readonly history: readonly unknown[]
+  readonly targetUtterance: string
+  readonly bucket: GroundingBucket
+  readonly severity: GroundingSeverity
+}
+
+const parseCaseSpine = (raw: Record<string, unknown>): GroundingCaseSpine => {
   const schema = raw.schema
   if (schema !== GROUNDING_SCHEMA_VERSION) {
     throw new Error(
@@ -493,6 +524,20 @@ export const parseGroundingCase = (raw: unknown): GroundingCase => {
   if (!isOneOf(severity, GROUNDING_SEVERITIES)) {
     throw new Error(`grounding case severity must be one of ${GROUNDING_SEVERITIES.join(", ")}`)
   }
+  return { id, history, targetUtterance, bucket, severity }
+}
+
+/** The run-context descriptors: which corpus/mode the case belongs to and the
+ *  free-text environment it was captured in. All optional, all validated here. */
+interface GroundingCaseDescriptors {
+  readonly corpus: GroundingCorpus | undefined
+  readonly mode: AgentMode | undefined
+  readonly cwd: string | undefined
+  readonly memoryContext: string | undefined
+  readonly repoRulesText: string | undefined
+}
+
+const parseCaseDescriptors = (raw: Record<string, unknown>): GroundingCaseDescriptors => {
   const corpus = raw.corpus
   if (corpus !== undefined && !isOneOf(corpus, GROUNDING_CORPORA)) {
     throw new Error(`grounding case corpus must be one of ${GROUNDING_CORPORA.join(", ")}`)
@@ -513,9 +558,20 @@ export const parseGroundingCase = (raw: unknown): GroundingCase => {
   if (repoRulesText !== undefined && typeof repoRulesText !== "string") {
     throw new Error("grounding case repoRulesText must be a string when present")
   }
-  const stateContract = raw.stateContract
-  const candidateThreadIds = raw.candidateThreadIds
-  const candidateReferentIds = raw.candidateReferentIds
+  return { corpus, mode, cwd, memoryContext, repoRulesText }
+}
+
+/** The ambiguity/pairing markers, plus the two cross-field rules they carry:
+ *  a pair ROLE is meaningless without a pair ID, and a paired case needs a
+ *  state contract for the pair's two halves to be comparable at all. */
+interface GroundingCaseMarkers {
+  readonly ambiguityClass: GroundingAmbiguityClass | undefined
+  readonly blockingEligible: boolean | undefined
+  readonly pairId: string | undefined
+  readonly pairRole: GroundingPairRole | undefined
+}
+
+const parseCaseMarkers = (raw: Record<string, unknown>): GroundingCaseMarkers => {
   const ambiguityClass = raw.ambiguityClass
   if (ambiguityClass !== undefined && !isOneOf(ambiguityClass, GROUNDING_AMBIGUITY_CLASSES)) {
     throw new Error(
@@ -537,51 +593,102 @@ export const parseGroundingCase = (raw: unknown): GroundingCase => {
   if (pairRole !== undefined && pairId === undefined) {
     throw new Error("grounding case pairRole requires pairId")
   }
-  if (pairId !== undefined && stateContract === undefined) {
+  if (pairId !== undefined && raw.stateContract === undefined) {
     throw new Error("grounding case pairId requires stateContract")
   }
+  return { ambiguityClass, blockingEligible, pairId, pairRole }
+}
+
+/** Projection of the descriptor block + the two raw passthrough fields that sit
+ *  interleaved with it in the case's key order. */
+const caseDescriptorFields = (
+  raw: Record<string, unknown>,
+  descriptors: GroundingCaseDescriptors,
+): Pick<
+  GroundingCase,
+  "corpus" | "mode" | "cwd" | "memoryContext" | "workingState" | "repoRulesText" | "contextChanges"
+> => ({
+  ...(descriptors.corpus !== undefined ? { corpus: descriptors.corpus } : {}),
+  ...(descriptors.mode !== undefined ? { mode: descriptors.mode } : {}),
+  ...(descriptors.cwd !== undefined ? { cwd: descriptors.cwd } : {}),
+  ...(descriptors.memoryContext !== undefined ? { memoryContext: descriptors.memoryContext } : {}),
+  ...(raw.workingState !== undefined ? { workingState: raw.workingState as WorkingState } : {}),
+  ...(descriptors.repoRulesText !== undefined ? { repoRulesText: descriptors.repoRulesText } : {}),
+  ...(Array.isArray(raw.contextChanges)
+    ? { contextChanges: raw.contextChanges.map(parseContextChange) }
+    : {}),
+})
+
+/** Projection of the grounding-aid block: the state the case pins down and the
+ *  candidate sets an ambiguous case offers. */
+const caseGroundingAidFields = (
+  raw: Record<string, unknown>,
+  markers: GroundingCaseMarkers,
+): Pick<
+  GroundingCase,
+  | "stateContract"
+  | "candidateThreadIds"
+  | "candidateReferentIds"
+  | "ambiguityClass"
+  | "blockingEligible"
+> => ({
+  ...(raw.stateContract !== undefined
+    ? { stateContract: parseStateContract(raw.stateContract) }
+    : {}),
+  ...(raw.candidateThreadIds !== undefined
+    ? {
+        candidateThreadIds: parseStringList(
+          raw.candidateThreadIds,
+          "grounding case candidateThreadIds",
+        ),
+      }
+    : {}),
+  ...(raw.candidateReferentIds !== undefined
+    ? {
+        candidateReferentIds: parseStringList(
+          raw.candidateReferentIds,
+          "grounding case candidateReferentIds",
+        ),
+      }
+    : {}),
+  ...(markers.ambiguityClass !== undefined ? { ambiguityClass: markers.ambiguityClass } : {}),
+  ...(markers.blockingEligible !== undefined ? { blockingEligible: markers.blockingEligible } : {}),
+})
+
+/** Projection of where the case CAME FROM and who signed off on it. */
+const caseProvenanceFields = (
+  raw: Record<string, unknown>,
+  markers: GroundingCaseMarkers,
+): Pick<GroundingCase, "sourceProvenance" | "humanAudit" | "pairId" | "pairRole"> => ({
+  ...(raw.sourceProvenance !== undefined
+    ? { sourceProvenance: parseSourceProvenance(raw.sourceProvenance) }
+    : {}),
+  ...(raw.humanAudit !== undefined ? { humanAudit: parseHumanAudit(raw.humanAudit) } : {}),
+  ...(markers.pairId !== undefined ? { pairId: markers.pairId } : {}),
+  ...(markers.pairRole !== undefined ? { pairRole: markers.pairRole } : {}),
+})
+
+/**
+ * VALIDATE-THEN-PROJECT, in that order: every shape check runs (spine →
+ * descriptors → markers) before the first nested parse, so a malformed case
+ * still reports its FIRST structural error rather than a downstream one.
+ */
+export const parseGroundingCase = (raw: unknown): GroundingCase => {
+  if (!isRecord(raw)) throw new Error("grounding case must be an object")
+  const spine = parseCaseSpine(raw)
+  const descriptors = parseCaseDescriptors(raw)
+  const markers = parseCaseMarkers(raw)
   return {
     schema: GROUNDING_SCHEMA_VERSION,
-    id,
+    id: spine.id,
     usecase: GROUNDING_USECASE,
-    history: history.map(parseHistoryEntry),
-    targetUtterance,
+    history: spine.history.map(parseHistoryEntry),
+    targetUtterance: spine.targetUtterance,
     gold: parseDecision(raw.gold, "gold"),
-    bucket,
-    severity,
-    ...(corpus !== undefined ? { corpus } : {}),
-    ...(mode !== undefined ? { mode } : {}),
-    ...(cwd !== undefined ? { cwd } : {}),
-    ...(memoryContext !== undefined ? { memoryContext } : {}),
-    ...(raw.workingState !== undefined ? { workingState: raw.workingState as WorkingState } : {}),
-    ...(repoRulesText !== undefined ? { repoRulesText } : {}),
-    ...(Array.isArray(raw.contextChanges)
-      ? { contextChanges: raw.contextChanges.map(parseContextChange) }
-      : {}),
-    ...(stateContract !== undefined ? { stateContract: parseStateContract(stateContract) } : {}),
-    ...(candidateThreadIds !== undefined
-      ? {
-          candidateThreadIds: parseStringList(
-            candidateThreadIds,
-            "grounding case candidateThreadIds",
-          ),
-        }
-      : {}),
-    ...(candidateReferentIds !== undefined
-      ? {
-          candidateReferentIds: parseStringList(
-            candidateReferentIds,
-            "grounding case candidateReferentIds",
-          ),
-        }
-      : {}),
-    ...(ambiguityClass !== undefined ? { ambiguityClass } : {}),
-    ...(blockingEligible !== undefined ? { blockingEligible } : {}),
-    ...(raw.sourceProvenance !== undefined
-      ? { sourceProvenance: parseSourceProvenance(raw.sourceProvenance) }
-      : {}),
-    ...(raw.humanAudit !== undefined ? { humanAudit: parseHumanAudit(raw.humanAudit) } : {}),
-    ...(pairId !== undefined ? { pairId } : {}),
-    ...(pairRole !== undefined ? { pairRole } : {}),
+    bucket: spine.bucket,
+    severity: spine.severity,
+    ...caseDescriptorFields(raw, descriptors),
+    ...caseGroundingAidFields(raw, markers),
+    ...caseProvenanceFields(raw, markers),
   }
 }

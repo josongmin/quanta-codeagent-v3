@@ -293,3 +293,38 @@ describe("the -i include id matches the PINNED harbor filter contract", () => {
     for (const id of includes) expect(id).toMatch(/^[a-z0-9-]+\/[a-z0-9-]+$/)
   })
 })
+
+/**
+ * aug-22 audit — the receipt's credential line was PROVIDER-BLIND, the same
+ * defect the doctor's `credentials` check carried. With no env key present it
+ * printed "the run would have no provider credential"; for `chatgpt-oauth`,
+ * whose credential is an on-disk token bundle and which reads no env key at all,
+ * that is false — and it tells an operator with a working setup to abort the run
+ * they were about to make. The env-key providers keep the warning, because for
+ * them an empty list really does mean the run cannot authenticate.
+ */
+describe("dry-run receipt — the credential line is provider-aware", () => {
+  const receiptFor = (provider: string) =>
+    formatHarborDryRunReceipt(cmd(["--provider", provider]), {})
+
+  test("chatgpt-oauth: an empty env is the NORMAL state, not a missing credential", () => {
+    const receipt = receiptFor("chatgpt-oauth")
+    expect(receipt).toContain("on-disk token bundle")
+    expect(receipt).not.toContain("would have no provider credential")
+  })
+
+  test("PAIRED CONTROL — an env-key provider still warns", () => {
+    // openai only: this fixture requests `xhigh`, which the anthropic surface
+    // cannot deliver, and the config REFUSES that combination outright (a
+    // separate, correct rail) — so anthropic cannot be exercised from here.
+    expect(receiptFor("openai")).toContain("would have no provider credential")
+  })
+
+  test("a present env key is still listed by NAME with its value redacted", () => {
+    const receipt = formatHarborDryRunReceipt(cmd(["--provider", "openai"]), {
+      OPENAI_API_KEY: "sk-super-secret-value",
+    })
+    expect(receipt).toContain("OPENAI_API_KEY=<redacted>")
+    expect(receipt).not.toContain("sk-super-secret-value")
+  })
+})

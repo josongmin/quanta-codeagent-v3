@@ -18,7 +18,6 @@ import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 
 const stubLLM: LLMPort = {
   model: "test",
-  // biome-ignore lint/correctness/useYield: never iterated in this test
   async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
     yield { type: "message_stop", stop_reason: "end_turn" }
   },

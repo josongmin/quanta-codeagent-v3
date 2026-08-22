@@ -318,65 +318,61 @@ describe("jul-13 edit-fresh-hash CHAOS — seeded property (interleaved multi-fi
     let goodStaleViolations = 0 // GOOD op that wrongly went stale (fix broken under interleave)
     let badPassViolations = 0 // BAD op that wrongly passed (staleness not enforced)
 
-    try {
-      for (let op = 0; op < OPS; op++) {
-        const f = randInt(rng, FILE_COUNT)
-        const p = paths[f]!
-        const cur = version[f]!
-        const useStale = staleHash[f] !== undefined && rng() < 0.4
+    for (let op = 0; op < OPS; op++) {
+      const f = randInt(rng, FILE_COUNT)
+      const p = paths[f]!
+      const cur = version[f]!
+      const useStale = staleHash[f] !== undefined && rng() < 0.4
 
-        if (useStale) {
-          // BAD branch: a hash captured before an intervening edit to THIS file.
-          badOps++
-          const r = await run(
-            tool,
-            {
-              path: p,
-              old_string: `v = ${cur}`,
-              new_string: `v = ${cur + 1}`,
-              expected_hash: staleHash[f],
-            },
-            CWD,
-            true,
-          )
-          // INVARIANT (BAD direction): a stale hash ALWAYS rejects. The file must be
-          // UNTOUCHED (version unchanged), and staleHash stays armed for retry.
-          if (r.failure?.mode !== "stale_precondition") badPassViolations++
-          expect(r.ok).toBe(false)
-          expect(r.failure?.mode).toBe("stale_precondition")
-          expect(files.get(p)).toBe(`v = ${cur}`)
-        } else {
-          // GOOD branch: the file's CORRECT last-advertised hash.
-          goodOps++
-          const r = await run(
-            tool,
-            {
-              path: p,
-              old_string: `v = ${cur}`,
-              new_string: `v = ${cur + 1}`,
-              expected_hash: lastHash[f],
-            },
-            CWD,
-            true,
-          )
-          // INVARIANT (GOOD direction): the correct last-advertised hash NEVER stales.
-          if (r.failure?.mode === "stale_precondition") goodStaleViolations++
-          expect(r.ok).toBe(true)
-          expect(r.failure).toBeUndefined()
-          // The edit landed: bump version, capture the PRIOR lastHash as the new
-          // stale witness (it is now genuinely stale — an intervening edit occurred),
-          // and record the fresh hash as the new correct precondition.
-          staleHash[f] = lastHash[f]
-          version[f] = cur + 1
-          lastHash[f] = advertisedHash(r)
-          // Real-effect check: the advertised hash equals the digest of the file's
-          // actual current bytes (the chain never advertised a hash that would
-          // stale its own next same-file edit).
-          expect(lastHash[f]).toBe(sha256Hex(files.get(p) ?? ""))
-        }
+      if (useStale) {
+        // BAD branch: a hash captured before an intervening edit to THIS file.
+        badOps++
+        const r = await run(
+          tool,
+          {
+            path: p,
+            old_string: `v = ${cur}`,
+            new_string: `v = ${cur + 1}`,
+            expected_hash: staleHash[f],
+          },
+          CWD,
+          true,
+        )
+        // INVARIANT (BAD direction): a stale hash ALWAYS rejects. The file must be
+        // UNTOUCHED (version unchanged), and staleHash stays armed for retry.
+        if (r.failure?.mode !== "stale_precondition") badPassViolations++
+        expect(r.ok).toBe(false)
+        expect(r.failure?.mode).toBe("stale_precondition")
+        expect(files.get(p)).toBe(`v = ${cur}`)
+      } else {
+        // GOOD branch: the file's CORRECT last-advertised hash.
+        goodOps++
+        const r = await run(
+          tool,
+          {
+            path: p,
+            old_string: `v = ${cur}`,
+            new_string: `v = ${cur + 1}`,
+            expected_hash: lastHash[f],
+          },
+          CWD,
+          true,
+        )
+        // INVARIANT (GOOD direction): the correct last-advertised hash NEVER stales.
+        if (r.failure?.mode === "stale_precondition") goodStaleViolations++
+        expect(r.ok).toBe(true)
+        expect(r.failure).toBeUndefined()
+        // The edit landed: bump version, capture the PRIOR lastHash as the new
+        // stale witness (it is now genuinely stale — an intervening edit occurred),
+        // and record the fresh hash as the new correct precondition.
+        staleHash[f] = lastHash[f]
+        version[f] = cur + 1
+        lastHash[f] = advertisedHash(r)
+        // Real-effect check: the advertised hash equals the digest of the file's
+        // actual current bytes (the chain never advertised a hash that would
+        // stale its own next same-file edit).
+        expect(lastHash[f]).toBe(sha256Hex(files.get(p) ?? ""))
       }
-    } catch (e) {
-      throw e
     }
 
     // Both directions must have been EXERCISED (guards against a vacuous property:

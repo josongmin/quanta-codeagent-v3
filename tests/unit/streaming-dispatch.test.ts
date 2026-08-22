@@ -321,7 +321,6 @@ describe("streamingTurn #8 tool-input callback observability", () => {
       inputSchema: z.object({}).passthrough(),
       isReadOnly: () => false,
       isConcurrencySafe: () => false,
-      // biome-ignore lint/suspicious/useAwait: async generator contract
       execute: async function* () {},
       onInputStart: () => {
         throw new Error("inner-layer boom")

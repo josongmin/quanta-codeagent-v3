@@ -26,15 +26,11 @@
  * things only a live machine can answer.
  */
 
+import { quantaHomeDirFrom } from "@/shared"
 import { sliceWholeChars } from "@/shared/slice-whole-chars"
 import type { ReasoningEffortRecord, TerminalProvider, TerminalSandbox } from "./config"
 import { EXPECTED_TASK_COUNT, TERMINAL_BENCH_DATASET, TERMINAL_BENCH_DATASET_REF } from "./dataset"
-import {
-  ADAPTER_PROJECT,
-  CREDENTIAL_ENV_NAMES,
-  HARBOR_AGENT_SELECTOR,
-  isSecretEnvName,
-} from "./harbor-command"
+import { ADAPTER_PROJECT, HARBOR_AGENT_SELECTOR, isSecretEnvName } from "./harbor-command"
 
 export interface RunResult {
   readonly code: number
@@ -46,6 +42,10 @@ export interface DoctorPorts {
   readonly run: (bin: string, args: readonly string[]) => RunResult
   readonly env: NodeJS.ProcessEnv
   readonly canWriteDir: (path: string) => boolean
+  /** PRESENCE of a file, never its contents. Used for the `chatgpt-oauth` token
+   *  bundle: the doctor must be able to say "the credential is there" without
+   *  ever opening a file that holds a bearer token. */
+  readonly fileExists: (path: string) => boolean
 }
 
 export interface DoctorCheck {
@@ -173,16 +173,35 @@ const versionCheck = (
   ports: DoctorPorts,
   bin: string,
   args: readonly string[],
+  /** The command that fixes this check, for the FAILURE detail only. A
+   *  precondition gate that says "missing" without saying "run this" costs an
+   *  operator a source dive before every paid run. */
+  remedy?: string,
 ): DoctorCheck => {
   const r = ports.run(bin, args)
+  const probe = `${bin} failed: ${r.stderr || r.stdout}`
+  // The remedy goes FIRST. `bound` truncates at MAX_DETAIL, and a probe error
+  // ("Executable not found in $PATH: …") is easily long enough on its own to eat
+  // the whole budget — measured: appending the remedy rendered it as a bare "—…".
+  // The actionable half must be the half that survives; the probe text is the
+  // part an operator can lose without losing the fix.
+  const failure = remedy === undefined ? probe : `${remedy} · probe: ${probe}`
   return {
     id,
     required: true,
     ok: r.code === 0,
-    detail:
-      r.code === 0 ? bound(firstLine(r.stdout)) : bound(`${bin} failed: ${r.stderr || r.stdout}`),
+    detail: bound(r.code === 0 ? firstLine(r.stdout) : failure),
   }
 }
+
+/**
+ * Harbor launches the Python hands ON THE HOST, so the brain shim must be on the
+ * host's PATH. Until aug-22 the shim's only definition was inside the adapter
+ * Dockerfile, so no host had one and this check could not pass anywhere — the
+ * reason no 2.1 canary had ever started. Name the install command here so the
+ * next operator spends a second on it, not an afternoon.
+ */
+const BRAIN_SHIM_REMEDY = "run `bun run install:terminal-brain`"
 
 const SHA_RE = /^[0-9a-f]{7,40}$/
 
@@ -213,21 +232,67 @@ const checkRepo = (ports: DoctorPorts): readonly DoctorCheck[] => {
   ]
 }
 
-const checkCredentials = (ports: DoctorPorts): DoctorCheck => {
-  // PRESENCE ONLY. Values are never read into a detail, and the names are the
-  // documented minimum the adapter needs.
-  const present = CREDENTIAL_ENV_NAMES.filter((name) => {
-    const v = ports.env[name]
-    return typeof v === "string" && v.trim() !== ""
-  })
+/**
+ * WHERE each terminal provider's credential lives. Exhaustive
+ * `Record<TerminalProvider, …>`, so adding a provider is a compile error here
+ * rather than a silent fall-through to "any env key will do".
+ *
+ * aug-22 audit — this used to be one hardcoded list of three env names applied
+ * to every provider, and it was wrong in both directions against the real CLI:
+ *
+ *  - `--provider openai` with only `ANTHROPIC_API_KEY` set rendered `[ok]`. The
+ *    gate exists to answer "would a paid run be meaningful right now?" and it
+ *    greenlit a run that 401s on its first call — the jul-03 crater shape, where
+ *    a box dying on auth is indistinguishable from a model scoring zero.
+ *  - `--provider chatgpt-oauth` was REFUSED for lacking env keys that provider
+ *    never reads; its credential is the on-disk token bundle, and that is how
+ *    every other quanta bench path authenticates.
+ *
+ * The `kind` field is cross-checked against `PROVIDER_CREDENTIALS`
+ * (`@/llm/provider-metadata`, the credential-model SSOT) by `doctor.test.ts`, so
+ * this table cannot drift away from what the provider layer actually does.
+ */
+export const TERMINAL_CREDENTIAL_REQUIREMENT: Record<
+  TerminalProvider,
+  { readonly kind: "env"; readonly envName: string } | { readonly kind: "file" }
+> = {
+  openai: { kind: "env", envName: "OPENAI_API_KEY" },
+  anthropic: { kind: "env", envName: "ANTHROPIC_API_KEY" },
+  "chatgpt-oauth": { kind: "file" },
+}
+
+/** The token bundle `chatgpt-oauth` authenticates from, under the resolved
+ *  quanta home. Resolved from the INJECTED env, never a global singleton. */
+const chatgptBundlePath = (env: NodeJS.ProcessEnv): string =>
+  `${quantaHomeDirFrom(env as Record<string, string | undefined>)}/auth/chatgpt.json`
+
+const checkCredentials = (ports: DoctorPorts, provider: TerminalProvider): DoctorCheck => {
+  // PRESENCE ONLY, on every arm. No value is read into a detail, and the file
+  // arm stats the bundle rather than opening it.
+  const req = TERMINAL_CREDENTIAL_REQUIREMENT[provider]
+  if (req.kind === "file") {
+    const path = chatgptBundlePath(ports.env)
+    const ok = ports.fileExists(path)
+    return {
+      id: "credentials",
+      required: true,
+      ok,
+      detail: bound(
+        ok
+          ? `${provider}: token bundle present at ${path}`
+          : `${provider} authenticates from ${path}, which is absent — run \`quanta login\``,
+      ),
+    }
+  }
+  const raw = ports.env[req.envName]
+  const ok = typeof raw === "string" && raw.trim() !== ""
   return {
     id: "credentials",
     required: true,
-    ok: present.length > 0,
-    detail:
-      present.length > 0
-        ? `present (values redacted): ${present.join(", ")}`
-        : `none of ${CREDENTIAL_ENV_NAMES.join(", ")} is set`,
+    ok,
+    detail: ok
+      ? `present (value redacted): ${req.envName}`
+      : `${provider} needs ${req.envName}, which is not set`,
   }
 }
 
@@ -276,7 +341,7 @@ export const runTerminalDoctor = (ports: DoctorPorts, input: DoctorInput): Docto
         : bound(`daemon unreachable: ${dockerDaemon.stderr || dockerDaemon.stdout}`),
     },
     checkAgentImport(ports),
-    versionCheck("brain-shim", ports, brainCmd, ["--version"]),
+    versionCheck("brain-shim", ports, brainCmd, ["--version"], BRAIN_SHIM_REMEDY),
     {
       id: "dataset-identity",
       required: true,
@@ -285,7 +350,7 @@ export const runTerminalDoctor = (ports: DoctorPorts, input: DoctorInput): Docto
       detail: `${TERMINAL_BENCH_DATASET}@${TERMINAL_BENCH_DATASET_REF} (${EXPECTED_TASK_COUNT} tasks)`,
     },
     checkSandbox(input.sandbox, dockerDaemonOk),
-    checkCredentials(ports),
+    checkCredentials(ports, input.provider),
     {
       id: "model-effort",
       required: true,

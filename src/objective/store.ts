@@ -534,7 +534,11 @@ export const createObjectiveCoreStore = (opts?: {
           met: c.met,
           checkId: c.kind === "checked" && c.check !== undefined ? c.check.id : null,
         }
-      } catch {
+      } catch (e) {
+        // NO-THROW contract preserved (still `null`) — but a read fault that
+        // reads as "no such criterion" would make a checked criterion look
+        // absent instead of unreadable.
+        logger.warn(`objective.getCriterion: ${errMessage(e)}`)
         return null
       }
     },

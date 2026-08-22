@@ -40,7 +40,6 @@ const noopTool = defineTool<z.infer<typeof noopSchema>>({
   inputSchema: noopSchema,
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
-  // biome-ignore lint/correctness/useYield: single-result generator
   async *execute() {
     yield { type: "result", result: { ok: true, output: "ok" } } as const
   },

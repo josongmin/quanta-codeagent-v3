@@ -3,7 +3,7 @@ title: Health snapshot watcher — periodic re-emit + SIGHUP hot-reload (3-chann
 section: 8
 subsystem: 관측성 — operator-facing file refresh layering
 order: 99
-maturity: L3
+maturity: L2
 status: stable
 ui_surfaces: [cli]
 monitoring: integrated
@@ -51,7 +51,26 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    Default-OFF and, verified 2026-08-22, unhosted at BOTH layers. The notes already
+    said "composition root (withFullObservability) does NOT attach the watcher
+    automatically" — the audit found the layer below is unhosted too:
+    `src/observability/metrics/observability-helper.ts` (which owns
+    `withFullObservability` and is the only importer of `health-snapshot.ts`) has
+    ZERO importers in `src/`, so both evidence files are unreachable from every
+    `src/apps/<surface>/index.ts`. The 3-channel refresh mechanism (interval +
+    SIGHUP + emitNow) is finished and hellgate-covered; what is missing is any
+    process that starts it.
+  promotion_path: |
+    L3 = a long-running host (the web daemon or the CLI's daemon mode) calls
+    `withFullObservability({ healthSnapshotPath })` from its composition root AND
+    `startHealthSnapshotWatcher(...)`, making
+    `src/observability/metrics/health-snapshot{,-watcher}.ts` reachable from an app
+    entrypoint. Wiring the watcher alone is not enough — the ADR-0180 primitive under
+    it must be hosted first.
+    `bun fc reachability --strict --symbols` is the objective judge: this id must
+    drop off the offender list on its own, with NO baseline edit.
 notes: |
   Default-OFF — composition root (withFullObservability) does NOT attach the
   watcher automatically; callers must invoke startHealthSnapshotWatcher()
@@ -62,3 +81,8 @@ notes: |
   process.on("SIGHUP")) only when test seams (setInterval, onSignal) are
   absent — production path. Follow-up: byte-identical write skip, snapshot
   rotation, composition-root auto-attach opt.
+
+  Maturity was L3 until 2026-08-22 (`status: stable`, `deliberate_hold: null`).
+  `monitoring: integrated` was likewise reading as "an operator can scrape this
+  today"; with no host attaching the watcher, L2 + an explicit hold is the honest
+  state. No code changed.

@@ -118,7 +118,6 @@ const RESOLVED_DIST_DIR: string | null = (() => {
     try {
       // Bun.file is lazy — check the index sentinel.
       const path = c.endsWith("/") ? `${c}index.html` : `${c}/index.html`
-      // biome-ignore lint/style/noNonNullAssertion: presence-only probe
       const file = Bun.file(path)
       // Bun.file.size === 0 on miss; > 0 means it exists with content.
       // We don't await stat: `existsSync` is sync and well-defined here.

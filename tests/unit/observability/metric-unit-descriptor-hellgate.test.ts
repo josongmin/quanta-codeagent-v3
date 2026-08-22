@@ -174,7 +174,6 @@ describe("T-C1 metric unit/description on the OTLP wire", () => {
         name: "read_image",
         description: "d",
         schema: { type: "object" as const },
-        // biome-ignore lint/suspicious/useAwait: async generator stub for the wrapper.
         async *execute() {
           yield { type: "result" as const, result: { ok: true as const, value: "ok" } }
         },

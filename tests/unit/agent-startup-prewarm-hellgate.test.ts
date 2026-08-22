@@ -37,7 +37,6 @@ import { Metrics } from "@/observability"
 
 // A bare LLMPort with NO prewarm capability.
 const bareLlm = (): LLMPort => ({
-  // biome-ignore lint/correctness/useYield: empty stub stream, never consumed
   stream: async function* (_input: StreamInput): AsyncIterable<StreamEvent> {
     /* never called in these tests */
   },

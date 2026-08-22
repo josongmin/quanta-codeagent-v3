@@ -198,7 +198,6 @@ export const parseTestFailureTool: Tool<Input> = {
   isReadOnly: () => true,
   isConcurrencySafe: () => true,
 
-  // biome-ignore lint/correctness/useYield: single-result generator (pure parse, no progress)
   async *execute(input: Input, _ctx: ToolContext): AsyncIterable<ToolEvent> {
     const frames = parseTestFailure(input.output, input.max_results ?? DEFAULT_MAX)
     yield { type: "result", result: { ok: true, output: render(frames) } }

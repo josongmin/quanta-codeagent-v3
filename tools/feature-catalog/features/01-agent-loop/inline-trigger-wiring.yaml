@@ -3,7 +3,7 @@ title: Inline-trigger watcher — Aider-style source-comment dispatch primitive
 section: 1
 subsystem: Playbook trigger primitive (ADR-0250)
 order: 250
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: n-a
@@ -45,8 +45,27 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    Seam-only by construction, and the purpose text says so ("Default-OFF — no host
+    wires it yet"). Verified 2026-08-22: `grep -rn "skill/playbook/trigger" src/`
+    outside the slice returns ZERO hits, so all seven evidence files are unreachable
+    from every `src/apps/<surface>/index.ts`. The hold is deliberate: this primitive
+    starts `node:fs.watch` recursion over caller-supplied roots, and which roots a
+    host may watch (repo only? worktree? home?) is a permission/ownership decision
+    owned by the host, not by the primitive.
+  promotion_path: |
+    L3 = a host (status-flash loop, REPL side-conversation, or the playbook runner)
+    constructs the fs-watch adapter with an explicit, permission-checked root list
+    from a composition root, making `src/skill/playbook/trigger/*` reachable from an
+    app entrypoint.
+    `bun fc reachability --strict --symbols` is the objective judge: this id must
+    drop off the offender list on its own, with NO baseline edit.
 notes: |
   Why fs.watch and not chokidar: install is blocked in this environment
   (verify-workflow memory). The port surface is unchanged so the swap to
   chokidar is a one-file body change if installs unblock.
+
+  Maturity was L3 until 2026-08-22 (`deliberate_hold: null` while the purpose text
+  said "no host wires it yet" — a self-contradiction the L3 reachability floor
+  caught). Corrected to L2 + explicit hold; no code changed.

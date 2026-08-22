@@ -407,7 +407,11 @@ const collectReferences = async (
   const paths = [
     ...(data.referenceImagePath !== undefined ? [data.referenceImagePath] : []),
     ...(data.referenceImagePaths ?? []),
-  ].filter((p) => (seen.has(p) ? false : (seen.add(p), true)))
+  ].filter((p) => {
+    if (seen.has(p)) return false
+    seen.add(p)
+    return true
+  })
   if (paths.length === 0) return { kind: "ok", refs: [] }
   const refs: GeneratedImage[] = []
   for (const p of paths) {

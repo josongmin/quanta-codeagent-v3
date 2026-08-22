@@ -3,7 +3,7 @@ title: N-phase HITL state machine (plan-exit-flow 일반화)
 section: 1
 subsystem: N-phase HITL workflow (ADR-0243; Cursor 흡수)
 order: 243
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [cli, ide]
 monitoring: n-a
@@ -44,13 +44,27 @@ evidence:
 knobs: []
 deliberate_hold:
   reason: |
-    AgentConfig 와이어는 의도적 보류 — 첫 호스트(CLI repl 또는 IDE)가 driver를
-    소비할 때 별도 ADR로 와이어. default-OFF 보존.
+    AgentConfig wire deliberately held: the first host (CLI repl or IDE) wires the
+    driver under its own ADR, and `plan-exit{,-flow}` stays byte-identical meanwhile.
+    Verified 2026-08-22: `grep -rn "agent/n-phase" src/` outside the slice returns
+    ZERO hits, so all four evidence files are unreachable from every
+    `src/apps/<surface>/index.ts`. The hold is real — an N-phase gate that blocks on
+    per-phase human feedback needs a host that owns an approval surface, and picking
+    that surface (CLI prompt vs IDE panel) is the deferred decision.
   promotion_path: |
-    Documented in ADR; wire when ROI concrete.
+    L3 = a host constructs `NPhaseDriver` at a composition root and routes its
+    per-phase feedback gate through an existing approval surface, making
+    `src/agent/n-phase/*` reachable from an app entrypoint. Until then the wired
+    3-way `plan-exit` remains the shipped path.
+    `bun fc reachability --strict --symbols` is the objective judge: this id must
+    drop off the offender list on its own, with NO baseline edit.
 notes: |
   exactOptionalPropertyTypes: OMIT 준수 (선택 필드는 부재; undefined로 명시
   set 안 함). 15 HELL-NP-01..15 hellgate가 모든 closed-error code 도달성 +
   files_to_modify[] context 보존 + 1000-phase 결정성 + module side-effect 0를
   잠금. depth=1 nested MVP는 inner driver 호스팅을 잠그지만 N-level recursive
   composition은 후속 작업.
+
+  Maturity was L3 until 2026-08-22. The hold ("AgentConfig 와이어는 의도적 보류")
+  already described an unwired slice while the maturity tag claimed L3 = wired;
+  the L3 reachability floor forced the two into agreement. No code changed.

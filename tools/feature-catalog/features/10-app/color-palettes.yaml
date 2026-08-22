@@ -3,7 +3,7 @@ title: Colorblind-safe color palettes (Okabe-Ito CUD SSOT)
 section: 10
 subsystem: Surface-agnostic UI helpers (theming data SSOT)
 order: 97
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [cli]
 monitoring: n-a
@@ -78,3 +78,11 @@ notes: |
   frozen drift-guard list the unit test asserts against. Distinct entry from
   color-policy-resolver (which owns the ANSI on/off cache); this owns the hue
   data. ADR policy for this lane = none, so adrs is empty.
+
+  Maturity was L3 until 2026-08-22. The existing deliberate_hold already stated the
+  true state ("no live production consumer at the RENDER call-site"), but the
+  maturity tag still claimed L3 = "wired, with tests" — a contradiction the L3
+  reachability floor caught (`src/apps/cli/color-palettes.ts` is unreachable from
+  `src/apps/cli/index.ts`; only the unit test + the drift guard import
+  `getColorPalette`). Corrected to L2 so the tag matches the hold. The theme-STRING
+  half stays live and drift-guarded; only the hex-palette resolver is unwired.

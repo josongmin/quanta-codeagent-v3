@@ -22,7 +22,7 @@ import {
   toCustomPatch,
 } from "../../../../src/permission/posture/presets"
 import type { PosturePatch } from "../../../../src/permission/posture/types"
-import { allCompleteRecords, DISTINCT_BASE } from "./fixtures"
+import { allCompleteRecords, DISTINCT_BASE, nthCompleteRecord } from "./fixtures"
 
 const RECORDS = allCompleteRecords()
 
@@ -103,7 +103,7 @@ describe("applyPatch — arbitrary partial patches preserve omitted fields (RED 
   })
 
   test("a patched askOutsidePlan:false wins over a base of true (?? not ||)", () => {
-    const base = { ...RECORDS[0]!, askOutsidePlan: true }
+    const base = { ...nthCompleteRecord(0), askOutsidePlan: true }
     expect(applyPatch(base, { askOutsidePlan: false }).askOutsidePlan).toBe(false)
   })
 })

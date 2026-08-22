@@ -136,7 +136,6 @@ const WORKER_GLYPHS = ["🟦", "🟥", "🟪", "🟨", "🟩", "🟧", "⬛", "�
  *  so a raw `\r` (line overwrite), ANSI/C0 control, or bidi-override could FORGE
  *  banner lines / corrupt scrollback. Drop every C0 control (incl CR/ESC/tab)
  *  and the Unicode bidi-override range before display. */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately matching control chars to STRIP them
 const stripBannerUnsafe = (s: string): string =>
   // biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately matches control + bidi chars to strip them.
   s.replace(/[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]/g, "")

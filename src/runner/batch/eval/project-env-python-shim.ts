@@ -57,7 +57,6 @@ export const installProjectEnvPythonShim = async (
   // active venv, else the same name with our shim dir stripped from PATH. This
   // breaks the recursion AND skips the expensive `--with-editable .` rebuild per
   // subprocess. The behaviour is pinned by the shim hellgate test.
-  // biome-ignore lint/suspicious/noTemplateCurlyInString: these `${…}` are bash
   // parameter expansions in a GENERATED shell script, not JS template literals.
   const body = [
     "#!/usr/bin/env bash",

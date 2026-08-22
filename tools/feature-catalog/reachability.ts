@@ -28,28 +28,81 @@ import { dirname, join, relative, resolve } from "node:path"
 const REPO_ROOT = resolve(import.meta.dir, "..", "..")
 const SRC = join(REPO_ROOT, "src")
 
-/** Production entrypoints — EVERY shipped surface's root module, auto-
- *  discovered as `src/apps/<surface>/index.ts`. A feature is "wired" iff
- *  reachable from at least one. Auto-discovery (vs a hand list) is what fixes
- *  the agent audit's false positives — apps/bench, apps/eval, apps/probe,
- *  apps/headless are ALL real surfaces and must seed the closure. */
+// `bun run <src/…>.ts` inside a package.json script — the LAUNCH form. Matches
+// `bun run x.ts`, `bun --hot run x.ts`, and any env-prefixed variant
+// (`FOO=1 bun run x.ts`). Deliberately does NOT match `bun build <file>` — a
+// bundler input is not a process entrypoint, and treating it as one would mark
+// a whole un-launched surface "reached" (the false-negative direction).
+const PKG_RUN_SPEC_RE = /\bbun\s+(?:-{1,2}[\w-]+(?:=\S+)?\s+)*run\s+(src\/[\w./-]+\.ts)\b/g
+
+/** Every `src/**.ts` that a package.json script actually LAUNCHES. Data-derived
+ *  (no hand list): the repo's own script table is the SSOT for "what does this
+ *  repo execute". This is what the `<surface>/index.ts` naming convention alone
+ *  cannot see — e.g. `"bench": "bun run src/apps/bench/cli.ts"` is the real
+ *  `bun run bench` entry (subcommand dispatcher for analyze / grade / terminal /
+ *  pool), a sibling of `src/apps/bench/index.ts` rather than a module under it.
+ *  Missing/malformed package.json ⇒ empty (falls back to index.ts discovery). */
+const packageJsonEntrypoints = async (): Promise<string[]> => {
+  let scripts: Record<string, unknown>
+  try {
+    const raw = JSON.parse(await readFile(join(REPO_ROOT, "package.json"), "utf8")) as {
+      scripts?: Record<string, unknown>
+    }
+    scripts = raw.scripts ?? {}
+  } catch {
+    return []
+  }
+  const out = new Set<string>()
+  for (const cmd of Object.values(scripts)) {
+    if (typeof cmd !== "string") continue
+    PKG_RUN_SPEC_RE.lastIndex = 0
+    let m = PKG_RUN_SPEC_RE.exec(cmd)
+    while (m !== null) {
+      out.add(m[1] as string)
+      m = PKG_RUN_SPEC_RE.exec(cmd)
+    }
+  }
+  const existing: string[] = []
+  for (const p of out) {
+    try {
+      if ((await stat(join(REPO_ROOT, p))).isFile()) existing.push(p)
+    } catch {
+      /* script points at a deleted path — ignore */
+    }
+  }
+  return existing
+}
+
+/** Production entrypoints — EVERY shipped surface's root module. Two
+ *  data-derived sources, unioned (never a hand list):
+ *    1. `src/apps/<surface>/index.ts` — the naming convention. This is what
+ *       fixes the agent audit's false positives: apps/bench, apps/eval,
+ *       apps/probe, apps/headless are ALL real surfaces and must seed.
+ *    2. every `src/**.ts` a package.json script LAUNCHES (`bun run …`) — the
+ *       convention's blind spot. `bun run bench` boots
+ *       `src/apps/bench/cli.ts`, NOT `index.ts`, so without this source the
+ *       whole bench subcommand tree (analyze / leaderboard / grade / terminal /
+ *       remote / auth-pool, 70 files) reads as UNREACHABLE and every feature
+ *       resting on it looks like a maturity overclaim when it is in fact live.
+ *  A feature is "wired" iff reachable from at least one. */
 const discoverEntrypoints = async (): Promise<string[]> => {
-  const out: string[] = []
-  let apps: string[]
+  const out = new Set<string>()
+  let apps: string[] = []
   try {
     apps = await readdir(join(SRC, "apps"))
   } catch {
-    return out
+    /* no apps dir — package.json entries may still seed */
   }
   for (const app of apps) {
     const idx = join(SRC, "apps", app, "index.ts")
     try {
-      if ((await stat(idx)).isFile()) out.push(relative(REPO_ROOT, idx))
+      if ((await stat(idx)).isFile()) out.add(relative(REPO_ROOT, idx))
     } catch {
       /* no index */
     }
   }
-  return out
+  for (const p of await packageJsonEntrypoints()) out.add(p)
+  return [...out].sort()
 }
 
 const isSkipped = (name: string): boolean =>

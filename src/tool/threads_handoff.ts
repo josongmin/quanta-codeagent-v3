@@ -52,7 +52,6 @@ export const threadsHandoffTool = (): Tool<Input> =>
     // Read-only: emits a link, mutates nothing.
     isReadOnly: () => true,
     isConcurrencySafe: () => true,
-    // biome-ignore lint/correctness/useYield: single-result generator by design.
     async *execute(input: Input): AsyncIterable<ToolEvent> {
       const deeplink = buildThreadDeeplink(input.threadId)
       const output =

@@ -3,7 +3,7 @@ title: ModelTag invalidator auto-hook — EmbedCache + VectorStore registrar (AD
 section: 4
 subsystem: retrieval — embedder swap → cache + store auto-invalidate seam
 order: 273
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [cli]
 monitoring: integrated
@@ -62,16 +62,20 @@ knobs:
     purpose: '(invalidator) idempotent disposal thunk; second call is no-op'
 deliberate_hold:
   reason: |
-    The slice attaches duck-typed `CacheLike` / `StoreLike` to the
-    invalidator registry. Concrete bulk-purge wiring for stores that
-    need delete-by-filter (i.e. delete every doc tagged with the old
-    modelTag) is left to the store implementation — the store registers
-    its own `InvalidationCallback` directly via
-    `registerInvalidationCallback(...)`. This is consistent with ADR-0266's
-    "consumer owns the wiring" posture and avoids leaking store layout
-    into the registrar.
+    Existing reason (store-owned bulk-purge wiring deferred to the store) still holds,
+    and the audit adds the sharper fact: verified 2026-08-22, `grep -rn
+    "retrieval/auto-hook" src/` outside the slice returns ZERO hits, so all four
+    evidence files are unreachable from every `src/apps/<surface>/index.ts`. The
+    registrar's whole job is to be called from a composition root; none calls it.
+    Its dependency `model-tag-versioning` is unwired for the same reason, so this
+    slice cannot become live before that one does.
   promotion_path: |
-    Documented in ADR; wire when ROI concrete.
+    L3 = a retrieval composition root calls `installAll(invalidator)` with a real
+    cache + store, making `src/retrieval/auto-hook/*` reachable from an app
+    entrypoint. Strictly ordered AFTER `model-tag-versioning` reaches L3 — an
+    auto-hook onto an unhosted invalidator is still dead.
+    `bun fc reachability --strict --symbols` is the objective judge: this id must
+    drop off the offender list on its own, with NO baseline edit.
 notes: |
   Hellgate 12 cases (HELL-AH-01..HELL-AH-12) cover registration → fire
   flow for cache, store, and both; callback isolation when one hook
@@ -81,3 +85,8 @@ notes: |
   closed exhaustive switch. `exactOptionalPropertyTypes` is intentionally
   omitted on `AutoHookRegistrarOptions` for ergonomic literal `{}`
   call-sites.
+
+  Maturity was L3 until 2026-08-22; the L3 reachability floor showed zero
+  production importers, so L2 (mechanism built + hellgate-covered, host edge
+  deferred) is the honest tier. `monitoring: integrated` describes the warn/error
+  hooks the slice EXPOSES, not a live monitored path. No code changed.

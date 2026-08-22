@@ -24,14 +24,39 @@ const resultOf = async (it: AsyncIterable<ToolEvent>) => {
 const fakePrompter = (calls: string[]): ElicitationPrompter => {
   const ok = <T>(value: T): Promise<ElicitationResult<T>> => Promise.resolve({ ok: true, value })
   return {
-    promptString: (r) => (calls.push("string"), ok(`s:${r.prompt}`)),
-    promptNumber: () => (calls.push("number"), ok(42)),
-    promptInteger: () => (calls.push("integer"), ok(7)),
-    promptBoolean: () => (calls.push("boolean"), ok(true)),
-    promptEnum: (r) => (calls.push("enum"), ok(r.options[0] as string)),
-    promptMultiEnum: (r) => (calls.push("multiEnum"), ok([r.options[0] as string])),
-    promptSingleEnum: () => (calls.push("singleEnum"), ok("x")),
-    promptUrl: (r) => (calls.push("url"), ok(r.url)),
+    promptString: (r) => {
+      calls.push("string")
+
+      return ok(`s:${r.prompt}`)
+    },
+    promptNumber: () => {
+      calls.push("number")
+      return ok(42)
+    },
+    promptInteger: () => {
+      calls.push("integer")
+      return ok(7)
+    },
+    promptBoolean: () => {
+      calls.push("boolean")
+      return ok(true)
+    },
+    promptEnum: (r) => {
+      calls.push("enum")
+      return ok(r.options[0] as string)
+    },
+    promptMultiEnum: (r) => {
+      calls.push("multiEnum")
+      return ok([r.options[0] as string])
+    },
+    promptSingleEnum: () => {
+      calls.push("singleEnum")
+      return ok("x")
+    },
+    promptUrl: (r) => {
+      calls.push("url")
+      return ok(r.url)
+    },
   }
 }
 

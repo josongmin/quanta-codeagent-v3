@@ -33,7 +33,6 @@ const knownLeafId = allLeaves()[0]?.id ?? "software-quality.debugging.error-mess
 
 const scriptedLLM = (text: string): LLMPort => ({
   model: "test",
-  // biome-ignore lint/correctness/useYield: yields a scripted sequence
   async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
     yield { type: "text_delta", delta: text }
     yield { type: "message_stop", stop_reason: "end_turn" }

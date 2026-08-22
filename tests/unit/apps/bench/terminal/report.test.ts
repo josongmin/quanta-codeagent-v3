@@ -205,7 +205,8 @@ describe("TB21-04 — one receipt per distinct trial id (the fold is gone)", () 
 })
 
 describe("TB21-04 — outcome taxonomy", () => {
-  test("the taxonomy declares every kind the ticket requires", () => {
+  test("the taxonomy declares every kind the ticket requires, and nothing unaccounted for", () => {
+    // TB21-04's eight.
     const required: readonly TerminalTrialOutcome[] = [
       "agent_crash",
       "agent_timeout",
@@ -216,7 +217,18 @@ describe("TB21-04 — outcome taxonomy", () => {
       "missing_reward",
       "verifier_error",
     ]
-    expect([...TERMINAL_TRIAL_OUTCOMES].sort()).toEqual([...required].sort())
+    // Deliberate ADDITIONS beyond the ticket, each recorded here so the set stays
+    // EXACT: an accidental new kind still fails this rail, while an intended one
+    // has to be justified in writing at the point it is admitted.
+    //
+    //  - `no_agent_activity` (aug-22): a trial the agent never attempted. Harbor
+    //    reports it as completed, exception-free, reward 0, with every token
+    //    counter null; folding it into `graded_fail` scored a measurement hole as
+    //    a capability result. Found by the first live 2.1 canary.
+    const admittedAdditions: readonly TerminalTrialOutcome[] = ["no_agent_activity"]
+
+    expect([...TERMINAL_TRIAL_OUTCOMES].sort()).toEqual([...required, ...admittedAdditions].sort())
+    for (const kind of required) expect(TERMINAL_TRIAL_OUTCOMES).toContain(kind)
   })
 
   test("real harbor exception types classify without directory-name heuristics", () => {
@@ -610,5 +622,143 @@ describe("TB21-04 — report identity", () => {
     expect(report.defects.length).toBe(1)
     expect(report.admission.complete).toBe(false)
     expect(report.trials.length).toBe(15)
+  })
+})
+
+/**
+ * MEASURED aug-22, the first two live canaries — the SILENT ZERO.
+ *
+ * The first run's brain never launched (a shim bug). Harbor reported the trial
+ * as completed with `exception_info: null` and `reward: 0.0`, and every token
+ * counter `null`. Fed through this pipeline it came out as:
+ *
+ *     outcomes {graded_fail: 1}   accuracy 0.0%   defects []
+ *
+ * i.e. byte-identical to a model that attempted the task and failed. That is the
+ * confound this repo has been bitten by before (jun-20 throttle/miss, jul-03
+ * auth crash read as 0/89): a measurement hole scored as a capability result.
+ *
+ * The discriminator is on the receipt already and was simply never consulted.
+ * The second, WORKING canary reported 51 175 input / 4 742 output tokens; the
+ * dead one reported `null` for all three counters. An agent that issued no model
+ * call did not attempt the task.
+ *
+ * The rule is deliberately narrow: only a NON-passing, exception-free trial with
+ * NO token telemetry at all is reclassified. A pass is never demoted, and a
+ * failure that shows real token spend stays a real failure.
+ */
+describe("no_agent_activity — a trial the agent never attempted is not a model miss", () => {
+  const trialDir = (
+    root: string,
+    name: string,
+    agentResult: Record<string, unknown>,
+    reward: number,
+  ) => {
+    const dir = join(root, name)
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, "result.json"),
+      JSON.stringify({
+        id: `id-${name}`,
+        trial_name: name,
+        task_name: "terminal-bench/openssl-selfsigned-cert",
+        task_id: { org: "terminal-bench", name: "openssl-selfsigned-cert", ref: "sha256:aa" },
+        source: "terminal-bench/terminal-bench-2-1",
+        config: { task: { ref: "sha256:aa" } },
+        agent_info: { name: "quanta", version: "1.0.0+gabc.dirty" },
+        agent_result: agentResult,
+        verifier_result: { rewards: { reward } },
+        exception_info: null,
+        started_at: "2026-08-22T11:39:09.000000",
+        finished_at: "2026-08-22T11:39:31.000000",
+      }),
+    )
+    return dir
+  }
+
+  /** The dead canary's shape, verbatim: no exception, reward 0, no telemetry. */
+  const DEAD_AGENT_RESULT = {
+    n_input_tokens: null,
+    n_cache_tokens: null,
+    n_output_tokens: null,
+    cost_usd: null,
+  }
+  /** The green canary's shape. */
+  const LIVE_AGENT_RESULT = {
+    n_input_tokens: 51175,
+    n_cache_tokens: 0,
+    n_output_tokens: 4742,
+    cost_usd: 0,
+  }
+
+  const outcomeOf = (agentResult: Record<string, unknown>, reward: number) => {
+    const root = mkdtempSync(join(tmpdir(), "tb-activity-"))
+    try {
+      trialDir(root, "openssl-selfsigned-cert__x", agentResult, reward)
+      const parsed = scanHarborJobDir(root).map((f) => parseHarborTrialResult(f))
+      const records = parsed.filter((p): p is TerminalTrialRecord => !isTrialDefect(p))
+      expect(records.length).toBe(1)
+      return records[0]?.outcome
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  }
+
+  test("a failing trial with NO token telemetry is not counted as a model failure", () => {
+    expect(outcomeOf(DEAD_AGENT_RESULT, 0)).toBe("no_agent_activity")
+  })
+
+  test("PAIRED CONTROL — a failing trial WITH real token spend stays a model failure", () => {
+    expect(outcomeOf(LIVE_AGENT_RESULT, 0)).toBe("graded_fail")
+  })
+
+  test("PAIRED CONTROL — a PASS is never demoted, telemetry or not", () => {
+    expect(outcomeOf(LIVE_AGENT_RESULT, 1)).toBe("graded_pass")
+    expect(outcomeOf(DEAD_AGENT_RESULT, 1)).toBe("graded_pass")
+  })
+
+  test("partial telemetry still counts as an attempt (only a TOTAL absence reclassifies)", () => {
+    expect(outcomeOf({ ...DEAD_AGENT_RESULT, n_output_tokens: 12 }, 0)).toBe("graded_fail")
+    expect(outcomeOf({ ...DEAD_AGENT_RESULT, n_input_tokens: 5 }, 0)).toBe("graded_fail")
+  })
+
+  test("the new outcome is part of the closed taxonomy the report tallies", () => {
+    expect(TERMINAL_TRIAL_OUTCOMES).toContain("no_agent_activity")
+  })
+})
+
+/**
+ * A classification nobody acts on is decoration. `missing_reward` and
+ * `malformed_result` both make a run INCOMPLETE and name themselves in the
+ * admission reasons, because neither is a scoreable model result. A trial the
+ * agent never attempted is the same class of thing — and is the one that can
+ * silently pass for a full campaign, since Harbor reports it as a normal
+ * completed trial.
+ */
+describe("admission — a run containing unattempted trials cannot be called complete", () => {
+  const trialWith = (
+    over: Partial<TerminalTrialRecord> & Pick<TerminalTrialRecord, "outcome">,
+    i: number,
+  ): TerminalTrialRecord => {
+    const base = canaryTrials()[0]
+    if (base === undefined) throw new Error("fixture has no trials")
+    return {
+      ...base,
+      trialId: `synthetic-${i}`,
+      trialName: `synthetic-${i}`,
+      ...over,
+    }
+  }
+
+  test("it names itself in the admission reasons and blocks `complete`", () => {
+    const report = buildFrom([trialWith({ outcome: "no_agent_activity", reward: 0 }, 1)])
+    expect(report.admission.reasons.some((r) => r.startsWith("no-agent-activity:"))).toBe(true)
+    expect(report.admission.complete).toBe(false)
+    expect(report.admission.promotable).toBe(false)
+  })
+
+  test("PAIRED CONTROL — a run with no such trial does not name the reason", () => {
+    const report = buildFrom([trialWith({ outcome: "graded_fail", reward: 0 }, 2)])
+    expect(report.admission.reasons.some((r) => r.startsWith("no-agent-activity:"))).toBe(false)
   })
 })

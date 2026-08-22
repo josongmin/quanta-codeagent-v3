@@ -20,7 +20,7 @@
  * INJECTED port so tests can prove the gate without ever spending, and the
  * doctor gate is checked BEFORE the port is called.
  */
-import { accessSync, constants, existsSync, readFileSync } from "node:fs"
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { writeReport } from "@/runner/batch/report"
 import { errMessage, logger } from "@/shared"
@@ -88,6 +88,10 @@ export interface CmdTerminalDeps {
   /** The doctor's subprocess port. */
   readonly doctorRun?: DoctorPorts["run"]
   readonly canWriteDir?: (path: string) => boolean
+  readonly fileExists?: (path: string) => boolean
+  /** Persist a text file (the run manifest). Injected so the handoff is
+   *  provable without touching the filesystem. */
+  readonly writeFile?: (path: string, text: string) => void
   readonly readText?: (path: string) => string
   readonly now?: () => string
 }
@@ -188,10 +192,19 @@ const readProvenance = (
   return { packageVersion: pkg.version, sha, dirty: status.stdout.trim() !== "" }
 }
 
+/** Default manifest sink: create the output root if needed, then write. */
+const defaultWriteFile = (path: string, text: string): void => {
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, text, "utf8")
+}
+
 const doctorPorts = (deps: CmdTerminalDeps, env: NodeJS.ProcessEnv): DoctorPorts => ({
   run: deps.doctorRun ?? spawnSyncText,
   env,
   canWriteDir: deps.canWriteDir ?? defaultCanWriteDir,
+  // PRESENCE only — the credential check stats the chatgpt-oauth token bundle
+  // and must never open it.
+  fileExists: deps.fileExists ?? ((path: string) => existsSync(path)),
 })
 
 const buildManifestFor = (
@@ -281,6 +294,22 @@ const actionRun = (
   }
 
   write(formatHarborDryRunReceipt(command, env))
+
+  // THE HANDOFF. `terminal report` takes `--manifest <run-manifest.json>` as its
+  // authority for the dataset ref, agent version, effort decision, knob set and
+  // promotion blockers. Until aug-22 this manifest lived only in memory, so after
+  // a real run the last hop of the pipeline had no input at all — each half was
+  // only ever tested against a hand-built fixture, so nothing noticed.
+  //
+  // Written BEFORE the spawn on purpose: a harbor job that dies halfway is
+  // precisely when an operator needs to know what was launched.
+  const manifestPath = join(
+    cfg.outputRoot,
+    `run-manifest-${manifest.timestamp.replace(/[:.]/g, "-")}.json`,
+  )
+  ;(deps.writeFile ?? defaultWriteFile)(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`)
+  write(`  run manifest      ${manifestPath}`)
+
   return (deps.spawnHarbor ?? defaultSpawnHarbor)(command.bin, command.argv, env)
 }
 

@@ -50,12 +50,15 @@ jobs:
         # (CI linted the gitignored `.js` mirror artifacts the wrapper skips,
         # so `bun run lint` was green on files CI failed on, and vice versa).
         run: bun run lint
-      - name: cognitive-complexity ceiling (one-directional)
-        # biome declares maxAllowedComplexity=15 at level WARN, and `biome check`
-        # exits 0 on warnings — so the rule gates nothing on its own. This step
-        # is the actual gate: repo-wide over-threshold COUNT + WORST score are
-        # pinned in tools/dev/complexity-ceiling.json and may only go DOWN.
-        run: bun run lint:complexity
+      - name: lint-debt ceiling (per-rule, one-directional, closed universe)
+        # `biome check` exits 0 on WARN-level diagnostics, so every warn rule
+        # (noNonNullAssertion, noExcessiveCognitiveComplexity, noConsole, …)
+        # gates nothing on its own — ~1200 had piled up unnoticed. This step is
+        # the gate: per-rule counts + the worst cognitive-complexity score are
+        # pinned in tools/dev/lint-debt-ceiling.json and may only go DOWN, and a
+        # rule that fires while ABSENT from that file fails as "unpinned" so a
+        # biome upgrade / newly-enabled rule cannot add debt silently.
+        run: bun run lint:debt
       - name: unit
         run: bun test tests/unit --reporter=junit --reporter-outfile=.cache/unit-junit.xml
       - name: unit speed budget (slowest single test, one-directional)

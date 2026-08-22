@@ -60,7 +60,6 @@ const fakeLlm = {
  *  record). Yields one text delta + a stop so a real interaction is captured. */
 const streamingFakeLlm = {
   ...fakeLlm,
-  // biome-ignore lint/correctness/useYield: async generator streaming fake
   stream: async function* (): AsyncGenerator<{ type: string; delta?: string }> {
     yield { type: "text_delta", delta: "ok" }
     yield { type: "message_stop" }

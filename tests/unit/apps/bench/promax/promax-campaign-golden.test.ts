@@ -174,7 +174,7 @@ describe("PMX-04 structural diff — every non-image_name delta is a VIOLATION",
     expect(
       violationCodes(
         mutate((rows) => {
-          delete (rows[0] ?? {}).meta
+          delete rows[0]?.meta
         }),
       ),
     ).toEqual(["field_removed"])

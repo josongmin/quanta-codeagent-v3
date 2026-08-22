@@ -88,6 +88,97 @@ const redirectTargets = (segment: string): string[] => {
   return out
 }
 
+/** The mutable taint accumulator threaded through the laundering scan: the
+ *  membership test plus the two taint operations every write-site needs. Held
+ *  in ONE record so each extracted step gets exactly the vocabulary it uses and
+ *  every step sees the SAME live set (taint is transitive within a run). */
+type TaintSink = {
+  /** True iff `tok` is an oracle SOURCE (per the caller's predicate) or is
+   *  already tainted by an earlier statement. */
+  readonly unfairTok: (tok: string) => boolean
+  /** Taint a copy DESTINATION verbatim: a `dir/`-terminated dst becomes a directory-prefix taint
+   *  (via {@link isUnfair}); an exact filename becomes an exact taint. */
+  readonly taintDest: (raw: string) => void
+  /** Taint a KNOWN-directory destination (a `-t DIR`) as a `dir/` prefix even without a trailing
+   *  slash — every file `cp -t` drops into it is oracle-derived. */
+  readonly taintDir: (raw: string) => void
+}
+
+/** Responsibility: taint a laundering statement's OUTPUT SINKS — every `>`/`>>`
+ *  redirect target and every `dd of=` target. The caller gates this on the
+ *  statement NOT running the deliverable. */
+const taintRedirectSinks = (stmt: string, sink: TaintSink): void => {
+  for (const t of redirectTargets(stmt)) sink.taintDest(t)
+  for (const m of stmt.matchAll(/\bof=([^\s;|&]+)/g)) {
+    const t = m[1]
+    if (t !== undefined) sink.taintDest(t)
+  }
+}
+
+/** Responsibility: taint every non-flag `tee` operand — a `tee ref` inside a
+ *  laundering statement writes the oracle content into `ref`. */
+const taintTeeTargets = (args: readonly string[], sink: TaintSink): void => {
+  for (const a of args) if (!a.startsWith("-")) sink.taintDest(a)
+}
+
+/** Responsibility: taint the destination of a GNU `-t DIR` /
+ *  `--target-directory[=DIR]` copy, where DEST is the FLAG argument and the
+ *  positionals are sources (operand order is inverted). Returns false when the
+ *  leader carries no such flag, so the caller falls back to the positional form. */
+const taintTargetDirectoryCopy = (args: readonly string[], sink: TaintSink): boolean => {
+  const tIdx = args.findIndex((a) => a === "-t" || a === "--target-directory")
+  const eqArg = args.find((a) => a.startsWith("--target-directory="))
+  if (tIdx < 0 && eqArg === undefined) return false
+  const flagArg = tIdx >= 0 ? args[tIdx + 1] : undefined
+  const dir = tIdx >= 0 ? flagArg : eqArg?.slice((eqArg?.indexOf("=") ?? -1) + 1)
+  const srcs = args.filter((a) => !a.startsWith("-") && a !== flagArg)
+  if (dir !== undefined && srcs.some(sink.unfairTok)) sink.taintDir(dir)
+  return true
+}
+
+/** Responsibility: taint the destination of a POSITIONAL copy (`cp a b`,
+ *  `cp a b dir/`) — the LAST operand receives the earlier operands' content. */
+const taintPositionalCopy = (args: readonly string[], sink: TaintSink): void => {
+  const operands = args.filter((a) => !a.startsWith("-"))
+  if (operands.length < 2) return
+  const dst = operands[operands.length - 1]
+  const srcs = operands.slice(0, -1)
+  if (dst !== undefined && srcs.some(sink.unfairTok)) sink.taintDest(dst)
+}
+
+/** Responsibility: walk a laundering statement's PIPE STAGES — `tee` targets
+ *  (skipped for a deliverable run) and the destination of every copy-shaped
+ *  leader, in either the `-t DIR` or the positional operand form. */
+const taintPipeStages = (stmt: string, runsDeliverable: boolean, sink: TaintSink): void => {
+  for (const seg of stmt.split("|")) {
+    const { leader, args } = leaderAndArgs(seg)
+    if (leader === "") continue
+    const base = baseName(leader)
+    if (base === "tee") {
+      if (!runsDeliverable) taintTeeTargets(args, sink)
+      continue
+    }
+    if (!TAINT_COPIERS.has(base)) continue
+    // GNU `-t DIR` / `--target-directory[=DIR]`: DEST is the flag arg, positionals are sources.
+    if (taintTargetDirectoryCopy(args, sink)) continue
+    taintPositionalCopy(args, sink)
+  }
+}
+
+/** Responsibility: decide whether ONE statement can launder the oracle and, if
+ *  so, taint everything it writes. A statement that references no unfair source
+ *  cannot launder one, so it is skipped whole. */
+const taintLaunderingStatement = (stmt: string, sink: TaintSink): void => {
+  if (stmt.trim().length === 0) return
+  if (!stmt.split(/\s+/).some((t) => t.length > 0 && sink.unfairTok(t))) return
+  // (a) redirect / `dd of=` / `tee` targets — SKIPPED when the statement RUNS THE DELIVERABLE
+  //     (its own stdout is output, not laundered oracle; `./solve tests/in > out` stays fair).
+  const runsDeliverable = isExerciseCommand(stmt)
+  if (!runsDeliverable) taintRedirectSinks(stmt, sink)
+  // (b) walk PIPE STAGES: `tee` targets (skipped for a deliverable run) + copy-shaped leaders.
+  taintPipeStages(stmt, runsDeliverable, sink)
+}
+
 /** Build the tainted-path set from the model's own commands, in order (transitive: `cp /tests/g a
  *  && cp a b` taints both `a` and `b`). PURE; exported for direct unit-pinning.
  *
@@ -105,63 +196,21 @@ export const buildTaintedRefs = (
   isOracleSource: (operand: string) => boolean = isTestPath,
 ): ReadonlySet<string> => {
   const tainted = new Set<string>()
-  const unfairTok = (tok: string): boolean =>
-    isOracleSource(normalizeToken(tok)) || inTaint(tok, tainted)
-  /** Taint a copy DESTINATION verbatim: a `dir/`-terminated dst becomes a directory-prefix taint
-   *  (via {@link isUnfair}); an exact filename becomes an exact taint. */
-  const taintDest = (raw: string): void => {
-    tainted.add(normalizeToken(raw))
-  }
-  /** Taint a KNOWN-directory destination (a `-t DIR`) as a `dir/` prefix even without a trailing
-   *  slash — every file `cp -t` drops into it is oracle-derived. */
-  const taintDir = (raw: string): void => {
-    const d = normalizeToken(raw)
-    tainted.add(d.endsWith("/") ? d : `${d}/`)
+  const sink: TaintSink = {
+    unfairTok: (tok) => isOracleSource(normalizeToken(tok)) || inTaint(tok, tainted),
+    taintDest: (raw) => {
+      tainted.add(normalizeToken(raw))
+    },
+    taintDir: (raw) => {
+      const d = normalizeToken(raw)
+      tainted.add(d.endsWith("/") ? d : `${d}/`)
+    },
   }
   for (const command of commands) {
     // STATEMENT level (pipe kept inside): only a statement that REFERENCES an unfair source can
     // launder it, and a pipe carries that source to a downstream `tee`/redirect in the SAME
     // statement (`cat /tests/g | tee ref`).
-    for (const stmt of command.split(STATEMENT_SEP)) {
-      if (stmt.trim().length === 0) continue
-      if (!stmt.split(/\s+/).some((t) => t.length > 0 && unfairTok(t))) continue
-      // (a) redirect / `dd of=` / `tee` targets — SKIPPED when the statement RUNS THE DELIVERABLE
-      //     (its own stdout is output, not laundered oracle; `./solve tests/in > out` stays fair).
-      const runsDeliverable = isExerciseCommand(stmt)
-      if (!runsDeliverable) {
-        for (const t of redirectTargets(stmt)) taintDest(t)
-        for (const m of stmt.matchAll(/\bof=([^\s;|&]+)/g)) {
-          const t = m[1]
-          if (t !== undefined) taintDest(t)
-        }
-      }
-      // (b) walk PIPE STAGES: `tee` targets (skipped for a deliverable run) + copy-shaped leaders.
-      for (const seg of stmt.split("|")) {
-        const { leader, args } = leaderAndArgs(seg)
-        if (leader === "") continue
-        const base = baseName(leader)
-        if (base === "tee") {
-          if (!runsDeliverable) for (const a of args) if (!a.startsWith("-")) taintDest(a)
-          continue
-        }
-        if (!TAINT_COPIERS.has(base)) continue
-        // GNU `-t DIR` / `--target-directory[=DIR]`: DEST is the flag arg, positionals are sources.
-        const tIdx = args.findIndex((a) => a === "-t" || a === "--target-directory")
-        const eqArg = args.find((a) => a.startsWith("--target-directory="))
-        if (tIdx >= 0 || eqArg !== undefined) {
-          const flagArg = tIdx >= 0 ? args[tIdx + 1] : undefined
-          const dir = tIdx >= 0 ? flagArg : eqArg?.slice((eqArg?.indexOf("=") ?? -1) + 1)
-          const srcs = args.filter((a) => !a.startsWith("-") && a !== flagArg)
-          if (dir !== undefined && srcs.some(unfairTok)) taintDir(dir)
-          continue
-        }
-        const operands = args.filter((a) => !a.startsWith("-"))
-        if (operands.length < 2) continue
-        const dst = operands[operands.length - 1]
-        const srcs = operands.slice(0, -1)
-        if (dst !== undefined && srcs.some(unfairTok)) taintDest(dst)
-      }
-    }
+    for (const stmt of command.split(STATEMENT_SEP)) taintLaunderingStatement(stmt, sink)
   }
   return tainted
 }

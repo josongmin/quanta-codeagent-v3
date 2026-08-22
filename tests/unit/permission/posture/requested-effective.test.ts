@@ -18,11 +18,21 @@ import {
 } from "../../../../src/permission/posture/availability"
 import type { PostureRecord, ReviewerAvailability } from "../../../../src/permission/posture/types"
 import { INITIAL_REVISION, nextRevision } from "../../../../src/permission/posture/types"
-import { allCompleteRecords } from "./fixtures"
+import { allCompleteRecords, nthCompleteRecord } from "./fixtures"
 
 const RECORDS = allCompleteRecords()
 
-const availabilities: ReadonlyArray<ReviewerAvailability> = [
+// A fixed-length TUPLE type (not `ReadonlyArray`): indexing is then statically
+// total, so the fixture reads need no `!`, while each element keeps the full
+// `ReviewerAvailability` shape (an `as const` here would narrow the union and
+// hide the optional `autoReviewEnabled` field).
+const availabilities: readonly [
+  ReviewerAvailability,
+  ReviewerAvailability,
+  ReviewerAvailability,
+  ReviewerAvailability,
+  ReviewerAvailability,
+] = [
   { hasAutoReview: false, hasGuardianReview: false },
   { hasAutoReview: true, hasGuardianReview: false },
   { hasAutoReview: false, hasGuardianReview: true },
@@ -85,7 +95,7 @@ describe("resolveEffective — reuses selectDefaultReviewer (no remap)", () => {
 
   test("effective view is COMPLETE and carries the record's question knob", () => {
     for (const record of RECORDS) {
-      const effective = resolveEffective(record, availabilities[0]!)
+      const effective = resolveEffective(record, availabilities[0])
       expect(effective.threadPermission).toEqual(record.threadPermission)
       expect(effective.askOutsidePlan).toBe(record.askOutsidePlan)
       expect(effective.reviewerRoute).toBeDefined()
@@ -97,12 +107,12 @@ describe("buildResolvedPosture — requested and effective are distinct views", 
   const MANAGED: ControlPolicy = { managedBy: "admin", auditRequired: true }
 
   test("requested keeps the operator's lossless patch; effective is resolved", () => {
-    const record = RECORDS[0]!
+    const record = nthCompleteRecord(0)
     const resolved = buildResolvedPosture({
       record,
       revision: 7,
       requestedPatch: { approvalPolicy: "always" },
-      availability: availabilities[3]!,
+      availability: availabilities[3],
     })
     // Requested carries the PATCH (partial), not the complete record.
     expect(resolved.requested.patch).toEqual({ approvalPolicy: "always" })
@@ -115,19 +125,19 @@ describe("buildResolvedPosture — requested and effective are distinct views", 
   })
 
   test("locks derive from the managed policy producer only", () => {
-    const record = RECORDS[0]!
+    const record = nthCompleteRecord(0)
     const withManaged = buildResolvedPosture({
       record,
       revision: 1,
       requestedPatch: {},
-      availability: availabilities[0]!,
+      availability: availabilities[0],
       managedPolicy: MANAGED,
     })
     const withoutManaged = buildResolvedPosture({
       record,
       revision: 1,
       requestedPatch: {},
-      availability: availabilities[0]!,
+      availability: availabilities[0],
     })
     expect(withManaged.locks.map((l) => l.reason)).toEqual(["managed_policy"])
     expect(withoutManaged.locks).toEqual([])
@@ -135,10 +145,10 @@ describe("buildResolvedPosture — requested and effective are distinct views", 
 
   test("carries the domain revision verbatim", () => {
     const resolved = buildResolvedPosture({
-      record: RECORDS[0]!,
+      record: nthCompleteRecord(0),
       revision: 42,
       requestedPatch: {},
-      availability: availabilities[0]!,
+      availability: availabilities[0],
     })
     expect(resolved.revision).toBe(42)
   })

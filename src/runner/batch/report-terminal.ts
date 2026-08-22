@@ -68,7 +68,7 @@ export type TerminalBenchDatasetId = typeof TERMINAL_BENCH_DATASET_ID
 
 // ── taxonomy ─────────────────────────────────────────────────────────────────
 
-/** Every outcome a Terminal trial can have (TB21-04's eight classes). Closed
+/** Every outcome a Terminal trial can have. Closed
  *  set: adding a kind forces every exhaustive consumer to compile-fail. */
 export const TERMINAL_TRIAL_OUTCOMES = [
   "graded_pass",
@@ -79,6 +79,12 @@ export const TERMINAL_TRIAL_OUTCOMES = [
   "verifier_error",
   "missing_reward",
   "malformed_result",
+  // aug-22: a trial the agent never ATTEMPTED. The upstream harness reports it
+  // as a completed trial with no exception and reward 0, so it used to land in
+  // `graded_fail`
+  // and depress the score as though the model had tried and lost. Measured on
+  // the first live 2.1 canary, whose brain failed to launch.
+  "no_agent_activity",
 ] as const
 export type TerminalTrialOutcome = (typeof TERMINAL_TRIAL_OUTCOMES)[number]
 
@@ -94,6 +100,7 @@ const TERMINAL_TRIAL_OUTCOME_SET = {
   verifier_error: true,
   missing_reward: true,
   malformed_result: true,
+  no_agent_activity: true,
 } as const satisfies Record<TerminalTrialOutcome, true>
 
 export const isTerminalTrialOutcome = (raw: unknown): raw is TerminalTrialOutcome =>

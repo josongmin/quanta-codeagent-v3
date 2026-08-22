@@ -243,6 +243,24 @@ export const RUNNER: readonly KnobInventoryEntry[] = [
   // a RUNNER-side authority graph, not terminal render — cli-knobs is excluded from
   // the web `/knobs` catalog. Default-OFF ⇒ `buildSessionAuthorities` returns the
   // pre-attention graph and `/attention` is never registered (byte-identical).
+  // RFC-03 C3 — HITL objective-proposal gate. Read at the objective-store
+  // composition root via `gateOn(env, "QUANTA_PROPOSE_GOAL")` (INJECTED env bag,
+  // not raw process.env). Declared here, not in cli-knobs.ts: it governs the
+  // RUNNER-side objective AUTHORITY (whether a model mutation must be confirmed),
+  // not terminal render. Default-OFF ⇒ no gate on the authority ⇒ model mutations
+  // commit without approval, byte-identical to the pre-C3 path. Fail-closed when
+  // ON: a surface with no confirm capability refuses activation rather than
+  // silently bypassing approval.
+  {
+    envKey: "QUANTA_PROPOSE_GOAL",
+    kind: "bool",
+    default: false,
+    group: "agent-feature",
+    home: "runtime-config",
+    describe:
+      "Objective HITL proposal gate (RFC-03 C3) — when ON, a model-originated objective mutation is PROPOSED and must be confirmed through the surface's confirm authority before it commits; a surface without that authority refuses activation (never an approval bypass). Unset ⇒ mutations commit directly (byte-identical).",
+    readSite: "host/runtime/objective-store-wire.ts",
+  },
   {
     envKey: "QUANTA_ATTENTION_NAV",
     kind: "bool",

@@ -30,6 +30,7 @@
  * exactOptionalPropertyTypes: optional fields are typed `x?: T | undefined`.
  */
 
+import { errMessage, logger } from "@/shared"
 import type { ManualCompletionReceipt } from "./criteria/model"
 import { isVerifierReceipt } from "./criteria/model"
 import type { ObjectiveDomainSnapshot } from "./model"
@@ -361,7 +362,11 @@ const createObjectiveAuthorityWithCore = (
     try {
       const t = nowFn()
       return Number.isFinite(t) ? t : Date.now()
-    } catch {
+    } catch (e) {
+      // Same fallback, but attributed: an injected clock that THROWS is a host
+      // wiring fault, and swallowing it made every timestamp silently drift to
+      // wall time with no trace of which seam broke.
+      logger.warn(`objective.authority.clockNow: ${errMessage(e)}`)
       return Date.now()
     }
   }

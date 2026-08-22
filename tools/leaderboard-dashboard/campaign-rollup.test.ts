@@ -265,7 +265,9 @@ describe("F5 — a REJECTED official partition is distinguishable from no gradin
   test("rejected: the row keeps the fallback rate AND says the official denominator was refused", () => {
     const broken = totalsOf({ assigned: 4, resolved: 1 })
     const camps = groupRuns([
-      withOfficial("bad", { ...broken, assigned: 9 } as OfficialGradeTotals, [row("repo__a", true)]),
+      withOfficial("bad", { ...broken, assigned: 9 } as OfficialGradeTotals, [
+        row("repo__a", true),
+      ]),
     ])
     const camp = camps[0]
     if (camp === undefined) throw new Error("expected a campaign")
@@ -280,7 +282,11 @@ describe("F5 — a REJECTED official partition is distinguishable from no gradin
   })
 
   test("PAIRED CONTROL: a campaign that simply never graded is NOT marked rejected", () => {
-    const camps = groupRuns([withOfficial("none", undefined, [row("repo__a", true)])])
+    const camps = groupRuns([
+      run({ label: "none", perInstance: [row("repo__a", true)] } as Partial<Run> & {
+        label: string
+      }),
+    ])
     const camp = camps[0]
     if (camp === undefined) throw new Error("expected a campaign")
     expect(camp.official).toBeUndefined()

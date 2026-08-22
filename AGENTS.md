@@ -63,16 +63,26 @@ The ratchet only goes DOWN: a NEW violation **fails the build — you must split
 never add it to the allowlist**; and when a refactor drops a file/function below
 threshold you **remove its stale allowlist entry** (the test demands it).
 
-Cognitive COMPLEXITY is a *separate* gate. Biome declares
-`noExcessiveCognitiveComplexity` with `maxAllowedComplexity: 15`, but at level
-**warn** — and `biome check` exits 0 on warnings, so that rule by itself blocks
-nothing (it is a per-site advisory you should still act on). The gate is
-`bun run lint:complexity` (`tools/dev/complexity-ceiling.ts`, CI step
-"cognitive-complexity ceiling"): the repo-wide COUNT of over-threshold functions
-and the WORST single score are pinned in `tools/dev/complexity-ceiling.json` and
-may only go DOWN. A new over-threshold function fails the build — **split it,
-never raise the ceiling**; when you improve things, run
-`bun run lint:complexity --tighten` to lock the improvement in.
+### Lint WARNINGS are not free — `bun run lint:debt`
+
+`biome check` (`bun run lint`) exits non-zero only on **error**-level
+diagnostics. Every rule declared at `warn` — `noNonNullAssertion`,
+`noExcessiveCognitiveComplexity` (max 15), `noConsole`, … — therefore gates
+nothing on its own, which is how ~1200 of them accumulated unnoticed. Do NOT
+read a warning as "optional".
+
+The gate is `bun run lint:debt` (`tools/dev/lint-debt-ceiling.ts`, CI step
+"lint-debt ceiling"):
+
+- **Per-rule counts** are pinned in `tools/dev/lint-debt-ceiling.json` and may
+  only go DOWN. A new site fails the build — fix it, **never raise the ceiling**.
+- **Closed universe**: a rule that fires while ABSENT from that file is treated
+  as ceiling 0 and fails as "unpinned". A biome upgrade, a newly-enabled rule or
+  an upstream rename cannot add a whole new debt category silently.
+- **Worst score**: `noExcessiveCognitiveComplexity` also pins the highest single
+  score, because counts alone cannot see one function being grown into a monster.
+- Improvements are locked in deliberately with `bun run lint:debt --tighten`
+  (which refuses to run while anything is regressing or unpinned).
 
 **Proactive rule — fix on sight.** Whenever you open, edit, or even pass through a
 god-module or god-function (or any obvious SE smell — a 20-arg signature, a copy-

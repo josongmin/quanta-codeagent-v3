@@ -119,7 +119,13 @@ describe.if(POSIX)("runShell({ background, confirm }) — PROMPT consent gate", 
     const { seam, calls } = recordingSeam("bg-approved")
     let asked = 0
     const r = await runShell("printf 'pre\\n'; sleep 5", {
-      background: { ...seam, confirm: async () => (asked++, true) },
+      background: {
+        ...seam,
+        confirm: async () => {
+          asked++
+          return true
+        },
+      },
       timeoutMs: 120,
     })
     expect(asked).toBe(1) // consent was requested exactly once
@@ -133,7 +139,13 @@ describe.if(POSIX)("runShell({ background, confirm }) — PROMPT consent gate", 
     const { seam, calls } = recordingSeam()
     let asked = 0
     const r = await runShell("printf 'pre\\n'; sleep 1", {
-      background: { ...seam, confirm: async () => (asked++, false) },
+      background: {
+        ...seam,
+        confirm: async () => {
+          asked++
+          return false
+        },
+      },
       timeoutMs: 120,
     })
     expect(asked).toBe(1)

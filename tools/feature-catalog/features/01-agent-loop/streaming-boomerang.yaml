@@ -3,7 +3,7 @@ title: streaming-boomerang — Roo Boomerang async-iterator progressive consumpt
 section: 1
 subsystem: subagent / mode-typed delegation (ADR-0218 sibling)
 order: 251
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [n-a]
 monitoring: n-a
@@ -65,3 +65,9 @@ notes: |
   반환). 본 슬라이스는 sibling `spawn(spec): AsyncIterable<BoomerangChunk>` 추가.
   두 슬라이스 독립 — host는 progressive surface가 필요할 때만 wiring.
   Non-goal: built-in tee (multi-consumer fan-out)·persistence·loop 자동 wire.
+
+  Maturity was L3 until 2026-08-22 — while this entry's own deliberate_hold said the
+  slice is "parked as an L2 catalogued orphan". The L3 reachability floor caught the
+  contradiction (`grep -rn "agent/streaming-boomerang" src/` outside the slice: ZERO
+  hits; all four evidence files unreachable from every `src/apps/<surface>/index.ts`).
+  The maturity tag now matches the hold text that was already there. No code changed.

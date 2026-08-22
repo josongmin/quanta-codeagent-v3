@@ -11,12 +11,15 @@
  * checks nor the rendered receipt can leak a credential VALUE or the environment.
  */
 import { describe, expect, test } from "bun:test"
+import { PROVIDER_CREDENTIALS } from "@/llm/provider-metadata"
+import { TERMINAL_PROVIDERS } from "./config"
 import { TERMINAL_BENCH_DATASET, TERMINAL_BENCH_DATASET_REF } from "./dataset"
 import {
   type DoctorPorts,
   formatDoctorReceipt,
   REQUIRED_DOCTOR_CHECKS,
   runTerminalDoctor,
+  TERMINAL_CREDENTIAL_REQUIREMENT,
 } from "./doctor"
 
 const SECRET = "sk-live-DOCTOR-MUST-NOT-PRINT-9876"
@@ -67,6 +70,7 @@ const makePorts = (
     readonly stdout?: Readonly<Record<string, string>>
     readonly env?: NodeJS.ProcessEnv
     readonly canWrite?: boolean
+    readonly fileExists?: boolean
   } = {},
 ): DoctorPorts => ({
   run: (bin, args) => {
@@ -79,6 +83,7 @@ const makePorts = (
   },
   env: over.env ?? { OPENAI_API_KEY: SECRET, PATH: "/usr/bin" },
   canWriteDir: () => over.canWrite !== false,
+  fileExists: () => over.fileExists === true,
 })
 
 const INPUT = {
@@ -226,5 +231,105 @@ describe("SECURITY — the doctor never prints credential values or the environm
     )
     const sha = report.checks.find((c) => c.id === "repo-sha")
     expect(sha?.detail.length).toBeLessThan(120)
+  })
+})
+
+/**
+ * aug-22 audit — the credentials check was PROVIDER-BLIND.
+ *
+ * It asked one question ("is any of OPENAI_API_KEY / ANTHROPIC_API_KEY /
+ * QUANTA_API_KEY set?") regardless of which provider the run had selected. Both
+ * arms were wrong, and both were reproduced against the real CLI:
+ *
+ *  - FALSE POSITIVE (the expensive one). `--provider openai` with only
+ *    `ANTHROPIC_API_KEY` present rendered `[ok] credentials`. A precondition
+ *    gate whose entire job is "would a paid run be meaningful right now?"
+ *    greenlit a run that 401s on its first LLM call. This is the jul-03 crater
+ *    shape: a box that dies on auth looks like a model that scored zero.
+ *  - FALSE NEGATIVE. `--provider chatgpt-oauth` — whose credential is an on-disk
+ *    token bundle, declared as `{kind:"oauth", source:"file"}` in the
+ *    `PROVIDER_CREDENTIALS` SSOT, and which is how every other quanta bench path
+ *    authenticates — was refused for lacking env keys it never reads.
+ *
+ * The repair asks the provider what its credential IS before looking for it.
+ */
+describe("credentials — provider-aware", () => {
+  test("FALSE POSITIVE: a foreign vendor's key does not satisfy an openai run", () => {
+    const report = runTerminalDoctor(
+      makePorts({ env: { ANTHROPIC_API_KEY: SECRET, PATH: "/usr/bin" } }),
+      { ...INPUT, provider: "openai" },
+    )
+    const cred = report.checks.find((c) => c.id === "credentials")
+    expect(cred?.ok).toBe(false)
+    expect(cred?.detail).toContain("OPENAI_API_KEY")
+    // …and the gate as a whole must refuse to spend.
+    expect(report.ok).toBe(false)
+  })
+
+  test("the RIGHT vendor key satisfies it (paired control — not a blanket refusal)", () => {
+    const report = runTerminalDoctor(
+      makePorts({ env: { OPENAI_API_KEY: SECRET, PATH: "/usr/bin" } }),
+      { ...INPUT, provider: "openai" },
+    )
+    expect(report.checks.find((c) => c.id === "credentials")?.ok).toBe(true)
+
+    const anthropic = runTerminalDoctor(
+      makePorts({ env: { ANTHROPIC_API_KEY: SECRET, PATH: "/usr/bin" } }),
+      { ...INPUT, provider: "anthropic" },
+    )
+    expect(anthropic.checks.find((c) => c.id === "credentials")?.ok).toBe(true)
+  })
+
+  test("FALSE NEGATIVE: chatgpt-oauth is satisfied by the on-disk bundle, no env key", () => {
+    const report = runTerminalDoctor(makePorts({ env: { PATH: "/usr/bin" }, fileExists: true }), {
+      ...INPUT,
+      provider: "chatgpt-oauth",
+    })
+    const cred = report.checks.find((c) => c.id === "credentials")
+    expect(cred?.ok, cred?.detail).toBe(true)
+  })
+
+  test("chatgpt-oauth with NO bundle on disk is still refused", () => {
+    const report = runTerminalDoctor(
+      makePorts({ env: { OPENAI_API_KEY: SECRET, PATH: "/usr/bin" }, fileExists: false }),
+      { ...INPUT, provider: "chatgpt-oauth" },
+    )
+    const cred = report.checks.find((c) => c.id === "credentials")
+    // An env key must NOT rescue a provider that never reads one.
+    expect(cred?.ok).toBe(false)
+    expect(cred?.detail).toContain("chatgpt.json")
+  })
+
+  test("PRESENCE ONLY — no credential VALUE reaches a detail, on any arm", () => {
+    for (const provider of ["openai", "anthropic", "chatgpt-oauth"] as const) {
+      for (const fileExists of [true, false]) {
+        const report = runTerminalDoctor(
+          makePorts({
+            env: { OPENAI_API_KEY: SECRET, ANTHROPIC_API_KEY: SECRET, PATH: "/usr/bin" },
+            fileExists,
+          }),
+          { ...INPUT, provider },
+        )
+        for (const c of report.checks) expect(c.detail).not.toContain(SECRET)
+      }
+    }
+  })
+
+  test("DRIFT GUARD — the doctor's table agrees with the PROVIDER_CREDENTIALS SSOT", () => {
+    // The doctor must not invent its own opinion about where a credential lives.
+    // Every terminal provider is classified in `@/llm/provider-metadata`, and the
+    // doctor's requirement table must match that classification exactly — so a
+    // provider whose credential model changes there fails HERE, not in a paid run.
+    for (const provider of TERMINAL_PROVIDERS) {
+      const declared = PROVIDER_CREDENTIALS[provider]
+      const requirement = TERMINAL_CREDENTIAL_REQUIREMENT[provider]
+      expect(requirement.kind, `provider ${provider}`).toBe(
+        declared.source === "file" ? "file" : "env",
+      )
+    }
+    // Anti-vacuity: the table covers every provider and is not empty.
+    expect(Object.keys(TERMINAL_CREDENTIAL_REQUIREMENT).sort()).toEqual(
+      [...TERMINAL_PROVIDERS].sort(),
+    )
   })
 })

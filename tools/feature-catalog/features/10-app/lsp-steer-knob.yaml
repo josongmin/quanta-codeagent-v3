@@ -28,6 +28,8 @@ purpose: |
   (`=0/off/false`) for A/B baseline. Coupled to `lsp` in benchPostureFromState.
 evidence:
   code:
+    - src/config/knob-schema/schemas/bench-gap-1.ts
+    - src/runner/batch/eval/knobs-bench.ts
     - src/runner/knobs/knobs/lsp-steer.ts
   adrs: [24, 535]
   tests:
@@ -38,3 +40,17 @@ evidence:
     contract: []
 knobs: ["lsp-steer"]
 deliberate_hold: null
+notes: |
+  EVIDENCE REPOINT (2026-08-22): `src/runner/knobs/knobs/lsp-steer.ts` alone was
+  the declared evidence and it is a VESTIGIAL back-compat re-export — since the
+  knob-registration unification (`registerBenchKnobs` derives every bench Knob
+  from `ALL_BENCH_SCHEMAS`) that file self-registers nothing and no reached module
+  imports `lspSteerKnob`, so `bun fc reachability --strict --symbols`
+  read the whole feature as UNREACHABLE. The knob itself is LIVE, just not there:
+    declare  `lspSteerSchema` in `src/config/knob-schema/schemas/bench-gap-1.ts` (envKey +
+             domain + default; the SSOT `registerBenchKnobs()` iterates)
+    read     `benchPostureFromState` / `benchOptIns` in
+             `src/runner/batch/eval/knobs-bench.ts` (`readKnobValue(state, "lsp-steer", …)`)
+    effect   `lspGroundingSteer` (knobs-bench.ts, coupled to `lsp`) -> `src/runner/batch/eval/driver/config-build.ts` (localize-phase steer append)
+  Both added files are REACHED from `src/apps/bench/index.ts`. Maturity stays L3
+  because the wiring is real; only the evidence pointer was stale.

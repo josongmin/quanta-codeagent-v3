@@ -25,18 +25,7 @@ export {
   type GroundingBaselineStatus,
   resolveGroundingBaseline,
 } from "./baseline"
-export {
-  buildGroundingComparison,
-  buildGroundingRegressionResult,
-  evaluateGroundingRegression,
-  GROUNDING_REGRESSION_PROFILES,
-  type GroundingComparisonOutput,
-  type GroundingRegressionFailure,
-  type GroundingRegressionOutput,
-  type GroundingRegressionProfile,
-  type GroundingRegressionResult,
-  isGroundingRegressionProfile,
-} from "./compare"
+export { buildGroundingComparison, type GroundingComparisonOutput } from "./compare"
 export {
   type GroundingExecutionConfig,
   manualSuiteForCorpus,
@@ -61,6 +50,20 @@ export {
   isGroundingFileId,
   resolveGroundingSpecificFileContext,
 } from "./file-context"
+export {
+  buildGroundingGateResult,
+  buildGroundingRouteMatrixGateResult,
+  evaluateGroundingGate,
+  GROUNDING_GATE_PROFILES,
+  type GroundingGateFailure,
+  type GroundingGateOutput,
+  type GroundingGateProfile,
+  type GroundingGateResult,
+  type GroundingRouteMatrixFailure,
+  type GroundingRouteMatrixGateOutput,
+  type GroundingRouteMatrixGateResult,
+  isGroundingGateProfile,
+} from "./gate"
 export { buildGroundingHarnessManifest, groundingHarnessFingerprint } from "./harness"
 export { loadGroundingCases } from "./loader"
 export { normalizeGroundingDecision } from "./normalizer"
@@ -75,6 +78,16 @@ export {
   type GroundingReferentContext,
   resolveGroundingReferentContext,
 } from "./referent-context"
+export {
+  buildGroundingRegressionResult,
+  evaluateGroundingRegression,
+  GROUNDING_REGRESSION_PROFILES,
+  type GroundingRegressionFailure,
+  type GroundingRegressionOutput,
+  type GroundingRegressionProfile,
+  type GroundingRegressionResult,
+  isGroundingRegressionProfile,
+} from "./regression"
 export {
   type BuildGroundingReplayDraftOpts,
   buildGroundingReplayDraft,
@@ -91,21 +104,9 @@ export {
 } from "./replay-scaffold"
 export {
   buildGroundingBucketReports,
-  buildGroundingGateResult,
   buildGroundingMetrics,
   buildGroundingReport,
-  buildGroundingRouteMatrixGateResult,
-  evaluateGroundingGate,
-  GROUNDING_GATE_PROFILES,
-  type GroundingGateFailure,
-  type GroundingGateOutput,
-  type GroundingGateProfile,
-  type GroundingGateResult,
   type GroundingReportOutput,
-  type GroundingRouteMatrixFailure,
-  type GroundingRouteMatrixGateOutput,
-  type GroundingRouteMatrixGateResult,
-  isGroundingGateProfile,
 } from "./report"
 export {
   GROUNDING_ROUTE_MATRICES,

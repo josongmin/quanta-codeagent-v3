@@ -3,7 +3,7 @@ title: Cross-subagent todo readback (Roo bidirectional extension)
 section: 1
 subsystem: Cross-subagent todo readback (ADR-0255)
 order: 255
-maturity: L3
+maturity: L2
 status: stable
 ui_surfaces: [n-a]
 monitoring: n-a
@@ -49,7 +49,24 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    Seam-only, verified 2026-08-22: `grep -rn "agent/todo-readback" src/` outside the
+    slice returns ZERO hits, so all four evidence files are unreachable from every
+    `src/apps/<surface>/index.ts`. This is by design of sequencing, not neglect — the
+    parent-isolation invariant means the HOST must choose the safe seams at which
+    `propagate(child, parent)` fires (turn boundary / subagent close-out), and that
+    choice belongs to the subagent runner, not to this leaf store. Shipping the
+    store LIVE with no host-chosen propagate seam would either mirror child state
+    into the parent automatically (breaking the invariant the slice exists to hold)
+    or register a store nobody ever reads.
+  promotion_path: |
+    L3 = the subagent runner (`src/agent/subagent-typed/*` or the task-record lineage
+    layer) constructs the default store at a composition root and calls
+    `propagate(childSid, parentSid)` at a declared turn-boundary seam, making
+    `src/agent/todo-readback/*` reachable from an app entrypoint.
+    `bun fc reachability --strict --symbols` is the objective judge: this id must
+    drop off the offender list on its own, with NO baseline edit.
 notes: |
   Sibling of ADR-0219 focus chain. Intentional API divergence: status
   enum uses underscore (in_progress / completed) — Roo wire format —
@@ -62,3 +79,7 @@ notes: |
   (ADR-0145 voice). subscribe(sid, cb, { snapshot: true }) synchronously
   delivers the current snapshot before returning. Subscription supports
   AbortSignal-driven cleanup for host-side fence semantics.
+
+  Maturity was L3 until 2026-08-22 (`status: stable` + `deliberate_hold: null`
+  implied a wired slice). The L3 reachability floor showed zero production
+  importers, so the entry now states L2 + an explicit hold. Behaviour unchanged.

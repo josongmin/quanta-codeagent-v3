@@ -50,7 +50,7 @@
     "typecheck:all": "bun run tools/dev/typecheck.ts all",
     "lint": "bun run tools/dev/run-biome.ts check",
     "lint:fix": "bun run tools/dev/run-biome.ts check --write",
-    "lint:complexity": "bun run tools/dev/complexity-ceiling.ts",
+    "lint:debt": "bun run tools/dev/lint-debt-ceiling.ts",
     "format": "bun run tools/dev/run-biome.ts format --write",
     "build": "bun build --compile --minify src/apps/cli/index.ts --outfile dist/agent",
     "install:cli": "bash tools/bin/install-quanta-cli.sh",
@@ -74,7 +74,8 @@
     "eval:replay": "bun run src/apps/eval/index.ts trajectory replay",
     "eval:compare": "bun run src/apps/eval/index.ts compare",
     "eval:generate": "bun run src/apps/eval/index.ts generate",
-    "eval:report": "bun run src/apps/eval/index.ts report"
+    "eval:report": "bun run src/apps/eval/index.ts report",
+    "install:terminal-brain": "bash tools/bin/install-terminal-brain.sh"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "0.29.2",

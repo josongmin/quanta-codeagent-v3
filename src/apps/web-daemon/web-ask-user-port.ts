@@ -51,6 +51,135 @@ const parseBoolean = (text: string): boolean | null => {
   return null
 }
 
+/** Responsibility: validate a free-text `string` answer against the request's
+ *  length window and pattern. An UNPARSEABLE pattern is a validation error, not
+ *  a throw (a hostile answer must not strand the agent). */
+const validateStringAnswer = (
+  req: Extract<AskUserRequest, { kind: "string" }>,
+  text: string,
+): AskUserResult => {
+  if (req.minLength !== undefined && text.length < req.minLength) {
+    return { ok: false, reason: "validation-error" }
+  }
+  if (req.maxLength !== undefined && text.length > req.maxLength) {
+    return { ok: false, reason: "validation-error" }
+  }
+  if (req.pattern !== undefined) {
+    let re: RegExp
+    try {
+      re = new RegExp(req.pattern)
+    } catch {
+      return { ok: false, reason: "validation-error" }
+    }
+    if (!re.test(text)) return { ok: false, reason: "validation-error" }
+  }
+  return { ok: true, value: text }
+}
+
+/** Responsibility: validate a `number` / `integer` answer — the finite parse
+ *  (unparseable ⇒ `invalid-input`), the integer-ness demand, then the min/max
+ *  window (both ⇒ `validation-error`). */
+const validateNumericAnswer = (
+  req: Extract<AskUserRequest, { kind: "number" | "integer" }>,
+  text: string,
+): AskUserResult => {
+  const n = Number(text.trim())
+  if (!Number.isFinite(n)) return { ok: false, reason: "invalid-input" }
+  if (req.kind === "integer" && !Number.isInteger(n)) {
+    return { ok: false, reason: "validation-error" }
+  }
+  if (req.min !== undefined && n < req.min) return { ok: false, reason: "validation-error" }
+  if (req.max !== undefined && n > req.max) return { ok: false, reason: "validation-error" }
+  return { ok: true, value: n }
+}
+
+/** Responsibility: validate a `multiselect` answer — undo the comma-separated
+ *  free-text degrade (split, trim, drop blanks, de-duplicate), reject anything
+ *  off the fixed menu, then enforce the min/max selection counts. */
+const validateMultiselectAnswer = (
+  req: Extract<AskUserRequest, { kind: "multiselect" }>,
+  labels: readonly string[] | undefined,
+  text: string,
+): AskUserResult => {
+  const valid = new Set(labels ?? [])
+  const picked = [
+    ...new Set(
+      text
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0),
+    ),
+  ]
+  if (picked.some((p) => !valid.has(p))) return { ok: false, reason: "invalid-input" }
+  if (req.minSelected !== undefined && picked.length < req.minSelected) {
+    return { ok: false, reason: "validation-error" }
+  }
+  if (req.maxSelected !== undefined && picked.length > req.maxSelected) {
+    return { ok: false, reason: "validation-error" }
+  }
+  return { ok: true, value: picked }
+}
+
+/** Responsibility: map the returned free-text answer BACK to the typed
+ *  {@link AskUserResult}, dispatching on the request kind. */
+const validateAnswer = (
+  req: AskUserRequest,
+  labels: readonly string[] | undefined,
+  text: string,
+): AskUserResult => {
+  switch (req.kind) {
+    case "string":
+      return validateStringAnswer(req, text)
+    case "boolean": {
+      const b = parseBoolean(text)
+      return b === null ? { ok: false, reason: "invalid-input" } : { ok: true, value: b }
+    }
+    case "number":
+    case "integer":
+      return validateNumericAnswer(req, text)
+    case "select": {
+      // The value is the chosen LABEL; a fixed-choice select rejects off-menu text.
+      if (!(labels ?? []).includes(text)) return { ok: false, reason: "invalid-input" }
+      return { ok: true, value: text }
+    }
+    case "multiselect":
+      return validateMultiselectAnswer(req, labels, text)
+  }
+}
+
+/** Responsibility: run ONE structured question over the web
+ *  `request_user_input` round-trip — map the request DOWN to the
+ *  `{prompt, choices, choiceDetails}` frame, await the single free-text answer,
+ *  and hand it to the per-kind validator. */
+const askOverUserInput = async (
+  requester: WebUserInputRequester,
+  idFactory: () => string,
+  req: AskUserRequest,
+): Promise<AskUserResult> => {
+  // Empty fixed-choice set is a programming error, resolvable WITHOUT prompting.
+  if ((req.kind === "select" || req.kind === "multiselect") && req.options.length === 0) {
+    return { ok: false, reason: "empty-options" }
+  }
+  const labels =
+    req.kind === "select" || req.kind === "multiselect" ? req.options.map(optionLabel) : undefined
+  // UUX-2-17 — the rich structure rides ALONGSIDE the label-only `choices`
+  // (which stays the pickable-value contract for label-only clients).
+  const details =
+    req.kind === "select" || req.kind === "multiselect" ? optionDetails(req.options) : undefined
+  // Multiselect degrades to a comma-separated free-text over the single-answer
+  // channel — the instruction makes that explicit to the user.
+  const prompt = req.kind === "multiselect" ? `${req.prompt} (comma-separated)` : req.prompt
+  const outcome = await requester({
+    promptId: idFactory(),
+    prompt,
+    ...(labels !== undefined ? { choices: labels } : {}),
+    ...(details !== undefined ? { choiceDetails: details } : {}),
+    ...(req.kind === "string" ? { multiline: true } : {}),
+  })
+  if (outcome.decision === "cancelled") return { ok: false, reason: "cancelled" }
+  return validateAnswer(req, labels, outcome.text)
+}
+
 /**
  * Adapt a {@link UserInputRequester} (the web `request_user_input` round-trip)
  * into an {@link AskUserPort}. `idFactory` is injectable so a test can pin the
@@ -61,86 +190,6 @@ export const createWebAskUserPort = (
   idFactory: () => string = () => crypto.randomUUID(),
 ): AskUserPort => ({
   async ask(req: AskUserRequest): Promise<AskUserResult> {
-    // Empty fixed-choice set is a programming error, resolvable WITHOUT prompting.
-    if ((req.kind === "select" || req.kind === "multiselect") && req.options.length === 0) {
-      return { ok: false, reason: "empty-options" }
-    }
-    const labels =
-      req.kind === "select" || req.kind === "multiselect" ? req.options.map(optionLabel) : undefined
-    // UUX-2-17 — the rich structure rides ALONGSIDE the label-only `choices`
-    // (which stays the pickable-value contract for label-only clients).
-    const details =
-      req.kind === "select" || req.kind === "multiselect" ? optionDetails(req.options) : undefined
-    // Multiselect degrades to a comma-separated free-text over the single-answer
-    // channel — the instruction makes that explicit to the user.
-    const prompt = req.kind === "multiselect" ? `${req.prompt} (comma-separated)` : req.prompt
-    const outcome = await requester({
-      promptId: idFactory(),
-      prompt,
-      ...(labels !== undefined ? { choices: labels } : {}),
-      ...(details !== undefined ? { choiceDetails: details } : {}),
-      ...(req.kind === "string" ? { multiline: true } : {}),
-    })
-    if (outcome.decision === "cancelled") return { ok: false, reason: "cancelled" }
-    const text = outcome.text
-    switch (req.kind) {
-      case "string": {
-        if (req.minLength !== undefined && text.length < req.minLength) {
-          return { ok: false, reason: "validation-error" }
-        }
-        if (req.maxLength !== undefined && text.length > req.maxLength) {
-          return { ok: false, reason: "validation-error" }
-        }
-        if (req.pattern !== undefined) {
-          let re: RegExp
-          try {
-            re = new RegExp(req.pattern)
-          } catch {
-            return { ok: false, reason: "validation-error" }
-          }
-          if (!re.test(text)) return { ok: false, reason: "validation-error" }
-        }
-        return { ok: true, value: text }
-      }
-      case "boolean": {
-        const b = parseBoolean(text)
-        return b === null ? { ok: false, reason: "invalid-input" } : { ok: true, value: b }
-      }
-      case "number":
-      case "integer": {
-        const n = Number(text.trim())
-        if (!Number.isFinite(n)) return { ok: false, reason: "invalid-input" }
-        if (req.kind === "integer" && !Number.isInteger(n)) {
-          return { ok: false, reason: "validation-error" }
-        }
-        if (req.min !== undefined && n < req.min) return { ok: false, reason: "validation-error" }
-        if (req.max !== undefined && n > req.max) return { ok: false, reason: "validation-error" }
-        return { ok: true, value: n }
-      }
-      case "select": {
-        // The value is the chosen LABEL; a fixed-choice select rejects off-menu text.
-        if (!(labels ?? []).includes(text)) return { ok: false, reason: "invalid-input" }
-        return { ok: true, value: text }
-      }
-      case "multiselect": {
-        const valid = new Set(labels ?? [])
-        const picked = [
-          ...new Set(
-            text
-              .split(",")
-              .map((s) => s.trim())
-              .filter((s) => s.length > 0),
-          ),
-        ]
-        if (picked.some((p) => !valid.has(p))) return { ok: false, reason: "invalid-input" }
-        if (req.minSelected !== undefined && picked.length < req.minSelected) {
-          return { ok: false, reason: "validation-error" }
-        }
-        if (req.maxSelected !== undefined && picked.length > req.maxSelected) {
-          return { ok: false, reason: "validation-error" }
-        }
-        return { ok: true, value: picked }
-      }
-    }
+    return await askOverUserInput(requester, idFactory, req)
   },
 })

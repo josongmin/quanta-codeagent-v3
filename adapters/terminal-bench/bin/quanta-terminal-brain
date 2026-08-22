@@ -1,0 +1,83 @@
+#!/bin/sh
+# quanta-terminal-brain — the hands→brain launch shim. THE single definition.
+#
+# CONTRACT (must match adapters/terminal-bench/quanta_agent.py):
+#   * the default brain command name is `quanta-terminal-brain`
+#     (`quanta_agent._DEFAULT_BRAIN_CMD`); `QUANTA_TERMINAL_BRAIN_CMD` points the
+#     hands at a specific copy of THIS file;
+#   * `setup()` probes `<brain> --version` and REQUIRES exit 0. `brain-mode.ts`
+#     has no `--version` — it would exit 2 demanding `--instruction-file` — so
+#     the shim answers the probe itself. Intercepting it here is what lets
+#     `setup()` (and `quanta-bench terminal doctor`) pass;
+#   * every other argv (`--instruction-file` / `--model` / `--report-out` / …) is
+#     forwarded VERBATIM and IN ORDER to `bun run …/src/apps/terminal/brain-mode.ts`.
+#
+# WHY A TRACKED FILE AND NOT A DOCKERFILE HEREDOC. Harbor launches the Python
+# hands on the HOST (`uv run --project adapters/terminal-bench harbor run …`),
+# so the brain is spawned on the host too. A shim that exists only inside a
+# container image leaves every host without one — which is exactly what the
+# aug-22 doctor found (`BLOCKED: brain-shim`), and why no 2.1 canary had ever
+# been startable. The Dockerfile now COPIES this file, so the image and the host
+# run the same launch contract instead of two copies that drift.
+#
+# ROOT RESOLUTION. Never the caller's cwd: Harbor spawns the brain from whatever
+# directory it happens to be in. In order:
+#   1. $QUANTA_TERMINAL_BRAIN_REPO — how the image says "the repo is /opt/quanta",
+#      where this file lives in /usr/local/bin and path derivation cannot work;
+#   2. this script's own location, three levels up (adapters/terminal-bench/bin).
+# Neither resolving is a hard error. Guessing a root and exec'ing the wrong file
+# would surface as an unexplained brain crash mid-run.
+set -e
+
+# Resolve $0 THROUGH SYMLINKS before deriving anything from it. The installer
+# links this file into ~/.local/bin, and $0 is then the LINK path — deriving the
+# repo root from it yields /Users (measured aug-22: the first live canary spent
+# 22s producing a silent reward-0 trial for exactly this reason). macOS has no
+# `readlink -f`, so walk the chain by hand.
+self=$0
+case $self in
+  */*) ;;
+  *) self=$(command -v -- "$self" 2>/dev/null || printf '%s' "$self") ;;
+esac
+while [ -L "$self" ]; do
+  link=$(readlink -- "$self")
+  case $link in
+    /*) self=$link ;;
+    *)  self="${self%/*}/$link" ;;
+  esac
+done
+case $self in
+  */*) self_dir=$(CDPATH= cd -- "${self%/*}" && pwd) ;;
+  *)   self_dir=$(pwd) ;;
+esac
+
+brain_rel="src/apps/terminal/brain-mode.ts"
+for candidate in "$QUANTA_TERMINAL_BRAIN_REPO" "$self_dir/../../.."; do
+  [ -n "$candidate" ] || continue
+  if [ -f "$candidate/$brain_rel" ]; then
+    root=$(CDPATH= cd -- "$candidate" && pwd)
+    break
+  fi
+done
+
+if [ -z "${root:-}" ]; then
+  echo "quanta-terminal-brain: cannot locate $brain_rel." >&2
+  echo "  looked in: \$QUANTA_TERMINAL_BRAIN_REPO=${QUANTA_TERMINAL_BRAIN_REPO:-<unset>}" >&2
+  echo "             $self_dir/../../.." >&2
+  echo "  Set QUANTA_TERMINAL_BRAIN_REPO to the quanta repo root." >&2
+  exit 78
+fi
+
+# The LIVENESS PROBE. `quanta_agent.setup()` runs `<brain> --version` and treats
+# exit 0 as "the brain is usable", so answering it unconditionally made the probe
+# vacuous — it passed on a shim that could not launch anything, and the real
+# failure surfaced later as a silent reward-0 trial with `Exceptions 0`. It is
+# answered only AFTER the root resolves, so a probe that says ok means a launch
+# would find the brain.
+if [ "$1" = "--version" ]; then
+  echo "quanta-terminal-brain (bun $(bun --version 2>/dev/null || echo unknown), repo $root)"
+  exit 0
+fi
+
+# Run from the repo root so the tsconfig `@/` path aliases resolve.
+exec bun run "$root/$brain_rel" "$@"

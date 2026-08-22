@@ -25,6 +25,8 @@ surface_integration:
 purpose: 'Default-OFF: append adversarial-coverage block to repro generation so shallow fixes stay RED (#10999 under-fix class).'
 evidence:
   code:
+    - src/config/knob-schema/schemas/bench-b.ts
+    - src/runner/batch/eval/knobs-bench.ts
     - src/runner/knobs/knobs/adversarial-repro.ts
   adrs: [433]
   tests:
@@ -36,3 +38,17 @@ evidence:
     contract: []
 knobs: ["adversarial-repro"]
 deliberate_hold: null
+notes: |
+  EVIDENCE REPOINT (2026-08-22): `src/runner/knobs/knobs/adversarial-repro.ts` alone was
+  the declared evidence and it is a VESTIGIAL back-compat re-export — since the
+  knob-registration unification (`registerBenchKnobs` derives every bench Knob
+  from `ALL_BENCH_SCHEMAS`) that file self-registers nothing and no reached module
+  imports `adversarialReproKnob`, so `bun fc reachability --strict --symbols`
+  read the whole feature as UNREACHABLE. The knob itself is LIVE, just not there:
+    declare  `adversarialReproSchema` in `src/config/knob-schema/schemas/bench-b.ts` (envKey +
+             domain + default; the SSOT `registerBenchKnobs()` iterates)
+    read     `benchPostureFromState` / `benchOptIns` in
+             `src/runner/batch/eval/knobs-bench.ts` (`readKnobValue(state, "adversarial-repro", …)`)
+    effect   `benchOptIns().adversarialRepro` -> `src/runner/batch/eval/driver/repro-test-prep.ts` (repro-generation prompt block)
+  Both added files are REACHED from `src/apps/bench/index.ts`. Maturity stays L3
+  because the wiring is real; only the evidence pointer was stale.

@@ -7,7 +7,8 @@
  *   - Unicode look-alikes (fullwidth @, math font, ZWSP, ZWJ, diacritics),
  *   - whitespace boundary edge cases (no-match suffix, paragraph end),
  *   - mention inside our own idempotency marker comment,
- *   - performance ceiling (10MB body),
+ *   - huge-body correctness (10MB) + LINEAR scan-work scaling (the
+ *     anti-catastrophic-backtracking invariant; not a wall-clock ceiling),
  *   - multiple phrases / triple boundary / escape sequences.
  *
  * Invariant: every case must produce a deterministic, well-defined match
@@ -18,6 +19,52 @@
 import { describe, expect, test } from "bun:test"
 
 import { matchMention } from "@/integrations/github"
+
+/** Deadlock backstop for the huge-body cases — generous on purpose so machine
+ *  load can never turn it into the verdict; it exists only so a non-terminating
+ *  (catastrophic-backtracking) regression fails instead of hanging the suite. */
+const HUGE_BODY_BACKSTOP_MS = 120_000
+
+/** A body of exactly `bytes` whose ONLY mention sits on the final line — the
+ *  worst case for a scanner (every byte must be walked before the hit). */
+const hugeBody = (bytes: number): string => `${"x".repeat(bytes - 16)}\n@quanta go`
+
+/** Input-size step between the two scaling probes. Linear work ⇒ the cost ratio
+ *  lands on this number; quadratic work ⇒ its SQUARE. */
+const SCALE_STEP = 16
+const SMALL_BODY_BYTES = 256 * 1024
+const LARGE_BODY_BYTES = SMALL_BODY_BYTES * SCALE_STEP
+/** Allocated ONCE, outside every timed window — a fresh multi-MB string per
+ *  measurement would put allocation + GC (which scale with size, and with the
+ *  host process's heap) inside the numbers we are comparing. */
+const smallBody = hugeBody(SMALL_BODY_BYTES)
+const largeBody = hugeBody(LARGE_BODY_BYTES)
+
+/**
+ * Minimum scan cost over `repeats` runs of an ALREADY-ALLOCATED body.
+ *
+ * Load-robustness comes from three properties, in order of importance:
+ *  1. the whole measurement is SYNCHRONOUS — a congested event loop (the
+ *     full-suite failure mode) cannot interleave anything into it;
+ *  2. contention and GC can only ADD time to a run, so the MINIMUM over K runs
+ *     is the estimator closest to the algorithm's real cost;
+ *  3. the body is built by the caller and warmed once here, so neither the
+ *     multi-MB string allocation nor JIT warm-up is inside a timed window.
+ * Every repeat re-asserts the match, so a regression that "gets fast" by not
+ * scanning cannot pass.
+ */
+const minScanCostMs = (body: string, repeats = 7): number => {
+  expect(matchMention(body, ["@quanta"]).matched).toBe(true) // warm-up, untimed
+  let min = Number.POSITIVE_INFINITY
+  for (let i = 0; i < repeats; i++) {
+    const startNs = Bun.nanoseconds()
+    const m = matchMention(body, ["@quanta"])
+    const ms = (Bun.nanoseconds() - startNs) / 1e6
+    expect(m.matched).toBe(true)
+    if (ms < min) min = ms
+  }
+  return min
+}
 
 describe("ADR-0314 hellgate R2 — mention-filter fuzz", () => {
   test("nested backticks (```inner```)inside fenced block ⇒ no match", () => {
@@ -106,14 +153,45 @@ describe("ADR-0314 hellgate R2 — mention-filter fuzz", () => {
     expect(matchMention("<!-- quanta:idempotency=abc @quanta -->", ["@quanta"]).matched).toBe(false)
   })
 
-  test("10MB body with mention at the END terminates in <2s and matches", () => {
-    const huge = `${"x".repeat(10 * 1024 * 1024 - 16)}\n@quanta go`
-    const start = Date.now()
-    const m = matchMention(huge, ["@quanta"])
-    const elapsed = Date.now() - start
-    expect(m.matched).toBe(true)
-    expect(elapsed).toBeLessThan(2000)
-  })
+  test(
+    "10MB body with mention at the END matches (huge-body correctness ceiling)",
+    () => {
+      const m = matchMention(hugeBody(10 * 1024 * 1024), ["@quanta"])
+      expect(m.matched).toBe(true)
+      expect(m.command).toBe("@quanta")
+      expect(m.atLine).toBe(2)
+    },
+    // Deadlock backstop ONLY (a catastrophic-backtracking regression never
+    // returns, and must not wedge the suite forever). It is not the verdict:
+    // the verdict is the match above + the scaling assertion below.
+    HUGE_BODY_BACKSTOP_MS,
+  )
+
+  test(
+    "mention scan work scales LINEARLY with body size (the anti-catastrophic-backtracking invariant)",
+    () => {
+      // The R2 header's "performance ceiling" case used to assert `elapsed <
+      // 2000` on a 10MB body. That is a statement about THIS MACHINE AT THIS
+      // MOMENT, not about the algorithm: a congested full-suite process (2805
+      // files, bloated heap, GC pauses) inflates every wall-clock number and the
+      // test flips red without any code change. What the case is actually
+      // defending is the ALGORITHM — catastrophic backtracking / a quadratic
+      // scan must not creep into the fence walk, the inline-code strip or the
+      // boundary search.
+      //
+      // So: measure WORK SCALING with an estimator congestion cannot corrupt in
+      // the failing direction (see `minScanCostMs`). A 16x input step separates
+      // the classes widely: linear ⇒ ratio ≈ 16, quadratic ⇒ ≈ 256,
+      // catastrophic ⇒ never returns (the backstop above). The ceiling sits at
+      // 64 — measured worst case on a loaded box is ~23, and quadratic is 4x
+      // above the ceiling — so a constant-factor slowdown (a slow machine, a
+      // congested suite) can never red this, and no super-linear class survives.
+      const small = minScanCostMs(smallBody)
+      const large = minScanCostMs(largeBody)
+      expect(large / small).toBeLessThan(SCALE_STEP * 4)
+    },
+    HUGE_BODY_BACKSTOP_MS,
+  )
 
   test("multiple distinct trigger phrases — first match wins (deterministic)", () => {
     const m = matchMention("@quanta first\n/quanta second", ["@quanta", "/quanta"])

@@ -29,10 +29,7 @@ export interface FollowerApprovalWiring {
 /** Parse QUANTA_FOLLOWER_APPROVAL_TIMEOUT_MS — the ms deadline for a follower to
  *  respond to a pending approval. 0 / unset / invalid ⇒ 0 (DISABLED ⇒ the
  *  coordinator passes relays straight through, byte-identical to no timeout). */
-export const parseFollowerApprovalTimeoutMs = (
-  raw: string | undefined,
-  env: Record<string, string | undefined> = process.env,
-): number => {
+export const parseFollowerApprovalTimeoutMs = (raw: string | undefined): number => {
   if (raw === undefined) return 0
   const n = Number(raw)
   return Number.isInteger(n) && n > 0 ? n : 0

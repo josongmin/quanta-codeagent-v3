@@ -3,7 +3,7 @@ title: OTLP HTTP + Prometheus exporter helpers
 section: 8
 subsystem: metrics export (ADR-0144)
 order: 114
-maturity: L3
+maturity: L2
 status: stable
 ui_surfaces: [api]
 monitoring: integrated
@@ -37,7 +37,25 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    Verified 2026-08-22: `src/observability/metrics/otlp-helper.ts` has ZERO importers
+    in `src/` (the only non-test reference is a doc comment in `otel-resource.ts`),
+    so it is unreachable from every `src/apps/<surface>/index.ts`. The deferral is
+    structural: the helper lazily dynamic-imports three `@opentelemetry/*` packages
+    that are NOT dependencies of this repo, and installs are blocked in this
+    environment, so a composition root that constructs it unconditionally would boot
+    straight into `OtelDepsMissingError`. The helper is therefore built to be wired
+    by a deployment that has already added those packages.
+  promotion_path: |
+    L3 = a composition root constructs the helper behind an explicit env/config gate
+    (e.g. an `OTEL_EXPORTER_OTLP_ENDPOINT`-driven branch in the daemon's
+    observability boot) and hands the returned `{sink, shutdown}` to the metrics
+    registry, making `src/observability/metrics/otlp-helper.ts` reachable from an app
+    entrypoint — with the `@opentelemetry/*` packages present so the typed
+    deps-missing arm is a real fallback rather than the only outcome.
+    `bun fc reachability --strict --symbols` is the objective judge: this id must
+    drop off the offender list on its own, with NO baseline edit.
 notes: |
   Zero runtime npm deps until caller invokes the helper. Test seam `__loader`
   injects fake module surface for off-network unit tests.
@@ -49,3 +67,9 @@ notes: |
   PeriodicExportingMetricReader). `configurable: integrated` because env
   knobs `OTEL_*` (endpoint / headers / interval) reach the underlying
   exporter packages directly.
+
+  Maturity was L3 until 2026-08-22 (`status: stable`, `monitoring: integrated`,
+  `deliberate_hold: null` — reading as "metrics are being exported today"). The L3
+  reachability floor showed no caller at all. The self-evidence note below is still
+  correct about WHAT the module is; it just does not establish that anything runs
+  it. No code changed.

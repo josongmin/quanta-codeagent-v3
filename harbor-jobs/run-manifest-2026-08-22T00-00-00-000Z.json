@@ -1,0 +1,50 @@
+{
+  "schemaVersion": "terminal-bench-run/v2",
+  "benchmarkSuite": "terminal-bench",
+  "benchmarkVersion": "2.1",
+  "dataset": "terminal-bench/terminal-bench-2-1",
+  "datasetRef": "sha256:7d7bdc1cbedad549fc1140404bd4dc45e5fd0ea7c4186773687d177ad3a0699a",
+  "harborVersion": "0.21.0",
+  "quantaSha": "9d5369d310bb",
+  "dirty": false,
+  "agentVersion": "1.0.025+g9d5369d310bb",
+  "profile": "quanta-full",
+  "model": "gpt-5.5",
+  "provider": "openai",
+  "reasoningEffort": "xhigh",
+  "reasoningEffortDecision": {
+    "requested": "xhigh",
+    "delivered": "xhigh",
+    "kind": "delivered"
+  },
+  "sandbox": "docker",
+  "k": 5,
+  "concurrency": 1,
+  "timeoutMultiplier": 1,
+  "agentTimeoutOverride": null,
+  "verifierTimeoutOverride": null,
+  "resourceOverrides": null,
+  "taskSelection": "full",
+  "resolvedKnobs": {
+    "QUANTA_TB_ENV_OWNED": true,
+    "QUANTA_TB_TRAJECTORY": true,
+    "QUANTA_TB_STREAM_CAP": 8192,
+    "QUANTA_TB_VERIFY_GATE": true,
+    "QUANTA_TB_OUTPUT_CONTRACT": true,
+    "QUANTA_TB_SELF_TEST": true,
+    "QUANTA_TB_ORACLE_LOOP": 2,
+    "QUANTA_TB_WRITE_TOOL": true,
+    "QUANTA_MAX_TURNS": 60
+  },
+  "timestamp": "2026-08-22T00:00:00.000Z",
+  "arm": "quanta-full",
+  "preset": "terminal-bench-2.1/quanta-full",
+  "harborJobIds": [],
+  "sourcePaths": [],
+  "promotable": false,
+  "promotionBlockers": [],
+  "upload": {
+    "enabled": false,
+    "visibility": null
+  }
+}

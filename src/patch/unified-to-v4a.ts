@@ -98,6 +98,134 @@ const isHunkAwareBoundary = (lines: string[], i: number): boolean => {
   return false
 }
 
+/** Git meta-header line prefixes that carry no V4A representation — every one
+ *  of them is consumed and discarded by the outer scan. */
+const GIT_META_PREFIXES = [
+  "diff --git ",
+  "index ",
+  "new file mode",
+  "deleted file mode",
+  "old mode",
+  "new mode",
+  "similarity index",
+  "rename from",
+  "rename to",
+  "Binary files",
+] as const
+
+/** Responsibility: recognise a git meta-header line (no content in V4A). */
+const isGitMetaHeader = (line: string): boolean =>
+  GIT_META_PREFIXES.some((prefix) => line.startsWith(prefix))
+
+/** The from/to paths of one unified-diff file-pair header, git prefix stripped. */
+type FilePairHeader = {
+  readonly fromPath: string
+  readonly toPath: string
+}
+
+/** Responsibility: read the "--- <from>" / "+++ <to>" file-pair header whose
+ *  "---" half sits at `i`. Returns null when the "+++" half is missing — the
+ *  caller then treats the "---" line as noise and keeps scanning. */
+const readFilePairHeader = (lines: string[], i: number): FilePairHeader | null => {
+  const fromRaw = ((lines[i] ?? "").slice(4).split("\t")[0] ?? "").trimEnd()
+  const toLine = lines[i + 1] ?? ""
+  if (!toLine.startsWith("+++ ") && !toLine.startsWith("+++\t")) return null
+  const toRaw = (toLine.slice(4).split("\t")[0] ?? "").trimEnd()
+  return { fromPath: stripGitPrefix(fromRaw), toPath: stripGitPrefix(toRaw) }
+}
+
+/**
+ * Responsibility: walk ONE file section's hunk body, stopping at the next true
+ * file boundary, and hand every consumed line to `onLine`. `onLine` returns
+ * true when the line it consumed was a hunk header — from that point on the
+ * stricter three-line-lookahead boundary test applies.
+ *
+ * After the first "@@ " hunk header has been seen, guard against the
+ * false-positive where a content deletion of a line starting with "-- "
+ * produces "--- X" whose next line is "+++ Y" (addition of "++ Y") and the
+ * lookahead incorrectly fires. In that case both X and Y start with the same
+ * dash/plus pair, so we require the next line NOT to look like a mere content
+ * addition when seenHunk is true.
+ *
+ * Returns the index of the boundary line (or lines.length at end of input).
+ */
+const scanHunkBody = (
+  lines: string[],
+  start: number,
+  onLine: (line: string) => boolean,
+): number => {
+  let i = start
+  let seenHunk = false
+  while (i < lines.length) {
+    const l = lines[i] ?? ""
+    if (seenHunk ? isHunkAwareBoundary(lines, i) : isTrueFileBoundary(lines, i)) break
+    i++
+    if (onLine(l)) seenHunk = true
+  }
+  return i
+}
+
+/** Responsibility: consume the body of a DELETED file. A V4A delete op has no
+ *  body, so every hunk line is discarded. */
+const skipDeletedFileBody = (lines: string[], start: number): number =>
+  scanHunkBody(lines, start, (l) => l.startsWith("@@ "))
+
+/** Responsibility: emit the body of an ADDED file — only "+" lines survive;
+ *  hunk headers, context lines and "-" lines are dropped. */
+const emitAddedFileBody = (lines: string[], start: number, out: string[]): number =>
+  scanHunkBody(lines, start, (l) => {
+    if (l.startsWith("@@ ") || l === "@@") return true // skip hunk header
+    if (l.startsWith("+")) out.push(l) // keep + lines (strip later if needed)
+    // context and - lines are skipped for add file
+    return false
+  })
+
+/** Responsibility: emit the body of an UPDATED file — a unified
+ *  "@@ -x,y +x,y @@ <ctx>" header is rewritten to the V4A "@@ <ctx>" form and
+ *  every +/-/context/blank line passes through verbatim. */
+const emitUpdatedFileBody = (lines: string[], start: number, out: string[]): number =>
+  scanHunkBody(lines, start, (l) => {
+    if (l.startsWith("@@ ") || l === "@@") {
+      const m = l.match(/^@@ [^@]+ @@(?:\s+(.*))?$/)
+      const ctx = m?.[1]?.trim()
+      out.push(ctx ? `@@ ${ctx}` : "@@")
+      return true
+    }
+    if (l.startsWith("+") || l.startsWith("-") || l.startsWith(" ") || l === "") {
+      out.push(l)
+    }
+    // "\\No newline at end of file" -> skip
+    return false
+  })
+
+/** Responsibility: emit ONE V4A file section (op sentinel + body) for an
+ *  already-parsed file pair, choosing the add/delete/update op the pair's
+ *  /dev/null placement implies. Returns the index just past the section. */
+const emitFileSection = (
+  pair: FilePairHeader,
+  lines: string[],
+  start: number,
+  out: string[],
+): number => {
+  const isAdd = pair.fromPath === "/dev/null"
+  const isDel = pair.toPath === "/dev/null"
+  const filePath = isAdd ? pair.toPath : pair.fromPath
+
+  if (isDel) {
+    out.push(PATCH_SENTINELS.deleteFile + filePath)
+    return skipDeletedFileBody(lines, start)
+  }
+
+  if (isAdd) {
+    out.push(PATCH_SENTINELS.addFile + filePath)
+    return emitAddedFileBody(lines, start, out)
+  }
+
+  // Normal update
+  out.push(PATCH_SENTINELS.updateFile + filePath)
+  return emitUpdatedFileBody(lines, start, out)
+}
+
 /** Convert a unified diff string to V4A format. Returns best-effort V4A even
  *  on malformed input — parsePatch will throw PatchParseError if the result
  *  is still invalid. Called only when isUnifiedDiff returns true. */
@@ -110,100 +238,19 @@ export const unifiedDiffToV4A = (text: string): string => {
     const line = lines[i] ?? ""
 
     // Skip git diff meta-header lines (no content in V4A)
-    if (
-      line.startsWith("diff --git ") ||
-      line.startsWith("index ") ||
-      line.startsWith("new file mode") ||
-      line.startsWith("deleted file mode") ||
-      line.startsWith("old mode") ||
-      line.startsWith("new mode") ||
-      line.startsWith("similarity index") ||
-      line.startsWith("rename from") ||
-      line.startsWith("rename to") ||
-      line.startsWith("Binary files")
-    ) {
+    if (isGitMetaHeader(line)) {
       i++
       continue
     }
 
     // File pair: "--- <from>\n+++ <to>"
     if (line.startsWith("--- ") || line.startsWith("---\t")) {
-      const fromRaw = (line.slice(4).split("\t")[0] ?? "").trimEnd()
-      const fromPath = stripGitPrefix(fromRaw)
-      const toLine = lines[i + 1] ?? ""
-      if (!toLine.startsWith("+++ ") && !toLine.startsWith("+++\t")) {
+      const pair = readFilePairHeader(lines, i)
+      if (pair === null) {
         i++
         continue
       }
-      const toRaw = (toLine.slice(4).split("\t")[0] ?? "").trimEnd()
-      const toPath = stripGitPrefix(toRaw)
-      i += 2
-
-      const isAdd = fromPath === "/dev/null"
-      const isDel = toPath === "/dev/null"
-      const filePath = isAdd ? toPath : fromPath
-
-      if (isDel) {
-        out.push(PATCH_SENTINELS.deleteFile + filePath)
-        // Delete op has no body in V4A — skip hunk content.
-        // After seeing the first "@@ " hunk header, guard against the
-        // false-positive where a content deletion of a line starting with "-- "
-        // produces "--- X" whose next line is "+++ Y" (addition of "++ Y") and
-        // the lookahead incorrectly fires. In that case both X and Y start with
-        // the same dash/plus pair, so we require the next line NOT to look like
-        // a mere content addition when seenHunk is true.
-        {
-          let seenHunk = false
-          while (i < lines.length) {
-            const l = lines[i] ?? ""
-            if (seenHunk ? isHunkAwareBoundary(lines, i) : isTrueFileBoundary(lines, i)) break
-            i++
-            if (l.startsWith("@@ ")) seenHunk = true
-          }
-        }
-        continue
-      }
-
-      if (isAdd) {
-        out.push(PATCH_SENTINELS.addFile + filePath)
-        {
-          let seenHunk = false
-          while (i < lines.length) {
-            const l = lines[i] ?? ""
-            if (seenHunk ? isHunkAwareBoundary(lines, i) : isTrueFileBoundary(lines, i)) break
-            i++
-            if (l.startsWith("@@ ") || l === "@@") {
-              seenHunk = true
-              continue // skip hunk header
-            }
-            if (l.startsWith("+")) out.push(l) // keep + lines (strip later if needed)
-            // context and - lines are skipped for add file
-          }
-        }
-        continue
-      }
-
-      // Normal update
-      out.push(PATCH_SENTINELS.updateFile + filePath)
-      {
-        let seenHunk = false
-        while (i < lines.length) {
-          const l = lines[i] ?? ""
-          if (seenHunk ? isHunkAwareBoundary(lines, i) : isTrueFileBoundary(lines, i)) break
-          i++
-          if (l.startsWith("@@ ") || l === "@@") {
-            seenHunk = true
-            const m = l.match(/^@@ [^@]+ @@(?:\s+(.*))?$/)
-            const ctx = m?.[1]?.trim()
-            out.push(ctx ? `@@ ${ctx}` : "@@")
-            continue
-          }
-          if (l.startsWith("+") || l.startsWith("-") || l.startsWith(" ") || l === "") {
-            out.push(l)
-          }
-          // "\\No newline at end of file" -> skip
-        }
-      }
+      i = emitFileSection(pair, lines, i + 2, out)
       continue
     }
 

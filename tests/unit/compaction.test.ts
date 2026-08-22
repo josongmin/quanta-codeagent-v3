@@ -182,7 +182,6 @@ describe("compactIfNeeded", () => {
 class SignalRecordingLLM implements LLMPort {
   seenSignal: AbortSignal | undefined
   signalPresent = false
-  // biome-ignore lint/suspicious/useAwait: async generator contract
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
     this.signalPresent = "signal" in input
     this.seenSignal = input.signal

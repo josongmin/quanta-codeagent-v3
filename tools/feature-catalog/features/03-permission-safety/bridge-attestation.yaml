@@ -3,7 +3,7 @@ title: Bridge Attestation — remote permission preflight + STS token (ADR-0246)
 section: 3
 subsystem: Remote attestation seam (preflight + HMAC-SHA256 STS) — Claude Desktop onBridgePermissionPreflight + 9-event stream absorption
 order: 246
-maturity: L3
+maturity: L2
 status: hold
 ui_surfaces: [n-a]
 monitoring: n-a
@@ -102,17 +102,22 @@ knobs:
       caller-selected TTLs would bypass the preflight authority boundary.
 deliberate_hold:
   reason: |
-    Network protocol (gRPC / WebSocket / Tauri IPC channel) is out of scope —
-    this slice produces tokens; transport is the caller's choice. JWT / JWKS /
-    asymmetric signing migration is a future ADR; current HMAC is symmetric for
-    round-trip simplicity. OS-keyring secret backend mirrors ADR-0050's deferred
-    OS-keyring path. Cross-process token cache and multi-process replay/revocation
-    protection are future work; the local adapter already enforces bounded
-    request freshness before policy lookup.
+    Deliberate sequencing, and the purpose text already says it: "Default-OFF:
+    nothing in dispatch/loop/agent wires this today." Verified 2026-08-22 —
+    `grep -rn "security/bridge-attest" src/` outside the slice returns ZERO hits, so
+    all five evidence files are unreachable from every `src/apps/<surface>/index.ts`.
+    The slice mints STS credentials, so the intended callers are transport-bearing
+    (Tauri sidecar bridge, org-policy proxy, an MCP `bridge_attest_preflight` tool)
+    and every one of them is a separate ADR; wiring a credential minter ahead of the
+    transport decision is what the hold prevents. Mechanism (3-arm AttestResult,
+    fail-closed >=32-byte secret, freshness bounds, 9-event stream) is finished and
+    hellgate-covered.
   promotion_path: |
-    L4 = first real caller wires the port (a Tauri sidecar bridge wrapper, an
-    org-policy proxy, or an MCP `bridge_attest_preflight` tool) + the 9-event
-    stream gets a downstream subscriber (jsonl recorder or OTel sink).
+    L3 = the first production caller constructs the port from a composition root, so
+    `src/security/bridge-attest/*` becomes reachable from an app entrypoint; L4 adds
+    a downstream subscriber for the 9-event stream (jsonl recorder or OTel sink).
+    `bun fc reachability --strict --symbols` is the objective judge: this id must
+    drop off the offender list on its own, with NO baseline edit.
 notes: |
   Sibling to ADR-0050 trust-scope (local grant memory) and ADR-0158/0166
   checkpoints (local rollback). Closes the "remote-side preflight + token"
@@ -120,3 +125,9 @@ notes: |
 
   Test pattern: hellgate alone (no integration test) until a real caller wires
   this slice — by design, since wiring is a future-ADR concern.
+
+  Maturity was L3 until 2026-08-22, when the L3 reachability floor
+  (`bun fc reachability --strict --symbols`) was audited item-by-item instead of
+  grandfathered. L3 asserts "wired, with tests"; this slice has tests but zero
+  production importers, so L2 (mechanism built + tested, host edge deferred) is
+  the honest tier. No code changed — only the claim.

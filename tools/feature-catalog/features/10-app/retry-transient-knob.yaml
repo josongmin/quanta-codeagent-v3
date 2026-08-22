@@ -25,6 +25,8 @@ surface_integration:
 purpose: 'Default-OFF per-instance retry cap (integer N in [1,5]; N unset => single attempt) for TRANSIENT bench failures only (empty patch / infra-fail). Real model failures are FROZEN no-retry by policy (measurement integrity). Registry-only mirror: APPLY IS A NOOP — the cap is consumed out of band by the bench driver retry wrapper (runInstance -> runRetryLoop), not stored on AgentConfig; the registry entry exists so the bench resolver / report / preset layer SEE the knob. Strict integer domain: anything outside [1,5] => undefined (no heuristics).'
 evidence:
   code:
+    - src/config/knob-schema/schemas/bench-loop.ts
+    - src/runner/batch/eval/knobs-bench.ts
     - src/runner/knobs/knobs/retry-transient.ts
   adrs: []
   tests:
@@ -34,4 +36,19 @@ evidence:
     contract: []
 knobs: ["retry-transient"]
 deliberate_hold: null
-notes: 'Migrated from parseRetryTransientEnv. Domain N in [1,5]; absent => single attempt (byte-identical no-retry baseline). surfaces:["bench"] only — keeps interactive/headless trajectories + prefix-cache keys untouched.'
+notes: |
+  Migrated from parseRetryTransientEnv. Domain N in [1,5]; absent => single attempt (byte-identical no-retry baseline). surfaces:["bench"] only — keeps interactive/headless trajectories + prefix-cache keys untouched.
+
+  EVIDENCE REPOINT (2026-08-22): `src/runner/knobs/knobs/retry-transient.ts` alone was
+  the declared evidence and it is a VESTIGIAL back-compat re-export — since the
+  knob-registration unification (`registerBenchKnobs` derives every bench Knob
+  from `ALL_BENCH_SCHEMAS`) that file self-registers nothing and no reached module
+  imports `retryTransientKnob`, so `bun fc reachability --strict --symbols`
+  read the whole feature as UNREACHABLE. The knob itself is LIVE, just not there:
+    declare  `retryTransientSchema` in `src/config/knob-schema/schemas/bench-loop.ts` (envKey +
+             domain + default; the SSOT `registerBenchKnobs()` iterates)
+    read     `benchPostureFromState` / `benchOptIns` in
+             `src/runner/batch/eval/knobs-bench.ts` (`readKnobValue(state, "retry-transient", …)`)
+    effect   `benchOptIns().retryTransient` -> the driver retry wrapper (`runInstance` -> `runRetryLoop`, `driver/context-types.ts` maxAttempts resolution)
+  Both added files are REACHED from `src/apps/bench/index.ts`. Maturity stays L3
+  because the wiring is real; only the evidence pointer was stale.

@@ -156,203 +156,338 @@ export interface GroundingNormalizationPassResult {
   reasons: readonly string[]
 }
 
+/** The five fields the heuristic pass rewrites (confidence is never touched). */
+interface HeuristicDraft {
+  readonly activeThreadId: GroundingDecision["activeThreadId"]
+  readonly referentId: GroundingDecision["referentId"]
+  readonly intent: GroundingDecision["intent"]
+  readonly scope: GroundingDecision["scope"]
+  readonly shouldClarify: GroundingDecision["shouldClarify"]
+}
+
+/**
+ * Case-derived facts, computed ONCE up front exactly as the pre-split function
+ * did. Every entry is a pure function of the case (never of the running draft),
+ * which is what makes the rule extraction behaviour-preserving.
+ */
+interface HeuristicContext {
+  readonly groundingCase: GroundingCase
+  readonly stateContract: GroundingCase["stateContract"]
+  readonly fileContext: ReturnType<typeof resolveGroundingSpecificFileContext>
+  readonly referentContext: ReturnType<typeof resolveGroundingReferentContext>
+  /** Lower-cased target utterance — every cue predicate matches against this. */
+  readonly utterance: string
+  readonly inferredActiveThread: string | null
+  readonly canonicalActiveThread: string | null
+  readonly hasLatestToolResultAuthority: boolean
+  readonly stepReferent: string | null
+}
+
+type HeuristicRule = (draft: HeuristicDraft, ctx: HeuristicContext) => HeuristicDraft
+
+const buildHeuristicContext = (
+  groundingCase: GroundingCase,
+  decision: GroundingDecision,
+): HeuristicContext => {
+  const stateContract = groundingCase.stateContract
+  const inferredActiveThread = extractActiveThreadFromHistory(groundingCase)
+  return {
+    groundingCase,
+    stateContract,
+    fileContext: resolveGroundingSpecificFileContext(groundingCase),
+    referentContext: resolveGroundingReferentContext(groundingCase),
+    utterance: groundingCase.targetUtterance.toLowerCase(),
+    inferredActiveThread,
+    canonicalActiveThread:
+      stateContract?.activeThreadId ?? inferredActiveThread ?? decision.activeThreadId,
+    hasLatestToolResultAuthority:
+      (stateContract?.latestToolResultId !== undefined &&
+        stateContract.latestToolResultId !== null) ||
+      groundingCase.history.some((entry) => entry.kind === "tool_result"),
+    stepReferent: extractStepReferent(groundingCase),
+  }
+}
+
+/** "How are we doing overall?" is a whole-session status question; it keeps a
+ *  thread anchor only when the history is itself a cross-thread summary. */
+const applyEntireSessionStatus: HeuristicRule = (draft, ctx) => {
+  if (!isEntireSessionStatus(ctx.utterance)) return draft
+  const anchored =
+    ctx.inferredActiveThread !== null &&
+    (historyText(ctx.groundingCase).includes("session summary") ||
+      historyText(ctx.groundingCase).includes("cross-thread status"))
+  return {
+    ...draft,
+    intent: "status_check",
+    scope: "entire_session",
+    shouldClarify: false,
+    activeThreadId: anchored ? ctx.inferredActiveThread : null,
+    referentId: anchored ? ctx.inferredActiveThread : null,
+  }
+}
+
+/** "Ask me first if it's ambiguous" states a POLICY — the turn itself is the
+ *  clarify request, so the decision must not also flag shouldClarify. */
+const applyExplicitClarifyPolicy: HeuristicRule = (draft, ctx) =>
+  isExplicitClarifyPolicy(ctx.utterance)
+    ? {
+        ...draft,
+        intent: "clarify_request",
+        scope: hasFileAmbiguity(ctx.groundingCase) ? "specific_file" : draft.scope,
+        activeThreadId: ctx.inferredActiveThread,
+        referentId: null,
+        shouldClarify: false,
+      }
+    : draft
+
+/** Utterance cues that name the INTENT outright: a fact question, or a work
+ *  directive that is not really an explain / lookup / approval ask. */
+const applyUtteranceIntentCues: HeuristicRule = (draft, ctx) => {
+  let intent = draft.intent
+  if (isFactLookupRequest(ctx.utterance)) intent = "fact_lookup"
+  if (
+    isStructuralWorkDirective(ctx.utterance) &&
+    !isExplainRequest(ctx.utterance) &&
+    !isFactLookupRequest(ctx.utterance) &&
+    !isApprovalRequest(ctx.utterance)
+  ) {
+    intent = "execute_change"
+  }
+  return intent === draft.intent ? draft : { ...draft, intent }
+}
+
+/** A file cue (explicit path, "that file", or a matching candidate) narrows a
+ *  whole-workstream scope down to that file. */
+const promoteFileCuedScope: HeuristicRule = (draft, ctx) =>
+  draft.scope === "current_workstream" &&
+  (ctx.fileContext.hasExplicitFileCue ||
+    ctx.fileContext.hasGenericFileCue ||
+    ctx.fileContext.matchingCandidateFileIds.length > 0)
+    ? { ...draft, scope: "specific_file" }
+    : draft
+
+/** With no file cue, a referent pointing away from the canonical thread narrows
+ *  the workstream scope to that subthread / tool result instead. */
+const promoteSubthreadCuedScope: HeuristicRule = (draft, ctx) =>
+  draft.scope === "current_workstream" &&
+  ctx.referentContext.suggestsSpecificSubthread &&
+  !ctx.fileContext.hasExplicitFileCue &&
+  !ctx.fileContext.hasGenericFileCue &&
+  (ctx.referentContext.suggestsLatestToolResult ||
+    (ctx.referentContext.resolvedReferentId !== null &&
+      ctx.referentContext.resolvedReferentId !== ctx.canonicalActiveThread))
+    ? {
+        ...draft,
+        scope: ctx.referentContext.suggestsLatestToolResult
+          ? "latest_tool_result"
+          : "specific_subthread",
+      }
+    : draft
+
+/** "N번" names a numbered plan step in the history — an unambiguous subthread. */
+const applyStepReferent: HeuristicRule = (draft, ctx) =>
+  ctx.stepReferent !== null
+    ? {
+        ...draft,
+        referentId: ctx.stepReferent,
+        scope: "specific_subthread",
+        ...(draft.activeThreadId === null && ctx.inferredActiveThread !== null
+          ? { activeThreadId: ctx.inferredActiveThread }
+          : {}),
+      }
+    : draft
+
+/** A vague "that / keep going" against a history holding two open threads is
+ *  genuinely under-determined — clarify, never guess. */
+const clarifyGenericThreadReference: HeuristicRule = (draft, ctx) =>
+  hasThreadAmbiguity(ctx.groundingCase) && isGenericThreadReference(ctx.utterance)
+    ? {
+        ...draft,
+        activeThreadId: null,
+        referentId: null,
+        shouldClarify: true,
+        scope: "current_workstream",
+      }
+    : draft
+
+/** Same, for "that file" against two candidate files. */
+const clarifyGenericFileReference: HeuristicRule = (draft, ctx) =>
+  hasFileAmbiguity(ctx.groundingCase) && isGenericFileReference(ctx.utterance)
+    ? {
+        ...draft,
+        activeThreadId: ctx.inferredActiveThread,
+        referentId: null,
+        shouldClarify: true,
+        scope: "specific_file",
+      }
+    : draft
+
+/** Late intent overrides that depend on the scope the rules above settled on. */
+const applyLateIntentOverrides: HeuristicRule = (draft, ctx) => {
+  let intent = draft.intent
+  if (isRerunRequest(ctx.utterance)) intent = "execute_change"
+  if (isApprovalRequest(ctx.utterance)) intent = "approval_request"
+  if (draft.scope === "specific_subthread" && isActionDirective(ctx.utterance))
+    intent = "execute_change"
+  return intent === draft.intent ? draft : { ...draft, intent }
+}
+
+/** A clarify flag on the current workstream is unfounded when nothing in the
+ *  case is actually ambiguous and no clarify policy was stated. */
+const dropUnfoundedWorkstreamClarify: HeuristicRule = (draft, ctx) =>
+  draft.scope === "current_workstream" &&
+  draft.shouldClarify === true &&
+  ctx.canonicalActiveThread !== null &&
+  !hasThreadAmbiguity(ctx.groundingCase) &&
+  !hasFileAmbiguity(ctx.groundingCase) &&
+  !isExplicitClarifyPolicy(ctx.utterance)
+    ? {
+        ...draft,
+        activeThreadId: ctx.canonicalActiveThread,
+        referentId: ctx.canonicalActiveThread,
+        shouldClarify: false,
+      }
+    : draft
+
+/** A confident decision with no thread inherits the state contract's. */
+const inheritContractActiveThread: HeuristicRule = (draft, ctx) =>
+  draft.activeThreadId === null &&
+  draft.shouldClarify === false &&
+  ctx.stateContract?.activeThreadId !== undefined &&
+  ctx.stateContract.activeThreadId !== null
+    ? { ...draft, activeThreadId: ctx.stateContract.activeThreadId }
+    : draft
+
+/** A confident decision with no referent takes the one its scope implies. */
+const fillReferentFromScope: HeuristicRule = (draft, ctx) => {
+  if (!(draft.referentId === null && draft.shouldClarify === false)) return draft
+  if (draft.scope === "latest_tool_result" && ctx.stateContract?.latestToolResultId !== undefined) {
+    return { ...draft, referentId: ctx.stateContract.latestToolResultId }
+  }
+  if (draft.scope === "current_workstream" && draft.activeThreadId !== null) {
+    return { ...draft, referentId: draft.activeThreadId }
+  }
+  return draft
+}
+
+/** Everything a settled `specific_file` scope owes: demote it when no file was
+ *  actually cued, clarify when the file is ambiguous, otherwise bind the
+ *  resolved file id — and never keep a referent while clarifying. */
+const refineSpecificFileScope: HeuristicRule = (draft, ctx) => {
+  if (draft.scope !== "specific_file") return draft
+  let next = draft
+  if (
+    !ctx.fileContext.hasExplicitFileCue &&
+    !ctx.fileContext.hasGenericFileCue &&
+    ctx.referentContext.resolvedReferentId !== null &&
+    !isGroundingFileId(ctx.referentContext.resolvedReferentId)
+  ) {
+    next = {
+      ...next,
+      scope: ctx.referentContext.suggestsLatestToolResult
+        ? "latest_tool_result"
+        : "specific_subthread",
+    }
+  }
+  if (ctx.fileContext.isAmbiguous && next.intent !== "clarify_request") {
+    next = { ...next, referentId: null, shouldClarify: true }
+  } else if (
+    next.shouldClarify === false &&
+    (next.referentId === null || !isGroundingFileId(next.referentId)) &&
+    ctx.fileContext.resolvedReferentId !== null
+  ) {
+    next = { ...next, referentId: ctx.fileContext.resolvedReferentId }
+  }
+  if (next.shouldClarify === true || next.intent === "clarify_request") {
+    next = { ...next, referentId: null }
+  }
+  return next
+}
+
+/** `latest_tool_result` needs an actual tool result behind it. */
+const demoteUnsupportedToolResultScope: HeuristicRule = (draft, ctx) =>
+  draft.scope === "latest_tool_result" && !ctx.hasLatestToolResultAuthority
+    ? { ...draft, scope: "specific_subthread" }
+    : draft
+
+/** Referent binding for the two sub-thread-shaped scopes: clarify when the
+ *  referent context is ambiguous, otherwise adopt what it resolved. */
+const bindSubthreadReferent: HeuristicRule = (draft, ctx) => {
+  if (!(draft.scope === "specific_subthread" || draft.scope === "latest_tool_result")) return draft
+  if (ctx.referentContext.isAmbiguous && draft.scope === "specific_subthread") {
+    return { ...draft, referentId: null, shouldClarify: true }
+  }
+  if (draft.shouldClarify === false && ctx.referentContext.resolvedReferentId !== null) {
+    return { ...draft, referentId: ctx.referentContext.resolvedReferentId }
+  }
+  return draft
+}
+
+/** A settled current-workstream decision points at the canonical thread. */
+const bindCurrentWorkstreamToCanonicalThread: HeuristicRule = (draft, ctx) =>
+  draft.scope === "current_workstream" &&
+  draft.shouldClarify === false &&
+  ctx.canonicalActiveThread !== null
+    ? {
+        ...draft,
+        activeThreadId: ctx.canonicalActiveThread,
+        referentId: ctx.canonicalActiveThread,
+      }
+    : draft
+
+/** Re-check the action-directive intent AFTER the scope rules above may have
+ *  demoted something into `specific_subthread`. */
+const applySubthreadActionIntent: HeuristicRule = (draft, ctx) =>
+  draft.scope === "specific_subthread" &&
+  isActionDirective(ctx.utterance) &&
+  !isExplainRequest(ctx.utterance) &&
+  !isFactLookupRequest(ctx.utterance) &&
+  !isApprovalRequest(ctx.utterance)
+    ? { ...draft, intent: "execute_change" }
+    : draft
+
+/**
+ * ORDER IS LOAD-BEARING — this is the exact statement order of the pre-split
+ * function. Later rules read the scope/clarify state earlier ones settled.
+ */
+const HEURISTIC_RULES: readonly HeuristicRule[] = [
+  applyEntireSessionStatus,
+  applyExplicitClarifyPolicy,
+  applyUtteranceIntentCues,
+  promoteFileCuedScope,
+  promoteSubthreadCuedScope,
+  applyStepReferent,
+  clarifyGenericThreadReference,
+  clarifyGenericFileReference,
+  applyLateIntentOverrides,
+  dropUnfoundedWorkstreamClarify,
+  inheritContractActiveThread,
+  fillReferentFromScope,
+  refineSpecificFileScope,
+  demoteUnsupportedToolResultScope,
+  bindSubthreadReferent,
+  bindCurrentWorkstreamToCanonicalThread,
+  applySubthreadActionIntent,
+]
+
 export const normalizeGroundingDecisionHeuristically = (
   groundingCase: GroundingCase,
   decision: GroundingDecision,
 ): GroundingNormalizationPassResult => {
-  const stateContract = groundingCase.stateContract
-  const fileContext = resolveGroundingSpecificFileContext(groundingCase)
-  const referentContext = resolveGroundingReferentContext(groundingCase)
-  const utterance = groundingCase.targetUtterance.toLowerCase()
-  const inferredActiveThread = extractActiveThreadFromHistory(groundingCase)
-  const canonicalActiveThread =
-    stateContract?.activeThreadId ?? inferredActiveThread ?? decision.activeThreadId
-  const hasLatestToolResultAuthority =
-    (stateContract?.latestToolResultId !== undefined &&
-      stateContract.latestToolResultId !== null) ||
-    groundingCase.history.some((entry) => entry.kind === "tool_result")
-  let activeThreadId = decision.activeThreadId
-  let referentId = decision.referentId
-  let intent = decision.intent
-  let scope = decision.scope
-  let shouldClarify = decision.shouldClarify
-
-  if (isEntireSessionStatus(utterance)) {
-    intent = "status_check"
-    scope = "entire_session"
-    shouldClarify = false
-    if (
-      inferredActiveThread !== null &&
-      (historyText(groundingCase).includes("session summary") ||
-        historyText(groundingCase).includes("cross-thread status"))
-    ) {
-      activeThreadId = inferredActiveThread
-      referentId = inferredActiveThread
-    } else {
-      activeThreadId = null
-      referentId = null
-    }
+  const ctx = buildHeuristicContext(groundingCase, decision)
+  let draft: HeuristicDraft = {
+    activeThreadId: decision.activeThreadId,
+    referentId: decision.referentId,
+    intent: decision.intent,
+    scope: decision.scope,
+    shouldClarify: decision.shouldClarify,
   }
-
-  if (isExplicitClarifyPolicy(utterance)) {
-    intent = "clarify_request"
-    scope = hasFileAmbiguity(groundingCase) ? "specific_file" : scope
-    activeThreadId = inferredActiveThread
-    referentId = null
-    shouldClarify = false
-  }
-
-  if (isFactLookupRequest(utterance)) intent = "fact_lookup"
-  if (
-    isStructuralWorkDirective(utterance) &&
-    !isExplainRequest(utterance) &&
-    !isFactLookupRequest(utterance) &&
-    !isApprovalRequest(utterance)
-  ) {
-    intent = "execute_change"
-  }
-  if (
-    scope === "current_workstream" &&
-    (fileContext.hasExplicitFileCue ||
-      fileContext.hasGenericFileCue ||
-      fileContext.matchingCandidateFileIds.length > 0)
-  ) {
-    scope = "specific_file"
-  }
-  if (
-    scope === "current_workstream" &&
-    referentContext.suggestsSpecificSubthread &&
-    !fileContext.hasExplicitFileCue &&
-    !fileContext.hasGenericFileCue &&
-    (referentContext.suggestsLatestToolResult ||
-      (referentContext.resolvedReferentId !== null &&
-        referentContext.resolvedReferentId !== canonicalActiveThread))
-  ) {
-    scope = referentContext.suggestsLatestToolResult ? "latest_tool_result" : "specific_subthread"
-  }
-
-  const stepReferent = extractStepReferent(groundingCase)
-  if (stepReferent !== null) {
-    referentId = stepReferent
-    scope = "specific_subthread"
-    if (activeThreadId === null && inferredActiveThread !== null)
-      activeThreadId = inferredActiveThread
-  }
-
-  if (hasThreadAmbiguity(groundingCase) && isGenericThreadReference(utterance)) {
-    activeThreadId = null
-    referentId = null
-    shouldClarify = true
-    scope = "current_workstream"
-  }
-
-  if (hasFileAmbiguity(groundingCase) && isGenericFileReference(utterance)) {
-    activeThreadId = inferredActiveThread
-    referentId = null
-    shouldClarify = true
-    scope = "specific_file"
-  }
-
-  if (isRerunRequest(utterance)) intent = "execute_change"
-  if (isApprovalRequest(utterance)) intent = "approval_request"
-  if (scope === "specific_subthread" && isActionDirective(utterance)) intent = "execute_change"
-
-  if (
-    scope === "current_workstream" &&
-    shouldClarify === true &&
-    canonicalActiveThread !== null &&
-    !hasThreadAmbiguity(groundingCase) &&
-    !hasFileAmbiguity(groundingCase) &&
-    !isExplicitClarifyPolicy(utterance)
-  ) {
-    activeThreadId = canonicalActiveThread
-    referentId = canonicalActiveThread
-    shouldClarify = false
-  }
-
-  if (
-    activeThreadId === null &&
-    shouldClarify === false &&
-    stateContract?.activeThreadId !== undefined &&
-    stateContract.activeThreadId !== null
-  ) {
-    activeThreadId = stateContract.activeThreadId
-  }
-
-  if (referentId === null && shouldClarify === false) {
-    if (scope === "latest_tool_result" && stateContract?.latestToolResultId !== undefined) {
-      referentId = stateContract.latestToolResultId
-    } else if (scope === "current_workstream" && activeThreadId !== null) {
-      referentId = activeThreadId
-    }
-  }
-
-  if (scope === "specific_file") {
-    if (
-      !fileContext.hasExplicitFileCue &&
-      !fileContext.hasGenericFileCue &&
-      referentContext.resolvedReferentId !== null &&
-      !isGroundingFileId(referentContext.resolvedReferentId)
-    ) {
-      scope = referentContext.suggestsLatestToolResult ? "latest_tool_result" : "specific_subthread"
-    }
-    if (fileContext.isAmbiguous && intent !== "clarify_request") {
-      referentId = null
-      shouldClarify = true
-    } else if (
-      shouldClarify === false &&
-      (referentId === null || !isGroundingFileId(referentId)) &&
-      fileContext.resolvedReferentId !== null
-    ) {
-      referentId = fileContext.resolvedReferentId
-    }
-    if (shouldClarify === true || intent === "clarify_request") referentId = null
-  }
-
-  if (scope === "latest_tool_result" && !hasLatestToolResultAuthority) {
-    scope = "specific_subthread"
-  }
-
-  if (scope === "specific_subthread" || scope === "latest_tool_result") {
-    if (referentContext.isAmbiguous && scope === "specific_subthread") {
-      referentId = null
-      shouldClarify = true
-    } else if (shouldClarify === false && referentContext.resolvedReferentId !== null) {
-      referentId = referentContext.resolvedReferentId
-    }
-  }
-
-  if (scope === "current_workstream" && shouldClarify === false) {
-    if (canonicalActiveThread !== null) {
-      activeThreadId = canonicalActiveThread
-      referentId = canonicalActiveThread
-    }
-  }
-
-  if (
-    scope === "specific_subthread" &&
-    isActionDirective(utterance) &&
-    !isExplainRequest(utterance) &&
-    !isFactLookupRequest(utterance) &&
-    !isApprovalRequest(utterance)
-  ) {
-    intent = "execute_change"
-  }
+  for (const rule of HEURISTIC_RULES) draft = rule(draft, ctx)
 
   const normalized: GroundingDecision = {
     ...decision,
-    activeThreadId,
-    referentId,
-    intent: normalizeIntent(groundingCase, {
-      ...decision,
-      activeThreadId,
-      referentId,
-      intent,
-      scope,
-      shouldClarify,
-    }),
-    scope,
-    shouldClarify,
+    ...draft,
+    intent: normalizeIntent(groundingCase, { ...decision, ...draft }),
   }
   const reasons = diffReasons(decision, normalized)
   return {

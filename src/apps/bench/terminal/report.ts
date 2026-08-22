@@ -259,17 +259,45 @@ const parseQuantaFacts = (
   }
 }
 
+/**
+ * Did the agent issue ANY model call? Harbor puts the three token counters on
+ * `agent_result`; an agent that never reached its provider reports all three as
+ * `null`.
+ *
+ * MEASURED aug-22 on the first two live 2.1 canaries: the one whose brain failed
+ * to launch reported `n_input_tokens/n_cache_tokens/n_output_tokens = null` with
+ * `exception_info: null` and `reward: 0.0`; the working one reported 51 175 /
+ * 4 742. Harbor cannot tell these apart — it saw a completed trial both times.
+ */
+const hasAgentActivity = (t: TrialTokenCounters): boolean =>
+  t.inputTokens !== null || t.cacheTokens !== null || t.outputTokens !== null
+
+interface TrialTokenCounters {
+  readonly inputTokens: number | null
+  readonly cacheTokens: number | null
+  readonly outputTokens: number | null
+}
+
 const classify = (
   reward: number | null,
   exceptionType: string | undefined,
   malformed: boolean,
+  tokens: TrialTokenCounters,
 ): TerminalTrialOutcome => {
   if (malformed) return "malformed_result"
   if (exceptionType !== undefined) {
     return EXCEPTION_OUTCOMES[exceptionType] ?? "agent_crash"
   }
   if (reward === null) return "missing_reward"
-  return isSuccess(reward) ? "graded_pass" : "graded_fail"
+  if (isSuccess(reward)) return "graded_pass"
+  // NARROW BY DESIGN. Only a non-passing, exception-free trial with NO telemetry
+  // at all is reclassified:
+  //   * a PASS is never demoted — a scored success is a success however quiet;
+  //   * partial telemetry is an ATTEMPT, so an agent that burned tokens and lost
+  //     stays a real `graded_fail` and the arm keeps its honest miss.
+  // Anything wider would let a provider that under-reports usage launder real
+  // failures out of the denominator, which is the mirror of the bug being fixed.
+  return hasAgentActivity(tokens) ? "graded_fail" : "no_agent_activity"
 }
 
 /**
@@ -323,7 +351,11 @@ export const parseHarborTrialResult = (
     ...put("taskChecksum", asString(raw.task_checksum)),
     ...put("datasetSource", asString(raw.source)),
     reward,
-    outcome: classify(reward, exceptionType, malformed || config === undefined),
+    outcome: classify(reward, exceptionType, malformed || config === undefined, {
+      inputTokens,
+      cacheTokens,
+      outputTokens: asFiniteNumber(agentResult?.n_output_tokens),
+    }),
     ...put("exceptionType", exceptionType),
     ...put("exceptionMessage", asString(exception?.exception_message)),
     startedAt,
@@ -414,6 +446,11 @@ const admit = (
   const shortTasks = [...perTask.values()].filter((count) => count !== k).length
   const missingReward = trials.filter((t) => t.outcome === "missing_reward").length
   const malformed = trials.filter((t) => t.outcome === "malformed_result").length
+  // Same class as `missing_reward` / `malformed_result`: not a scoreable model
+  // result. The dangerous one, though — Harbor reports an unattempted trial as a
+  // perfectly normal completed trial, so without this a whole campaign of them
+  // would be admitted as a legitimate 0%.
+  const noAgentActivity = trials.filter((t) => t.outcome === "no_agent_activity").length
   const overridden = trials.filter((t) => t.configOverrides.length > 0)
   const rewardedWithoutTrajectory = trials.filter(
     (t) => isSuccess(t.reward) && t.trajectoryPath === undefined,
@@ -435,6 +472,7 @@ const admit = (
   if (shortTasks > 0) reasons.push(`tasks-not-at-k${k}:${shortTasks}`)
   if (missingReward > 0) reasons.push(`missing-reward:${missingReward}`)
   if (malformed > 0) reasons.push(`malformed-result:${malformed}`)
+  if (noAgentActivity > 0) reasons.push(`no-agent-activity:${noAgentActivity}`)
   if (defects.length > 0) reasons.push(`unreadable-trial-records:${defects.length}`)
   if (overridden.length > 0) {
     reasons.push(`nonstandard-config:${overridden.length} (${overridden[0]?.configOverrides[0]})`)
@@ -453,6 +491,7 @@ const admit = (
     shortTasks === 0 &&
     missingReward === 0 &&
     malformed === 0 &&
+    noAgentActivity === 0 &&
     defects.length === 0
   const standardConfig = overridden.length === 0
   const rejected = duplicateTrialIds.length > 0 || rejections.length > 0

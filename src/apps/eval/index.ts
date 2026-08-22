@@ -21,6 +21,40 @@
  *
  * Exits 0 in all "no work to do / missing key" paths so a CI matrix entry that
  * has no API key configured does not break the build — it prints guidance.
+ *
+ * ── WHY `console.*` IS THE RIGHT SINK HERE (biome `suspicious/noConsole`) ────
+ *
+ * The repo-wide rule is `noConsole: "error"`, and `biome.json` carries an
+ * override lowering it to `warn` for exactly this path. That override is
+ * load-bearing, not a grandfathered leak, and this is its rationale:
+ *
+ *   1. This file is the eval CLI's COMPOSITION ROOT — the `#!/usr/bin/env bun`
+ *      entrypoint that owns the process. `src/shared/terminal-io.ts` states the
+ *      contract: "Non-app modules MUST NOT reach for `process.stdout` /
+ *      `process.stderr` directly. The app/composition root registers the real
+ *      terminal sinks." This file IS that root: it calls `setTerminalIo` with
+ *      the real streams a few lines below. Terminal ownership is its job.
+ *
+ *   2. Human-readable stdout IS the product. `eval grounding report`,
+ *      `compare`, `regress` and `report` emit markdown/JSON on stdout for a
+ *      human or a pipe to consume; routing that through the structured
+ *      `logger` would wrap the artifact in log envelopes and destroy it.
+ *
+ *   3. The stdout/stderr SPLIT is deliberate and must survive: the artifact
+ *      goes to stdout (`console.log`), while headlines, usage errors,
+ *      validation failures and gate verdicts go to stderr (`console.error`) —
+ *      see every `console.log(out.markdown)` / `console.error(out.headline)`
+ *      pair below. That is what makes `bun run eval ... > report.md` yield a
+ *      clean report while diagnostics still reach the operator.
+ *
+ * Every `console.*` call in this file is one of those two categories: an
+ * stdout artifact or an stderr diagnostic. NONE is a debug leftover. The single
+ * non-console sink is `logger.error("eval: fatal", …)` at the bottom, which is
+ * correct: an unhandled crash is an observability event, not CLI output.
+ *
+ * If you add a `console.*` here, it must fall in one of those two categories —
+ * anything else (progress spam, debug traces) belongs in `logger`, or in the
+ * library module that owns the work, which is NOT covered by this override.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
 import { dirname, resolve } from "node:path"

@@ -16,7 +16,7 @@ import {
   presetPatch,
   projectPreset,
 } from "../../../../src/permission/posture/presets"
-import { allCompleteRecords } from "./fixtures"
+import { allCompleteRecords, nthCompleteRecord } from "./fixtures"
 
 describe("availablePresets — parks full-access, excludes custom", () => {
   test("offers exactly the non-parked rungs", () => {
@@ -37,7 +37,7 @@ describe("projectPreset — round-trips each offered preset", () => {
   })
 
   test("applying a preset then projecting yields that preset (askOutsidePlan-agnostic)", () => {
-    const base = allCompleteRecords()[10]!
+    const base = nthCompleteRecord(10)
     for (const preset of OFFERED_PRESETS) {
       const next = applyPreset(base, preset)
       expect(projectPreset(next.threadPermission)).toBe(preset)

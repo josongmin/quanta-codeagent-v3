@@ -22,7 +22,8 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { __resetRuntimeConfig } from "@/shared/runtime-config"
 import { resolveTerminalRunConfig } from "../terminal/config"
-import { buildTerminalRunManifest } from "../terminal/manifest"
+import { TERMINAL_BENCH_DATASET } from "../terminal/dataset"
+import { buildTerminalRunManifest, validateTerminalRunManifest } from "../terminal/manifest"
 import { cmdTerminal, spawnSyncText } from "./terminal"
 
 const CLI = join(import.meta.dir, "..", "cli.ts")
@@ -201,28 +202,31 @@ describe("the dry-run receipt is the operator's proof of what would run", () => 
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-describe("SPEND GUARD — the executing path is only ever reached deliberately", () => {
-  /** An ALL-GREEN doctor + provenance port. Injected so the paid-path control
-   *  test measures the SPEND GATE, not whether this machine has a Docker daemon. */
-  const greenRun = (bin: string, args: readonly string[]) => {
-    const line = [bin, ...args].join(" ")
-    if (line.startsWith("git rev-parse")) return { code: 0, stdout: "9d5369d310bb\n", stderr: "" }
-    if (line.startsWith("git status")) return { code: 0, stdout: "", stderr: "" }
-    if (line.includes("quanta_agent")) {
-      return {
-        code: 0,
-        stdout: JSON.stringify({
-          module: "quanta_agent",
-          klass: "QuantaAgent",
-          isBaseAgentSubclass: true,
-          abstractMethods: [],
-          supportsAtif: true,
-        }),
-        stderr: "",
-      }
+/** An ALL-GREEN doctor + provenance port. Injected so the paid-path tests
+ *  measure the SPEND GATE, not whether this machine has a Docker daemon.
+ *  Module-scoped: both the spend-guard block and the run→report handoff block
+ *  drive the paid path and must agree on what "green" means. */
+const greenRun = (bin: string, args: readonly string[]) => {
+  const line = [bin, ...args].join(" ")
+  if (line.startsWith("git rev-parse")) return { code: 0, stdout: "9d5369d310bb\n", stderr: "" }
+  if (line.startsWith("git status")) return { code: 0, stdout: "", stderr: "" }
+  if (line.includes("quanta_agent")) {
+    return {
+      code: 0,
+      stdout: JSON.stringify({
+        module: "quanta_agent",
+        klass: "QuantaAgent",
+        isBaseAgentSubclass: true,
+        abstractMethods: [],
+        supportsAtif: true,
+      }),
+      stderr: "",
     }
-    return { code: 0, stdout: "1.0.0\n", stderr: "" }
   }
+  return { code: 0, stdout: "1.0.0\n", stderr: "" }
+}
+
+describe("SPEND GUARD — the executing path is only ever reached deliberately", () => {
   const base = {
     doctorRun: greenRun,
     canWriteDir: () => true,
@@ -456,5 +460,106 @@ describe("`terminal report` consumes the manifest, it does not re-derive one", (
     })
     expect(codes).toEqual([2])
     expect(lines.join("\n")).toContain("--out")
+  })
+})
+
+/**
+ * MEASURED aug-22, first green canary. `terminal report` REQUIRES
+ * `--manifest <run-manifest.json>` — it is the authority for the dataset ref,
+ * the agent version, the effort decision, the knob set and the promotion
+ * blockers. `terminal run` built that manifest in memory, printed a receipt from
+ * it, spawned harbor, and threw it away.
+ *
+ * So after a REAL run there was no manifest on disk and the last hop of the
+ * TB21-04 pipeline had no input: the two halves of the pipeline had never been
+ * connected, and nothing said so, because every test drove each half with a
+ * hand-built fixture.
+ *
+ * The manifest is written BEFORE the spawn, deliberately: a harbor job that dies
+ * halfway is exactly when an operator needs to know what was launched.
+ */
+describe("run → report handoff", () => {
+  // The same green-doctor fixture the paid-run tests above use, re-declared here
+  // because it is scoped to that describe block.
+  const base = {
+    doctorRun: greenRun,
+    canWriteDir: () => true,
+    fileExists: () => true,
+    now: () => "2026-08-22T00:00:00.000Z",
+    write: () => {},
+  } as const
+
+  const runArgs = (out: string) => [
+    "terminal",
+    "run",
+    "--profile",
+    "quanta-full",
+    "--model",
+    "gpt-5.5",
+    "--effort",
+    "xhigh",
+    "--out",
+    out,
+  ]
+
+  test("a paid run PERSISTS its run-manifest into the output root", async () => {
+    const out = mkdtempSync(join(tmpdir(), "tb-run-manifest-"))
+    const written: Array<{ path: string; text: string }> = []
+    await cmdTerminal({
+      ...base,
+      argv: runArgs(out),
+      env: { OPENAI_API_KEY: "x" },
+      spawnHarbor: () => 0,
+      writeFile: (path, text) => {
+        written.push({ path, text })
+      },
+      exit: () => {},
+    })
+
+    const manifests = written.filter((w) => w.path.includes("run-manifest"))
+    expect(manifests.length, "no run-manifest was persisted").toBe(1)
+    expect(manifests[0]?.path.startsWith(out)).toBe(true)
+
+    // It must be the REAL manifest — `report` validates it, so a placeholder or
+    // a partial dump would fail there rather than here.
+    const parsed = validateTerminalRunManifest(JSON.parse(manifests[0]?.text ?? "{}"))
+    expect(parsed.model).toBe("gpt-5.5")
+    expect(parsed.dataset).toBe(TERMINAL_BENCH_DATASET)
+    rmSync(out, { recursive: true, force: true })
+  })
+
+  test("it is written BEFORE the spawn, so a dead job still leaves provenance", async () => {
+    const out = mkdtempSync(join(tmpdir(), "tb-run-manifest-"))
+    const order: string[] = []
+    await cmdTerminal({
+      ...base,
+      argv: runArgs(out),
+      env: { OPENAI_API_KEY: "x" },
+      writeFile: (path) => {
+        if (path.includes("run-manifest")) order.push("manifest")
+      },
+      spawnHarbor: () => {
+        order.push("spawn")
+        return 1 // the job dies
+      },
+      exit: () => {},
+    })
+    expect(order).toEqual(["manifest", "spawn"])
+    rmSync(out, { recursive: true, force: true })
+  })
+
+  test("PAIRED CONTROL — a --dry-run persists nothing (it spends nothing)", async () => {
+    const out = mkdtempSync(join(tmpdir(), "tb-run-manifest-"))
+    const written: string[] = []
+    await cmdTerminal({
+      ...base,
+      argv: [...runArgs(out), "--dry-run"],
+      env: { OPENAI_API_KEY: "x" },
+      writeFile: (path) => written.push(path),
+      spawnHarbor: () => 0,
+      exit: () => {},
+    })
+    expect(written.filter((p) => p.includes("run-manifest"))).toEqual([])
+    rmSync(out, { recursive: true, force: true })
   })
 })

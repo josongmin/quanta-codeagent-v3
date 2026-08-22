@@ -254,7 +254,6 @@ describe("runPhase2 happy path", () => {
   test("tokensUsed defaults to null when port omits it", async () => {
     const log = makeLog()
     const out: typeof goodPortOut = { ...goodPortOut }
-    // biome-ignore lint/performance/noDelete: test scaffolding only
     delete (out as Partial<typeof goodPortOut>).tokensUsed
     const res = await runPhase2(
       baseInput(),

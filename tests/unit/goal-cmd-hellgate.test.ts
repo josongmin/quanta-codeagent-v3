@@ -257,10 +257,9 @@ describe("/goal clear|stop — clear path", () => {
 describe("/goal — not wired (no goal slot)", () => {
   test("bare ctx → 'not wired', exit 0, NO throw", async () => {
     const buf: string[] = []
-    let code: number | undefined
     // The whole point: no throw. If run() threw, this await rejects and the
     // test fails loudly (red-on-injection for the undefined-guard).
-    code = await goalCmd.run(["ship", "something"], ctxBare(buf))
+    const code: number | undefined = await goalCmd.run(["ship", "something"], ctxBare(buf))
     expect(code).toBe(0)
     expect(text(buf)).toContain("not wired")
   })

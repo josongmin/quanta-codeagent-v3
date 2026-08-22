@@ -3,7 +3,7 @@ title: Per-tool TTL drift detector — config-vs-preset divergence as typed sign
 section: 10
 subsystem: Tool-dedup config drift detection
 order: 92
-maturity: L3
+maturity: L2
 status: stable
 ui_surfaces: [cli]
 monitoring: integrated
@@ -45,7 +45,29 @@ evidence:
     integration: []
     contract: []
 knobs: []
-deliberate_hold: null
+deliberate_hold:
+  reason: |
+    Verified 2026-08-22: `grep -rn "instrument-tool-dedup\|instrumentToolDedup\|tool_dedup_ttl_drift" src/`
+    outside the file returns ZERO hits — no cache construction site compares its
+    `perToolTtlMs` against `RECOMMENDED_PER_TOOL_TTL_MS`, and the
+    `tool_dedup_ttl_drift_total` counter is never incremented in production. The
+    detector is a pure verdict function plus a counter emitter; it only bites when
+    the tool-dedup cache's composition root calls it at construction, and that
+    call-site was never added.
+  promotion_path: |
+    L3 = the tool-dedup cache's construction site invokes the drift check with the
+    caller's `perToolTtlMs` and routes the 4-arm verdict to the operator-log channel
+    + the counter, making `src/observability/metrics/instrument-tool-dedup.ts`
+    reachable from an app entrypoint. That is a one-call-site wire and the highest-ROI
+    item in this batch — the feature's whole value is catching a misconfiguration that
+    today ships silently.
+    `bun fc reachability --strict --symbols` is the objective judge: this id must
+    drop off the offender list on its own, with NO baseline edit.
 notes: |
   Sibling dual-audience pattern to ADR-0169 (skipped-warning operator
   log) + ADR-0175 (wired-gauge machine counter). All options default-OFF.
+
+  Maturity was L3 until 2026-08-22 (`status: stable`, `monitoring: integrated`,
+  `deliberate_hold: null` — reading as "drift is being detected today"). The L3
+  reachability floor showed the detector has no caller, so nothing is detected.
+  Corrected to L2; no code changed.

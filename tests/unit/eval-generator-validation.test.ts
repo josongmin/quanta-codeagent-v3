@@ -15,7 +15,6 @@ import type { LLMPort, StreamEvent, StreamInput } from "@/llm"
 
 const makeLLM = (text: string): LLMPort => ({
   model: "test",
-  // biome-ignore lint/correctness/useYield: scripted; iterates a fixed sequence
   async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
     yield { type: "text_delta", delta: text }
     yield { type: "message_stop", stop_reason: "end_turn" }

@@ -35,7 +35,6 @@ const SENTINEL = "OMO-WS4-E2E-RULE-9d7f-DO-NOT-DELETE-THIS-LINE"
 class CapturingLLM implements LLMPort {
   capturedSystem: unknown = "__uncalled__"
   readonly model = "capture"
-  // biome-ignore lint/suspicious/useAwait: async generator contract
   async *stream(input: StreamInput): AsyncIterable<StreamEvent> {
     if (this.capturedSystem === "__uncalled__") this.capturedSystem = input.system ?? null
     yield { type: "text_delta", delta: "ok" }

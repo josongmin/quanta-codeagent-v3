@@ -169,7 +169,6 @@ describe("P4 — the structural diff uses OWN-property checks, not `in`", () => 
       const derived = deriveCampaignGolden({ sourceText: src, pins: PINS })
       if (!derived.ok) throw new Error("derivation refused")
       const dropped = JSON.parse(derived.json) as Record<string, unknown>[]
-      // biome-ignore lint/performance/noDelete: modelling a producer that dropped the key
       if (dropped[0] !== undefined) delete dropped[0][key]
       const diff = diffGoldenDocuments(src, JSON.stringify(dropped, null, 2))
       if (!diff.ok) throw new Error("diff refused")

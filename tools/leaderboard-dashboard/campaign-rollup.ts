@@ -281,9 +281,7 @@ export type OfficialGradeRollupOutcome =
   | { readonly kind: "absent" }
   | { readonly kind: "rejected" }
 
-export const rollUpOfficialGradeOutcome = (
-  members: readonly Run[],
-): OfficialGradeRollupOutcome => {
+export const rollUpOfficialGradeOutcome = (members: readonly Run[]): OfficialGradeRollupOutcome => {
   const graded = members.filter(
     (run) => run.instanceRowKind === "swe-grade" && run.officialGrade !== undefined,
   )

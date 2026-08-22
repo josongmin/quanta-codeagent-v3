@@ -184,7 +184,6 @@ describe("renderAgentFleet — colour map (status → colour)", () => {
       { format: "table", now: NOW },
     )
     // ANSI escape present (renderer delegates colour to @/ui, never TTY-detects).
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: asserting ANSI presence
     const ANSI = new RegExp(String.fromCharCode(27))
     expect(ANSI.test(running)).toBe(true)
     expect(ANSI.test(failed)).toBe(true)

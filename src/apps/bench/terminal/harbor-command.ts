@@ -213,7 +213,17 @@ export const formatHarborDryRunReceipt = (
     "inherited credential env (NAMES only — values REDACTED, never printed):",
     ...(inherited.length > 0
       ? inherited.map((name) => `  ${name}=<redacted>`)
-      : ["  (none present — the run would have no provider credential)"]),
+      : [
+          // PROVIDER-AWARE, like the doctor's credentials check. `chatgpt-oauth`
+          // authenticates from an on-disk token bundle and reads no env key, so
+          // "none present" there is the NORMAL state — printing "the run would
+          // have no provider credential" told an operator with a perfectly good
+          // setup to abort. The env-key providers keep the warning, because for
+          // them an empty list really does mean the run cannot authenticate.
+          manifest.provider === "chatgpt-oauth"
+            ? "  (none — chatgpt-oauth authenticates from its on-disk token bundle, not env)"
+            : "  (none present — the run would have no provider credential)",
+        ]),
   ]
   return lines.join("\n")
 }

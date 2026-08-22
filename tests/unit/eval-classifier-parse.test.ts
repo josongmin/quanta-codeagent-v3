@@ -20,7 +20,6 @@ const knownLeafId = allLeaves()[0]?.id ?? "software-quality.debugging.error-mess
 
 const makeLLM = (assistantText: string): LLMPort => ({
   model: "test",
-  // biome-ignore lint/correctness/useYield: scripted; iterates a fixed sequence
   async *stream(_input: StreamInput): AsyncIterable<StreamEvent> {
     yield { type: "text_delta", delta: assistantText }
     yield { type: "message_stop", stop_reason: "end_turn" }

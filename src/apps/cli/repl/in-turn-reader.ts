@@ -106,6 +106,180 @@ const DEFAULT_MAX_LINE_BYTES = 64 * 1024
 type EscSwallowState = "none" | "esc" | "csi" | "ss3" | "str" | "str-esc"
 
 /**
+ * The bounded partial-line buffer and its edit operations. Owns the OVERFLOW
+ * contract: a line that grows past `maxLineBytes` is marked `overflowed` so its
+ * REST (to the next terminator) is discarded — a runaway / newline-less paste
+ * must never be emitted as a truncated line nor grow the buffer unbounded.
+ * `esc` rides along because the swallow state must persist across chunks.
+ */
+type LineAccumulator = {
+  partial: string
+  bytes: number
+  overflowed: boolean
+  esc: EscSwallowState
+  reset(): void
+  terminate(): void
+  backspace(): void
+  push(ch: string): void
+}
+
+/** Responsibility: build the partial-line accumulator. Buffers a STRING
+ *  (utf8-decoded per chunk); a CR/LF terminates a line, a CTRL-C drops the
+ *  partial (interrupt), and an over-cap line overflows silently. */
+const createLineAccumulator = (
+  maxLineBytes: number,
+  emitLine: (line: string) => void,
+): LineAccumulator => ({
+  partial: "",
+  bytes: 0,
+  overflowed: false,
+  esc: "none" as EscSwallowState,
+  reset(): void {
+    this.partial = ""
+    this.bytes = 0
+    this.overflowed = false
+    this.esc = "none"
+  },
+  /** Handle a CR/LF: emit the accumulated line (unless overflowed / empty),
+   *  then reset. CRLF yields one real line + one empty line; the empty one is
+   *  skipped so a Windows terminator does not enqueue a blank capture. */
+  terminate(): void {
+    const { partial, overflowed } = this
+    this.reset()
+    if (overflowed || partial.length === 0) return
+    emitLine(partial)
+  },
+  /** §08b — Backspace/DEL edits the buffer (was previously accumulated as a
+   *  raw control char, corrupting the captured line). No-op on an empty or
+   *  overflowed partial. */
+  backspace(): void {
+    if (this.overflowed || this.partial.length === 0) return
+    // Audit R1 #1 — surrogate-aware: a Backspace must delete a whole code point,
+    // not a lone UTF-16 unit (else an emoji/astral char leaves a broken half-
+    // surrogate in the captured line). Drop 2 units when the tail is a low
+    // surrogate preceded by a high surrogate.
+    const last = this.partial.charCodeAt(this.partial.length - 1)
+    const prev = this.partial.length >= 2 ? this.partial.charCodeAt(this.partial.length - 2) : 0
+    const isPair = last >= 0xdc00 && last <= 0xdfff && prev >= 0xd800 && prev <= 0xdbff
+    const drop = isPair ? 2 : 1
+    this.partial = this.partial.slice(0, -drop)
+    this.bytes = Math.max(0, this.bytes - drop)
+  },
+  /** Handle an ordinary char: accumulate, bounding the partial. Once a line
+   *  has overflowed, swallow its remaining chars until the next terminator. */
+  push(ch: string): void {
+    if (this.overflowed) return
+    this.partial += ch
+    this.bytes += 1
+    if (this.bytes > maxLineBytes) {
+      this.partial = ""
+      this.bytes = 0
+      this.overflowed = true
+    }
+  },
+})
+
+/** Responsibility: map the byte FOLLOWING a lone Esc onto the sequence class it
+ *  introduces — CSI (`[`), SS3 (`O`), a string sequence (OSC `]` / DCS `P` /
+ *  PM `^` / APC `_`), or none (a plain Alt-chord, whose byte is still consumed
+ *  by the caller and never becomes text). */
+const escIntroducerState = (introducer: string | undefined): EscSwallowState =>
+  introducer === "["
+    ? "csi"
+    : introducer === "O"
+      ? "ss3"
+      : introducer === "]" || introducer === "P" || introducer === "^" || introducer === "_"
+        ? "str"
+        : "none"
+
+/** Responsibility: advance an OSC/DCS/PM/APC string payload by ONE byte. */
+const advanceStringSequence = (code: number): EscSwallowState => {
+  // OSC/DCS/PM/APC string payload — swallowed until BEL (OSC) or ST
+  // (\x1b\\). Audit W3-B1: pasted terminal output carrying OSC-8
+  // hyperlinks / title writes must never leak payload as text.
+  if (code === 0x07) return "none"
+  if (code === ESC) return "str-esc"
+  return "str"
+}
+
+/** Responsibility: advance a CSI (`\x1b[`) parameter scan by ONE byte. */
+const advanceCsi = (code: number): EscSwallowState => {
+  // Audit R3 — a fresh ESC inside CSI RESTARTS the parser (terminals
+  // treat it as sequence abort + new introducer); staying in CSI let
+  // `\x1b[\x1b]0;EVIL\x07` leak its OSC payload as text.
+  if (code === ESC) return "esc"
+  if (code >= 0x40 && code <= 0x7e) return "none" // final byte ends CSI
+  return "csi"
+}
+
+/** Responsibility: advance the escape-swallow FSM by ONE byte while a sequence
+ *  is in flight — the state dispatch itself. The caller has already ruled out
+ *  the terminators/interrupt (which WIN over a swallow) and always consumes the
+ *  byte: a byte seen in any non-"none" state is part of the chord, never text. */
+const advanceEscapeSwallow = (
+  state: Exclude<EscSwallowState, "none">,
+  code: number,
+  ch: string | undefined,
+): EscSwallowState => {
+  if (state === "str") return advanceStringSequence(code)
+  if (state === "str-esc") return ch === "\\" ? "none" : code === ESC ? "str-esc" : "str"
+  if (state === "csi") return advanceCsi(code)
+  if (state === "ss3") return code === ESC ? "esc" : "none" // SS3 carries exactly one byte after \x1bO
+  // state === "esc": \x1b\x1b — the Esc-Esc chord is COMPLETE (cancel FSM
+  // pairs them); the next byte is ordinary text again.
+  if (code === ESC) return "none"
+  return escIntroducerState(ch)
+}
+
+/** Responsibility: apply ONE ordinary byte — already known to be neither a
+ *  terminator/interrupt nor part of an escape sequence. Backspace/DEL edits the
+ *  buffer, the remaining C0 bytes are chords (^A/^E/^K…) and drop with TAB
+ *  excepted, and everything else accumulates as text. */
+const applyOrdinaryByte = (acc: LineAccumulator, code: number, ch: string | undefined): void => {
+  if (code === BACKSPACE || code === DELETE) {
+    acc.backspace()
+    return
+  }
+  if (code < 0x20 && code !== TAB) return
+  acc.push(ch ?? "")
+}
+
+/** Responsibility: walk ONE decoded chunk char-by-char, driving the accumulator
+ *  and the escape FSM. A CTRL-C byte (0x03) is intercepted as an interrupt and
+ *  CR/LF terminate the current line. We never consume the SIGINT signal — on a
+ *  TTY Node raises SIGINT from the kernel line discipline; raw mode only changes
+ *  WHO sees the 0x03, not whether the surface's abort wiring
+ *  (installTurnCancel / outerAbort) runs.
+ *
+ *  WS-B (UUX-3-04) — terminators/interrupt WIN over an in-flight escape swallow
+ *  (never eat a newline), everything else inside a sequence is consumed until
+ *  its final byte. State persists across chunks. */
+const feedChunk = (acc: LineAccumulator, text: string): void => {
+  for (let i = 0; i < text.length; i += 1) {
+    const code = text.charCodeAt(i)
+    if (code === CTRL_C) {
+      acc.reset()
+      continue
+    }
+    if (code === CR || code === LF) {
+      acc.esc = "none"
+      acc.terminate()
+      continue
+    }
+    const escState = acc.esc
+    if (escState !== "none") {
+      acc.esc = advanceEscapeSwallow(escState, code, text[i])
+      continue
+    }
+    if (code === ESC) {
+      acc.esc = "esc"
+      continue
+    }
+    applyOrdinaryByte(acc, code, text[i])
+  }
+}
+
+/**
  * The escape-filtering partial-line accumulator (god-fn split, audit W4-R2).
  * Owns the WS-B contract in one place: CR/LF terminate, ^C drops the partial,
  * BS/DEL edit (surrogate-aware), escape SEQUENCES (CSI/SS3/OSC/DCS/PM/APC,
@@ -117,138 +291,8 @@ const createEscapeFilteringAccumulator = (
   maxLineBytes: number,
   emitLine: (line: string) => void,
 ): { feed: (text: string) => void; partial: () => string } => {
-  // Buffers a STRING (utf8-decoded per chunk); a CR/LF
-  // terminates a line, a CTRL-C drops the partial (interrupt), and a line that
-  // grows past `maxLineBytes` is marked `overflowed` so its REST (to the next
-  // terminator) is discarded — a runaway / newline-less paste must never be
-  // emitted as a truncated line nor grow the buffer unbounded.
-  const acc = {
-    partial: "",
-    bytes: 0,
-    overflowed: false,
-    esc: "none" as EscSwallowState,
-    reset(): void {
-      this.partial = ""
-      this.bytes = 0
-      this.overflowed = false
-      this.esc = "none"
-    },
-    /** Handle a CR/LF: emit the accumulated line (unless overflowed / empty),
-     *  then reset. CRLF yields one real line + one empty line; the empty one is
-     *  skipped so a Windows terminator does not enqueue a blank capture. */
-    terminate(): void {
-      const { partial, overflowed } = this
-      this.reset()
-      if (overflowed || partial.length === 0) return
-      emitLine(partial)
-    },
-    /** Handle an ordinary char: accumulate, bounding the partial. Once a line
-     *  has overflowed, swallow its remaining chars until the next terminator. */
-    /** §08b — Backspace/DEL edits the buffer (was previously accumulated as a
-     *  raw control char, corrupting the captured line). No-op on an empty or
-     *  overflowed partial. */
-    backspace(): void {
-      if (this.overflowed || this.partial.length === 0) return
-      // Audit R1 #1 — surrogate-aware: a Backspace must delete a whole code point,
-      // not a lone UTF-16 unit (else an emoji/astral char leaves a broken half-
-      // surrogate in the captured line). Drop 2 units when the tail is a low
-      // surrogate preceded by a high surrogate.
-      const last = this.partial.charCodeAt(this.partial.length - 1)
-      const prev = this.partial.length >= 2 ? this.partial.charCodeAt(this.partial.length - 2) : 0
-      const isPair = last >= 0xdc00 && last <= 0xdfff && prev >= 0xd800 && prev <= 0xdbff
-      const drop = isPair ? 2 : 1
-      this.partial = this.partial.slice(0, -drop)
-      this.bytes = Math.max(0, this.bytes - drop)
-    },
-    push(ch: string): void {
-      if (this.overflowed) return
-      this.partial += ch
-      this.bytes += 1
-      if (this.bytes > maxLineBytes) {
-        this.partial = ""
-        this.bytes = 0
-        this.overflowed = true
-      }
-    },
-  }
-
-  const feed = (text: string): void => {
-    // Walk the chunk char-by-char so a CTRL-C byte (0x03) is intercepted as an
-    // interrupt and CR/LF terminate the current line. We never consume the SIGINT
-    // signal — on a TTY Node raises SIGINT from the kernel line discipline; raw
-    // mode only changes WHO sees the 0x03, not whether the surface's abort wiring
-    // (installTurnCancel / outerAbort) runs. Everything else accumulates.
-    for (let i = 0; i < text.length; i += 1) {
-      const code = text.charCodeAt(i)
-      // WS-B (UUX-3-04) — terminators/interrupt WIN over an in-flight escape
-      // swallow (never eat a newline), everything else inside a sequence is
-      // consumed until its final byte. State persists across chunks.
-      if (code === CTRL_C) {
-        acc.reset()
-        continue
-      }
-      if (code === CR || code === LF) {
-        acc.esc = "none"
-        acc.terminate()
-        continue
-      }
-      if (acc.esc === "str") {
-        // OSC/DCS/PM/APC string payload — swallowed until BEL (OSC) or ST
-        // (\x1b\\). Audit W3-B1: pasted terminal output carrying OSC-8
-        // hyperlinks / title writes must never leak payload as text.
-        if (code === 0x07) acc.esc = "none"
-        else if (code === ESC) acc.esc = "str-esc"
-        continue
-      }
-      if (acc.esc === "str-esc") {
-        acc.esc = text[i] === "\\" ? "none" : code === ESC ? "str-esc" : "str"
-        continue
-      }
-      if (acc.esc === "csi") {
-        // Audit R3 — a fresh ESC inside CSI RESTARTS the parser (terminals
-        // treat it as sequence abort + new introducer); staying in CSI let
-        // `\x1b[\x1b]0;EVIL\x07` leak its OSC payload as text.
-        if (code === ESC) acc.esc = "esc"
-        else if (code >= 0x40 && code <= 0x7e) acc.esc = "none" // final byte ends CSI
-        continue
-      }
-      if (acc.esc === "ss3") {
-        acc.esc = code === ESC ? "esc" : "none" // SS3 carries exactly one byte after \x1bO
-        continue
-      }
-      if (acc.esc === "esc") {
-        // \x1b\x1b — the Esc-Esc chord is COMPLETE (cancel FSM pairs them);
-        // the next byte is ordinary text again.
-        if (code === ESC) {
-          acc.esc = "none"
-          continue
-        }
-        const introducer = text[i]
-        acc.esc =
-          introducer === "["
-            ? "csi"
-            : introducer === "O"
-              ? "ss3"
-              : introducer === "]" || introducer === "P" || introducer === "^" || introducer === "_"
-                ? "str"
-                : "none"
-        continue // the byte after Esc is part of the chord (Alt+x etc.), never text
-      }
-      if (code === ESC) {
-        acc.esc = "esc"
-        continue
-      }
-      if (code === BACKSPACE || code === DELETE) {
-        acc.backspace()
-        continue
-      }
-      // Remaining C0 bytes are chords (^A/^E/^K…), not text — TAB excepted.
-      if (code < 0x20 && code !== TAB) continue
-      acc.push(text[i] ?? "")
-    }
-  }
-
-  return { feed, partial: () => acc.partial }
+  const acc = createLineAccumulator(maxLineBytes, emitLine)
+  return { feed: (text: string): void => feedChunk(acc, text), partial: () => acc.partial }
 }
 
 /**

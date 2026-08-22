@@ -346,7 +346,6 @@ describe("applyPatchStructured — no-throw boundary", () => {
   test("misbehaving port that throws a NON-Error value is still a per-file failure", async () => {
     class WeirdThrowFs extends MemFs {
       override async writeFile(): Promise<void> {
-        // biome-ignore lint/style/useThrowOnlyError: adversarial port
         throw "string-shaped failure"
       }
     }

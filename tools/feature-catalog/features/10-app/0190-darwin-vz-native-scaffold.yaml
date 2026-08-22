@@ -3,7 +3,7 @@ title: Darwin VZ native scaffold — napi-rs binding to Virtualization.framework
 section: 10
 subsystem: Darwin microVM native helper (Skybridge Phase 3.3)
 order: 93
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [api]
 monitoring: planned
@@ -54,12 +54,28 @@ evidence:
 knobs: []
 deliberate_hold:
   reason: |
-    Phase 3.4 (real VM bring-up + vsock IPC + AVF entitlements + DMG
-    image management) is intentionally deferred — current slice is
-    typed-surface scaffold + fake-binding hellgate only.
+    Phase 3.4 (real VZVirtualMachine bring-up + vsock IPC + AVF entitlements + DMG
+    image management) is intentionally deferred — the current slice is a typed
+    surface + fake-binding hellgate only, as the title ("scaffold") says.
+
+    Verified 2026-08-22: the deferral reaches further than the Rust crate. The WHOLE
+    `src/mcp/skybridge/**` slice — including `registry.ts`, which the purpose text
+    cites as the wiring site — is unreachable from every `src/apps/<surface>/index.ts`;
+    the only importers of `@/mcp/skybridge` are test files. So "wired into
+    registry.ts" is true slice-internally and false end-to-end: the registry itself
+    has no production host.
   promotion_path: |
-    Phase 3.4 ADR landing real VZVirtualMachine bring-up + production
-    image flow + signing/notarization story.
+    L3 = TWO things, not one: (a) Phase 3.4 lands the real VZ bring-up, and (b) a
+    production host mounts the skybridge sandbox registry (`resolveMcpSandbox`) from
+    an app composition root so `src/mcp/skybridge/*` becomes reachable from an app
+    entrypoint. (b) alone lifts the reachability verdict; both are needed for the
+    feature to be real.
+    `bun fc reachability --strict --symbols` is the objective judge: this id must
+    drop off the offender list on its own, with NO baseline edit.
 notes: |
   Resolver v2 + `cfg(target_os = "macos")` target deps. Future
   `darwin-seatbelt-helper`, `win-appcontainer-helper` siblings expected.
+
+  Maturity was L3 until 2026-08-22. A "scaffold + fake binding" slice whose host
+  registry is itself unhosted cannot claim L3 ("wired, with tests"); corrected to
+  L2. Nothing in the crate or the TS adapter changed.

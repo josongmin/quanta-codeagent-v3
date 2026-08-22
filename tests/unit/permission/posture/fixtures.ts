@@ -54,3 +54,18 @@ export const DISTINCT_BASE: PostureRecord = {
   },
   askOutsidePlan: false,
 }
+
+/** Nth complete record, by index, with a NAMED failure. The fixtures are a
+ *  cartesian product, so an index is only meaningful relative to that product's
+ *  size — a non-null assertion (`records[i]!`) would let a fixture-count change
+ *  hand the test `undefined` and fail somewhere downstream instead of here. */
+export const nthCompleteRecord = (index: number): PostureRecord => {
+  const records = allCompleteRecords()
+  const record = records[index]
+  if (record === undefined) {
+    throw new Error(
+      `posture fixtures: no complete record at index ${index} (have ${records.length})`,
+    )
+  }
+  return record
+}

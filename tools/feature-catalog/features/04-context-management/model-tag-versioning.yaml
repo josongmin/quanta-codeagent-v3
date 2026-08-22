@@ -3,7 +3,7 @@ title: ModelTag versioning + invalidator + canonical codec (ADR-0266)
 section: 4
 subsystem: retrieval — embedding model identity / cache-store invalidation
 order: 266
-maturity: L3
+maturity: L2
 status: new
 ui_surfaces: [cli]
 monitoring: integrated
@@ -55,12 +55,18 @@ knobs:
     purpose: 'major-version-bump triggers stale; minor / patch do NOT'
 deliberate_hold:
   reason: |
-    Wiring this invalidator into specific cache (ADR-0254) and persisted
-    index (ADR-0263) layers is deferred. Those consumers own the
-    callback construction + lifetime — this slice ships the primitive,
-    the rules, and the registry seam only.
+    Existing reason (cache/index consumers own callback construction + lifetime) still
+    holds. Verified 2026-08-22: the only importer of `@/retrieval/versioning` anywhere
+    in `src/` is its own sibling `src/retrieval/auto-hook/*`, which is itself unwired
+    — so all six evidence files are unreachable from every
+    `src/apps/<surface>/index.ts`. Two unwired slices importing each other is not a
+    production consumer.
   promotion_path: |
-    Documented in ADR; wire when ROI concrete.
+    L3 = a real embedding consumer (the ADR-0254 cache or the ADR-0263 persisted
+    index) calls `registerInvalidationCallback(...)` from a composition root, making
+    `src/retrieval/versioning/*` reachable from an app entrypoint.
+    `bun fc reachability --strict --symbols` is the objective judge: this id must
+    drop off the offender list on its own, with NO baseline edit.
 notes: |
   Hellgate 15 cases (HELL-MT-01..HELL-MT-15) cover canonical format,
   round-trip, malformed / missing-dim / missing-version / empty-field
@@ -69,3 +75,7 @@ notes: |
   error isolation, default-OFF byte-identity, and ParseError 4-arm
   exhaustive switch. `exactOptionalPropertyTypes` omitted on
   InvalidationDecision.reason for ergonomic literal {stale:false}.
+
+  Maturity was L3 until 2026-08-22; the L3 reachability floor showed the only
+  importer is an equally-unwired sibling slice, so L2 is the honest tier. No code
+  changed.

@@ -75,6 +75,17 @@ const allSrcFiles = (): string[] => {
 const QUANTA_LITERAL_RE = /"(quanta\.[a-z0-9_.]+)"/g
 const GEN_AI_LITERAL_RE = /"(gen_ai\.[a-z0-9_.]+)"/g
 
+/** A `Symbol("quanta.…")` DESCRIPTION is not an attribute key — it never reaches
+ *  a span or a metric, it only labels a module-private brand in a debugger. The
+ *  scan is about the OTel vocabulary, so counting one was a false positive that
+ *  would have pushed an unrelated slice to invent a fake `QUANTA_ATTRS` entry.
+ *  Narrow by construction: ONLY the argument position of `Symbol(` is dropped,
+ *  so every real attribute-key literal is still scanned (proven by the
+ *  red-on-injection case below, which uses a bare literal). */
+const SYMBOL_DESCRIPTION_RE = /\bSymbol\(\s*"[^"]*"\s*\)/g
+const withoutSymbolDescriptions = (text: string): string =>
+  text.replace(SYMBOL_DESCRIPTION_RE, (m) => " ".repeat(m.length))
+
 /** Files explicitly authorized to host the canonical literal forms — they
  *  ARE the source of truth (the vocabulary itself), the test that introspects
  *  vocabulary keys, and the JSONL envelope schema label (which is a SCHEMA
@@ -128,7 +139,7 @@ const scanForLiterals = (): LiteralHit[] => {
   const hits: LiteralHit[] = []
   for (const file of allSrcFiles()) {
     if (VOCABULARY_OWNER_FILES.has(file)) continue
-    const text = readFileSync(file, "utf8")
+    const text = withoutSymbolDescriptions(readFileSync(file, "utf8"))
     // Iterate both regexes independently — they have disjoint prefixes so a
     // match in one cannot mask the other.
     for (const m of text.matchAll(QUANTA_LITERAL_RE)) {
