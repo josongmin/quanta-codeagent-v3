@@ -203,6 +203,18 @@ const childControlConfig = (
           : {}),
       }
 
+/** RFC-01 A3 — propagate the attention pending-question authority DOWN the whole
+ *  spawn tree so every descendant shares ONE broker (the same instance A2's
+ *  `AttentionReader` reads). The child's OWN `spawnedAsTaskId` is what the
+ *  dispatch seam binds as the question owner, so each child's question projects
+ *  to its own exact task id. Absent at the root ⇒ absent everywhere ⇒
+ *  byte-identical OFF (the gate is the broker's presence). Extracted so the
+ *  caller stays under biome's cognitive-complexity cap. */
+const inheritQuestionBroker = (
+  parent: AgentConfig,
+): Pick<AgentConfig, "questionBroker"> | Record<string, never> =>
+  parent.questionBroker !== undefined ? { questionBroker: parent.questionBroker } : {}
+
 const buildChildInheritedConfig = (
   parent: AgentConfig,
   req: SubagentRequest,
@@ -239,6 +251,7 @@ const buildChildInheritedConfig = (
     // (`parent.onSubagentEvent !== undefined`) consistent at every level — absent
     // at the root ⇒ absent everywhere ⇒ byte-identical OFF.
     ...(parent.onSubagentEvent !== undefined ? { onSubagentEvent: parent.onSubagentEvent } : {}),
+    ...inheritQuestionBroker(parent),
     ...maybeWireCoordinationBroker(parent, mailboxIds),
   }
 }

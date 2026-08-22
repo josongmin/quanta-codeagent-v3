@@ -24,6 +24,7 @@ import type {
   ReviewKind,
 } from "@/permission"
 import type { RulesStore } from "@/rules"
+import type { UserQuestionBroker } from "@/session/user-question"
 import type { ShellExecObserver, UserInputRequester } from "@/tool"
 import type { BranchSearchConfig } from "../branch-search"
 import type { BriefStore } from "../brief"
@@ -242,6 +243,24 @@ export interface WireSlotsCoreConfig {
    * answer/cancelled decision asynchronously.
    */
   userInputPort?: UserInputRequester
+  /**
+   * RFC-01 A3 attention PRODUCER — the per-session pending-question authority
+   * (`@/session/user-question`). When wired (composition resolves it ONLY under
+   * the `QUANTA_ATTENTION_NAV` gate, from the same `buildSessionAuthorities`
+   * instance A2's `AttentionReader` reads), the dispatch seam routes
+   * `request_user_input` THROUGH the broker instead of the legacy
+   * {@link userInputPort}, binding the owner from the explicit
+   * {@link spawnedAsTaskId}. This publishes a pending record the attention
+   * projection surfaces, and the subagent runner propagates the SAME broker down
+   * the spawn tree so every child shares one authority.
+   *
+   * PRESENT ⇒ broker supersedes `userInputPort` (the CLI inline surface becomes
+   * the broker's answer adapter in A4). ABSENT ⇒ byte-identical legacy path
+   * (`userInputPort` used verbatim; NO broker interaction) — the gate is the
+   * broker's presence, INDEPENDENT of the subagent-panel gate
+   * (`QUANTA_WEB_SUBAGENTS`), so panel-ON + attention-OFF leaks nothing.
+   */
+  questionBroker?: UserQuestionBroker
   /**
    * ADR-0296 PROMPT-mode consent port. When wired AND the effective bash
    * `timeout_behavior` is `prompt`, the bash tool calls this AT the deadline to

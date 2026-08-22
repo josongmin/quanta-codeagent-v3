@@ -8,6 +8,7 @@ import { planStoreToMutator } from "../plan/mutator-adapter"
 import { runPlanExitFlow } from "../plan-exit-flow"
 import { materializeReviewerAgent } from "../tier1/reviewer-subagent"
 import type { AgentConfig } from "../types"
+import { bindBrokerUserInputPort, questionOwnerFor } from "../user-question"
 
 /** jun-6 (RFC jun-6-tool-interrupt-behavior) — build the per-call interrupt
  *  router for a `block` tool when the knob is ON. Returns `undefined` when the
@@ -76,6 +77,22 @@ const mailboxLabels = (
   ...(config.mailboxParentId !== undefined ? { parentAgentLabel: config.mailboxParentId } : {}),
 })
 
+/** RFC-01 A3 — resolve the user-input requester for `ctx.requestUserInput`.
+ *  The attention broker (present ONLY under `QUANTA_ATTENTION_NAV`, wired by
+ *  composition) SUPERSEDES the legacy `userInputPort`: it routes the question
+ *  through the pending-question authority, bound to the EXPLICIT
+ *  `spawnedAsTaskId` owner, so the attention projection can surface it. ABSENT
+ *  broker ⇒ the legacy port is used verbatim (byte-identical OFF path — a single
+ *  resolution, never both authorities at once). */
+const resolveRequestUserInput = (config: AgentConfig): ToolContext["requestUserInput"] =>
+  config.questionBroker !== undefined
+    ? bindBrokerUserInputPort(
+        config.questionBroker,
+        questionOwnerFor(config.spawnedAsTaskId),
+        config.signal,
+      )
+    : config.userInputPort
+
 const buildSessionSeams = (args: {
   config: AgentConfig
   workingState: WorkingStateHandle | undefined
@@ -85,6 +102,7 @@ const buildSessionSeams = (args: {
 }): Partial<ToolContext> => {
   const { config, workingState, requestPlanExit, enterPlanMode, reviewerAgent } = args
   const shellSnapshot = config.shellSnapshotSession?.currentSeam()
+  const requestUserInput = resolveRequestUserInput(config)
   return {
     ...(workingState !== undefined ? { workingState } : {}),
     ...(requestPlanExit !== undefined ? { requestPlanExit } : {}),
@@ -94,7 +112,7 @@ const buildSessionSeams = (args: {
     ...(config.planStore !== undefined
       ? { planMutator: planStoreToMutator(config.planStore) }
       : {}),
-    ...(config.userInputPort !== undefined ? { requestUserInput: config.userInputPort } : {}),
+    ...(requestUserInput !== undefined ? { requestUserInput } : {}),
     ...(config.backgroundConsentPort !== undefined
       ? { requestBackgroundConsent: config.backgroundConsentPort }
       : {}),
