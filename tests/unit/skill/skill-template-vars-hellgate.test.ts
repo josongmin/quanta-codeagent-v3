@@ -29,6 +29,7 @@ import {
   createSkillTool,
   expandSkillTemplateVars,
   parseKeyValueArgs,
+  staticSkillResolver,
 } from "@/../src/skill/skill-tool"
 import type { Skill } from "@/../src/skill/types"
 import { __resetRuntimeConfig } from "@/shared"
@@ -40,7 +41,8 @@ const skill = (body: string): Skill =>
 const ctx = (): ToolContext => ({ signal: new AbortController().signal }) as ToolContext
 
 const run = async (body: string, input: unknown): Promise<{ ok: boolean; output: string }> => {
-  const tool = createSkillTool([skill(body)])
+  const list = [skill(body)]
+  const tool = createSkillTool({ resolve: staticSkillResolver(list), catalogue: list })
   let last: ToolEvent | undefined
   for await (const ev of tool.execute(input as never, ctx())) last = ev
   if (last?.type !== "result") throw new Error("no result")

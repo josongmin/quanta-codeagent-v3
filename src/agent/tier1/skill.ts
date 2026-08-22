@@ -33,8 +33,11 @@ import type {
 } from "../../skill"
 import {
   buildSkillSnapshot,
+  createAuthoritySkillResolver,
+  createInMemoryDisabledStore,
   createSkillCreatorTool,
   createSkillProposalArtifactPort,
+  createSkillRuntimeAuthority,
   createSkillTool,
   createToolSearchTool,
   skillEffortOverride,
@@ -179,12 +182,32 @@ export const buildSkillBlock = async (config: AgentConfig): Promise<SkillBlock |
   // shadowed" belongs to the proposal/import admission layer, not read-time.
   const snapshot = await buildSkillSnapshot(dir !== undefined ? { userDir: dir } : {})
   const skills = [...snapshot.skills]
+  // RFC-06 F2 — the LIVE skill runtime authority for this session's invocation
+  // path. The `Skill` tool resolves EVERY invocation through this authority at
+  // action time (see `createAuthoritySkillResolver`), so a disable that lands
+  // after tool construction immediately blocks an already-created handle and a
+  // re-enable restores it at a higher revision — there is no captured snapshot.
+  //
+  // Interim store/policy (F2 scope): an in-process disabled-set store and no
+  // admin policy (`policy: null`). This keys the same-session enable/disable
+  // receipt F2 owns. The DURABLE, org-policy-loaded authority is constructed
+  // once at the composition root (`buildSkillRuntimeAuthority`) and threaded to
+  // every surface by F4; this local authority is F4's convergence target, not a
+  // permanent second cache.
+  const disabledStore = createInMemoryDisabledStore()
+  const persisted = await disabledStore.read()
+  const authority = createSkillRuntimeAuthority({
+    snapshot,
+    policy: null,
+    disabledStore,
+    persisted,
+  })
   const tools: Tool[] = [
-    // `createSkillTool` ALWAYS receives the full discovered list — a user can
-    // still invoke any skill by name. The `paths:` filter below only narrows
-    // the per-turn SUGGESTION inventory, never the invocable surface (that
-    // would silently strip authority).
-    createSkillTool(skills),
+    // ACTION-TIME resolution: the tool never captures the discovered list — it
+    // resolves each name through `authority` at invoke time. `catalogue` feeds
+    // only the (display-only) tool description; the `paths:` filter below narrows
+    // the per-turn SUGGESTION inventory, never the invocable surface.
+    createSkillTool({ resolve: createAuthoritySkillResolver(authority), catalogue: skills }),
     // RFC03-1 — ToolSearch gets the pinned snapshot's registry entries so its
     // additive `catalog:"skills"` mode reads the SAME resolved set (no second
     // discovery / scorer). `catalog` defaults to "tools" ⇒ byte-identical for

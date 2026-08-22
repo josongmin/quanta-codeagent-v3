@@ -2,6 +2,15 @@ import { z } from "zod"
 import { runtimeConfig } from "@/shared"
 import type { Tool, ToolContext, ToolEvent } from "@/tool"
 import { createDefaultTemplateExpander, type ExpandContext, type ExpandError } from "./playbook"
+// RFC-06 F2 — the `Skill` tool resolves its target through the LIVE runtime
+// authority AT INVOCATION time (a sibling `@/skill/runtime` module, TYPE-only
+// import). It does NOT import any permission module (`admin-policy` /
+// `install-enforcement`): the enable/disable/policy decision is baked into the
+// authority's `active`/`management` projections (F1), and the agent slice owns
+// constructing + injecting that authority. The tool proper depends ONLY on the
+// abstract {@link SkillActionResolver} function — so it can never resolve off a
+// construction-time snapshot.
+import type { SkillRuntimeAuthority } from "./runtime"
 import type { Skill, SkillEffort } from "./types"
 
 const schema = z.object({
@@ -205,9 +214,112 @@ export const skillCatalogueRow = (s: Skill): string => {
   return `- ${head}: ${blurb}`
 }
 
-export const createSkillTool = (skills: Skill[]): Tool<Input> => {
-  const byName = new Map(skills.map((s) => [s.name, s]))
-  const catalogue = skills.map(skillCatalogueRow).join("\n")
+/**
+ * RFC-06 F2 — the typed outcome of resolving a skill name AT INVOCATION time.
+ * Every arm is a value, never a throw: a missing name, a since-disabled skill,
+ * and an active hit are all normal, handled results (a crash is never a valid
+ * resolution outcome — one of the F2 pins).
+ */
+export type SkillActionResolution =
+  | { readonly kind: "active"; readonly skill: Skill; readonly revision: number }
+  | { readonly kind: "disabled"; readonly name: string; readonly revision: number }
+  | {
+      readonly kind: "unknown"
+      readonly name: string
+      readonly revision: number
+      /** The names currently INVOCABLE (active projection) at `revision` — the
+       *  live "Available: …" hint, not a stale construction-time catalogue. */
+      readonly available: readonly string[]
+    }
+
+/**
+ * The Skill tool's sole resolution dependency. Called ONCE per `execute`,
+ * immediately before any content read — so the answer always reflects the
+ * CURRENT revision/policy/disabled state, never a handle captured at
+ * construction. Async so the production resolver can converge a cross-process
+ * disabled-set write before it answers.
+ */
+export type SkillActionResolver = (name: string) => Promise<SkillActionResolution>
+
+/**
+ * RFC-06 F2 — the PRODUCTION resolver: resolve a skill name through the live F1
+ * {@link SkillRuntimeAuthority} at ACTION time.
+ *
+ * Three properties this closes (the F2 REDs):
+ *  1. **Action-time only.** It reads the authority on every call — there is NO
+ *     captured `byName` map, so a handle created before a disable can never
+ *     execute a since-disabled skill.
+ *  2. **Current re-resolution + revision/policy re-check.** `sync()` re-reads the
+ *     durable disabled set and republishes the projections; the name is then
+ *     resolved against the ACTIVE projection at that fresh revision (F1 already
+ *     folds admin required/banned policy into the projection). This is the
+ *     "re-resolve + verify still active/allowed at the current revision
+ *     immediately before executing" step — with NO `await` between the sync and
+ *     the resolve, so the view cannot change under us.
+ *  3. **Typed, never a crash.** An exists-but-disabled name (retained in the
+ *     `management` projection) is reported distinctly from a name that was never
+ *     a registry winner; a duplicate name resolves to the registry precedence
+ *     winner deterministically (the authority owns collision resolution), not a
+ *     Map's silent last-write-wins.
+ */
+export const createAuthoritySkillResolver =
+  (authority: SkillRuntimeAuthority): SkillActionResolver =>
+  async (name): Promise<SkillActionResolution> => {
+    // ACTION-TIME convergence: adopt any disabled-set write (same- or
+    // cross-process) IMMEDIATELY before resolving. `sync()` returns the freshly
+    // published view; `resolveActive` reads that SAME view (no await between ⇒
+    // atomic), so we check "still active at the current revision" with no gap.
+    const view = await authority.sync()
+    const active = authority.resolveActive(name)
+    if (active !== undefined) return { kind: "active", skill: active, revision: view.revision }
+    // Not active ⇒ distinguish "retained but disabled" (management row with
+    // enabled:false) from "never a winner". Both are values, not throws.
+    const managed = view.management.find((m) => m.name === name)
+    if (managed !== undefined && managed.enabled === false) {
+      return { kind: "disabled", name, revision: view.revision }
+    }
+    return {
+      kind: "unknown",
+      name,
+      revision: view.revision,
+      available: view.active.map((s) => s.name),
+    }
+  }
+
+/**
+ * A STATIC resolver over a fixed skill list, for callers/tests that legitimately
+ * have no live authority (e.g. the arg-interpolation unit tests). It is the SAME
+ * injected `SkillActionResolver` seam — NOT a second resolution path inside the
+ * tool — so the tool still owns no captured map. Resolution is by first match
+ * (deterministic); it never reports "disabled" (a static list has no revisions).
+ */
+export const staticSkillResolver = (skills: readonly Skill[]): SkillActionResolver => {
+  const list = [...skills]
+  return async (name): Promise<SkillActionResolution> => {
+    const skill = list.find((s) => s.name === name)
+    if (skill !== undefined) return { kind: "active", skill, revision: 0 }
+    return { kind: "unknown", name, revision: 0, available: list.map((s) => s.name) }
+  }
+}
+
+/**
+ * Dependencies for {@link createSkillTool}. The `resolve` seam is the ONLY path
+ * from a name to a skill body; `catalogue` feeds the tool DESCRIPTION only (a
+ * display surface F3 makes live) and is NEVER consulted on execute.
+ */
+export interface SkillToolDeps {
+  /** Action-time resolver (production: {@link createAuthoritySkillResolver}). */
+  readonly resolve: SkillActionResolver
+  /** Skills to list in the tool description. Display-only; not a resolution
+   *  surface. */
+  readonly catalogue: readonly Skill[]
+}
+
+export const createSkillTool = (deps: SkillToolDeps): Tool<Input> => {
+  // NOTE: NO `byName` map, NO captured skill list for resolution — the tool
+  // resolves EVERY invocation through `deps.resolve` at action time (F2 cutover).
+  // `catalogue` is used ONLY to render the static description below.
+  const catalogue = deps.catalogue.map(skillCatalogueRow).join("\n")
 
   return {
     name: "Skill",
@@ -222,15 +334,28 @@ export const createSkillTool = (skills: Skill[]): Tool<Input> => {
 
     async *execute(input: Input, _ctx: ToolContext): AsyncIterable<ToolEvent> {
       const want = input.name.trim().replace(/^\//, "") // tolerate a "/foo" form
-      const skill = byName.get(want)
-      if (!skill) {
-        const names = [...byName.keys()].join(", ") || "(none)"
+      // ACTION-TIME resolution — the authority re-check happens HERE, immediately
+      // before any content read, so a since-disabled skill cannot execute.
+      const resolution = await deps.resolve(want)
+      if (resolution.kind === "unknown") {
+        const names = [...resolution.available].join(", ") || "(none)"
         yield {
           type: "result",
           result: { ok: false, output: `Unknown skill: ${want}. Available: ${names}` },
         }
         return
       }
+      if (resolution.kind === "disabled") {
+        yield {
+          type: "result",
+          result: {
+            ok: false,
+            output: `Skill '${want}' is currently disabled (revision ${resolution.revision}) and cannot be invoked.`,
+          },
+        }
+        return
+      }
+      const skill = resolution.skill
       // ADR-0252 — Windsurf `{{ name }}` named-var substitution. Gated
       // (`QUANTA_SKILL_TEMPLATE_VARS`, default-OFF) AND only when the caller
       // passed args. OFF or no-args ⇒ this branch is skipped entirely, so a

@@ -171,7 +171,14 @@ export {
   parseOpenaiYamlPolicy,
   SKILL_RESOURCE_DIRS,
 } from "./skill-resources"
+export type {
+  SkillActionResolution,
+  SkillActionResolver,
+  SkillToolDeps,
+} from "./skill-tool"
 export {
+  // RFC-06 F2 — action-time resolution seam + the two resolver factories.
+  createAuthoritySkillResolver,
   createSkillTool,
   scopingNote,
   // ADR-0457 — listing row that surfaces argumentHint + shortDescription.
@@ -179,6 +186,7 @@ export {
   skillEffortOverride,
   skillModelOverride,
   skillToolAllowlist,
+  staticSkillResolver,
 } from "./skill-tool"
 export {
   // ADR-0134 engineering-task skills cluster (debug-error / add-tests /

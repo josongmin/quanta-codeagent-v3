@@ -26,7 +26,9 @@ import {
   discoverSkills,
   parseFrontmatter,
   parseOpenaiYamlInterface,
+  type Skill,
   skillCatalogueRow,
+  staticSkillResolver,
 } from "../../src/skill"
 import { parseSkillMarkdown, SkillFrontmatterSchema } from "../../src/skill/skill-frontmatter"
 
@@ -80,7 +82,7 @@ describe("A. argument-hint (kebab frontmatter)", () => {
   })
 
   test("listing renders `name <hint>`", () => {
-    const tool = createSkillTool([
+    const list: Skill[] = [
       {
         name: "rr",
         description: "Ruthless review skill.",
@@ -89,7 +91,8 @@ describe("A. argument-hint (kebab frontmatter)", () => {
         scope: "user",
         argumentHint: "[scope]",
       },
-    ])
+    ]
+    const tool = createSkillTool({ resolve: staticSkillResolver(list), catalogue: list })
     expect(tool.description).toContain("- rr [scope]: Ruthless review skill.")
   })
 
@@ -140,7 +143,7 @@ describe("B. metadata.short-description (nested block)", () => {
   })
 
   test("listing PREFERS shortDescription over the long description", () => {
-    const tool = createSkillTool([
+    const list: Skill[] = [
       {
         name: "rr2",
         description: "WAY too long to ever show in a compact listing row.",
@@ -150,7 +153,8 @@ describe("B. metadata.short-description (nested block)", () => {
         argumentHint: "[scope]",
         shortDescription: "Urgent review, repair, prevention",
       },
-    ])
+    ]
+    const tool = createSkillTool({ resolve: staticSkillResolver(list), catalogue: list })
     expect(tool.description).toContain("- rr2 [scope]: Urgent review, repair, prevention")
     expect(tool.description).not.toContain("WAY too long")
   })

@@ -10,6 +10,7 @@ import {
   parseFrontmatter,
   skillsActivatedFor,
   skillToolAllowlist,
+  staticSkillResolver,
 } from "../../src/skill"
 import type { ToolContext, ToolResult, ToolSpec } from "../../src/tool"
 
@@ -228,7 +229,7 @@ describe("createSkillTool", () => {
   ]
 
   test("returns body plus an advisory (not enforced) scoping note", async () => {
-    const tool = createSkillTool(skills)
+    const tool = createSkillTool({ resolve: staticSkillResolver(skills), catalogue: skills })
     const r = await run(tool, { name: "deploy" })
     expect(r.ok).toBe(true)
     expect(r.output).toContain("tools: Bash")
@@ -243,7 +244,10 @@ describe("createSkillTool", () => {
   })
 
   test("no scope declared ⇒ 'none declared' note", async () => {
-    const r = await run(createSkillTool(skills), { name: "plain" })
+    const r = await run(
+      createSkillTool({ resolve: staticSkillResolver(skills), catalogue: skills }),
+      { name: "plain" },
+    )
     expect(r.output).toContain("none declared")
     expect(r.output).toContain("just do it")
   })
@@ -260,7 +264,7 @@ describe("createSkillTool", () => {
   })
 
   test("tolerates a leading slash and reports unknown skills", async () => {
-    const tool = createSkillTool(skills)
+    const tool = createSkillTool({ resolve: staticSkillResolver(skills), catalogue: skills })
     expect((await run(tool, { name: "/deploy" })).ok).toBe(true)
     const miss = await run(tool, { name: "ghost" })
     expect(miss.ok).toBe(false)

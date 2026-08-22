@@ -10,7 +10,11 @@
  */
 
 import { describe, expect, test } from "bun:test"
-import { createSkillTool, interpolateSkillArgs } from "@/../src/skill/skill-tool"
+import {
+  createSkillTool,
+  interpolateSkillArgs,
+  staticSkillResolver,
+} from "@/../src/skill/skill-tool"
 import type { Skill } from "@/../src/skill/types"
 import type { ToolContext, ToolEvent } from "@/tool"
 
@@ -20,7 +24,8 @@ const skill = (body: string): Skill =>
 const ctx = (): ToolContext => ({ signal: new AbortController().signal }) as ToolContext
 
 const run = async (body: string, input: unknown): Promise<string> => {
-  const tool = createSkillTool([skill(body)])
+  const list = [skill(body)]
+  const tool = createSkillTool({ resolve: staticSkillResolver(list), catalogue: list })
   let last: ToolEvent | undefined
   for await (const ev of tool.execute(input as never, ctx())) last = ev
   if (last?.type !== "result") throw new Error("no result")
