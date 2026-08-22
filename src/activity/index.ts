@@ -46,6 +46,13 @@ export {
   projectFleet,
   projectTree,
 } from "./project"
+export {
+  INDETERMINATE,
+  mergeProgress,
+  type Progress,
+  progressEquals,
+  toProgress,
+} from "./progress"
 export { formatAge, type RenderActivityOpts, renderActivity } from "./render"
 export {
   type ActivityState,
@@ -62,14 +69,26 @@ export {
   type WorkflowSink,
   type WorkflowSinkOpts,
 } from "./store"
+export {
+  type ActivityChange,
+  type ActivityListener,
+  type ActivitySeqSource,
+  type ActivitySnapshotReader,
+  type ActivitySubscription,
+  createActivitySubscription,
+  type RawActivitySource,
+  type SubscribeOptions,
+} from "./subscription"
 export type {
   ActivityAggregate,
+  ActivityEvent,
   ActivityKind,
   ActivityNode,
   ActivitySnapshot,
   ActivityStatus,
   AgentActivityEvent,
   NodeInit,
+  NodeProgressEvent,
   OperationCorrelation,
   Stuck,
   StuckReason,

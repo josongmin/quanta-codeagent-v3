@@ -11,31 +11,98 @@
  * NO-THROW: feeding a malformed event degrades inside the pure reducer.
  */
 
+import { mergeProgress } from "./progress"
 import { type WorkflowEventLike, wfPhaseId, wfRunId, wfStepId } from "./producers/workflow"
 import { type ActivityState, emptyActivityState, materialize, reduceActivity } from "./spine"
-import type { ActivityNode, ActivitySnapshot, AgentActivityEvent } from "./types"
+import {
+  type ActivityChange,
+  type ActivityListener,
+  type ActivitySubscription,
+  createActivitySubscription,
+  type SubscribeOptions,
+} from "./subscription"
+import type {
+  ActivityEvent,
+  ActivityNode,
+  ActivitySnapshot,
+  NodeProgressEvent,
+} from "./types"
 
 /** A live, mutable activity accumulator. */
 export interface ActivityStore {
-  emit(event: AgentActivityEvent): void
-  emitAll(events: Iterable<AgentActivityEvent>): void
+  emit(event: ActivityEvent): void
+  emitAll(events: Iterable<ActivityEvent>): void
   snapshot(): ActivitySnapshot
+  /** RFC-04 R6 D1 — store-level monotonic sequence: the count of events applied
+   *  so far (0 before any emit). The SSOT ordering handle a subscription uses to
+   *  partition "already in the snapshot" (`seq <= baseSeq`) from "delivered"
+   *  (`seq > baseSeq`). Distinct from `OperationCorrelation.sequence` (a
+   *  per-operation step counter on a node) — this is the per-STORE event clock. */
+  readonly seq: number
+  /** RFC-04 R6 D1 — subscribe atomically. Returns `{snapshot, nextSeq}` and
+   *  registers `listener`; an event injected between capture and registration is
+   *  neither lost nor duplicated (see `subscription.ts`). */
+  subscribe(listener: ActivityListener, opts?: SubscribeOptions): ActivitySubscription
   /** Internal accumulator (escape hatch for tests/diagnostics). */
   readonly state: ActivityState
 }
 
 export const createActivityStore = (): ActivityStore => {
   const state = emptyActivityState()
-  return {
+  let seq = 0
+  const rawListeners = new Set<(change: ActivityChange) => void>()
+
+  /** Apply a typed progress refresh onto the node (store-level, NOT the pure
+   *  spine). NO-THROW: an unknown id is dropped (mirrors the spine's rule). The
+   *  node object is REPLACED (structural sharing), so an earlier snapshot stays
+   *  frozen — exactly as `reduceActivity` does. */
+  const applyProgress = (event: NodeProgressEvent): void => {
+    const node = state.nodes.get(event.id)
+    if (node === undefined) return
+    state.nodes.set(event.id, { ...node, progress: mergeProgress(node.progress, event.progress) })
+  }
+
+  /** Advance the clock + fan out to raw listeners. Materialization stays lazy —
+   *  a subscriber pulls `snapshot()` when it renders — so with no listeners the
+   *  emit path is byte-identical to the landed store (state + snapshot unchanged;
+   *  only the cheap counter moves). */
+  const notify = (event: ActivityEvent): void => {
+    seq += 1
+    if (rawListeners.size === 0) return
+    const change: ActivityChange = { seq, event }
+    for (const l of [...rawListeners]) l(change)
+  }
+
+  const store: ActivityStore = {
     state,
+    get seq() {
+      return seq
+    },
     emit: (event) => {
-      reduceActivity(state, event)
+      if (event.type === "node_progress") applyProgress(event)
+      else reduceActivity(state, event)
+      notify(event)
     },
     emitAll: (events) => {
-      for (const e of events) reduceActivity(state, e)
+      for (const e of events) store.emit(e)
     },
     snapshot: () => materialize(state),
+    subscribe: (listener, opts) =>
+      createActivitySubscription(
+        {
+          // Atomic attach: register the raw listener BEFORE capturing the
+          // snapshot + seq, so a mid-capture emit is seen and reconciled.
+          attach: (raw) => {
+            rawListeners.add(raw)
+            const snapshot = materialize(state)
+            return { snapshot, seq, detach: () => rawListeners.delete(raw) }
+          },
+        },
+        listener,
+        opts,
+      ),
   }
+  return store
 }
 
 /** Replay ONE node into the seed store: open + counters + (leaf-only) status.

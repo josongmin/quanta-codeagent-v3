@@ -20,9 +20,18 @@
  *    the drift ratchet.
  */
 
+import type { Progress } from "./progress"
+
 /** The kind of node. Drives the surface's icon + which zoom level it anchors.
  *  `workflow`/`reactor`/`daemon`/`remote`/`scheduled` are L0 roots (one per
- *  running agent); `phase` is L1; `agent`/`tool` are L2. */
+ *  running agent); `phase` is L1; `agent`/`tool` are L2.
+ *
+ *  `operation`/`step` (RFC-04 R6 D1) are STRUCTURAL long-running-op nodes — an
+ *  `operation` container (e.g. a worktree transition) with `step` children
+ *  (validate / create / checkout / bind). They are DELIBERATELY not agent-ish:
+ *  the aggregate's `AGENT_KINDS` (`spine.ts`) excludes them, so a staged
+ *  operation NEVER fabricates agent/running/stuck counts — the D1 receipt
+ *  "step nodes leave agent aggregate unchanged". */
 export type ActivityKind =
   | "workflow"
   | "phase"
@@ -33,6 +42,8 @@ export type ActivityKind =
   | "remote"
   | "scheduled"
   | "subagent"
+  | "operation"
+  | "step"
 
 /** Lifecycle status. A single SSOT vocabulary every producer maps INTO (so the
  *  source registries' divergent vocabularies — `completed` vs `done`,
@@ -116,6 +127,11 @@ export interface ActivityNode {
    *  a correlated long-running operation). Absent for ordinary spine nodes so
    *  the default posture is byte-identical. Stamped at `node_open`. */
   readonly correlation?: OperationCorrelation
+  /** RFC-04 R6 D1 — the node's TYPED live progress (a closed `Progress` union,
+   *  NOT a free-form meta string). Set/updated by `node_progress`; absent for a
+   *  node with no ratio (the default posture is byte-identical). A renderer reads
+   *  this typed field, never a stringly-typed `meta.checkoutPercentage`. */
+  readonly progress?: Progress | undefined
   /** Free-form, surface-rendered hints (e.g. `{ tool: "Bash", model: "gpt-5" }`). */
   readonly meta?: Readonly<Record<string, string>>
 }
@@ -157,6 +173,29 @@ export type AgentActivityEvent =
       readonly tokensDelta?: number
       readonly toolCallsDelta?: number
     }
+
+/**
+ * RFC-04 R6 D1 — refresh a node's TYPED live progress. Kept OUT of
+ * {@link AgentActivityEvent} deliberately: that union is the pure spine's closed
+ * reducer contract (`spine.ts` folds it exhaustively), and progress is a
+ * store-level concern (it rides the monotonic sequence + subscription, not the
+ * pure fold). The store applies it (`store.ts`) via `mergeProgress`, so the
+ * spine reducer and its exhaustiveness check stay byte-identical.
+ *
+ * `progress` is the already-closed `Progress` value (never a free-form string);
+ * an unknown `id` is a NO-THROW drop (mirrors the spine's status/metric rule).
+ */
+export interface NodeProgressEvent {
+  readonly type: "node_progress"
+  readonly id: string
+  readonly progress: Progress
+}
+
+/** The full store-level event vocabulary: the pure-spine events PLUS the
+ *  store-applied {@link NodeProgressEvent}. `store.emit` accepts this wider
+ *  union; anything that is not `node_progress` routes to the unchanged spine
+ *  reducer. */
+export type ActivityEvent = AgentActivityEvent | NodeProgressEvent
 
 /** Rolled-up totals over the whole tree (the L0 header line). */
 export interface ActivityAggregate {
